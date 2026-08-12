@@ -1,0 +1,45 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Runtime data
+.runtime/
+data/
+artifacts/
+logs/
+coverage/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Local vault contents (the templates are versioned; personal working knowledge is not)
+vault/CycloneVault/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Tauri / Rust build artifacts
+target/
+apps/desktop/src-tauri/target/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# n8n local imports / exports
+services/n8n/local/
+
+# Test artifacts
+playwright-report/
+test-results/
