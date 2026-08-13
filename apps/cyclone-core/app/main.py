@@ -108,7 +108,12 @@ class AppServices:
             raise RuntimeError("The Cyclone Core runtime requires the redis package. Install requirements.txt.")
         self.redis = redis.from_url(self.settings.redis_url, decode_responses=True)
         if self.settings.telegram_bot_token:
-            self.telegram = TelegramWorker(self, self.settings.telegram_bot_token, self.settings.telegram_allowed_users)
+            self.telegram = TelegramWorker(
+                self,
+                self.settings.telegram_bot_token,
+                self.settings.telegram_allowed_users,
+                self.settings.telegram_home_channel,
+            )
             self.telegram_task = asyncio.create_task(self.telegram.run())
 
     async def close(self) -> None:

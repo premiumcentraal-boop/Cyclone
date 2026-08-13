@@ -21,6 +21,11 @@ logger = logging.getLogger("cyclone.telegram")
 
 API_BASE = "https://api.telegram.org/bot{token}"
 MAX_MESSAGE_LENGTH = 3500
+BOT_COMMANDS = [
+    {"command": "help", "description": "How to direct work"},
+    {"command": "agents", "description": "Show the live agent roster"},
+    {"command": "agent", "description": "Ask a specific agent"},
+]
 
 
 def _initials(name: str) -> str:
@@ -29,10 +34,17 @@ def _initials(name: str) -> str:
 
 
 class TelegramWorker:
-    def __init__(self, runtime: Any, token: str, allowed_users: list[int] | None = None) -> None:
+    def __init__(
+        self,
+        runtime: Any,
+        token: str,
+        allowed_users: list[int] | None = None,
+        home_channel: str | None = None,
+    ) -> None:
         self.runtime = runtime
         self.token = token
         self.allowed_users = set(allowed_users or [])
+        self.home_channel = _chat_id(home_channel)
         self.base = API_BASE.format(token=token)
         self._offset: int | None = None
         self._active_conversations: set[UUID] = set()
@@ -71,22 +83,45 @@ class TelegramWorker:
         result = await self._api("getUpdates", **payload)
         return result.get("result", []) if result.get("ok") else []
 
+    async def _register_commands(self) -> None:
+        """Expose the real Cyclone controls in Telegram's command picker."""
+        await self._api("setMyCommands", commands=BOT_COMMANDS)
+
     # ------------------------------------------------------------- dispatch
     async def handle_update(self, update: dict[str, Any]) -> None:
         message = update.get("message") or {}
         text = (message.get("text") or "").strip()
         chat = message.get("chat") or {}
         chat_id = chat.get("id")
+        sender = message.get("from") or {}
+        sender_id = sender.get("id")
         update_id = update.get("update_id")
         if update_id is not None:
             self._offset = update_id + 1
         if not chat_id or not text or chat.get("type") != "private":
             return
-        if self.allowed_users and chat_id not in self.allowed_users:
-            logger.info("telegram: ignoring chat %s (not in allowed users)", chat_id)
+        # A private chat id usually matches a user id, but authorization must
+        # always be tied to the Telegram sender identity, not the chat shell.
+        if self.allowed_users and sender_id not in self.allowed_users:
+            logger.info("telegram: ignoring sender %s in chat %s (not authorized)", sender_id, chat_id)
             return
 
-        sender = message.get("from") or {}
+        command, arguments = _command(text)
+        if command in {"start", "help"}:
+            await self.send_message(chat_id, _help_text())
+            return
+        if command == "agents":
+            await self.send_message(chat_id, await self._agent_roster_text())
+            return
+        if command in {"agent", "ask"}:
+            text = _agent_message(arguments)
+            if text is None:
+                await self.send_message(chat_id, "Use /agent <agent> <request>. Send /agents to see the live roster.")
+                return
+        elif command:
+            await self.send_message(chat_id, "I don't know that command. Send /help for the available controls.")
+            return
+
         display_name = sender.get("first_name") or chat.get("first_name") or "Telegram user"
         user_id = await self._ensure_user(chat_id, display_name)
         conversation_id = await self._ensure_conversation(chat_id, display_name)
@@ -129,15 +164,43 @@ class TelegramWorker:
         key = f"telegram-{chat_id}"
         existing = await self.runtime.repository.find_conversation_by_key(key)
         if existing:
+            await self._sync_agent_roster(existing)
             return existing
+        agents = await self.runtime.repository.list_agents()
+        if not agents:
+            logger.error("telegram: cannot create chat %s without any Cyclone agents", chat_id)
+            return None
         conversation = await self.runtime.repository.create_conversation(
             title=display_name,
             kind="telegram",
             hermes_conversation_key=key,
-            agent_slugs=["chief"],
+            # This is the operator's control room, not a Chief-only inbox.
+            # Members are real persisted agents, so @slug uses the exact same
+            # semantic routing and task ownership as the desktop crew.
+            agent_slugs=[agent.slug for agent in agents],
             project_key=None,
         )
         return conversation.id
+
+    async def _sync_agent_roster(self, conversation_id: UUID) -> None:
+        """Keep the remote control room aligned with real Cyclone agents."""
+        conversation = await self.runtime.repository.get_conversation(conversation_id, message_limit=1)
+        existing_ids = {member.agent.id for member in conversation.members if member.agent is not None}
+        for agent in await self.runtime.repository.list_agents():
+            if agent.id not in existing_ids:
+                await self.runtime.repository.add_conversation_member(conversation_id, agent)
+
+    async def _agent_roster_text(self) -> str:
+        agents = await self.runtime.repository.list_agents()
+        if not agents:
+            return "Cyclone has no agents yet. Create one in the desktop app first."
+        lines = ["<b>Live Cyclone agents</b>"]
+        for agent in agents:
+            role = f" — {agent.role}" if agent.role else ""
+            lines.append(f"• <code>@{_escape(agent.slug)}</code> — {_escape(agent.name)}{_escape(role)}")
+        lines.append("\nAsk one directly: <code>@research compare these options</code>")
+        lines.append("Or use: <code>/agent research compare these options</code>")
+        return "\n".join(lines)
 
     async def _subscribe(self, conversation_id: UUID, chat_id: int) -> None:
         if conversation_id in self._subscriptions:
@@ -165,9 +228,13 @@ class TelegramWorker:
                 chat_id = int(key.removeprefix("telegram-"))
             except ValueError:
                 continue
+            if self.allowed_users and chat_id not in self.allowed_users:
+                logger.info("telegram: not restoring unauthorized chat %s", chat_id)
+                continue
             if conversation_id in self._subscriptions:
                 continue
             try:
+                await self._sync_agent_roster(conversation_id)
                 await self._subscribe(conversation_id, chat_id)
                 logger.info("telegram: restored forwarder for conversation %s (chat %s)", conversation_id, chat_id)
             except Exception:  # pragma: no cover - defensive
@@ -222,6 +289,21 @@ class TelegramWorker:
         finally:
             self._subscriptions.pop(conversation_id, None)
 
+    async def _restore_home_channel(self) -> None:
+        """Restore the designated Super User's remote control room after restart."""
+        if self.home_channel is None:
+            return
+        if self.allowed_users and self.home_channel not in self.allowed_users:
+            logger.warning("telegram: home channel is not an authorized Super User; not subscribing")
+            return
+        key = f"telegram-{self.home_channel}"
+        conversation_id = await self.runtime.repository.find_conversation_by_key(key)
+        if conversation_id is None:
+            logger.info("telegram: home channel %s will be initialized on its first message", self.home_channel)
+            return
+        await self._sync_agent_roster(conversation_id)
+        await self._subscribe(conversation_id, self.home_channel)
+
     # ----------------------------------------------------------------- main
     async def run(self) -> None:
         me = await self.get_me()
@@ -229,7 +311,9 @@ class TelegramWorker:
             logger.error("telegram: bot token rejected by Telegram (getMe failed); worker disabled.")
             return
         logger.info("telegram: connected as @%s (%s)", me.get("username"), me.get("first_name"))
+        await self._register_commands()
         await self.restore_subscriptions()
+        await self._restore_home_channel()
         while True:
             try:
                 updates = await self.get_updates()
@@ -254,6 +338,47 @@ def _approval_choice(text: str) -> str | None:
         "deny": "deny", "no": "deny", "denied": "deny", "block": "deny",
     }
     return aliases.get(normalized)
+
+
+def _chat_id(value: str | None) -> int | None:
+    """Parse an explicitly configured Telegram home channel safely."""
+    if value is None:
+        return None
+    try:
+        return int(value.strip())
+    except ValueError:
+        logger.warning("telegram: TELEGRAM_HOME_CHANNEL is not a numeric chat id")
+        return None
+
+
+def _command(text: str) -> tuple[str | None, str]:
+    """Return a normalized Telegram command and its untouched arguments."""
+    if not text.startswith("/"):
+        return None, text
+    head, _, arguments = text[1:].partition(" ")
+    command = head.partition("@")[0].lower()
+    return command, arguments.strip()
+
+
+def _agent_message(arguments: str) -> str | None:
+    """Translate /agent agent-name request into the normal @mention path."""
+    slug, separator, request = arguments.partition(" ")
+    slug = slug.lstrip("@").strip().lower()
+    if not slug or not separator or not request.strip():
+        return None
+    return f"@{slug} {request.strip()}"
+
+
+def _help_text() -> str:
+    return (
+        "<b>Cyclone control room</b>\n\n"
+        "Write naturally and Chief will coordinate, or address any real agent directly:\n"
+        "<code>@research compare the options and hand the implementation to @developer</code>\n\n"
+        "Commands:\n"
+        "• <code>/agents</code> — live agents and their roles\n"
+        "• <code>/agent &lt;agent&gt; &lt;request&gt;</code> — ask an agent directly\n"
+        "• <code>/help</code> — show this guide"
+    )
 
 
 def _chunk_text(text: str) -> list[str]:
