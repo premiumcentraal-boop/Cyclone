@@ -8,7 +8,9 @@ import { MonitorIcon, PanelIcon, SearchIcon, SpinnerIcon } from "./components/Ic
 import { MessageTimeline } from "./components/MessageTimeline";
 import { NewConversationModal } from "./components/NewConversationModal";
 import { AgentUtilityPanel } from "./components/AgentUtilityPanel";
+import { AgentProfilePanel } from "./components/AgentProfilePanel";
 import { PluginsView } from "./components/PluginsView";
+import { TeachTaskModal } from "./components/TeachTaskModal";
 import { ComputerUnavailableOverlay, RemoteComputerOverlay } from "./components/RemoteComputerOverlay";
 import { TitleBar } from "./components/TitleBar";
 import type { Agent, AgentAvatarShape, ApprovalEvent, AttachmentRef, ComputerOwner, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, StartupState, UserIdentity } from "./types";
@@ -35,6 +37,9 @@ function App() {
   const [computerUnavailable, setComputerUnavailable] = useState(false);
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
+  const [profileAgent, setProfileAgent] = useState<Agent | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [teachTaskOpen, setTeachTaskOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [focusedConversationId, setFocusedConversationId] = useState<string | null>(null);
   const activeEventSource = useRef<EventSource | null>(null);
@@ -167,12 +172,12 @@ function App() {
   }
 
   function openAgent(agent: Agent) {
-    const candidate = conversations.find((item) => item.kind === "direct" && item.title.toLowerCase() === agent.name.toLowerCase());
+    const candidate = conversations.find((item) => item.kind === "direct" && (item.title.toLowerCase() === agent.name.toLowerCase() || item.member_agents?.some((member) => member.id === agent.id)));
     if (candidate) {
       void selectConversation(candidate);
       return;
     }
-    setNotice(`${agent.name} is part of this conversation. A direct thread will appear when Cyclone has one for that agent.`);
+    setProfileAgent(agent);
   }
 
   async function openComputer(session?: ComputerSession) {
@@ -231,6 +236,31 @@ function App() {
     return agent;
   }
 
+  async function saveAgentProfile(updates: { name: string; role: string; description: string }) {
+    if (!profileAgent || mode !== "live") return;
+    setProfileSaving(true);
+    try {
+      const updated = await coreClient.updateAgent(profileAgent.id, updates);
+      setAgents((current) => current.map((agent) => agent.id === updated.id ? updated : agent));
+      setProfileAgent(updated);
+      if (conversation?.members.some((member) => member.agent?.id === updated.id)) await refreshConversation(conversation.id);
+      setNotice(`${updated.name}'s profile was updated.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Cyclone could not update this agent profile.");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function teachTask(routine: { slug: string; name: string; description: string; instructions: string; schedule?: string }) {
+    if (!conversation || mode !== "live") throw new Error("Open a real conversation before teaching a task.");
+    const owner = selectedAgents.find((agent) => agent.status !== "offline") ?? agents.find((agent) => agent.slug === "chief");
+    if (!owner) throw new Error("Choose a conversation with an available agent first.");
+    await coreClient.createRoutine(conversation.id, { ...routine, owner_agent_slug: owner.slug });
+    await refreshConversation(conversation.id);
+    setNotice(`${routine.name} is now a taught routine for ${owner.name}.`);
+  }
+
   async function resolveQuestion(runId: string, choice: "once" | "session" | "always" | "deny") {
     if (mode !== "live" || !runId) return;
     try {
@@ -247,7 +277,7 @@ function App() {
   }
 
   return <div className="cyclone-app">
-    <div className="cyclone-window" style={utilityOpen ? { gridTemplateColumns: "var(--sidebar-width) minmax(0, 1fr) 318px" } : undefined}>
+    <div className="cyclone-window" style={utilityOpen || profileAgent ? { gridTemplateColumns: "var(--sidebar-width) minmax(0, 1fr) 342px" } : undefined}>
       <aside className="sidebar">
         <TitleBar onNewConversation={() => setNewModalOpen(true)} onWindowAction={(action) => void handleWindowAction(action)} />
         <div className="sidebar__search"><SearchIcon size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" aria-label="Search conversations" /></div>
@@ -273,14 +303,16 @@ function App() {
           {conversation ? <MessageTimeline conversation={conversation} agents={agents} onOpenAgent={openAgent} onOpenComputer={openComputer} onDecideApproval={(approval, decision) => void decideApproval(approval, decision)} onResolveQuestion={resolveQuestion} /> : mode === "live" && agents.length === 0 ? <FirstAgentState onStart={() => setNewModalOpen(true)} /> : <LoadingConversation />}
         </section>
         <div className="conversation-composer">
-          {mode === "loading" ? <div className="composer composer--disabled"><SpinnerIcon size={15} /><span>Connecting to Cyclone…</span></div> : <Composer conversationName={conversation?.title ?? "Cyclone"} agents={agents} disabled={mode !== "live" || !conversation} busy={sending} onSend={sendMessage} />}
+          {mode === "loading" ? <div className="composer composer--disabled"><SpinnerIcon size={15} /><span>Connecting to Cyclone…</span></div> : <Composer conversationName={conversation?.title ?? "Cyclone"} agents={agents} disabled={mode !== "live" || !conversation} busy={sending} onSend={sendMessage} onTeachTask={() => setTeachTaskOpen(true)} />}
         </div>
       </main>}
-      {utilityOpen && <AgentUtilityPanel agent={headerAgents[0]} conversationTitle={conversation?.title ?? "Cyclone"} onClose={() => setUtilityOpen(false)} onOpenComputer={(session) => void openComputer(session)} />}
+      {utilityOpen && <AgentUtilityPanel agent={headerAgents[0]} conversationTitle={conversation?.title ?? "Cyclone"} onClose={() => setUtilityOpen(false)} onOpenComputer={(session) => void openComputer(session)} onEditProfile={(agent) => { setUtilityOpen(false); setProfileAgent(agent); }} />}
+      {profileAgent && <AgentProfilePanel agent={profileAgent} saving={profileSaving} onClose={() => setProfileAgent(null)} onSave={saveAgentProfile} />}
     </div>
     {computerSession && <RemoteComputerOverlay session={computerSession} agent={agents.find((agent) => agent.id === computerSession.agent_id || agent.slug === computerSession.agent_id)} onClose={() => setComputerSession(null)} onChangeOwner={updateComputerOwner} />}
     {computerUnavailable && <ComputerUnavailableOverlay onClose={() => setComputerUnavailable(false)} />}
     {newModalOpen && <NewConversationModal agents={agents} onClose={() => setNewModalOpen(false)} onCreateConversation={handleCreateConversation} onCreateAgent={handleCreateAgent} />}
+    {teachTaskOpen && <TeachTaskModal agent={selectedAgents.find((agent) => agent.status !== "offline") ?? agents.find((agent) => agent.slug === "chief")} onClose={() => setTeachTaskOpen(false)} onCreate={teachTask} />}
   </div>;
 }
 
@@ -315,6 +347,7 @@ function LoadingConversation() {
 }
 
 function agentsForConversation(summary: ConversationSummary, allAgents: Agent[], active: ConversationDetail | null): Agent[] {
+  if (summary.member_agents?.length) return summary.member_agents;
   if (active?.id === summary.id) {
     const members = active.members.map((member) => member.agent).filter((agent): agent is Agent => Boolean(agent));
     if (members.length) return members;
@@ -339,4 +372,3 @@ function healthDetail(health: HealthResponse): string {
 function capitalize(value: string) { return value.slice(0, 1).toUpperCase() + value.slice(1); }
 
 export default App;
-

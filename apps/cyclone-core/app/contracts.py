@@ -68,6 +68,14 @@ class CreateAgentRequest(StrictModel):
     workspace_path: str = Field(default="/workspace", max_length=512)
 
 
+class UpdateAgentRequest(StrictModel):
+    """Administrator-owned fields for one persistent agent identity."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    role: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=2_000)
+
+
 class ConversationSummary(StrictModel):
     id: UUID
     title: str
@@ -75,6 +83,10 @@ class ConversationSummary(StrictModel):
     project_key: str | None = None
     updated_at: datetime
     latest_preview: str | None = None
+    # A summary is rendered before its full conversation is loaded. Include the
+    # actual agent identities so direct and crew rows do not have to guess from
+    # a title or the globally loaded agent list.
+    member_agents: list[AgentSummary] = Field(default_factory=list)
 
 
 class ConversationMember(StrictModel):
@@ -187,6 +199,26 @@ class UserRecord(StrictModel):
 class TaskStatusRequest(StrictModel):
     status: Literal["queued", "running", "awaiting_review", "changes_requested", "completed", "blocked", "failed", "cancelled"]
     note: str | None = Field(default=None, max_length=2_000)
+
+
+class RoutineSummary(StrictModel):
+    id: UUID
+    slug: str
+    name: str
+    description: str
+    owner_agent_id: UUID | None = None
+    n8n_workflow_id: str | None = None
+    enabled: bool
+
+
+class CreateRoutineRequest(StrictModel):
+    slug: str = Field(min_length=1, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2_000)
+    instructions: str = Field(min_length=1, max_length=10_000)
+    owner_agent_slug: str | None = Field(default=None, max_length=63)
+    schedule: str | None = Field(default=None, max_length=200)
+
 
 
 class RunApprovalRequest(StrictModel):

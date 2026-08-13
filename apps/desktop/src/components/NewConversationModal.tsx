@@ -23,8 +23,7 @@ interface NewConversationModalProps {
 export function NewConversationModal({ agents, onClose, onCreateConversation, onCreateAgent }: NewConversationModalProps) {
   const [mode, setMode] = useState<"conversation" | "agent">("conversation");
   const [title, setTitle] = useState("");
-  const [selected, setSelected] = useState<string[]>(["chief"]);
-  const [kind, setKind] = useState<"direct" | "group">("direct");
+  const [selected, setSelected] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
@@ -37,10 +36,17 @@ export function NewConversationModal({ agents, onClose, onCreateConversation, on
     setSelected((current) => current.includes(slug) ? current.filter((item) => item !== slug) : [...current, slug]);
   }
 
+  const selectedAgents = agents.filter((agent) => selected.includes(agent.slug));
+  const isGroup = selectedAgents.length > 1;
+  const generatedGroupTitle = selectedAgents.length < 3
+    ? selectedAgents.map((agent) => agent.name).join(" & ")
+    : `${selectedAgents.slice(0, 2).map((agent) => agent.name).join(", ")} & ${selectedAgents.length - 2} more`;
+
   async function submitConversation(event: FormEvent) {
     event.preventDefault();
-    const trimmed = title.trim();
-    if (!trimmed || !selected.length || working) return;
+    if (!selected.length || working) return;
+    const kind = isGroup ? "group" : "direct";
+    const trimmed = isGroup ? title.trim() || generatedGroupTitle : selectedAgents[0]?.name ?? "New conversation";
     setWorking(true);
     setError("");
     try {
@@ -85,27 +91,25 @@ export function NewConversationModal({ agents, onClose, onCreateConversation, on
       </div>
 
       {mode === "conversation" && <form onSubmit={(event) => void submitConversation(event)} className="new-modal__form">
-        <label><span>Title</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Website redesign" autoFocus /></label>
-        <div className="new-modal__kind"><label><input type="radio" name="kind" checked={kind === "direct"} onChange={() => setKind("direct")} />One agent</label><label><input type="radio" name="kind" checked={kind === "group"} onChange={() => setKind("group")} />Group</label></div>
         <div className="new-modal__agents">
           <span>Members</span>
           <div>{agents.map((agent) => <button type="button" key={agent.id} className={`agent-pick ${selected.includes(agent.slug) ? "agent-pick--selected" : ""}`} onClick={() => toggleAgent(agent.slug)}><BotAvatar agent={agent} size={22} /><span>{agent.name}</span><i>{selected.includes(agent.slug) ? "✓" : ""}</i></button>)}</div>
         </div>
+        {isGroup && <label><span>Group title <em className="new-modal__optional">optional</em></span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={generatedGroupTitle || "e.g. Website redesign"} autoFocus /></label>}
         {error && <p className="new-modal__error">{error}</p>}
-        <div className="new-modal__actions"><button type="submit" disabled={working || !title.trim() || !selected.length}>{working ? "Creating…" : "Create"}</button></div>
+        <div className="new-modal__actions"><button type="submit" disabled={working || !selected.length}>{working ? "Creating…" : isGroup ? "Create group" : "Create"}</button></div>
       </form>}
 
       {mode === "agent" && <form onSubmit={(event) => void submitAgent(event)} className="new-modal__form">
         <div className="new-modal__identity">
           <div className="identity-preview"><BotAvatar agent={{ id: "preview", slug: slugify(name) || "new-agent", name: name.trim() || "New Agent", role, description, avatar_color: color, avatar_shape: shape, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={54} /></div>
-          <span>Character</span>
-          <div className="identity-colors">{COLORS.map((candidate) => <button key={candidate} type="button" aria-label={`Color ${candidate}`} aria-pressed={color === candidate} className={color === candidate ? "selected" : ""} style={{ background: candidate }} onClick={() => setColor(candidate)} />)}</div>
-          <div className="identity-shapes">{SHAPES.map((candidate) => <button key={candidate} type="button" aria-pressed={shape === candidate} className={shape === candidate ? "selected" : ""} onClick={() => setShape(candidate)}><BotAvatar agent={{ id: "shape", slug: "shape", name: "S", role: "", description: "", avatar_color: color, avatar_shape: candidate, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={24} /></button>)}</div>
+          <div className="identity-controls">
+            <span>Character</span>
+            <div className="identity-colors" aria-label="Avatar color">{COLORS.map((candidate) => <button key={candidate} type="button" aria-label={`Color ${candidate}`} aria-pressed={color === candidate} className={color === candidate ? "selected" : ""} style={{ background: candidate }} onClick={() => setColor(candidate)} />)}</div>
+            <div className="identity-shapes" aria-label="Avatar shape">{SHAPES.map((candidate) => <button key={candidate} type="button" aria-label={`Shape ${candidate}`} aria-pressed={shape === candidate} className={shape === candidate ? "selected" : ""} onClick={() => setShape(candidate)}><BotAvatar agent={{ id: "shape", slug: "shape", name: "S", role: "", description: "", avatar_color: color, avatar_shape: candidate, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={24} /></button>)}</div>
+          </div>
         </div>
-        <div className="new-modal__name">
-          <span>Name</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="New Agent" autoFocus />
-        </div>
+        <label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="New Agent" autoFocus /></label>
         <label><span>Role</span><input value={role} onChange={(event) => setRole(event.target.value)} placeholder="e.g. Evidence specialist" /></label>
         <label><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this teammate does…" rows={2} /></label>
         {error && <p className="new-modal__error">{error}</p>}

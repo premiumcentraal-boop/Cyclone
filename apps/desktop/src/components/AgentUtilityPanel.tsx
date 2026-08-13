@@ -9,9 +9,10 @@ interface AgentUtilityPanelProps {
   conversationTitle: string;
   onClose: () => void;
   onOpenComputer: (session?: ComputerSession) => void;
+  onEditProfile: (agent: Agent) => void;
 }
 
-export function AgentUtilityPanel({ agent, conversationTitle, onClose, onOpenComputer }: AgentUtilityPanelProps) {
+export function AgentUtilityPanel({ agent, conversationTitle, onClose, onOpenComputer, onEditProfile }: AgentUtilityPanelProps) {
   const [session, setSession] = useState<ComputerSession | null | undefined>(undefined);
   const [routines, setRoutines] = useState<RoutineSummary[] | null>(null);
   const [notice, setNotice] = useState("");
@@ -40,7 +41,7 @@ export function AgentUtilityPanel({ agent, conversationTitle, onClose, onOpenCom
 
   return <aside className="utility-panel" aria-label={`${name} utility panel`}>
     <div className="utility-header">
-      <button type="button" aria-label="Agent settings" title={`${name} settings`} onClick={() => setNotice("Agent settings arrive with the next pass.")}><SettingsIcon size={16} /></button>
+      <button type="button" className="utility-header__edit" aria-label="Edit agent profile" title={`Edit ${name} profile`} onClick={() => agent && onEditProfile(agent)}><SettingsIcon size={15} /><span>Edit profile</span></button>
       <button type="button" aria-label="Close panel" title="Close panel" onClick={onClose}><CloseIcon size={15} /></button>
     </div>
     <div className="utility-body">

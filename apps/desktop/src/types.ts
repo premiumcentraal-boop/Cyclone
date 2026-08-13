@@ -33,6 +33,8 @@ export interface ConversationSummary {
   project_key?: string | null;
   updated_at: string;
   latest_preview?: string | null;
+  /** Actual agent identities for rendering the sidebar before opening the chat. */
+  member_agents?: Agent[];
 }
 
 export type MessageKind =

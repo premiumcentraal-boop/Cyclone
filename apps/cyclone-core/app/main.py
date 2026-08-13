@@ -48,6 +48,7 @@ from .contracts import (
     ConversationSummary,
     CreateAgentRequest,
     CreateConversationRequest,
+    CreateRoutineRequest,
     CreateMessageRequest,
     HealthDependency,
     HealthResponse,
@@ -69,6 +70,8 @@ from .contracts import (
     RunApprovalRequest,
     TaskStatusRequest,
     TaskSummary,
+    RoutineSummary,
+    UpdateAgentRequest,
     UserRecord,
 )
 from .events import EventBus
@@ -274,6 +277,29 @@ async def create_agent(request: CreateAgentRequest, runtime: AppServices = Depen
     return agent
 
 
+@app.patch("/api/v1/agents/{agent_id}", response_model=AgentSummary, tags=["agents"])
+async def update_agent(agent_id: UUID, request: UpdateAgentRequest, runtime: AppServices = Depends(services)) -> AgentSummary:
+    """Persist an administrator's profile edits for future Hermes context packets."""
+    try:
+        agent = await runtime.repository.update_agent(
+            agent_id,
+            name=request.name,
+            role=request.role,
+            description=request.description,
+        )
+    except NotFoundError as error:
+        raise _not_found(error) from error
+    await runtime.repository.add_audit_event(
+        actor_type="human",
+        actor_id="administrator",
+        action="agent.profile_updated",
+        target=agent.slug,
+        outcome="updated",
+        metadata={"agent_id": str(agent.id), "name": agent.name, "role": agent.role},
+    )
+    return agent
+
+
 @app.get("/api/v1/agents/{agent_id}/computer", response_model=ComputerSessionResponse, tags=["computers"])
 async def get_agent_computer(agent_id: UUID, runtime: AppServices = Depends(services)) -> ComputerSessionResponse:
     """Return a real persisted computer descriptor or an honest 404."""
@@ -415,6 +441,47 @@ async def create_conversation(request: CreateConversationRequest, runtime: AppSe
         payload={"id": str(conversation.id), "title": conversation.title, "kind": conversation.kind},
     )
     return conversation
+
+
+@app.post("/api/v1/conversations/{conversation_id}/routines", response_model=RoutineSummary, status_code=status.HTTP_201_CREATED, tags=["routines"])
+async def create_routine(
+    conversation_id: UUID, request: CreateRoutineRequest, runtime: AppServices = Depends(services)
+) -> RoutineSummary:
+    """Store a taught routine and show its creation naturally in the real conversation."""
+    try:
+        await runtime.repository.get_conversation(conversation_id, message_limit=1)
+        owner = await runtime.repository.get_agent_by_slug(request.owner_agent_slug) if request.owner_agent_slug else None
+        routine = await runtime.repository.create_routine(
+            slug=request.slug,
+            name=request.name,
+            description=request.description,
+            instructions=request.instructions,
+            owner_agent_id=owner.id if owner else None,
+            schedule=request.schedule,
+        )
+    except NotFoundError as error:
+        raise _not_found(error) from error
+    except Exception as error:
+        if "unique" in str(error).lower() and "routines_slug_key" in str(error):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"A routine with slug '{request.slug}' already exists.") from error
+        raise
+    message = await runtime.repository.add_message(
+        conversation_id=conversation_id,
+        author_type="system",
+        kind="automation",
+        body=f"Created routine: {routine.name}",
+        metadata={"routine": {"id": str(routine.id), "name": routine.name, "schedule": request.schedule, "status": "created"}},
+    )
+    await publish_message(runtime, message, "routine.created")
+    await runtime.repository.add_audit_event(
+        actor_type="human",
+        actor_id="administrator",
+        action="routine.taught",
+        target=routine.slug,
+        outcome="created",
+        metadata={"routine_id": str(routine.id), "conversation_id": str(conversation_id), "owner_agent_id": str(routine.owner_agent_id) if routine.owner_agent_id else None},
+    )
+    return routine
 
 
 @app.get("/api/v1/conversations/{conversation_id}", response_model=ConversationDetail, tags=["conversations"])

@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
+import { agentColor } from "../agent-visuals";
 import { BotAvatar } from "./BotAvatar";
 import type { Agent, MentionSegment } from "../types";
 
 export function AgentMention({ agent, fallbackName, onOpen }: { agent?: Agent; fallbackName?: string; onOpen?: (agent: Agent) => void }) {
   if (!agent) return <span className="agent-mention agent-mention--missing">{fallbackName ?? "Agent"}</span>;
-  return <button type="button" className="agent-mention" style={{ "--mention-color": agent.avatar_color } as CSSProperties} onClick={() => onOpen?.(agent)} title={`Open ${agent.name}`}>
-    <BotAvatar agent={agent} size={14} />
-    <span>{agent.name}</span>
+  return <button type="button" className="agent-mention" style={{ "--mention-color": agentColor(agent) } as CSSProperties} onClick={() => onOpen?.(agent)} title={`Open ${agent.name}`} aria-label={`Open ${agent.name}'s profile`}>
+    <BotAvatar agent={agent} size={14} interactive={false} className="agent-mention__avatar" />
+    <span className="agent-mention__name">{agent.name}</span>
   </button>;
 }
 

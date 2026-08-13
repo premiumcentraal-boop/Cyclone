@@ -28,6 +28,7 @@ from .contracts import (
     Message,
     ReactionResponse,
     TaskSummary,
+    RoutineSummary,
 )
 from .fts import fts_query_terms
 
@@ -207,6 +208,37 @@ class Repository:
             await connection.execute("UPDATE agents SET status = %s WHERE id = %s", (status, agent_id))
             await connection.commit()
 
+    async def update_agent(
+        self,
+        agent_id: UUID,
+        *,
+        name: str | None = None,
+        role: str | None = None,
+        description: str | None = None,
+    ) -> AgentSummary:
+        """Persist the editable profile fields that form the agent's identity context."""
+        assignments: list[str] = []
+        values: list[Any] = []
+        for column, value in (("name", name), ("role", role), ("description", description)):
+            if value is not None:
+                assignments.append(f"{column} = %s")
+                values.append(value)
+        if not assignments:
+            return await self.get_agent_by_id(agent_id)
+        values.append(agent_id)
+        async with self.connection() as connection:
+            result = await connection.execute(f"""
+                UPDATE agents SET {", ".join(assignments)}
+                WHERE id = %s
+                RETURNING id, slug, name, role, description, avatar_color, avatar_shape, status,
+                          provider, model, hermes_profile, workspace_path
+            """, values)
+            row = await result.fetchone()
+            await connection.commit()
+        if row is None:
+            raise NotFoundError("Agent was not found")
+        return self._agent(row)
+
     async def get_latest_computer_session(self, agent_id: UUID) -> ComputerSessionResponse:
         async with self.connection() as connection:
             result = await connection.execute(
@@ -255,9 +287,23 @@ class Repository:
                 ORDER BY c.updated_at DESC
             """)
             rows = await result.fetchall()
+            member_agents: dict[UUID, list[AgentSummary]] = {row["id"]: [] for row in rows}
+            if rows:
+                members_result = await connection.execute("""
+                    SELECT cm.conversation_id,
+                           a.id, a.slug, a.name, a.role, a.description, a.avatar_color, a.avatar_shape,
+                           a.status, a.provider, a.model, a.hermes_profile, a.workspace_path
+                    FROM conversation_members AS cm
+                    JOIN agents AS a ON a.id = cm.agent_id
+                    WHERE cm.conversation_id = ANY(%s) AND cm.member_type = 'agent'
+                    ORDER BY cm.conversation_id, cm.created_at
+                """, ([row["id"] for row in rows],))
+                for row in await members_result.fetchall():
+                    member_agents[row["conversation_id"]].append(self._agent(row))
         return [ConversationSummary(
             id=row["id"], title=row["title"], kind=row["kind"], project_key=row["project_key"],
             updated_at=row["updated_at"], latest_preview=row["latest_preview"],
+            member_agents=member_agents[row["id"]],
         ) for row in rows]
 
     async def create_conversation(self, *, title: str, kind: str, project_key: str | None, agent_slugs: list[str], hermes_conversation_key: str | None = None) -> ConversationDetail:
@@ -810,6 +856,30 @@ class Repository:
                 FROM routines WHERE owner_agent_id = %s ORDER BY created_at DESC
             """, (agent_id,))
             return await result.fetchall()
+
+    async def create_routine(
+        self,
+        *,
+        slug: str,
+        name: str,
+        description: str,
+        instructions: str,
+        owner_agent_id: UUID | None,
+        schedule: str | None,
+    ) -> RoutineSummary:
+        trigger_config = {"schedule": schedule} if schedule else {}
+        async with self.connection() as connection:
+            result = await connection.execute("""
+                INSERT INTO routines
+                  (slug, name, description, owner_agent_id, instructions, trigger_config, enabled)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, true)
+                RETURNING id, slug, name, description, owner_agent_id, n8n_workflow_id, enabled
+            """, (slug, name, description, owner_agent_id, instructions, psycopg.types.json.Jsonb(trigger_config)))
+            row = await result.fetchone()
+            await connection.commit()
+        if row is None:
+            raise NotFoundError("Routine could not be created")
+        return RoutineSummary(**row)
 
     async def upsert_telegram_user(self, *, chat_id: int, display_name: str, initials: str) -> UUID:
         """Create or update the Cyclone user record for a Telegram chat."""

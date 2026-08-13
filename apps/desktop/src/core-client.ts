@@ -40,9 +40,19 @@ export const coreClient = {
     provider?: string | null;
     model?: string | null;
   }) => request<Agent>("/api/v1/agents", { method: "POST", body: JSON.stringify(agent) }),
+  updateAgent: (agentId: string, updates: { name?: string; role?: string; description?: string }) =>
+    request<Agent>(`/api/v1/agents/${agentId}`, { method: "PATCH", body: JSON.stringify(updates) }),
   listConversations: () => request<ConversationSummary[]>("/api/v1/conversations"),
   createConversation: (payload: { title: string; kind: "direct" | "group" | "cluster" | "routine"; project_key?: string | null; agent_slugs: string[] }) =>
     request<ConversationDetail>("/api/v1/conversations", { method: "POST", body: JSON.stringify(payload) }),
+  createRoutine: (conversationId: string, routine: {
+    slug: string;
+    name: string;
+    description: string;
+    instructions: string;
+    owner_agent_slug?: string;
+    schedule?: string;
+  }) => request<RoutineSummary>(`/api/v1/conversations/${conversationId}/routines`, { method: "POST", body: JSON.stringify(routine) }),
   conversation: (id: string) => request<ConversationDetail>(`/api/v1/conversations/${id}`),
   sendMessage: (conversationId: string, body: string, agentSlug: string, options: { provider?: string | null; model?: string | null; attachments?: AttachmentRef[]; replyToMessageId?: string | null } = {}) =>
     request<AgentRunResponse>(`/api/v1/conversations/${conversationId}/messages`, {
