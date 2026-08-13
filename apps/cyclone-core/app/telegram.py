@@ -37,6 +37,8 @@ class TelegramWorker:
         self._offset: int | None = None
         self._active_conversations: set[UUID] = set()
         self._subscriptions: dict[UUID, Any] = {}
+        # conversation_id -> run_id awaiting a human decision (Telegram answers).
+        self._pending_approvals: dict[UUID, str] = {}
 
     # ------------------------------------------------------------------ api
     async def _api(self, method: str, **payload: Any) -> dict[str, Any]:
@@ -93,6 +95,19 @@ class TelegramWorker:
             return
 
         await self._subscribe(conversation_id, chat_id)
+        pending_run = self._pending_approvals.get(conversation_id)
+        choice = _approval_choice(text)
+        if pending_run and choice:
+            try:
+                await self.runtime.hermes.resolve_run_approval(pending_run, choice)
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("telegram: failed to resolve run approval")
+                await self.send_message(chat_id, "Cyclone could not send your answer. Try again.")
+                return
+            self._pending_approvals.pop(conversation_id, None)
+            label = {"once": "Allow once", "session": "Allow this session", "always": "Always allow", "deny": "Deny"}[choice]
+            await self.send_message(chat_id, f"Answer sent: {label}. The agent continues.")
+            return
         try:
             from .main import create_message_and_start_agent  # noqa: PLC0415 - deferred: avoids import cycle
             from .contracts import CreateMessageRequest  # noqa: PLC0415
@@ -152,6 +167,12 @@ class TelegramWorker:
                 kind = str(payload.get("kind", "message"))
                 if kind in {"activity", "task"}:
                     continue
+                if envelope.type == "approval.requested":
+                    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+                    run_id = str(metadata.get("hermes_run_id") or "")
+                    if run_id:
+                        self._pending_approvals[conversation_id] = run_id
+                    body = f"{body}\n\nReply with one of: allow once · allow session · always allow · deny"
                 prefix = "" if kind == "message" else f"({kind}) "
                 await self.send_message(chat_id, f"<b>{_escape(author_name)}</b>\n{prefix}{_escape(body)}")
         except Exception:  # pragma: no cover - defensive
@@ -178,6 +199,18 @@ class TelegramWorker:
                 logger.exception("telegram: poll loop error; retrying in 10s")
                 await asyncio.sleep(10)
             await asyncio.sleep(0.5)
+
+
+def _approval_choice(text: str) -> str | None:
+    """Map a Telegram reply to a run-approval choice (or None when not one)."""
+    normalized = text.strip().lower().rstrip(".!")
+    aliases = {
+        "allow once": "once", "allow": "once", "approve": "once", "yes": "once", "approve once": "once",
+        "allow session": "session", "this session": "session", "for this session": "session",
+        "always allow": "always", "always": "always", "allow always": "always",
+        "deny": "deny", "no": "deny", "denied": "deny", "block": "deny",
+    }
+    return aliases.get(normalized)
 
 
 def _chunk_text(text: str) -> list[str]:

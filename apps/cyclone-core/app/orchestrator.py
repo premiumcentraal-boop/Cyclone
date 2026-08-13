@@ -101,13 +101,18 @@ async def _monitor_run(
 ) -> None:
     """Poll bounded Hermes run status; durable task/message records are truth."""
     try:
-        for _ in range(180):
+        waited = 0
+        for _ in range(600):
             await asyncio.sleep(1)
             current = await runtime.hermes.get_run(run_id)
             run_status = str(current.get("status", "unknown"))
             if run_status == "waiting_for_approval":
+                # A run paused for a human decision must not age out: it only
+                # resolves when the operator answers (desktop card or Telegram).
+                waited = 0
                 await _handle_run_approval(runtime, run_id=run_id, task_id=task_id, conversation_id=conversation_id, agent=agent)
                 continue
+            waited += 1
             if run_status in {"completed", "failed", "cancelled"}:
                 output = current.get("output")
                 summary = output if isinstance(output, str) else None
@@ -162,7 +167,7 @@ async def _monitor_run(
             task_id=task_id,
             author_type="system",
             kind="activity",
-            body="The agent run is still unresolved after the observation window. Check Hermes diagnostics before retrying.",
+            body=f"Run {run_id} did not finish within the observation window (10 minutes). It may still be working in Hermes — check its status before retrying.",
             metadata={"hermes_run_id": run_id},
         )
         await publish_message(runtime, message, "agent.run.blocked")
