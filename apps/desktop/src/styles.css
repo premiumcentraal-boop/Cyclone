@@ -577,10 +577,10 @@ button.bot-avatar { cursor: pointer; }
 .identity-preview { grid-row: span 2; display: grid; place-items: center; width: 60px; height: 60px; border-radius: 12px; background: #F4F4F2; }
 .identity-colors { display: flex; flex-wrap: wrap; gap: 7px; }
 .identity-colors button { width: 20px; height: 20px; padding: 0; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
-.identity-colors button.selected { border-color: var(--text-primary); outline: 1px solid #fff; outline-offset: -3px; }
+.identity-colors button.selected { border-color: transparent; box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--text-primary); }
 .identity-shapes { display: flex; flex-wrap: wrap; gap: 6px; }
 .identity-shapes button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid #E4E4E1; border-radius: 7px; background: var(--main-bg); cursor: pointer; }
-.identity-shapes button.selected { border-color: var(--text-primary); border-radius: 9px; }
+.identity-shapes button.selected { border-color: var(--text-primary); box-shadow: 0 0 0 1px var(--text-primary); border-radius: 9px; }
 .new-modal__error { margin: 0; color: #C0392B; font-size: 11px; }
 .new-modal__actions { display: flex; justify-content: center; margin-top: 6px; }
 .new-modal__actions button { min-height: 32px; padding: 0 16px; border: 0; border-radius: 8px; background: #111; color: #fff; font-size: 12px; font-weight: 500; cursor: pointer; }

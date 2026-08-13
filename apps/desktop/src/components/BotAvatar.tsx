@@ -49,6 +49,11 @@ function geometry(shape: AgentAvatarShape): Geometry {
         clipPath: "M50 10 L90 84 L10 84 Z",
         outlinePath: "M50 10 L90 84 L10 84 Z",
       };
+    case "diamond":
+      return {
+        clipPath: "M49 7 C61 7 65 15 73 24 C83 35 93 41 93 52 C93 65 82 72 72 81 C63 89 60 94 49 94 C38 94 34 89 25 81 C15 72 7 65 7 52 C7 41 17 35 27 24 C36 15 39 7 49 7 Z",
+        outlinePath: "M49 7 C61 7 65 15 73 24 C83 35 93 41 93 52 C93 65 82 72 72 81 C63 89 60 94 49 94 C38 94 34 89 25 81 C15 72 7 65 7 52 C7 41 17 35 27 24 C36 15 39 7 49 7 Z",
+      };
     case "pebble":
       return {
         clipPath: "M49 8 C74 5 91 20 92 45 C94 67 78 91 52 92 C27 93 8 76 8 50 C8 27 24 11 49 8 Z",

@@ -28,7 +28,7 @@ export function NewConversationModal({ agents, onClose, onCreateConversation, on
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
-  const [color, setColor] = useState(COLORS[0]);
+  const [color, setColor] = useState("#1084FE");
   const [shape, setShape] = useState<AgentAvatarShape>("round");
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
@@ -99,8 +99,8 @@ export function NewConversationModal({ agents, onClose, onCreateConversation, on
         <div className="new-modal__identity">
           <div className="identity-preview"><BotAvatar agent={{ id: "preview", slug: slugify(name) || "new-agent", name: name.trim() || "New Agent", role, description, avatar_color: color, avatar_shape: shape, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={54} /></div>
           <span>Character</span>
-          <div className="identity-colors">{COLORS.map((candidate) => <button key={candidate} type="button" aria-label={`Color ${candidate}`} className={color === candidate ? "selected" : ""} style={{ background: candidate }} onClick={() => setColor(candidate)} />)}</div>
-          <div className="identity-shapes">{SHAPES.map((candidate) => <button key={candidate} type="button" className={shape === candidate ? "selected" : ""} onClick={() => setShape(candidate)}><BotAvatar agent={{ id: "shape", slug: "shape", name: "S", role: "", description: "", avatar_color: color, avatar_shape: candidate, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={24} /></button>)}</div>
+          <div className="identity-colors">{COLORS.map((candidate) => <button key={candidate} type="button" aria-label={`Color ${candidate}`} aria-pressed={color === candidate} className={color === candidate ? "selected" : ""} style={{ background: candidate }} onClick={() => setColor(candidate)} />)}</div>
+          <div className="identity-shapes">{SHAPES.map((candidate) => <button key={candidate} type="button" aria-pressed={shape === candidate} className={shape === candidate ? "selected" : ""} onClick={() => setShape(candidate)}><BotAvatar agent={{ id: "shape", slug: "shape", name: "S", role: "", description: "", avatar_color: color, avatar_shape: candidate, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={24} /></button>)}</div>
         </div>
         <div className="new-modal__name">
           <span>Name</span>
