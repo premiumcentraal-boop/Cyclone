@@ -2,11 +2,11 @@ import { BotAvatar, CrewAvatar } from "./BotAvatar";
 import { formatSidebarTime } from "../types";
 import type { Agent, ConversationSummary } from "../types";
 
-export function ConversationRow({ conversation, agents, active, focused, onSelect }: { conversation: ConversationSummary; agents: Agent[]; active: boolean; focused?: boolean; onSelect: (conversation: ConversationSummary) => void }) {
+export function ConversationRow({ conversation, agents, active, focused, onSelect, onContextMenu }: { conversation: ConversationSummary; agents: Agent[]; active: boolean; focused?: boolean; onSelect: (conversation: ConversationSummary) => void; onContextMenu?: (conversation: ConversationSummary, point: { x: number; y: number }) => void }) {
   const crew = conversation.kind === "cluster" || conversation.kind === "group";
   const memberAgents = crew ? agents.slice(0, 3) : agents.slice(0, 1);
   const agent = memberAgents[0];
-  return <button type="button" className={`conversation-row ${active ? "conversation-row--active" : ""} ${focused ? "conversation-row--focused" : ""}`} onClick={() => onSelect(conversation)}>
+  return <button type="button" className={`conversation-row ${active ? "conversation-row--active" : ""} ${focused ? "conversation-row--focused" : ""} ${conversation.is_unread ? "conversation-row--unread" : ""}`} onClick={() => onSelect(conversation)} onContextMenu={(event) => { event.preventDefault(); const bounds = event.currentTarget.getBoundingClientRect(); onContextMenu?.(conversation, { x: Math.max(event.clientX, bounds.right - 34), y: event.clientY - 6 }); }}>
     <span className="conversation-row__avatar">
       {crew ? <CrewAvatar agents={memberAgents} size={32} /> : agent ? <BotAvatar agent={agent} size={32} /> : <span className="conversation-row__fallback" />}
     </span>

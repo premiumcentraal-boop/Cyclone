@@ -83,6 +83,9 @@ class ConversationSummary(StrictModel):
     project_key: str | None = None
     updated_at: datetime
     latest_preview: str | None = None
+    is_pinned: bool = False
+    is_unread: bool = False
+    sidebar_section: str | None = None
     # A summary is rendered before its full conversation is loaded. Include the
     # actual agent identities so direct and crew rows do not have to guess from
     # a title or the globally loaded agent list.
@@ -138,6 +141,20 @@ class CreateConversationRequest(StrictModel):
     kind: Literal["direct", "group", "cluster", "routine"] = "direct"
     project_key: str | None = Field(default=None, max_length=120)
     agent_slugs: list[str] = Field(min_length=1, max_length=20)
+
+
+class ConversationSidebarUpdateRequest(StrictModel):
+    """User-owned presentation state for one durable conversation."""
+
+    is_pinned: bool | None = None
+    is_unread: bool | None = None
+    sidebar_section: str | None = Field(default=None, max_length=80)
+    hidden: bool | None = None
+
+
+class DuplicateAgentResponse(StrictModel):
+    agent: AgentSummary
+    conversation: ConversationDetail
 
 
 class AttachmentRef(StrictModel):

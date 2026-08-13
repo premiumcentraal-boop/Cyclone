@@ -46,9 +46,11 @@ from .contracts import (
     ComputerSessionResponse,
     ConversationDetail,
     ConversationSummary,
+    ConversationSidebarUpdateRequest,
     CreateAgentRequest,
     CreateConversationRequest,
     CreateRoutineRequest,
+    DuplicateAgentResponse,
     CreateMessageRequest,
     HealthDependency,
     HealthResponse,
@@ -455,6 +457,44 @@ async def create_conversation(request: CreateConversationRequest, runtime: AppSe
     return conversation
 
 
+@app.patch("/api/v1/conversations/{conversation_id}/sidebar", response_model=ConversationSummary, tags=["conversations"])
+async def update_conversation_sidebar(
+    conversation_id: UUID, request: ConversationSidebarUpdateRequest, runtime: AppServices = Depends(services)
+) -> ConversationSummary:
+    """Persist real sidebar controls: pin, unread state, section, and hide."""
+    updates = request.model_dump(exclude_unset=True)
+    if "sidebar_section" in updates:
+        section = updates["sidebar_section"]
+        updates["sidebar_section"] = section.strip() or None if isinstance(section, str) else None
+    try:
+        conversation = await runtime.repository.update_conversation_sidebar(conversation_id, updates)
+    except NotFoundError as error:
+        raise _not_found(error) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    await runtime.repository.add_audit_event(
+        actor_type="human",
+        actor_id="administrator",
+        action="conversation.sidebar_updated",
+        target=str(conversation_id),
+        outcome="updated",
+        metadata=updates,
+    )
+    return conversation
+
+
+@app.delete("/api/v1/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["conversations"])
+async def delete_conversation(conversation_id: UUID, runtime: AppServices = Depends(services)) -> None:
+    try:
+        await runtime.repository.delete_conversation(conversation_id)
+    except NotFoundError as error:
+        raise _not_found(error) from error
+    await runtime.repository.add_audit_event(
+        actor_type="human", actor_id="administrator", action="conversation.deleted",
+        target=str(conversation_id), outcome="deleted", metadata={},
+    )
+
+
 @app.post("/api/v1/conversations/{conversation_id}/routines", response_model=RoutineSummary, status_code=status.HTTP_201_CREATED, tags=["routines"])
 async def create_routine(
     conversation_id: UUID, request: CreateRoutineRequest, runtime: AppServices = Depends(services)
@@ -735,6 +775,28 @@ async def update_task_status(task_id: UUID, request: TaskStatusRequest, runtime:
         )
     await runtime.event_bus.publish(conversation_id=task.conversation_id, event_type="task.updated", payload=updated.model_dump(mode="json"))
     return updated
+
+
+@app.post("/api/v1/agents/{agent_id}/duplicate", response_model=DuplicateAgentResponse, status_code=status.HTTP_201_CREATED, tags=["agents"])
+async def duplicate_agent(agent_id: UUID, runtime: AppServices = Depends(services)) -> DuplicateAgentResponse:
+    """Clone an agent's durable identity and open a real direct chat for it."""
+    try:
+        duplicate = await runtime.repository.duplicate_agent(agent_id)
+        conversation = await runtime.repository.create_conversation(
+            title=duplicate.name, kind="direct", project_key=None, agent_slugs=[duplicate.slug]
+        )
+    except NotFoundError as error:
+        raise _not_found(error) from error
+    await runtime.repository.add_audit_event(
+        actor_type="human", actor_id="administrator", action="agent.duplicated",
+        target=duplicate.slug, outcome="created", metadata={"source_agent_id": str(agent_id), "conversation_id": str(conversation.id)},
+    )
+    await runtime.event_bus.publish(
+        conversation_id=conversation.id,
+        event_type="conversation.created",
+        payload={"id": str(conversation.id), "title": conversation.title, "kind": conversation.kind},
+    )
+    return DuplicateAgentResponse(agent=duplicate, conversation=conversation)
 
 
 @app.get("/api/v1/tasks/{task_id}/artifacts", response_model=list[ArtifactResponse], tags=["tasks"])

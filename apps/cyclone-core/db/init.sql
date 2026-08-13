@@ -34,9 +34,17 @@ CREATE TABLE IF NOT EXISTS conversations (
     kind cyclone_conversation_kind NOT NULL DEFAULT 'direct',
     hermes_conversation_key TEXT UNIQUE,
     project_key TEXT,
+    is_pinned BOOLEAN NOT NULL DEFAULT false,
+    is_unread BOOLEAN NOT NULL DEFAULT false,
+    sidebar_section TEXT CHECK (sidebar_section IS NULL OR char_length(sidebar_section) BETWEEN 1 AND 80),
+    hidden_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS conversations_sidebar_idx
+ON conversations (is_pinned DESC, updated_at DESC)
+WHERE hidden_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS conversation_members (
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,

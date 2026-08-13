@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.contracts import AgentSummary, ComputerOwnershipRequest, ComputerSessionResponse
+from app.contracts import AgentSummary, ComputerOwnershipRequest, ComputerSessionResponse, ConversationSidebarUpdateRequest
 
 
 def test_agent_contract_exposes_optional_visual_shape_without_requiring_a_visual_default() -> None:
@@ -41,3 +41,13 @@ def test_computer_ownership_contract_only_allows_one_authoritative_controller() 
     assert ComputerOwnershipRequest(owner="human").owner == "human"
     assert ComputerOwnershipRequest(owner="agent").owner == "agent"
     assert ComputerOwnershipRequest(owner="idle").owner == "idle"
+
+
+def test_sidebar_contract_supports_real_pin_unread_section_and_hide_controls() -> None:
+    update = ConversationSidebarUpdateRequest(
+        is_pinned=True, is_unread=True, sidebar_section="Active work", hidden=False
+    )
+
+    assert update.model_dump(exclude_unset=True) == {
+        "is_pinned": True, "is_unread": True, "sidebar_section": "Active work", "hidden": False,
+    }

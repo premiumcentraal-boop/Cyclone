@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { coreClient, CoreClientError } from "./core-client";
 import { demoAgents, demoConversations, disconnectedConversation } from "./mock-data";
 import { BotAvatar, CrewAvatar } from "./components/BotAvatar";
 import { Composer } from "./components/Composer";
 import { ConversationRow, ConversationRowSkeleton } from "./components/ConversationRow";
+import { ConversationContextMenu } from "./components/ConversationContextMenu";
+import type { ConversationContextMenuState, ConversationMenuAction } from "./components/ConversationContextMenu";
 import { MonitorIcon, PanelIcon, SearchIcon, SpinnerIcon } from "./components/Icons";
 import { MessageTimeline } from "./components/MessageTimeline";
 import { NewConversationModal } from "./components/NewConversationModal";
@@ -42,6 +45,10 @@ function App() {
   const [teachTaskOpen, setTeachTaskOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [focusedConversationId, setFocusedConversationId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ConversationContextMenuState | null>(null);
+  const [sectionConversation, setSectionConversation] = useState<ConversationSummary | null>(null);
+  const [sectionName, setSectionName] = useState("");
+  const [deleteConversation, setDeleteConversation] = useState<ConversationSummary | null>(null);
   const activeEventSource = useRef<EventSource | null>(null);
 
   const loadLiveData = useCallback(async () => {
@@ -122,6 +129,23 @@ function App() {
     return conversations.filter((item) => `${item.title} ${item.latest_preview ?? ""}`.toLowerCase().includes(needle));
   }, [conversations, search]);
 
+  const sidebarGroups = useMemo(() => {
+    const pinned = searchableConversations.filter((item) => item.is_pinned);
+    const unpinned = searchableConversations.filter((item) => !item.is_pinned);
+    const bySection = new Map<string, ConversationSummary[]>();
+    const unsectioned: ConversationSummary[] = [];
+    for (const item of unpinned) {
+      const section = item.sidebar_section?.trim();
+      if (!section) unsectioned.push(item);
+      else bySection.set(section, [...(bySection.get(section) ?? []), item]);
+    }
+    return [
+      ...(pinned.length ? [{ label: "Pinned", items: pinned }] : []),
+      ...(unsectioned.length ? [{ label: "", items: unsectioned }] : []),
+      ...[...bySection.entries()].map(([label, items]) => ({ label, items })),
+    ];
+  }, [searchableConversations]);
+
   const selectedAgents = useMemo(() => conversation?.members.map((member) => member.agent).filter((agent): agent is Agent => Boolean(agent)) ?? [], [conversation]);
   const headerAgents = selectedAgents.length ? selectedAgents : agents;
   const isPreview = mode === "disconnected" && Boolean(conversation && PREVIEW_CONVERSATION_IDS.has(conversation.id));
@@ -133,8 +157,122 @@ function App() {
     try {
       setConversation(await coreClient.conversation(item.id));
       setNotice("");
+      if (item.is_unread) {
+        void coreClient.updateConversationSidebar(item.id, { is_unread: false }).then((updated) => {
+          setConversations((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+        });
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Cyclone could not open this conversation.");
+    }
+  }
+
+  async function updateSidebar(conversationId: string, updates: { is_pinned?: boolean; is_unread?: boolean; sidebar_section?: string | null; hidden?: boolean }) {
+    if (mode !== "live") return;
+    try {
+      await coreClient.updateConversationSidebar(conversationId, updates);
+      const refreshed = await coreClient.listConversations();
+      setConversations(refreshed);
+      if (!refreshed.some((item) => item.id === selectedId)) {
+        const next = refreshed[0];
+        setSelectedId(next?.id ?? "");
+        setConversation(next ? await coreClient.conversation(next.id) : null);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Cyclone could not update the conversation sidebar.");
+    }
+  }
+
+  function contextAgent(item: ConversationSummary): Agent | undefined {
+    return agentsForConversation(item, agents, conversation)[0];
+  }
+
+  async function handleContextAction(action: ConversationMenuAction) {
+    const target = contextMenu?.conversation;
+    if (!target || mode !== "live") return;
+    if (action === "pin") {
+      await updateSidebar(target.id, { is_pinned: !target.is_pinned });
+      setNotice(target.is_pinned ? "Conversation unpinned." : "Conversation pinned.");
+      return;
+    }
+    if (action === "unread") {
+      await updateSidebar(target.id, { is_unread: !target.is_unread });
+      setNotice(target.is_unread ? "Conversation marked as read." : "Conversation marked as unread.");
+      return;
+    }
+    if (action === "section") {
+      setSectionConversation(target);
+      setSectionName(target.sidebar_section ?? "");
+      return;
+    }
+    if (action === "edit") {
+      const agent = contextAgent(target);
+      if (agent) setProfileAgent(agent);
+      else setNotice("This conversation has no editable agent profile.");
+      return;
+    }
+    if (action === "duplicate") {
+      const agent = contextAgent(target);
+      if (!agent) {
+        setNotice("This conversation has no agent to duplicate.");
+        return;
+      }
+      try {
+        const duplicated = await coreClient.duplicateAgent(agent.id);
+        const [loadedAgents, loadedConversations] = await Promise.all([coreClient.listAgents(), coreClient.listConversations()]);
+        setAgents(loadedAgents);
+        setConversations(loadedConversations);
+        setSelectedId(duplicated.conversation.id);
+        setConversation(duplicated.conversation);
+        setNotice(`${duplicated.agent.name} and its new direct conversation are ready.`);
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Cyclone could not duplicate this agent.");
+      }
+      return;
+    }
+    if (action === "copy-id") {
+      try {
+        await navigator.clipboard.writeText(target.id);
+        setNotice("Conversation ID copied.");
+      } catch {
+        setNotice(`Conversation ID: ${target.id}`);
+      }
+      return;
+    }
+    if (action === "hide") {
+      await updateSidebar(target.id, { hidden: true });
+      setNotice("Conversation hidden from the sidebar.");
+      return;
+    }
+    if (action === "delete") setDeleteConversation(target);
+  }
+
+  async function moveConversationToSection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const target = sectionConversation;
+    const section = sectionName.trim();
+    if (!target || !section) return;
+    await updateSidebar(target.id, { sidebar_section: section });
+    setSectionConversation(null);
+    setNotice(`Moved to ${section}.`);
+  }
+
+  async function confirmDeleteConversation() {
+    const target = deleteConversation;
+    if (!target || mode !== "live") return;
+    try {
+      await coreClient.deleteConversation(target.id);
+      const refreshed = await coreClient.listConversations();
+      setConversations(refreshed);
+      if (selectedId === target.id) {
+        const next = refreshed[0];
+        setSelectedId(next?.id ?? "");
+        setConversation(next ? await coreClient.conversation(next.id) : null);
+      }
+      setDeleteConversation(null);
+      setNotice("Conversation deleted.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Cyclone could not delete this conversation.");
     }
   }
 
@@ -283,7 +421,10 @@ function App() {
         <div className="sidebar__search"><SearchIcon size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" aria-label="Search conversations" /></div>
         <div className="sidebar__threads" aria-label="Conversations">
           {mode === "loading" && <><ConversationRowSkeleton /><ConversationRowSkeleton /><ConversationRowSkeleton /><ConversationRowSkeleton /></>}
-          {mode === "live" && searchableConversations.map((item) => <ConversationRow key={item.id} conversation={item} agents={agentsForConversation(item, agents, conversation)} active={item.id === selectedId} focused={item.id === focusedConversationId} onSelect={selectConversation} />)}
+          {mode === "live" && sidebarGroups.map((group, index) => <div className="sidebar__section" key={`${group.label || "conversations"}-${index}`}>
+            {group.label && <div className="sidebar__section-label">{group.label}</div>}
+            {group.items.map((item) => <ConversationRow key={item.id} conversation={item} agents={agentsForConversation(item, agents, conversation)} active={item.id === selectedId} focused={item.id === focusedConversationId} onSelect={selectConversation} onContextMenu={(conversation, point) => setContextMenu({ conversation, ...point })} />)}
+          </div>)}
           {mode === "live" && !searchableConversations.length && <div className="sidebar__empty">{agents.length ? "No conversations found." : "No chats yet"}</div>}
           {mode === "disconnected" && <div className="sidebar__offline"><span className="sidebar__offline-dot" /><p>Waiting for your agent network</p><small>Conversations appear here when Cyclone Core is online.</small></div>}
         </div>
@@ -313,6 +454,24 @@ function App() {
     {computerUnavailable && <ComputerUnavailableOverlay onClose={() => setComputerUnavailable(false)} />}
     {newModalOpen && <NewConversationModal agents={agents} onClose={() => setNewModalOpen(false)} onCreateConversation={handleCreateConversation} onCreateAgent={handleCreateAgent} />}
     {teachTaskOpen && <TeachTaskModal agent={selectedAgents.find((agent) => agent.status !== "offline") ?? agents.find((agent) => agent.slug === "chief")} onClose={() => setTeachTaskOpen(false)} onCreate={teachTask} />}
+    {contextMenu && <ConversationContextMenu state={contextMenu} onAction={(action) => void handleContextAction(action)} onClose={() => setContextMenu(null)} />}
+    {sectionConversation && <div className="sidebar-action-dialog" role="dialog" aria-modal="true" aria-labelledby="section-dialog-title">
+      <button type="button" className="sidebar-action-dialog__scrim" aria-label="Close" onClick={() => setSectionConversation(null)} />
+      <form className="sidebar-action-dialog__window" onSubmit={(event) => void moveConversationToSection(event)}>
+        <h2 id="section-dialog-title">Move to new section</h2>
+        <p>Organize the real conversation without changing its agents or history.</p>
+        <label>Section name<input value={sectionName} onChange={(event) => setSectionName(event.target.value)} placeholder="For example, Active work" autoFocus maxLength={80} /></label>
+        <div className="sidebar-action-dialog__actions"><button type="button" onClick={() => setSectionConversation(null)}>Cancel</button><button type="submit" disabled={!sectionName.trim()}>Move</button></div>
+      </form>
+    </div>}
+    {deleteConversation && <div className="sidebar-action-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
+      <button type="button" className="sidebar-action-dialog__scrim" aria-label="Close" onClick={() => setDeleteConversation(null)} />
+      <div className="sidebar-action-dialog__window">
+        <h2 id="delete-dialog-title">Delete conversation?</h2>
+        <p>“{deleteConversation.title}” and its messages, tasks, and handoffs will be permanently removed.</p>
+        <div className="sidebar-action-dialog__actions"><button type="button" onClick={() => setDeleteConversation(null)}>Cancel</button><button type="button" className="sidebar-action-dialog__delete" onClick={() => void confirmDeleteConversation()}>Delete</button></div>
+      </div>
+    </div>}
   </div>;
 }
 

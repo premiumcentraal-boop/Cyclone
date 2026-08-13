@@ -130,6 +130,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .sidebar__threads::-webkit-scrollbar { width: 7px; }
 .sidebar__threads::-webkit-scrollbar-thumb { border-radius: 999px; background: #cccccc; }
 .sidebar__threads::-webkit-scrollbar-track { background: transparent; }
+.sidebar__section { display: grid; gap: 3px; }
+.sidebar__section + .sidebar__section { margin-top: 8px; }
+.sidebar__section-label { margin: 5px 10px 1px; color: var(--text-muted); font-size: 10px; font-weight: 650; letter-spacing: .055em; text-transform: uppercase; }
 .sidebar__empty, .sidebar__offline { padding: 15px 10px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 .sidebar__offline { margin: auto 8px; text-align: left; }
 .sidebar__offline p { margin: 0 0 4px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
@@ -164,11 +167,36 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .conversation-row__line strong { overflow: hidden; color: var(--text-primary); font-size: 13px; font-weight: 550; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-row__line time { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 .conversation-row__preview { overflow: hidden; color: var(--text-secondary); font-size: 11.5px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-row--unread .conversation-row__line strong, .conversation-row--unread .conversation-row__preview { color: var(--text-primary); font-weight: 600; }
+.conversation-row--unread .conversation-row__line time { color: #4B8DF7; }
 .conversation-row--skeleton { pointer-events: none; }
 .skeleton { display: block; border-radius: 999px; background: linear-gradient(90deg, #f1f1ef 25%, #f7f7f5 37%, #f1f1ef 63%); background-size: 400% 100%; animation: skeleton 1.5s ease infinite; }
 .skeleton--avatar { width: 32px; height: 32px; }
 .skeleton--title { width: 62%; height: 10px; }
 .skeleton--preview { width: 87%; height: 8px; margin-top: 5px; }
+
+/* Grok-style context actions for real sidebar conversations. */
+.conversation-context-menu { position: fixed; z-index: 50; display: grid; width: 200px; padding: 7px 0; border: 1px solid #E6E6E3; border-radius: 13px; background: #fff; box-shadow: 0 12px 26px rgba(18,18,16,.16); animation: context-menu-in 110ms ease-out both; }
+@keyframes context-menu-in { from { opacity: 0; transform: translateY(-3px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.conversation-context-menu__item { display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 13px; border: 0; background: transparent; color: #343430; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.conversation-context-menu__item:hover, .conversation-context-menu__item:focus-visible { outline: 0; background: #F3F3F1; }
+.conversation-context-menu__item svg { color: #52524F; stroke-width: 1.45; }
+.conversation-context-menu__item--destructive, .conversation-context-menu__item--destructive svg { color: #EF5C69; }
+.conversation-context-menu__divider { height: 1px; margin: 5px 13px; background: #DDDDDA; }
+
+/* Small confirmation and section dialogs used by the context menu. */
+.sidebar-action-dialog { position: fixed; z-index: 55; inset: 0; display: grid; place-items: center; padding: 24px; }
+.sidebar-action-dialog__scrim { position: absolute; inset: 0; background: rgba(20,20,18,.28); }
+.sidebar-action-dialog__window { position: relative; z-index: 1; display: grid; gap: 13px; width: min(364px, calc(100vw - 48px)); padding: 17px; border: 1px solid #E5E5E2; border-radius: 14px; background: var(--main-bg); box-shadow: 0 18px 44px rgba(23,23,21,.15); }
+.sidebar-action-dialog__window h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.sidebar-action-dialog__window p { margin: -7px 0 0; color: var(--text-secondary); font-size: 11.5px; line-height: 1.45; }
+.sidebar-action-dialog__window label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 11px; }
+.sidebar-action-dialog__window input { width: 100%; padding: 8px 9px; border: 1px solid #E1E1DE; border-radius: 8px; outline: 0; background: var(--main-bg); color: var(--text-primary); font: inherit; font-size: 12px; }
+.sidebar-action-dialog__window input:focus { border-color: #9D9D98; box-shadow: 0 0 0 2px rgba(23,23,21,.06); }
+.sidebar-action-dialog__actions { display: flex; justify-content: flex-end; gap: 7px; padding-top: 2px; }
+.sidebar-action-dialog__actions button { min-height: 31px; padding: 0 12px; border: 0; border-radius: 8px; background: #F0F0EE; color: var(--text-primary); font-size: 11.5px; cursor: pointer; }
+.sidebar-action-dialog__actions button[type="submit"], .sidebar-action-dialog__actions .sidebar-action-dialog__delete { background: #171715; color: #fff; }
+.sidebar-action-dialog__actions .sidebar-action-dialog__delete { background: #E95260; }
 @keyframes skeleton { from { background-position: 100% 0; } to { background-position: 0 0; } }
 
 /* Bottom of sidebar: Plugins, then User. */

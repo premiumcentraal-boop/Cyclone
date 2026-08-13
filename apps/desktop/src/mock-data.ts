@@ -39,8 +39,8 @@ export const demoAgents: Agent[] = [
 ];
 
 export const demoConversations: ConversationSummary[] = [
-  { id: "preview-chief", title: "Chief", kind: "direct", updated_at: now, latest_preview: "Cyclone Core is not connected yet." },
-  { id: "preview-crew", title: "Build crew", kind: "cluster", updated_at: now, latest_preview: "Waiting for a real task." },
+  { id: "preview-chief", title: "Chief", kind: "direct", updated_at: now, latest_preview: "Cyclone Core is not connected yet.", is_pinned: false, is_unread: false },
+  { id: "preview-crew", title: "Build crew", kind: "cluster", updated_at: now, latest_preview: "Waiting for a real task.", is_pinned: false, is_unread: false },
 ];
 
 export const demoConversation: ConversationDetail = {

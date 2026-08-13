@@ -31,3 +31,10 @@ export function SendIcon(props: IconProps) { return <Icon {...props}><path d="m4
 export function ExternalIcon(props: IconProps) { return <Icon {...props}><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5" /></Icon>; }
 export function SpinnerIcon(props: IconProps) { return <Icon {...props} className={`spinner ${props.className ?? ""}`}><path d="M20 12a8 8 0 1 1-2.34-5.66" /></Icon>; }
 export function ChatIcon(props: IconProps) { return <Icon {...props}><path d="M20 11.4a7.7 7.7 0 0 1-8 7.4 8.4 8.4 0 0 1-3.2-.64L4 20l1.5-4A7.1 7.1 0 0 1 4 11.4 7.7 7.7 0 0 1 12 4a7.7 7.7 0 0 1 8 7.4Z" /></Icon>; }
+export function PinIcon(props: IconProps) { return <Icon {...props}><path d="m14.5 4.5 5 5-2.2 2.1v3.1l-3.1 3.1-3.2-3.2-4.5 4.5-.8-.8 4.5-4.5-3.2-3.2 3.1-3.1h3.1l2.3-2.2Z" /></Icon>; }
+export function FolderPlusIcon(props: IconProps) { return <Icon {...props}><path d="M3.5 6.8h5l1.6 1.8h10.4v8.7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6.8Z" /><path d="M16.5 12v5M14 14.5h5" /></Icon>; }
+export function UnreadIcon(props: IconProps) { return <Icon {...props}><path d="M5 6.4h10.2l2.8 2.8v8.3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2.1Z" /><path d="M15.2 6.4v2.9h2.8M7.4 13.3h6.8" /></Icon>; }
+export function EditIcon(props: IconProps) { return <Icon {...props}><path d="m4 16.8-.6 3.8 3.8-.6L18 9.2l-3.2-3.2L4 16.8Z" /><path d="m12.8 8 3.2 3.2M15.5 5.3l1.1-1.1a2.2 2.2 0 0 1 3.1 3.1L18.5 8.5" /></Icon>; }
+export function CopyIcon(props: IconProps) { return <Icon {...props}><rect x="8" y="7" width="11.5" height="12" rx="1.8" /><path d="M16 7V5.8A1.8 1.8 0 0 0 14.2 4H5.8A1.8 1.8 0 0 0 4 5.8v8.4A1.8 1.8 0 0 0 5.8 16H8" /></Icon>; }
+export function HideIcon(props: IconProps) { return <Icon {...props}><path d="M3.5 12s3-5.2 8.5-5.2S20.5 12 20.5 12s-3 5.2-8.5 5.2S3.5 12 3.5 12Z" /><circle cx="12" cy="12" r="2.3" /><path d="M4 4 20 20" /></Icon>; }
+export function TrashIcon(props: IconProps) { return <Icon {...props}><path d="M4.5 7h15M9 7V4.5h6V7M6.5 7l.8 12.5h9.4L17.5 7M10 10.5v5.8M14 10.5v5.8" /></Icon>; }

@@ -278,13 +278,15 @@ class Repository:
     async def list_conversations(self) -> list[ConversationSummary]:
         async with self.connection() as connection:
             result = await connection.execute("""
-                SELECT c.id, c.title, c.kind, c.project_key, c.updated_at, latest.body AS latest_preview
+                SELECT c.id, c.title, c.kind, c.project_key, c.updated_at, c.is_pinned, c.is_unread,
+                       c.sidebar_section, latest.body AS latest_preview
                 FROM conversations AS c
                 LEFT JOIN LATERAL (
                     SELECT body FROM messages WHERE conversation_id = c.id
                     ORDER BY created_at DESC LIMIT 1
                 ) AS latest ON TRUE
-                ORDER BY c.updated_at DESC
+                WHERE c.hidden_at IS NULL
+                ORDER BY c.is_pinned DESC, c.updated_at DESC
             """)
             rows = await result.fetchall()
             member_agents: dict[UUID, list[AgentSummary]] = {row["id"]: [] for row in rows}
@@ -303,8 +305,100 @@ class Repository:
         return [ConversationSummary(
             id=row["id"], title=row["title"], kind=row["kind"], project_key=row["project_key"],
             updated_at=row["updated_at"], latest_preview=row["latest_preview"],
+            is_pinned=row["is_pinned"], is_unread=row["is_unread"], sidebar_section=row["sidebar_section"],
             member_agents=member_agents[row["id"]],
         ) for row in rows]
+
+    async def update_conversation_sidebar(self, conversation_id: UUID, updates: dict[str, Any]) -> ConversationSummary:
+        """Persist sidebar-only state without touching the conversation's work history."""
+        columns = {
+            "is_pinned": "is_pinned",
+            "is_unread": "is_unread",
+            "sidebar_section": "sidebar_section",
+        }
+        assignments: list[str] = []
+        values: list[Any] = []
+        for field, column in columns.items():
+            if field in updates:
+                assignments.append(f"{column} = %s")
+                values.append(updates[field])
+        if "hidden" in updates:
+            assignments.append("hidden_at = now()" if updates["hidden"] else "hidden_at = NULL")
+        if not assignments:
+            raise ValueError("No sidebar fields were provided.")
+        async with self.connection() as connection:
+            result = await connection.execute(
+                f"UPDATE conversations SET {', '.join(assignments)} WHERE id = %s RETURNING id",
+                (*values, conversation_id),
+            )
+            row = await result.fetchone()
+            await connection.commit()
+        if row is None:
+            raise NotFoundError("Conversation was not found")
+        summaries = await self.list_conversations()
+        summary = next((item for item in summaries if item.id == conversation_id), None)
+        if summary is not None:
+            return summary
+        # A hidden conversation correctly drops out of the normal list. Read
+        # its side state directly so the mutation still has a concrete result.
+        async with self.connection() as connection:
+            result = await connection.execute("""
+                SELECT id, title, kind, project_key, updated_at, is_pinned, is_unread, sidebar_section
+                FROM conversations WHERE id = %s
+            """, (conversation_id,))
+            hidden = await result.fetchone()
+        if hidden is None:
+            raise NotFoundError("Conversation was not found")
+        return ConversationSummary(
+            id=hidden["id"], title=hidden["title"], kind=hidden["kind"], project_key=hidden["project_key"],
+            updated_at=hidden["updated_at"], latest_preview=None, is_pinned=hidden["is_pinned"],
+            is_unread=hidden["is_unread"], sidebar_section=hidden["sidebar_section"], member_agents=[],
+        )
+
+    async def delete_conversation(self, conversation_id: UUID) -> None:
+        async with self.connection() as connection:
+            result = await connection.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
+            await connection.commit()
+        if result.rowcount == 0:
+            raise NotFoundError("Conversation was not found")
+
+    async def duplicate_agent(self, agent_id: UUID) -> AgentSummary:
+        """Clone a real agent identity into a new independently addressable agent."""
+        async with self.connection() as connection:
+            source_result = await connection.execute("""
+                SELECT id, slug, name, role, description, avatar_color, avatar_shape, system_instructions,
+                       provider, model, hermes_profile, workspace_path, tool_permissions
+                FROM agents WHERE id = %s
+            """, (agent_id,))
+            source = await source_result.fetchone()
+            if source is None:
+                raise NotFoundError("Agent was not found")
+            base_slug = f"{source['slug'][:58]}-copy"
+            slug = base_slug
+            suffix = 2
+            while True:
+                exists = await connection.execute("SELECT 1 FROM agents WHERE slug = %s", (slug,))
+                if await exists.fetchone() is None:
+                    break
+                suffix_text = f"-{suffix}"
+                slug = f"{base_slug[:63 - len(suffix_text)]}{suffix_text}"
+                suffix += 1
+            name = f"{source['name']} copy"
+            created = await connection.execute("""
+                INSERT INTO agents (
+                    slug, name, role, description, avatar_color, avatar_shape, system_instructions,
+                    provider, model, hermes_profile, workspace_path, tool_permissions, status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'idle')
+                RETURNING id, slug, name, role, description, avatar_color, avatar_shape, status,
+                          provider, model, hermes_profile, workspace_path
+            """, (
+                slug, name, source["role"], source["description"], source["avatar_color"], source["avatar_shape"],
+                source["system_instructions"], source["provider"], source["model"], source["hermes_profile"],
+                source["workspace_path"], source["tool_permissions"],
+            ))
+            row = await created.fetchone()
+            await connection.commit()
+        return self._agent(row)
 
     async def create_conversation(self, *, title: str, kind: str, project_key: str | None, agent_slugs: list[str], hermes_conversation_key: str | None = None) -> ConversationDetail:
         async with self.connection() as connection:

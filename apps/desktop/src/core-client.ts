@@ -24,6 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const error = (await response.json().catch(() => ({}))) as { detail?: string };
     throw new CoreClientError(error.detail ?? `Cyclone Core returned HTTP ${response.status}.`, response.status);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -42,7 +43,11 @@ export const coreClient = {
   }) => request<Agent>("/api/v1/agents", { method: "POST", body: JSON.stringify(agent) }),
   updateAgent: (agentId: string, updates: { name?: string; role?: string; description?: string }) =>
     request<Agent>(`/api/v1/agents/${agentId}`, { method: "PATCH", body: JSON.stringify(updates) }),
+  duplicateAgent: (agentId: string) => request<{ agent: Agent; conversation: ConversationDetail }>(`/api/v1/agents/${agentId}/duplicate`, { method: "POST" }),
   listConversations: () => request<ConversationSummary[]>("/api/v1/conversations"),
+  updateConversationSidebar: (conversationId: string, updates: { is_pinned?: boolean; is_unread?: boolean; sidebar_section?: string | null; hidden?: boolean }) =>
+    request<ConversationSummary>(`/api/v1/conversations/${conversationId}/sidebar`, { method: "PATCH", body: JSON.stringify(updates) }),
+  deleteConversation: (conversationId: string) => request<void>(`/api/v1/conversations/${conversationId}`, { method: "DELETE" }),
   createConversation: (payload: { title: string; kind: "direct" | "group" | "cluster" | "routine"; project_key?: string | null; agent_slugs: string[] }) =>
     request<ConversationDetail>("/api/v1/conversations", { method: "POST", body: JSON.stringify(payload) }),
   createRoutine: (conversationId: string, routine: {
