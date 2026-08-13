@@ -1,14 +1,20 @@
 {
-  "id": "2e5f9b3c-71d4-4a8e-9f2c-1a7b6d5e4f3c",
-  "name": "Cyclone Routine Event (example)",
+  "id": "7c1a0d44-9b2e-4f3c-8d6a-2b8e7f6a5c4d",
+  "name": "Cyclone Routine Event (webhook harness)",
   "nodes": [
     {
-      "parameters": {},
-      "id": "4bc45888-0b6e-488f-8465-7c09d0f2f9e2",
-      "name": "Manual trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [260, 300]
+      "parameters": {
+        "path": "cyclone-routine",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1a2b3c4d-0000-4000-8000-0000000000a1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300],
+      "webhookId": "cyclone-routine-test"
     },
     {
       "parameters": {
@@ -24,7 +30,7 @@
         "sendBody": true,
         "contentType": "raw",
         "rawContentType": "application/json",
-        "body": "={\"external_event_id\":\"n8n-{{$execution.id}}\",\"event_type\":\"routine.manual_triggered\",\"payload\":{\"source\":\"n8n\",\"workflow\":\"Cyclone Routine Event (example)\"}}",
+        "body": "={\"external_event_id\":\"n8n-{{$execution.id}}\",\"event_type\":\"routine.manual_triggered\",\"payload\":{\"source\":\"n8n\",\"workflow\":\"Cyclone Routine Event (webhook harness)\"}}",
         "options": {}
       },
       "id": "7e39f5d4-0a15-4ae6-8c74-8f500a02875c",
@@ -36,11 +42,11 @@
   ],
   "pinData": {},
   "connections": {
-    "Manual trigger": { "main": [[{ "node": "Notify Cyclone Core", "type": "main", "index": 0 }]] }
+    "Webhook": { "main": [[{ "node": "Notify Cyclone Core", "type": "main", "index": 0 }]] }
   },
   "active": false,
   "settings": { "executionOrder": "v1" },
-  "versionId": "c406a4b1-cdc3-4c2c-8578-16e9b47f3261",
+  "versionId": "9f8e7d6c-5b4a-3c2d-1e0f-abcdef123456",
   "meta": { "templateCredsSetupCompleted": true },
   "tags": []
 }
