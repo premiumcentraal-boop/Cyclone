@@ -11,6 +11,8 @@ This file separates **implemented**, **verified**, **blocked**, and **planned** 
 - **2026-08-13 — stack started for real:** Postgres, Redis, Hermes gateway, Cyclone Core, and n8n all run healthy in Docker; Core `/health` reports `ok` for database, redis, hermes, vault, and workspace.
 - **2026-08-13 — real model response verified:** a message through Core to Chief produced a real DeepSeek (`deepseek-v4-flash`) response persisted in the conversation. Root cause of an initial 401 was a stale OpenRouter `model.base_url` in Hermes' persisted config; fixed and made durable via the `hermes-config` one-shot service.
 - **2026-08-13 — semantic mentions/handoffs implemented:** `@slug` mentions route runs to the named agent and are stored on messages; explicit `@HANDOFF @slug: summary | criteria` in agent output creates durable handoff rows, chat handoff events, and real follow-up runs with a delegation-depth guard. Unit-tested.
+- **2026-08-13 — Windows bootstrap verified:** a fresh checkout ran `scripts/launch-windows.ps1 -WebOnly -NoOpen -SkipInstall`; the launcher rebuilt Core, started the Docker services, passed the Core health gate, and started the desktop browser client. The repository now includes double-click `Launch-Cyclone.bat` and `Stop-Cyclone.bat` entry points.
+- **2026-08-13 — GitHub sync verified:** the complete Cyclone tree, including persistent-agent foundations, Telegram control-room work, UI corrections, and Windows launch tooling, is published on `premiumcentraal-boop/Cyclone` `main`.
 
 ## Acceptance matrix
 
@@ -33,6 +35,8 @@ This file separates **implemented**, **verified**, **blocked**, and **planned** 
 | Restart persistence | **Not yet tested** | Must restart built stack and verify stored records/files. |
 | Windows desktop executable | **Blocked by missing Rust toolchain** | Tauri build requires Rust/Cargo. Installing system software needs operator approval. |
 | Windows installer | **Blocked by desktop build prerequisite** | Depends on executable build plus installer validation. |
+| Fresh Windows checkout bootstrap | **Verified** | One-click launcher creates local secrets/runtime folders, starts the Docker stack, waits for Core health, and opens the browser client; native Tauri is used when Rust is installed. |
+| GitHub project publication | **Verified** | `premiumcentraal-boop/Cyclone` `main` contains the complete local project and launcher documentation. |
 | GitHub CI succeeds | **Not yet tested** | Workflow implementation and remote authentication/testing pending. |
 | Full prescribed end-to-end test | **Not yet tested** | Must use actual configured model + Telegram credentials; cannot simulate. |
 
