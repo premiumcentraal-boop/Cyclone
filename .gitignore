@@ -43,3 +43,4 @@ services/n8n/local/
 # Test artifacts
 playwright-report/
 test-results/
+apps/desktop/.visual/

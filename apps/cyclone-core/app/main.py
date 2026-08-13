@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
 from typing import AsyncIterator
 from uuid import UUID
 
@@ -257,6 +258,18 @@ async def _monitor_run(
         )
     finally:
         runtime.run_tasks.pop(run_id, None)
+
+
+def _read_vault_excerpt(runtime: AppServices, vault_path: str, limit: int = 600) -> str | None:
+    """Return a short readable excerpt of a vault note, or None when unreadable."""
+    try:
+        path = Path(vault_path)
+        if not path.is_absolute():
+            path = runtime.settings.vault_path / path
+        text = path.read_text(encoding="utf-8", errors="replace")[:limit]
+        return " ".join(text.split())
+    except OSError:
+        return None
 
 
 def _build_instructions(agent: AgentSummary, member_agents: list[AgentSummary]) -> str:
@@ -655,6 +668,19 @@ async def create_message_and_start_agent(
             + ", ".join(f"@{slug}" for slug in referenced)
             + ". Reference their expertise where useful; only delegate via your handoff syntax."
         )
+    try:
+        knowledge = await runtime.repository.search_knowledge(request.body[:300], limit=3)
+    except Exception:
+        knowledge = []  # Retrieval is an enhancement, never a run blocker.
+    if knowledge:
+        knowledge_lines = ["Relevant knowledge from the Cyclone vault:"]
+        for entry in knowledge:
+            excerpt = _read_vault_excerpt(runtime, entry["vault_path"])
+            line = f"- {entry['title']} ({entry['vault_path']})"
+            if excerpt:
+                line += f"\n  {excerpt}"
+            knowledge_lines.append(line)
+        instructions += "\n\n" + "\n".join(knowledge_lines)
     response = await _start_agent_run(
         runtime,
         conversation_id=conversation_id,

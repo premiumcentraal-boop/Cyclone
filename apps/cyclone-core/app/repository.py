@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from .contracts import AgentSummary, Approval, ComputerSessionResponse, ConversationDetail, ConversationMember, ConversationSummary, Message, TaskSummary
+from .fts import fts_query_terms
 
 
 class NotFoundError(LookupError):
@@ -455,12 +456,15 @@ class Repository:
         return row
 
     async def search_knowledge(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        query_terms = fts_query_terms(query)
+        if not query_terms:
+            return []
         async with self.connection() as connection:
             result = await connection.execute("""
                 SELECT id, vault_path, title, category, project_key, agent_id, created_at, updated_at
-                FROM knowledge_entries WHERE keywords @@ websearch_to_tsquery('simple', %s)
-                ORDER BY ts_rank(keywords, websearch_to_tsquery('simple', %s)) DESC, updated_at DESC LIMIT %s
-            """, (query, query, limit))
+                FROM knowledge_entries WHERE keywords @@ to_tsquery('simple', %s)
+                ORDER BY ts_rank(keywords, to_tsquery('simple', %s)) DESC, updated_at DESC LIMIT %s
+            """, (query_terms, query_terms, limit))
             return await result.fetchall()
 
     async def default_conversation_id(self) -> UUID:
