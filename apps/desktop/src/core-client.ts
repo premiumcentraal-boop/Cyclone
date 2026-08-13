@@ -1,4 +1,4 @@
-import type { Agent, AgentAvatarShape, AgentRunResponse, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, IntegrationState, RoutineSummary } from "./types";
+import type { Agent, AgentAvatarShape, AgentRunResponse, AttachmentRef, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, IntegrationState, RoutineSummary } from "./types";
 
 const coreUrl = import.meta.env.VITE_CYCLONE_CORE_URL ?? "http://127.0.0.1:8787";
 
@@ -44,11 +44,29 @@ export const coreClient = {
   createConversation: (payload: { title: string; kind: "direct" | "group" | "cluster" | "routine"; project_key?: string | null; agent_slugs: string[] }) =>
     request<ConversationDetail>("/api/v1/conversations", { method: "POST", body: JSON.stringify(payload) }),
   conversation: (id: string) => request<ConversationDetail>(`/api/v1/conversations/${id}`),
-  sendMessage: (conversationId: string, body: string, agentSlug = "chief") =>
+  sendMessage: (conversationId: string, body: string, agentSlug: string, options: { provider?: string | null; model?: string | null; attachments?: AttachmentRef[]; replyToMessageId?: string | null } = {}) =>
     request<AgentRunResponse>(`/api/v1/conversations/${conversationId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ body, agent_slug: agentSlug, run: true }),
+      body: JSON.stringify({
+        body,
+        agent_slug: agentSlug,
+        run: true,
+        provider: options.provider ?? undefined,
+        model: options.model ?? undefined,
+        reply_to_message_id: options.replyToMessageId ?? undefined,
+        attachments: options.attachments ?? [],
+      }),
     }),
+  uploadAttachment: async (file: File): Promise<AttachmentRef> => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await fetch(`${coreUrl}/api/v1/attachments`, { method: "POST", body: form });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new CoreClientError(`Upload failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`, response.status);
+    }
+    return response.json() as Promise<AttachmentRef>;
+  },
   approve: (approvalId: string, decision: "approved" | "denied") =>
     request(`/api/v1/approvals/${approvalId}/decision`, {
       method: "POST",

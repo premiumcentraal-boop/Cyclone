@@ -16,17 +16,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
+from pathlib import Path
 from typing import AsyncIterator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 try:
     import redis.asyncio as redis
 except ModuleNotFoundError:  # Host test preflight may use a stripped Python runtime.
     redis = None  # type: ignore[assignment]
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from .contracts import (
     AgentRunResponse,
@@ -36,6 +39,7 @@ from .contracts import (
     ApprovalRequest,
     ArtifactCreateRequest,
     ArtifactResponse,
+    AttachmentRef,
     AutomationEventRequest,
     AutomationEventResponse,
     ComputerOwnershipRequest,
@@ -197,6 +201,12 @@ def _not_found(error: NotFoundError) -> HTTPException:
 # The Cyclone MCP server (agent messaging tools) is mounted loopback-only,
 # like the rest of the API. Services are resolved per call from app.state.
 app.mount("/mcp", create_cyclone_mcp(lambda: app.state.services).streamable_http_app())
+_attachments_dir = get_settings().workspace_path / "attachments"
+try:
+    _attachments_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/attachments", StaticFiles(directory=_attachments_dir), name="attachments")
+except OSError:
+    pass  # Workspace not mounted (host test preflight); upload endpoint will raise clearly.
 
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
@@ -337,6 +347,29 @@ async def list_integrations(runtime: AppServices = Depends(services)) -> Integra
         IntegrationState(name="Browser", available=hermes_ok, detail="Hermes browser tools are available." if hermes_ok else "Unavailable until Hermes is healthy."),
     ]
     return IntegrationResponse(integrations=integrations)
+
+
+@app.post("/api/v1/attachments", tags=["operations"])
+async def upload_attachment(file: UploadFile = File(...), runtime: AppServices = Depends(services)) -> dict[str, object]:
+    """Store a real file under the shared workspace and return its reference.
+
+    The desktop uploads actual files; the message metadata carries the
+    reference and agents see the path in the workspace.
+    """
+    attachments_dir = runtime.settings.workspace_path / "attachments"
+    attachments_dir.mkdir(parents=True, exist_ok=True)
+    original = Path(file.filename or "attachment").name
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", original)[:120]
+    target = attachments_dir / f"{uuid4().hex[:10]}-{safe}"
+    size = 0
+    with target.open("wb") as handle:
+        while chunk := await file.read(1_048_576):
+            size += len(chunk)
+            handle.write(chunk)
+    if size == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="The uploaded file is empty.")
+    return {"name": safe, "size": size, "url": f"/attachments/{target.name}", "kind": "file"}
 
 
 @app.get("/api/v1/users/me", response_model=UserRecord, tags=["operations"])
@@ -501,12 +534,20 @@ async def create_message_and_start_agent(
     )
 
     # Persist the human message with structured mention objects.
+    user_metadata: dict[str, object] = {}
+    if mentioned_slugs or has_everyone:
+        user_metadata["mentions"] = mentioned_slugs
+    if request.attachments:
+        user_metadata["attachments"] = [
+            {"name": attachment.name, "size": attachment.size, "url": attachment.url, "kind": attachment.kind}
+            for attachment in request.attachments
+        ]
     user_message = await runtime.repository.add_message(
         conversation_id=conversation_id,
         author_type="human",
         kind="message",
         body=request.body,
-        metadata={"mentions": mentioned_slugs} if mentioned_slugs or has_everyone else None,
+        metadata=user_metadata or None,
         reply_to_message_id=request.reply_to_message_id,
     )
     mention_rows = []

@@ -486,6 +486,40 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .composer__mic--recording { background: #E81123; animation: record 1.1s ease infinite; }
 @keyframes record { 50% { transform: scale(1.06); } }
 .composer--disabled { gap: 8px; color: var(--text-muted); font-size: 12px; }
+
+/* Attachment chips above the composer input. */
+.composer__chips { position: absolute; bottom: calc(100% + 6px); left: 9px; display: flex; flex-wrap: wrap; gap: 5px; max-width: calc(100% - 18px); }
+.composer__chip { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; min-height: 24px; padding: 0 6px 0 8px; border: 1px solid #D8D8D8; border-radius: 999px; background: var(--main-bg); color: var(--text-secondary); font-size: 11px; }
+.composer__chip em { overflow: hidden; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.composer__chip button { display: grid; place-items: center; width: 15px; height: 15px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; }
+.composer__chip button:hover { background: #ECECEC; color: var(--text-primary); }
+
+/* Model selector beside the send button. */
+.composer__model { flex: 0 0 auto; min-height: 24px; padding: 0 9px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer; }
+.composer__model:hover { border-color: #D8D8D8; background: #F4F4F4; color: var(--text-primary); }
+.model-pop { position: absolute; z-index: 8; right: 10px; bottom: calc(100% + 7px); width: min(250px, calc(100vw - 60px)); padding: 5px; border: 1px solid #E1E1DD; border-radius: 10px; background: #fff; box-shadow: 0 9px 22px rgba(23,23,21,.11); }
+.model-pop button { display: grid; width: 100%; padding: 7px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.model-pop button:hover { background: #F1F1EF; }
+.model-pop button.selected { background: #EFEFEF; }
+.model-pop button span { display: grid; gap: 1px; }
+.model-pop strong { font-size: 11.5px; font-weight: 500; }
+.model-pop small { color: var(--text-muted); font-size: 10px; }
+
+/* Attachment popover from the + button. */
+.attach-pop { position: absolute; z-index: 8; left: 9px; bottom: calc(100% + 7px); width: min(280px, calc(100vw - 60px)); padding: 5px; border: 1px solid #E1E1DD; border-radius: 10px; background: #fff; box-shadow: 0 9px 22px rgba(23,23,21,.11); display: grid; gap: 1px; }
+.attach-pop > button { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.attach-pop > button:hover { background: #F1F1EF; }
+.attach-pop > button:disabled { opacity: .6; cursor: default; }
+.attach-pop > button span:not(.attach-pop__icon) { display: grid; min-width: 0; gap: 1px; }
+.attach-pop strong { overflow: hidden; font-size: 11.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.attach-pop small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.attach-pop__icon { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: #F1F1EF; color: var(--text-secondary); }
+.attach-pop__url { display: flex; gap: 6px; padding: 6px 8px 7px; }
+.attach-pop__url input { flex: 1; min-width: 0; height: 28px; padding: 0 9px; border: 1px solid #D6D6D6; border-radius: 8px; background: var(--main-bg); color: var(--text-primary); font-size: 11px; }
+.attach-pop__url input:focus { outline: 0; border-color: var(--text-secondary); }
+.attach-pop__url button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: #111; color: #fff; font-size: 11px; cursor: pointer; }
+.attach-pop__url button:disabled { background: #DCDCDC; color: #AAAAAA; cursor: default; }
+.attach-pop__notice { padding: 0 8px 6px; color: #C0392B; font-size: 10px; line-height: 1.35; }
 .mention-picker { position: absolute; z-index: 8; bottom: calc(100% + 7px); left: 11px; width: min(270px, calc(100vw - 60px)); padding: 5px; border: 1px solid #E1E1DD; border-radius: 10px; background: #fff; box-shadow: 0 9px 22px rgba(23,23,21,.11); }
 .mention-picker button { display: grid; grid-template-columns: 20px minmax(0,1fr); align-items: center; gap: 8px; width: 100%; padding: 6px; border: 0; border-radius: 7px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .mention-picker button:hover { background: #F1F1EF; }

@@ -128,6 +128,13 @@ class CreateConversationRequest(StrictModel):
     agent_slugs: list[str] = Field(min_length=1, max_length=20)
 
 
+class AttachmentRef(StrictModel):
+    name: str = Field(min_length=1, max_length=500)
+    size: int | None = None
+    url: str | None = Field(default=None, max_length=2_000)
+    kind: str | None = Field(default=None, max_length=40)
+
+
 class CreateMessageRequest(StrictModel):
     body: str = Field(min_length=1, max_length=20_000)
     agent_slug: str = Field(default="chief", min_length=1, max_length=63)
@@ -135,6 +142,7 @@ class CreateMessageRequest(StrictModel):
     provider: str | None = Field(default=None, max_length=128)
     model: str | None = Field(default=None, max_length=256)
     reply_to_message_id: UUID | None = None
+    attachments: list[AttachmentRef] = Field(default_factory=list, max_length=12)
 
 
 class InboxItem(StrictModel):

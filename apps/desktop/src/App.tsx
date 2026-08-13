@@ -11,7 +11,7 @@ import { AgentUtilityPanel } from "./components/AgentUtilityPanel";
 import { PluginsView } from "./components/PluginsView";
 import { ComputerUnavailableOverlay, RemoteComputerOverlay } from "./components/RemoteComputerOverlay";
 import { TitleBar } from "./components/TitleBar";
-import type { Agent, AgentAvatarShape, ApprovalEvent, ComputerOwner, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, StartupState, UserIdentity } from "./types";
+import type { Agent, AgentAvatarShape, ApprovalEvent, AttachmentRef, ComputerOwner, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, StartupState, UserIdentity } from "./types";
 import { DEFAULT_USER } from "./types";
 import { handleWindowAction } from "./window-controls";
 import "./styles.css";
@@ -133,7 +133,7 @@ function App() {
     }
   }
 
-  async function sendMessage(body: string) {
+  async function sendMessage(body: string, attachments: AttachmentRef[] = [], model: { provider: string | null; model: string | null } = { provider: null, model: null }) {
     if (!conversation || mode !== "live" || sending) return;
     setSending(true);
     try {
@@ -142,7 +142,11 @@ function App() {
         setNotice("There is no available agent in this conversation yet.");
         return;
       }
-      const result = await coreClient.sendMessage(conversation.id, body, selectedAgent.slug);
+      const result = await coreClient.sendMessage(conversation.id, body, selectedAgent.slug, {
+        provider: model.provider,
+        model: model.model,
+        attachments,
+      });
       setNotice(result.status === "blocked" ? result.detail : "");
       await refreshConversation(conversation.id);
     } catch (error) {
@@ -269,7 +273,7 @@ function App() {
           {conversation ? <MessageTimeline conversation={conversation} agents={agents} onOpenAgent={openAgent} onOpenComputer={openComputer} onDecideApproval={(approval, decision) => void decideApproval(approval, decision)} onResolveQuestion={resolveQuestion} /> : mode === "live" && agents.length === 0 ? <FirstAgentState onStart={() => setNewModalOpen(true)} /> : <LoadingConversation />}
         </section>
         <div className="conversation-composer">
-          {mode === "loading" ? <div className="composer composer--disabled"><SpinnerIcon size={15} /><span>Connecting to Cyclone…</span></div> : <Composer conversationName={conversation?.title ?? "Cyclone"} agents={agents} disabled={mode !== "live" || !conversation} busy={sending} onSend={sendMessage} onAttachment={() => setNotice("Attach files and references from a live Cyclone conversation.")} />}
+          {mode === "loading" ? <div className="composer composer--disabled"><SpinnerIcon size={15} /><span>Connecting to Cyclone…</span></div> : <Composer conversationName={conversation?.title ?? "Cyclone"} agents={agents} disabled={mode !== "live" || !conversation} busy={sending} onSend={sendMessage} />}
         </div>
       </main>}
       {utilityOpen && <AgentUtilityPanel agent={headerAgents[0]} conversationTitle={conversation?.title ?? "Cyclone"} onClose={() => setUtilityOpen(false)} onOpenComputer={(session) => void openComputer(session)} />}
