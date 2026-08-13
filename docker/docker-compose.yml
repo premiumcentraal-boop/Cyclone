@@ -135,6 +135,11 @@ services:
       CYCLONE_VAULT_PATH: /vault
       CYCLONE_WORKSPACE_PATH: /workspace
       CYCLONE_CORS_ORIGINS: http://127.0.0.1:1420,http://localhost:1420
+      # Telegram channel for the Cyclone agent mesh (the Hermes gateway's own
+      # Telegram platform stays disabled — Cyclone owns the remote channel).
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+      TELEGRAM_HOME_CHANNEL: ${TELEGRAM_HOME_CHANNEL:-}
     volumes:
       - ${CYCLONE_WORKSPACE_HOST_PATH:?set CYCLONE_WORKSPACE_HOST_PATH in .env}:/workspace
       - ${CYCLONE_VAULT_HOST_PATH:?set CYCLONE_VAULT_HOST_PATH in .env}:/vault
