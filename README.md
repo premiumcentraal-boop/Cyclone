@@ -77,6 +77,10 @@ Cyclone detects Docker Desktop at runtime. It does **not** silently install Dock
 
 Hermes is an internal service. Cyclone Core is its sole application-facing adapter and uses authenticated, private Docker-network traffic.
 
+## One-click Windows launch
+
+For a fresh ZIP download or clone, install Docker Desktop (Linux containers) and Node.js 22+, then double-click [`Launch-Cyclone.bat`](Launch-Cyclone.bat). It creates a local `.env` with generated secrets, creates an isolated `.runtime` workspace/vault, installs the desktop dependencies, starts the Docker stack, waits for Core health, and opens the browser client at `http://127.0.0.1:1420`. If Rust/Cargo is installed, the launcher starts the native Tauri window instead. See [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md) for Telegram, provider, stop, and native installer instructions.
+
 ## Security posture
 
 - Host ports are bound to `127.0.0.1` by default.
