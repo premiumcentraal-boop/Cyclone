@@ -218,6 +218,16 @@ class TaskStatusRequest(StrictModel):
     note: str | None = Field(default=None, max_length=2_000)
 
 
+class ReviewerDecisionRequest(StrictModel):
+    """An evidence-bearing decision by a real Cyclone reviewer agent."""
+
+    reviewer_agent_id: UUID
+    reviewed_run_id: str = Field(min_length=1, max_length=512)
+    decision: Literal["accepted", "changes_requested"]
+    evidence_summary: str = Field(min_length=1, max_length=4_000)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
 class RoutineSummary(StrictModel):
     id: UUID
     slug: str

@@ -21,6 +21,7 @@ class Settings(BaseModel):
     host_bridge_token: str = Field(default="development-host-bridge-token")
     vault_path: Path = Field(default=Path("/vault"))
     workspace_path: Path = Field(default=Path("/workspace"))
+    agent_environments_root: Path = Field(default=Path("/agent-environments"))
     cors_origins: list[str] = Field(default_factory=list)
     telegram_bot_token: str | None = None
     telegram_allowed_users: list[int] = Field(default_factory=list)
@@ -51,6 +52,7 @@ class Settings(BaseModel):
             host_bridge_token=os.getenv("CYCLONE_HOST_BRIDGE_TOKEN", "development-host-bridge-token"),
             vault_path=Path(os.getenv("CYCLONE_VAULT_PATH", "/vault")),
             workspace_path=Path(os.getenv("CYCLONE_WORKSPACE_PATH", "/workspace")),
+            agent_environments_root=Path(os.getenv("CYCLONE_AGENT_ENVIRONMENTS_ROOT", "/agent-environments")),
             cors_origins=origins,
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
             telegram_allowed_users=[

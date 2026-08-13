@@ -117,9 +117,21 @@ async def _monitor_run(
                 output = current.get("output")
                 summary = output if isinstance(output, str) else None
                 mapped_status = "completed" if run_status == "completed" else "failed" if run_status == "failed" else "cancelled"
-                task = await runtime.repository.set_task_terminal(task_id, status=mapped_status, result_summary=summary)
-                await runtime.repository.set_agent_status(agent.id, "idle" if mapped_status == "completed" else "error")
-                result_body = summary or f"Hermes run {run_id} ended with status: {run_status}."
+                # Hermes completing a run means the work is ready to inspect,
+                # not that Cyclone has independently verified it. A durable
+                # reviewer decision is the only path from awaiting_review to
+                # completed.
+                if mapped_status == "completed":
+                    task = await runtime.repository.set_task_awaiting_review(task_id, summary)
+                    await runtime.repository.set_agent_status(agent.id, "idle")
+                else:
+                    task = await runtime.repository.set_task_terminal(task_id, status=mapped_status, result_summary=summary)
+                    await runtime.repository.set_agent_status(agent.id, "error")
+                result_body = summary or (
+                    "The agent finished without a shareable summary."
+                    if mapped_status == "completed"
+                    else "The agent run ended before it could provide a shareable summary."
+                )
                 metadata: dict[str, object] = {"hermes_run_id": run_id, "status": run_status}
                 if mapped_status == "completed" and summary:
                     mention_slugs = parse_mentions(summary)
@@ -141,6 +153,17 @@ async def _monitor_run(
                     event_type="task.updated",
                     payload=task.model_dump(mode="json"),
                 )
+                if mapped_status == "completed":
+                    review_message = await runtime.repository.add_message(
+                        conversation_id=conversation_id,
+                        task_id=task_id,
+                        author_type="system",
+                        kind="activity",
+                        body="Work is ready for reviewer verification.",
+                        metadata={"review": "awaiting_review"},
+                        source="cyclone-review",
+                    )
+                    await publish_message(runtime, review_message, "task.awaiting_review")
                 if inbox_item_id is not None:
                     await runtime.repository.mark_inbox_terminal(
                         inbox_item_id, "done" if mapped_status == "completed" else "failed"

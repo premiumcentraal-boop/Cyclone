@@ -69,6 +69,7 @@ from .contracts import (
     MemoryWriteRequest,
     ReactionRequest,
     ReactionResponse,
+    ReviewerDecisionRequest,
     RunApprovalRequest,
     TaskStatusRequest,
     TaskSummary,
@@ -77,13 +78,29 @@ from .contracts import (
     UserRecord,
 )
 from .events import EventBus
+from .agent_environments import (
+    AgentEnvironmentRecord,
+    EnvironmentError,
+    EnvironmentHealth,
+    EnvironmentLifecycle,
+    PrivateEnvironmentManager,
+)
 from .hermes import HermesAdapter
 from .mcp_server import create_cyclone_mcp
 from .memory import VaultMemoryService
 from .mentions import parse_mentions, resolve_addressed_slug
-from .orchestrator import dispatch_inbox_item, publish_message, wake_agent
+from .orchestrator import _monitor_run, dispatch_inbox_item, publish_message, wake_agent
 from .policy import HostAction, PolicyEngine
-from .repository import NotFoundError, Repository
+from .recovery import (
+    RecoveryAction,
+    RecoveryTask,
+    ReviewerAcceptanceRecord,
+    ReviewerDecision,
+    TaskLifecycle,
+    plan_orphaned_run_recovery,
+    resolve_reviewer_acceptance,
+)
+from .repository import NotFoundError, ProtectedRecordError, Repository
 from .router import route_group_message
 from .settings import Settings, get_settings
 from .telegram import TelegramWorker
@@ -98,6 +115,7 @@ class AppServices:
         self.memory = VaultMemoryService(settings.vault_path)
         self.policy = PolicyEngine()
         self.redis: object | None = None
+        self.agent_environments = PrivateEnvironmentManager(settings.agent_environments_root)
         self.run_tasks: dict[str, asyncio.Task[None]] = {}
         self.pending_run_approvals: set[str] = set()
         self.telegram: TelegramWorker | None = None
@@ -154,6 +172,131 @@ async def _recovery_sweep(runtime: AppServices) -> None:
             await dispatch_inbox_item(runtime, item)
         except Exception:
             pass  # The item stays pending; a later sweep retries it.
+    # A Core restart loses in-memory monitoring tasks. Reattach only runs that
+    # Hermes still knows; a terminal success awaits reviewer verification and
+    # an absent/ambiguous run becomes an honest blocked task.
+    for task in await runtime.repository.list_recoverable_tasks(limit=100):
+        lifecycle = TaskLifecycle(task.status)
+        observation = await runtime.hermes.observe_run(task.hermes_run_id or "")
+        plan = plan_orphaned_run_recovery(
+            RecoveryTask(id=task.id, status=lifecycle, hermes_run_id=task.hermes_run_id), observation
+        )
+        try:
+            if plan.action is RecoveryAction.RESUME_OBSERVATION:
+                agent = await runtime.repository.get_agent_by_id(task.owner_agent_id) if task.owner_agent_id else None
+                if agent is None:
+                    raise RuntimeError("The task has no available owning agent.")
+                watcher = asyncio.create_task(
+                    _monitor_run(
+                        runtime, task_id=task.id, conversation_id=task.conversation_id,
+                        agent=agent, run_id=task.hermes_run_id or "", member_agents=[],
+                    )
+                )
+                runtime.run_tasks[task.hermes_run_id or ""] = watcher
+                continue
+            if plan.action is RecoveryAction.REQUEST_REVIEW:
+                run = await runtime.hermes.get_run(task.hermes_run_id or "")
+                output = run.get("output")
+                summary = output if isinstance(output, str) else None
+                recovered = await runtime.repository.set_task_awaiting_review(task.id, summary)
+                if recovered.owner_agent_id:
+                    await runtime.repository.set_agent_status(recovered.owner_agent_id, "idle")
+                message = await runtime.repository.add_message(
+                    conversation_id=task.conversation_id,
+                    task_id=task.id,
+                    author_type="system",
+                    kind="activity",
+                    body="Recovered work is ready for reviewer verification before it is marked complete.",
+                    metadata={"recovery": "awaiting_review"},
+                )
+                await publish_message(runtime, message, "task.awaiting_review")
+                continue
+            if plan.action in {RecoveryAction.MARK_FAILED, RecoveryAction.MARK_CANCELLED}:
+                terminal = await runtime.repository.set_task_terminal(
+                    task.id, status=plan.target_task_status.value, result_summary=plan.reason
+                )
+                if terminal.owner_agent_id:
+                    await runtime.repository.set_agent_status(terminal.owner_agent_id, "error")
+                continue
+            if plan.action is RecoveryAction.BLOCK_FOR_OPERATOR:
+                blocked = await runtime.repository.block_orphaned_run_task(task.id, plan.reason)
+                if blocked.owner_agent_id:
+                    await runtime.repository.set_agent_status(blocked.owner_agent_id, "blocked")
+                message = await runtime.repository.add_message(
+                    conversation_id=task.conversation_id,
+                    task_id=task.id,
+                    author_type="system",
+                    kind="activity",
+                    body="A previous agent run needs operator attention after restart; no completion was claimed.",
+                    metadata={"recovery": "blocked"},
+                )
+                await publish_message(runtime, message, "task.blocked")
+        except (NotFoundError, RuntimeError):
+            # A concurrent operator update or a temporary Hermes failure must
+            # not make startup fail or overwrite newer durable state.
+            continue
+
+
+async def _reconcile_agent_environments(runtime: AppServices) -> None:
+    """Provision known agents once, then repair only registered private layouts.
+
+    The database identity is the source of truth for bootstrap.  The filesystem
+    manager still refuses to adopt any unknown directory without its manifest.
+    """
+    try:
+        rows = await runtime.repository.list_agent_environment_rows()
+        registered_agent_ids = {row["agent_id"] for row in rows}
+        for agent in await runtime.repository.list_agents():
+            if agent.id not in registered_agent_ids:
+                await _provision_agent_environment(runtime, agent)
+
+        # Reload after bootstrap so every row has a manifest before the
+        # conservative restart reconciliation begins.
+        rows = await runtime.repository.list_agent_environment_rows()
+        records = [
+            AgentEnvironmentRecord(
+                id=row["id"], agent_id=row["agent_id"], agent_slug=row["agent_slug"],
+                template_key=row["template_key"], relative_root_path=row["relative_root_path"],
+                lifecycle_state=EnvironmentLifecycle(row["lifecycle_state"]),
+                health_state=EnvironmentHealth(row["health_state"]), created_at=row["created_at"],
+                updated_at=row["updated_at"], last_reconciled_at=row["last_reconciled_at"] or row["updated_at"],
+                paths=runtime.agent_environments.paths_for(row["agent_id"]),
+            ) for row in rows
+        ]
+        for record in records:
+            try:
+                outcome = runtime.agent_environments.reconcile(
+                    agent_id=record.agent_id, agent_slug=record.agent_slug
+                )
+                await runtime.repository.upsert_agent_environment(outcome.record.repository_values())
+            except EnvironmentError:
+                # A bad environment is isolated to its owning agent rather
+                # than preventing the other agents from recovering.
+                await runtime.repository.set_agent_status(record.agent_id, "blocked")
+    except Exception:
+        # Environment recovery must never prevent chat/API startup. A later
+        # environment supervisor surfaces integrity problems explicitly.
+        return
+
+
+def _environment_template_for(agent: AgentSummary) -> str:
+    """Choose from operator-reviewed environment templates, never user paths."""
+    identity = f"{agent.role} {agent.description}".lower()
+    if "review" in identity or "quality" in identity:
+        return "reviewer"
+    if any(term in identity for term in ("developer", "engineer", "code", "software")):
+        return "developer"
+    return "research"
+
+
+async def _provision_agent_environment(runtime: AppServices, agent: AgentSummary) -> None:
+    """Create the isolated layout and durable inventory record for one real agent."""
+    outcome = runtime.agent_environments.provision(
+        agent_id=agent.id,
+        agent_slug=agent.slug,
+        template_key=_environment_template_for(agent),
+    )
+    await runtime.repository.upsert_agent_environment(outcome.record.repository_values())
 
 
 _cyclone_mcp = create_cyclone_mcp(lambda: app.state.services)
@@ -165,6 +308,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.services = services
     await services.open()
     asyncio.create_task(_recovery_sweep(services))
+    asyncio.create_task(_reconcile_agent_environments(services))
     try:
         # Starlette does not run a mounted application's lifespan. FastMCP's
         # Streamable HTTP transport needs its session manager running, so own
@@ -280,6 +424,16 @@ async def create_agent(request: CreateAgentRequest, runtime: AppServices = Depen
                 detail=f"An agent with slug '{request.slug}' already exists.",
             ) from error
         raise
+    try:
+        await _provision_agent_environment(runtime, agent)
+    except EnvironmentError as error:
+        # Keep the durable identity visible for operator repair, but never
+        # present it as ready to receive work without its private boundary.
+        await runtime.repository.set_agent_status(agent.id, "blocked")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent was created but its private environment could not be provisioned safely.",
+        ) from error
     await runtime.repository.add_audit_event(
         actor_type="human",
         actor_id="administrator",
@@ -489,6 +643,8 @@ async def delete_conversation(conversation_id: UUID, runtime: AppServices = Depe
         await runtime.repository.delete_conversation(conversation_id)
     except NotFoundError as error:
         raise _not_found(error) from error
+    except ProtectedRecordError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
     await runtime.repository.add_audit_event(
         actor_type="human", actor_id="administrator", action="conversation.deleted",
         target=str(conversation_id), outcome="deleted", metadata={},
@@ -763,6 +919,11 @@ async def update_task_status(task_id: UUID, request: TaskStatusRequest, runtime:
         task = await runtime.repository.get_task(task_id)
     except NotFoundError as error:
         raise _not_found(error) from error
+    if request.status == "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Use the reviewer decision endpoint to mark work completed.",
+        )
     updated = await runtime.repository.set_task_status(task_id, request.status)
     if request.note:
         await runtime.repository.add_message(
@@ -777,16 +938,78 @@ async def update_task_status(task_id: UUID, request: TaskStatusRequest, runtime:
     return updated
 
 
+@app.post("/api/v1/tasks/{task_id}/review", response_model=TaskSummary, tags=["tasks"])
+async def submit_reviewer_decision(
+    task_id: UUID, request: ReviewerDecisionRequest, runtime: AppServices = Depends(services)
+) -> TaskSummary:
+    """Record a real review decision; this is the only review path to completion."""
+    try:
+        task = await runtime.repository.get_task(task_id)
+        acceptance = ReviewerAcceptanceRecord.create(
+            task_id=task_id,
+            reviewer_agent_id=request.reviewer_agent_id,
+            reviewed_run_id=request.reviewed_run_id,
+            decision=ReviewerDecision(request.decision),
+            evidence_summary=request.evidence_summary,
+            evidence=request.evidence,
+        )
+        resolution = resolve_reviewer_acceptance(
+            task=RecoveryTask(
+                id=task.id, status=TaskLifecycle(task.status), hermes_run_id=task.hermes_run_id
+            ),
+            completed_run_id=request.reviewed_run_id,
+            acceptance=acceptance,
+        )
+        updated = await runtime.repository.apply_reviewer_decision(**acceptance.repository_values())
+        if updated.status != resolution.target_task_status.value:
+            raise RuntimeError("Reviewer decision did not produce its validated task transition")
+        reviewer = await runtime.repository.get_agent_by_id(request.reviewer_agent_id)
+    except NotFoundError as error:
+        raise _not_found(error) from error
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    message = await runtime.repository.add_message(
+        conversation_id=task.conversation_id,
+        task_id=task.id,
+        author_type="agent",
+        author_agent_id=reviewer.id,
+        kind="result" if request.decision == "accepted" else "activity",
+        body=(
+            f"{reviewer.name} verified the work: {request.evidence_summary}"
+            if request.decision == "accepted"
+            else f"{reviewer.name} requested changes: {request.evidence_summary}"
+        ),
+        metadata={"review_decision": request.decision, "evidence": request.evidence},
+        source="cyclone-review",
+    )
+    await publish_message(runtime, message, "task.reviewed")
+    await runtime.event_bus.publish(
+        conversation_id=task.conversation_id, event_type="task.updated", payload=updated.model_dump(mode="json")
+    )
+    await runtime.repository.add_audit_event(
+        actor_type="agent", actor_id=str(reviewer.id), action="task.reviewed", target=str(task.id),
+        outcome=request.decision, metadata={"hermes_run_id": request.reviewed_run_id},
+    )
+    return updated
+
+
 @app.post("/api/v1/agents/{agent_id}/duplicate", response_model=DuplicateAgentResponse, status_code=status.HTTP_201_CREATED, tags=["agents"])
 async def duplicate_agent(agent_id: UUID, runtime: AppServices = Depends(services)) -> DuplicateAgentResponse:
     """Clone an agent's durable identity and open a real direct chat for it."""
     try:
         duplicate = await runtime.repository.duplicate_agent(agent_id)
+        await _provision_agent_environment(runtime, duplicate)
         conversation = await runtime.repository.create_conversation(
             title=duplicate.name, kind="direct", project_key=None, agent_slugs=[duplicate.slug]
         )
     except NotFoundError as error:
         raise _not_found(error) from error
+    except EnvironmentError as error:
+        await runtime.repository.set_agent_status(duplicate.id, "blocked")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent was duplicated but its private environment could not be provisioned safely.",
+        ) from error
     await runtime.repository.add_audit_event(
         actor_type="human", actor_id="administrator", action="agent.duplicated",
         target=duplicate.slug, outcome="created", metadata={"source_agent_id": str(agent_id), "conversation_id": str(conversation.id)},

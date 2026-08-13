@@ -119,6 +119,18 @@ services:
       start_period: 30s
     networks: [cyclone_private]
 
+  # Own the private-volume permission boundary without elevating the Core
+  # process. The numeric owner matches the non-root `cyclone` user in the
+  # Core image; no host workspace or browser profile is mounted here.
+  agent-environments-init:
+    image: busybox:1.36.1
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-ec", "mkdir -p /agent-environments && chown 100:101 /agent-environments && chmod 700 /agent-environments"]
+    volumes:
+      - agent_environments_data:/agent-environments
+    networks: [cyclone_private]
+
   cyclone-core:
     build:
       context: ../apps/cyclone-core
@@ -133,6 +145,7 @@ services:
       CYCLONE_HOST_BRIDGE_TOKEN: ${CYCLONE_HOST_BRIDGE_TOKEN:?set CYCLONE_HOST_BRIDGE_TOKEN in .env}
       CYCLONE_VAULT_PATH: /vault
       CYCLONE_WORKSPACE_PATH: /workspace
+      CYCLONE_AGENT_ENVIRONMENTS_ROOT: /agent-environments
       CYCLONE_CORS_ORIGINS: http://127.0.0.1:1420,http://localhost:1420
       # Telegram channel for the Cyclone agent mesh (the Hermes gateway's own
       # Telegram platform stays disabled — Cyclone owns the remote channel).
@@ -142,7 +155,10 @@ services:
     volumes:
       - ${CYCLONE_WORKSPACE_HOST_PATH:?set CYCLONE_WORKSPACE_HOST_PATH in .env}:/workspace
       - ${CYCLONE_VAULT_HOST_PATH:?set CYCLONE_VAULT_HOST_PATH in .env}:/vault
+      - agent_environments_data:/agent-environments
     depends_on:
+      agent-environments-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -219,3 +235,4 @@ volumes:
   redis_data:
   hermes_data:
   n8n_data:
+  agent_environments_data:

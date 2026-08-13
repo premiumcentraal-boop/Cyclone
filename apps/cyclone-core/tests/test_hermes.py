@@ -65,3 +65,21 @@ async def test_adapter_reports_unavailable_without_leaking_secret() -> None:
 
     assert "sensitive-token" not in str(error.value)
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_observe_run_keeps_a_missing_hermes_run_distinct_from_an_outage() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "run not found"})
+
+    adapter = HermesAdapter(
+        base_url="http://hermes:8642",
+        api_key="test-private-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    observation = await adapter.observe_run("run_lost_after_restart")
+
+    assert observation.found is False
+    assert observation.state.value == "missing"
+    await adapter.close()

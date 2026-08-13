@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator
 from uuid import UUID
 
 import psycopg
+from psycopg.errors import IntegrityConstraintViolation
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -35,6 +36,10 @@ from .fts import fts_query_terms
 
 class NotFoundError(LookupError):
     """Raised where the API should return a stable resource-not-found response."""
+
+
+class ProtectedRecordError(PermissionError):
+    """Raised when Postgres rejects a mutation of an operator-protected row."""
 
 
 class Repository:
@@ -145,6 +150,155 @@ class Repository:
                 FROM agents ORDER BY name
             """)
             return [self._agent(row) for row in await result.fetchall()]
+
+    async def list_agent_environment_rows(self) -> list[dict[str, Any]]:
+        """Return durable environment inventory with the only agent identity needed for reconciliation."""
+        async with self.connection() as connection:
+            result = await connection.execute("""
+                SELECT e.id, e.agent_id, a.slug AS agent_slug, e.template_key, e.relative_root_path,
+                       e.lifecycle_state, e.health_state, e.created_at, e.updated_at, e.last_reconciled_at
+                FROM agent_environments e JOIN agents a ON a.id = e.agent_id
+                ORDER BY a.slug
+            """)
+            return await result.fetchall()
+
+    async def upsert_agent_environment(self, values: dict[str, Any]) -> None:
+        """Persist only portable environment metadata; physical paths stay operator-local."""
+        async with self.connection() as connection:
+            await connection.execute("""
+                INSERT INTO agent_environments (
+                    id, agent_id, template_key, relative_root_path, layout_version,
+                    lifecycle_state, health_state, last_reconciled_at, last_healthy_at
+                ) VALUES (%(id)s, %(agent_id)s, %(template_key)s, %(relative_root_path)s,
+                          %(layout_version)s, %(lifecycle_state)s, %(health_state)s,
+                          %(last_reconciled_at)s, %(last_healthy_at)s)
+                ON CONFLICT (agent_id) DO UPDATE SET
+                    template_key = EXCLUDED.template_key,
+                    relative_root_path = EXCLUDED.relative_root_path,
+                    layout_version = EXCLUDED.layout_version,
+                    lifecycle_state = EXCLUDED.lifecycle_state,
+                    health_state = EXCLUDED.health_state,
+                    last_reconciled_at = EXCLUDED.last_reconciled_at,
+                    last_healthy_at = EXCLUDED.last_healthy_at,
+                    updated_at = now()
+            """, values)
+            await connection.commit()
+
+    async def list_recoverable_tasks(self, limit: int = 100) -> list[TaskSummary]:
+        """Tasks with a recorded Hermes run that need status reconciliation after restart."""
+        async with self.connection() as connection:
+            result = await connection.execute("""
+                SELECT id, conversation_id, parent_task_id, owner_agent_id, title, objective, status,
+                       priority, hermes_run_id, result_summary, verification_criteria,
+                       created_at, started_at, completed_at, updated_at
+                FROM tasks
+                WHERE status IN ('running', 'awaiting_approval')
+                  AND hermes_run_id IS NOT NULL
+                ORDER BY updated_at ASC LIMIT %s
+            """, (limit,))
+            return [self._task(row) for row in await result.fetchall()]
+
+    async def block_orphaned_run_task(self, task_id: UUID, detail: str) -> TaskSummary:
+        """Fail closed after restart when Hermes no longer knows a recorded run."""
+        async with self.connection() as connection:
+            result = await connection.execute("""
+                UPDATE tasks
+                SET status = 'blocked', result_summary = %s, completed_at = now()
+                WHERE id = %s AND status IN ('running', 'awaiting_approval')
+                RETURNING id, conversation_id, parent_task_id, owner_agent_id, title, objective, status,
+                          priority, hermes_run_id, result_summary, verification_criteria,
+                          created_at, started_at, completed_at, updated_at
+            """, (detail, task_id))
+            row = await result.fetchone()
+            await connection.commit()
+        if row is None:
+            raise NotFoundError("Recoverable task was not found")
+        return self._task(row)
+
+    async def set_task_awaiting_review(self, task_id: UUID, result_summary: str | None) -> TaskSummary:
+        """Persist a recovered Hermes success as reviewable work, never completion."""
+        async with self.connection() as connection:
+            result = await connection.execute("""
+                UPDATE tasks
+                SET status = 'awaiting_review', result_summary = %s
+                WHERE id = %s AND status IN ('running', 'awaiting_approval')
+                RETURNING id, conversation_id, parent_task_id, owner_agent_id, title, objective,
+                          status, priority, hermes_run_id, result_summary, verification_criteria,
+                          created_at, started_at, completed_at, updated_at
+            """, (result_summary, task_id))
+            row = await result.fetchone()
+            await connection.commit()
+        if row is None:
+            raise NotFoundError("Recoverable task was not found")
+        return self._task(row)
+
+    async def apply_reviewer_decision(
+        self,
+        *,
+        task_id: UUID,
+        reviewer_agent_id: UUID,
+        reviewed_run_id: str,
+        decision: str,
+        evidence_summary: str,
+        evidence: dict[str, Any],
+        idempotency_key: str,
+    ) -> TaskSummary:
+        """Append a reviewer decision and resolve only its exact awaiting-review task.
+
+        This transaction is the persistence boundary that prevents a stale
+        reviewer, a duplicate retry, or a general status PATCH from claiming
+        unverified Hermes work as complete.
+        """
+        async with self.connection() as connection:
+            task_result = await connection.execute("""
+                SELECT id, conversation_id, parent_task_id, owner_agent_id, title, objective, status,
+                       priority, hermes_run_id, result_summary, verification_criteria,
+                       created_at, started_at, completed_at, updated_at
+                FROM tasks WHERE id = %s FOR UPDATE
+            """, (task_id,))
+            task = await task_result.fetchone()
+            if task is None:
+                raise NotFoundError("Task was not found")
+            existing_result = await connection.execute("""
+                SELECT task_id FROM reviewer_acceptances WHERE idempotency_key = %s
+            """, (idempotency_key,))
+            existing = await existing_result.fetchone()
+            if existing is not None:
+                if existing["task_id"] != task_id:
+                    raise ValueError("Reviewer decision idempotency key belongs to a different task")
+                return self._task(task)
+            if task["status"] != "awaiting_review":
+                raise ValueError("Only a task awaiting review can be resolved by a reviewer")
+            if task["hermes_run_id"] != reviewed_run_id:
+                raise ValueError("Reviewer decision does not match the task's durable Hermes run")
+            reviewer_result = await connection.execute(
+                "SELECT role FROM agents WHERE id = %s", (reviewer_agent_id,)
+            )
+            reviewer = await reviewer_result.fetchone()
+            if reviewer is None or "review" not in str(reviewer["role"]).lower():
+                raise ValueError("Reviewer decision must be made by a real reviewer agent")
+            await connection.execute("""
+                INSERT INTO reviewer_acceptances
+                    (task_id, reviewer_agent_id, reviewed_run_id, decision, evidence_summary, evidence, idempotency_key)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
+            """, (
+                task_id, reviewer_agent_id, reviewed_run_id, decision, evidence_summary,
+                psycopg.types.json.Jsonb(evidence), idempotency_key,
+            ))
+            result = await connection.execute("""
+                UPDATE tasks
+                SET status = %s,
+                    completed_at = CASE WHEN %s = 'completed' THEN COALESCE(completed_at, now()) ELSE completed_at END
+                WHERE id = %s
+                RETURNING id, conversation_id, parent_task_id, owner_agent_id, title, objective,
+                          status, priority, hermes_run_id, result_summary, verification_criteria,
+                          created_at, started_at, completed_at, updated_at
+            """, ("completed" if decision == "accepted" else "changes_requested", "completed" if decision == "accepted" else "changes_requested", task_id))
+            row = await result.fetchone()
+            await connection.commit()
+        if row is None:
+            raise NotFoundError("Task was not found")
+        return self._task(row)
 
     async def get_agent_by_slug(self, slug: str) -> AgentSummary:
         async with self.connection() as connection:
@@ -356,9 +510,14 @@ class Repository:
         )
 
     async def delete_conversation(self, conversation_id: UUID) -> None:
-        async with self.connection() as connection:
-            result = await connection.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
-            await connection.commit()
+        try:
+            async with self.connection() as connection:
+                result = await connection.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
+                await connection.commit()
+        except IntegrityConstraintViolation as error:
+            if "Protected Cyclone records" in str(error):
+                raise ProtectedRecordError("This protected conversation cannot be deleted.") from error
+            raise
         if result.rowcount == 0:
             raise NotFoundError("Conversation was not found")
 
@@ -982,7 +1141,8 @@ class Repository:
                 INSERT INTO users (display_name, initials, telegram_chat_id)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (telegram_chat_id) DO UPDATE
-                  SET display_name = EXCLUDED.display_name, initials = EXCLUDED.initials,
+                  SET display_name = CASE WHEN users.is_protected THEN users.display_name ELSE EXCLUDED.display_name END,
+                      initials = CASE WHEN users.is_protected THEN users.initials ELSE EXCLUDED.initials END,
                       updated_at = now()
                 RETURNING id
             """, (display_name, initials, chat_id))

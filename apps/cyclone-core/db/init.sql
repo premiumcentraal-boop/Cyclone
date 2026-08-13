@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     is_unread BOOLEAN NOT NULL DEFAULT false,
     sidebar_section TEXT CHECK (sidebar_section IS NULL OR char_length(sidebar_section) BETWEEN 1 AND 80),
     hidden_at TIMESTAMPTZ,
+    is_protected BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

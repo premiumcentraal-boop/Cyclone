@@ -8,6 +8,8 @@ from uuid import UUID
 
 import httpx
 
+from .recovery import HermesRunObservation
+
 
 @dataclass(frozen=True)
 class StartedRun:
@@ -96,6 +98,33 @@ class HermesAdapter:
         if not isinstance(data, dict):
             raise RuntimeError("Hermes returned invalid run status data.")
         return data
+
+    async def observe_run(self, run_id: str) -> HermesRunObservation:
+        """Look up a pre-restart run without conflating 404 with an outage."""
+        try:
+            response = await self._client.get(
+                f"{self._base_url}/v1/runs/{run_id}", headers=self.headers
+            )
+        except httpx.HTTPError as error:
+            return HermesRunObservation(found=None, detail=f"Hermes status lookup failed: {type(error).__name__}")
+        if response.status_code == 404:
+            return HermesRunObservation(found=False, detail="Hermes returned HTTP 404 for the stored run.")
+        if response.status_code >= 400:
+            return HermesRunObservation(
+                found=None, detail=f"Hermes status lookup returned HTTP {response.status_code}."
+            )
+        try:
+            data = response.json()
+        except ValueError:
+            return HermesRunObservation(found=None, detail="Hermes returned invalid JSON for the stored run.")
+        if not isinstance(data, dict):
+            return HermesRunObservation(found=None, detail="Hermes returned an invalid stored-run payload.")
+        run_status = data.get("status")
+        return HermesRunObservation(
+            found=True,
+            status=run_status if isinstance(run_status, str) else None,
+            detail="Hermes returned the stored run.",
+        )
 
     async def stop_run(self, run_id: str) -> None:
         try:
