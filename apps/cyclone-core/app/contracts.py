@@ -32,7 +32,7 @@ class AgentSummary(StrictModel):
     role: str
     description: str
     avatar_color: str
-    avatar_shape: Literal["round", "triangle", "diamond", "pebble", "squircle"] | None = None
+    avatar_shape: Literal["round", "blob", "squircle", "capsule", "triangle", "polygon", "cloud", "droplet", "diamond", "pebble"] | None = None
     status: str
     provider: str | None = None
     model: str | None = None
@@ -61,7 +61,7 @@ class CreateAgentRequest(StrictModel):
     role: str = Field(default="", max_length=120)
     description: str = Field(default="", max_length=2_000)
     avatar_color: str = Field(default="#70B7A7", pattern=r"^#[0-9A-Fa-f]{6}$")
-    avatar_shape: Literal["round", "triangle", "diamond", "pebble", "squircle"] | None = None
+    avatar_shape: Literal["round", "blob", "squircle", "capsule", "triangle", "polygon", "cloud", "droplet"] | None = None
     provider: str | None = Field(default=None, max_length=128)
     model: str | None = Field(default=None, max_length=256)
     hermes_profile: str = Field(default="default", max_length=128)
@@ -84,10 +84,20 @@ class ConversationMember(StrictModel):
     agent: AgentSummary | None = None
 
 
+class Mention(StrictModel):
+    id: UUID
+    mention_type: Literal["agent", "group", "everyone", "routine", "connector"]
+    target_agent_id: UUID | None = None
+    target_slug: str | None = None
+    position_start: int | None = None
+    position_end: int | None = None
+
+
 class Message(StrictModel):
     id: UUID
     conversation_id: UUID
     task_id: UUID | None = None
+    reply_to_message_id: UUID | None = None
     author_type: Literal["human", "agent", "system", "automation"]
     author_agent_id: UUID | None = None
     author_name: str
@@ -95,6 +105,7 @@ class Message(StrictModel):
     body: str
     metadata: dict[str, Any]
     source: str
+    mentions: list[Mention] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -112,7 +123,7 @@ class ConversationDetail(StrictModel):
 
 class CreateConversationRequest(StrictModel):
     title: str = Field(min_length=1, max_length=200)
-    kind: Literal["direct", "cluster", "routine"] = "direct"
+    kind: Literal["direct", "group", "cluster", "routine"] = "direct"
     project_key: str | None = Field(default=None, max_length=120)
     agent_slugs: list[str] = Field(min_length=1, max_length=20)
 
@@ -123,6 +134,85 @@ class CreateMessageRequest(StrictModel):
     run: bool = True
     provider: str | None = Field(default=None, max_length=128)
     model: str | None = Field(default=None, max_length=256)
+    reply_to_message_id: UUID | None = None
+
+
+class InboxItem(StrictModel):
+    id: UUID
+    agent_id: UUID
+    event_type: str
+    conversation_id: UUID | None = None
+    message_id: UUID | None = None
+    task_id: UUID | None = None
+    source_agent_id: UUID | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    attempts: int
+    created_at: datetime
+    delivered_at: datetime | None = None
+
+
+class ReactionResponse(StrictModel):
+    id: UUID
+    message_id: UUID
+    actor_type: Literal["human", "agent"]
+    actor_agent_id: UUID | None = None
+    emoji: str
+    created_at: datetime
+
+
+class ReactionRequest(StrictModel):
+    emoji: str = Field(min_length=1, max_length=8)
+    actor_type: Literal["human", "agent"] = "human"
+    actor_agent_id: UUID | None = None
+
+
+class UserRecord(StrictModel):
+    id: UUID
+    display_name: str
+    initials: str
+    telegram_chat_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TaskStatusRequest(StrictModel):
+    status: Literal["queued", "running", "awaiting_review", "changes_requested", "completed", "blocked", "failed", "cancelled"]
+    note: str | None = Field(default=None, max_length=2_000)
+
+
+class RunApprovalRequest(StrictModel):
+    choice: Literal["once", "session", "always", "deny"]
+
+
+class IntegrationState(StrictModel):
+    name: str
+    available: bool
+    detail: str
+
+
+class IntegrationResponse(StrictModel):
+    integrations: list[IntegrationState]
+
+
+class MemberAddRequest(StrictModel):
+    agent_slug: str = Field(min_length=1, max_length=63)
+
+
+class ArtifactResponse(StrictModel):
+    id: UUID
+    task_id: UUID | None = None
+    conversation_id: UUID | None = None
+    created_by_agent_id: UUID | None = None
+    type: str
+    path: str
+    created_at: datetime
+
+
+class ArtifactCreateRequest(StrictModel):
+    type: str = Field(default="file", max_length=64)
+    path: str = Field(min_length=1, max_length=1_000)
+    created_by_agent_slug: str | None = None
 
 
 class TaskSummary(StrictModel):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -105,3 +106,47 @@ class HermesAdapter:
             raise RuntimeError("Hermes stop endpoint is unreachable.") from error
         if response.status_code >= 400:
             raise RuntimeError(f"Hermes stop endpoint returned HTTP {response.status_code}.")
+
+    async def resolve_run_approval(self, run_id: str, choice: str) -> dict[str, object]:
+        """Resolve a pending Hermes run approval (once | session | always | deny)."""
+        try:
+            response = await self._client.post(
+                f"{self._base_url}/v1/runs/{run_id}/approval",
+                json={"choice": choice},
+                headers=self.headers,
+            )
+        except httpx.HTTPError as error:
+            raise RuntimeError("Hermes approval endpoint is unreachable.") from error
+        if response.status_code >= 400:
+            raise RuntimeError(f"Hermes approval endpoint returned HTTP {response.status_code}.")
+        data = response.json()
+        return data if isinstance(data, dict) else {"status": "resolved"}
+
+    async def get_run_approval_request(self, run_id: str, timeout: float = 8.0) -> dict[str, object] | None:
+        """Capture the pending approval.request event from the run's SSE stream.
+
+        Returns None when no approval request is seen within *timeout* seconds.
+        """
+        try:
+            async with self._client.stream(
+                "GET", f"{self._base_url}/v1/runs/{run_id}/events", headers=self.headers, timeout=timeout
+            ) as response:
+                if response.status_code >= 400:
+                    return None
+                event: str | None = None
+                data_lines: list[str] = []
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        if event == "approval.request" and data_lines:
+                            payload = json.loads("\n".join(data_lines))
+                            return payload if isinstance(payload, dict) else None
+                        event = None
+                        data_lines = []
+                    elif line.startswith("event:"):
+                        event = line[len("event:"):].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line[len("data:"):].strip())
+        except (httpx.HTTPError, json.JSONDecodeError, TimeoutError):
+            return None
+        return None

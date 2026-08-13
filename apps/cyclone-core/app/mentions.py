@@ -26,7 +26,7 @@ _HANDOFF_RE = re.compile(
 )
 
 
-_RESERVED_SLUGS = frozenset({"handoff"})
+_RESERVED_SLUGS = frozenset({"handoff", "everyone"})
 
 _LEAD_MENTION_RE = re.compile(rf"^@({SLUG_PATTERN})\b", re.IGNORECASE)
 

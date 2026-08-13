@@ -55,6 +55,11 @@ def test_parse_mentions_does_not_match_handoff_token_as_a_slug() -> None:
     assert parse_mentions("@HANDOFF @research: do the thing") == ["research"]
 
 
+def test_parse_mentions_does_not_include_everyone_token() -> None:
+    # @everyone is a broadcast marker, handled separately from agent slugs.
+    assert parse_mentions("@everyone please look at this") == []
+
+
 def test_resolve_addressed_slug_requires_a_leading_mention() -> None:
     members = {"chief", "research"}
     assert resolve_addressed_slug("@research please verify this", members) == "research"

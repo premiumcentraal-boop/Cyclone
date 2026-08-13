@@ -19,15 +19,35 @@ interface Geometry {
 
 function geometry(shape: AgentAvatarShape): Geometry {
   switch (shape) {
+    case "blob":
+      return {
+        clipPath: "M50 6 C70 3 88 14 93 33 C99 54 88 76 70 87 C53 98 29 95 15 79 C2 63 2 38 17 23 C27 12 36 8 50 6 Z",
+        outlinePath: "M50 6 C70 3 88 14 93 33 C99 54 88 76 70 87 C53 98 29 95 15 79 C2 63 2 38 17 23 C27 12 36 8 50 6 Z",
+      };
+    case "capsule":
+      return {
+        clipPath: "M50 7 C31 7 17 21 17 50 C17 79 31 93 50 93 C69 93 83 79 83 50 C83 21 69 7 50 7 Z",
+        outlinePath: "M50 7 C31 7 17 21 17 50 C17 79 31 93 50 93 C69 93 83 79 83 50 C83 21 69 7 50 7 Z",
+      };
+    case "polygon":
+      return {
+        clipPath: "M50 6 L84 28 L84 72 L50 94 L16 72 L16 28 Z",
+        outlinePath: "M50 6 L84 28 L84 72 L50 94 L16 72 L16 28 Z",
+      };
+    case "cloud":
+      return {
+        clipPath: "M50 30 C40 16 18 18 12 33 C2 34 -1 50 10 58 C8 74 26 84 42 78 C54 90 80 86 84 70 C97 66 96 44 82 40 C76 24 58 24 50 30 Z",
+        outlinePath: "M50 30 C40 16 18 18 12 33 C2 34 -1 50 10 58 C8 74 26 84 42 78 C54 90 80 86 84 70 C97 66 96 44 82 40 C76 24 58 24 50 30 Z",
+      };
+    case "droplet":
+      return {
+        clipPath: "M50 6 C50 6 90 46 90 68 C90 86 74 95 50 95 C26 95 10 86 10 68 C10 46 50 6 50 6 Z",
+        outlinePath: "M50 6 C50 6 90 46 90 68 C90 86 74 95 50 95 C26 95 10 86 10 68 C10 46 50 6 50 6 Z",
+      };
     case "triangle":
       return {
-        clipPath: "M50 8 C72 8 88 29 89 54 C90 79 72 91 50 91 C28 91 10 79 11 54 C12 29 28 8 50 8 Z",
-        outlinePath: "M50 8 C72 8 88 29 89 54 C90 79 72 91 50 91 C28 91 10 79 11 54 C12 29 28 8 50 8 Z",
-      };
-    case "diamond":
-      return {
-        clipPath: "M49 7 C61 7 65 15 73 24 C83 35 93 41 93 52 C93 65 82 72 72 81 C63 89 60 94 49 94 C38 94 34 89 25 81 C15 72 7 65 7 52 C7 41 17 35 27 24 C36 15 39 7 49 7 Z",
-        outlinePath: "M49 7 C61 7 65 15 73 24 C83 35 93 41 93 52 C93 65 82 72 72 81 C63 89 60 94 49 94 C38 94 34 89 25 81 C15 72 7 65 7 52 C7 41 17 35 27 24 C36 15 39 7 49 7 Z",
+        clipPath: "M50 10 L90 84 L10 84 Z",
+        outlinePath: "M50 10 L90 84 L10 84 Z",
       };
     case "pebble":
       return {

@@ -1,4 +1,4 @@
-import type { Agent, AgentRunResponse, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse } from "./types";
+import type { Agent, AgentAvatarShape, AgentRunResponse, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, IntegrationState, RoutineSummary } from "./types";
 
 const coreUrl = import.meta.env.VITE_CYCLONE_CORE_URL ?? "http://127.0.0.1:8787";
 
@@ -36,12 +36,12 @@ export const coreClient = {
     role?: string;
     description?: string;
     avatar_color?: string;
-    avatar_shape?: "round" | "triangle" | "diamond" | "pebble" | "squircle";
+    avatar_shape?: AgentAvatarShape;
     provider?: string | null;
     model?: string | null;
   }) => request<Agent>("/api/v1/agents", { method: "POST", body: JSON.stringify(agent) }),
   listConversations: () => request<ConversationSummary[]>("/api/v1/conversations"),
-  createConversation: (payload: { title: string; kind: "direct" | "cluster" | "routine"; project_key?: string | null; agent_slugs: string[] }) =>
+  createConversation: (payload: { title: string; kind: "direct" | "group" | "cluster" | "routine"; project_key?: string | null; agent_slugs: string[] }) =>
     request<ConversationDetail>("/api/v1/conversations", { method: "POST", body: JSON.stringify(payload) }),
   conversation: (id: string) => request<ConversationDetail>(`/api/v1/conversations/${id}`),
   sendMessage: (conversationId: string, body: string, agentSlug = "chief") =>
@@ -59,6 +59,14 @@ export const coreClient = {
     method: "POST",
     body: JSON.stringify({ owner }),
   }),
+  agentRoutines: (agentId: string) => request<RoutineSummary[]>(`/api/v1/agents/${agentId}/routines`),
+  integrations: () => request<{ integrations: IntegrationState[] }>("/api/v1/integrations"),
+  usersMe: () => request<{ id: string; display_name: string; initials: string; telegram_chat_id?: number | null }>("/api/v1/users/me"),
+  runApproval: (runId: string, choice: "once" | "session" | "always" | "deny") =>
+    request<{ status: string; run_id: string; choice: string }>(`/api/v1/runs/${runId}/approval`, {
+      method: "POST",
+      body: JSON.stringify({ choice }),
+    }),
   eventsUrl: (conversationId: string) => `${coreUrl}/api/v1/conversations/${conversationId}/events`,
 };
 

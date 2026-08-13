@@ -22,6 +22,9 @@ class Settings(BaseModel):
     vault_path: Path = Field(default=Path("/vault"))
     workspace_path: Path = Field(default=Path("/workspace"))
     cors_origins: list[str] = Field(default_factory=list)
+    telegram_bot_token: str | None = None
+    telegram_allowed_users: list[int] = Field(default_factory=list)
+    telegram_home_channel: str | None = None
 
     @field_validator("hermes_base_url")
     @classmethod
@@ -49,6 +52,11 @@ class Settings(BaseModel):
             vault_path=Path(os.getenv("CYCLONE_VAULT_PATH", "/vault")),
             workspace_path=Path(os.getenv("CYCLONE_WORKSPACE_PATH", "/workspace")),
             cors_origins=origins,
+            telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
+            telegram_allowed_users=[
+                int(part) for part in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",") if part.strip().lstrip("-").isdigit()
+            ],
+            telegram_home_channel=os.getenv("TELEGRAM_HOME_CHANNEL") or None,
         )
 
 

@@ -1,11 +1,12 @@
 import { FormEvent, useState } from "react";
-import { agentColor } from "../agent-visuals";
+import { AGENT_PALETTE, AGENT_SHAPES, agentColor } from "../agent-visuals";
 import { BotAvatar } from "./BotAvatar";
 import { CloseIcon } from "./Icons";
 import type { Agent, AgentAvatarShape } from "../types";
 
-const SHAPES: AgentAvatarShape[] = ["round", "triangle", "diamond", "pebble", "squircle"];
-const COLORS = ["#70B7A7", "#E2A254", "#6665E1", "#8061E4", "#5280E7", "#DC7945"];
+// The ten-character creator palette and eight shape presets (DESIGN.md §22-23).
+const SHAPES: AgentAvatarShape[] = [...AGENT_SHAPES];
+const COLORS = [...AGENT_PALETTE];
 
 function slugify(value: string): string {
   const slug = value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
@@ -15,7 +16,7 @@ function slugify(value: string): string {
 interface NewConversationModalProps {
   agents: Agent[];
   onClose: () => void;
-  onCreateConversation: (title: string, agentSlugs: string[], kind: "direct" | "cluster") => Promise<void>;
+  onCreateConversation: (title: string, agentSlugs: string[], kind: "direct" | "group") => Promise<void>;
   onCreateAgent: (name: string, role: string, description: string, color: string, shape: AgentAvatarShape) => Promise<Agent | undefined>;
 }
 
@@ -23,7 +24,7 @@ export function NewConversationModal({ agents, onClose, onCreateConversation, on
   const [mode, setMode] = useState<"conversation" | "agent">("conversation");
   const [title, setTitle] = useState("");
   const [selected, setSelected] = useState<string[]>(["chief"]);
-  const [kind, setKind] = useState<"direct" | "cluster">("direct");
+  const [kind, setKind] = useState<"direct" | "group">("direct");
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
@@ -85,7 +86,7 @@ export function NewConversationModal({ agents, onClose, onCreateConversation, on
 
       {mode === "conversation" && <form onSubmit={(event) => void submitConversation(event)} className="new-modal__form">
         <label><span>Title</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Website redesign" autoFocus /></label>
-        <div className="new-modal__kind"><label><input type="radio" name="kind" checked={kind === "direct"} onChange={() => setKind("direct")} />One agent</label><label><input type="radio" name="kind" checked={kind === "cluster"} onChange={() => setKind("cluster")} />Crew</label></div>
+        <div className="new-modal__kind"><label><input type="radio" name="kind" checked={kind === "direct"} onChange={() => setKind("direct")} />One agent</label><label><input type="radio" name="kind" checked={kind === "group"} onChange={() => setKind("group")} />Group</label></div>
         <div className="new-modal__agents">
           <span>Members</span>
           <div>{agents.map((agent) => <button type="button" key={agent.id} className={`agent-pick ${selected.includes(agent.slug) ? "agent-pick--selected" : ""}`} onClick={() => toggleAgent(agent.slug)}><BotAvatar agent={agent} size={22} /><span>{agent.name}</span><i>{selected.includes(agent.slug) ? "✓" : ""}</i></button>)}</div>
@@ -95,17 +96,20 @@ export function NewConversationModal({ agents, onClose, onCreateConversation, on
       </form>}
 
       {mode === "agent" && <form onSubmit={(event) => void submitAgent(event)} className="new-modal__form">
-        <label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Research" autoFocus /></label>
-        <label><span>Role</span><input value={role} onChange={(event) => setRole(event.target.value)} placeholder="e.g. Evidence specialist" /></label>
-        <label><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this teammate does…" rows={2} /></label>
         <div className="new-modal__identity">
+          <div className="identity-preview"><BotAvatar agent={{ id: "preview", slug: slugify(name) || "new-agent", name: name.trim() || "New Agent", role, description, avatar_color: color, avatar_shape: shape, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={54} /></div>
           <span>Character</span>
-          <div className="identity-preview"><BotAvatar agent={{ id: "preview", slug: slugify(name) || "new-agent", name: name.trim() || "New agent", role, description, avatar_color: color, avatar_shape: shape, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={40} /></div>
           <div className="identity-colors">{COLORS.map((candidate) => <button key={candidate} type="button" aria-label={`Color ${candidate}`} className={color === candidate ? "selected" : ""} style={{ background: candidate }} onClick={() => setColor(candidate)} />)}</div>
           <div className="identity-shapes">{SHAPES.map((candidate) => <button key={candidate} type="button" className={shape === candidate ? "selected" : ""} onClick={() => setShape(candidate)}><BotAvatar agent={{ id: "shape", slug: "shape", name: "S", role: "", description: "", avatar_color: color, avatar_shape: candidate, status: "idle", hermes_profile: "default", workspace_path: "/workspace" }} size={24} /></button>)}</div>
         </div>
+        <div className="new-modal__name">
+          <span>Name</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="New Agent" autoFocus />
+        </div>
+        <label><span>Role</span><input value={role} onChange={(event) => setRole(event.target.value)} placeholder="e.g. Evidence specialist" /></label>
+        <label><span>Description</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What this teammate does…" rows={2} /></label>
         {error && <p className="new-modal__error">{error}</p>}
-        <div className="new-modal__actions"><button type="submit" disabled={working || !name.trim()}>{working ? "Creating…" : "Create agent"}</button></div>
+        <div className="new-modal__actions"><button type="submit" disabled={working || !name.trim()}>{working ? "Creating…" : "Get started"}</button></div>
       </form>}
     </section>
   </div>;

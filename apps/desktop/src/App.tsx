@@ -7,15 +7,17 @@ import { ConversationRow, ConversationRowSkeleton } from "./components/Conversat
 import { MonitorIcon, PanelIcon, SearchIcon, SpinnerIcon } from "./components/Icons";
 import { MessageTimeline } from "./components/MessageTimeline";
 import { NewConversationModal } from "./components/NewConversationModal";
+import { AgentUtilityPanel } from "./components/AgentUtilityPanel";
+import { PluginsView } from "./components/PluginsView";
 import { ComputerUnavailableOverlay, RemoteComputerOverlay } from "./components/RemoteComputerOverlay";
 import { TitleBar } from "./components/TitleBar";
-import type { Agent, ApprovalEvent, ComputerOwner, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, StartupState, UserIdentity } from "./types";
+import type { Agent, AgentAvatarShape, ApprovalEvent, ComputerOwner, ComputerSession, ConversationDetail, ConversationSummary, HealthResponse, StartupState, UserIdentity } from "./types";
 import { DEFAULT_USER } from "./types";
 import { handleWindowAction } from "./window-controls";
 import "./styles.css";
 
 const PREVIEW_CONVERSATION_IDS = new Set(["preview-chief", "preview-crew"]);
-const identity: UserIdentity = DEFAULT_USER;
+const [identity, setIdentity] = useState<UserIdentity>(DEFAULT_USER);
 
 type DataMode = "loading" | "live" | "disconnected";
 
@@ -32,6 +34,8 @@ function App() {
   const [computerSession, setComputerSession] = useState<ComputerSession | null>(null);
   const [computerUnavailable, setComputerUnavailable] = useState(false);
   const [newModalOpen, setNewModalOpen] = useState(false);
+  const [utilityOpen, setUtilityOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
   const [focusedConversationId, setFocusedConversationId] = useState<string | null>(null);
   const activeEventSource = useRef<EventSource | null>(null);
 
@@ -46,6 +50,10 @@ function App() {
     setStartup(fromHealth(health));
     setMode("live");
     setNotice(health.status === "ok" ? "" : healthDetail(health));
+    coreClient.usersMe().then(
+      (user) => setIdentity({ displayName: user.display_name, initials: user.initials }),
+      () => undefined,
+    );
 
     const target = loadedConversations.find((item) => item.id === selectedId) ?? loadedConversations[0];
     if (target) {
@@ -98,7 +106,7 @@ function App() {
     const source = new EventSource(coreClient.eventsUrl(selectedId));
     activeEventSource.current = source;
     const refresh = () => void refreshConversation(selectedId);
-    ["message.created", "task.created", "task.updated", "agent.run.started", "agent.run.completed", "agent.run.blocked", "approval.requested", "approval.decided", "automation.received"].forEach((event) => source.addEventListener(event, refresh));
+    ["message.created", "task.created", "task.updated", "agent.run.started", "agent.run.completed", "agent.run.blocked", "approval.requested", "approval.decided", "automation.received", "handoff.created", "agent.wake"].forEach((event) => source.addEventListener(event, refresh));
     source.onerror = () => setNotice((current) => current || "Live updates paused. Cyclone will reconnect when the conversation changes.");
     return () => source.close();
   }, [mode, refreshConversation, selectedId]);
@@ -174,14 +182,14 @@ function App() {
       return;
     }
     if (mode !== "live") {
-      setComputerSession({ id: `unavailable-${agent.id}`, agentId: agent.id, status: "unavailable", owner: { type: "idle" } });
+      setComputerSession({ id: `unavailable-${agent.id}`, agent_id: agent.id, status: "unavailable", owner: { type: "idle" } });
       return;
     }
     try {
       setComputerSession(await coreClient.computerSession(agent.id));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No computer session is available for this agent.");
-      setComputerSession({ id: `unavailable-${agent.id}`, agentId: agent.id, status: "unavailable", owner: { type: "idle" } });
+      setComputerSession({ id: `unavailable-${agent.id}`, agent_id: agent.id, status: "unavailable", owner: { type: "idle" } });
     }
   }
 
@@ -201,7 +209,7 @@ function App() {
     }
   }
 
-  async function handleCreateConversation(title: string, agentSlugs: string[], kind: "direct" | "cluster") {
+  async function handleCreateConversation(title: string, agentSlugs: string[], kind: "direct" | "group") {
     if (mode !== "live") throw new Error("Cyclone Core must be online to create a conversation.");
     const conversation = await coreClient.createConversation({ title, agent_slugs: agentSlugs, kind });
     setConversations(await coreClient.listConversations());
@@ -210,7 +218,7 @@ function App() {
     setNotice("");
   }
 
-  async function handleCreateAgent(name: string, role: string, description: string, color: string, shape: "round" | "triangle" | "diamond" | "pebble" | "squircle") {
+  async function handleCreateAgent(name: string, role: string, description: string, color: string, shape: AgentAvatarShape) {
     if (mode !== "live") throw new Error("Cyclone Core must be online to create an agent.");
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
     const agent = await coreClient.createAgent({ slug, name, role, description, avatar_color: color, avatar_shape: shape });
@@ -219,40 +227,71 @@ function App() {
     return agent;
   }
 
+  async function resolveQuestion(runId: string, choice: "once" | "session" | "always" | "deny") {
+    if (mode !== "live" || !runId) return;
+    try {
+      await coreClient.runApproval(runId, choice);
+      if (conversation) await refreshConversation(conversation.id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Cyclone could not send your answer.");
+    }
+  }
+
+  function toggleUtility() {
+    setPluginsOpen(false);
+    setUtilityOpen((current) => !current);
+  }
+
   return <div className="cyclone-app">
-    <div className="cyclone-window">
+    <div className="cyclone-window" style={utilityOpen ? { gridTemplateColumns: "var(--sidebar-width) minmax(0, 1fr) 318px" } : undefined}>
       <aside className="sidebar">
         <TitleBar onNewConversation={() => setNewModalOpen(true)} onWindowAction={(action) => void handleWindowAction(action)} />
         <div className="sidebar__search"><SearchIcon size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" aria-label="Search conversations" /></div>
         <div className="sidebar__threads" aria-label="Conversations">
           {mode === "loading" && <><ConversationRowSkeleton /><ConversationRowSkeleton /><ConversationRowSkeleton /><ConversationRowSkeleton /></>}
           {mode === "live" && searchableConversations.map((item) => <ConversationRow key={item.id} conversation={item} agents={agentsForConversation(item, agents, conversation)} active={item.id === selectedId} focused={item.id === focusedConversationId} onSelect={selectConversation} />)}
-          {mode === "live" && !searchableConversations.length && <div className="sidebar__empty">No conversations found.</div>}
+          {mode === "live" && !searchableConversations.length && <div className="sidebar__empty">{agents.length ? "No conversations found." : "No chats yet"}</div>}
           {mode === "disconnected" && <div className="sidebar__offline"><span className="sidebar__offline-dot" /><p>Waiting for your agent network</p><small>Conversations appear here when Cyclone Core is online.</small></div>}
         </div>
-        <button type="button" className="sidebar__user" title="Administrator settings"><span>{identity.initials}</span><strong>{identity.displayName}</strong></button>
+        <div className="sidebar__bottom">
+          <button type="button" className={`sidebar__nav-item ${pluginsOpen ? "sidebar__nav-item--active" : ""}`} title="Plugins and integrations" onClick={() => { setUtilityOpen(false); setPluginsOpen((current) => !current); }}>
+            <span className="sidebar__nav-icon"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M6.5 2.2a2 2 0 0 1 4 0V5h2v2h-2v3.5a1 1 0 0 1-1 1H8.5v-1.7a.8.8 0 0 0-1.6 0v1.7H5a1 1 0 0 1-1-1V7H2V5h2V2.2Z" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg></span>
+            Plugins
+          </button>
+          <button type="button" className="sidebar__user" title="Administrator settings"><span>{identity.initials}</span><strong>{identity.displayName}</strong></button>
+        </div>
       </aside>
 
-      <main className="conversation-surface">
-        <ConversationHeader conversation={conversation} agents={headerAgents} status={startup} onOpenComputer={() => void openComputer()} />
+      {pluginsOpen ? <PluginsView onClose={() => setPluginsOpen(false)} /> : <main className="conversation-surface">
+        <ConversationHeader conversation={conversation} agents={headerAgents} status={startup} utilityOpen={utilityOpen} onToggleUtility={toggleUtility} onOpenComputer={() => void openComputer()} />
         {notice && <div className="quiet-notice" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>×</button></div>}
         <section className="conversation-body">
-          {conversation ? <MessageTimeline conversation={conversation} agents={agents} onOpenAgent={openAgent} onOpenComputer={openComputer} onDecideApproval={(approval, decision) => void decideApproval(approval, decision)} /> : <LoadingConversation />}
+          {conversation ? <MessageTimeline conversation={conversation} agents={agents} onOpenAgent={openAgent} onOpenComputer={openComputer} onDecideApproval={(approval, decision) => void decideApproval(approval, decision)} onResolveQuestion={resolveQuestion} /> : mode === "live" && agents.length === 0 ? <FirstAgentState onStart={() => setNewModalOpen(true)} /> : <LoadingConversation />}
         </section>
         <div className="conversation-composer">
           {mode === "loading" ? <div className="composer composer--disabled"><SpinnerIcon size={15} /><span>Connecting to Cyclone…</span></div> : <Composer conversationName={conversation?.title ?? "Cyclone"} agents={agents} disabled={mode !== "live" || !conversation} busy={sending} onSend={sendMessage} onAttachment={() => setNotice("Attach files and references from a live Cyclone conversation.")} />}
         </div>
-      </main>
+      </main>}
+      {utilityOpen && <AgentUtilityPanel agent={headerAgents[0]} conversationTitle={conversation?.title ?? "Cyclone"} onClose={() => setUtilityOpen(false)} onOpenComputer={(session) => void openComputer(session)} />}
     </div>
-    {computerSession && <RemoteComputerOverlay session={computerSession} agent={agents.find((agent) => agent.id === computerSession.agentId || agent.slug === computerSession.agentId)} onClose={() => setComputerSession(null)} onChangeOwner={updateComputerOwner} />}
+    {computerSession && <RemoteComputerOverlay session={computerSession} agent={agents.find((agent) => agent.id === computerSession.agent_id || agent.slug === computerSession.agent_id)} onClose={() => setComputerSession(null)} onChangeOwner={updateComputerOwner} />}
     {computerUnavailable && <ComputerUnavailableOverlay onClose={() => setComputerUnavailable(false)} />}
     {newModalOpen && <NewConversationModal agents={agents} onClose={() => setNewModalOpen(false)} onCreateConversation={handleCreateConversation} onCreateAgent={handleCreateAgent} />}
   </div>;
 }
 
-function ConversationHeader({ conversation, agents, status, onOpenComputer }: { conversation: ConversationDetail | null; agents: Agent[]; status: StartupState; onOpenComputer: () => void }) {
+function FirstAgentState({ onStart }: { onStart: () => void }) {
+  return <div className="conversation-empty">
+    <BotAvatar agent={{ id: "starter", slug: "starter", name: "Agent", role: "", description: "", avatar_color: "#2A92FE", avatar_shape: "round", status: "idle", provider: null, model: null, hermes_profile: "default", workspace_path: "/workspace" } as Agent} size={52} />
+    <h2>Create your first Agent</h2>
+    <p>No chats yet. Spawn a persistent teammate and start working together.</p>
+    <button type="button" className="conversation-empty__cta" onClick={onStart}>New Agent</button>
+  </div>;
+}
+
+function ConversationHeader({ conversation, agents, status, utilityOpen, onToggleUtility, onOpenComputer }: { conversation: ConversationDetail | null; agents: Agent[]; status: StartupState; utilityOpen: boolean; onToggleUtility: () => void; onOpenComputer: () => void }) {
   const title = conversation?.title ?? "Cyclone";
-  const crew = conversation?.kind === "cluster";
+  const crew = conversation?.kind === "cluster" || conversation?.kind === "group";
   const activeAgent = agents[0];
   const activity = status.stage === "ready" ? "" : status.stage === "unavailable" ? "Offline" : status.headline;
   return <header className="conversation-header">
@@ -260,7 +299,10 @@ function ConversationHeader({ conversation, agents, status, onOpenComputer }: { 
       {crew ? <CrewAvatar agents={agents} size={19} /> : activeAgent ? <BotAvatar agent={activeAgent} size={19} /> : <span className="conversation-header__placeholder" />}
       <strong>{title}</strong>{activity && <span className="conversation-header__status">{activity}</span>}
     </div>
-    <button type="button" className="conversation-header__computer" aria-label="Open agent computer" title="Open agent computer" onClick={onOpenComputer}><MonitorIcon size={17} /></button>
+    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <button type="button" className="conversation-header__computer" aria-label="Open agent computer" title="Open agent computer" onClick={onOpenComputer}><MonitorIcon size={17} /></button>
+      <button type="button" className={`conversation-header__computer ${utilityOpen ? "conversation-header__computer--active" : ""}`} aria-label={utilityOpen ? "Close agent utility panel" : "Open agent utility panel"} title={utilityOpen ? "Close utility panel" : "Agent utility"} onClick={onToggleUtility}><PanelIcon size={17} /></button>
+    </div>
   </header>;
 }
 
@@ -273,7 +315,7 @@ function agentsForConversation(summary: ConversationSummary, allAgents: Agent[],
     const members = active.members.map((member) => member.agent).filter((agent): agent is Agent => Boolean(agent));
     if (members.length) return members;
   }
-  if (summary.kind === "cluster") return allAgents.slice(0, 3);
+  if (summary.kind === "cluster" || summary.kind === "group") return allAgents.slice(0, 3);
   const direct = allAgents.find((agent) => agent.name.toLowerCase() === summary.title.toLowerCase());
   return direct ? [direct] : allAgents.slice(0, 1);
 }

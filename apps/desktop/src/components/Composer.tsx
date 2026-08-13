@@ -30,10 +30,26 @@ export function Composer({ conversationName, agents, disabled = false, busy = fa
     if (!currentQuery) return [];
     return agents.filter((agent) => `${agent.name} ${agent.role}`.toLowerCase().includes(currentQuery.query)).slice(0, 6);
   }, [agents, currentQuery]);
+  const showEveryone = Boolean(currentQuery && "everyone".startsWith(currentQuery.query));
+
+  function insertMention(token: string) {
+    if (!currentQuery) return;
+    const before = value.slice(0, currentQuery.start);
+    const after = value.slice(caret);
+    const next = `${before}${token} ${after}`;
+    setValue(next);
+    const nextCaret = before.length + token.length + 1;
+    setCaret(nextCaret);
+    setOpenMenu(false);
+    requestAnimationFrame(() => {
+      textAreaRef.current?.focus();
+      textAreaRef.current?.setSelectionRange(nextCaret, nextCaret);
+    });
+  }
 
   useEffect(() => {
-    setOpenMenu(Boolean(currentQuery && suggestions.length));
-  }, [currentQuery, suggestions.length]);
+    setOpenMenu(Boolean(currentQuery && (suggestions.length || showEveryone)));
+  }, [currentQuery, suggestions.length, showEveryone]);
 
   useEffect(() => {
     const element = textAreaRef.current;
@@ -60,23 +76,13 @@ export function Composer({ conversationName, agents, disabled = false, busy = fa
   }
 
   function selectAgent(agent: Agent) {
-    if (!currentQuery) return;
-    const before = value.slice(0, currentQuery.start);
-    const after = value.slice(caret);
-    const next = `${before}@${agent.name} ${after}`;
-    setValue(next);
-    const nextCaret = before.length + agent.name.length + 3;
-    setCaret(nextCaret);
-    setOpenMenu(false);
-    requestAnimationFrame(() => {
-      textAreaRef.current?.focus();
-      textAreaRef.current?.setSelectionRange(nextCaret, nextCaret);
-    });
+    insertMention(`@${agent.name}`);
   }
 
   return <form className="composer" onSubmit={(event) => void submit(event)}>
     {openMenu && <div className="mention-picker" role="listbox" aria-label="Mention an agent">
       {suggestions.map((agent) => <button type="button" key={agent.id} role="option" onMouseDown={(event) => { event.preventDefault(); selectAgent(agent); }}><BotAvatar agent={agent} size={20} /><span><strong>{agent.name}</strong><small>{agent.role}</small></span></button>)}
+      {showEveryone && <button type="button" role="option" onMouseDown={(event) => { event.preventDefault(); insertMention("@everyone"); }}><span className="mention-picker__everyone"><strong>Everyone</strong><small>Broadcast to the whole group</small></span></button>}
     </div>}
     <button type="button" className="composer__plus" title="Add reference or file" aria-label="Add reference or file" onClick={onAttachment} disabled={disabled}><PlusIcon size={16} /></button>
     <textarea ref={textAreaRef} value={value} disabled={disabled} onChange={(event) => { setValue(event.target.value); setCaret(event.target.selectionStart); }} onClick={(event) => setCaret(event.currentTarget.selectionStart)} onKeyUp={(event) => setCaret(event.currentTarget.selectionStart)} onKeyDown={handleKeyDown} placeholder={`Message ${conversationName}`} rows={1} aria-label={`Message ${conversationName}`} />

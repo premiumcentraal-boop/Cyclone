@@ -24,7 +24,7 @@ export interface Agent {
   workspace_path: string;
 }
 
-export type AgentAvatarShape = "round" | "triangle" | "diamond" | "pebble" | "squircle";
+export type AgentAvatarShape = "round" | "blob" | "squircle" | "capsule" | "triangle" | "polygon" | "cloud" | "droplet" | "diamond" | "pebble";
 
 export interface ConversationSummary {
   id: string;
@@ -45,10 +45,20 @@ export type MessageKind =
   | "automation"
   | "system";
 
+export interface Mention {
+  id: string;
+  mention_type: "agent" | "group" | "everyone" | "routine" | "connector";
+  target_agent_id?: string | null;
+  target_slug?: string | null;
+  position_start?: number | null;
+  position_end?: number | null;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
   task_id?: string | null;
+  reply_to_message_id?: string | null;
   author_type: "human" | "agent" | "system" | "automation";
   author_agent_id?: string | null;
   author_name: string;
@@ -56,6 +66,7 @@ export interface Message {
   body: string;
   metadata: Record<string, unknown>;
   source: string;
+  mentions?: Mention[];
   created_at: string;
 }
 
@@ -113,13 +124,36 @@ export interface StartupState {
 
 export interface ComputerSession {
   id: string;
-  agentId: string;
+  agent_id: string;
   status: "idle" | "working" | "waiting_for_user" | "done" | "error" | "unavailable";
-  instruction?: string;
-  streamUrl?: string;
-  recentFrameUrl?: string;
+  instruction?: string | null;
+  stream_url?: string | null;
+  recent_frame_url?: string | null;
   owner: ComputerOwner;
-  updatedAt?: string;
+  updated_at?: string | null;
+}
+
+export interface RoutineSummary {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  owner_agent_id: string | null;
+  n8n_workflow_id: string | null;
+  enabled: boolean;
+}
+
+export interface IntegrationState {
+  name: string;
+  available: boolean;
+  detail: string;
+}
+
+export interface AttachmentRef {
+  name: string;
+  size?: number | null;
+  url?: string | null;
+  kind?: string;
 }
 
 export type MentionSegment =
@@ -268,13 +302,13 @@ export function parseMessage(message: Message, agents: Agent[] = []): ParsedMess
 
   const computer = computerRecord ? {
     id: typeof computerRecord.session_id === "string" ? computerRecord.session_id : `computer-${message.id}`,
-    agentId: typeof computerRecord.agent_id === "string" ? computerRecord.agent_id : message.author_agent_id ?? "",
+    agent_id: typeof computerRecord.agent_id === "string" ? computerRecord.agent_id : message.author_agent_id ?? "",
     status: (typeof computerRecord.status === "string" ? computerRecord.status : "unavailable") as ComputerSession["status"],
     instruction: typeof computerRecord.instruction === "string" ? computerRecord.instruction : message.body,
-    streamUrl: typeof computerRecord.stream_url === "string" ? computerRecord.stream_url : undefined,
-    recentFrameUrl: typeof computerRecord.recent_frame_url === "string" ? computerRecord.recent_frame_url : undefined,
-    owner: computerRecord.owner === "human" ? { type: "human" } : typeof computerRecord.agent_id === "string" ? { type: "agent", agentId: computerRecord.agent_id } : { type: "idle" },
-    updatedAt: message.created_at,
+    stream_url: typeof computerRecord.stream_url === "string" ? computerRecord.stream_url : undefined,
+    recent_frame_url: typeof computerRecord.recent_frame_url === "string" ? computerRecord.recent_frame_url : undefined,
+    owner: { type: "idle" },
+    updated_at: message.created_at,
   } satisfies ComputerSession : undefined;
 
   return {

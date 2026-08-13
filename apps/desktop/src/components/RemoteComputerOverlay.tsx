@@ -15,7 +15,7 @@ export function RemoteComputerOverlay({ session, agent, onClose, onChangeOwner }
   const [fullscreen, setFullscreen] = useState(false);
   const frameRef = useRef<HTMLDivElement>(null);
   const isHuman = session.owner.type === "human";
-  const liveStream = Boolean(session.streamUrl);
+  const liveStream = Boolean(session.stream_url);
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
@@ -58,8 +58,8 @@ export function RemoteComputerOverlay({ session, agent, onClose, onChangeOwner }
 }
 
 function ComputerSurface({ session, liveStream, isHuman }: { session: ComputerSession; liveStream: boolean; isHuman: boolean }) {
-  if (liveStream && session.streamUrl) {
-    return <div className="computer-surface computer-surface--live"><iframe title="Live agent computer" src={session.streamUrl} sandbox="allow-scripts allow-same-origin allow-forms" /><OwnershipCursor visible={isHuman} /></div>;
+  if (liveStream && session.stream_url) {
+    return <div className="computer-surface computer-surface--live"><iframe title="Live agent computer" src={session.stream_url} sandbox="allow-scripts allow-same-origin allow-forms" /><OwnershipCursor visible={isHuman} /></div>;
   }
   if (session.status === "unavailable" || session.status === "error") {
     return <div className="computer-surface computer-surface--unavailable"><MonitorIcon size={26} /><h2>Computer unavailable</h2><p>The agent computer has not provided a live session. Cyclone will not pretend a static preview is interactive.</p></div>;

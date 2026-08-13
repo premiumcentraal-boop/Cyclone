@@ -1,13 +1,29 @@
 import type { Agent, AgentAvatarShape } from "./types";
 
+// The ten-character palette from the real Grok Bot creator (DESIGN.md §22).
 export const AGENT_PALETTE = [
-  "#70B7A7",
-  "#E2A254",
-  "#6665E1",
-  "#8061E4",
-  "#5280E7",
-  "#DC7945",
+  "#936439", // brown
+  "#FF263C", // red
+  "#FF6700", // orange
+  "#FF9800", // amber
+  "#00C972", // green
+  "#00BCA6", // teal
+  "#1084FE", // blue
+  "#9159FE", // purple
+  "#FF309B", // pink
+  "#777777", // gray
 ] as const;
+
+export const AGENT_SHAPES: AgentAvatarShape[] = [
+  "round",
+  "blob",
+  "squircle",
+  "capsule",
+  "triangle",
+  "polygon",
+  "cloud",
+  "droplet",
+];
 
 export function agentColor(agent: Pick<Agent, "avatar_color" | "slug">): string {
   if (/^#[0-9a-f]{6}$/i.test(agent.avatar_color)) return agent.avatar_color;
@@ -17,10 +33,9 @@ export function agentColor(agent: Pick<Agent, "avatar_color" | "slug">): string 
 }
 
 export function agentShapeFromSlug(slug: string): AgentAvatarShape {
-  const family: AgentAvatarShape[] = ["round", "triangle", "diamond", "pebble", "squircle"];
   let sum = 0;
   for (const character of slug) sum += character.charCodeAt(0);
-  return family[sum % family.length];
+  return AGENT_SHAPES[sum % AGENT_SHAPES.length];
 }
 
 export function shade(hex: string, percent: number): string {
