@@ -17,11 +17,11 @@ import { handleWindowAction } from "./window-controls";
 import "./styles.css";
 
 const PREVIEW_CONVERSATION_IDS = new Set(["preview-chief", "preview-crew"]);
-const [identity, setIdentity] = useState<UserIdentity>(DEFAULT_USER);
 
 type DataMode = "loading" | "live" | "disconnected";
 
 function App() {
+  const [identity, setIdentity] = useState<UserIdentity>(DEFAULT_USER);
   const [mode, setMode] = useState<DataMode>("loading");
   const [startup, setStartup] = useState<StartupState>({ stage: "checking", headline: "Starting Cyclone…", detail: "Connecting to your local agent environment." });
   const [agents, setAgents] = useState<Agent[]>([]);
