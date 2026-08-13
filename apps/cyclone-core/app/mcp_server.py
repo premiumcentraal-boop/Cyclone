@@ -5,10 +5,10 @@ genuinely message teammates, hand off work, post results, and read group
 context — without the human relaying anything and without string-parsing
 fakes.
 
-The server is mounted at /mcp on Cyclone Core (loopback-bound like the rest
-of the API). Hermes connects with ``hermes mcp add cyclone --url
-http://cyclone-core:8787/mcp``; the gateway auto-reloads MCP connections when
-the config changes.
+The server is mounted at /mcp/mcp on Cyclone Core (loopback-bound like the
+rest of the API). Hermes connects with ``hermes mcp add cyclone --url
+http://cyclone-core:8787/mcp/mcp``; the gateway auto-reloads MCP connections
+when the config changes.
 
 Tools identify the caller by the agent slug the prompt instructs them to
 pass. This is a single-user localhost product; cross-container authentication
@@ -26,16 +26,16 @@ from .repository import NotFoundError
 ServicesGetter = Callable[[], Any]
 
 
-def _agent_by_slug(runtime: Any, slug: str) -> Any:
+async def _agent_by_slug(runtime: Any, slug: str) -> Any:
     try:
-        return runtime.repository.get_agent_by_slug(slug)
+        return await runtime.repository.get_agent_by_slug(slug)
     except NotFoundError as error:
         raise ValueError(f"Unknown agent slug: {slug}") from error
 
 
-def _conversation(runtime: Any, conversation_id: str) -> Any:
+async def _conversation(runtime: Any, conversation_id: str) -> Any:
     try:
-        return runtime.repository.get_conversation(UUID(conversation_id), message_limit=100)
+        return await runtime.repository.get_conversation(UUID(conversation_id), message_limit=100)
     except (NotFoundError, ValueError) as error:
         raise ValueError(f"Unknown conversation: {conversation_id}") from error
 
@@ -44,20 +44,20 @@ def _member_agents(conversation: Any) -> list[Any]:
     return [member.agent for member in conversation.members if member.agent is not None]
 
 
-def _find_direct_conversation(runtime: Any, first: Any, second: Any) -> Any:
+async def _find_direct_conversation(runtime: Any, first: Any, second: Any) -> Any:
     """Find or create the direct conversation between two agents."""
     try:
-        conversations = runtime.repository.list_conversations()
+        conversations = await runtime.repository.list_conversations()
     except Exception:
         conversations = []
     for summary in conversations:
         if summary.kind != "direct":
             continue
-        detail = runtime.repository.get_conversation(summary.id, message_limit=1)
+        detail = await runtime.repository.get_conversation(summary.id, message_limit=1)
         slugs = {m.agent.slug for m in detail.members if m.agent}
         if slugs == {first.slug, second.slug}:
             return detail
-    created = runtime.repository.create_conversation(
+    created = await runtime.repository.create_conversation(
         title=f"{first.name} & {second.name}",
         kind="direct",
         project_key=None,
@@ -97,7 +97,10 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
     except ImportError as error:  # pragma: no cover - host test preflight
         raise RuntimeError("The mcp package is required for the Cyclone MCP server.") from error
 
-    mcp = FastMCP("cyclone-collaboration")
+    # Core is loopback-published to the host, but Hermes connects over the
+    # private Compose network as ``cyclone-core``.  Do not enable FastMCP's
+    # localhost-only Host header guard for that internal service name.
+    mcp = FastMCP("cyclone-collaboration", host="0.0.0.0")
 
     @mcp.tool()
     async def send_agent_message(
@@ -116,16 +119,16 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
         Use handoff=True when you are transferring ownership of work.
         """
         runtime = get_services()
-        sender = _agent_by_slug(runtime, from_agent_slug)
-        receiver = _agent_by_slug(runtime, to_agent_slug)
+        sender = await _agent_by_slug(runtime, from_agent_slug)
+        receiver = await _agent_by_slug(runtime, to_agent_slug)
         if sender.id == receiver.id:
             raise ValueError("Cannot message yourself; post to the group instead.")
         if conversation_id:
-            conversation = _conversation(runtime, conversation_id)
+            conversation = await _conversation(runtime, conversation_id)
             if not any(m.agent and m.agent.id == sender.id for m in conversation.members):
                 raise ValueError(f"{sender.name} is not a member of that conversation.")
         else:
-            conversation = _find_direct_conversation(runtime, sender, receiver)
+            conversation = await _find_direct_conversation(runtime, sender, receiver)
 
         member_agents = _member_agents(conversation)
         posted = await _post_agent_message(
@@ -196,8 +199,8 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
         message in their inbox); omit it for a plain group update.
         """
         runtime = get_services()
-        sender = _agent_by_slug(runtime, agent_slug)
-        conversation = _conversation(runtime, conversation_id)
+        sender = await _agent_by_slug(runtime, agent_slug)
+        conversation = await _conversation(runtime, conversation_id)
         posted = await _post_agent_message(
             runtime, conversation=conversation, from_agent=sender, body=message, task_id=task_id
         )
@@ -238,9 +241,9 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
         """Transfer ownership of work to another agent: durable handoff record,
         chat handoff event, new owned task, and a wake for the receiver."""
         runtime = get_services()
-        sender = _agent_by_slug(runtime, from_agent_slug)
-        receiver = _agent_by_slug(runtime, to_agent_slug)
-        conversation = _conversation(runtime, conversation_id)
+        sender = await _agent_by_slug(runtime, from_agent_slug)
+        receiver = await _agent_by_slug(runtime, to_agent_slug)
+        conversation = await _conversation(runtime, conversation_id)
         member_agents = _member_agents(conversation)
         parent = await runtime.repository.get_task(UUID(task_id)) if task_id else None
         child_task = await runtime.repository.create_task(
@@ -283,8 +286,8 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
     async def post_result(agent_slug: str, conversation_id: str, task_id: str, summary: str, status: str = "completed") -> str:
         """Post your completed result into the group as yourself and update the task."""
         runtime = get_services()
-        agent = _agent_by_slug(runtime, agent_slug)
-        conversation = _conversation(runtime, conversation_id)
+        agent = await _agent_by_slug(runtime, agent_slug)
+        conversation = await _conversation(runtime, conversation_id)
         task = await runtime.repository.get_task(UUID(task_id))
         if task.owner_agent_id != agent.id:
             raise ValueError("You can only complete tasks you own.")
@@ -302,7 +305,7 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
         """Transition the task state machine (review loop): e.g. running ->
         awaiting_review -> changes_requested -> running -> completed."""
         runtime = get_services()
-        agent = _agent_by_slug(runtime, agent_slug)
+        agent = await _agent_by_slug(runtime, agent_slug)
         task = await runtime.repository.get_task(UUID(task_id))
         if task.owner_agent_id != agent.id and status not in ("changes_requested", "awaiting_review"):
             raise ValueError("You can only transition tasks you own (reviews may be requested by the reviewer).")
@@ -330,8 +333,8 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
     async def get_group_context(agent_slug: str, conversation_id: str, limit: int = 8) -> str:
         """Read the recent group conversation and task state (context on demand)."""
         runtime = get_services()
-        agent = _agent_by_slug(runtime, agent_slug)
-        conversation = _conversation(runtime, conversation_id)
+        agent = await _agent_by_slug(runtime, agent_slug)
+        conversation = await _conversation(runtime, conversation_id)
         member_agents = _member_agents(conversation)
         recent = [m for m in conversation.messages if m.kind in ("message", "result", "handoff")][-limit:]
         lines = [f"Group: {conversation.title}", f"Members: {', '.join(m.name for m in member_agents)}"]
@@ -347,7 +350,7 @@ def create_cyclone_mcp(get_services: ServicesGetter) -> Any:
     async def get_my_inbox(agent_slug: str, limit: int = 10) -> str:
         """List your pending Cyclone inbox items (work assigned to you)."""
         runtime = get_services()
-        agent = _agent_by_slug(runtime, agent_slug)
+        agent = await _agent_by_slug(runtime, agent_slug)
         items = await runtime.repository.list_agent_inbox(agent.id, limit=limit, only_pending=True)
         if not items:
             return "Your inbox is empty."

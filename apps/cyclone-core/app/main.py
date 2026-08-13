@@ -149,6 +149,9 @@ async def _recovery_sweep(runtime: AppServices) -> None:
             pass  # The item stays pending; a later sweep retries it.
 
 
+_cyclone_mcp = create_cyclone_mcp(lambda: app.state.services)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     services = AppServices(get_settings())
@@ -156,7 +159,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await services.open()
     asyncio.create_task(_recovery_sweep(services))
     try:
-        yield
+        # Starlette does not run a mounted application's lifespan. FastMCP's
+        # Streamable HTTP transport needs its session manager running, so own
+        # it at the Core application's lifespan instead.
+        async with _cyclone_mcp.session_manager.run():
+            yield
     finally:
         await services.close()
 
@@ -203,7 +210,7 @@ def _not_found(error: NotFoundError) -> HTTPException:
 
 # The Cyclone MCP server (agent messaging tools) is mounted loopback-only,
 # like the rest of the API. Services are resolved per call from app.state.
-app.mount("/mcp", create_cyclone_mcp(lambda: app.state.services).streamable_http_app())
+app.mount("/mcp", _cyclone_mcp.streamable_http_app())
 _attachments_dir = get_settings().workspace_path / "attachments"
 try:
     _attachments_dir.mkdir(parents=True, exist_ok=True)
