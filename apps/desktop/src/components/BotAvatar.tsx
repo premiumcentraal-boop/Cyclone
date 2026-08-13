@@ -150,7 +150,7 @@ export function BotAvatar({ agent, size = 32, className = "", title, interactive
           <feGaussianBlur stdDeviation="0.35" />
         </filter>
       </defs>
-      <path d={path.outlinePath} fill="url(#${gradientId})" filter={`url(#${gradientId}-soft)`} />
+      <path d={path.outlinePath} fill={`url(#${gradientId})`} filter={`url(#${gradientId}-soft)`} />
       <path d={path.clipPath} fill="none" stroke="rgba(255,255,255,.24)" strokeWidth="1.2" />
       <ellipse cx="34" cy="28" rx="16" ry="11" fill="rgba(255,255,255,.11)" transform="rotate(-23 34 28)" />
       <g transform={`translate(${eyeX} ${eyeY})`} className="bot-avatar__eyes" style={{ transformOrigin: "50px 50px" }}>
