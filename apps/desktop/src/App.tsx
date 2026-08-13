@@ -296,7 +296,7 @@ function App() {
         </div>
       </aside>
 
-      {pluginsOpen ? <PluginsView onClose={() => setPluginsOpen(false)} /> : <main className="conversation-surface">
+      {pluginsOpen ? <PluginsView onClose={() => setPluginsOpen(false)} /> : <main className={`conversation-surface${notice ? " conversation-surface--with-notice" : ""}`}>
         <ConversationHeader conversation={conversation} agents={headerAgents} status={startup} utilityOpen={utilityOpen} onToggleUtility={toggleUtility} onOpenComputer={() => void openComputer()} />
         {notice && <div className="quiet-notice" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>×</button></div>}
         <section className="conversation-body">
