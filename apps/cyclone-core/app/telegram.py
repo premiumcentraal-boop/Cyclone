@@ -146,6 +146,33 @@ class TelegramWorker:
         self._subscriptions[conversation_id] = subscription
         asyncio.create_task(self._forward_loop(conversation_id, chat_id, subscription))
 
+    async def restore_subscriptions(self) -> None:
+        """Re-attach the forwarders to every existing Telegram conversation.
+
+        Subscriptions are in-memory; after a restart the worker must find the
+        conversation rows (kind='telegram', key 'telegram-<chat_id>') and
+        resume forwarding, otherwise agent results never reach the phone.
+        """
+        try:
+            rows = await self.runtime.repository.list_telegram_conversations()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("telegram: could not list telegram conversations")
+            return
+        for conversation_id, key in rows:
+            if not key.startswith("telegram-"):
+                continue
+            try:
+                chat_id = int(key.removeprefix("telegram-"))
+            except ValueError:
+                continue
+            if conversation_id in self._subscriptions:
+                continue
+            try:
+                await self._subscribe(conversation_id, chat_id)
+                logger.info("telegram: restored forwarder for conversation %s (chat %s)", conversation_id, chat_id)
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("telegram: failed to restore forwarder for %s", conversation_id)
+
     async def _forward_loop(self, conversation_id: UUID, chat_id: int, subscription: Any) -> None:
         """Forward agent/system messages from the conversation into Telegram."""
         try:
@@ -154,9 +181,19 @@ class TelegramWorker:
                     envelope = await asyncio.wait_for(subscription.get(), timeout=30)
                 except asyncio.TimeoutError:
                     continue
-                if envelope.type not in {"message.created", "approval.requested"}:
+                if envelope.type not in {
+                    "message.created",
+                    "agent.run.completed",
+                    "agent.run.started",
+                    "agent.run.blocked",
+                    "approval.requested",
+                    "approval.decided",
+                    "handoff.created",
+                }:
                     continue
                 payload = envelope.payload
+                if not isinstance(payload, dict):
+                    continue
                 author_type = str(payload.get("author_type", ""))
                 if author_type == "human":
                     continue
@@ -165,7 +202,9 @@ class TelegramWorker:
                     continue
                 author_name = str(payload.get("author_name") or "Agent")
                 kind = str(payload.get("kind", "message"))
-                if kind in {"activity", "task"}:
+                # Progress noise stays quiet; system activity (e.g. blocked
+                # runs) is important enough to surface.
+                if kind in {"activity", "task"} and author_type != "system":
                     continue
                 if envelope.type == "approval.requested":
                     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
@@ -174,7 +213,10 @@ class TelegramWorker:
                         self._pending_approvals[conversation_id] = run_id
                     body = f"{body}\n\nReply with one of: allow once · allow session · always allow · deny"
                 prefix = "" if kind == "message" else f"({kind}) "
-                await self.send_message(chat_id, f"<b>{_escape(author_name)}</b>\n{prefix}{_escape(body)}")
+                try:
+                    await self.send_message(chat_id, f"<b>{_escape(author_name)}</b>\n{prefix}{_escape(body)}")
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception("telegram: failed to forward a message to chat %s", chat_id)
         except Exception:  # pragma: no cover - defensive
             logger.exception("telegram: forward loop ended for %s", conversation_id)
         finally:
@@ -187,6 +229,7 @@ class TelegramWorker:
             logger.error("telegram: bot token rejected by Telegram (getMe failed); worker disabled.")
             return
         logger.info("telegram: connected as @%s (%s)", me.get("username"), me.get("first_name"))
+        await self.restore_subscriptions()
         while True:
             try:
                 updates = await self.get_updates()

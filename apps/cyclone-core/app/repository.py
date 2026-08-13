@@ -777,6 +777,17 @@ class Repository:
             raise NotFoundError("Task was not found")
         return self._task(row)
 
+    async def list_telegram_conversations(self) -> list[tuple[UUID, str]]:
+        """(id, hermes_conversation_key) for every Telegram channel conversation."""
+        async with self.connection() as connection:
+            result = await connection.execute("""
+                SELECT id, hermes_conversation_key FROM conversations
+                WHERE kind = 'telegram' AND hermes_conversation_key IS NOT NULL
+                ORDER BY created_at ASC
+            """)
+            rows = await result.fetchall()
+        return [(row["id"], row["hermes_conversation_key"]) for row in rows]
+
     async def get_active_task(self, conversation_id: UUID) -> TaskSummary | None:
         """Most recent non-terminal task in the conversation (routing signal)."""
         async with self.connection() as connection:
