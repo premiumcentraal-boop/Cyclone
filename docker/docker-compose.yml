@@ -93,9 +93,8 @@ services:
       # Passed only when a developer explicitly adds it to untracked .env.
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
-      TELEGRAM_HOME_CHANNEL: ${TELEGRAM_HOME_CHANNEL:-}
+      # No TELEGRAM_* env here: the Hermes gateway's own Telegram platform must
+      # stay disabled — Cyclone Core owns the remote channel (TelegramWorker).
     volumes:
       - hermes_data:/opt/data
       - ${CYCLONE_WORKSPACE_HOST_PATH:?set CYCLONE_WORKSPACE_HOST_PATH in .env}:/workspace
