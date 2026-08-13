@@ -58,12 +58,19 @@ Cyclone detects Docker Desktop at runtime. It does **not** silently install Dock
 ## Quick start (development)
 
 1. Copy `.env.example` to `.env` and set strong local secrets. Do **not** commit `.env`.
+   Compose reads the `.env` file next to the compose file (`docker/.env`); when keeping
+   it at the repository root, pass it explicitly (all examples below do).
 2. Create the real Obsidian vault at `C:\Users\<you>\Documents\CycloneVault` using the documented structure, or override `CYCLONE_VAULT_HOST_PATH` in `.env`.
 3. Start the environment:
 
    ```bash
-   docker compose -f docker/docker-compose.yml up --build
+   docker compose -f docker/docker-compose.yml --env-file .env up --build
    ```
+
+   The `hermes-config` one-shot aligns the Hermes gateway's default provider with
+   your credentials automatically: a `DEEPSEEK_API_KEY` selects the DeepSeek native
+   API with `deepseek-v4-flash` as default; otherwise an `OPENROUTER_API_KEY`
+   selects OpenRouter. Neither key present leaves image defaults untouched.
 
 4. Open the Cyclone Core health endpoint at `http://127.0.0.1:8787/health`.
 5. Open n8n locally at `http://127.0.0.1:5678` if you enabled its UI port.

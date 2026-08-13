@@ -33,6 +33,51 @@ services:
       start_period: 5s
     networks: [cyclone_private]
 
+  # One-shot: aligns the Hermes gateway's default inference provider with the
+  # model credentials in .env before the gateway starts. DeepSeek key present
+  # -> DeepSeek native API with deepseek-v4-flash default; otherwise
+  # OpenRouter. Runs on every `docker compose up` and is idempotent. A later
+  # `hermes boot` chowns config.yaml back to the runtime user.
+  hermes-config:
+    image: nousresearch/hermes-agent:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if [ -n "$${DEEPSEEK_API_KEY:-}" ]; then
+          echo "[cyclone] DeepSeek credentials found; configuring DeepSeek as the default provider."
+          /opt/hermes/bin/hermes config set model.provider deepseek
+          /opt/hermes/bin/hermes config set model.base_url https://api.deepseek.com/v1
+          current=$$(/opt/hermes/bin/hermes config get model.default 2>/dev/null | tail -n 1)
+          case "$$current" in
+            ""|"anthropic/claude-opus-4.6")
+              /opt/hermes/bin/hermes config set model.default deepseek/deepseek-v4-flash
+              ;;
+            *)
+              echo "[cyclone] preserving operator-chosen model.default: $$current"
+              ;;
+          esac
+        elif [ -n "$${OPENROUTER_API_KEY:-}" ]; then
+          echo "[cyclone] OpenRouter credentials found; configuring OpenRouter as the default provider."
+          /opt/hermes/bin/hermes config set model.provider openrouter
+          /opt/hermes/bin/hermes config set model.base_url https://openrouter.ai/api/v1
+        else
+          echo "[cyclone] No model credentials found; leaving Hermes defaults untouched."
+        fi
+    environment:
+      HERMES_HOME: /opt/data
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    volumes:
+      - hermes_data:/opt/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [cyclone_private]
+
   hermes:
     image: nousresearch/hermes-agent:latest
     restart: unless-stopped
@@ -57,6 +102,8 @@ services:
       - ${CYCLONE_VAULT_HOST_PATH:?set CYCLONE_VAULT_HOST_PATH in .env}:/vault
     shm_size: 1gb
     depends_on:
+      hermes-config:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

@@ -480,3 +480,46 @@ class Repository:
         async with self.connection() as connection:
             result = await connection.execute("SELECT status::text, count(*) AS total FROM tasks GROUP BY status")
             return {row["status"]: row["total"] for row in await result.fetchall()}
+
+    async def create_handoff(
+        self,
+        *,
+        task_id: UUID,
+        from_agent_id: UUID,
+        to_agent_id: UUID,
+        summary: str,
+        acceptance_criteria: str | None = None,
+    ) -> dict[str, Any]:
+        """Record a durable agent-to-agent delegation event."""
+        async with self.connection() as connection:
+            result = await connection.execute(
+                """
+                INSERT INTO handoffs (task_id, from_agent_id, to_agent_id, summary, acceptance_criteria)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, task_id, from_agent_id, to_agent_id, summary, acceptance_criteria, created_at
+                """,
+                (task_id, from_agent_id, to_agent_id, summary, acceptance_criteria),
+            )
+            row = await result.fetchone()
+            await connection.commit()
+        return row
+
+    async def handoff_depth(self, task_id: UUID, limit: int = 12) -> int:
+        """Count handoffs in *task_id*'s ancestor chain (delegation-loop guard)."""
+        async with self.connection() as connection:
+            chain: list[UUID] = []
+            current: UUID | None = task_id
+            while current is not None and len(chain) < limit:
+                chain.append(current)
+                result = await connection.execute(
+                    "SELECT parent_task_id FROM tasks WHERE id = %s", (current,)
+                )
+                row = await result.fetchone()
+                current = row["parent_task_id"] if row else None
+            if not chain:
+                return 0
+            result = await connection.execute(
+                "SELECT count(*) AS total FROM handoffs WHERE task_id = ANY(%s)", (chain,)
+            )
+            row = await result.fetchone()
+        return int(row["total"])

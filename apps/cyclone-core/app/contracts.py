@@ -204,7 +204,7 @@ class HermesRunStatus(StrictModel):
 
 class AgentRunResponse(StrictModel):
     task: TaskSummary
-    user_message: Message
+    user_message: Message | None = None
     run: HermesRunStart | None = None
     status: Literal["queued", "started", "blocked"]
     detail: str

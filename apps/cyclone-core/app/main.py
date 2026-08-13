@@ -55,9 +55,12 @@ from .contracts import (
 from .events import EventBus
 from .hermes import HermesAdapter
 from .memory import VaultMemoryService
+from .mentions import crew_context_text, parse_handoffs, parse_mentions, resolve_addressed_slug
 from .policy import HostAction, PolicyEngine
 from .repository import NotFoundError, Repository
 from .settings import Settings, get_settings
+
+MAX_HANDOFF_DEPTH = 4  # Delegation-loop guard: cap handoffs per task ancestry chain.
 
 
 class AppServices:
@@ -159,7 +162,15 @@ async def _publish_message(runtime: AppServices, message: object, event_type: st
     )
 
 
-async def _monitor_run(runtime: AppServices, *, task_id: UUID, conversation_id: UUID, agent: AgentSummary, run_id: str) -> None:
+async def _monitor_run(
+    runtime: AppServices,
+    *,
+    task_id: UUID,
+    conversation_id: UUID,
+    agent: AgentSummary,
+    run_id: str,
+    member_agents: list[AgentSummary],
+) -> None:
     """Poll bounded Hermes run status; durable task/message records are truth.
 
     Hermes offers its own SSE endpoint. The initial Core builds a reliable
@@ -179,6 +190,11 @@ async def _monitor_run(runtime: AppServices, *, task_id: UUID, conversation_id: 
                 task = await runtime.repository.set_task_terminal(task_id, status=mapped_status, result_summary=summary)
                 await runtime.repository.set_agent_status(agent.id, "idle" if mapped_status == "completed" else "error")
                 result_body = summary or f"Hermes run {run_id} ended with status: {run_status}."
+                metadata: dict[str, object] = {"hermes_run_id": run_id, "status": run_status}
+                if mapped_status == "completed" and summary:
+                    mention_slugs = parse_mentions(summary)
+                    if mention_slugs:
+                        metadata["mentions"] = mention_slugs
                 message = await runtime.repository.add_message(
                     conversation_id=conversation_id,
                     task_id=task_id,
@@ -186,7 +202,7 @@ async def _monitor_run(runtime: AppServices, *, task_id: UUID, conversation_id: 
                     author_agent_id=agent.id,
                     kind="result" if mapped_status == "completed" else "activity",
                     body=result_body,
-                    metadata={"hermes_run_id": run_id, "status": run_status},
+                    metadata=metadata,
                     source="hermes",
                 )
                 await _publish_message(runtime, message, "agent.run.completed")
@@ -195,6 +211,16 @@ async def _monitor_run(runtime: AppServices, *, task_id: UUID, conversation_id: 
                     event_type="task.updated",
                     payload=task.model_dump(mode="json"),
                 )
+                if mapped_status == "completed" and summary:
+                    for instruction in parse_handoffs(summary):
+                        await _try_handoff(
+                            runtime,
+                            conversation_id=conversation_id,
+                            from_task=task,
+                            from_agent=agent,
+                            instruction=instruction,
+                            member_agents=member_agents,
+                        )
                 return
         task = await runtime.repository.set_task_terminal(
             task_id, status="blocked", result_summary="Hermes run status polling exceeded the Core observation window."
@@ -231,6 +257,184 @@ async def _monitor_run(runtime: AppServices, *, task_id: UUID, conversation_id: 
         )
     finally:
         runtime.run_tasks.pop(run_id, None)
+
+
+def _build_instructions(agent: AgentSummary, member_agents: list[AgentSummary]) -> str:
+    """Assemble the system instructions for a crew-aware agent run."""
+    parts: list[str] = []
+    if agent.description:
+        parts.append(agent.description)
+    if agent.role:
+        parts.append(f"Role: {agent.role}")
+    parts.append(
+        "Use the following operating instructions:\n"
+        "Report only verified work and state open blockers."
+    )
+    teammates = [member for member in member_agents if member.id != agent.id]
+    if teammates:
+        parts.append(crew_context_text([(member.slug, member.role) for member in teammates]))
+    return "\n\n".join(parts)
+
+
+async def _start_agent_run(
+    runtime: AppServices,
+    *,
+    conversation_id: UUID,
+    agent: AgentSummary,
+    task: TaskSummary,
+    input_text: str,
+    instructions: str,
+    member_agents: list[AgentSummary],
+    provider_override: str | None = None,
+    model_override: str | None = None,
+) -> AgentRunResponse:
+    """Start a Hermes run for *task* and attach the observation monitor.
+
+    Returns a blocked response (with durable chat records) when Hermes is
+    unavailable or rejects the run; never fabricates an agent result.
+    """
+    health_ok, health_detail = await runtime.hermes.health()
+    if not health_ok:
+        blocked = await runtime.repository.set_task_terminal(task.id, status="blocked", result_summary="Hermes is not ready.")
+        blocked_message = await runtime.repository.add_message(
+            conversation_id=conversation_id,
+            task_id=task.id,
+            author_type="system",
+            kind="activity",
+            body="Cyclone did not start the agent because Hermes is unavailable or not configured.",
+            metadata={"reason": health_detail},
+        )
+        await _publish_message(runtime, blocked_message, "agent.run.blocked")
+        return AgentRunResponse(task=blocked, status="blocked", detail=health_detail)
+
+    await runtime.repository.set_agent_status(agent.id, "working")
+    try:
+        started = await runtime.hermes.start_run(
+            conversation_id=conversation_id,
+            input_text=input_text,
+            system_instructions=instructions,
+            provider=provider_override or agent.provider,
+            model=model_override or agent.model,
+        )
+    except RuntimeError as error:
+        blocked = await runtime.repository.set_task_terminal(task.id, status="blocked", result_summary="Hermes rejected or could not accept the run.")
+        await runtime.repository.set_agent_status(agent.id, "blocked")
+        blocked_message = await runtime.repository.add_message(
+            conversation_id=conversation_id,
+            task_id=task.id,
+            author_type="system",
+            kind="activity",
+            body="Cyclone did not fabricate a response: Hermes could not accept the run.",
+            metadata={"error": str(error)},
+        )
+        await _publish_message(runtime, blocked_message, "agent.run.blocked")
+        return AgentRunResponse(task=blocked, status="blocked", detail=str(error))
+
+    active_task = await runtime.repository.set_task_run(task.id, started.run_id)
+    activity = await runtime.repository.add_message(
+        conversation_id=conversation_id,
+        task_id=task.id,
+        author_type="agent",
+        author_agent_id=agent.id,
+        kind="activity",
+        body=f"{agent.name} started work.",
+        metadata={"hermes_run_id": started.run_id, "status": started.status},
+        source="hermes",
+    )
+    await _publish_message(runtime, activity, "agent.run.started")
+    await runtime.event_bus.publish(conversation_id=conversation_id, event_type="task.updated", payload=active_task.model_dump(mode="json"))
+    watcher = asyncio.create_task(
+        _monitor_run(
+            runtime,
+            task_id=task.id,
+            conversation_id=conversation_id,
+            agent=agent,
+            run_id=started.run_id,
+            member_agents=member_agents,
+        )
+    )
+    runtime.run_tasks[started.run_id] = watcher
+    return AgentRunResponse(
+        task=active_task,
+        run=HermesRunStart(run_id=started.run_id, status=started.status),
+        status="started",
+        detail="Hermes accepted the task; Cyclone is observing its real run state.",
+    )
+
+
+async def _try_handoff(
+    runtime: AppServices,
+    *,
+    conversation_id: UUID,
+    from_task: TaskSummary,
+    from_agent: AgentSummary,
+    instruction: object,
+    member_agents: list[AgentSummary],
+) -> None:
+    """Execute a real agent-to-agent delegation from an explicit @HANDOFF."""
+    from .mentions import HandoffInstruction
+
+    if not isinstance(instruction, HandoffInstruction):
+        return
+    target = next((member for member in member_agents if member.slug == instruction.to_slug), None)
+    if target is None or target.id == from_agent.id:
+        return  # Mention of a non-member or self: a reference, not a handoff.
+    depth = await runtime.repository.handoff_depth(from_task.id)
+    if depth >= MAX_HANDOFF_DEPTH:
+        guard_message = await runtime.repository.add_message(
+            conversation_id=conversation_id,
+            task_id=from_task.id,
+            author_type="system",
+            kind="activity",
+            body=f"Delegation stopped: {from_agent.name} reached the handoff depth limit.",
+            metadata={"from_slug": from_agent.slug, "to_slug": instruction.to_slug, "depth": depth},
+        )
+        await _publish_message(runtime, guard_message, "agent.run.blocked")
+        return
+    child_task = await runtime.repository.create_task(
+        conversation_id=conversation_id,
+        owner_agent_id=target.id,
+        title=instruction.summary[:300],
+        objective=instruction.summary,
+        parent_task_id=from_task.id,
+        verification_criteria=instruction.acceptance_criteria,
+    )
+    await runtime.repository.create_handoff(
+        task_id=from_task.id,
+        from_agent_id=from_agent.id,
+        to_agent_id=target.id,
+        summary=instruction.summary,
+        acceptance_criteria=instruction.acceptance_criteria,
+    )
+    handoff_message = await runtime.repository.add_message(
+        conversation_id=conversation_id,
+        task_id=child_task.id,
+        author_type="system",
+        kind="handoff",
+        body=f"{from_agent.name} handed work to {target.name}: {instruction.summary}",
+        metadata={
+            "from_slug": from_agent.slug,
+            "to_slug": target.slug,
+            "parent_task_id": str(from_task.id),
+            "task_id": str(child_task.id),
+            "acceptance_criteria": instruction.acceptance_criteria,
+        },
+    )
+    await _publish_message(runtime, handoff_message, "handoff.created")
+    instructions = _build_instructions(target, member_agents)
+    instructions += (
+        f"\n\n@{from_agent.slug} delegated this task to you with the following "
+        f"request:\n{instruction.summary}"
+    )
+    await _start_agent_run(
+        runtime,
+        conversation_id=conversation_id,
+        agent=target,
+        task=child_task,
+        input_text=instruction.summary,
+        instructions=instructions,
+        member_agents=member_agents,
+    )
 
 
 @app.get("/health", response_model=HealthResponse, tags=["operations"])
@@ -396,19 +600,37 @@ async def stream_conversation_events(conversation_id: UUID, request: Request, ru
 async def create_message_and_start_agent(
     conversation_id: UUID, request: CreateMessageRequest, runtime: AppServices = Depends(services)
 ) -> AgentRunResponse:
+    """Record a human message and start a real Hermes run.
+
+    Semantic mentions have backend meaning: an ``@slug`` reference to a
+    conversation member routes the run to that agent, and the mention set is
+    stored on the message so bot-to-bot references stay structured.
+    """
     try:
         conversation = await runtime.repository.get_conversation(conversation_id, message_limit=1)
-        agent = await runtime.repository.get_agent_by_slug(request.agent_slug)
+        requested_agent = await runtime.repository.get_agent_by_slug(request.agent_slug)
     except NotFoundError as error:
         raise _not_found(error) from error
 
+    member_agents = [member.agent for member in conversation.members if member.agent is not None]
+    member_by_slug = {member.slug: member for member in member_agents}
+    mentions = parse_mentions(request.body)
+    target = requested_agent
+    addressed_slug = resolve_addressed_slug(request.body, set(member_by_slug))
+    if addressed_slug is not None:
+        addressed = member_by_slug[addressed_slug]
+        if addressed.id != requested_agent.id:
+            target = addressed  # The message opens with "@slug": directly addressed.
+    referenced = [slug for slug in mentions if slug in member_by_slug and member_by_slug[slug].id != target.id]
+
+    user_metadata = {"mentions": mentions} if mentions else None
     user_message = await runtime.repository.add_message(
-        conversation_id=conversation_id, author_type="human", kind="message", body=request.body
+        conversation_id=conversation_id, author_type="human", kind="message", body=request.body, metadata=user_metadata
     )
     await _publish_message(runtime, user_message)
     task = await runtime.repository.create_task(
         conversation_id=conversation_id,
-        owner_agent_id=agent.id,
+        owner_agent_id=target.id,
         title=request.body[:300],
         objective=request.body,
         verification_criteria="Report only verified work and state open blockers.",
@@ -418,7 +640,7 @@ async def create_message_and_start_agent(
         task_id=task.id,
         author_type="system",
         kind="task",
-        body=f"{agent.name} accepted a task: {task.title}",
+        body=f"{target.name} accepted a task: {task.title}",
         metadata={"task_id": str(task.id), "status": task.status},
     )
     await _publish_message(runtime, task_message, "task.created")
@@ -426,65 +648,26 @@ async def create_message_and_start_agent(
     if not request.run:
         return AgentRunResponse(task=task, user_message=user_message, status="queued", detail="Task recorded without starting a model run.")
 
-    health_ok, health_detail = await runtime.hermes.health()
-    if not health_ok:
-        blocked = await runtime.repository.set_task_terminal(task.id, status="blocked", result_summary="Hermes is not ready.")
-        blocked_message = await runtime.repository.add_message(
-            conversation_id=conversation_id,
-            task_id=task.id,
-            author_type="system",
-            kind="activity",
-            body="Cyclone did not start the agent because Hermes is unavailable or not configured.",
-            metadata={"reason": health_detail},
+    instructions = _build_instructions(target, member_agents)
+    if referenced:
+        instructions += (
+            "\n\nThe user's message mentions your teammates: "
+            + ", ".join(f"@{slug}" for slug in referenced)
+            + ". Reference their expertise where useful; only delegate via your handoff syntax."
         )
-        await _publish_message(runtime, blocked_message, "agent.run.blocked")
-        return AgentRunResponse(task=blocked, user_message=user_message, status="blocked", detail=health_detail)
-
-    await runtime.repository.set_agent_status(agent.id, "working")
-    try:
-        started = await runtime.hermes.start_run(
-            conversation_id=conversation_id,
-            input_text=request.body,
-            system_instructions=agent.description + "\n\n" + "Use the following operating instructions:\n" + ("" if not agent.role else f"Role: {agent.role}\n"),
-            provider=request.provider or agent.provider,
-            model=request.model or agent.model,
-        )
-    except RuntimeError as error:
-        blocked = await runtime.repository.set_task_terminal(task.id, status="blocked", result_summary="Hermes rejected or could not accept the run.")
-        await runtime.repository.set_agent_status(agent.id, "blocked")
-        blocked_message = await runtime.repository.add_message(
-            conversation_id=conversation_id,
-            task_id=task.id,
-            author_type="system",
-            kind="activity",
-            body="Cyclone did not fabricate a response: Hermes could not accept the run.",
-            metadata={"error": str(error)},
-        )
-        await _publish_message(runtime, blocked_message, "agent.run.blocked")
-        return AgentRunResponse(task=blocked, user_message=user_message, status="blocked", detail=str(error))
-
-    active_task = await runtime.repository.set_task_run(task.id, started.run_id)
-    activity = await runtime.repository.add_message(
+    response = await _start_agent_run(
+        runtime,
         conversation_id=conversation_id,
-        task_id=task.id,
-        author_type="agent",
-        author_agent_id=agent.id,
-        kind="activity",
-        body=f"{agent.name} started work.",
-        metadata={"hermes_run_id": started.run_id, "status": started.status},
-        source="hermes",
+        agent=target,
+        task=task,
+        input_text=request.body,
+        instructions=instructions,
+        member_agents=member_agents,
+        provider_override=request.provider,
+        model_override=request.model,
     )
-    await _publish_message(runtime, activity, "agent.run.started")
-    await runtime.event_bus.publish(conversation_id=conversation_id, event_type="task.updated", payload=active_task.model_dump(mode="json"))
-    watcher = asyncio.create_task(_monitor_run(runtime, task_id=task.id, conversation_id=conversation_id, agent=agent, run_id=started.run_id))
-    runtime.run_tasks[started.run_id] = watcher
-    return AgentRunResponse(
-        task=active_task,
-        user_message=user_message,
-        run=HermesRunStart(run_id=started.run_id, status=started.status),
-        status="started",
-        detail="Hermes accepted the task; Cyclone is observing its real run state.",
-    )
+    response.user_message = user_message
+    return response
 
 
 @app.get("/api/v1/tasks/{task_id}", response_model=TaskSummary, tags=["tasks"])
