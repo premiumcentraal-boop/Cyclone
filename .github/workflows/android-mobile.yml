@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/android-mobile-v0
+      - feature/mobile-phone-toolbox-agent1
     paths:
       - 'apps/mobile/**'
       - '.github/workflows/android-mobile.yml'
@@ -28,6 +29,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Run mobile unit tests
+        run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
       - name: Assemble debug APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
       - name: Upload APK
