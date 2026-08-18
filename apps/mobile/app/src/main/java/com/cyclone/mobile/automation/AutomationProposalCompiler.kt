@@ -11,7 +11,10 @@ import org.json.JSONObject
  * leaves the result disabled until a human explicitly enables it.
  */
 object AutomationProposalCompiler {
+    private val secretKeys = setOf("password", "passcode", "secret", "token", "api_key", "apikey", "credential")
+
     fun compile(document: JSONObject): AutomationDefinition {
+        require(!containsLiteralSecret(document)) { "Workflow proposal contains a raw credential; use SecretReference" }
         val name = document.optString("name").trim()
         require(name.isNotBlank()) { "Workflow requires a non-empty name" }
 
@@ -57,8 +60,9 @@ object AutomationProposalCompiler {
         }
         val parameters = linkedMapOf<String, String>()
         raw.optJSONObject("params")?.let { parameters.putAll(stringMap(it)) }
+        raw.optJSONObject("parameters")?.let { parameters.putAll(stringMap(it)) }
         raw.keys().forEach { key ->
-            if (key != "type" && key != "params") scalarString(raw.opt(key))?.let { parameters[key] = it }
+            if (key != "type" && key != "params" && key != "parameters") scalarString(raw.opt(key))?.let { parameters[key] = it }
         }
         return TriggerDefinition(type, parameters)
     }
@@ -103,10 +107,10 @@ object AutomationProposalCompiler {
             "wait" -> {
                 val condition = raw.optJSONObject("condition")
                 if (condition != null) {
-                    val waitParams = stringMap(condition).toMutableMap()
+                    val waitParams = normalizePhoneCondition(condition).toMutableMap()
                     raw.optLong("timeoutMs", -1).takeIf { it >= 0 }?.let { waitParams["timeoutMs"] = it.toString() }
                     params["timeoutMs"]?.let { waitParams["timeoutMs"] = it }
-                    listOf(step(StepType.PHONE_TOOL, "Wait for phone state", waitParams + ("tool" to "phone.wait_for"), confirmation = false))
+                    listOf(step(StepType.PHONE_TOOL, "Wait for phone state", waitParams + ("tool" to "phone.wait_for"), condition.selectorCandidate()?.let(::compileSelector), confirmation = false))
                 } else listOf(step(StepType.WAIT, "Wait"))
             }
             "condition" -> listOf(step(StepType.CONDITION, "Condition", normalizeConditionParameters(raw, params), confirmation = false))
@@ -119,8 +123,8 @@ object AutomationProposalCompiler {
             "assertion" -> {
                 val condition = raw.optJSONObject("condition")
                 if (condition != null && !condition.has("left")) {
-                    val assertParams = stringMap(condition) + ("tool" to "phone.assert")
-                    listOf(step(StepType.PHONE_TOOL, "Assert phone state", assertParams, confirmation = false))
+                    val assertParams = normalizePhoneCondition(condition) + ("tool" to "phone.assert")
+                    listOf(step(StepType.PHONE_TOOL, "Assert phone state", assertParams, condition.selectorCandidate()?.let(::compileSelector), confirmation = false))
                 } else listOf(step(StepType.ASSERTION, "Assertion", normalizeConditionParameters(raw, params), confirmation = false))
             }
             "invoke_skill" -> listOf(step(StepType.INVOKE_SKILL, "Invoke skill", mergeTopLevel(raw, params, "skillId"), confirmation = false))
@@ -133,7 +137,8 @@ object AutomationProposalCompiler {
                 val resumeCheck = StepDefinition(
                     name = "Verify takeover resume condition",
                     type = StepType.PHONE_TOOL,
-                    parameters = stringMap(resume) + ("tool" to "phone.assert"),
+                    parameters = normalizePhoneCondition(resume) + ("tool" to "phone.assert"),
+                    selector = resume.selectorCandidate()?.let(::compileSelector),
                     confirmationRequired = false,
                     recovery = RecoveryPolicy(maxRetries = 1, onFailure = FailureAction.REQUEST_HUMAN)
                 )
@@ -146,8 +151,8 @@ object AutomationProposalCompiler {
     private fun compileSelector(raw: JSONObject): Selector = Selector(
         resourceId = raw.s("resourceId"),
         text = raw.s("text"),
-        partialText = raw.s("textContains") ?: raw.s("partialText"),
-        contentDescription = raw.s("contentDescription"),
+        partialText = raw.s("textContains") ?: raw.s("partialText") ?: raw.s("fuzzyText"),
+        contentDescription = raw.s("contentDescription") ?: raw.s("contentDescriptionContains"),
         role = raw.s("role"),
         className = raw.s("class") ?: raw.s("className"),
         ancestor = raw.s("ancestorText") ?: raw.s("ancestor"),
@@ -188,7 +193,8 @@ object AutomationProposalCompiler {
             return StepDefinition(
                 name = "Verify automation result",
                 type = StepType.PHONE_TOOL,
-                parameters = stringMap(item) + ("tool" to "phone.assert"),
+                parameters = normalizePhoneCondition(item) + ("tool" to "phone.assert"),
+                selector = item.selectorCandidate()?.let(::compileSelector),
                 recovery = RecoveryPolicy(maxRetries = 1)
             )
         }
@@ -217,6 +223,21 @@ object AutomationProposalCompiler {
     private fun normalizeConditionParameters(raw: JSONObject, params: Map<String, String>): Map<String, String> {
         val condition = raw.optJSONObject("condition")
         return if (condition != null) stringMap(condition) else mergeTopLevel(raw, params, "left", "operator", "right")
+    }
+
+    private fun normalizePhoneCondition(raw: JSONObject): Map<String, String> = stringMap(raw).toMutableMap().apply {
+        if (!containsKey("type")) {
+            put("type", when {
+                raw.has("package") && !raw.has("text") && !raw.has("resourceId") && !raw.has("selector") -> "package_equals"
+                raw.has("from") && !raw.has("selector") -> "fingerprint_changed"
+                else -> "selector_exists"
+            })
+        }
+        raw.optJSONObject("selector")?.let { put("selectorJson", it.toString()) }
+    }
+
+    private fun JSONObject.selectorCandidate(): JSONObject? = optJSONObject("selector") ?: takeIf {
+        listOf("resourceId", "text", "textContains", "contentDescription", "class", "className", "role", "ancestorText", "descendantText", "relativeToText", "fuzzyText", "x", "y").any(::has)
     }
 
     private fun compileVariables(raw: JSONArray?): List<VariableDefinition> {
@@ -257,6 +278,17 @@ object AutomationProposalCompiler {
         "request_ai_help", "ai_help" -> FailureAction.REQUEST_AI_HELP
         "request_human", "human" -> FailureAction.REQUEST_HUMAN
         else -> error("Unsupported failure action: $raw")
+    }
+
+    private fun containsLiteralSecret(value: Any?): Boolean = when (value) {
+        is JSONObject -> value.keys().asSequence().any { key ->
+            val child = value.opt(key)
+            val normalized = key.lowercase().replace('-', '_')
+            val explicitReference = child is JSONObject && (child.has("secretRef") || child.has("secretReference"))
+            (normalized in secretKeys && !explicitReference && child != null && child !== JSONObject.NULL && child.toString().isNotBlank() && child.toString() != "***") || containsLiteralSecret(child)
+        }
+        is JSONArray -> (0 until value.length()).any { containsLiteralSecret(value.opt(it)) }
+        else -> false
     }
 
     private fun mergeTopLevel(raw: JSONObject, existing: Map<String, String>, vararg keys: String): Map<String, String> =
