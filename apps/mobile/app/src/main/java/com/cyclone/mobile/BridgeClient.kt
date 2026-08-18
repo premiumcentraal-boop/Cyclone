@@ -1,18 +1,18 @@
 package com.cyclone.mobile
 
 import android.content.Context
-import android.util.Base64
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
-import java.io.File
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 object BridgeClient {
     private val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
+    private val commandExecutor = Executors.newFixedThreadPool(2)
     @Volatile private var socket: WebSocket? = null
     @Volatile private var appContext: Context? = null
 
@@ -26,7 +26,12 @@ object BridgeClient {
         socket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 DeviceState.bridgeConnected = true
-                send(JSONObject().put("type", "mobile.hello").put("androidApi", android.os.Build.VERSION.SDK_INT))
+                send(JSONObject()
+                    .put("type", "mobile.hello")
+                    .put("protocol", "phone-tool-v1")
+                    .put("androidApi", android.os.Build.VERSION.SDK_INT)
+                    .put("tools", org.json.JSONArray(PhoneToolNames.all.toList()))
+                    .put("capabilities", CapabilityRegistry.toJson(context)))
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) = handleCommand(text)
@@ -52,38 +57,53 @@ object BridgeClient {
 
     private fun handleCommand(raw: String) {
         val msg = runCatching { JSONObject(raw) }.getOrNull() ?: return
-        val id = msg.optString("id")
-        val action = msg.optString("action")
-        val service = CycloneAccessibilityService.instance
-        fun reply(ok: Boolean, payload: Any? = null) {
-            send(JSONObject().put("type", "mobile.result").put("id", id).put("ok", ok).put("payload", payload ?: JSONObject.NULL))
-        }
-        when (action) {
-            "observe" -> reply(service != null, service?.observe())
-            "click_text" -> reply(service?.clickText(msg.optString("text")) == true)
-            "set_text" -> reply(service?.setText(msg.optString("target"), msg.optString("value")) == true)
-            "scroll" -> reply(service?.scrollForward() == true)
-            "tap" -> reply(service?.tap(msg.optDouble("x").toFloat(), msg.optDouble("y").toFloat()) == true)
-            "swipe" -> reply(service?.swipe(msg.optDouble("x1").toFloat(), msg.optDouble("y1").toFloat(), msg.optDouble("x2").toFloat(), msg.optDouble("y2").toFloat()) == true)
-            "back" -> reply(service?.goBack() == true)
-            "home" -> reply(service?.goHome() == true)
-            "takeover_start" -> { DeviceState.controller = DeviceState.Controller.HUMAN; reply(true) }
-            "takeover_return" -> { DeviceState.controller = DeviceState.Controller.AGENT; reply(true, service?.observe()) }
-            "screenshot" -> {
-                if (service == null) reply(false) else service.takeScreenshot { result ->
-                    result.onSuccess { file ->
-                        val encoded = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
-                        reply(true, JSONObject().put("pngBase64", encoded).put("bytes", file.length()))
-                    }.onFailure { reply(false, it.message) }
-                }
-            }
-            else -> reply(false, "unknown_action")
+        val context = appContext ?: return
+        val request = normalizeLegacyCommand(msg)
+        commandExecutor.submit {
+            val result = PhoneToolExecutor.execute(context, request)
+            send(JSONObject().put("type", "mobile.tool_result").put("result", result.toJson()))
         }
     }
 
-    fun sendNotificationEvent(packageName: String, title: String, text: String) {
-        send(JSONObject().put("type", "mobile.notification").put("package", packageName).put("title", title).put("text", text))
+    private fun normalizeLegacyCommand(msg: JSONObject): PhoneToolRequest {
+        if (msg.has("tool")) return PhoneToolRequest.fromJson(msg)
+        val legacy = msg.optString("action")
+        val tool = when (legacy) {
+            "observe" -> "phone.observe"
+            "screenshot" -> "phone.screenshot"
+            "click_text" -> "phone.click"
+            "set_text" -> "phone.replace_text"
+            "scroll" -> "phone.scroll"
+            "tap" -> "phone.tap"
+            "swipe" -> "phone.swipe"
+            "back" -> "phone.back"
+            "home" -> "phone.home"
+            else -> legacy
+        }
+        val params = JSONObject()
+        when (legacy) {
+            "click_text" -> params.put("selector", JSONObject().put("textContains", msg.optString("text")))
+            "set_text" -> params
+                .put("selector", JSONObject().put("textContains", msg.optString("target")))
+                .put("value", msg.optString("value"))
+            "tap" -> params.put("x", msg.optDouble("x")).put("y", msg.optDouble("y"))
+            "swipe" -> params.put("x1", msg.optDouble("x1")).put("y1", msg.optDouble("y1"))
+                .put("x2", msg.optDouble("x2")).put("y2", msg.optDouble("y2"))
+            "screenshot" -> params.put("includeBase64", true)
+        }
+        return PhoneToolRequest(msg.optString("id").ifBlank { "legacy-${System.nanoTime()}" }, tool, params)
     }
 
-    private fun send(json: JSONObject) { socket?.send(json.toString()) }
+    fun sendNotificationEvent(packageName: String, title: String, text: String, key: String? = null) {
+        send(JSONObject()
+            .put("type", "mobile.notification")
+            .put("key", key ?: JSONObject.NULL)
+            .put("package", packageName)
+            .put("title", title)
+            .put("text", text))
+    }
+
+    private fun send(json: JSONObject) {
+        socket?.send(json.toString())
+    }
 }
