@@ -1,7 +1,6 @@
 package com.cyclone.mobile
 
 import android.content.Context
-import android.os.Build
 import android.util.Base64
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,7 +8,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
-import java.util.UUID
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 object BridgeClient {
@@ -22,33 +21,15 @@ object BridgeClient {
         val prefs = context.getSharedPreferences("cyclone", Context.MODE_PRIVATE)
         val url = prefs.getString("coreWsUrl", "").orEmpty()
         if (url.isBlank() || socket != null) return
-
-        val deviceId = prefs.getString("deviceId", "").orEmpty().ifBlank {
-            "android-${UUID.randomUUID()}".also { generated ->
-                prefs.edit().putString("deviceId", generated).apply()
-            }
-        }
-        val requestBuilder = Request.Builder()
-            .url(url)
-            .header("X-Cyclone-Device-Id", deviceId)
-            .header("X-Cyclone-Device-Name", Build.MODEL.ifBlank { "Cyclone Android" })
-            .header("X-Cyclone-Device-Platform", "android")
-        prefs.getString("coreToken", "")
-            ?.takeIf { it.isNotBlank() }
-            ?.let { requestBuilder.header("Authorization", "Bearer $it") }
-
+        val requestBuilder = Request.Builder().url(url)
+        prefs.getString("coreToken", "")?.takeIf { it.isNotBlank() }?.let { requestBuilder.header("Authorization", "Bearer $it") }
         socket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 DeviceState.bridgeConnected = true
-                send(
-                    JSONObject()
-                        .put("type", "mobile.hello")
-                        .put("deviceId", deviceId)
-                        .put("androidApi", Build.VERSION.SDK_INT)
-                )
+                send(JSONObject().put("type", "mobile.hello").put("androidApi", android.os.Build.VERSION.SDK_INT))
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) = handleMessage(text)
+            override fun onMessage(webSocket: WebSocket, text: String) = handleCommand(text)
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 DeviceState.bridgeConnected = false
@@ -69,43 +50,13 @@ object BridgeClient {
         DeviceState.bridgeConnected = false
     }
 
-    private fun handleMessage(raw: String) {
+    private fun handleCommand(raw: String) {
         val msg = runCatching { JSONObject(raw) }.getOrNull() ?: return
-        when (msg.optString("type")) {
-            "mobile.control" -> {
-                val owner = msg.optString("owner")
-                DeviceState.controller = if (owner == "human") {
-                    DeviceState.Controller.HUMAN
-                } else {
-                    DeviceState.Controller.AGENT
-                }
-                send(
-                    JSONObject()
-                        .put("type", "mobile.control.changed")
-                        .put("owner", owner)
-                )
-            }
-            "mobile.registered" -> {
-                DeviceState.addLog("Registered with Cyclone Core as ${msg.optString("deviceId")}")
-            }
-            else -> handleCommand(msg)
-        }
-    }
-
-    private fun handleCommand(msg: JSONObject) {
         val id = msg.optString("id")
-        val tool = msg.optString("tool")
         val action = msg.optString("action")
         val service = CycloneAccessibilityService.instance
         fun reply(ok: Boolean, payload: Any? = null) {
-            send(
-                JSONObject()
-                    .put("type", "mobile.result")
-                    .put("id", id)
-                    .put("tool", tool)
-                    .put("ok", ok)
-                    .put("payload", payload ?: JSONObject.NULL)
-            )
+            send(JSONObject().put("type", "mobile.result").put("id", id).put("ok", ok).put("payload", payload ?: JSONObject.NULL))
         }
         when (action) {
             "observe" -> reply(service != null, service?.observe())
@@ -126,7 +77,7 @@ object BridgeClient {
                     }.onFailure { reply(false, it.message) }
                 }
             }
-            else -> reply(false, JSONObject().put("code", "TOOL_NOT_AVAILABLE").put("tool", tool))
+            else -> reply(false, "unknown_action")
         }
     }
 
