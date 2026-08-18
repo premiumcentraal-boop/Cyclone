@@ -1,4 +1,4 @@
-name: Cyclone Mobile V2.4 Integration
+name: Cyclone Mobile V2.5 Integration
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
       - release/cyclone-mobile-v2
       - release/cyclone-mobile-v2.3-openrouter-agent
       - release/cyclone-mobile-v2.4-guided-recorder
+      - release/cyclone-mobile-v2.5-app-learner-beta
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/cyclone-core/**'
@@ -65,11 +66,11 @@ jobs:
           gradle-version: '8.9'
       - name: Run integrated Android tests
         run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
-      - name: Assemble Cyclone Mobile V2.4 APK
+      - name: Assemble Cyclone Mobile V2.5 Beta APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload Cyclone Mobile V2.4 APK
+      - name: Upload Cyclone Mobile V2.5 Beta APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-4-integration-apk
+          name: cyclone-mobile-v2-5-integration-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
