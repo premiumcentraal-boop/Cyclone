@@ -28,6 +28,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Run unit tests
+        run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
       - name: Assemble debug APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
       - name: Upload APK
