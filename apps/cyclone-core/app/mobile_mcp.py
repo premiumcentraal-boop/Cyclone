@@ -6,6 +6,7 @@ import json
 from typing import Any, Callable
 
 from .mobile_registry import MobileDeviceRegistry
+from .mobile_takeover import HumanInterventionCoordinator
 
 
 ServicesGetter = Callable[[], Any]
@@ -31,6 +32,7 @@ def register_mobile_mcp_tools(
     mcp: Any,
     get_services: ServicesGetter,
     devices: MobileDeviceRegistry,
+    takeovers: HumanInterventionCoordinator | None = None,
 ) -> None:
     """Install Agent-3 phone tools into the existing Cyclone MCP server."""
 
@@ -119,3 +121,69 @@ def register_mobile_mcp_tools(
         except Exception:
             pass
         return _result_json(result)
+
+    if takeovers is not None:
+
+        @mcp.tool()
+        async def request_phone_takeover(
+            agent_slug: str,
+            task_id: str,
+            device_id: str,
+            reason: str,
+            user_instruction: str,
+            current_app: str | None = None,
+            resume_condition: dict[str, Any] | None = None,
+        ) -> str:
+            """Yield phone control to the user and wait on an event until they return.
+
+            This tool intentionally remains suspended on an asyncio Event while
+            the human owns the phone. No screenshot polling or LLM loop is
+            required. The user-facing return action calls Core's takeover return
+            endpoint, which forces a fresh observe and verifies resume_condition.
+            """
+            agent = await require_agent(agent_slug)
+            checkpoint = await takeovers.request_takeover(
+                task_id=task_id,
+                device_id=device_id,
+                reason=reason,
+                current_app=current_app,
+                user_instruction=user_instruction,
+                resume_condition=dict(resume_condition or {}),
+            )
+            runtime = get_services()
+            try:
+                await runtime.repository.add_audit_event(
+                    actor_type="agent",
+                    actor_id=str(agent.id),
+                    action="TAKEOVER_REQUIRED",
+                    target=device_id,
+                    outcome="waiting_for_human",
+                    metadata={
+                        "task_id": task_id,
+                        "checkpoint_id": checkpoint.checkpoint_id,
+                        "reason": reason,
+                    },
+                )
+            except Exception:
+                pass
+
+            await takeovers.wait_for_return(task_id)
+            try:
+                await runtime.repository.add_audit_event(
+                    actor_type="agent",
+                    actor_id=str(agent.id),
+                    action="TAKEOVER_COMPLETED",
+                    target=device_id,
+                    outcome="resumed",
+                    metadata={"task_id": task_id},
+                )
+            except Exception:
+                pass
+            return json.dumps(
+                {
+                    "status": "TAKEOVER_COMPLETED",
+                    "taskId": task_id,
+                    "deviceId": device_id,
+                    "next": "Call phone_observe before continuing if additional state is needed.",
+                }
+            )
