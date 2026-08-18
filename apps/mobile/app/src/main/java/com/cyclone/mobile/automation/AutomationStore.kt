@@ -34,6 +34,8 @@ class AutomationStore(context: Context) {
         return values.takeLast(limit.coerceAtLeast(1)).reversed()
     }
 
+    @Synchronized fun getRun(id: String): AutomationRun? = listRuns(MAX_RUNS).firstOrNull { it.id == id }
+
     @Synchronized fun saveCheckpoint(checkpoint: Checkpoint) {
         val all = rawObject(KEY_CHECKPOINTS)
         all.put(checkpoint.runId, checkpointToJson(checkpoint))
