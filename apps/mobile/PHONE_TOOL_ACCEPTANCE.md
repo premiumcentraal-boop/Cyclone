@@ -2,13 +2,13 @@
 
 Target: Android 14+ non-root device.
 
-The boxes below distinguish source implementation from physical-device verification. Do not check a device item without observed evidence.
+The boxes below distinguish source/CI verification from physical-device verification. Do not check a device item without observed evidence.
 
 ## Build / unit verification
 
-- [ ] `testDebugUnitTest` passes
-- [ ] `assembleDebug` passes
-- [ ] APK artifact produced
+- [x] `testDebugUnitTest` passes — GitHub Actions run `32155030855`
+- [x] `assembleDebug` passes — GitHub Actions run `32155030855`
+- [x] APK artifact produced — artifact `9331378907`, `cyclone-mobile-debug-apk`
 
 ## Device capabilities
 
@@ -33,16 +33,18 @@ The boxes below distinguish source implementation from physical-device verificat
 
 ## Selectors
 
-- [ ] resource-ID selector
-- [ ] exact text selector
-- [ ] partial text selector
-- [ ] content-description selector
-- [ ] class/role selector
-- [ ] ancestor selector
-- [ ] descendant selector
-- [ ] coordinate hit selector
-- [ ] relative selector
-- [ ] fuzzy text selector
+Selector resolution has unit-test coverage, but Android-device behavior remains unchecked below.
+
+- [ ] resource-ID selector on device
+- [ ] exact text selector on device
+- [ ] partial text selector on device
+- [ ] content-description selector on device
+- [ ] class/role selector on device
+- [ ] ancestor selector on device
+- [ ] descendant selector on device
+- [ ] coordinate hit selector on device
+- [ ] relative selector on device
+- [ ] fuzzy text selector on device
 
 ## Actions
 
@@ -109,7 +111,7 @@ Use harmless screens/settings for initial tests.
 
 ## Privacy / audit
 
-- [ ] command audit records command ID, tool, duration, result, fingerprints, error code
+- [ ] command audit records command ID, tool, duration, result, fingerprints, error code on device
 - [ ] audit does not store screenshot bytes
 - [ ] audit does not store bearer token
 - [ ] logs are bounded
@@ -122,6 +124,6 @@ Record device/OEM/Android version and failures:
 |---|---:|---:|---:|---:|---:|---:|---|
 | pending | 14+ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | |
 
-## Agent 1 definition of done
+## Agent 1 implementation status
 
-Agent 1 can mark implementation complete when unit tests and APK compilation pass, protocol documentation exists, and every requested primitive has a typed result/error contract. Physical-device verification remains a separate gate and must stay unchecked until run on hardware.
+CI/build definition of done is satisfied: unit tests pass, the APK compiles, the protocol documentation exists, and requested primitives have typed result/error contracts. Physical-device verification remains a separate gate and intentionally stays unchecked until run on hardware.
