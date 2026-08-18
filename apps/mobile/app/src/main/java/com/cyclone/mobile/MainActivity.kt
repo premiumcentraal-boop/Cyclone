@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.cyclone.mobile.automation.AutomationRuntime
-import com.cyclone.mobile.ui.CycloneMobileApp
+import com.cyclone.mobile.ui.CycloneMobileV22App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -12,7 +12,7 @@ class MainActivity : ComponentActivity() {
         AutomationRuntime.initialize(this)
         BridgeClient.start(this)
         setContent {
-            CycloneMobileApp()
+            CycloneMobileV22App()
         }
     }
 
