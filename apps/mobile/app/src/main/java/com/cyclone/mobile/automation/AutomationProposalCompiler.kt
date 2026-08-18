@@ -151,13 +151,21 @@ object AutomationProposalCompiler {
     private fun compileSelector(raw: JSONObject): Selector = Selector(
         resourceId = raw.s("resourceId"),
         text = raw.s("text"),
-        partialText = raw.s("textContains") ?: raw.s("partialText") ?: raw.s("fuzzyText"),
-        contentDescription = raw.s("contentDescription") ?: raw.s("contentDescriptionContains"),
+        partialText = raw.s("textContains") ?: raw.s("partialText"),
+        contentDescription = raw.s("contentDescription"),
+        contentDescriptionContains = raw.s("contentDescriptionContains"),
         role = raw.s("role"),
         className = raw.s("class") ?: raw.s("className"),
         ancestor = raw.s("ancestorText") ?: raw.s("ancestor"),
         descendant = raw.s("descendantText") ?: raw.s("descendant"),
         relativePosition = buildRelativePosition(raw),
+        relativeToText = raw.s("relativeToText"),
+        relativeDirection = raw.s("relativeDirection"),
+        fuzzyText = raw.s("fuzzyText"),
+        minFuzzyScore = raw.optDouble("minFuzzyScore").takeIf { raw.has("minFuzzyScore") },
+        requireClickable = booleanSelectorFlag(raw, "clickable", "requireClickable"),
+        requireEditable = booleanSelectorFlag(raw, "editable", "requireEditable"),
+        requireScrollable = booleanSelectorFlag(raw, "scrollable", "requireScrollable"),
         x = raw.optInt("x").takeIf { raw.has("x") },
         y = raw.optInt("y").takeIf { raw.has("y") }
     )
@@ -166,6 +174,12 @@ object AutomationProposalCompiler {
         val target = raw.s("relativeToText") ?: return raw.s("relativePosition")
         val direction = raw.s("relativeDirection")?.lowercase() ?: "near"
         return "$direction:$target"
+    }
+
+    private fun booleanSelectorFlag(raw: JSONObject, agent1Key: String, internalKey: String): Boolean? = when {
+        raw.has(agent1Key) -> raw.optBoolean(agent1Key)
+        raw.has(internalKey) -> raw.optBoolean(internalKey)
+        else -> null
     }
 
     private fun compileConditions(raw: JSONArray?): List<ConditionDefinition> {
@@ -237,7 +251,11 @@ object AutomationProposalCompiler {
     }
 
     private fun JSONObject.selectorCandidate(): JSONObject? = optJSONObject("selector") ?: takeIf {
-        listOf("resourceId", "text", "textContains", "contentDescription", "class", "className", "role", "ancestorText", "descendantText", "relativeToText", "fuzzyText", "x", "y").any(::has)
+        listOf(
+            "resourceId", "text", "textContains", "partialText", "contentDescription", "contentDescriptionContains",
+            "class", "className", "role", "ancestorText", "descendantText", "relativeToText", "relativeDirection",
+            "fuzzyText", "x", "y"
+        ).any(::has)
     }
 
     private fun compileVariables(raw: JSONArray?): List<VariableDefinition> {
@@ -285,7 +303,8 @@ object AutomationProposalCompiler {
             val child = value.opt(key)
             val normalized = key.lowercase().replace('-', '_')
             val explicitReference = child is JSONObject && (child.has("secretRef") || child.has("secretReference"))
-            (normalized in secretKeys && !explicitReference && child != null && child !== JSONObject.NULL && child.toString().isNotBlank() && child.toString() != "***") || containsLiteralSecret(child)
+            val schemaFlag = normalized == "secret" && child is Boolean
+            (!schemaFlag && normalized in secretKeys && !explicitReference && child != null && child !== JSONObject.NULL && child.toString().isNotBlank() && child.toString() != "***") || containsLiteralSecret(child)
         }
         is JSONArray -> (0 until value.length()).any { containsLiteralSecret(value.opt(it)) }
         else -> false
