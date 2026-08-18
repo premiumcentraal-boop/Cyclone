@@ -1,0 +1,72 @@
+name: Cyclone Mobile V2 Integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release/cyclone-mobile-v2
+      - feature/mobile-v2-modern-ui-mobilerun-embedded
+    paths:
+      - 'apps/cyclone-core/**'
+      - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
+      - 'docker/**'
+      - '.env.example'
+      - '.github/workflows/mobile-ai-runtime.yml'
+  pull_request:
+    paths:
+      - 'apps/cyclone-core/**'
+      - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
+      - 'docker/**'
+      - '.env.example'
+      - '.github/workflows/mobile-ai-runtime.yml'
+
+jobs:
+  core-mobile-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/cyclone-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: apps/cyclone-core/requirements.txt
+      - name: Install Core dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Run Hermes mobile + Mobilerun tests
+        run: python -m pytest -q tests/test_mobile_*.py
+      - name: Import V2 Core entrypoint
+        run: python -c "from app.mobile_entry import app; assert any(getattr(r, 'path', '') == '/api/v1/mobile/connect' for r in app.routes)"
+
+  android-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Run integrated Android tests
+        run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
+      - name: Assemble Cyclone Mobile V2 APK
+        run: gradle -p apps/mobile :app:assembleDebug --stacktrace
+      - name: Upload Cyclone Mobile V2 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyclone-mobile-v2-apk
+          path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

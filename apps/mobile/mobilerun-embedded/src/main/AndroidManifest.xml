@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Upstream Mobilerun Portal capabilities embedded into the Cyclone APK. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:name="com.mobilerun.portal.PortalApplication"
+        android:usesCleartextTraffic="true">
+
+        <service
+            android:name="com.mobilerun.portal.service.MobilerunAccessibilityService"
+            android:enabled="true"
+            android:exported="false"
+            android:label="Cyclone Enhanced Control"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <service
+            android:name="com.mobilerun.portal.service.MobilerunNotificationListener"
+            android:label="Cyclone Enhanced Notifications"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="com.mobilerun.portal.service.ReverseConnectionService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="com.mobilerun.portal.service.PortalService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="com.mobilerun.portal.service.ScreenCaptureService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name="com.mobilerun.portal.keepalive.KeepAliveService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="com.mobilerun.portal.input.MobilerunKeyboardIME"
+            android:label="Cyclone Agent Keyboard"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
+        <activity
+            android:name="com.mobilerun.portal.ui.ScreenCaptureActivity"
+            android:theme="@style/Theme.Transparent"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.keepalive.KeepAliveRecoveryActivity"
+            android:theme="@style/Theme.Transparent"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.ui.PermissionDialogActivity"
+            android:theme="@style/Theme.Transparent"
+            android:excludeFromRecents="true"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.ui.settings.SettingsActivity"
+            android:theme="@style/Theme.Mobilerun"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.ui.triggers.TriggerRulesActivity"
+            android:theme="@style/Theme.Mobilerun"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.ui.triggers.TriggerRuleEditorActivity"
+            android:theme="@style/Theme.Mobilerun"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.ui.taskprompt.TaskHistoryActivity"
+            android:theme="@style/Theme.Mobilerun"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.ui.taskprompt.TaskDetailsActivity"
+            android:theme="@style/Theme.Mobilerun"
+            android:exported="false" />
+
+        <activity
+            android:name="com.mobilerun.portal.ui.MainActivity"
+            android:theme="@style/Theme.Mobilerun"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="mobilerun" android:host="auth-callback" />
+                <data android:scheme="droidrun" android:host="auth-callback" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="com.mobilerun.portal.service.MobilerunContentProvider"
+            android:authorities="${applicationId}"
+            android:enabled="true"
+            android:exported="true" />
+
+        <receiver
+            android:name="com.mobilerun.portal.service.LocalWsNotificationActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+        <receiver
+            android:name="com.mobilerun.portal.taskprompt.TaskPromptNotificationActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+        <receiver
+            android:name="com.mobilerun.portal.triggers.TriggerAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+        <receiver
+            android:name="com.mobilerun.portal.update.UpdateInstallReceiver"
+            android:enabled="true"
+            android:exported="false" />
+        <receiver
+            android:name="com.mobilerun.portal.update.UpdateRelaunchReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.mobilerun.portal.triggers.TriggerBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.mobilerun.portal.triggers.TriggerSmsReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

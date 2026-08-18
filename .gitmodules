@@ -1,0 +1,4 @@
+[submodule "third_party/mobilerun-portal"]
+	path = third_party/mobilerun-portal
+	url = https://github.com/droidrun/mobilerun-portal.git
+	branch = main
