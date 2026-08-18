@@ -106,7 +106,7 @@ def test_selector_supports_text_description_ancestor_and_fuzzy() -> None:
     snapshot = normalize_portal_state(_state_payload())
     assert find_nodes(snapshot, {"textContains": "claim", "clickable": True}, limit=1)
     assert find_nodes(snapshot, {"contentDescriptionContains": "this shift"}, limit=1)
-    assert find_nodes(snapshot, {"ancestorText": ""}, limit=1) == []
+    assert find_nodes(snapshot, {"ancestorText": "definitely-not-present"}, limit=1) == []
     fuzzy = find_nodes(snapshot, {"fuzzyText": "claim shft", "minFuzzyScore": 0.65}, limit=1)
     assert fuzzy and fuzzy[0]["node"]["resourceId"] == "com.example:id/claim"
 
