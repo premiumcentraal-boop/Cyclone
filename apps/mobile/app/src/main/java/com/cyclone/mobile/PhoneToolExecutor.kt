@@ -325,6 +325,12 @@ object PhoneToolExecutor {
             afterFingerprint = after,
             errorCode = error?.code?.name,
         ))
+        if (error?.code == PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED) {
+            SetupReminderState.request(
+                SetupNeed.PHONE_CONTROL,
+                "Enable Cyclone phone control before using screen-reading or UI-action features.",
+            )
+        }
         DeviceState.addLog("${request.tool} ${if (result.ok) "OK" else "FAIL:${error?.code}"}")
         return result
     }
