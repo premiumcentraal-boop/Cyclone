@@ -5,7 +5,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Cyclone Mobile V2"
+        android:label="Cyclone"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
