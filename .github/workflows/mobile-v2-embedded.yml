@@ -1,4 +1,4 @@
-name: Cyclone Mobile V2.2 Embedded Runtime
+name: Cyclone Mobile V2.3 Embedded Runtime
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - release/cyclone-mobile-v2.2
+      - release/cyclone-mobile-v2.3-openrouter-agent
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
@@ -45,6 +46,6 @@ jobs:
       - name: Upload unified APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-2-embedded-apk
+          name: cyclone-mobile-v2-3-embedded-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
