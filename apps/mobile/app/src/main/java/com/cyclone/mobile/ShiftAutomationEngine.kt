@@ -33,7 +33,10 @@ object ShiftAutomationEngine {
 
         openNotification(sbn.notification.contentIntent)
         android.os.Handler(context.mainLooper).postDelayed({
-            val clicked = CycloneAccessibilityService.instance?.clickText(prefs.getString("claimText", "claim") ?: "claim") == true
+            val claimText = prefs.getString("claimText", "claim") ?: "claim"
+            val clicked = CycloneAccessibilityService.instance?.click(
+                ElementSelector(textContains = claimText, requireClickable = null)
+            ) == true
             DeviceState.addLog("Auto-claim click attempted success=$clicked")
         }, 1500)
     }
