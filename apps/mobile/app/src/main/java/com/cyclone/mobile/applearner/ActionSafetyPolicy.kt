@@ -14,22 +14,18 @@ object ActionSafetyPolicy {
         "otp", "one-time code", "one time code", "passkey", "security key", "sign in", "log in",
         "login", "password", "authentication", "biometric", "fingerprint", "face id",
     )
-    private val benignNavigation = setOf(
-        "home", "orders", "order", "invoice", "invoices", "tracking", "track", "search", "filter",
-        "back", "next", "previous", "details", "help", "support", "settings", "account", "profile",
-        "library", "history", "delivery", "deliveries", "battery", "display", "network", "about",
-    )
 
     fun classify(label: String, resourceId: String = "", contentDescription: String = ""): ActionRisk {
         val text = listOf(label, resourceId.substringAfterLast('/'), contentDescription)
-            .joinToString(" ").lowercase().replace(Regex("[_-]+"), " ")
+            .joinToString(" ").lowercase().replace(Regex("[_-]+"), " ").trim()
         if (authentication.any { token -> text.contains(token) }) return ActionRisk.AUTHENTICATION
         if (consequential.any { token -> text.contains(token) }) return ActionRisk.CONSEQUENTIAL
-        if (benignNavigation.any { token -> text.contains(token) }) return ActionRisk.SAFE
-        return ActionRisk.UNKNOWN
+        // A visible, labelled navigation/action control with no high-risk semantics is safe to inspect.
+        // Unlabelled controls are mapped but not automatically explored.
+        return if (text.isNotBlank()) ActionRisk.SAFE else ActionRisk.UNKNOWN
     }
 
-    fun isExplorable(risk: ActionRisk): Boolean = risk == ActionRisk.SAFE || risk == ActionRisk.UNKNOWN
+    fun isExplorable(risk: ActionRisk): Boolean = risk == ActionRisk.SAFE
 
     fun looksSensitiveField(node: JSONObject): Boolean {
         val text = listOf(
