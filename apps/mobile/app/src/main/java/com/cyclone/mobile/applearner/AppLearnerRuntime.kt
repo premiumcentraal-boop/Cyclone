@@ -91,7 +91,12 @@ object AppLearnerRuntime {
     fun executeLearnedRoute(packageName: String, goal: String): Result<String> = graphExecutor.execute(packageName, goal)
 
     fun markScreenIncorrect(packageName: String, screenId: String) {
-        store.markScreenState(screenId, KnowledgeState.STALE, confidenceDelta = -0.25)
+        val screen = store.graph(packageName)?.screens?.firstOrNull { it.id == screenId } ?: return
+        store.upsertScreen(screen.copy(
+            knowledgeState = KnowledgeState.STALE,
+            confidence = (screen.confidence - 0.25).coerceAtLeast(0.05),
+            lastSeenAt = System.currentTimeMillis(),
+        ))
         store.mirror(packageName)
     }
 
@@ -112,8 +117,8 @@ object AppLearnerRuntime {
                 AccessibilityEvent.TYPE_VIEW_SCROLLED,
             )) {
             val now = System.currentTimeMillis()
-            if (now - lastPassiveObservation.get() < 450L) return
-            if (!lastPassiveObservation.compareAndSet(lastPassiveObservation.get(), now)) return
+            val previous = lastPassiveObservation.get()
+            if (now - previous < 450L || !lastPassiveObservation.compareAndSet(previous, now)) return
             passiveExecutor.submit {
                 Thread.sleep(120)
                 val result = PhoneToolExecutor.execute(
