@@ -40,6 +40,7 @@ object BridgeClient {
         socket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 DeviceState.bridgeConnected = true
+                SetupReminderState.clear()
                 send(JSONObject()
                     .put("type", "mobile.hello")
                     .put("protocol", "phone-tool-v1")
@@ -158,7 +159,14 @@ object BridgeClient {
     fun sendAutomationEvent(type: String, payload: Map<String, String>): Boolean {
         val json = JSONObject().put("type", type)
         payload.forEach { (key, value) -> json.put(key, value) }
-        return socket?.send(json.toString()) == true
+        val sent = socket?.send(json.toString()) == true
+        if (!sent) {
+            SetupReminderState.request(
+                SetupNeed.CORE,
+                "Connect Cyclone Core before using Hermes or AI-generated automations.",
+            )
+        }
+        return sent
     }
 
     private fun send(json: JSONObject) { socket?.send(json.toString()) }
