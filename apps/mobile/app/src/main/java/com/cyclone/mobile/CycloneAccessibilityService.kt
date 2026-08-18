@@ -12,6 +12,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
+import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -37,6 +38,7 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
     private var lastAutomationPackage: String? = null
+    private var guidedOverlay: GuidedRecorderOverlayController? = null
 
     companion object {
         @Volatile var instance: CycloneAccessibilityService? = null
@@ -74,11 +76,24 @@ class CycloneAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        guidedOverlay?.dismiss()
+        guidedOverlay = null
         instance = null
         DeviceState.accessibilityConnected = false
         BridgeClient.stop()
         screenshotExecutor.shutdownNow()
         super.onDestroy()
+    }
+
+    /** Opens Cyclone V2.4's floating teach-a-routine bubble over any app. */
+    fun showGuidedRecorderOverlay() {
+        if (guidedOverlay == null) guidedOverlay = GuidedRecorderOverlayController(this)
+        guidedOverlay?.show()
+    }
+
+    fun hideGuidedRecorderOverlay() {
+        guidedOverlay?.dismiss()
+        guidedOverlay = null
     }
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
@@ -164,29 +179,51 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     fun tap(x: Float, y: Float): Boolean {
         if (!agentCanAct()) return false
+        return rawTap(x, y)
+    }
+
+    fun longPress(x: Float, y: Float, durationMs: Long = 650): Boolean {
+        if (!agentCanAct()) return false
+        return rawLongPress(x, y, durationMs)
+    }
+
+    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean {
+        if (!agentCanAct()) return false
+        return rawSwipe(x1, y1, x2, y2, durationMs)
+    }
+
+    fun goBack(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_BACK)
+    fun goHome(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_HOME)
+
+    /**
+     * Guided gestures are allowed only through the recorder overlay and bypass the AGENT lock because
+     * they are direct, current user instructions. Normal phone.* tools remain blocked while HUMAN owns input.
+     */
+    fun guidedTap(x: Float, y: Float): Boolean = rawTap(x, y)
+    fun guidedLongPress(x: Float, y: Float, durationMs: Long = 750): Boolean = rawLongPress(x, y, durationMs)
+    fun guidedSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean = rawSwipe(x1, y1, x2, y2, durationMs)
+    fun guidedBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
+    fun guidedHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
+
+    private fun rawTap(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y) }
         val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 80)).build()
         return dispatchGesture(gesture, null, null)
     }
 
-    fun longPress(x: Float, y: Float, durationMs: Long = 650): Boolean {
-        if (!agentCanAct()) return false
+    private fun rawLongPress(x: Float, y: Float, durationMs: Long): Boolean {
         val path = Path().apply { moveTo(x, y) }
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(450, 3000))).build()
         return dispatchGesture(gesture, null, null)
     }
 
-    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean {
-        if (!agentCanAct()) return false
+    private fun rawSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long): Boolean {
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(100, 3000))).build()
         return dispatchGesture(gesture, null, null)
     }
-
-    fun goBack(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_BACK)
-    fun goHome(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_HOME)
 
     fun takeScreenshot(crop: UiBounds? = null, callback: (Result<ScreenshotArtifact>) -> Unit) {
         takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, object : TakeScreenshotCallback {
