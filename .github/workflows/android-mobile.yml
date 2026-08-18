@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - feature/android-mobile-v0
       - feature/mobile-phone-toolbox-agent1
       - release/cyclone-mobile-v2
