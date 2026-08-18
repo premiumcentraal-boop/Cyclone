@@ -5,9 +5,12 @@ on:
   push:
     branches:
       - release/cyclone-mobile-v2
+      - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/cyclone-core/**'
       - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
       - 'docker/**'
       - '.env.example'
       - '.github/workflows/mobile-ai-runtime.yml'
@@ -15,6 +18,8 @@ on:
     paths:
       - 'apps/cyclone-core/**'
       - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
       - 'docker/**'
       - '.env.example'
       - '.github/workflows/mobile-ai-runtime.yml'
@@ -43,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
