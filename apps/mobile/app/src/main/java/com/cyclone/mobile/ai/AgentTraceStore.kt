@@ -1,0 +1,296 @@
+package com.cyclone.mobile.ai
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+import org.json.JSONObject
+import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
+
+data class AiTraceSession(
+    val id: String,
+    val goal: String,
+    val model: String,
+    val status: String,
+    val startedAt: Long,
+    val endedAt: Long?,
+    val result: String?,
+    val decisions: Int,
+)
+
+data class AiTraceEvent(
+    val id: String,
+    val sessionId: String,
+    val timestampMs: Long,
+    val kind: String,
+    val displayText: String,
+    val code: String?,
+    val ok: Boolean?,
+    val detail: String?,
+)
+
+/**
+ * V2.6 user-visible decision history.
+ *
+ * This is intentionally NOT a hidden-chain-of-thought recorder. It stores compact user-facing
+ * status/decision summaries, phone-tool names, verification outcomes and failures. Typed values,
+ * screenshots, credentials and provider-private reasoning are not persisted here.
+ */
+object AgentTraceRuntime {
+    @Volatile private var initialized = false
+    lateinit var store: AgentTraceStore
+        private set
+
+    @Synchronized
+    fun initialize(context: Context) {
+        if (initialized) return
+        store = AgentTraceStore(context.applicationContext)
+        initialized = true
+    }
+
+    fun start(context: Context, goal: String, model: String): String {
+        initialize(context)
+        return store.startSession(goal, model)
+    }
+
+    fun event(
+        context: Context,
+        sessionId: String,
+        kind: String,
+        displayText: String,
+        code: String? = null,
+        ok: Boolean? = null,
+        detail: String? = null,
+    ) {
+        initialize(context)
+        store.append(sessionId, kind, displayText, code, ok, detail)
+    }
+
+    fun finish(context: Context, sessionId: String, status: String, result: String, decisions: Int) {
+        initialize(context)
+        store.finishSession(sessionId, status, result, decisions)
+    }
+}
+
+object AiTraceBus {
+    private val listeners = CopyOnWriteArrayList<(AiTraceEvent) -> Unit>()
+    @Volatile var latest: AiTraceEvent? = null
+        private set
+
+    fun publish(event: AiTraceEvent) {
+        latest = event
+        listeners.forEach { listener -> runCatching { listener(event) } }
+    }
+
+    fun subscribe(listener: (AiTraceEvent) -> Unit): () -> Unit {
+        listeners += listener
+        latest?.let(listener)
+        return { listeners -= listener }
+    }
+}
+
+class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_history.db", null, 1) {
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE sessions(
+              id TEXT PRIMARY KEY,
+              goal TEXT NOT NULL,
+              model TEXT NOT NULL,
+              status TEXT NOT NULL,
+              started_at INTEGER NOT NULL,
+              ended_at INTEGER,
+              result TEXT,
+              decisions INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE TABLE events(
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL,
+              timestamp_ms INTEGER NOT NULL,
+              kind TEXT NOT NULL,
+              display_text TEXT NOT NULL,
+              code TEXT,
+              ok INTEGER,
+              detail TEXT
+            )
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX events_session_time ON events(session_id, timestamp_ms)")
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+
+    fun startSession(goal: String, model: String): String {
+        val id = "ai-${UUID.randomUUID()}"
+        writableDatabase.insertOrThrow(
+            "sessions",
+            null,
+            ContentValues().apply {
+                put("id", id)
+                put("goal", TracePrivacy.clean(goal).take(500))
+                put("model", model.take(180))
+                put("status", "RUNNING")
+                put("started_at", System.currentTimeMillis())
+                put("decisions", 0)
+            },
+        )
+        append(id, "START", "Starting task", code = "task.start", detail = "Model: ${model.take(120)}")
+        return id
+    }
+
+    fun append(
+        sessionId: String,
+        kind: String,
+        displayText: String,
+        code: String? = null,
+        ok: Boolean? = null,
+        detail: String? = null,
+    ): AiTraceEvent {
+        val event = AiTraceEvent(
+            id = "evt-${UUID.randomUUID()}",
+            sessionId = sessionId,
+            timestampMs = System.currentTimeMillis(),
+            kind = kind.take(40),
+            displayText = TracePrivacy.clean(displayText).take(360),
+            code = code?.take(120),
+            ok = ok,
+            detail = detail?.let(TracePrivacy::clean)?.take(1200),
+        )
+        writableDatabase.insertOrThrow(
+            "events",
+            null,
+            ContentValues().apply {
+                put("id", event.id)
+                put("session_id", event.sessionId)
+                put("timestamp_ms", event.timestampMs)
+                put("kind", event.kind)
+                put("display_text", event.displayText)
+                put("code", event.code)
+                if (event.ok == null) putNull("ok") else put("ok", if (event.ok) 1 else 0)
+                put("detail", event.detail)
+            },
+        )
+        AiTraceBus.publish(event)
+        return event
+    }
+
+    fun finishSession(id: String, status: String, result: String, decisions: Int) {
+        writableDatabase.update(
+            "sessions",
+            ContentValues().apply {
+                put("status", status.take(40))
+                put("ended_at", System.currentTimeMillis())
+                put("result", TracePrivacy.clean(result).take(1500))
+                put("decisions", decisions.coerceAtLeast(0))
+            },
+            "id=?",
+            arrayOf(id),
+        )
+        append(
+            id,
+            if (status == "COMPLETED") "DONE" else "STOPPED",
+            if (status == "COMPLETED") "Task finished" else "Task stopped",
+            code = "task.finish",
+            ok = status == "COMPLETED",
+            detail = result,
+        )
+    }
+
+    fun listSessions(limit: Int = 40): List<AiTraceSession> {
+        val out = mutableListOf<AiTraceSession>()
+        readableDatabase.query(
+            "sessions",
+            arrayOf("id", "goal", "model", "status", "started_at", "ended_at", "result", "decisions"),
+            null,
+            null,
+            null,
+            null,
+            "started_at DESC",
+            limit.coerceIn(1, 200).toString(),
+        ).use { c ->
+            while (c.moveToNext()) {
+                out += AiTraceSession(
+                    id = c.getString(0), goal = c.getString(1), model = c.getString(2), status = c.getString(3),
+                    startedAt = c.getLong(4), endedAt = if (c.isNull(5)) null else c.getLong(5),
+                    result = if (c.isNull(6)) null else c.getString(6), decisions = c.getInt(7),
+                )
+            }
+        }
+        return out
+    }
+
+    fun events(sessionId: String): List<AiTraceEvent> {
+        val out = mutableListOf<AiTraceEvent>()
+        readableDatabase.query(
+            "events",
+            arrayOf("id", "session_id", "timestamp_ms", "kind", "display_text", "code", "ok", "detail"),
+            "session_id=?",
+            arrayOf(sessionId),
+            null,
+            null,
+            "timestamp_ms ASC",
+        ).use { c ->
+            while (c.moveToNext()) {
+                out += AiTraceEvent(
+                    id = c.getString(0), sessionId = c.getString(1), timestampMs = c.getLong(2), kind = c.getString(3),
+                    displayText = c.getString(4), code = if (c.isNull(5)) null else c.getString(5),
+                    ok = if (c.isNull(6)) null else c.getInt(6) == 1,
+                    detail = if (c.isNull(7)) null else c.getString(7),
+                )
+            }
+        }
+        return out
+    }
+}
+
+object TraceHumanizer {
+    fun decision(tool: String, params: JSONObject, providedSummary: String?): String {
+        val clean = providedSummary?.trim().orEmpty()
+        if (clean.isNotBlank()) return TracePrivacy.clean(clean).take(260)
+        val verb = when (tool) {
+            "phone.observe" -> "Checking the current screen before acting"
+            "phone.find" -> "Looking for the safest matching control"
+            "phone.click" -> "Opening the selected control using Android's semantic UI"
+            "phone.type" -> "Filling the requested field without storing its contents"
+            "phone.scroll" -> "Scrolling to find the next relevant control"
+            "phone.open_app" -> "Opening the app needed for this task"
+            "phone.open_notification" -> "Opening the relevant notification"
+            "phone.wait_for" -> "Waiting for the expected screen state"
+            "phone.assert" -> "Verifying the expected result before continuing"
+            "phone.screenshot" -> "Structured UI is not enough, so checking the screen visually"
+            "phone.back" -> "Going back one screen"
+            "phone.home" -> "Returning to the Android home screen"
+            else -> "Using ${tool.removePrefix("phone.").replace('_', ' ')}"
+        }
+        val selector = params.optJSONObject("selector")
+        val target = selector?.optString("text").orEmpty()
+            .ifBlank { selector?.optString("contentDescription").orEmpty() }
+            .ifBlank { selector?.optString("resourceId").orEmpty().substringAfterLast('/') }
+        return if (target.isBlank() || tool == "phone.type") verb else "$verb: ${target.take(80)}"
+    }
+
+    fun result(tool: String, ok: Boolean): String = when {
+        ok && tool == "phone.observe" -> "Current screen understood"
+        ok && tool == "phone.assert" -> "Verification passed"
+        ok -> "Action completed and Cyclone will verify the new state"
+        tool == "phone.assert" -> "Verification failed; the expected state was not found"
+        else -> "That action did not succeed; Cyclone will use the fresh screen state to recover"
+    }
+}
+
+object TracePrivacy {
+    private val secretAssignments = Regex("(?i)(password|passwd|token|api[_ -]?key|secret|otp|2fa|pin)\\s*[:=]\\s*[^,;\\s}]+")
+    private val bearer = Regex("(?i)bearer\\s+[a-z0-9._~+/-]{8,}")
+    private val longBase64 = Regex("[A-Za-z0-9+/]{180,}={0,2}")
+
+    fun clean(value: String): String = value
+        .replace(secretAssignments) { "${it.groupValues[1]}=[REDACTED]" }
+        .replace(bearer, "Bearer [REDACTED]")
+        .replace(longBase64, "[BINARY_REDACTED]")
+        .replace(Regex("(?s)\\\"pngBase64\\\"\\s*:\\s*\\\".*?\\\""), "\"pngBase64\":\"[REDACTED]\"")
+}
