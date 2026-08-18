@@ -65,6 +65,10 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
+        // A user-visible transition often emits several Accessibility events in a short burst.
+        // Fresh observations wait briefly for that burst to settle so selectors are less likely
+        // to target an intermediate screen. Internal polling deliberately skips this debounce.
+        if (markFresh) waitForUiQuiet()
         val root = rootInActiveWindow
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
@@ -334,6 +338,15 @@ class CycloneAccessibilityService : AccessibilityService() {
         if (node.isScrollable) return node
         for (i in 0 until node.childCount) findScrollable(node.getChild(i))?.let { return it }
         return null
+    }
+
+    private fun waitForUiQuiet(quietMs: Long = 90L, maxWaitMs: Long = 300L) {
+        val started = System.currentTimeMillis()
+        while (System.currentTimeMillis() - started < maxWaitMs) {
+            val lastEvent = DeviceState.lastUiEventAtMs
+            if (lastEvent == 0L || System.currentTimeMillis() - lastEvent >= quietMs) return
+            Thread.sleep(20)
+        }
     }
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
