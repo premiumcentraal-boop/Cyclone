@@ -101,11 +101,19 @@ object AutomationCodec {
         value.text?.let { put("text", it) }
         value.partialText?.let { put("partialText", it) }
         value.contentDescription?.let { put("contentDescription", it) }
+        value.contentDescriptionContains?.let { put("contentDescriptionContains", it) }
         value.role?.let { put("role", it) }
         value.className?.let { put("className", it) }
         value.ancestor?.let { put("ancestor", it) }
         value.descendant?.let { put("descendant", it) }
         value.relativePosition?.let { put("relativePosition", it) }
+        value.relativeToText?.let { put("relativeToText", it) }
+        value.relativeDirection?.let { put("relativeDirection", it) }
+        value.fuzzyText?.let { put("fuzzyText", it) }
+        value.minFuzzyScore?.let { put("minFuzzyScore", it) }
+        value.requireClickable?.let { put("requireClickable", it) }
+        value.requireEditable?.let { put("requireEditable", it) }
+        value.requireScrollable?.let { put("requireScrollable", it) }
         value.x?.let { put("x", it) }
         value.y?.let { put("y", it) }
     }
@@ -113,13 +121,21 @@ object AutomationCodec {
     private fun selectorFromJson(json: JSONObject) = Selector(
         resourceId = json.optNullableString("resourceId"),
         text = json.optNullableString("text"),
-        partialText = json.optNullableString("partialText"),
+        partialText = json.optNullableString("partialText") ?: json.optNullableString("textContains"),
         contentDescription = json.optNullableString("contentDescription"),
+        contentDescriptionContains = json.optNullableString("contentDescriptionContains"),
         role = json.optNullableString("role"),
-        className = json.optNullableString("className"),
-        ancestor = json.optNullableString("ancestor"),
-        descendant = json.optNullableString("descendant"),
+        className = json.optNullableString("className") ?: json.optNullableString("class"),
+        ancestor = json.optNullableString("ancestor") ?: json.optNullableString("ancestorText"),
+        descendant = json.optNullableString("descendant") ?: json.optNullableString("descendantText"),
         relativePosition = json.optNullableString("relativePosition"),
+        relativeToText = json.optNullableString("relativeToText"),
+        relativeDirection = json.optNullableString("relativeDirection"),
+        fuzzyText = json.optNullableString("fuzzyText"),
+        minFuzzyScore = json.optDouble("minFuzzyScore").takeIf { json.has("minFuzzyScore") },
+        requireClickable = json.optBoolean("requireClickable").takeIf { json.has("requireClickable") },
+        requireEditable = json.optBoolean("requireEditable").takeIf { json.has("requireEditable") },
+        requireScrollable = json.optBoolean("requireScrollable").takeIf { json.has("requireScrollable") },
         x = json.optInt("x").takeIf { json.has("x") },
         y = json.optInt("y").takeIf { json.has("y") }
     )
