@@ -94,7 +94,7 @@ class MainActivity : Activity() {
         val triggerType = edit("Trigger type (MANUAL / NOTIFICATION / SCHEDULE / APP_OPENED / CYCLONE_REMOTE / WEBSOCKET / CALENDAR_TIME)", "MANUAL")
         val triggerPackage = edit("Trigger package filter (optional)", "")
         val triggerText = edit("Trigger text/event filter (optional)", "")
-        val conditionLeft = edit("Condition left value or $variable (optional)", "")
+        val conditionLeft = edit("Condition left value or variable placeholder (optional)", "")
         val conditionOperator = edit("Condition operator", "EQUALS")
         val conditionRight = edit("Condition right value", "")
         val actionTool = edit("Phone tool action", "phone.open_app")
@@ -102,7 +102,7 @@ class MainActivity : Activity() {
         val actionSelectorText = edit("Action selector text (optional)", "")
         val confirmation = CheckBox(this).apply { text = "Require human confirmation before action" }
         root.addView(confirmation)
-        val successLeft = edit("Success criterion left value or $variable (optional)", "")
+        val successLeft = edit("Success criterion left value or variable placeholder (optional)", "")
         val successOperator = edit("Success operator", "EQUALS")
         val successRight = edit("Success right value", "")
         val failureBehavior = edit("Failure behavior (ABORT / REQUEST_HUMAN / REQUEST_AI_HELP / GO_BACK / RESTART_APP / RETRY)", "ABORT")
