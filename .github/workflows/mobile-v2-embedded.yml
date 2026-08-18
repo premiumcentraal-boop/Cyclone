@@ -1,4 +1,4 @@
-name: Cyclone Mobile V2.3 Embedded Runtime
+name: Cyclone Mobile V2.4 Embedded Runtime
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
       - main
       - release/cyclone-mobile-v2.2
       - release/cyclone-mobile-v2.3-openrouter-agent
+      - release/cyclone-mobile-v2.4-guided-recorder
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
@@ -39,13 +40,13 @@ jobs:
           gradle-version: '8.9'
       - name: Verify Mobilerun source is present
         run: test -f third_party/mobilerun-portal/LICENSE && test -f third_party/mobilerun-portal/app/src/main/java/com/mobilerun/portal/PortalApplication.kt
-      - name: Run Cyclone Android tests
+      - name: Run Cyclone V2.4 Android tests
         run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
-      - name: Assemble unified Cyclone APK
+      - name: Assemble unified Cyclone V2.4 APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
       - name: Upload unified APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-3-embedded-apk
+          name: cyclone-mobile-v2-4-embedded-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
