@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import hmac
 import json
-import os
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field
 
 from .mobile_protocol import ControllerOwner, DeviceDescriptor, valid_bearer_token
@@ -44,10 +43,6 @@ def _runtime(request: Request) -> Any:
     return request.app.state.services
 
 
-def _mobile_bootstrap_token() -> str:
-    return os.getenv("CYCLONE_MOBILE_DEVICE_TOKEN", "")
-
-
 def _constant_time_equal(left: str, right: str) -> bool:
     return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
@@ -68,7 +63,8 @@ def _snapshot_json(snapshot: Any) -> dict[str, Any]:
 
 @router.websocket("/api/v1/mobile/connect")
 async def mobile_connect(websocket: WebSocket) -> None:
-    expected = _mobile_bootstrap_token()
+    runtime = websocket.app.state.services
+    expected = runtime.settings.mobile_device_token or ""
     authorization = websocket.headers.get("authorization")
     if not expected or not valid_bearer_token(authorization, expected):
         await websocket.close(code=4401, reason="invalid mobile credential")
@@ -96,7 +92,6 @@ async def mobile_connect(websocket: WebSocket) -> None:
         }
     )
 
-    runtime = websocket.app.state.services
     try:
         await runtime.repository.add_audit_event(
             actor_type="device",
