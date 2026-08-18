@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
+import org.json.JSONObject
 
 object AutomationRuntime {
     @Volatile private var initialized = false
@@ -35,6 +36,20 @@ object AutomationRuntime {
         router = AutomationEventRouter(store, runner)
         seedExamples()
         initialized = true
+        store.listAutomations()
+            .filter { it.enabled && it.trigger.type == TriggerType.SCHEDULE }
+            .forEach { registerSchedule(app, it) }
+    }
+
+    fun importAiProposal(context: Context, document: JSONObject): Result<AutomationDefinition> {
+        initialize(context)
+        return runCatching {
+            AutomationProposalCompiler.compile(document).also { compiled ->
+                check(!compiled.enabled) { "AI workflow proposals must remain disabled until review" }
+                store.saveAutomation(compiled)
+                DeviceState.addLog("AI workflow proposal compiled and saved disabled: ${compiled.name}")
+            }
+        }.onFailure { DeviceState.addLog("AI workflow proposal rejected: ${it.message}") }
     }
 
     fun onNotification(context: Context, packageName: String, title: String, text: String) {
@@ -65,18 +80,49 @@ object AutomationRuntime {
 
     fun schedule(context: Context, automationId: String, atMillis: Long) {
         initialize(context)
-        val intent = Intent(context, AutomationAlarmReceiver::class.java).putExtra("automationId", automationId)
-        val pending = PendingIntent.getBroadcast(context, automationId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val alarm = context.getSystemService(AlarmManager::class.java)
-        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pending)
+        scheduleInternal(context.applicationContext, automationId, atMillis)
+    }
+
+    fun registerSchedule(context: Context, automation: AutomationDefinition) {
+        initialize(context)
+        if (!automation.enabled || automation.trigger.type != TriggerType.SCHEDULE) {
+            cancelSchedule(context, automation.id)
+            return
+        }
+        val now = System.currentTimeMillis()
+        val configuredAt = automation.trigger.parameters["atMillis"]?.toLongOrNull()
+        val interval = automation.trigger.parameters["intervalMs"]?.toLongOrNull()?.takeIf { it > 0 }
+        val next = configuredAt?.takeIf { it > now } ?: interval?.let { now + it }
+        if (next != null) scheduleInternal(context.applicationContext, automation.id, next)
+    }
+
+    fun cancelSchedule(context: Context, automationId: String) {
+        val app = context.applicationContext
+        val intent = Intent(app, AutomationAlarmReceiver::class.java).putExtra("automationId", automationId)
+        val pending = PendingIntent.getBroadcast(app, automationId.hashCode(), intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+        if (pending != null) {
+            app.getSystemService(AlarmManager::class.java).cancel(pending)
+            pending.cancel()
+        }
     }
 
     fun emitScheduled(context: Context, automationId: String) {
         initialize(context)
-        router.emit(TriggerEvent(TriggerType.SCHEDULE, mapOf("automationId" to automationId)))
         val automation = store.getAutomation(automationId) ?: return
+        if (!automation.enabled || automation.trigger.type != TriggerType.SCHEDULE) {
+            cancelSchedule(context, automationId)
+            return
+        }
+        router.emit(TriggerEvent(TriggerType.SCHEDULE, mapOf("automationId" to automationId)))
         val interval = automation.trigger.parameters["intervalMs"]?.toLongOrNull()?.takeIf { it > 0 } ?: return
-        schedule(context, automationId, System.currentTimeMillis() + interval)
+        scheduleInternal(context.applicationContext, automationId, System.currentTimeMillis() + interval)
+    }
+
+    private fun scheduleInternal(context: Context, automationId: String, atMillis: Long) {
+        val intent = Intent(context, AutomationAlarmReceiver::class.java).putExtra("automationId", automationId)
+        val pending = PendingIntent.getBroadcast(context, automationId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val alarm = context.getSystemService(AlarmManager::class.java)
+        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis.coerceAtLeast(System.currentTimeMillis() + 1_000), pending)
     }
 
     private fun seedExamples() {
