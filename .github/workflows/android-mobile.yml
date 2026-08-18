@@ -7,12 +7,17 @@ on:
       - feature/android-mobile-v0
       - feature/mobile-phone-toolbox-agent1
       - release/cyclone-mobile-v2
+      - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
       - '.github/workflows/android-mobile.yml'
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
       - '.github/workflows/android-mobile.yml'
 
 jobs:
@@ -20,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
