@@ -12,8 +12,8 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.3.0-v2.1"
+        versionCode = 5
+        versionName = "0.4.0-v2.2"
     }
 
     buildTypes {
@@ -25,6 +25,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
