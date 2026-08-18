@@ -41,7 +41,7 @@ class MainActivity : Activity() {
         setContentView(scroll)
 
         title("Cyclone Mobile · Android 14+")
-        text("First non-root mobile node. Built features are checked separately from on-device verification so the app never claims a test that has not happened.")
+        text("Universal non-root phone toolbox. Built features are tracked separately from physical-device verification.")
 
         section("Device permissions")
         status("Accessibility enabled", accessibilityEnabled())
@@ -77,46 +77,47 @@ class MainActivity : Activity() {
                 .putString("claimText", claimText.text.toString().trim())
                 .putBoolean("autoClaimEnabled", auto.isChecked).apply()
         }
-        text("The v0 parser currently recognizes same-day HH:MM-HH:MM notification text. Real Teamwork/Picnic formatting still needs capture and device verification before this is trusted unattended.")
+        text("Picnic/Teamwork remains one optional workflow. The underlying device layer is now being generalized for arbitrary Android apps.")
 
         section("Human takeover")
         status("Controller: ${DeviceState.controller.name}", true)
+        if (DeviceState.requireFreshObservation) status("Fresh observation required before next agent action", false)
         button(if (DeviceState.controller == DeviceState.Controller.AGENT) "Take control from agent" else "Return control to agent") {
-            DeviceState.controller = if (DeviceState.controller == DeviceState.Controller.AGENT) DeviceState.Controller.HUMAN else DeviceState.Controller.AGENT
+            val target = if (DeviceState.controller == DeviceState.Controller.AGENT) DeviceState.Controller.HUMAN else DeviceState.Controller.AGENT
+            DeviceState.setController(target)
             buildUi()
         }
 
-        section("Build checklist")
-        built("Android 14+ APK target (minSdk 34)")
-        built("Accessibility UI-tree observation")
-        built("Semantic click + set text")
-        built("Tap / swipe / scroll / Back / Home")
-        built("Accessibility screenshot capture")
-        built("Notification listener")
-        built("Calendar conflict matcher")
-        built("Work-shift notification routine scaffold")
-        built("Safe dry-run / explicit auto-claim opt-in")
+        section("Universal toolbox · built")
+        built("Typed phone.* tool protocol")
+        built("Normalized flat UI snapshots + screen fingerprints")
+        built("Selectors: IDs, text, descriptions, class/role, hierarchy, coordinates, relative and fuzzy")
+        built("Click / long press / text / tap / swipe / scroll / Back / Home")
+        built("Wait/assert + retries + duplicate suppression + action evidence")
+        built("Accessibility screenshot + crop metadata")
+        built("App launch + notification open + clipboard + safe intents/share")
+        built("Capability registry")
+        built("Human/agent controller lock with forced fresh observe")
+        built("Privacy-conscious command audit records")
+        built("Notification listener + calendar matcher")
         built("Cyclone WebSocket command bridge")
-        built("Human/agent controller lock")
-        built("GitHub Actions APK build pipeline")
 
         section("Verification checklist")
-        verified("APK compiled in GitHub CI", true)
+        verified("APK compiles in GitHub CI", true)
+        verified("Universal toolbox branch compiles in GitHub CI", false)
         verified("APK installed on Android 14+ device", false)
-        verified("Accessibility tree read from real phone", false)
+        verified("Normalized UI snapshot read from real phone", false)
         verified("Screenshot returned from real phone", false)
-        verified("Remote semantic click performed", false)
-        verified("Notification received from real work app", false)
-        verified("Real Teamwork/Picnic UI mapped", false)
-        verified("Calendar conflict test passed", false)
-        verified("Eligible shift detected correctly", false)
-        verified("Claim action verified end-to-end", false)
-        verified("Cyclone Core WebSocket endpoint connected", DeviceState.bridgeConnected)
-        verified("Takeover blocks agent actions", false)
+        verified("Selector-based click performed", false)
+        verified("Long press / swipe / scroll verified", false)
+        verified("App launch + notification open verified", false)
+        verified("Clipboard tools verified", false)
+        verified("Takeover blocks agent actions and requires fresh observe", false)
+        verified("Stale UI recovery verified", false)
         verified("24-hour reliability test", false)
 
         section("Next")
-        text("1. Install this CI-built APK on an Android 14+ phone.\n2. Enable Accessibility + Notification access + Calendar.\n3. Run observe/screenshot/click acceptance tests.\n4. Capture one real Teamwork notification and UI tree.\n5. Replace the generic shift parser with the real app state machine.\n6. Connect to Cyclone Core and add event-driven Hermes fallback/takeover.\n7. Run restart, reliability, and battery soak tests.")
+        text("1. Build this Agent 1 branch in CI.\n2. Install on Android 14+ hardware.\n3. Run the phone-tool acceptance checklist.\n4. Feed the typed PhoneToolRegistry contract to Automation Studio and Hermes agents.\n5. Keep vision as a fallback only after structured selectors fail.")
     }
 
     private fun accessibilityEnabled(): Boolean {
