@@ -6,11 +6,17 @@ mobile branches develop in parallel.
 """
 
 from .main import _cyclone_mcp, app
-from .mobile_api import mobile_devices, router as mobile_router
+from .mobile_api import mobile_devices, mobile_takeovers, router as mobile_router
 from .mobile_mcp import register_mobile_mcp_tools
 
-register_mobile_mcp_tools(_cyclone_mcp, lambda: app.state.services, mobile_devices)
+register_mobile_mcp_tools(
+    _cyclone_mcp,
+    lambda: app.state.services,
+    mobile_devices,
+    mobile_takeovers,
+)
 app.include_router(mobile_router)
 app.state.mobile_devices = mobile_devices
+app.state.mobile_takeovers = mobile_takeovers
 
 __all__ = ["app"]
