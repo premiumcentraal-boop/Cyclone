@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Protocol
 from uuid import uuid4
 
@@ -56,8 +57,8 @@ class MobileSession:
     socket: MobileSocket
     session_id: str = field(default_factory=lambda: uuid4().hex)
     controller: ControllerOwner = ControllerOwner.AGENT
-    connected_at: object = field(default_factory=now_utc)
-    last_seen_at: object = field(default_factory=now_utc)
+    connected_at: datetime = field(default_factory=now_utc)
+    last_seen_at: datetime = field(default_factory=now_utc)
     fresh_observation_required: bool = False
     pending: dict[str, _PendingCommand] = field(default_factory=dict)
 
@@ -106,6 +107,8 @@ class MobileSession:
         await self.socket.send_json(
             {
                 "type": "mobile.control",
+                "id": f"control-{uuid4().hex}",
+                "action": "takeover_start" if owner is ControllerOwner.HUMAN else "takeover_return",
                 "owner": owner.value,
                 "freshObserveRequired": self.fresh_observation_required,
             }
@@ -114,27 +117,50 @@ class MobileSession:
     def receive(self, message: dict[str, Any]) -> dict[str, Any] | None:
         self.last_seen_at = now_utc()
         kind = str(message.get("type", ""))
-        if kind == "mobile.result":
-            command_id = str(message.get("id") or message.get("commandId") or "")
-            pending = self.pending.get(command_id)
-            if pending and not pending.future.done():
-                pending.future.set_result(
-                    PhoneResult.from_envelope(message, expected_tool=pending.tool)
-                )
+        if kind == "mobile.tool_result":
+            nested = message.get("result")
+            if isinstance(nested, dict):
+                self._resolve_result(nested)
             return None
-        if kind == "mobile.capabilities":
-            raw = message.get("capabilities")
-            if isinstance(raw, dict):
+        if kind == "mobile.result":
+            self._resolve_result(message)
+            return None
+        if kind in {"mobile.capabilities", "mobile.hello"}:
+            capabilities = self._normalize_capabilities(message.get("capabilities"))
+            if capabilities:
                 self.descriptor = DeviceDescriptor(
                     device_id=self.descriptor.device_id,
                     name=self.descriptor.name,
                     platform=self.descriptor.platform,
-                    capabilities={str(k): str(v) for k, v in raw.items()},
+                    capabilities=capabilities,
                 )
             return None
-        if kind in {"mobile.heartbeat", "mobile.hello"}:
+        if kind == "mobile.heartbeat":
             return None
         return dict(message) if kind.startswith("mobile.") else None
+
+    def _resolve_result(self, raw: dict[str, Any]) -> None:
+        command_id = str(raw.get("id") or raw.get("commandId") or "")
+        pending = self.pending.get(command_id)
+        if pending and not pending.future.done():
+            pending.future.set_result(
+                PhoneResult.from_envelope(raw, expected_tool=pending.tool)
+            )
+
+    def _normalize_capabilities(self, raw: Any) -> dict[str, str]:
+        if isinstance(raw, dict):
+            return {str(key): str(value) for key, value in raw.items()}
+        if isinstance(raw, list):
+            normalized: dict[str, str] = {}
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name", "")).strip()
+                status = str(item.get("status", "")).strip()
+                if name and status:
+                    normalized[name] = status
+            return normalized
+        return {}
 
     async def close(self, reason: str) -> None:
         for pending in self.pending.values():
