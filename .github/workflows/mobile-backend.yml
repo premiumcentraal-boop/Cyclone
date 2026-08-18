@@ -3,6 +3,7 @@ name: Cyclone Mobile Backend
 on:
   push:
     branches:
+      - main
       - feature/mobile-mobilerun-backend
     paths:
       - "apps/cyclone-core/app/mobile_portal.py"
