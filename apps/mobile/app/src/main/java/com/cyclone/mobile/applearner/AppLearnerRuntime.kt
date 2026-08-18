@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
@@ -24,6 +25,7 @@ object AppLearnerRuntime {
     private val passiveExecutor = Executors.newSingleThreadExecutor()
     private val lastPassiveObservation = AtomicLong(0L)
     private var controllerBeforeLearning = DeviceState.Controller.AGENT
+    private var overlay: AppLearnerOverlayController? = null
 
     @Synchronized
     fun initialize(context: Context) {
@@ -44,6 +46,10 @@ object AppLearnerRuntime {
         controllerBeforeLearning = DeviceState.controller
         if (mode == LearningMode.PASSIVE) DeviceState.setController(DeviceState.Controller.HUMAN)
         explorer.start(AppExplorer.SessionConfig(packageName, appLabel, instruction, mode, useAiPlanner = useAiPlanner))
+        CycloneAccessibilityService.instance?.let { service ->
+            overlay?.dismiss()
+            overlay = AppLearnerOverlayController(service).also { it.show() }
+        }
     }
 
     fun pause() = explorer.pause()
@@ -55,10 +61,17 @@ object AppLearnerRuntime {
     fun stop() {
         if (!initialized) return
         explorer.stop()
+        overlay?.dismiss()
+        overlay = null
         if (controllerBeforeLearning == DeviceState.Controller.AGENT) {
             DeviceState.setController(DeviceState.Controller.AGENT)
             PhoneToolExecutor.execute(appContext, PhoneToolRequest("learner-stop-observe-${UUID.randomUUID()}", "phone.observe", JSONObject()))
         }
+    }
+
+    fun dismissOverlay() {
+        overlay?.dismiss()
+        overlay = null
     }
 
     fun ask(packageName: String, question: String): String {
