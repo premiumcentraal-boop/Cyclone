@@ -101,7 +101,7 @@ class MainActivity : Activity() {
         built("GitHub Actions APK build pipeline")
 
         section("Verification checklist")
-        verified("APK compiled in CI", false)
+        verified("APK compiled in GitHub CI", true)
         verified("APK installed on Android 14+ device", false)
         verified("Accessibility tree read from real phone", false)
         verified("Screenshot returned from real phone", false)
@@ -116,7 +116,7 @@ class MainActivity : Activity() {
         verified("24-hour reliability test", false)
 
         section("Next")
-        text("1. Let GitHub CI build the debug APK.\n2. Install it on an Android 14+ phone.\n3. Enable Accessibility + Notification access + Calendar.\n4. Run observe/screenshot/click acceptance tests.\n5. Capture one real Teamwork notification and UI tree.\n6. Replace the generic shift parser with the real app state machine.\n7. Connect to Cyclone Core and add event-driven Hermes fallback/takeover.")
+        text("1. Install this CI-built APK on an Android 14+ phone.\n2. Enable Accessibility + Notification access + Calendar.\n3. Run observe/screenshot/click acceptance tests.\n4. Capture one real Teamwork notification and UI tree.\n5. Replace the generic shift parser with the real app state machine.\n6. Connect to Cyclone Core and add event-driven Hermes fallback/takeover.\n7. Run restart, reliability, and battery soak tests.")
     }
 
     private fun accessibilityEnabled(): Boolean {
