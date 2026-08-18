@@ -107,9 +107,9 @@ def test_selector_supports_text_description_ancestor_and_fuzzy() -> None:
     assert find_nodes(snapshot, {"textContains": "claim", "clickable": True}, limit=1)
     assert find_nodes(snapshot, {"contentDescriptionContains": "this shift"}, limit=1)
     assert find_nodes(snapshot, {"ancestorText": "definitely-not-present"}, limit=1) == []
-    # Lightweight SequenceMatcher compares the semantic text + description;
-    # use a typo that still clears a deliberately conservative low threshold.
-    fuzzy = find_nodes(snapshot, {"fuzzyText": "claim shft", "minFuzzyScore": 0.45}, limit=1)
+    # In realistic AI targeting, semantic fuzziness is combined with structural
+    # facts such as whether the intended control is clickable.
+    fuzzy = find_nodes(snapshot, {"fuzzyText": "claim shft", "minFuzzyScore": 0.45, "clickable": True}, limit=1)
     assert fuzzy and fuzzy[0]["node"]["resourceId"] == "com.example:id/claim"
 
 
