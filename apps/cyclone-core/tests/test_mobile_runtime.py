@@ -91,7 +91,7 @@ async def test_registry_correlates_typed_phone_result() -> None:
 
 
 @pytest.mark.asyncio
-async def test_human_ownership_blocks_input_but_allows_observation() -> None:
+async def test_human_ownership_blocks_input_and_sensitive_reads_but_allows_coarse_metadata() -> None:
     registry = MobileDeviceRegistry()
     socket = FakeSocket()
     session = await registry.register(
@@ -99,21 +99,63 @@ async def test_human_ownership_blocks_input_but_allows_observation() -> None:
     )
     await registry.set_controller("phone-1", ControllerOwner.HUMAN)
 
-    with pytest.raises(ControllerOwnershipError):
-        await registry.execute("phone-1", "phone.click", {"selector": {"text": "Battery"}})
+    for tool, params in (
+        ("phone.click", {"selector": {"text": "Battery"}}),
+        ("phone.observe", {}),
+        ("phone.screenshot", {}),
+        ("phone.get_clipboard", {}),
+    ):
+        with pytest.raises(ControllerOwnershipError):
+            await registry.execute("phone-1", tool, params)
 
-    observe = asyncio.create_task(
+    current_app = asyncio.create_task(
         registry.execute(
-            "phone-1", "phone.observe", {}, timeout=1.0, command_id="cmd-human-observe"
+            "phone-1",
+            "phone.get_current_app",
+            {},
+            timeout=1.0,
+            command_id="cmd-human-current-app",
         )
     )
     await asyncio.sleep(0)
     await registry.receive(
         "phone-1",
         session.session_id,
-        {"type": "mobile.result", "id": "cmd-human-observe", "ok": True, "payload": {}},
+        {
+            "type": "mobile.result",
+            "id": "cmd-human-current-app",
+            "ok": True,
+            "payload": {"package": "com.example.login"},
+        },
     )
-    assert (await observe).ok is True
+    assert (await current_app).ok is True
+
+
+@pytest.mark.asyncio
+async def test_takeover_interrupts_pending_sensitive_command_future() -> None:
+    registry = MobileDeviceRegistry()
+    socket = FakeSocket()
+    await registry.register(
+        DeviceDescriptor(device_id="phone-1", name="Test phone"), socket
+    )
+
+    pending = asyncio.create_task(
+        registry.execute(
+            "phone-1",
+            "phone.click",
+            {"selector": {"text": "Submit"}},
+            timeout=5.0,
+            command_id="cmd-in-flight",
+        )
+    )
+    await asyncio.sleep(0)
+    assert socket.sent[-1]["id"] == "cmd-in-flight"
+
+    await registry.set_controller("phone-1", ControllerOwner.HUMAN)
+    with pytest.raises(ControllerOwnershipError, match="takeover"):
+        await pending
+
+    assert socket.sent[-1]["action"] == "takeover_start"
 
 
 @pytest.mark.asyncio
