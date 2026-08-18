@@ -10,6 +10,8 @@ import android.os.Bundle
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.cyclone.mobile.automation.AutomationRuntime
+import com.cyclone.mobile.automation.Selector as AutomationSelector
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -34,6 +36,7 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
+    private var lastAutomationPackage: String? = null
 
     companion object {
         @Volatile var instance: CycloneAccessibilityService? = null
@@ -44,14 +47,28 @@ class CycloneAccessibilityService : AccessibilityService() {
         instance = this
         DeviceState.accessibilityConnected = true
         DeviceState.addLog("Accessibility connected")
+        AutomationRuntime.initialize(this)
         BridgeClient.start(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-        event.packageName?.toString()?.takeIf { it.isNotBlank() }?.let { DeviceState.currentPackage = it }
+        val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
+        packageName?.let { DeviceState.currentPackage = it }
         event.className?.toString()?.takeIf { it.isNotBlank() }?.let { DeviceState.currentClassName = it }
         DeviceState.lastUiEventAtMs = System.currentTimeMillis()
+
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && packageName != null && packageName != lastAutomationPackage) {
+            lastAutomationPackage = packageName
+            AutomationRuntime.onAppOpened(this, packageName)
+        }
+        if (AutomationRuntime.recorder.isRecording()) {
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_VIEW_CLICKED -> event.source?.let { AutomationRuntime.recorder.recordClick(automationSelector(it)) }
+                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> event.source?.let { AutomationRuntime.recorder.recordText(automationSelector(it)) }
+                AccessibilityEvent.TYPE_VIEW_SCROLLED -> AutomationRuntime.recorder.recordScroll("forward")
+            }
+        }
     }
 
     override fun onInterrupt() = Unit
@@ -65,9 +82,6 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
-        // A user-visible transition often emits several Accessibility events in a short burst.
-        // Fresh observations wait briefly for that burst to settle so selectors are less likely
-        // to target an intermediate screen. Internal polling deliberately skips this debounce.
         if (markFresh) waitForUiQuiet()
         val root = rootInActiveWindow
         val metrics = resources.displayMetrics
@@ -131,16 +145,12 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     fun setText(selector: ElementSelector?, value: String): Boolean {
         if (!agentCanAct()) return false
-        val node = if (selector == null) {
-            rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        } else {
-            resolveLiveTarget(selector)?.second
-        } ?: return false
+        val node = if (selector == null) rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        else resolveLiveTarget(selector)?.second
+        node ?: return false
         if (!node.isEditable && !node.isFocusable) return false
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        val args = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
-        }
+        val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
@@ -155,9 +165,7 @@ class CycloneAccessibilityService : AccessibilityService() {
     fun tap(x: Float, y: Float): Boolean {
         if (!agentCanAct()) return false
         val path = Path().apply { moveTo(x, y) }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 80))
-            .build()
+        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 80)).build()
         return dispatchGesture(gesture, null, null)
     }
 
@@ -165,8 +173,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         if (!agentCanAct()) return false
         val path = Path().apply { moveTo(x, y) }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(450, 3000)))
-            .build()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(450, 3000))).build()
         return dispatchGesture(gesture, null, null)
     }
 
@@ -174,8 +181,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         if (!agentCanAct()) return false
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(100, 3000)))
-            .build()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(100, 3000))).build()
         return dispatchGesture(gesture, null, null)
     }
 
@@ -187,29 +193,21 @@ class CycloneAccessibilityService : AccessibilityService() {
             override fun onSuccess(result: ScreenshotResult) {
                 val outcome = runCatching {
                     try {
-                        val wrapped = Bitmap.wrapHardwareBuffer(
-                            result.hardwareBuffer,
-                            result.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB),
-                        ) ?: error("Unable to map screenshot buffer")
+                        val wrapped = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB))
+                            ?: error("Unable to map screenshot buffer")
                         val bitmap = wrapped.copy(Bitmap.Config.ARGB_8888, false) ?: wrapped
                         val boundedCrop = crop?.let { bounds ->
                             UiBounds(
-                                bounds.left.coerceIn(0, bitmap.width),
-                                bounds.top.coerceIn(0, bitmap.height),
-                                bounds.right.coerceIn(0, bitmap.width),
-                                bounds.bottom.coerceIn(0, bitmap.height),
+                                bounds.left.coerceIn(0, bitmap.width), bounds.top.coerceIn(0, bitmap.height),
+                                bounds.right.coerceIn(0, bitmap.width), bounds.bottom.coerceIn(0, bitmap.height),
                             ).takeIf { it.width > 0 && it.height > 0 }
                         }
-                        val outputBitmap = boundedCrop?.let {
-                            Bitmap.createBitmap(bitmap, it.left, it.top, it.width, it.height)
-                        } ?: bitmap
+                        val outputBitmap = boundedCrop?.let { Bitmap.createBitmap(bitmap, it.left, it.top, it.width, it.height) } ?: bitmap
                         val file = File(cacheDir, "cyclone-${System.currentTimeMillis()}.png")
                         FileOutputStream(file).use { output -> outputBitmap.compress(Bitmap.CompressFormat.PNG, 95, output) }
                         DeviceState.lastScreenshotPath = file.absolutePath
                         ScreenshotArtifact(file, outputBitmap.width, outputBitmap.height, boundedCrop, System.currentTimeMillis())
-                    } finally {
-                        result.hardwareBuffer.close()
-                    }
+                    } finally { result.hardwareBuffer.close() }
                 }
                 callback(outcome)
             }
@@ -220,8 +218,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         })
     }
 
-    private fun agentCanAct(): Boolean =
-        DeviceState.controller == DeviceState.Controller.AGENT && !DeviceState.requireFreshObservation
+    private fun agentCanAct(): Boolean = DeviceState.controller == DeviceState.Controller.AGENT && !DeviceState.requireFreshObservation
 
     private fun resolveLiveTarget(selector: ElementSelector): Pair<UiNodeSnapshot, AccessibilityNodeInfo>? {
         val snapshot = observe(markFresh = false)
@@ -235,9 +232,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         val pieces = path.split('/').filter { it.isNotBlank() }
         if (pieces.isEmpty() || pieces.first() != "0") return null
         var node = root
-        for (index in pieces.drop(1)) {
-            node = node.getChild(index.toIntOrNull() ?: return null) ?: return null
-        }
+        for (index in pieces.drop(1)) node = node.getChild(index.toIntOrNull() ?: return null) ?: return null
         return node
     }
 
@@ -248,13 +243,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             snapshot.bounds == UiBounds(rect.left, rect.top, rect.right, rect.bottom)
     }
 
-    private fun collectNode(
-        node: AccessibilityNodeInfo,
-        path: String,
-        parentId: String?,
-        depth: Int,
-        out: MutableList<UiNodeSnapshot>,
-    ) {
+    private fun collectNode(node: AccessibilityNodeInfo, path: String, parentId: String?, depth: Int, out: MutableList<UiNodeSnapshot>) {
         if (depth > 40 || out.size >= 2500) return
         val rect = Rect().also { node.getBoundsInScreen(it) }
         val bounds = UiBounds(rect.left, rect.top, rect.right, rect.bottom)
@@ -266,42 +255,30 @@ class CycloneAccessibilityService : AccessibilityService() {
             childIds += stableNodeId("$path/$i", child, UiBounds(childRect.left, childRect.top, childRect.right, childRect.bottom))
         }
         out += UiNodeSnapshot(
-            id = id,
-            path = path,
-            parentId = parentId,
-            childIds = childIds,
-            depth = depth,
-            windowId = node.windowId,
-            className = node.className?.toString().orEmpty(),
-            role = inferRole(node),
-            text = node.text?.toString().orEmpty(),
-            contentDescription = node.contentDescription?.toString().orEmpty(),
-            resourceId = node.viewIdResourceName.orEmpty(),
-            bounds = bounds,
-            clickable = node.isClickable,
-            longClickable = node.isLongClickable,
-            editable = node.isEditable,
-            scrollable = node.isScrollable,
-            enabled = node.isEnabled,
-            selected = node.isSelected,
-            checked = node.isChecked,
-            checkable = node.isCheckable,
-            focused = node.isFocused,
-            focusable = node.isFocusable,
-            visibleToUser = node.isVisibleToUser,
+            id = id, path = path, parentId = parentId, childIds = childIds, depth = depth, windowId = node.windowId,
+            className = node.className?.toString().orEmpty(), role = inferRole(node), text = node.text?.toString().orEmpty(),
+            contentDescription = node.contentDescription?.toString().orEmpty(), resourceId = node.viewIdResourceName.orEmpty(), bounds = bounds,
+            clickable = node.isClickable, longClickable = node.isLongClickable, editable = node.isEditable, scrollable = node.isScrollable,
+            enabled = node.isEnabled, selected = node.isSelected, checked = node.isChecked, checkable = node.isCheckable,
+            focused = node.isFocused, focusable = node.isFocusable, visibleToUser = node.isVisibleToUser,
         )
-        for (i in 0 until node.childCount) {
-            node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out) }
-        }
+        for (i in 0 until node.childCount) node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out) }
     }
 
+    private fun automationSelector(node: AccessibilityNodeInfo): AutomationSelector = AutomationSelector(
+        resourceId = node.viewIdResourceName?.takeIf { it.isNotBlank() },
+        text = node.text?.toString()?.takeIf { it.isNotBlank() },
+        contentDescription = node.contentDescription?.toString()?.takeIf { it.isNotBlank() },
+        role = inferRole(node),
+        className = node.className?.toString()?.takeIf { it.isNotBlank() },
+        requireClickable = node.isClickable.takeIf { it },
+        requireEditable = node.isEditable.takeIf { it },
+        requireScrollable = node.isScrollable.takeIf { it },
+    )
+
     private fun stableNodeId(path: String, node: AccessibilityNodeInfo, bounds: UiBounds): String {
-        val raw = listOf(
-            path,
-            node.viewIdResourceName.orEmpty(),
-            node.className?.toString().orEmpty(),
-            "${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}",
-        ).joinToString("|")
+        val raw = listOf(path, node.viewIdResourceName.orEmpty(), node.className?.toString().orEmpty(),
+            "${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}").joinToString("|")
         return sha256(raw).take(16)
     }
 
@@ -323,11 +300,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         val normalized = buildString {
             append(packageName.orEmpty())
             nodes.filter { it.visibleToUser }.take(800).forEach {
-                append('|').append(it.resourceId)
-                append('|').append(it.text.take(120))
-                append('|').append(it.contentDescription.take(120))
-                append('|').append(it.className)
-                append('|').append(it.bounds.left).append(',').append(it.bounds.top).append(',').append(it.bounds.right).append(',').append(it.bounds.bottom)
+                append('|').append(it.resourceId).append('|').append(it.text.take(120)).append('|').append(it.contentDescription.take(120))
+                    .append('|').append(it.className).append('|').append(it.bounds.left).append(',').append(it.bounds.top)
+                    .append(',').append(it.bounds.right).append(',').append(it.bounds.bottom)
             }
         }
         return sha256(normalized).take(20)
@@ -350,6 +325,5 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
-        .digest(value.toByteArray())
-        .joinToString("") { "%02x".format(it) }
+        .digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
 }

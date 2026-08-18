@@ -11,8 +11,8 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-alpha01"
+        versionCode = 3
+        versionName = "0.2.0-v2"
     }
 
     buildTypes {
@@ -36,4 +36,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20250517")
 }

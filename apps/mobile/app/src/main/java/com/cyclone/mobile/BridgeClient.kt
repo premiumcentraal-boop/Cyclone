@@ -1,6 +1,9 @@
 package com.cyclone.mobile
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
+import com.cyclone.mobile.automation.AutomationRuntime
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -12,8 +15,6 @@ import java.util.concurrent.TimeUnit
 
 object BridgeClient {
     private val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
-    // A physical phone has one interactive foreground UI. Serialize commands to prevent
-    // two remote actions racing each other across the same screen state.
     private val commandExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var socket: WebSocket? = null
     @Volatile private var appContext: Context? = null
@@ -23,20 +24,34 @@ object BridgeClient {
         val prefs = context.getSharedPreferences("cyclone", Context.MODE_PRIVATE)
         val url = prefs.getString("coreWsUrl", "").orEmpty()
         if (url.isBlank() || socket != null) return
+        val deviceId = prefs.getString("deviceId", "").orEmpty().ifBlank {
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+                ?.let { "android-$it" } ?: "android-${Build.FINGERPRINT.hashCode()}"
+        }
+        val deviceName = prefs.getString("deviceName", "").orEmpty().ifBlank {
+            listOf(Build.MANUFACTURER, Build.MODEL).filter { it.isNotBlank() }.joinToString(" ").ifBlank { "Android device" }
+        }
         val requestBuilder = Request.Builder().url(url)
-        prefs.getString("coreToken", "")?.takeIf { it.isNotBlank() }?.let { requestBuilder.header("Authorization", "Bearer $it") }
+            .header("X-Cyclone-Device-Id", deviceId)
+            .header("X-Cyclone-Device-Name", deviceName)
+            .header("X-Cyclone-Device-Platform", "android")
+        prefs.getString("coreToken", "")?.takeIf { it.isNotBlank() }
+            ?.let { requestBuilder.header("Authorization", "Bearer $it") }
         socket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 DeviceState.bridgeConnected = true
                 send(JSONObject()
                     .put("type", "mobile.hello")
                     .put("protocol", "phone-tool-v1")
-                    .put("androidApi", android.os.Build.VERSION.SDK_INT)
+                    .put("deviceId", deviceId)
+                    .put("deviceName", deviceName)
+                    .put("platform", "android")
+                    .put("androidApi", Build.VERSION.SDK_INT)
                     .put("tools", PhoneToolRegistry.toJson())
                     .put("capabilities", CapabilityRegistry.toJson(context)))
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) = handleCommand(text)
+            override fun onMessage(webSocket: WebSocket, text: String) = handleMessage(text)
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 DeviceState.bridgeConnected = false
@@ -57,12 +72,29 @@ object BridgeClient {
         DeviceState.bridgeConnected = false
     }
 
-    private fun handleCommand(raw: String) {
+    private fun handleMessage(raw: String) {
         val msg = runCatching { JSONObject(raw) }.getOrNull() ?: return
-        val context = appContext ?: return
+        if (msg.has("tool") || msg.optString("action").isNotBlank()) handleCommand(msg) else routeAutomationEvent(msg)
+    }
 
-        // Preserve the v0 takeover API and process ownership changes immediately rather
-        // than queueing them behind a long wait_for command.
+    private fun routeAutomationEvent(msg: JSONObject) {
+        val context = appContext ?: return
+        val type = msg.optString("type").ifBlank { "websocket.message" }
+        val payload = buildMap {
+            msg.keys().forEach { key ->
+                val value = msg.opt(key)
+                if (value != null && value !== JSONObject.NULL) put(key, value.toString())
+            }
+        }
+        when (type) {
+            "automation.request", "cyclone.remote", "mobile.automation.request" -> AutomationRuntime.onCycloneRemote(context, payload)
+            else -> AutomationRuntime.onWebSocketEvent(context, type, payload)
+        }
+        DeviceState.addLog("Automation bridge event routed: $type")
+    }
+
+    private fun handleCommand(msg: JSONObject) {
+        val context = appContext ?: return
         when (msg.optString("action")) {
             "takeover_start" -> {
                 DeviceState.setController(DeviceState.Controller.HUMAN)
@@ -111,27 +143,23 @@ object BridgeClient {
         val params = JSONObject()
         when (legacy) {
             "click_text" -> params.put("selector", JSONObject().put("textContains", msg.optString("text")))
-            "set_text" -> params
-                .put("selector", JSONObject().put("textContains", msg.optString("target")))
-                .put("value", msg.optString("value"))
+            "set_text" -> params.put("selector", JSONObject().put("textContains", msg.optString("target"))).put("value", msg.optString("value"))
             "tap" -> params.put("x", msg.optDouble("x")).put("y", msg.optDouble("y"))
-            "swipe" -> params.put("x1", msg.optDouble("x1")).put("y1", msg.optDouble("y1"))
-                .put("x2", msg.optDouble("x2")).put("y2", msg.optDouble("y2"))
+            "swipe" -> params.put("x1", msg.optDouble("x1")).put("y1", msg.optDouble("y1")).put("x2", msg.optDouble("x2")).put("y2", msg.optDouble("y2"))
             "screenshot" -> params.put("includeBase64", true)
         }
         return PhoneToolRequest(msg.optString("id").ifBlank { "legacy-${System.nanoTime()}" }, tool, params)
     }
 
     fun sendNotificationEvent(packageName: String, title: String, text: String, key: String? = null) {
-        send(JSONObject()
-            .put("type", "mobile.notification")
-            .put("key", key ?: JSONObject.NULL)
-            .put("package", packageName)
-            .put("title", title)
-            .put("text", text))
+        send(JSONObject().put("type", "mobile.notification").put("key", key ?: JSONObject.NULL).put("package", packageName).put("title", title).put("text", text))
     }
 
-    private fun send(json: JSONObject) {
-        socket?.send(json.toString())
+    fun sendAutomationEvent(type: String, payload: Map<String, String>): Boolean {
+        val json = JSONObject().put("type", type)
+        payload.forEach { (key, value) -> json.put(key, value) }
+        return socket?.send(json.toString()) == true
     }
+
+    private fun send(json: JSONObject) { socket?.send(json.toString()) }
 }
