@@ -30,17 +30,25 @@ class FakeSocket:
         self.closed = (code, reason)
 
 
-async def respond_to_latest(
+async def respond_to_tool(
     registry: MobileDeviceRegistry,
     *,
     device_id: str,
     session_id: str,
     socket: FakeSocket,
+    expected_tool: str,
     ok: bool = True,
     payload: object | None = None,
 ) -> None:
-    await asyncio.sleep(0)
-    command = socket.sent[-1]
+    command: dict[str, object] | None = None
+    for _ in range(100):
+        await asyncio.sleep(0)
+        if socket.sent and socket.sent[-1].get("tool") == expected_tool:
+            command = socket.sent[-1]
+            break
+    if command is None:
+        raise AssertionError(f"Timed out waiting for fake command {expected_tool}")
+
     await registry.receive(
         device_id,
         session_id,
@@ -89,11 +97,12 @@ async def test_harmless_settings_battery_flow_routes_plans_acts_and_verifies() -
             arguments={"package": "com.android.settings"},
         )
     )
-    await respond_to_latest(
+    await respond_to_tool(
         registry,
         device_id=device_id,
         session_id=session.session_id,
         socket=socket,
+        expected_tool="phone.open_app",
         payload={"package": "com.android.settings"},
     )
     assert (await open_app).ok is True
@@ -109,25 +118,28 @@ async def test_harmless_settings_battery_flow_routes_plans_acts_and_verifies() -
         )
     )
 
-    await respond_to_latest(
+    await respond_to_tool(
         registry,
         device_id=device_id,
         session_id=session.session_id,
         socket=socket,
+        expected_tool="phone.find",
         payload={"matches": [{"text": "Battery", "role": "button"}]},
     )
-    await respond_to_latest(
+    await respond_to_tool(
         registry,
         device_id=device_id,
         session_id=session.session_id,
         socket=socket,
+        expected_tool="phone.click",
         payload={"clicked": True},
     )
-    await respond_to_latest(
+    await respond_to_tool(
         registry,
         device_id=device_id,
         session_id=session.session_id,
         socket=socket,
+        expected_tool="phone.assert",
         payload={"assertion": "matched"},
     )
     outcome = await navigation
