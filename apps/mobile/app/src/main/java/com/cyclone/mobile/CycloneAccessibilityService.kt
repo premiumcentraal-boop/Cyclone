@@ -309,7 +309,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
             AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "ACTION_SCROLL_FORWARD"
             AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "ACTION_SCROLL_BACKWARD"
-            AccessibilityNodeInfo.ACTION_SCROLL_TO_POSITION -> "ACTION_SCROLL_TO_POSITION"
+            AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_TO_POSITION.id -> "ACTION_SCROLL_TO_POSITION"
             AccessibilityNodeInfo.ACTION_SET_TEXT -> "ACTION_SET_TEXT"
             AccessibilityNodeInfo.ACTION_EXPAND -> "ACTION_EXPAND"
             AccessibilityNodeInfo.ACTION_COLLAPSE -> "ACTION_COLLAPSE"
