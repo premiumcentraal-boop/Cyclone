@@ -12,7 +12,8 @@ from .mobile_protocol import (
     ControllerOwner,
     DeviceDescriptor,
     DeviceSessionSnapshot,
-    OBSERVATION_TOOLS,
+    HUMAN_SAFE_TOOLS,
+    NON_MUTATING_TOOLS,
     PhoneCommand,
     PhoneResult,
     now_utc,
@@ -76,9 +77,11 @@ class MobileSession:
         )
 
     async def execute(self, command: PhoneCommand, timeout: float = 30.0) -> PhoneResult:
-        if self.controller is ControllerOwner.HUMAN and command.tool not in OBSERVATION_TOOLS:
-            raise ControllerOwnershipError("Human currently owns device input.")
-        if self.fresh_observation_required and command.tool not in OBSERVATION_TOOLS:
+        if self.controller is ControllerOwner.HUMAN and command.tool not in HUMAN_SAFE_TOOLS:
+            raise ControllerOwnershipError(
+                "Human currently owns the device; sensitive phone reads and input are paused."
+            )
+        if self.fresh_observation_required and command.tool not in NON_MUTATING_TOOLS:
             raise FreshObservationRequiredError(
                 "phone.observe must succeed before agent input resumes after takeover."
             )
@@ -102,7 +105,9 @@ class MobileSession:
 
     async def set_controller(self, owner: ControllerOwner) -> None:
         self.controller = owner
-        if owner is ControllerOwner.AGENT:
+        if owner is ControllerOwner.HUMAN:
+            self._fail_pending_sensitive_commands()
+        else:
             self.fresh_observation_required = True
         await self.socket.send_json(
             {
@@ -113,6 +118,14 @@ class MobileSession:
                 "freshObserveRequired": self.fresh_observation_required,
             }
         )
+
+    def _fail_pending_sensitive_commands(self) -> None:
+        for pending in self.pending.values():
+            if pending.tool in HUMAN_SAFE_TOOLS or pending.future.done():
+                continue
+            pending.future.set_exception(
+                ControllerOwnershipError("Command interrupted because human takeover began.")
+            )
 
     def receive(self, message: dict[str, Any]) -> dict[str, Any] | None:
         self.last_seen_at = now_utc()
