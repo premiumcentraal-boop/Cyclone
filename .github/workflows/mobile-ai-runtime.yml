@@ -1,4 +1,4 @@
-name: Cyclone Mobile V2 Integration
+name: Cyclone Mobile V2.3 Integration
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - release/cyclone-mobile-v2
+      - release/cyclone-mobile-v2.3-openrouter-agent
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/cyclone-core/**'
@@ -42,7 +43,7 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
       - name: Run Hermes mobile + Mobilerun tests
         run: python -m pytest -q tests/test_mobile_*.py
-      - name: Import V2 Core entrypoint
+      - name: Import Core entrypoint
         run: python -c "from app.mobile_entry import app; assert any(getattr(r, 'path', '') == '/api/v1/mobile/connect' for r in app.routes)"
 
   android-v2:
@@ -63,11 +64,11 @@ jobs:
           gradle-version: '8.9'
       - name: Run integrated Android tests
         run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
-      - name: Assemble Cyclone Mobile V2 APK
+      - name: Assemble Cyclone Mobile V2.3 APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload Cyclone Mobile V2 APK
+      - name: Upload Cyclone Mobile V2.3 APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-apk
+          name: cyclone-mobile-v2-3-integration-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
