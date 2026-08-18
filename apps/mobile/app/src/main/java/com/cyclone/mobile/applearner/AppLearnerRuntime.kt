@@ -43,6 +43,7 @@ object AppLearnerRuntime {
 
     fun start(context: Context, packageName: String, appLabel: String, instruction: String, mode: LearningMode, useAiPlanner: Boolean = true) {
         initialize(context)
+        if (FollowMeLearnerRuntime.progress().active) FollowMeLearnerRuntime.stop()
         controllerBeforeLearning = DeviceState.controller
         if (mode == LearningMode.PASSIVE) DeviceState.setController(DeviceState.Controller.HUMAN)
         explorer.start(AppExplorer.SessionConfig(packageName, appLabel, instruction, mode, useAiPlanner = useAiPlanner))
@@ -115,6 +116,11 @@ object AppLearnerRuntime {
 
     fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (!initialized) return
+
+        // V2.7 Follow Me is a separate passive whole-phone observer. It gets the same Accessibility
+        // stream but never performs input actions and never receives typed field contents.
+        FollowMeLearnerRuntime.onAccessibilityEvent(event)
+
         val p = explorer.progress()
         if (p.mode != LearningMode.PASSIVE || p.state != LearnerSessionState.LEARNING) return
         val packageName = event.packageName?.toString() ?: return
