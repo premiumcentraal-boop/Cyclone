@@ -1,4 +1,4 @@
-name: Cyclone Mobile V2 APK
+name: Cyclone Mobile V2.2 APK
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
       - feature/android-mobile-v0
       - feature/mobile-phone-toolbox-agent1
       - release/cyclone-mobile-v2
+      - release/cyclone-mobile-v2.2
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
@@ -38,13 +39,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Run V2 mobile unit tests
+      - name: Run V2.2 mobile unit tests
         run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
-      - name: Assemble V2 debug APK
+      - name: Assemble V2.2 debug APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload V2 APK
+      - name: Upload V2.2 APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-apk
+          name: cyclone-mobile-v2-2-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
