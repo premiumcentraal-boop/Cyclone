@@ -40,6 +40,16 @@ class AutomationRunner(
             startedAt = now(),
             variables = variables.toMap()
         )
+
+        if (resume != null && !integrations.refreshObservation()) {
+            run = run.copy(
+                state = RunState.WAITING_FOR_HUMAN,
+                error = "resume_observation_failed",
+                variables = variables.toMap()
+            )
+            publish(run)
+            return run
+        }
         publish(run)
 
         if (!automation.conditions.all { evaluate(it, variables) }) {
@@ -53,20 +63,45 @@ class AutomationRunner(
         var index = resume?.nextStepIndex ?: 0
         while (index < automation.steps.size) {
             val step = automation.steps[index]
+            val resumingCurrentHumanStep = resume?.waitingForHuman == true && resume.nextStepIndex == index
+
+            if (resumingCurrentHumanStep && step.type == StepType.REQUEST_HUMAN_TAKEOVER) {
+                records.add(
+                    RunStepRecord(
+                        stepId = step.id,
+                        name = step.name,
+                        state = RunState.SUCCESS,
+                        startedAt = now(),
+                        endedAt = now(),
+                        message = "human_takeover_completed"
+                    )
+                )
+                index++
+                run = run.copy(state = RunState.RUNNING, steps = records.toList(), variables = variables.toMap(), error = null)
+                publish(run)
+                continue
+            }
+
             store.saveCheckpoint(Checkpoint(run.id, automation.id, index, variables.toMap(), waitingForHuman = false))
-            if (step.confirmationRequired && !confirmations.confirm(step, variables)) {
+            val confirmationAlreadyApproved = resumingCurrentHumanStep && step.confirmationRequired
+            if (step.confirmationRequired && !confirmationAlreadyApproved && !confirmations.confirm(step, variables)) {
                 takeover.request("Confirmation required: ${step.name}", run.id, step.id)
                 val record = RunStepRecord(step.id, step.name, RunState.WAITING_FOR_HUMAN, now(), now(), message = "confirmation_required")
                 records.add(record)
                 store.saveCheckpoint(Checkpoint(run.id, automation.id, index, variables.toMap(), waitingForHuman = true))
-                run = run.copy(state = RunState.WAITING_FOR_HUMAN, steps = records.toList(), variables = variables.toMap())
+                run = run.copy(state = RunState.WAITING_FOR_HUMAN, steps = records.toList(), variables = variables.toMap(), error = null)
                 publish(run)
                 return run
             }
 
             val record = executeWithRecovery(run.id, step, variables)
             records.add(record)
-            run = run.copy(steps = records.toList(), variables = variables.toMap(), state = if (record.state == RunState.WAITING_FOR_HUMAN) RunState.WAITING_FOR_HUMAN else RunState.RUNNING)
+            run = run.copy(
+                steps = records.toList(),
+                variables = variables.toMap(),
+                state = if (record.state == RunState.WAITING_FOR_HUMAN) RunState.WAITING_FOR_HUMAN else RunState.RUNNING,
+                error = null
+            )
             publish(run)
 
             when (record.state) {
