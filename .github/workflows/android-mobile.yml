@@ -1,4 +1,4 @@
-name: Cyclone Mobile V2.5 Beta APK
+name: Cyclone Mobile V2.6 Beta APK
 
 on:
   workflow_dispatch:
@@ -12,6 +12,7 @@ on:
       - release/cyclone-mobile-v2.3-openrouter-agent
       - release/cyclone-mobile-v2.4-guided-recorder
       - release/cyclone-mobile-v2.5-app-learner-beta
+      - release/cyclone-mobile-v2.6-ai-brain-rehaul
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
@@ -42,23 +43,23 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Run V2.5 Beta mobile unit tests
+      - name: Run V2.6 Beta mobile unit tests
         shell: bash
         run: |
           set -o pipefail
-          gradle -p apps/mobile :app:testDebugUnitTest --stacktrace 2>&1 | tee v25-gradle-test.log
-      - name: Upload V2.5 diagnostic log
+          gradle -p apps/mobile :app:testDebugUnitTest --stacktrace 2>&1 | tee v26-gradle-test.log
+      - name: Upload V2.6 diagnostic log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-5-build-log
-          path: v25-gradle-test.log
+          name: cyclone-mobile-v2-6-build-log
+          path: v26-gradle-test.log
           if-no-files-found: warn
-      - name: Assemble Cyclone V2.5 Beta APK
+      - name: Assemble Cyclone V2.6 Beta APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload Cyclone V2.5 Beta APK
+      - name: Upload Cyclone V2.6 Beta APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-5-beta-apk
+          name: cyclone-mobile-v2-6-beta-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
