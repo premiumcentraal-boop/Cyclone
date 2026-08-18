@@ -40,7 +40,7 @@ object GuidedWorkflowOptimizer {
                 for (i in 0 until minOf(steps.length(), 8)) {
                     val path = steps.optJSONObject(i)?.optString("beforeScreenshot").orEmpty()
                     val file = File(path)
-                    if (file.isFile && file.length() in 1..4_000_000) {
+                    if (file.isFile && file.length() in 1L..4_000_000L) {
                         content.put(
                             JSONObject().put("type", "image_url").put(
                                 "image_url",
