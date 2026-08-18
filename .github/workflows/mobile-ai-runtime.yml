@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - release/cyclone-mobile-v2
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
