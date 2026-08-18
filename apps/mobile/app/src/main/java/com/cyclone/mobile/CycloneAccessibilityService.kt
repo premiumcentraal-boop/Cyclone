@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
@@ -50,6 +51,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         DeviceState.accessibilityConnected = true
         DeviceState.addLog("Accessibility connected")
         AutomationRuntime.initialize(this)
+        AppLearnerRuntime.initialize(this)
         BridgeClient.start(this)
     }
 
@@ -71,6 +73,7 @@ class CycloneAccessibilityService : AccessibilityService() {
                 AccessibilityEvent.TYPE_VIEW_SCROLLED -> AutomationRuntime.recorder.recordScroll("forward")
             }
         }
+        AppLearnerRuntime.onAccessibilityEvent(event)
     }
 
     override fun onInterrupt() = Unit
@@ -85,7 +88,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    /** Opens Cyclone V2.4's floating teach-a-routine bubble over any app. */
+    /** Opens Cyclone V2.4+'s floating teach-a-routine bubble over any app. */
     fun showGuidedRecorderOverlay() {
         if (guidedOverlay == null) guidedOverlay = GuidedRecorderOverlayController(this)
         guidedOverlay?.show()
@@ -195,10 +198,7 @@ class CycloneAccessibilityService : AccessibilityService() {
     fun goBack(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_BACK)
     fun goHome(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_HOME)
 
-    /**
-     * Guided gestures are allowed only through the recorder overlay and bypass the AGENT lock because
-     * they are direct, current user instructions. Normal phone.* tools remain blocked while HUMAN owns input.
-     */
+    /** Guided gestures are direct user instructions and bypass the AGENT lock. */
     fun guidedTap(x: Float, y: Float): Boolean = rawTap(x, y)
     fun guidedLongPress(x: Float, y: Float, durationMs: Long = 750): Boolean = rawLongPress(x, y, durationMs)
     fun guidedSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean = rawSwipe(x1, y1, x2, y2, durationMs)
@@ -298,9 +298,26 @@ class CycloneAccessibilityService : AccessibilityService() {
             clickable = node.isClickable, longClickable = node.isLongClickable, editable = node.isEditable, scrollable = node.isScrollable,
             enabled = node.isEnabled, selected = node.isSelected, checked = node.isChecked, checkable = node.isCheckable,
             focused = node.isFocused, focusable = node.isFocusable, visibleToUser = node.isVisibleToUser,
+            actions = accessibilityActionNames(node),
         )
         for (i in 0 until node.childCount) node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out) }
     }
+
+    private fun accessibilityActionNames(node: AccessibilityNodeInfo): List<String> = node.actionList.orEmpty().map { action ->
+        when (action.id) {
+            AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
+            AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
+            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "ACTION_SCROLL_FORWARD"
+            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "ACTION_SCROLL_BACKWARD"
+            AccessibilityNodeInfo.ACTION_SCROLL_TO_POSITION -> "ACTION_SCROLL_TO_POSITION"
+            AccessibilityNodeInfo.ACTION_SET_TEXT -> "ACTION_SET_TEXT"
+            AccessibilityNodeInfo.ACTION_EXPAND -> "ACTION_EXPAND"
+            AccessibilityNodeInfo.ACTION_COLLAPSE -> "ACTION_COLLAPSE"
+            AccessibilityNodeInfo.ACTION_FOCUS -> "ACTION_FOCUS"
+            AccessibilityNodeInfo.ACTION_SELECT -> "ACTION_SELECT"
+            else -> action.label?.toString()?.takeIf { it.isNotBlank() } ?: "ACTION_${action.id}"
+        }
+    }.distinct()
 
     private fun automationSelector(node: AccessibilityNodeInfo): AutomationSelector = AutomationSelector(
         resourceId = node.viewIdResourceName?.takeIf { it.isNotBlank() },
