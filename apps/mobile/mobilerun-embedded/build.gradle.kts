@@ -3,6 +3,27 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val upstreamMobilerun = file("${rootDir}/../../third_party/mobilerun-portal/app/src/main")
+val adaptedSources = layout.buildDirectory.dir("generated/mobilerun-src")
+
+// Keep the upstream git submodule pristine and reproducible. Kotlin 2 tightens
+// the nullability of PackageInfo.versionName compared with the Kotlin version
+// used by the pinned upstream app, so make the one compatibility adaptation in
+// generated build input instead of silently editing vendored source.
+val prepareMobilerunSources by tasks.registering(Copy::class) {
+    from(upstreamMobilerun.resolve("java"))
+    into(adaptedSources)
+    filteringCharset = "UTF-8"
+    filesMatching("**/MobilerunAccessibilityService.kt") {
+        filter { line: String ->
+            line.replace(
+                "packageManager.getPackageInfo(packageName, 0).versionName",
+                "packageManager.getPackageInfo(packageName, 0).versionName ?: \"unknown\"",
+            )
+        }
+    }
+}
+
 android {
     namespace = "com.mobilerun.portal"
     compileSdk = 35
@@ -24,12 +45,9 @@ android {
 
     sourceSets {
         getByName("main") {
-            java.srcDir("${rootDir}/../../third_party/mobilerun-portal/app/src/main/java")
-            res.srcDir("${rootDir}/../../third_party/mobilerun-portal/app/src/main/res")
-            assets.srcDir("${rootDir}/../../third_party/mobilerun-portal/app/src/main/assets")
-        }
-        getByName("test") {
-            java.srcDir("${rootDir}/../../third_party/mobilerun-portal/app/src/test/java")
+            java.srcDir(adaptedSources)
+            res.srcDir(upstreamMobilerun.resolve("res"))
+            assets.srcDir(upstreamMobilerun.resolve("assets"))
         }
     }
 
@@ -43,6 +61,10 @@ android {
     }
 }
 
+tasks.named("preBuild").configure {
+    dependsOn(prepareMobilerunSources)
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -52,8 +74,4 @@ dependencies {
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
     implementation("io.github.webrtc-sdk:android:137.7151.05")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
-    testImplementation("io.mockk:mockk:1.13.12")
 }
