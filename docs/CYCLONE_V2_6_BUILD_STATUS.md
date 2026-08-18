@@ -36,11 +36,13 @@ This document deliberately separates code/CI evidence from physical Android veri
 - [x] display summaries stripped before subsequent model context
 - [x] trace privacy redaction
 - [x] typed values intentionally omitted from generated trace summaries
+- [x] model-authored `phone.type` display summaries ignored so typed values cannot be echoed into trace history
 - [x] screenshot base64 omitted from persistent trace
 - [x] user-only live trace overlay built with `TYPE_ACCESSIBILITY_OVERLAY`
 - [x] trace overlay is non-focusable and non-touchable
 - [x] trace overlay listens only to local `AiTraceBus`
 - [x] trace overlay can be toggled from AI page
+- [x] enabled trace overlay is restored when Cyclone resumes and Accessibility is connected
 - [x] explicit UX language that trace is not raw hidden chain-of-thought
 - [x] `cyclone_brain.db` persistent post-task learning store
 - [x] post-task reports
@@ -54,6 +56,7 @@ This document deliberately separates code/CI evidence from physical Android veri
 - [x] existing `Cyclone Brain/Apps/...` App Learner knowledge retained
 - [x] tests for trace privacy
 - [x] tests that trace humanization does not include typed value
+- [x] tests that model-provided typing summaries cannot leak typed content into AI history
 - [x] tests for arbitrary custom model slug
 - [x] tests for Brain goal normalization
 - [x] tests for Brain confidence changes
@@ -62,7 +65,7 @@ This document deliberately separates code/CI evidence from physical Android veri
 
 ## CI verified
 
-The following GitHub Actions runs completed successfully for the V2.6 source commit `96c847a1d141213b180b63cab56b365ad9821c51`:
+The following GitHub Actions runs completed successfully for the final V2.6 source commit `64ffc7626b4f80502cdc0fa82fb69eaf0d2c9c65`:
 
 - [x] `Cyclone Mobile V2.6 Beta APK` — Android unit tests
 - [x] `Cyclone Mobile V2.6 Beta APK` — APK assembly
