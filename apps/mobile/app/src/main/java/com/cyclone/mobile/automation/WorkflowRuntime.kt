@@ -31,13 +31,15 @@ class AutomationRunner(
         val variables = automation.variables.associate { it.name to it.defaultValue.orEmpty() }.toMutableMap()
         variables.putAll(trigger.payload)
         resume?.variables?.let(variables::putAll)
+        val previousRun = resume?.let { store.getRun(it.runId) }
         var run = AutomationRun(
             id = resume?.runId ?: java.util.UUID.randomUUID().toString(),
             automationId = automation.id,
             automationName = automation.name,
             state = RunState.RUNNING,
-            trigger = trigger,
-            startedAt = now(),
+            trigger = previousRun?.trigger ?: trigger,
+            startedAt = previousRun?.startedAt ?: now(),
+            steps = previousRun?.steps ?: emptyList(),
             variables = variables.toMap()
         )
 
@@ -59,7 +61,7 @@ class AutomationRunner(
             return run
         }
 
-        val records = mutableListOf<RunStepRecord>()
+        val records = previousRun?.steps?.toMutableList() ?: mutableListOf()
         var index = resume?.nextStepIndex ?: 0
         while (index < automation.steps.size) {
             val step = automation.steps[index]
