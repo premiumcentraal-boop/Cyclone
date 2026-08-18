@@ -60,19 +60,29 @@ This file deliberately separates source implementation, CI evidence and physical
 - [x] unit tests for stable Home/app-open identities
 - [x] V2.7 architecture + integration documentation
 
-## CI verification
+## CI verified
 
-Pending until the final V2.7 source commit passes all GitHub Actions gates:
+The V2.7 Android source commit `f9386928a067996f56cb9e2694dcef5a431ae9cd` passed every release gate. Later commits on the branch only update documentation.
 
-- [ ] `Cyclone Mobile V2.7 Beta APK` — Android unit tests
-- [ ] `Cyclone Mobile V2.7 Beta APK` — APK assembly
-- [ ] `Cyclone Mobile V2.7 Beta APK` — artifact upload
-- [x] `Cyclone Mobile V2.7 Integration` — Core/Hermes/Mobilerun Python tests (first PR run)
-- [ ] `Cyclone Mobile V2.7 Integration` — Android integration tests
-- [ ] `Cyclone Mobile V2.7 Integration` — APK assembly/artifact
-- [ ] `Cyclone Mobile V2.7 Embedded Runtime` — Mobilerun source check
-- [ ] `Cyclone Mobile V2.7 Embedded Runtime` — Android tests
-- [ ] `Cyclone Mobile V2.7 Embedded Runtime` — unified APK assembly/artifact
+- [x] `Cyclone Mobile V2.7 Beta APK` — Android unit tests
+- [x] `Cyclone Mobile V2.7 Beta APK` — APK assembly
+- [x] `Cyclone Mobile V2.7 Beta APK` — artifact upload
+- [x] `Cyclone Mobile V2.7 Integration` — Core/Hermes/Mobilerun Python tests
+- [x] `Cyclone Mobile V2.7 Integration` — Android integration tests
+- [x] `Cyclone Mobile V2.7 Integration` — APK assembly/artifact
+- [x] `Cyclone Mobile V2.7 Embedded Runtime` — Mobilerun source check
+- [x] `Cyclone Mobile V2.7 Embedded Runtime` — Android tests
+- [x] `Cyclone Mobile V2.7 Embedded Runtime` — unified APK assembly/artifact
+
+Primary APK artifact:
+
+- `cyclone-mobile-v2-7-beta-apk`
+- workflow run `32194031904`
+- artifact id `9345304120`
+
+Integration workflow run: `32194031936`
+
+Embedded runtime workflow run: `32194031945`
 
 ## Physical Android verification — NOT YET CLAIMED
 
