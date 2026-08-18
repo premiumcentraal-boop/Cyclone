@@ -84,14 +84,24 @@ Transport-level MCP timeout behavior still needs an end-to-end Hermes integratio
 
 Controller ownership is enforced twice:
 
-1. Cyclone Core `MobileDeviceRegistry` blocks mutating commands while HUMAN owns the device.
+1. Cyclone Core `MobileDeviceRegistry` blocks all input and sensitive reads while HUMAN owns the device. At the Core/Hermes boundary only coarse metadata (`phone.get_current_app` and `phone.capabilities`) remains available; UI-tree observation, screenshots, notifications and clipboard reads are paused.
 2. Agent 1's phone toolbox independently rejects mutating commands while HUMAN owns the device.
 
-This defense in depth prevents a queued or buggy Core command from bypassing the phone-side lock.
+When HUMAN takeover begins, Core also fails pending sensitive command futures so a waiting Hermes call cannot later mistake a stale action result for a valid continuation. Agent 1 remains responsible for phone-side suppression of queued actions already delivered to the Android bridge.
 
-When ownership returns to AGENT, both layers require a fresh observation before mutations continue.
+This defense in depth prevents a queued or buggy Core command from bypassing the phone-side lock and keeps sensitive login/verification screens out of the model context during takeover.
+
+When ownership returns to AGENT, both layers require a fresh observation before mutations continue. The resume coordinator switches to AGENT only provisionally, performs that observation, checks the structured resume condition, and restores HUMAN ownership if verification fails.
 
 ## API
+
+All REST state/control endpoints below require:
+
+```text
+X-Cyclone-Internal-Key: <internal integration key>
+```
+
+The persistent device WebSocket uses the separate `CYCLONE_MOBILE_DEVICE_TOKEN` Bearer credential and stable device identity headers.
 
 ### Request takeover
 
@@ -118,14 +128,16 @@ Example body:
 
 ```text
 GET /api/v1/mobile/takeovers/{taskId}
+X-Cyclone-Internal-Key: <internal integration key>
 ```
 
-This is intended for the local Cyclone UI/takeover card. Core remains loopback-published by default.
+This is intended for a trusted Cyclone UI/takeover-card integration. Core remains loopback-published by default; a later user-session authorization layer can replace the internal integration credential for a browser-facing UI without weakening the mobile-control boundary.
 
 ### Return to agent
 
 ```text
 POST /api/v1/mobile/takeovers/{taskId}/return
+X-Cyclone-Internal-Key: <internal integration key>
 ```
 
 Return does **not** immediately authorize new actions. Core first:
@@ -189,14 +201,16 @@ with task ID, device ID, reason/checkpoint metadata and the fresh observation fi
 - [ ] request takeover while AGENT owns phone
 - [ ] verify phone-side controller becomes HUMAN
 - [ ] verify mutating Core command is rejected
+- [ ] verify screenshot/UI-tree/clipboard reads are rejected at the Core/Hermes boundary while HUMAN owns the phone
+- [ ] verify only coarse current-app/capability metadata remains available through Core while HUMAN owns the phone
 - [ ] verify mutating Agent 1 tool is independently rejected
-- [ ] verify observation remains available where intended
+- [ ] verify pending sensitive Core command futures are interrupted at takeover
 - [ ] verify no screenshot/model polling occurs while waiting
 - [ ] press Return to agent
 - [ ] verify fresh `phone.observe` is mandatory
 - [ ] verify a mismatching resume condition returns device to HUMAN
 - [ ] verify a matching resume condition releases the wait event
-- [ ] verify no queued pre-takeover action fires afterward
+- [ ] verify no queued pre-takeover action fires afterward on a physical device
 - [ ] verify long human wait against actual Hermes MCP timeout
 - [ ] verify restart behavior after durable checkpoint binding is added
 
