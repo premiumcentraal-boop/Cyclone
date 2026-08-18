@@ -26,6 +26,8 @@ jobs:
     defaults:
       run:
         working-directory: apps/cyclone-core
+    env:
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,6 +38,6 @@ jobs:
       - name: Install Cyclone Core dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
       - name: Test Mobilerun compatibility backend
-        run: pytest -q tests/test_mobile_portal.py
+        run: python -m pytest -q tests/test_mobile_portal.py
       - name: Import mobile gateway
         run: python -c "from app.mobile_gateway import app; assert app.title == 'Cyclone Mobile Gateway'"
