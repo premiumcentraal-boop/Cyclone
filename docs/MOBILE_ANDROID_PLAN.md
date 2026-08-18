@@ -10,7 +10,7 @@ Target: **non-root Android 14+**. Branch: `feature/android-mobile-v0`.
 
 | Capability | Built | Verified | Next evidence |
 |---|---:|---:|---|
-| Android 14+ application shell | ✅ | ⬜ | CI assembleDebug |
+| Android 14+ application shell | ✅ | ✅ | install CI APK on Android 14+ |
 | Accessibility service | ✅ | ⬜ | enable on physical phone |
 | UI tree | ✅ | ⬜ | capture real app hierarchy |
 | semantic click / text | ✅ | ⬜ | click a harmless control |
@@ -22,7 +22,7 @@ Target: **non-root Android 14+**. Branch: `feature/android-mobile-v0`.
 | safe dry-run default | ✅ | ⬜ | verify no click while disabled |
 | WebSocket mobile bridge | ✅ | ⬜ | implement/connect Core endpoint |
 | human controller lock | ✅ | ⬜ | reject agent action while HUMAN |
-| APK build workflow | ✅ | ⬜ | GitHub Actions succeeds + artifact |
+| APK build workflow | ✅ | ✅ | CI run 32152844872 succeeded and artifact uploaded |
 | AI visual fallback | ⬜ | ⬜ | add only after screenshot path works |
 | Hermes event-driven takeover/resume | ⬜ | ⬜ | Core-side task checkpoint integration |
 | learned/local skills | ⬜ | ⬜ | stable Teamwork flow first |
@@ -30,10 +30,10 @@ Target: **non-root Android 14+**. Branch: `feature/android-mobile-v0`.
 
 ## Step-by-step gates
 
-### Gate 1 — Buildable APK
-CI compiles `apps/mobile` with Java 17, SDK 35 and Gradle 8.9. Upload the debug APK artifact. No device capability is called verified until installed.
+### Gate 1 — Buildable APK — VERIFIED
+GitHub CI compiled `apps/mobile` with Java 17, Android SDK 35 and Gradle 8.9. Workflow run `32152844872` completed successfully and uploaded the `cyclone-mobile-debug-apk` artifact. The final extracted APK is about 7.5 MB. This verifies buildability only, not device behavior.
 
-### Gate 2 — Physical phone control
+### Gate 2 — Physical phone control — NEXT
 Install on Android 14+, enable Accessibility, then verify `observe`, screenshot, click-by-text, swipe/scroll, Back and Home. Record failures by OEM/device.
 
 ### Gate 3 — Event-driven observation
@@ -53,4 +53,4 @@ Restart app/services, reboot phone, network disconnect/reconnect, app update, sc
 
 ## Current honest position
 
-The repository now contains the first APK source and CI builder, but no physical-device claim is verified yet. The next objective evidence is a successful CI APK artifact, followed by installation on an Android 14+ phone.
+**Gate 1 is complete.** The first Android 14+ APK has been compiled successfully and the CI artifact exists. No physical-device capability is marked verified yet because no Android 14+ phone has been connected to this build session. The next step is to install the APK on a real device and run Gate 2 acceptance tests.
