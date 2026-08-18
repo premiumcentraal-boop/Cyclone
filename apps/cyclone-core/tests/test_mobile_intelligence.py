@@ -155,7 +155,7 @@ class FakeTakeoverRegistry:
             command_id="cmd-observe",
             tool=tool,
             ok=True,
-            payload={"package": "com.android.settings"},
+            payload={"package": "com.example.app"},
             after_fingerprint="fresh-state",
         )
 
