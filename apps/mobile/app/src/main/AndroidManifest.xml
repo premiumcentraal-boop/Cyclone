@@ -18,6 +18,10 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name=".automation.AutomationAlarmReceiver"
+            android:exported="false" />
+
         <service
             android:name=".CycloneAccessibilityService"
             android:exported="false"

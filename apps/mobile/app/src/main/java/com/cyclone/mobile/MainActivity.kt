@@ -17,17 +17,24 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.app.NotificationManagerCompat
+import com.cyclone.mobile.automation.AutomationDefinition
+import com.cyclone.mobile.automation.AutomationRuntime
+import com.cyclone.mobile.automation.SkillDefinition
+import com.cyclone.mobile.automation.StepDefinition
+import com.cyclone.mobile.automation.StepType
 
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AutomationRuntime.initialize(this)
         buildUi()
     }
 
     override fun onResume() {
         super.onResume()
+        AutomationRuntime.initialize(this)
         buildUi()
     }
 
@@ -40,10 +47,113 @@ class MainActivity : Activity() {
         scroll.addView(root)
         setContentView(scroll)
 
-        title("Cyclone Mobile · Android 14+")
-        text("First non-root mobile node. Built features are checked separately from on-device verification so the app never claims a test that has not happened.")
+        title("Cyclone Mobile · Automation Studio")
+        text("Universal Android automations built from typed phone tools. Deterministic steps run without AI; Hermes can later generate and recover workflows through the documented contract.")
 
-        section("Device permissions")
+        section("Ask Cyclone")
+        val prefs = getSharedPreferences("cyclone", Context.MODE_PRIVATE)
+        val aiRequest = edit("Describe what you want Cyclone to do", prefs.getString("pendingAiBuildRequest", "") ?: "")
+        button("Save AI Build request") {
+            val request = aiRequest.text.toString().trim()
+            prefs.edit().putString("pendingAiBuildRequest", request).apply()
+            DeviceState.addLog("AI Build request saved for Agent 3 integration")
+            buildUi()
+        }
+        text("Agent 2 stores the request boundary only. Agent 3 must compile it into validated typed workflow objects before activation.")
+
+        section("Automations")
+        val automations = AutomationRuntime.store.listAutomations()
+        if (automations.isEmpty()) text("No automations yet.")
+        automations.forEach { automation ->
+            val enabled = CheckBox(this).apply {
+                text = automation.name
+                isChecked = automation.enabled
+                setOnCheckedChangeListener { _, checked ->
+                    AutomationRuntime.store.saveAutomation(automation.copy(enabled = checked))
+                }
+            }
+            root.addView(enabled)
+            if (automation.description.isNotBlank()) text(automation.description)
+            text("Trigger: ${automation.trigger.type} · ${automation.steps.size} steps")
+            button("Run · ${automation.name}") {
+                AutomationRuntime.router.runManual(automation.id)
+                DeviceState.addLog("Manual automation queued: ${automation.name}")
+            }
+        }
+
+        section("Skills")
+        val skills = AutomationRuntime.store.listSkills()
+        if (skills.isEmpty()) text("No reusable skills saved yet.")
+        skills.forEach { skill -> text("${skill.name} · inputs ${skill.inputs.size} · outputs ${skill.outputs.size} · ${skill.steps.size} steps") }
+        if (skills.none { it.id == "skill-open-settings" }) {
+            button("Add harmless example skill") {
+                AutomationRuntime.store.saveSkill(
+                    SkillDefinition(
+                        id = "skill-open-settings",
+                        name = "Open Android Settings",
+                        description = "Reusable deterministic example skill.",
+                        steps = listOf(
+                            StepDefinition(
+                                id = "skill-open-settings-step",
+                                name = "Open Settings",
+                                type = StepType.PHONE_TOOL,
+                                parameters = mapOf("tool" to "phone.open_app", "package" to "com.android.settings")
+                            )
+                        )
+                    )
+                )
+                buildUi()
+            }
+        }
+
+        section("Recorder")
+        val recordName = edit("Recorded automation name", "Recorded phone workflow")
+        status("Recorder active", AutomationRuntime.recorder.isRecording())
+        if (!AutomationRuntime.recorder.isRecording()) {
+            button("Start recording") {
+                AutomationRuntime.recorder.start()
+                DeviceState.addLog("Automation recorder started")
+                buildUi()
+            }
+        } else {
+            text("Captured normalized steps: ${AutomationRuntime.recorder.snapshot().size}. Accessibility event hooks are exposed for Agent 1; raw coordinates are not the preferred recording format.")
+            button("Stop and save recording") {
+                val definition: AutomationDefinition = AutomationRuntime.recorder.stop(recordName.text.toString().trim().ifBlank { "Recorded phone workflow" })
+                AutomationRuntime.store.saveAutomation(definition)
+                DeviceState.addLog("Recorded automation saved: ${definition.name}")
+                buildUi()
+            }
+            button("Cancel recording") {
+                AutomationRuntime.recorder.cancel()
+                buildUi()
+            }
+        }
+
+        section("Runs")
+        val runs = AutomationRuntime.store.listRuns(12)
+        if (runs.isEmpty()) text("No automation runs yet.")
+        runs.forEach { run ->
+            text("${run.state} · ${run.automationName} · ${run.steps.count { it.state.name == "SUCCESS" }}/${run.steps.size} steps${run.error?.let { " · $it" } ?: ""}")
+            if (run.state.name == "WAITING_FOR_HUMAN") {
+                button("Resume · ${run.automationName}") {
+                    DeviceState.controller = DeviceState.Controller.AGENT
+                    AutomationRuntime.router.resume(run.id)
+                    DeviceState.addLog("Automation resume requested: ${run.id}")
+                }
+            }
+        }
+
+        section("Devices")
+        status("Accessibility connected", DeviceState.accessibilityConnected)
+        status("Cyclone bridge connected", DeviceState.bridgeConnected)
+        text("Current app: ${DeviceState.currentPackage ?: "unknown"}")
+        text("Controller: ${DeviceState.controller.name}")
+        button(if (DeviceState.controller == DeviceState.Controller.AGENT) "Take control from agent" else "Return control to agent") {
+            DeviceState.controller = if (DeviceState.controller == DeviceState.Controller.AGENT) DeviceState.Controller.HUMAN else DeviceState.Controller.AGENT
+            buildUi()
+        }
+
+        section("Permissions")
         status("Accessibility enabled", accessibilityEnabled())
         button("Open Accessibility settings") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         status("Notification access enabled", notificationAccessEnabled())
@@ -53,7 +163,6 @@ class MainActivity : Activity() {
         if (!calendarGranted) button("Grant Calendar permission") { requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR), 100) }
 
         section("Cyclone connection")
-        val prefs = getSharedPreferences("cyclone", Context.MODE_PRIVATE)
         val url = edit("Cyclone Core WebSocket URL", prefs.getString("coreWsUrl", "") ?: "")
         val token = edit("Pairing/Bearer token", prefs.getString("coreToken", "") ?: "", secret = true)
         button("Save connection") {
@@ -62,61 +171,24 @@ class MainActivity : Activity() {
             CycloneAccessibilityService.instance?.let { BridgeClient.start(it) }
             buildUi()
         }
-        status("Bridge connected", DeviceState.bridgeConnected)
 
-        section("Work-shift routine (safe by default)")
-        val packageFilter = edit("Work app package filter", prefs.getString("workPackage", "") ?: "")
-        val claimText = edit("Claim button text", prefs.getString("claimText", "claim") ?: "claim")
-        val auto = CheckBox(this).apply {
-            text = "Enable real auto-claim (OFF by default)"
-            isChecked = prefs.getBoolean("autoClaimEnabled", false)
-        }
-        root.addView(auto)
-        button("Save routine settings") {
-            prefs.edit().putString("workPackage", packageFilter.text.toString().trim())
-                .putString("claimText", claimText.text.toString().trim())
-                .putBoolean("autoClaimEnabled", auto.isChecked).apply()
-        }
-        text("The v0 parser currently recognizes same-day HH:MM-HH:MM notification text. Real Teamwork/Picnic formatting still needs capture and device verification before this is trusted unattended.")
+        section("Settings")
+        text("Automation definitions and skills are persisted as readable JSON-compatible data. Consequential steps can require confirmation; the default Agent 2 confirmation gateway refuses unattended confirmation and moves control to HUMAN.")
+        text("Pending AI Build request: ${prefs.getString("pendingAiBuildRequest", "").orEmpty().take(140)}")
 
-        section("Human takeover")
-        status("Controller: ${DeviceState.controller.name}", true)
-        button(if (DeviceState.controller == DeviceState.Controller.AGENT) "Take control from agent" else "Return control to agent") {
-            DeviceState.controller = if (DeviceState.controller == DeviceState.Controller.AGENT) DeviceState.Controller.HUMAN else DeviceState.Controller.AGENT
-            buildUi()
-        }
-
-        section("Build checklist")
-        built("Android 14+ APK target (minSdk 34)")
-        built("Accessibility UI-tree observation")
-        built("Semantic click + set text")
-        built("Tap / swipe / scroll / Back / Home")
-        built("Accessibility screenshot capture")
-        built("Notification listener")
-        built("Calendar conflict matcher")
-        built("Work-shift notification routine scaffold")
-        built("Safe dry-run / explicit auto-claim opt-in")
-        built("Cyclone WebSocket command bridge")
-        built("Human/agent controller lock")
-        built("GitHub Actions APK build pipeline")
-
-        section("Verification checklist")
-        verified("APK compiled in GitHub CI", true)
-        verified("APK installed on Android 14+ device", false)
-        verified("Accessibility tree read from real phone", false)
-        verified("Screenshot returned from real phone", false)
-        verified("Remote semantic click performed", false)
-        verified("Notification received from real work app", false)
-        verified("Real Teamwork/Picnic UI mapped", false)
-        verified("Calendar conflict test passed", false)
-        verified("Eligible shift detected correctly", false)
-        verified("Claim action verified end-to-end", false)
-        verified("Cyclone Core WebSocket endpoint connected", DeviceState.bridgeConnected)
-        verified("Takeover blocks agent actions", false)
-        verified("24-hour reliability test", false)
-
-        section("Next")
-        text("1. Install this CI-built APK on an Android 14+ phone.\n2. Enable Accessibility + Notification access + Calendar.\n3. Run observe/screenshot/click acceptance tests.\n4. Capture one real Teamwork notification and UI tree.\n5. Replace the generic shift parser with the real app state machine.\n6. Connect to Cyclone Core and add event-driven Hermes fallback/takeover.\n7. Run restart, reliability, and battery soak tests.")
+        section("Built vs verified")
+        built("Typed Automation / Trigger / Condition / Step / Skill / Run / Checkpoint models")
+        built("JSON automation and skill persistence")
+        built("Event-driven workflow runner with retries and recovery policies")
+        built("Manual, notification, schedule, app-open, Cyclone remote, WebSocket and calendar/time trigger contracts")
+        built("Selector-preserving recorder core")
+        built("Automation, Skill, Recorder, Runs, Devices, Permissions and Connection UI sections")
+        verified("Existing Android APK build gate previously passed on base branch", true)
+        verified("This Automation Studio branch compiled in CI", false)
+        verified("Automation executed on physical Android 14+ device", false)
+        verified("Recorder captured real Accessibility events", false)
+        verified("Agent 1 PhoneToolGateway adapter merged", false)
+        verified("Agent 3 AI Build compiler connected", false)
     }
 
     private fun accessibilityEnabled(): Boolean {
