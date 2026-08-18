@@ -5,6 +5,7 @@ import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRegistry
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.automation.AutomationRuntime
+import com.cyclone.mobile.brain.CycloneBrainRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -58,27 +59,46 @@ class OpenRouterQuickAgent(private val context: Context) {
         if (apiKey.isBlank()) return@withContext QuickAgentResult(false, "Add an OpenRouter API key first.", 0, config.model.id)
         if (goal.isBlank()) return@withContext QuickAgentResult(false, "Describe what you want Cyclone to do.", 0, config.model.id)
 
-        val sessionId = "cyclone-mobile-${UUID.randomUUID()}"
+        val traceId = AgentTraceRuntime.start(context, goal, config.model.id)
+        val providerSessionId = "cyclone-mobile-${UUID.randomUUID()}"
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
         var environment = MobileContextHarness.observe(context, goal)
+        AgentTraceRuntime.event(context, traceId, "OBSERVE", "Reading the current phone state before acting", code = "phone.observe", ok = true)
         messages.put(JSONObject().put("role", "user").put("content", "USER_REQUEST:\n$goal\n\nCURRENT_PHONE_CONTEXT (fresh):\n$environment"))
 
         var decisions = 0
         while (decisions < config.maxDecisions) {
             decisions++
-            onProgress("Decision $decisions · ${config.model.label}")
-            val response = chat(apiKey, config.model.id, messages, phoneToolSchema(), config.providerSort, sessionId)
+            val progressText = "Decision $decisions · ${config.model.label}"
+            onProgress(progressText)
+            AgentTraceRuntime.event(context, traceId, "MODEL", "Choosing the next safe action", code = "model.decision", detail = progressText)
+
+            val response = chat(apiKey, config.model.id, messages, phoneToolSchema(), config.providerSort, providerSessionId)
             val choice = response.optJSONArray("choices")?.optJSONObject(0)
-                ?: return@withContext QuickAgentResult(false, apiError(response), decisions, config.model.id)
+            if (choice == null) {
+                val result = QuickAgentResult(false, apiError(response), decisions, config.model.id)
+                AgentTraceRuntime.event(context, traceId, "ERROR", "The model request failed before an action was chosen", code = "model.error", ok = false, detail = result.message)
+                return@withContext completeTrace(traceId, result)
+            }
             val message = choice.optJSONObject("message")
-                ?: return@withContext QuickAgentResult(false, "OpenRouter returned no assistant message.", decisions, config.model.id)
+            if (message == null) {
+                val result = QuickAgentResult(false, "OpenRouter returned no assistant message.", decisions, config.model.id)
+                AgentTraceRuntime.event(context, traceId, "ERROR", result.message, code = "model.empty", ok = false)
+                return@withContext completeTrace(traceId, result)
+            }
             val calls = message.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {
                 val finalText = message.optString("content").trim().ifBlank { "Done." }
-                return@withContext QuickAgentResult(true, finalText, decisions, response.optString("model", config.model.id))
+                AgentTraceRuntime.event(context, traceId, "ANSWER", "Cyclone has enough evidence to finish the task", code = "model.answer", ok = true, detail = finalText)
+                return@withContext completeTrace(
+                    traceId,
+                    QuickAgentResult(true, finalText, decisions, response.optString("model", config.model.id)),
+                )
             }
 
-            messages.put(message)
+            // Keep user-facing display_summary out of subsequent model context. The overlay/history is a
+            // separate visual channel and should never become self-conditioning prompt content.
+            messages.put(sanitizedAssistantMessage(message))
             for (i in 0 until calls.length()) {
                 val call = calls.optJSONObject(i) ?: continue
                 val function = call.optJSONObject("function") ?: continue
@@ -86,19 +106,36 @@ class OpenRouterQuickAgent(private val context: Context) {
                 val args = runCatching { JSONObject(function.optString("arguments")) }.getOrElse { JSONObject() }
                 val tool = args.optString("tool")
                 val params = args.optJSONObject("params") ?: JSONObject()
+                val displaySummary = args.optString("display_summary").takeIf { it.isNotBlank() }
+
                 if (tool.isBlank() || PhoneToolRegistry.definition(tool) == null) {
+                    AgentTraceRuntime.event(context, traceId, "ERROR", "The model requested an unsupported phone action", code = tool.ifBlank { "phone.unknown" }, ok = false)
                     appendToolResult(messages, call.optString("id"), JSONObject().put("ok", false).put("error", "Unknown phone tool: $tool"))
                     continue
                 }
+
+                val publicDecision = TraceHumanizer.decision(tool, params, displaySummary)
+                AgentTraceRuntime.event(context, traceId, "DECISION", publicDecision, code = tool)
+                onProgress(publicDecision)
+
                 if (config.safeMode && !SafeModeGuard.allowed(tool, params)) {
-                    appendToolResult(messages, call.optString("id"), JSONObject()
+                    val blocked = JSONObject()
                         .put("ok", false)
                         .put("error", "SAFE_MODE_BLOCKED")
-                        .put("message", "This action may be consequential. Ask the user to disable Safe Mode or perform it manually."))
+                        .put("message", "This action may be consequential. Ask the user to disable Safe Mode or perform it manually.")
+                    AgentTraceRuntime.event(
+                        context,
+                        traceId,
+                        "BOUNDARY",
+                        "Safe Mode stopped a potentially consequential action",
+                        code = tool,
+                        ok = false,
+                        detail = "The action was mapped but not executed.",
+                    )
+                    appendToolResult(messages, call.optString("id"), blocked)
                     continue
                 }
 
-                onProgress("${tool.removePrefix("phone.").replace('_', ' ')}…")
                 if (tool == "phone.screenshot") params.put("includeBase64", true)
                 val result = PhoneToolExecutor.execute(context, PhoneToolRequest("cqap-${UUID.randomUUID()}", tool, params))
                 val payload = JSONObject(result.toJson().toString())
@@ -108,39 +145,81 @@ class OpenRouterQuickAgent(private val context: Context) {
                     // The image goes only to the vision model. Do not resend base64 as text to the policy model.
                     payload.optJSONObject("payload")?.remove("pngBase64")
                     if (base64.isNotBlank()) {
+                        AgentTraceRuntime.event(context, traceId, "VISION", "Structured UI was insufficient, so Cyclone used a visual fallback", code = "phone.screenshot", ok = true)
                         payload.put("visionFallback", describeScreenshot(apiKey, config.visionModel.id, goal, environment, base64, config.providerSort))
                     }
                 }
+                val resultText = TraceHumanizer.result(tool, result.ok)
+                AgentTraceRuntime.event(
+                    context,
+                    traceId,
+                    if (result.ok) "RESULT" else "RECOVERY",
+                    resultText,
+                    code = tool,
+                    ok = result.ok,
+                    detail = if (result.ok) null else toolFailureDetail(payload),
+                )
                 appendToolResult(messages, call.optString("id"), payload)
             }
 
             environment = MobileContextHarness.observe(context, goal)
+            AgentTraceRuntime.event(context, traceId, "OBSERVE", "Refreshing the screen state before the next decision", code = "phone.observe", ok = true)
             messages.put(JSONObject().put("role", "user").put(
                 "content",
                 "CURRENT_PHONE_CONTEXT AFTER ACTIONS (fresh):\n$environment\nContinue from this exact state. Do not repeat successful work.",
             ))
         }
-        QuickAgentResult(false, "Stopped after ${config.maxDecisions} decisions to prevent an uncontrolled loop.", decisions, config.model.id)
+        val result = QuickAgentResult(false, "Stopped after ${config.maxDecisions} decisions to prevent an uncontrolled loop.", decisions, config.model.id)
+        AgentTraceRuntime.event(context, traceId, "STOPPED", "Cyclone hit the decision safety limit and stopped instead of looping", code = "safety.max_decisions", ok = false)
+        completeTrace(traceId, result)
     }
 
     suspend fun buildWorkflow(goal: String, config: QuickAgentConfig, onProgress: (String) -> Unit = {}): QuickAgentResult = withContext(Dispatchers.IO) {
         val apiKey = OpenRouterSecretStore.read(context)
         if (apiKey.isBlank()) return@withContext QuickAgentResult(false, "Add an OpenRouter API key first.", 0, config.model.id)
+        if (goal.isBlank()) return@withContext QuickAgentResult(false, "Describe the workflow you want Cyclone to build.", 0, config.model.id)
+
+        val traceId = AgentTraceRuntime.start(context, "Build workflow: $goal", config.model.id)
         val environment = MobileContextHarness.observe(context, goal)
         onProgress("Designing deterministic workflow…")
+        AgentTraceRuntime.event(context, traceId, "DECISION", "Turning the current phone state into a reviewable deterministic workflow", code = "workflow.design")
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", WORKFLOW_PROMPT))
             .put(JSONObject().put("role", "user").put("content", "REQUEST:\n$goal\n\nCURRENT_PHONE_CONTEXT:\n$environment"))
         val response = chat(apiKey, config.model.id, messages, null, config.providerSort, "cyclone-workflow-${UUID.randomUUID()}", jsonMode = true)
         val raw = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
-        if (raw.isBlank()) return@withContext QuickAgentResult(false, apiError(response), 1, config.model.id)
-        val proposal = runCatching { JSONObject(stripCodeFence(raw)) }.getOrElse {
-            return@withContext QuickAgentResult(false, "The model returned invalid workflow JSON: ${it.message}", 1, config.model.id)
+        if (raw.isBlank()) {
+            val result = QuickAgentResult(false, apiError(response), 1, config.model.id)
+            AgentTraceRuntime.event(context, traceId, "ERROR", "The workflow model did not return a usable proposal", code = "workflow.empty", ok = false, detail = result.message)
+            return@withContext completeTrace(traceId, result)
         }
-        AutomationRuntime.importAiProposal(context, proposal).fold(
-            onSuccess = { automation -> QuickAgentResult(true, "Workflow '${automation.name}' was created disabled for review.", 1, config.model.id, automation.id) },
-            onFailure = { QuickAgentResult(false, "Workflow was rejected by Cyclone's validator: ${it.message}", 1, config.model.id) },
+        val proposal = runCatching { JSONObject(stripCodeFence(raw)) }.getOrElse {
+            val result = QuickAgentResult(false, "The model returned invalid workflow JSON: ${it.message}", 1, config.model.id)
+            AgentTraceRuntime.event(context, traceId, "ERROR", "Cyclone rejected malformed workflow JSON", code = "workflow.invalid_json", ok = false, detail = result.message)
+            return@withContext completeTrace(traceId, result)
+        }
+        val result = AutomationRuntime.importAiProposal(context, proposal).fold(
+            onSuccess = { automation ->
+                AgentTraceRuntime.event(context, traceId, "RESULT", "A deterministic workflow was created and left disabled for review", code = "workflow.saved", ok = true, detail = automation.name)
+                QuickAgentResult(true, "Workflow '${automation.name}' was created disabled for review.", 1, config.model.id, automation.id)
+            },
+            onFailure = {
+                AgentTraceRuntime.event(context, traceId, "ERROR", "Cyclone's typed workflow validator rejected the proposal", code = "workflow.rejected", ok = false, detail = it.message)
+                QuickAgentResult(false, "Workflow was rejected by Cyclone's validator: ${it.message}", 1, config.model.id)
+            },
         )
+        completeTrace(traceId, result)
+    }
+
+    private fun completeTrace(traceId: String, result: QuickAgentResult): QuickAgentResult {
+        val status = if (result.ok) "COMPLETED" else "FAILED"
+        AgentTraceRuntime.finish(context, traceId, status, result.message, result.decisions)
+        val store = AgentTraceRuntime.store
+        val session = store.listSessions(100).firstOrNull { it.id == traceId }
+        if (session != null) {
+            runCatching { CycloneBrainRuntime.record(context, session, store.events(traceId)) }
+        }
+        return result
     }
 
     private fun chat(
@@ -156,7 +235,7 @@ class OpenRouterQuickAgent(private val context: Context) {
             .put("model", model)
             .put("messages", messages)
             .put("temperature", 0.1)
-            .put("max_tokens", if (jsonMode) 1400 else 420)
+            .put("max_tokens", if (jsonMode) 1400 else 480)
             .put("session_id", sessionId)
             .put("provider", JSONObject().put("sort", providerSort).put("allow_fallbacks", true).put("require_parameters", true))
             .put("stream", false)
@@ -202,6 +281,24 @@ class OpenRouterQuickAgent(private val context: Context) {
         messages.put(JSONObject().put("role", "tool").put("tool_call_id", callId).put("content", payload.toString()))
     }
 
+    private fun sanitizedAssistantMessage(message: JSONObject): JSONObject {
+        val copy = JSONObject(message.toString())
+        val calls = copy.optJSONArray("tool_calls") ?: return copy
+        for (i in 0 until calls.length()) {
+            val fn = calls.optJSONObject(i)?.optJSONObject("function") ?: continue
+            val args = runCatching { JSONObject(fn.optString("arguments")) }.getOrNull() ?: continue
+            args.remove("display_summary")
+            fn.put("arguments", args.toString())
+        }
+        return copy
+    }
+
+    private fun toolFailureDetail(payload: JSONObject): String = listOf(
+        payload.optString("error"),
+        payload.optString("message"),
+        payload.optJSONObject("payload")?.optString("message").orEmpty(),
+    ).firstOrNull { it.isNotBlank() } ?: "The phone tool returned unsuccessful without a detailed error."
+
     companion object {
         private val SYSTEM_PROMPT = """
 You are Cyclone Quick Agent, a fast Android control policy. You operate ONLY through the supplied phone_action tool.
@@ -215,6 +312,7 @@ Rules:
 6. Keep each decision small and immediate. Avoid long explanations while acting.
 7. If login, MFA, CAPTCHA, payment, transfer, purchase, deletion, sending a consequential message, identity verification or another human-only/high-risk decision is required, STOP and explain exactly what the user must do.
 8. Finish with a short factual summary. Never claim success without evidence.
+9. For every phone_action call, include display_summary: ONE short conversational sentence describing the immediate decision for the human UI. It is a progress summary, not hidden/private chain-of-thought. Do not expose private scratch reasoning, long analysis or secrets.
 """.trimIndent()
 
         private val WORKFLOW_PROMPT = """
@@ -240,7 +338,11 @@ Prefer stable semantic selectors from the current phone context. Never include p
                 .put("type", "object")
                 .put("properties", JSONObject()
                     .put("tool", JSONObject().put("type", "string").put("enum", toolNames))
-                    .put("params", JSONObject().put("type", "object").put("additionalProperties", true)))
+                    .put("params", JSONObject().put("type", "object").put("additionalProperties", true))
+                    .put("display_summary", JSONObject()
+                        .put("type", "string")
+                        .put("maxLength", 220)
+                        .put("description", "One short user-facing progress sentence explaining the immediate action. Not chain-of-thought and not persisted into model context.")))
                 .put("required", JSONArray().put("tool"))
                 .put("additionalProperties", false)
             return JSONArray().put(JSONObject()
