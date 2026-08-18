@@ -2,7 +2,6 @@ package com.cyclone.mobile
 
 import android.Manifest
 import android.app.Activity
-import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -11,13 +10,13 @@ import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
-import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.app.NotificationManagerCompat
 
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
@@ -126,7 +125,7 @@ class MainActivity : Activity() {
         return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
-    private fun notificationAccessEnabled(): Boolean = NotificationManager.getEnabledListenerPackages(this).contains(packageName)
+    private fun notificationAccessEnabled(): Boolean = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
 
     private fun title(value: String) = root.addView(TextView(this).apply { text = value; textSize = 26f; setTextColor(Color.BLACK); setPadding(0, 0, 0, 12) })
     private fun section(value: String) = root.addView(TextView(this).apply { text = value; textSize = 19f; setTextColor(Color.BLACK); setPadding(0, 28, 0, 8) })
