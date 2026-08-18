@@ -29,6 +29,20 @@ class AgentTraceCoreTest {
     }
 
     @Test
+    fun modelProvidedTypingSummaryIsIgnoredToPreventSecretEcho() {
+        val params = JSONObject()
+            .put("value", "1234-secret-value")
+            .put("selector", JSONObject().put("text", "Verification code"))
+        val summary = TraceHumanizer.decision(
+            "phone.type",
+            params,
+            "Typing verification code 1234-secret-value into the form",
+        )
+        assertFalse(summary.contains("1234-secret-value"))
+        assertEquals("Filling the requested field without storing its contents", summary)
+    }
+
+    @Test
     fun customOpenRouterSlugIsAcceptedAsConfiguration() {
         val slug = "my-provider/my-custom-model"
         val custom = OpenRouterModelPresets.byId(slug)
