@@ -27,7 +27,7 @@ class AutomationEventRouter(
             runner.run(
                 automation,
                 TriggerEvent(TriggerType.CYCLONE_REMOTE, mapOf("resumeRunId" to runId)),
-                checkpoint.copy(waitingForHuman = false)
+                checkpoint
             )
         }
     }
