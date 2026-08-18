@@ -134,7 +134,9 @@ class HumanInterventionCoordinator:
         observation = await self._registry.execute(
             checkpoint.device_id, "phone.observe", {}, timeout=15.0
         )
-        verified = observation.ok
+        verified = observation.ok and self._matches_resume_condition(
+            checkpoint.resume_condition, observation.payload
+        )
         if verified and verifier is not None:
             verified = await verifier(checkpoint, observation)
         if not verified:
@@ -154,6 +156,36 @@ class HumanInterventionCoordinator:
             },
         )
         return observation
+
+    def _matches_resume_condition(self, condition: dict[str, Any], payload: Any) -> bool:
+        if not condition:
+            return True
+        if not isinstance(payload, (dict, list)):
+            return False
+        package = condition.get("package")
+        if isinstance(package, str) and package:
+            if not isinstance(payload, dict) or payload.get("package") != package:
+                return False
+        for field in ("text", "resourceId", "contentDescription"):
+            expected = condition.get(field)
+            if isinstance(expected, str) and expected:
+                if not self._contains_field_value(payload, field, expected):
+                    return False
+        return True
+
+    def _contains_field_value(self, value: Any, field: str, expected: str) -> bool:
+        if isinstance(value, dict):
+            if value.get(field) == expected:
+                return True
+            return any(
+                self._contains_field_value(child, field, expected)
+                for child in value.values()
+            )
+        if isinstance(value, list):
+            return any(
+                self._contains_field_value(child, field, expected) for child in value
+            )
+        return False
 
     async def _emit(self, event_type: str, payload: dict[str, Any]) -> None:
         if self._event_sink is not None:
