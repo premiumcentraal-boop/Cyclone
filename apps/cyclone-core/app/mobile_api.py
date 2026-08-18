@@ -152,6 +152,7 @@ async def mobile_connect(websocket: WebSocket) -> None:
             kind = str(message.get("type", ""))
             if kind not in {
                 "mobile.result",
+                "mobile.tool_result",
                 "mobile.heartbeat",
                 "mobile.hello",
                 "mobile.capabilities",
@@ -174,14 +175,24 @@ async def mobile_connect(websocket: WebSocket) -> None:
 
 
 @router.get("/api/v1/mobile/devices", tags=["mobile"])
-async def list_mobile_devices() -> list[dict[str, Any]]:
+async def list_mobile_devices(
+    request: Request,
+    x_cyclone_internal_key: str = Header(default="", alias="X-Cyclone-Internal-Key"),
+) -> list[dict[str, Any]]:
+    runtime = _runtime(request)
+    _require_internal_key(runtime, x_cyclone_internal_key)
     return [_snapshot_json(snapshot) for snapshot in mobile_devices.list()]
 
 
 @router.post("/api/v1/mobile/devices/{device_id}/ownership", tags=["mobile"])
 async def set_mobile_ownership(
-    device_id: str, body: ControllerChange
+    device_id: str,
+    body: ControllerChange,
+    request: Request,
+    x_cyclone_internal_key: str = Header(default="", alias="X-Cyclone-Internal-Key"),
 ) -> dict[str, Any]:
+    runtime = _runtime(request)
+    _require_internal_key(runtime, x_cyclone_internal_key)
     try:
         snapshot = await mobile_devices.set_controller(device_id, body.owner)
     except DeviceOfflineError as error:
@@ -251,7 +262,13 @@ async def request_mobile_takeover(
 
 
 @router.get("/api/v1/mobile/takeovers/{task_id}", tags=["mobile"])
-async def get_mobile_takeover(task_id: str) -> dict[str, Any]:
+async def get_mobile_takeover(
+    task_id: str,
+    request: Request,
+    x_cyclone_internal_key: str = Header(default="", alias="X-Cyclone-Internal-Key"),
+) -> dict[str, Any]:
+    runtime = _runtime(request)
+    _require_internal_key(runtime, x_cyclone_internal_key)
     checkpoint = await mobile_takeover_store.get(task_id)
     if checkpoint is None:
         raise HTTPException(status_code=404, detail="Takeover checkpoint not found.")
@@ -259,7 +276,13 @@ async def get_mobile_takeover(task_id: str) -> dict[str, Any]:
 
 
 @router.post("/api/v1/mobile/takeovers/{task_id}/return", tags=["mobile"])
-async def return_mobile_to_agent(task_id: str) -> dict[str, Any]:
+async def return_mobile_to_agent(
+    task_id: str,
+    request: Request,
+    x_cyclone_internal_key: str = Header(default="", alias="X-Cyclone-Internal-Key"),
+) -> dict[str, Any]:
+    runtime = _runtime(request)
+    _require_internal_key(runtime, x_cyclone_internal_key)
     try:
         result = await mobile_takeovers.return_to_agent(task_id)
     except KeyError as error:
