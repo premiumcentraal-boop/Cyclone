@@ -12,7 +12,9 @@ import java.util.concurrent.TimeUnit
 
 object BridgeClient {
     private val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
-    private val commandExecutor = Executors.newFixedThreadPool(2)
+    // A physical phone has one interactive foreground UI. Serialize commands to prevent
+    // two remote actions racing each other across the same screen state.
+    private val commandExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var socket: WebSocket? = null
     @Volatile private var appContext: Context? = null
 
@@ -30,7 +32,7 @@ object BridgeClient {
                     .put("type", "mobile.hello")
                     .put("protocol", "phone-tool-v1")
                     .put("androidApi", android.os.Build.VERSION.SDK_INT)
-                    .put("tools", org.json.JSONArray(PhoneToolNames.all.toList()))
+                    .put("tools", PhoneToolRegistry.toJson())
                     .put("capabilities", CapabilityRegistry.toJson(context)))
             }
 
@@ -58,11 +60,37 @@ object BridgeClient {
     private fun handleCommand(raw: String) {
         val msg = runCatching { JSONObject(raw) }.getOrNull() ?: return
         val context = appContext ?: return
+
+        // Preserve the v0 takeover API and process ownership changes immediately rather
+        // than queueing them behind a long wait_for command.
+        when (msg.optString("action")) {
+            "takeover_start" -> {
+                DeviceState.setController(DeviceState.Controller.HUMAN)
+                sendLegacyControlResult(msg, "human", freshObservationRequired = false)
+                return
+            }
+            "takeover_return" -> {
+                DeviceState.setController(DeviceState.Controller.AGENT)
+                sendLegacyControlResult(msg, "agent", freshObservationRequired = true)
+                return
+            }
+        }
+
         val request = normalizeLegacyCommand(msg)
         commandExecutor.submit {
             val result = PhoneToolExecutor.execute(context, request)
             send(JSONObject().put("type", "mobile.tool_result").put("result", result.toJson()))
         }
+    }
+
+    private fun sendLegacyControlResult(msg: JSONObject, controller: String, freshObservationRequired: Boolean) {
+        send(JSONObject()
+            .put("type", "mobile.result")
+            .put("id", msg.optString("id"))
+            .put("ok", true)
+            .put("payload", JSONObject()
+                .put("controller", controller)
+                .put("freshObservationRequired", freshObservationRequired)))
     }
 
     private fun normalizeLegacyCommand(msg: JSONObject): PhoneToolRequest {
