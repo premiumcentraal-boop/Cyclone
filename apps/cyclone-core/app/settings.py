@@ -26,6 +26,11 @@ class Settings(BaseModel):
     telegram_bot_token: str | None = None
     telegram_allowed_users: list[int] = Field(default_factory=list)
     telegram_home_channel: str | None = None
+    # Optional compatibility backend. Mobilerun Portal remains an external
+    # companion app/process; Cyclone talks to its documented authenticated API.
+    # Both fields must be set before Core enables the backend.
+    mobilerun_portal_url: str | None = None
+    mobilerun_portal_token: str | None = None
 
     @field_validator("hermes_base_url")
     @classmethod
@@ -33,6 +38,16 @@ class Settings(BaseModel):
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("CYCLONE_HERMES_BASE_URL must be an absolute http(s) URL")
+        return value.rstrip("/")
+
+    @field_validator("mobilerun_portal_url")
+    @classmethod
+    def validate_mobilerun_portal_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("CYCLONE_MOBILERUN_PORTAL_URL must be an absolute http(s) URL")
         return value.rstrip("/")
 
     @classmethod
@@ -59,6 +74,8 @@ class Settings(BaseModel):
                 int(part) for part in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",") if part.strip().lstrip("-").isdigit()
             ],
             telegram_home_channel=os.getenv("TELEGRAM_HOME_CHANNEL") or None,
+            mobilerun_portal_url=os.getenv("CYCLONE_MOBILERUN_PORTAL_URL") or None,
+            mobilerun_portal_token=os.getenv("CYCLONE_MOBILERUN_PORTAL_TOKEN") or None,
         )
 
 
