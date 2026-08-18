@@ -2,13 +2,13 @@ package com.cyclone.mobile
 
 import android.content.Context
 import android.util.Base64
+import com.cyclone.mobile.automation.AutomationRuntime
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
-import java.io.File
 import java.util.concurrent.TimeUnit
 
 object BridgeClient {
@@ -29,7 +29,7 @@ object BridgeClient {
                 send(JSONObject().put("type", "mobile.hello").put("androidApi", android.os.Build.VERSION.SDK_INT))
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) = handleCommand(text)
+            override fun onMessage(webSocket: WebSocket, text: String) = handleMessage(text)
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 DeviceState.bridgeConnected = false
@@ -50,8 +50,33 @@ object BridgeClient {
         DeviceState.bridgeConnected = false
     }
 
-    private fun handleCommand(raw: String) {
+    private fun handleMessage(raw: String) {
         val msg = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        val action = msg.optString("action")
+        if (action.isBlank()) {
+            routeAutomationEvent(msg)
+            return
+        }
+        handleCommand(msg)
+    }
+
+    private fun routeAutomationEvent(msg: JSONObject) {
+        val context = appContext ?: return
+        val type = msg.optString("type").ifBlank { "websocket.message" }
+        val payload = buildMap {
+            msg.keys().forEach { key ->
+                val value = msg.opt(key)
+                if (value != null && value !== JSONObject.NULL) put(key, value.toString())
+            }
+        }
+        when (type) {
+            "automation.request", "cyclone.remote", "mobile.automation.request" -> AutomationRuntime.onCycloneRemote(context, payload)
+            else -> AutomationRuntime.onWebSocketEvent(context, type, payload)
+        }
+        DeviceState.addLog("Automation bridge event routed: $type")
+    }
+
+    private fun handleCommand(msg: JSONObject) {
         val id = msg.optString("id")
         val action = msg.optString("action")
         val service = CycloneAccessibilityService.instance
