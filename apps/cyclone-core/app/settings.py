@@ -19,6 +19,7 @@ class Settings(BaseModel):
     hermes_api_key: str = Field(default="development-hermes-key")
     internal_api_key: str = Field(default="development-internal-key")
     host_bridge_token: str = Field(default="development-host-bridge-token")
+    mobile_device_token: str | None = None
     vault_path: Path = Field(default=Path("/vault"))
     workspace_path: Path = Field(default=Path("/workspace"))
     agent_environments_root: Path = Field(default=Path("/agent-environments"))
@@ -50,6 +51,7 @@ class Settings(BaseModel):
             hermes_api_key=os.getenv("CYCLONE_HERMES_API_KEY", "development-hermes-key"),
             internal_api_key=os.getenv("CYCLONE_INTERNAL_API_KEY", "development-internal-key"),
             host_bridge_token=os.getenv("CYCLONE_HOST_BRIDGE_TOKEN", "development-host-bridge-token"),
+            mobile_device_token=os.getenv("CYCLONE_MOBILE_DEVICE_TOKEN") or None,
             vault_path=Path(os.getenv("CYCLONE_VAULT_PATH", "/vault")),
             workspace_path=Path(os.getenv("CYCLONE_WORKSPACE_PATH", "/workspace")),
             agent_environments_root=Path(os.getenv("CYCLONE_AGENT_ENVIRONMENTS_ROOT", "/agent-environments")),
