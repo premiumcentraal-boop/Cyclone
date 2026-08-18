@@ -18,10 +18,16 @@ from .mobile_registry import (
     MobileDeviceRegistry,
     MobileRegistryError,
 )
+from .mobile_takeover import HumanInterventionCoordinator, InMemoryCheckpointStore
 
 
 router = APIRouter()
 mobile_devices = MobileDeviceRegistry()
+mobile_takeover_store = InMemoryCheckpointStore()
+mobile_takeovers = HumanInterventionCoordinator(
+    registry=mobile_devices,
+    store=mobile_takeover_store,
+)
 
 
 class StrictModel(BaseModel):
@@ -39,12 +45,25 @@ class ControllerChange(StrictModel):
     owner: ControllerOwner
 
 
+class TakeoverStart(StrictModel):
+    task_id: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=2_000)
+    current_app: str | None = Field(default=None, max_length=500)
+    user_instruction: str = Field(min_length=1, max_length=2_000)
+    resume_condition: dict[str, Any] = Field(default_factory=dict)
+
+
 def _runtime(request: Request) -> Any:
     return request.app.state.services
 
 
 def _constant_time_equal(left: str, right: str) -> bool:
     return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
+def _require_internal_key(runtime: Any, provided: str) -> None:
+    if not provided or not _constant_time_equal(provided, runtime.settings.internal_api_key):
+        raise HTTPException(status_code=401, detail="Invalid internal integration credential.")
 
 
 def _snapshot_json(snapshot: Any) -> dict[str, Any]:
@@ -58,6 +77,19 @@ def _snapshot_json(snapshot: Any) -> dict[str, Any]:
         "connectedAt": snapshot.connected_at.isoformat(),
         "lastSeenAt": snapshot.last_seen_at.isoformat(),
         "freshObservationRequired": snapshot.fresh_observation_required,
+    }
+
+
+def _checkpoint_json(checkpoint: Any) -> dict[str, Any]:
+    return {
+        "checkpointId": checkpoint.checkpoint_id,
+        "taskId": checkpoint.task_id,
+        "deviceId": checkpoint.device_id,
+        "reason": checkpoint.reason,
+        "currentApp": checkpoint.current_app,
+        "userInstruction": checkpoint.user_instruction,
+        "resumeCondition": dict(checkpoint.resume_condition),
+        "createdAt": checkpoint.created_at.isoformat(),
     }
 
 
@@ -165,10 +197,7 @@ async def invoke_mobile_tool(
     x_cyclone_internal_key: str = Header(default="", alias="X-Cyclone-Internal-Key"),
 ) -> dict[str, Any]:
     runtime = _runtime(request)
-    if not x_cyclone_internal_key or not _constant_time_equal(
-        x_cyclone_internal_key, runtime.settings.internal_api_key
-    ):
-        raise HTTPException(status_code=401, detail="Invalid internal integration credential.")
+    _require_internal_key(runtime, x_cyclone_internal_key)
     try:
         result = await mobile_devices.execute(
             device_id,
@@ -195,4 +224,55 @@ async def invoke_mobile_tool(
         "beforeFingerprint": result.before_fingerprint,
         "afterFingerprint": result.after_fingerprint,
         "attempts": result.attempts,
+    }
+
+
+@router.post("/api/v1/mobile/devices/{device_id}/takeover", tags=["mobile"])
+async def request_mobile_takeover(
+    device_id: str,
+    body: TakeoverStart,
+    request: Request,
+    x_cyclone_internal_key: str = Header(default="", alias="X-Cyclone-Internal-Key"),
+) -> dict[str, Any]:
+    runtime = _runtime(request)
+    _require_internal_key(runtime, x_cyclone_internal_key)
+    try:
+        checkpoint = await mobile_takeovers.request_takeover(
+            task_id=body.task_id,
+            device_id=device_id,
+            reason=body.reason,
+            current_app=body.current_app,
+            user_instruction=body.user_instruction,
+            resume_condition=body.resume_condition,
+        )
+    except DeviceOfflineError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return _checkpoint_json(checkpoint)
+
+
+@router.get("/api/v1/mobile/takeovers/{task_id}", tags=["mobile"])
+async def get_mobile_takeover(task_id: str) -> dict[str, Any]:
+    checkpoint = await mobile_takeover_store.get(task_id)
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail="Takeover checkpoint not found.")
+    return _checkpoint_json(checkpoint)
+
+
+@router.post("/api/v1/mobile/takeovers/{task_id}/return", tags=["mobile"])
+async def return_mobile_to_agent(task_id: str) -> dict[str, Any]:
+    try:
+        result = await mobile_takeovers.return_to_agent(task_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {
+        "taskId": task_id,
+        "status": "TAKEOVER_COMPLETED",
+        "observation": {
+            "commandId": result.command_id,
+            "ok": result.ok,
+            "payload": result.payload,
+            "afterFingerprint": result.after_fingerprint,
+        },
     }
