@@ -250,13 +250,16 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
 
 object TraceHumanizer {
     fun decision(tool: String, params: JSONObject, providedSummary: String?): String {
+        // Never trust a model-authored summary for a typing action: it could echo the typed value.
+        // The history/overlay only needs to tell the user that Cyclone is filling the requested field.
+        if (tool == "phone.type") return "Filling the requested field without storing its contents"
+
         val clean = providedSummary?.trim().orEmpty()
         if (clean.isNotBlank()) return TracePrivacy.clean(clean).take(260)
         val verb = when (tool) {
             "phone.observe" -> "Checking the current screen before acting"
             "phone.find" -> "Looking for the safest matching control"
             "phone.click" -> "Opening the selected control using Android's semantic UI"
-            "phone.type" -> "Filling the requested field without storing its contents"
             "phone.scroll" -> "Scrolling to find the next relevant control"
             "phone.open_app" -> "Opening the app needed for this task"
             "phone.open_notification" -> "Opening the relevant notification"
@@ -271,7 +274,7 @@ object TraceHumanizer {
         val target = selector?.optString("text").orEmpty()
             .ifBlank { selector?.optString("contentDescription").orEmpty() }
             .ifBlank { selector?.optString("resourceId").orEmpty().substringAfterLast('/') }
-        return if (target.isBlank() || tool == "phone.type") verb else "$verb: ${target.take(80)}"
+        return if (target.isBlank()) verb else "$verb: ${target.take(80)}"
     }
 
     fun result(tool: String, ok: Boolean): String = when {
@@ -287,10 +290,14 @@ object TracePrivacy {
     private val secretAssignments = Regex("(?i)(password|passwd|token|api[_ -]?key|secret|otp|2fa|pin)\\s*[:=]\\s*[^,;\\s}]+")
     private val bearer = Regex("(?i)bearer\\s+[a-z0-9._~+/-]{8,}")
     private val longBase64 = Regex("[A-Za-z0-9+/]{180,}={0,2}")
+    private val paymentCard = Regex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)")
+    private val usSsn = Regex("(?<!\\d)\\d{3}-\\d{2}-\\d{4}(?!\\d)")
 
     fun clean(value: String): String = value
         .replace(secretAssignments) { "${it.groupValues[1]}=[REDACTED]" }
         .replace(bearer, "Bearer [REDACTED]")
+        .replace(usSsn, "[IDENTIFIER_REDACTED]")
+        .replace(paymentCard, "[PAYMENT_REDACTED]")
         .replace(longBase64, "[BINARY_REDACTED]")
         .replace(Regex("(?s)\\\"pngBase64\\\"\\s*:\\s*\\\".*?\\\""), "\"pngBase64\":\"[REDACTED]\"")
 }
