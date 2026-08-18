@@ -15,7 +15,10 @@ class ControllerOwner(str, Enum):
     HUMAN = "human"
 
 
-OBSERVATION_TOOLS = frozenset(
+# Read-only tools that may run while Core is waiting for a mandatory fresh
+# observation. These are not automatically safe to expose while a human owns
+# the phone; screenshot/clipboard/UI reads can contain sensitive information.
+NON_MUTATING_TOOLS = frozenset(
     {
         "phone.observe",
         "phone.screenshot",
@@ -26,6 +29,17 @@ OBSERVATION_TOOLS = frozenset(
         "phone.capabilities",
         "phone.wait_for",
         "phone.assert",
+    }
+)
+
+# HUMAN ownership is deliberately stricter. Core permits only coarse device
+# metadata while the user is completing login, 2FA, identity checks, or other
+# takeover work. The resume path switches provisionally to AGENT and performs
+# a fresh observe there, so no UI/screenshot/clipboard access is needed here.
+HUMAN_SAFE_TOOLS = frozenset(
+    {
+        "phone.get_current_app",
+        "phone.capabilities",
     }
 )
 
