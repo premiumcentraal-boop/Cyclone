@@ -216,7 +216,7 @@ class AutomationRunner(
             val result = executeStep(runId, nested, variables, depth)
             if (!result.success) return result
         }
-        return StepExecution(true, skill.outputs.mapNotNull { key -> variables[key]?.let { key to it } }.toMap(), "skill_completed")
+        return StepExecution(true, skill.outputs.mapNotNull { key -> variables[key]?.let { key to it } }.toMap(), message = "skill_completed")
     }
 
     private fun evaluate(condition: ConditionDefinition, variables: Map<String, String>) = evaluate(mapOf("left" to condition.left, "operator" to condition.operator.name, "right" to condition.right.orEmpty()), variables)
