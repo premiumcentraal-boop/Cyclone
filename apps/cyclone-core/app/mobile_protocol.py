@@ -29,6 +29,18 @@ OBSERVATION_TOOLS = frozenset(
     }
 )
 
+# Temporary compatibility for the pre-Agent-1 BridgeClient. New mobile code reads
+# the typed `tool` + `params`; the legacy bridge can still execute basic actions.
+_LEGACY_ACTIONS = {
+    "phone.observe": "observe",
+    "phone.screenshot": "screenshot",
+    "phone.scroll": "scroll",
+    "phone.tap": "tap",
+    "phone.swipe": "swipe",
+    "phone.back": "back",
+    "phone.home": "home",
+}
+
 
 @dataclass(frozen=True)
 class DeviceDescriptor:
@@ -62,12 +74,19 @@ class PhoneCommand:
             raise ValueError("Phone commands must use the phone.* namespace.")
 
     def envelope(self) -> dict[str, Any]:
-        return {
+        envelope: dict[str, Any] = {
             "type": "mobile.command",
             "id": self.command_id,
             "tool": self.tool,
             "params": dict(self.params),
         }
+        legacy_action = _LEGACY_ACTIONS.get(self.tool)
+        if legacy_action:
+            envelope["action"] = legacy_action
+            for key, value in self.params.items():
+                if key not in {"type", "id", "tool", "action", "params"}:
+                    envelope[key] = value
+        return envelope
 
 
 @dataclass(frozen=True)
