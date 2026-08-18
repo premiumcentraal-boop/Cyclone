@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "CycloneMobile"
 include(":app")
+include(":mobilerun-embedded")

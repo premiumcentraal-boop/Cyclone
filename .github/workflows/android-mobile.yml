@@ -1,16 +1,23 @@
-name: Cyclone Mobile APK
+name: Cyclone Mobile V2 APK
 
 on:
   workflow_dispatch:
   push:
     branches:
       - feature/android-mobile-v0
+      - feature/mobile-phone-toolbox-agent1
+      - release/cyclone-mobile-v2
+      - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
       - '.github/workflows/android-mobile.yml'
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal'
+      - '.gitmodules'
       - '.github/workflows/android-mobile.yml'
 
 jobs:
@@ -18,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,11 +37,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Assemble debug APK
+      - name: Run V2 mobile unit tests
+        run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
+      - name: Assemble V2 debug APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload APK
+      - name: Upload V2 APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-debug-apk
+          name: cyclone-mobile-v2-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

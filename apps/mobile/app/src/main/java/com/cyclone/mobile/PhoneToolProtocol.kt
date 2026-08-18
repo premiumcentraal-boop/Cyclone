@@ -1,0 +1,296 @@
+package com.cyclone.mobile
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class UiBounds(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+) {
+    val width: Int get() = (right - left).coerceAtLeast(0)
+    val height: Int get() = (bottom - top).coerceAtLeast(0)
+    val centerX: Float get() = left + width / 2f
+    val centerY: Float get() = top + height / 2f
+
+    fun contains(x: Int, y: Int): Boolean = x in left..right && y in top..bottom
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("left", left)
+        .put("top", top)
+        .put("right", right)
+        .put("bottom", bottom)
+        .put("width", width)
+        .put("height", height)
+}
+
+data class UiNodeSnapshot(
+    val id: String,
+    val path: String,
+    val parentId: String?,
+    val childIds: List<String>,
+    val depth: Int,
+    val windowId: Int,
+    val className: String,
+    val role: String,
+    val text: String,
+    val contentDescription: String,
+    val resourceId: String,
+    val bounds: UiBounds,
+    val clickable: Boolean,
+    val longClickable: Boolean,
+    val editable: Boolean,
+    val scrollable: Boolean,
+    val enabled: Boolean,
+    val selected: Boolean,
+    val checked: Boolean,
+    val checkable: Boolean,
+    val focused: Boolean,
+    val focusable: Boolean,
+    val visibleToUser: Boolean,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("path", path)
+        .put("parentId", parentId ?: JSONObject.NULL)
+        .put("childIds", JSONArray(childIds))
+        .put("depth", depth)
+        .put("windowId", windowId)
+        .put("class", className)
+        .put("role", role)
+        .put("text", text)
+        .put("contentDescription", contentDescription)
+        .put("resourceId", resourceId)
+        .put("bounds", bounds.toJson())
+        .put("clickable", clickable)
+        .put("longClickable", longClickable)
+        .put("editable", editable)
+        .put("scrollable", scrollable)
+        .put("enabled", enabled)
+        .put("selected", selected)
+        .put("checked", checked)
+        .put("checkable", checkable)
+        .put("focused", focused)
+        .put("focusable", focusable)
+        .put("visibleToUser", visibleToUser)
+}
+
+data class UiWindowSnapshot(
+    val id: Int,
+    val title: String,
+    val type: Int,
+    val layer: Int,
+    val active: Boolean,
+    val focused: Boolean,
+    val bounds: UiBounds,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("title", title)
+        .put("type", type)
+        .put("layer", layer)
+        .put("active", active)
+        .put("focused", focused)
+        .put("bounds", bounds.toJson())
+}
+
+data class UiSnapshot(
+    val packageName: String?,
+    val className: String?,
+    val screenWidth: Int,
+    val screenHeight: Int,
+    val timestampMs: Long,
+    val fingerprint: String,
+    val controller: String,
+    val windows: List<UiWindowSnapshot>,
+    val nodes: List<UiNodeSnapshot>,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("package", packageName ?: JSONObject.NULL)
+        .put("class", className ?: JSONObject.NULL)
+        .put("screen", JSONObject().put("width", screenWidth).put("height", screenHeight))
+        .put("timestampMs", timestampMs)
+        .put("fingerprint", fingerprint)
+        .put("controller", controller)
+        .put("windows", JSONArray().also { array -> windows.forEach { array.put(it.toJson()) } })
+        .put("nodes", JSONArray().also { array -> nodes.forEach { array.put(it.toJson()) } })
+}
+
+enum class RelativeDirection { ABOVE, BELOW, LEFT_OF, RIGHT_OF, NEAR }
+
+data class ElementSelector(
+    val resourceId: String? = null,
+    val text: String? = null,
+    val textContains: String? = null,
+    val contentDescription: String? = null,
+    val contentDescriptionContains: String? = null,
+    val className: String? = null,
+    val role: String? = null,
+    val ancestorText: String? = null,
+    val descendantText: String? = null,
+    val x: Int? = null,
+    val y: Int? = null,
+    val relativeToText: String? = null,
+    val relativeDirection: RelativeDirection? = null,
+    val fuzzyText: String? = null,
+    val minFuzzyScore: Double = 0.72,
+    val requireClickable: Boolean? = null,
+    val requireEditable: Boolean? = null,
+    val requireScrollable: Boolean? = null,
+) {
+    companion object {
+        fun fromJson(json: JSONObject?): ElementSelector {
+            if (json == null) return ElementSelector()
+            fun s(key: String): String? = json.optString(key).takeIf { it.isNotBlank() }
+            return ElementSelector(
+                resourceId = s("resourceId"),
+                text = s("text"),
+                textContains = s("textContains"),
+                contentDescription = s("contentDescription"),
+                contentDescriptionContains = s("contentDescriptionContains"),
+                className = s("class"),
+                role = s("role"),
+                ancestorText = s("ancestorText"),
+                descendantText = s("descendantText"),
+                x = if (json.has("x")) json.optInt("x") else null,
+                y = if (json.has("y")) json.optInt("y") else null,
+                relativeToText = s("relativeToText"),
+                relativeDirection = s("relativeDirection")?.uppercase()?.let { runCatching { RelativeDirection.valueOf(it) }.getOrNull() },
+                fuzzyText = s("fuzzyText"),
+                minFuzzyScore = json.optDouble("minFuzzyScore", 0.72).coerceIn(0.0, 1.0),
+                requireClickable = if (json.has("clickable")) json.optBoolean("clickable") else null,
+                requireEditable = if (json.has("editable")) json.optBoolean("editable") else null,
+                requireScrollable = if (json.has("scrollable")) json.optBoolean("scrollable") else null,
+            )
+        }
+    }
+
+    fun toJson(): JSONObject = JSONObject().apply {
+        resourceId?.let { put("resourceId", it) }
+        text?.let { put("text", it) }
+        textContains?.let { put("textContains", it) }
+        contentDescription?.let { put("contentDescription", it) }
+        contentDescriptionContains?.let { put("contentDescriptionContains", it) }
+        className?.let { put("class", it) }
+        role?.let { put("role", it) }
+        ancestorText?.let { put("ancestorText", it) }
+        descendantText?.let { put("descendantText", it) }
+        x?.let { put("x", it) }
+        y?.let { put("y", it) }
+        relativeToText?.let { put("relativeToText", it) }
+        relativeDirection?.let { put("relativeDirection", it.name.lowercase()) }
+        fuzzyText?.let { put("fuzzyText", it) }
+        put("minFuzzyScore", minFuzzyScore)
+        requireClickable?.let { put("clickable", it) }
+        requireEditable?.let { put("editable", it) }
+        requireScrollable?.let { put("scrollable", it) }
+    }
+}
+
+data class SelectorMatch(val node: UiNodeSnapshot, val score: Double, val reasons: List<String>) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("score", score)
+        .put("reasons", JSONArray(reasons))
+        .put("node", node.toJson())
+}
+
+enum class CapabilityStatus { AVAILABLE, MISSING_PERMISSION, UNSUPPORTED_ON_DEVICE, TEMPORARILY_UNAVAILABLE }
+
+data class CapabilityState(val name: String, val status: CapabilityStatus, val detail: String? = null) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("name", name)
+        .put("status", status.name)
+        .put("detail", detail ?: JSONObject.NULL)
+}
+
+enum class PhoneToolErrorCode {
+    UNKNOWN_TOOL,
+    INVALID_REQUEST,
+    CAPABILITY_UNAVAILABLE,
+    ACCESSIBILITY_NOT_CONNECTED,
+    HUMAN_HAS_CONTROL,
+    FRESH_OBSERVATION_REQUIRED,
+    ELEMENT_NOT_FOUND,
+    STALE_ELEMENT,
+    ACTION_FAILED,
+    TIMEOUT,
+    ASSERTION_FAILED,
+    DUPLICATE_ACTION,
+    APP_NOT_FOUND,
+    NOTIFICATION_NOT_FOUND,
+    SECURITY_RESTRICTION,
+    INTERNAL_ERROR,
+}
+
+data class PhoneToolError(val code: PhoneToolErrorCode, val message: String) {
+    fun toJson(): JSONObject = JSONObject().put("code", code.name).put("message", message)
+}
+
+data class PhoneToolRequest(
+    val commandId: String,
+    val tool: String,
+    val params: JSONObject = JSONObject(),
+) {
+    companion object {
+        fun fromJson(json: JSONObject): PhoneToolRequest = PhoneToolRequest(
+            commandId = json.optString("id").ifBlank { "cmd-${System.nanoTime()}" },
+            tool = json.optString("tool", json.optString("action")),
+            params = json.optJSONObject("params") ?: JSONObject(),
+        )
+    }
+}
+
+data class PhoneToolResult(
+    val commandId: String,
+    val tool: String,
+    val ok: Boolean,
+    val startedAtMs: Long,
+    val finishedAtMs: Long,
+    val attempts: Int = 1,
+    val beforeFingerprint: String? = null,
+    val afterFingerprint: String? = null,
+    val payload: Any? = null,
+    val error: PhoneToolError? = null,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("commandId", commandId)
+        .put("tool", tool)
+        .put("ok", ok)
+        .put("startedAtMs", startedAtMs)
+        .put("finishedAtMs", finishedAtMs)
+        .put("durationMs", finishedAtMs - startedAtMs)
+        .put("attempts", attempts)
+        .put("beforeFingerprint", beforeFingerprint ?: JSONObject.NULL)
+        .put("afterFingerprint", afterFingerprint ?: JSONObject.NULL)
+        .put("payload", payload ?: JSONObject.NULL)
+        .put("error", error?.toJson() ?: JSONObject.NULL)
+}
+
+object PhoneToolNames {
+    val all = setOf(
+        "phone.observe",
+        "phone.screenshot",
+        "phone.find",
+        "phone.click",
+        "phone.long_press",
+        "phone.tap",
+        "phone.type",
+        "phone.replace_text",
+        "phone.scroll",
+        "phone.swipe",
+        "phone.back",
+        "phone.home",
+        "phone.open_app",
+        "phone.open_notification",
+        "phone.wait_for",
+        "phone.assert",
+        "phone.get_notifications",
+        "phone.get_current_app",
+        "phone.get_clipboard",
+        "phone.set_clipboard",
+        "phone.share",
+        "phone.launch_intent",
+        "phone.capabilities",
+    )
+}
