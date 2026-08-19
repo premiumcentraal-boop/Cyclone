@@ -20,20 +20,20 @@ import android.widget.Spinner
 import android.widget.TextView
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
-import com.cyclone.mobile.ai.OpenRouterModelPresets
+import com.cyclone.mobile.ai.OpenRouterCustomModelStore
 import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.applearner.FollowMeLearnerRuntime
+import com.cyclone.mobile.applearner.discardFollowMeSession
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * V2.9 unifies passive Follow Me with the explicit V2.4 guided recorder.
+ * Cyclone 2.9.1 unified Follow Me + exact-step teaching overlay.
  *
- * The user can simply navigate, or explicitly place semantic Tap/Hold/Swipe/Check steps. The bubble
- * is always visible while learning and always provides Pause and Stop, fixing the ambiguous V2.7/2.8
- * background-only experience.
+ * The bubble remains visible while learning and exposes Pause, Stop & review and Cancel & discard.
+ * Normal navigation teaches semantic pages; exact Tap/Hold/Swipe/Check placements are optional.
  */
 object RoutineTeachingOverlayRuntime {
     @Volatile private var controller: RoutineTeachingOverlayController? = null
@@ -106,7 +106,7 @@ class RoutineTeachingOverlayController(
         }
         wm.addView(bubble, bubbleParams)
         handler.post(ticker)
-        DeviceState.addLog("V2.9 unified teaching overlay opened")
+        DeviceState.addLog("Cyclone 2.9.1 unified teaching overlay opened")
     }
 
     fun stopAndSave() {
@@ -175,7 +175,7 @@ class RoutineTeachingOverlayController(
             text = "Teaching model"
             setTextColor(Color.rgb(40, 39, 50)); textSize = 11.5f
         })
-        val models = OpenRouterModelPresets.all
+        val models = OpenRouterCustomModelStore.all(service)
         modelSpinner = Spinner(service).apply {
             adapter = ArrayAdapter(service, android.R.layout.simple_spinner_dropdown_item, models.map { it.label })
             val selected = models.indexOfFirst { it.id == modelId }.takeIf { it >= 0 } ?: 0
@@ -199,6 +199,14 @@ class RoutineTeachingOverlayController(
             actionButton("History") { RoutineTeachingRuntime.launchReport(service, null) },
             actionButton("Stop & review") { stopAndSave() },
         ))
+        root.addView(actionButton("Cancel & discard") {
+            if (!busy && !stopping) discardFollowMeSession(service)
+        })
+        root.addView(TextView(service).apply {
+            text = "Cancel & discard exits Follow Me without a review page, workflow compilation or post-session model analysis."
+            setTextColor(Color.rgb(95, 92, 106)); textSize = 10.5f
+            setPadding(0, 0, 0, dp(5))
+        })
 
         root.addView(TextView(service).apply {
             text = "Guide an exact step"
