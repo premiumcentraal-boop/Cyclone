@@ -1,5 +1,7 @@
 # Cyclone
 
+> 📱 **Android APKs:** use [`MOBILE_DOWNLOADS.md`](MOBILE_DOWNLOADS.md) for the current Cyclone Mobile build, direct APK links, checksums, and the permanent release shelf.
+
 Cyclone is a Windows-first agent operating environment: a native desktop experience over a persistent Docker-based agent computer. It combines:
 
 - **Cyclone Desktop** — a Tauri + React desktop application for conversations, agent rosters, clusters, tasks, approvals, routines, and diagnostics.
