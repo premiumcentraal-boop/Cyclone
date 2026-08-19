@@ -1,4 +1,4 @@
-name: Cyclone Mobile V2.7 Beta APK
+name: Cyclone Mobile V2.8 Beta APK
 
 on:
   workflow_dispatch:
@@ -14,6 +14,7 @@ on:
       - release/cyclone-mobile-v2.5-app-learner-beta
       - release/cyclone-mobile-v2.6-ai-brain-rehaul
       - release/cyclone-mobile-v2.7-adaptive-brain
+      - release/cyclone-mobile-v2.8-page-aware-agent
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
@@ -44,23 +45,23 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Run V2.7 Beta mobile unit tests
+      - name: Run V2.8 Beta mobile unit tests
         shell: bash
         run: |
           set -o pipefail
-          gradle -p apps/mobile :app:testDebugUnitTest --stacktrace 2>&1 | tee v27-gradle-test.log
-      - name: Upload V2.7 diagnostic log
+          gradle -p apps/mobile :app:testDebugUnitTest --stacktrace 2>&1 | tee v28-gradle-test.log
+      - name: Upload V2.8 diagnostic log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-7-build-log
-          path: v27-gradle-test.log
+          name: cyclone-mobile-v2-8-build-log
+          path: v28-gradle-test.log
           if-no-files-found: warn
-      - name: Assemble Cyclone V2.7 Beta APK
+      - name: Assemble Cyclone V2.8 Beta APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload Cyclone V2.7 Beta APK
+      - name: Upload Cyclone V2.8 Beta APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-7-beta-apk
+          name: cyclone-mobile-v2-8-beta-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
