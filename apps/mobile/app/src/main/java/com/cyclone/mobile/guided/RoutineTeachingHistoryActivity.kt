@@ -50,8 +50,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.ui.CycloneTheme
 import kotlinx.coroutines.delay
 import java.io.File
@@ -65,6 +67,7 @@ class RoutineTeachingHistoryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         RoutineTeachingRuntime.initialize(this)
+        AdaptiveBrainRuntime.initialize(this)
         val initial = intent.getStringExtra(EXTRA_SESSION_ID)
         setContent { CycloneTheme { TeachingHistoryScreen(initial, onClose = { finish() }) } }
     }
@@ -115,7 +118,7 @@ private fun TeachingSessionList(
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Icon(Icons.Rounded.History, null, modifier = Modifier.size(34.dp))
                     Text("Everything you taught Cyclone", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("Each session keeps the semantic pages, user actions, screenshots, native Android signals, model used, generated workflow IDs and your later corrections.")
+                    Text("Each session keeps semantic pages, actions, screenshots, native Android signals, the selected model, generated workflows and your corrections. Saved corrections are also added to the Adaptive Brain for future retrieval.")
                 }
             }
         }
@@ -123,7 +126,7 @@ private fun TeachingSessionList(
             Card(shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(18.dp)) {
                     Text("No routine teachings yet", fontWeight = FontWeight.SemiBold)
-                    Text("Start Follow Me from Learn. V2.9 will keep the overlay visible until you press Stop & review.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Start Follow Me from Learn. V2.9 keeps the LEARN overlay visible until you press Stop & review.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -191,16 +194,17 @@ private fun TeachingSessionDetail(session: RoutineTeachingSession, modifier: Mod
                 Icon(Icons.Rounded.Memory, null); Spacer(Modifier.size(7.dp))
                 Column {
                     Text("Teaching timeline", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Open every step, compare the screenshot with Cyclone's interpretation, and add a correction whenever it misunderstood you.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Compare each screenshot with Cyclone's interpretation. A correction is stored in this session and added to the Brain so later AI runs can retrieve it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        items(session.steps, key = { it.id }) { step -> TeachingStepCard(session.id, step, onChanged) }
+        items(session.steps, key = { it.id }) { step -> TeachingStepCard(session.id, session.name, step, onChanged) }
     }
 }
 
 @Composable
-private fun TeachingStepCard(sessionId: String, step: RoutineTeachingStep, onChanged: () -> Unit) {
+private fun TeachingStepCard(sessionId: String, sessionName: String, step: RoutineTeachingStep, onChanged: () -> Unit) {
+    val context = LocalContext.current
     var note by remember(step.id, step.note) { mutableStateOf(step.note) }
     val imagePath = listOf(step.afterScreenshotPath, step.screenshotPath, step.beforeScreenshotPath).firstOrNull { !it.isNullOrBlank() && File(it).exists() }
     Card(shape = RoundedCornerShape(20.dp)) {
@@ -238,7 +242,17 @@ private fun TeachingStepCard(sessionId: String, step: RoutineTeachingStep, onCha
             )
             Button(
                 onClick = {
-                    RoutineTeachingRuntime.updateNote(sessionId, step.id, note)
+                    val clean = note.trim()
+                    RoutineTeachingRuntime.updateNote(sessionId, step.id, clean)
+                    if (clean.isNotBlank() && clean != step.note.trim()) {
+                        val contextPrefix = listOfNotNull(
+                            "Teaching '$sessionName'",
+                            step.packageName?.let { "app $it" },
+                            step.pageTitle?.let { "page $it" },
+                            "step ${step.index} ${step.title}",
+                        ).joinToString(" · ")
+                        AdaptiveBrainRuntime.addUserNote(context, "$contextPrefix — user correction: $clean", "ROUTINE_TEACHING_CORRECTION")
+                    }
                     onChanged()
                 },
                 enabled = note.trim() != step.note.trim(),
