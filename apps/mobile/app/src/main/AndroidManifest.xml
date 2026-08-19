@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
         <intent>
@@ -12,7 +13,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Cyclone 2.9.1"
+        android:label="Cyclone 2.9.2"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
@@ -27,6 +28,10 @@
 
         <activity
             android:name=".guided.RoutineTeachingHistoryActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ai.TaskResultActivityV292"
             android:exported="false" />
 
         <receiver
@@ -48,7 +53,7 @@
         <service
             android:name=".CycloneNotificationListener"
             android:exported="true"
-            android:label="Cyclone 2.9.1 notification listener"
+            android:label="Cyclone 2.9.2 notification listener"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
