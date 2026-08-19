@@ -17,15 +17,9 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
 /**
- * V2.9.2 fills the biggest hole in Follow Me: TYPE_VIEW_SCROLLED used to be recorded as a generic
- * scroll and never became a directional navigation transition. A horizontal pager demonstration
- * therefore looked "learned" in the report but could not be reused by the Brain.
- *
- * This observer is deliberately additive. It does not replace the V2.9 page learner. It watches the
- * same user-owned Accessibility stream, infers swipe direction from Android scroll deltas/indexes,
- * links the before/after semantic pages, and writes one evidence-backed gesture into both App Graph
- * and Adaptive Brain. Repeated demonstrations strengthen the same transition instead of creating
- * duplicate knowledge.
+ * V2.9.2 fills the biggest Follow Me gap: a user swipe used to collapse into a generic scroll and
+ * never became a directional navigation transition. This additive observer turns real human swipes
+ * into before/after page evidence, App Graph gesture hops and exact phone.swipe Brain micro-skills.
  */
 object FollowMeGestureIntelligenceV292 {
     private val executor = Executors.newSingleThreadExecutor()
@@ -42,7 +36,7 @@ object FollowMeGestureIntelligenceV292 {
         val packageName: String,
         val direction: String,
         val label: String,
-        val selector: JSONObject,
+        val sourceSelector: JSONObject,
         val eventAt: Long,
     )
 
@@ -63,18 +57,11 @@ object FollowMeGestureIntelligenceV292 {
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             val direction = inferDirection(packageName, event)
             if (direction != null) {
-                val selector = event.source?.let(::selectorFromNode) ?: JSONObject()
-                selector.put("gesture", "swipe_$direction")
-                selector.put("scrollDeltaX", event.scrollDeltaX)
-                selector.put("scrollDeltaY", event.scrollDeltaY)
-                selector.put("fromIndex", event.fromIndex)
-                selector.put("toIndex", event.toIndex)
-                selector.put("itemCount", event.itemCount)
                 pendingGesture = PendingGesture(
                     packageName = packageName,
                     direction = direction,
-                    label = "Swipe ${direction.replace('_', ' ')}",
-                    selector = selector,
+                    label = "Swipe $direction",
+                    sourceSelector = event.source?.let(::selectorFromNode) ?: JSONObject(),
                     eventAt = System.currentTimeMillis(),
                 )
             }
@@ -119,8 +106,6 @@ object FollowMeGestureIntelligenceV292 {
         val pageChanged = oldPackage == packageName && !oldPageKey.isNullOrBlank() && oldPageKey != page.pageKey
 
         if (pageChanged && gesture != null && gesture.packageName == packageName && System.currentTimeMillis() - gesture.eventAt < 4_000L) {
-            // The original Follow Me worker normally persists these screens first. Give it one very
-            // small grace window, then resolve by semantic fingerprint.
             var graph = AppLearnerRuntime.graph(packageName)
             var from = graph?.screens?.firstOrNull { it.recognition.semanticFingerprint == oldPageKey }
             var to = graph?.screens?.firstOrNull { it.recognition.semanticFingerprint == page.pageKey }
@@ -134,11 +119,19 @@ object FollowMeGestureIntelligenceV292 {
             if (from != null && to != null) {
                 val width = snapshot.optInt("screenWidth", 1080).coerceAtLeast(320)
                 val height = snapshot.optInt("screenHeight", 1920).coerceAtLeast(480)
-                val gestureSelector = JSONObject(gesture.selector.toString())
-                    .put("screenWidth", width)
-                    .put("screenHeight", height)
-                    .put("fromPageKey", oldPageKey)
-                    .put("toPageKey", page.pageKey)
+                // Stable selector metadata means repeated demonstrations strengthen the same action
+                // instead of generating a new action because a raw scroll delta changed by 2 pixels.
+                val gestureSelector = JSONObject().apply {
+                    put("gesture", "swipe_${gesture.direction}")
+                    gesture.sourceSelector.optString("resourceId").takeIf(String::isNotBlank)?.let { put("resourceId", it) }
+                    gesture.sourceSelector.optString("contentDescription").takeIf(String::isNotBlank)?.let { put("contentDescription", it) }
+                    gesture.sourceSelector.optString("role").takeIf(String::isNotBlank)?.let { put("role", it) }
+                    if (gesture.sourceSelector.has("scrollable")) put("scrollable", gesture.sourceSelector.optBoolean("scrollable"))
+                    put("screenWidth", width)
+                    put("screenHeight", height)
+                    put("fromPageKey", oldPageKey)
+                    put("toPageKey", page.pageKey)
+                }
                 val action = LearnedAction(
                     packageName = packageName,
                     screenId = from.id,
@@ -148,9 +141,9 @@ object FollowMeGestureIntelligenceV292 {
                     selectorJson = gestureSelector.toString(),
                     risk = ActionRisk.SAFE,
                     knowledgeState = KnowledgeState.UNDERSTOOD,
-                    // Keep this just below the old auto-click replay threshold. The page agent sees
-                    // the gesture metadata and Brain micro-skill, but V2.8's click-only graph shortcut
-                    // cannot accidentally click a swipe action.
+                    // Intentionally below the legacy graph fast-path's click threshold. That fast
+                    // path assumes every graph hop is a click; V2.9.2 Page Agent instead reads this
+                    // gesture metadata + exact Brain phone.swipe evidence and executes a swipe.
                     confidence = 0.69,
                 )
                 AppLearnerRuntime.store.upsertAction(action)
@@ -158,7 +151,8 @@ object FollowMeGestureIntelligenceV292 {
                     it.screenId == from.id && it.semanticName == action.semanticName && it.selectorJson == action.selectorJson
                 }
                 if (stored != null) {
-                    AppLearnerRuntime.store.markActionSuccess(stored.id)
+                    // Do not markActionSuccess(): that API promotes an action above the legacy
+                    // click-replay threshold. Transition evidence is still strengthened normally.
                     AppLearnerRuntime.store.upsertTransition(
                         LearnedTransition(
                             packageName = packageName,
@@ -231,6 +225,8 @@ object FollowMeGestureIntelligenceV292 {
         lastScrollPosition[packageName] = event.scrollX to event.scrollY
         return direction
     }
+
+    internal fun swipeParamsForTest(direction: String, width: Int, height: Int): JSONObject = swipeParams(direction, width, height)
 
     private fun swipeParams(direction: String, width: Int, height: Int): JSONObject {
         val left = (width * 0.18).toInt()
