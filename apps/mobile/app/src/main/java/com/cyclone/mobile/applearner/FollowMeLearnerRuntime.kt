@@ -5,20 +5,27 @@ import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
+import com.cyclone.mobile.ai.OpenRouterModelPresets
+import com.cyclone.mobile.ai.OpenRouterSecretStore
+import com.cyclone.mobile.ai.RoutineTeachingAnalyzer
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
+import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
+import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * V2.8 user-driven whole-phone learning.
+ * V2.9 user-driven whole-phone learning.
  *
- * HUMAN keeps control. Accessibility events are debounced and then collapsed into stable
- * PageContexts. A thousand content-change events on one visible page therefore count as one page.
+ * HUMAN keeps control. Accessibility events are debounced and collapsed into stable PageContexts.
+ * V2.9 also opens an explicit LEARN overlay, records a persistent screenshot/UI timeline, accepts
+ * precise guided placements, and produces a reviewable teaching report when the user presses Stop.
  */
 data class FollowMeProgress(
     val active: Boolean = false,
@@ -31,6 +38,8 @@ data class FollowMeProgress(
     val screensSeen: Int = 0,
     val actionsSeen: Int = 0,
     val pathsLearned: Int = 0,
+    val teachingSessionId: String? = null,
+    val selectedModelId: String? = null,
     val message: String = "Ready",
 )
 
@@ -55,6 +64,8 @@ object FollowMeLearnerRuntime {
         val label: String,
         val selector: JSONObject,
         val risk: ActionRisk,
+        val advertisedActions: List<String>,
+        val kind: String,
     )
 
     fun progress(): FollowMeProgress = state
@@ -66,40 +77,90 @@ object FollowMeLearnerRuntime {
         AppLearnerRuntime.initialize(app)
         AdaptiveBrainRuntime.initialize(app)
         PageAwarenessRuntime.initialize(app)
+        RoutineTeachingRuntime.initialize(app)
         previousController = DeviceState.controller
         DeviceState.setController(DeviceState.Controller.HUMAN)
         previousPackage = null
         previousPageKey = null
         previousScreenId = null
         pendingAction = null
+        lastObservation.set(0L)
         seenApps.clear(); seenScreens.clear(); seenActions.clear(); seenPaths.clear()
+
+        val prefs = app.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
+        val selectedModel = prefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id)
+            .orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }
+        val session = RoutineTeachingRuntime.start(app, "Teach my phone routine", selectedModel)
         state = FollowMeProgress(
             active = true,
             startedAt = System.currentTimeMillis(),
-            message = "Use your phone normally. Cyclone learns only when the semantic page changes; repeated screen events are merged.",
+            teachingSessionId = session.id,
+            selectedModelId = selectedModel,
+            message = "Learning is live. Use your phone normally or tap the LEARN bubble to guide an exact Tap, Hold, Swipe, Check or Wait step.",
         )
+        val service = CycloneAccessibilityService.instance
+        if (service != null) {
+            RoutineTeachingOverlayRuntime.show(service, session)
+        } else {
+            state = state.copy(message = "Cyclone Accessibility is not connected, so the teaching overlay cannot start yet.")
+        }
     }
 
     fun pause() {
         if (!state.active) return
-        state = state.copy(paused = true, message = "Follow Me paused. No navigation is being learned.")
+        state = state.copy(paused = true, message = "Teaching paused. Cyclone is not learning navigation until you resume.")
     }
 
     fun resume() {
         if (!state.active) return
-        state = state.copy(paused = false, message = "Follow Me resumed. Keep using your phone normally.")
+        state = state.copy(paused = false, message = "Teaching resumed. Keep using your phone normally.")
     }
 
+    /** UI/API stop requests are routed through the overlay so explicit guided steps are saved first. */
     @Synchronized
     fun stop() {
-        val app = appContext
-        state = state.copy(active = false, paused = false, message = "Follow Me stopped. Semantic pages and paths were saved locally.")
+        if (!state.active) return
+        if (RoutineTeachingOverlayRuntime.isShowing()) {
+            RoutineTeachingOverlayRuntime.requestStop()
+            return
+        }
+        finishFromOverlay(null, null)
+    }
+
+    /** Called exactly once by the V2.9 overlay after its guided recorder has been saved/cancelled. */
+    @Synchronized
+    fun finishFromOverlay(copiedAutomationId: String?, optimizedAutomationId: String?) {
+        if (!state.active) return
+        val app = appContext ?: return
+        val finalStats = state
+        state = state.copy(active = false, paused = false, message = "Teaching stopped. Building your review report and updating Cyclone Brain.")
         pendingAction = null
+        RoutineTeachingOverlayRuntime.dismiss()
         if (previousController == DeviceState.Controller.AGENT) {
             DeviceState.setController(DeviceState.Controller.AGENT)
-            if (app != null) PhoneToolExecutor.execute(app, PhoneToolRequest("follow-me-final-observe-${UUID.randomUUID()}", "phone.observe", JSONObject()))
+            PhoneToolExecutor.execute(app, PhoneToolRequest("follow-me-final-observe-${UUID.randomUUID()}", "phone.observe", JSONObject()))
         }
         runCatching { AdaptiveBrainRuntime.store.writeMirror() }
+
+        val finished = RoutineTeachingRuntime.finish(
+            appsSeen = finalStats.appsSeen,
+            pagesSeen = finalStats.screensSeen,
+            actionsSeen = finalStats.actionsSeen,
+            pathsLearned = finalStats.pathsLearned,
+            copiedAutomationId = copiedAutomationId,
+            optimizedAutomationId = optimizedAutomationId,
+        )
+        if (finished != null) {
+            // Show the local report immediately. The optional selected-model analysis is one compact
+            // background request and refreshes the same persisted report when it returns.
+            RoutineTeachingRuntime.launchReport(app, finished.id)
+            if (OpenRouterSecretStore.hasKey(app) && finished.modelId.isNotBlank()) {
+                executor.submit {
+                    val analysis = RoutineTeachingAnalyzer.analyze(app, finished)
+                    if (!analysis.isNullOrBlank()) RoutineTeachingRuntime.saveAiAnalysis(finished.id, analysis)
+                }
+            }
+        }
     }
 
     fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -109,8 +170,8 @@ object FollowMeLearnerRuntime {
         if (packageName == app.packageName) return
 
         when (event.eventType) {
-            AccessibilityEvent.TYPE_VIEW_CLICKED,
-            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> event.source?.let { captureUserAction(packageName, it) }
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> event.source?.let { captureUserAction(packageName, it, "click") }
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> event.source?.let { captureUserAction(packageName, it, "long_click") }
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> Unit // Never learn typed contents.
         }
 
@@ -122,8 +183,6 @@ object FollowMeLearnerRuntime {
             )) {
             val now = System.currentTimeMillis()
             val previous = lastObservation.get()
-            // 650ms is intentionally calmer than V2.7. The page gate does the real dedupe, this only
-            // prevents redundant observe work while Android is animating/layouting.
             if (now - previous < 650L || !lastObservation.compareAndSet(previous, now)) return
             executor.submit {
                 Thread.sleep(180)
@@ -135,7 +194,7 @@ object FollowMeLearnerRuntime {
         }
     }
 
-    private fun captureUserAction(packageName: String, node: AccessibilityNodeInfo) {
+    private fun captureUserAction(packageName: String, node: AccessibilityNodeInfo, kind: String) {
         val json = nodeJson(node)
         if (ActionSafetyPolicy.looksSensitiveField(json)) return
         val label = json.optString("text").trim()
@@ -148,15 +207,30 @@ object FollowMeLearnerRuntime {
             json.optString("contentDescription").takeIf { it.isNotBlank() }?.let { put("contentDescription", it.take(180)) }
             json.optString("role").takeIf { it.isNotBlank() }?.let { put("role", it) }
         }
+        val actions = json.optJSONArray("actions")?.let { array ->
+            (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
+        }.orEmpty()
+        val risk = ActionSafetyPolicy.classify(label, json.optString("resourceId"), json.optString("contentDescription"))
         pendingAction = PendingUserAction(
             packageName = packageName,
             screenId = if (packageName == previousPackage) previousScreenId else null,
             label = label.take(120),
             selector = selector,
-            risk = ActionSafetyPolicy.classify(label, json.optString("resourceId"), json.optString("contentDescription")),
+            risk = risk,
+            advertisedActions = actions,
+            kind = kind,
         )
         seenActions += "$packageName|${PageSignatureEngine.normalizeLabel(label)}"
-        publish(message = "Saw you use $label · waiting to see whether the page changes")
+        RoutineTeachingRuntime.recordHumanAction(
+            packageName = packageName,
+            label = label.take(120),
+            kind = kind,
+            selector = selector,
+            advertisedActions = actions,
+            pageTitle = state.currentScreen.takeIf(String::isNotBlank),
+            pageKey = previousPageKey,
+        )
+        publish(message = "Saw you ${if (kind == "long_click") "hold" else "tap"} $label · capturing what that action changes")
     }
 
     private fun learnSnapshot(snapshot: JSONObject) {
@@ -164,14 +238,15 @@ object FollowMeLearnerRuntime {
         val packageName = snapshot.optString("package").takeIf { it.isNotBlank() } ?: return
         if (packageName == app.packageName) return
         val page = PageAwarenessRuntime.capture(app, snapshot)
+        val typedSnapshot = runCatching { com.cyclone.mobile.UiSnapshot.fromJson(snapshot) }.getOrNull()
+        if (typedSnapshot != null) RoutineTeachingRuntime.recordPage(typedSnapshot, page.pageKey, page.title)
 
-        // Same package + same stable page: merge observation evidence only.
         if (packageName == previousPackage && page.pageKey == previousPageKey) {
             publish(
                 currentApp = appLabel(packageName),
                 currentPackage = packageName,
                 currentScreen = page.title,
-                message = "Still on ${page.title} · ${page.observationCount} screen events merged into one page",
+                message = "Still on ${page.title} · ${page.observationCount} Android events merged into one semantic page",
             )
             return
         }
@@ -187,7 +262,7 @@ object FollowMeLearnerRuntime {
             knowledgeState = if (existingApp == null) KnowledgeState.DISCOVERED else existingApp.knowledgeState,
             confidence = maxOf(existingApp?.confidence ?: 0.0, 0.60),
             lastLearnedAt = System.currentTimeMillis(),
-            instructionSummary = "Observed in V2.8 Follow Me mode as stable semantic pages while the user navigated normally.",
+            instructionSummary = "Observed in V2.9 unified teaching mode as stable semantic pages while the user navigated normally.",
         ))
 
         val rawCandidate = ScreenSemanticizer.fromSnapshot(packageName, snapshot)
@@ -255,11 +330,11 @@ object FollowMeLearnerRuntime {
                 screenId = previousScreen,
                 semanticName = PageSignatureEngine.semanticName(action.label, "button"),
                 label = action.label,
-                androidActions = listOf("USER_DEMONSTRATED"),
+                androidActions = (action.advertisedActions + "USER_DEMONSTRATED").distinct(),
                 selectorJson = action.selector.toString(),
                 risk = action.risk,
                 knowledgeState = KnowledgeState.UNDERSTOOD,
-                confidence = 0.80,
+                confidence = 0.82,
             )
             store.upsertAction(learned)
             val storedAction = store.listActions(packageName).lastOrNull {
@@ -272,13 +347,11 @@ object FollowMeLearnerRuntime {
                     actionId = storedAction.id,
                     toScreenId = screen.id,
                     knowledgeState = KnowledgeState.UNDERSTOOD,
-                    confidence = 0.82,
+                    confidence = 0.84,
                 ))
                 seenPaths += "$previousPage|${storedAction.semanticName}|${page.pageKey}"
             }
         } else if (previousPkg != null && previousPkg != packageName) {
-            // Cross-app changes are useful even when Android did not emit a clickable source for the
-            // launcher gesture. The target package itself is deterministic evidence.
             AdaptiveBrainRuntime.store.recordHumanTransition(
                 goalHint = "open $label",
                 fromPackage = previousPkg,
@@ -299,7 +372,7 @@ object FollowMeLearnerRuntime {
             currentApp = label,
             currentPackage = packageName,
             currentScreen = screen.title,
-            message = "Learned one semantic page in $label · ${page.controls.size} controls mapped",
+            message = "Learned ${screen.title} · ${page.controls.size} semantic controls mapped · screenshot added to teaching timeline",
         )
     }
 
@@ -317,6 +390,7 @@ object FollowMeLearnerRuntime {
             screensSeen = seenScreens.size,
             actionsSeen = seenActions.size,
             pathsLearned = seenPaths.size,
+            selectedModelId = RoutineTeachingRuntime.activeSession()?.modelId ?: state.selectedModelId,
             message = message,
         )
     }
@@ -354,6 +428,19 @@ object FollowMeLearnerRuntime {
             .put("editable", node.isEditable)
             .put("scrollable", node.isScrollable)
             .put("password", node.isPassword)
+            .put("actions", org.json.JSONArray(node.actionList.orEmpty().map { action ->
+                when (action.id) {
+                    AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
+                    AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
+                    AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "ACTION_SCROLL_FORWARD"
+                    AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "ACTION_SCROLL_BACKWARD"
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_TO_POSITION.id -> "ACTION_SCROLL_TO_POSITION"
+                    AccessibilityNodeInfo.ACTION_SET_TEXT -> "ACTION_SET_TEXT"
+                    AccessibilityNodeInfo.ACTION_EXPAND -> "ACTION_EXPAND"
+                    AccessibilityNodeInfo.ACTION_COLLAPSE -> "ACTION_COLLAPSE"
+                    else -> action.label?.toString()?.takeIf { it.isNotBlank() } ?: "ACTION_${action.id}"
+                }
+            }.distinct()))
             .put("bounds", JSONObject().put("left", rect.left).put("top", rect.top).put("right", rect.right).put("bottom", rect.bottom))
     }
 }
