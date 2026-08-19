@@ -1,7 +1,13 @@
 package com.cyclone.mobile.ai
 
 /**
- * Narrow V2.8 helper: trace detail is optional, so a blank String can legitimately map to null.
- * This overload is selected only when the fallback lambda itself returns String?.
+ * Compatibility shim for one trace call that historically used `ifBlank { null }`.
+ *
+ * The lambda type is deliberately Nothing? so normal `ifBlank { "fallback" }` calls continue to
+ * resolve to Kotlin's standard non-null overload. Blank optional trace detail becomes an empty
+ * detail string rather than widening every String.ifBlank call in this package to nullable.
  */
-internal fun String.ifBlank(defaultValue: () -> String?): String? = if (isBlank()) defaultValue() else this
+internal fun String.ifBlank(defaultValue: () -> Nothing?): String = if (isBlank()) {
+    defaultValue()
+    ""
+} else this
