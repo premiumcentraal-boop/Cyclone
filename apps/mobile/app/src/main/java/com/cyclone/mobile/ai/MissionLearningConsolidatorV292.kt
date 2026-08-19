@@ -24,11 +24,7 @@ import java.util.concurrent.TimeUnit
  * or executable confidence. Real phone success/failure evidence remains authoritative.
  */
 object MissionLearningConsolidatorV292 {
-    data class Result(
-        val updates: Int,
-        val summary: String,
-        val usedModel: Boolean,
-    )
+    data class Result(val updates: Int, val summary: String, val usedModel: Boolean)
 
     private val executor = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -45,9 +41,14 @@ object MissionLearningConsolidatorV292 {
         if (sessionId in completed || !inFlight.add(sessionId)) return
         val app = context.applicationContext
         executor.submit {
+            val startedAt = System.currentTimeMillis()
             val result = runCatching { consolidate(app, sessionId) }.getOrElse {
                 Result(0, "Result compiled locally. No additional model lesson was stored.", false)
             }
+            // Even a zero-token local compilation should remain visible long enough for the user to
+            // see TASK COMPLETED/FAILED -> COMPILING RESULTS -> RESULTS COMPILED as three clear states.
+            val remaining = 1_050L - (System.currentTimeMillis() - startedAt)
+            if (remaining > 0) Thread.sleep(remaining)
             synchronized(this) {
                 inFlight.remove(sessionId)
                 completed.add(sessionId)
@@ -171,8 +172,6 @@ Rules:
         return Result(applied.size, summary, true)
     }
 
-    private fun stripFence(value: String): String = value.trim()
-        .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-
+    private fun stripFence(value: String): String = value.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
     private fun normalize(value: String): String = value.lowercase(Locale.US).replace(Regex("\\s+"), " ").trim()
 }
