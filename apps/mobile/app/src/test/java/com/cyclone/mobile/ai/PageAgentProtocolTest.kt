@@ -52,8 +52,8 @@ class PageAgentProtocolTest {
     fun lunaMaxIsDefaultAndGeminiFlashIsHigh() {
         assertEquals("openai/gpt-5.6-luna", OpenRouterModelPresets.DEFAULT.id)
         assertEquals("max", OpenRouterModelPresets.GPT_5_6_LUNA.reasoningEffort)
-        assertEquals("google/gemini-3.5-flash", OpenRouterModelPresets.GEMINI_3_5_FLASH.id)
-        assertEquals("high", OpenRouterModelPresets.GEMINI_3_5_FLASH.reasoningEffort)
+        assertEquals("google/gemini-3.6-flash", OpenRouterModelPresets.GEMINI_3_6_FLASH.id)
+        assertEquals("high", OpenRouterModelPresets.GEMINI_3_6_FLASH.reasoningEffort)
         assertEquals(6, QuickAgentConfig().maxDecisions)
     }
 }
