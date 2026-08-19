@@ -139,13 +139,13 @@ jobs:
           cat > "$NOTES_FILE" <<EOF
           Automated Cyclone Android build.
 
-          - Version: `${{ steps.version.outputs.version_name }}`
-          - Version code: `${{ steps.version.outputs.version_code }}`
-          - Commit: `${GITHUB_SHA}`
-          - Branch: `${GITHUB_REF_NAME}`
+          - Version: ${{ steps.version.outputs.version_name }}
+          - Version code: ${{ steps.version.outputs.version_code }}
+          - Commit: ${GITHUB_SHA}
+          - Branch: ${GITHUB_REF_NAME}
           - Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
 
-          Download the `.apk` asset directly. The `.sha256` asset is included for verification.
+          Download the .apk asset directly. The .sha256 asset is included for verification.
           EOF
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
