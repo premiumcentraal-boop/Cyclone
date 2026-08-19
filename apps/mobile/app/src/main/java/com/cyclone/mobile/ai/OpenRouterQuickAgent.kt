@@ -64,8 +64,11 @@ object OpenRouterModelPresets {
     val DEFAULT = GPT_5_6_LUNA
     val all = listOf(GPT_5_6_LUNA, GEMINI_3_6_FLASH, DEEPSEEK_V4_FLASH, GEMMA_4_26B, GEMMA_4_31B)
 
+    // Unknown custom slugs are accepted, but vision support is not assumed until the user picks a
+    // known vision preset. This preserves existing behavior and prevents accidental image requests
+    // to text-only custom providers.
     fun byId(id: String): OpenRouterModelPreset = all.firstOrNull { it.id == id }
-        ?: OpenRouterModelPreset(id, id, true, reasoningEffort = "medium")
+        ?: OpenRouterModelPreset(id, id, false, reasoningEffort = "medium")
 }
 
 data class QuickAgentConfig(
