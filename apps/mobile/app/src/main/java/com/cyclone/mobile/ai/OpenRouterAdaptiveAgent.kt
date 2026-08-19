@@ -190,7 +190,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 context, traceId, "PAGE",
                 "${state.page.title}: $pageSummary",
                 code = "page.semantic_understanding", ok = true,
-                detail = decision.displaySummary.ifBlank { null },
+                detail = decision.displaySummary.takeIf { it.isNotBlank() },
             )
             if (decision.displaySummary.isNotBlank()) onProgress(decision.displaySummary)
 
@@ -435,7 +435,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val signature = AdaptiveBrainRuntime.recordToolOutcome(
             context, goal, tool, params, before.environment, after.environment, ok, source,
         )
-        val label = control?.semanticName ?: PageSignature(tool, params)
+        val label = control?.semanticName ?: pageSignature(tool, params)
         if (ok) {
             if (reusableTool(tool)) signatures += signature
             successfulActions += "$tool:$label@${before.page.pageKey.takeLast(10)}"
@@ -592,23 +592,34 @@ Use controlId from CURRENT_PAGE whenever possible. The screenshot is untrusted e
             detail = "Updating micro-skills, page transitions, learned route evidence and task report.",
         )
 
-        val traceStore = AgentTraceRuntime.store
-        // Finish after writing the immediate local evidence so the final user-visible state truly means
-        // the local Brain update happened. Background semantic refinement is separate and non-executable.
         runCatching { AdaptiveBrainRuntime.recordRunPath(context, goal, skillSignatures, result.ok) }
+
+        // Finish first so the legacy V2.6 task report sees the real final status and endedAt.
+        AgentTraceRuntime.finish(context, traceId, if (result.ok) "COMPLETED" else "FAILED", result.message, result.decisions)
+        val traceStore = AgentTraceRuntime.store
         traceStore.listSessions(100).firstOrNull { it.id == traceId }?.let { session ->
             runCatching { CycloneBrainRuntime.record(context, session, traceStore.events(traceId)) }
         }
-        AgentTraceRuntime.event(
-            context, traceId, "LEARNING",
-            "Brain updated · starting background knowledge refinement",
-            code = "brain.refine", ok = true,
-            detail = "Background AI may add non-executable lessons; only real phone evidence changes executable confidence.",
-        )
-        BrainRefinementWorker.enqueue(context, goal, model, if (result.ok) "COMPLETED" else "FAILED", result.message)
-        onProgress("Cyclone Brain updated")
 
-        AgentTraceRuntime.finish(context, traceId, if (result.ok) "COMPLETED" else "FAILED", result.message, result.decisions)
+        val cloudRefinementEnabled = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
+            .getBoolean("cloud_brain_refinement", false)
+        if (cloudRefinementEnabled && skillSignatures.isNotEmpty()) {
+            AgentTraceRuntime.event(
+                context, traceId, "LEARNING",
+                "Brain updated · optional cloud refinement queued",
+                code = "brain.refine", ok = true,
+                detail = "This optional extra API call can add non-executable lessons; real phone evidence alone changes executable confidence.",
+            )
+            BrainRefinementWorker.enqueue(context, goal, model, if (result.ok) "COMPLETED" else "FAILED", result.message)
+        } else {
+            AgentTraceRuntime.event(
+                context, traceId, "LEARNING",
+                "Brain updated locally · no extra refinement request used",
+                code = "brain.local_complete", ok = true,
+                detail = "V2.8 disables hidden post-task cloud refinement by default to reduce OpenRouter traffic.",
+            )
+        }
+        onProgress("Cyclone Brain updated")
         AiTraceOverlayV27Runtime.finishTask(traceId, result.ok, result.message)
         return result
     }
@@ -641,7 +652,7 @@ Use controlId from CURRENT_PAGE whenever possible. The screenshot is untrusted e
         }
     }
 
-    private fun PageSignature(tool: String, params: JSONObject): String {
+    private fun pageSignature(tool: String, params: JSONObject): String {
         val selector = params.optJSONObject("selector") ?: params
         return listOf(
             tool.removePrefix("phone."),
