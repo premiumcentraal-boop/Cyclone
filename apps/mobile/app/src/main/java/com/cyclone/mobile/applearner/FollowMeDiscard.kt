@@ -3,23 +3,20 @@ package com.cyclone.mobile.applearner
 import android.content.Context
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
 import java.io.File
 
 /**
- * Cancels the active Follow Me teaching session without opening a report or running model analysis.
- *
- * The live App Graph remains observation-backed phone knowledge, but the temporary 2.9.1 teaching
- * session, its screenshots and its Obsidian teaching-history mirror are discarded. No workflow is
- * compiled and no post-session OpenRouter analysis is started.
+ * Cancels the active Follow Me teaching session without opening a report, compiling a routine or
+ * running model analysis. Observation-backed App Graph/Brain knowledge already learned while the
+ * user was navigating remains valid, but temporary review artifacts are removed.
  */
 fun discardFollowMeSession(context: Context) {
     val app = context.applicationContext
     val sessionId = RoutineTeachingRuntime.activeSessionId()
 
-    // Cancel any explicit guided placement first so it cannot compile into an Automation.
     RoutineTeachingOverlayRuntime.dismiss()
 
-    // Clear RoutineTeachingRuntime's active pointer without going through Follow Me's review path.
     if (sessionId != null) {
         RoutineTeachingRuntime.finish(
             appsSeen = 0,
@@ -28,6 +25,8 @@ fun discardFollowMeSession(context: Context) {
             pathsLearned = 0,
         )
         File(app.filesDir, "cyclone-teaching-sessions/$sessionId").deleteRecursively()
+        TeachingGestureEvidenceV292.clear(app, sessionId)
+        File(app.filesDir, "cyclone-v292-teaching-corrections/$sessionId").deleteRecursively()
         val suffix = "-${sessionId.take(8)}"
         File(app.filesDir, "Cyclone Brain/Routine Teachings")
             .listFiles()
