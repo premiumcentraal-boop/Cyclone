@@ -14,6 +14,7 @@ import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
+import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -81,6 +82,7 @@ class CycloneAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         guidedOverlay?.dismiss()
         guidedOverlay = null
+        RoutineTeachingOverlayRuntime.dismiss()
         instance = null
         DeviceState.accessibilityConnected = false
         BridgeClient.stop()
@@ -155,10 +157,25 @@ class CycloneAccessibilityService : AccessibilityService() {
         return false
     }
 
+    /**
+     * V2.9 replay optimization: a human may demonstrate a two-second hold, but if Android exposes
+     * ACTION_LONG_CLICK Cyclone sends that semantic action immediately. The original gesture duration
+     * remains only as a compatibility fallback for apps that do not expose a native long-click.
+     */
     fun longPress(selector: ElementSelector, durationMs: Long = 650): Boolean {
         if (!agentCanAct()) return false
-        val target = resolveLiveTarget(selector)?.first ?: return false
-        return longPress(target.bounds.centerX, target.bounds.centerY, durationMs)
+        repeat(2) {
+            val target = resolveLiveTarget(selector) ?: return@repeat
+            val (snapshotNode, node) = target
+            if (!sameNode(snapshotNode, node)) return@repeat
+            val advertisesLongClick = snapshotNode.actions.contains("ACTION_LONG_CLICK") || node.isLongClickable
+            if (advertisesLongClick && node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) {
+                DeviceState.addLog("Semantic ACTION_LONG_CLICK used instead of timed hold")
+                return true
+            }
+            return rawLongPress(snapshotNode.bounds.centerX, snapshotNode.bounds.centerY, durationMs)
+        }
+        return false
     }
 
     fun setText(selector: ElementSelector?, value: String): Boolean {
