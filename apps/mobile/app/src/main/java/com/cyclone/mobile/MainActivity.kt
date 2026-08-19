@@ -11,17 +11,15 @@ import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
-import com.cyclone.mobile.ui.CycloneMobileV27App
+import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.ui.CycloneMobileV291App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         initializeCyclone()
-        migrateV28ModelDefault()
-        setContent {
-            // V2.8 keeps the V2.7 five-tab product shell; the major upgrade is the runtime underneath.
-            CycloneMobileV27App()
-        }
+        migrateModelDefault()
+        setContent { CycloneMobileV291App() }
     }
 
     override fun onResume() {
@@ -37,21 +35,16 @@ class MainActivity : ComponentActivity() {
         CycloneBrainRuntime.initialize(this)
         AdaptiveBrainRuntime.initialize(this)
         BrainChatRuntime.initialize(this)
+        RoutineTeachingRuntime.initialize(this)
         BridgeClient.start(this)
     }
 
-    /**
-     * V2.8 makes GPT-5.6 Luna Max the built-in default. Existing users who deliberately selected a
-     * non-legacy model keep their choice; clean installs and the old DeepSeek default migrate once.
-     */
-    private fun migrateV28ModelDefault() {
+    /** Keep an existing deliberate model choice while giving clean installs Cyclone's current default. */
+    private fun migrateModelDefault() {
         val prefs = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
-        if (prefs.getBoolean("v28_model_default_migrated", false)) return
+        if (prefs.getBoolean("model_default_migrated", false)) return
         val selected = prefs.getString("openrouter_model", null)
-        val shouldMigrate = selected.isNullOrBlank() || selected == "deepseek/deepseek-v4-flash-0731"
-        prefs.edit().apply {
-            if (shouldMigrate) putString("openrouter_model", OpenRouterModelPresets.DEFAULT.id)
-            putBoolean("v28_model_default_migrated", true)
-        }.apply()
+        if (selected.isNullOrBlank()) prefs.edit().putString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).apply()
+        prefs.edit().putBoolean("model_default_migrated", true).apply()
     }
 }
