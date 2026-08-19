@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.cyclone.mobile.CycloneAccessibilityService
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -31,11 +32,9 @@ data class AiTraceEvent(
 )
 
 /**
- * V2.6 user-visible decision history.
- *
- * This is intentionally NOT a hidden-chain-of-thought recorder. It stores compact user-facing
- * status/decision summaries, phone-tool names, verification outcomes and failures. Typed values,
- * screenshots, credentials and provider-private reasoning are not persisted here.
+ * User-visible decision history. This is intentionally NOT a hidden-chain-of-thought recorder.
+ * It stores compact status/decision summaries, phone-tool names, verification outcomes and failures.
+ * Typed values, screenshots, credentials and provider-private reasoning are not persisted here.
  */
 object AgentTraceRuntime {
     @Volatile private var initialized = false
@@ -51,7 +50,11 @@ object AgentTraceRuntime {
 
     fun start(context: Context, goal: String, model: String): String {
         initialize(context)
-        return store.startSession(goal, model)
+        val id = store.startSession(goal, model)
+        // V2.9.2 makes the transparent decision HUD a core part of phone-task execution rather than
+        // a buried toggle. If Accessibility is connected it appears automatically for every trace.
+        CycloneAccessibilityService.instance?.let { AiTraceOverlayV27Runtime.startTask(it, id) }
+        return id
     }
 
     fun event(
@@ -69,7 +72,16 @@ object AgentTraceRuntime {
 
     fun finish(context: Context, sessionId: String, status: String, result: String, decisions: Int) {
         initialize(context)
+        val ok = status == "COMPLETED"
         store.finishSession(sessionId, status, result, decisions)
+        AiTraceOverlayV27Runtime.finishTask(sessionId, ok, result)
+
+        // One post-mission consolidation pass. This runs after the task result is durable and cannot
+        // drive the phone. It only adds evidence-based semantic notes to the existing Brain.
+        MissionLearningConsolidatorV292.enqueue(context, sessionId) { compiled ->
+            AiTraceOverlayV27Runtime.compilationComplete(sessionId, compiled.summary)
+            TaskResultNotifierV292.notify(context, sessionId, ok, result, compiled.summary)
+        }
     }
 }
 
@@ -250,10 +262,7 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
 
 object TraceHumanizer {
     fun decision(tool: String, params: JSONObject, providedSummary: String?): String {
-        // Never trust a model-authored summary for a typing action: it could echo the typed value.
-        // The history/overlay only needs to tell the user that Cyclone is filling the requested field.
         if (tool == "phone.type") return "Filling the requested field without storing its contents"
-
         val clean = providedSummary?.trim().orEmpty()
         if (clean.isNotBlank()) return TracePrivacy.clean(clean).take(260)
         val verb = when (tool) {
@@ -261,6 +270,7 @@ object TraceHumanizer {
             "phone.find" -> "Looking for the safest matching control"
             "phone.click" -> "Opening the selected control using Android's semantic UI"
             "phone.scroll" -> "Scrolling to find the next relevant control"
+            "phone.swipe" -> "Using a learned directional gesture on this page"
             "phone.open_app" -> "Opening the app needed for this task"
             "phone.open_notification" -> "Opening the relevant notification"
             "phone.wait_for" -> "Waiting for the expected screen state"
