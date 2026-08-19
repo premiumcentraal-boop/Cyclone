@@ -103,9 +103,12 @@ object FollowMeGestureIntelligenceV292 {
         val oldPageKey = previousPageKey
         val oldTitle = previousPageTitle
         val gesture = pendingGesture
+        val width = snapshot.optInt("screenWidth", 1080).coerceAtLeast(320)
+        val height = snapshot.optInt("screenHeight", 1920).coerceAtLeast(480)
+        val gestureFresh = gesture != null && gesture.packageName == packageName && System.currentTimeMillis() - gesture.eventAt < 4_000L
         val pageChanged = oldPackage == packageName && !oldPageKey.isNullOrBlank() && oldPageKey != page.pageKey
 
-        if (pageChanged && gesture != null && gesture.packageName == packageName && System.currentTimeMillis() - gesture.eventAt < 4_000L) {
+        if (pageChanged && gestureFresh && gesture != null) {
             var graph = AppLearnerRuntime.graph(packageName)
             var from = graph?.screens?.firstOrNull { it.recognition.semanticFingerprint == oldPageKey }
             var to = graph?.screens?.firstOrNull { it.recognition.semanticFingerprint == page.pageKey }
@@ -117,21 +120,7 @@ object FollowMeGestureIntelligenceV292 {
             }
 
             if (from != null && to != null) {
-                val width = snapshot.optInt("screenWidth", 1080).coerceAtLeast(320)
-                val height = snapshot.optInt("screenHeight", 1920).coerceAtLeast(480)
-                // Stable selector metadata means repeated demonstrations strengthen the same action
-                // instead of generating a new action because a raw scroll delta changed by 2 pixels.
-                val gestureSelector = JSONObject().apply {
-                    put("gesture", "swipe_${gesture.direction}")
-                    gesture.sourceSelector.optString("resourceId").takeIf(String::isNotBlank)?.let { put("resourceId", it) }
-                    gesture.sourceSelector.optString("contentDescription").takeIf(String::isNotBlank)?.let { put("contentDescription", it) }
-                    gesture.sourceSelector.optString("role").takeIf(String::isNotBlank)?.let { put("role", it) }
-                    if (gesture.sourceSelector.has("scrollable")) put("scrollable", gesture.sourceSelector.optBoolean("scrollable"))
-                    put("screenWidth", width)
-                    put("screenHeight", height)
-                    put("fromPageKey", oldPageKey)
-                    put("toPageKey", page.pageKey)
-                }
+                val gestureSelector = stableGestureSelector(gesture, width, height, oldPageKey.orEmpty(), page.pageKey)
                 val action = LearnedAction(
                     packageName = packageName,
                     screenId = from.id,
@@ -141,9 +130,8 @@ object FollowMeGestureIntelligenceV292 {
                     selectorJson = gestureSelector.toString(),
                     risk = ActionRisk.SAFE,
                     knowledgeState = KnowledgeState.UNDERSTOOD,
-                    // Intentionally below the legacy graph fast-path's click threshold. That fast
-                    // path assumes every graph hop is a click; V2.9.2 Page Agent instead reads this
-                    // gesture metadata + exact Brain phone.swipe evidence and executes a swipe.
+                    // Intentionally below the legacy graph fast-path's click threshold. V2.9.2 Page
+                    // Agent reads this gesture metadata + exact Brain phone.swipe evidence instead.
                     confidence = 0.69,
                 )
                 AppLearnerRuntime.store.upsertAction(action)
@@ -151,8 +139,9 @@ object FollowMeGestureIntelligenceV292 {
                     it.screenId == from.id && it.semanticName == action.semanticName && it.selectorJson == action.selectorJson
                 }
                 if (stored != null) {
-                    // Do not markActionSuccess(): that API promotes an action above the legacy
-                    // click-replay threshold. Transition evidence is still strengthened normally.
+                    // Do not markActionSuccess(): legacy V2.8 graph replay treats all verified graph
+                    // actions as clicks. The transition itself can still become VERIFIED by repeated
+                    // demonstrations, while exact executable swipe evidence lives in Adaptive Brain.
                     AppLearnerRuntime.store.upsertTransition(
                         LearnedTransition(
                             packageName = packageName,
@@ -164,44 +153,75 @@ object FollowMeGestureIntelligenceV292 {
                         ),
                     )
                 }
-
-                val params = swipeParams(gesture.direction, width, height)
-                val before = JSONObject().put("currentPackage", packageName).put("fingerprint", oldPageKey)
-                val after = JSONObject().put("currentPackage", packageName).put("fingerprint", page.pageKey)
-                AdaptiveBrainRuntime.recordToolOutcome(
-                    context = context,
-                    goal = "navigate from ${oldTitle.orEmpty().ifBlank { "this page" }} to ${page.title} with ${gesture.label}",
-                    tool = "phone.swipe",
-                    params = params,
-                    before = before,
-                    after = after,
-                    ok = true,
-                    source = "HUMAN_FOLLOW_ME_GESTURE",
-                )
-                AppLearnerRuntime.store.mirror(packageName)
-                AdaptiveBrainRuntime.store.writeMirror()
-
-                progress.teachingSessionId?.let { teachingId ->
-                    TeachingGestureEvidenceV292.append(
-                        context = context,
-                        sessionId = teachingId,
-                        timestampMs = gesture.eventAt,
-                        packageName = packageName,
-                        fromPageKey = oldPageKey,
-                        fromTitle = oldTitle.orEmpty(),
-                        toPageKey = page.pageKey,
-                        toTitle = page.title,
-                        direction = gesture.direction,
-                        params = params,
-                    )
-                }
             }
+            recordGestureEvidence(context, progress.teachingSessionId, gesture, packageName, oldPageKey.orEmpty(), oldTitle.orEmpty(), page.pageKey, page.title, width, height)
+            pendingGesture = null
+        } else if (gestureFresh && gesture != null && oldPackage == packageName && !oldPageKey.isNullOrBlank()) {
+            // Some horizontal pagers/carousels keep the same semantic page key even though Android
+            // emitted a real scroll. The old learner discarded these. Keep the demonstrated gesture
+            // as Brain/routine evidence even when the page fingerprint itself does not change.
+            recordGestureEvidence(context, progress.teachingSessionId, gesture, packageName, oldPageKey, oldTitle.orEmpty(), page.pageKey, page.title, width, height)
             pendingGesture = null
         }
 
         previousPackage = packageName
         previousPageKey = page.pageKey
         previousPageTitle = page.title
+    }
+
+    private fun recordGestureEvidence(
+        context: Context,
+        teachingSessionId: String?,
+        gesture: PendingGesture,
+        packageName: String,
+        fromPageKey: String,
+        fromTitle: String,
+        toPageKey: String,
+        toTitle: String,
+        width: Int,
+        height: Int,
+    ) {
+        val params = swipeParams(gesture.direction, width, height)
+        val before = JSONObject().put("currentPackage", packageName).put("fingerprint", fromPageKey)
+        val after = JSONObject().put("currentPackage", packageName).put("fingerprint", toPageKey)
+        AdaptiveBrainRuntime.recordToolOutcome(
+            context = context,
+            goal = if (fromPageKey == toPageKey) "use ${gesture.label} on ${fromTitle.ifBlank { "this page" }}" else "navigate from ${fromTitle.ifBlank { "this page" }} to ${toTitle.ifBlank { "the next page" }} with ${gesture.label}",
+            tool = "phone.swipe",
+            params = params,
+            before = before,
+            after = after,
+            ok = true,
+            source = "HUMAN_FOLLOW_ME_GESTURE",
+        )
+        AdaptiveBrainRuntime.store.writeMirror()
+        teachingSessionId?.let { id ->
+            TeachingGestureEvidenceV292.append(
+                context = context,
+                sessionId = id,
+                timestampMs = gesture.eventAt,
+                packageName = packageName,
+                fromPageKey = fromPageKey,
+                fromTitle = fromTitle,
+                toPageKey = toPageKey,
+                toTitle = toTitle,
+                direction = gesture.direction,
+                params = params,
+            )
+        }
+        AppLearnerRuntime.store.mirror(packageName)
+    }
+
+    private fun stableGestureSelector(gesture: PendingGesture, width: Int, height: Int, fromPageKey: String, toPageKey: String): JSONObject = JSONObject().apply {
+        put("gesture", "swipe_${gesture.direction}")
+        gesture.sourceSelector.optString("resourceId").takeIf(String::isNotBlank)?.let { put("resourceId", it) }
+        gesture.sourceSelector.optString("contentDescription").takeIf(String::isNotBlank)?.let { put("contentDescription", it) }
+        gesture.sourceSelector.optString("role").takeIf(String::isNotBlank)?.let { put("role", it) }
+        if (gesture.sourceSelector.has("scrollable")) put("scrollable", gesture.sourceSelector.optBoolean("scrollable"))
+        put("screenWidth", width)
+        put("screenHeight", height)
+        put("fromPageKey", fromPageKey)
+        put("toPageKey", toPageKey)
     }
 
     private fun inferDirection(packageName: String, event: AccessibilityEvent): String? {
