@@ -12,7 +12,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Cyclone V2.9"
+        android:label="Cyclone 2.9.1"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
@@ -48,7 +48,7 @@
         <service
             android:name=".CycloneNotificationListener"
             android:exported="true"
-            android:label="Cyclone V2.9 notification listener"
+            android:label="Cyclone 2.9.1 notification listener"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
