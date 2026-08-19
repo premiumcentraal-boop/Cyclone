@@ -15,9 +15,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * User-driven whole-phone learning. Cyclone observes only; the user retains HUMAN control.
- * Each visited app still lands in the existing AppKnowledgeStore so V2.5/V2.6 learned-app features
- * keep working. Cross-app transitions are additionally recorded as Adaptive Brain micro-skills.
+ * V2.8 user-driven whole-phone learning.
+ *
+ * HUMAN keeps control. Accessibility events are debounced and then collapsed into stable
+ * PageContexts. A thousand content-change events on one visible page therefore count as one page.
  */
 data class FollowMeProgress(
     val active: Boolean = false,
@@ -40,7 +41,7 @@ object FollowMeLearnerRuntime {
     @Volatile private var appContext: Context? = null
     private var previousController = DeviceState.Controller.AGENT
     private var previousPackage: String? = null
-    private var previousFingerprint: String? = null
+    private var previousPageKey: String? = null
     private var previousScreenId: String? = null
     private var pendingAction: PendingUserAction? = null
     private val seenApps = linkedSetOf<String>()
@@ -64,14 +65,19 @@ object FollowMeLearnerRuntime {
         appContext = app
         AppLearnerRuntime.initialize(app)
         AdaptiveBrainRuntime.initialize(app)
+        PageAwarenessRuntime.initialize(app)
         previousController = DeviceState.controller
         DeviceState.setController(DeviceState.Controller.HUMAN)
         previousPackage = null
-        previousFingerprint = null
+        previousPageKey = null
         previousScreenId = null
         pendingAction = null
         seenApps.clear(); seenScreens.clear(); seenActions.clear(); seenPaths.clear()
-        state = FollowMeProgress(active = true, startedAt = System.currentTimeMillis(), message = "Use your phone normally. Cyclone is observing navigation in the background and will not click for you.")
+        state = FollowMeProgress(
+            active = true,
+            startedAt = System.currentTimeMillis(),
+            message = "Use your phone normally. Cyclone learns only when the semantic page changes; repeated screen events are merged.",
+        )
     }
 
     fun pause() {
@@ -87,7 +93,7 @@ object FollowMeLearnerRuntime {
     @Synchronized
     fun stop() {
         val app = appContext
-        state = state.copy(active = false, paused = false, message = "Follow Me stopped. Learned app maps and micro-skills were saved locally.")
+        state = state.copy(active = false, paused = false, message = "Follow Me stopped. Semantic pages and paths were saved locally.")
         pendingAction = null
         if (previousController == DeviceState.Controller.AGENT) {
             DeviceState.setController(DeviceState.Controller.AGENT)
@@ -116,9 +122,11 @@ object FollowMeLearnerRuntime {
             )) {
             val now = System.currentTimeMillis()
             val previous = lastObservation.get()
-            if (now - previous < 320L || !lastObservation.compareAndSet(previous, now)) return
+            // 650ms is intentionally calmer than V2.7. The page gate does the real dedupe, this only
+            // prevents redundant observe work while Android is animating/layouting.
+            if (now - previous < 650L || !lastObservation.compareAndSet(previous, now)) return
             executor.submit {
-                Thread.sleep(100)
+                Thread.sleep(180)
                 if (!state.active || state.paused) return@submit
                 val result = PhoneToolExecutor.execute(app, PhoneToolRequest("follow-me-observe-${UUID.randomUUID()}", "phone.observe", JSONObject()))
                 val snapshot = result.payload as? JSONObject ?: return@submit
@@ -147,14 +155,27 @@ object FollowMeLearnerRuntime {
             selector = selector,
             risk = ActionSafetyPolicy.classify(label, json.optString("resourceId"), json.optString("contentDescription")),
         )
-        seenActions += "$packageName|$label"
-        publish(message = "Saw you use $label")
+        seenActions += "$packageName|${PageSignatureEngine.normalizeLabel(label)}"
+        publish(message = "Saw you use $label · waiting to see whether the page changes")
     }
 
     private fun learnSnapshot(snapshot: JSONObject) {
         val app = appContext ?: return
         val packageName = snapshot.optString("package").takeIf { it.isNotBlank() } ?: return
         if (packageName == app.packageName) return
+        val page = PageAwarenessRuntime.capture(app, snapshot)
+
+        // Same package + same stable page: merge observation evidence only.
+        if (packageName == previousPackage && page.pageKey == previousPageKey) {
+            publish(
+                currentApp = appLabel(packageName),
+                currentPackage = packageName,
+                currentScreen = page.title,
+                message = "Still on ${page.title} · ${page.observationCount} screen events merged into one page",
+            )
+            return
+        }
+
         val label = appLabel(packageName)
         val store = AppLearnerRuntime.store
         val packageInfo = runCatching { app.packageManager.getPackageInfo(packageName, 0) }.getOrNull()
@@ -164,21 +185,32 @@ object FollowMeLearnerRuntime {
             versionName = packageInfo?.versionName,
             versionCode = packageInfo?.longVersionCode,
             knowledgeState = if (existingApp == null) KnowledgeState.DISCOVERED else existingApp.knowledgeState,
-            confidence = maxOf(existingApp?.confidence ?: 0.0, 0.58),
+            confidence = maxOf(existingApp?.confidence ?: 0.0, 0.60),
             lastLearnedAt = System.currentTimeMillis(),
-            instructionSummary = "Observed in V2.7 Follow Me mode while the user navigated normally.",
+            instructionSummary = "Observed in V2.8 Follow Me mode as stable semantic pages while the user navigated normally.",
         ))
 
-        val candidate = ScreenSemanticizer.fromSnapshot(packageName, snapshot)
-        val match = store.findBestScreenMatch(packageName, candidate.recognition)
+        val rawCandidate = ScreenSemanticizer.fromSnapshot(packageName, snapshot)
+        val recognition = rawCandidate.recognition.copy(
+            semanticFingerprint = page.pageKey,
+            structuralFingerprint = page.structuralKey,
+            stableAnchors = page.controls.map { PageSignatureEngine.normalizeLabel(it.label) }.filter(String::isNotBlank).distinct().take(24),
+            className = page.className ?: rawCandidate.recognition.className,
+        )
+        val candidate = rawCandidate.copy(
+            identity = PageSignatureEngine.semanticName(page.title, "page"),
+            title = page.title.ifBlank { rawCandidate.title },
+            recognition = recognition,
+        )
+        val match = store.findBestScreenMatch(packageName, candidate.recognition, threshold = 0.56)
         val screen = if (match != null) {
             val current = match.first
             current.copy(
                 title = if (candidate.title != "Screen") candidate.title else current.title,
                 purpose = if (current.purpose.startsWith("A learned screen")) candidate.purpose else current.purpose,
                 recognition = candidate.recognition,
-                knowledgeState = if (match.second >= 0.90) KnowledgeState.UNDERSTOOD else current.knowledgeState,
-                confidence = maxOf(current.confidence, match.second.coerceIn(0.58, 0.94)),
+                knowledgeState = if (match.second >= 0.86) KnowledgeState.UNDERSTOOD else current.knowledgeState,
+                confidence = maxOf(current.confidence, match.second.coerceIn(0.62, 0.97)),
                 appVersion = packageInfo?.versionName,
                 lastSeenAt = System.currentTimeMillis(),
             )
@@ -190,32 +222,44 @@ object FollowMeLearnerRuntime {
                 purpose = candidate.purpose,
                 recognition = candidate.recognition,
                 knowledgeState = KnowledgeState.DISCOVERED,
-                confidence = 0.62,
+                confidence = 0.70,
                 appVersion = packageInfo?.versionName,
             )
         }
         store.upsertScreen(screen)
-        candidate.actions.forEach { action ->
-            if (action.requiredInput == null) store.upsertAction(action.copy(screenId = screen.id, knowledgeState = KnowledgeState.UNDERSTOOD, confidence = maxOf(action.confidence, 0.64)))
+        page.controls.forEach { control ->
+            store.upsertAction(LearnedAction(
+                packageName = packageName,
+                screenId = screen.id,
+                semanticName = control.semanticName,
+                label = control.label,
+                androidActions = control.androidActions,
+                selectorJson = control.selector.toString(),
+                risk = control.risk,
+                requiredInput = null,
+                knowledgeState = KnowledgeState.UNDERSTOOD,
+                confidence = maxOf(control.confidence, 0.68),
+            ))
         }
 
         seenApps += packageName
-        seenScreens += "$packageName|${screen.identity}"
+        seenScreens += page.pageKey
 
         val previousPkg = previousPackage
         val previousScreen = previousScreenId
+        val previousPage = previousPageKey
         val action = pendingAction
         if (previousPkg != null && previousPkg == packageName && previousScreen != null && previousScreen != screen.id && action != null && action.packageName == packageName) {
             val learned = LearnedAction(
                 packageName = packageName,
                 screenId = previousScreen,
-                semanticName = ScreenSemanticizer.slugify(action.label).ifBlank { "user_action" },
+                semanticName = PageSignatureEngine.semanticName(action.label, "button"),
                 label = action.label,
                 androidActions = listOf("USER_DEMONSTRATED"),
                 selectorJson = action.selector.toString(),
                 risk = action.risk,
                 knowledgeState = KnowledgeState.UNDERSTOOD,
-                confidence = 0.76,
+                confidence = 0.80,
             )
             store.upsertAction(learned)
             val storedAction = store.listActions(packageName).lastOrNull {
@@ -228,24 +272,26 @@ object FollowMeLearnerRuntime {
                     actionId = storedAction.id,
                     toScreenId = screen.id,
                     knowledgeState = KnowledgeState.UNDERSTOOD,
-                    confidence = 0.77,
+                    confidence = 0.82,
                 ))
-                seenPaths += "$packageName|$previousScreen|${storedAction.id}|${screen.id}"
+                seenPaths += "$previousPage|${storedAction.semanticName}|${page.pageKey}"
             }
-        } else if (previousPkg != null && previousPkg != packageName && action != null && action.packageName == previousPkg) {
+        } else if (previousPkg != null && previousPkg != packageName) {
+            // Cross-app changes are useful even when Android did not emit a clickable source for the
+            // launcher gesture. The target package itself is deterministic evidence.
             AdaptiveBrainRuntime.store.recordHumanTransition(
                 goalHint = "open $label",
                 fromPackage = previousPkg,
-                fromFingerprint = previousFingerprint,
+                fromFingerprint = previousPage,
                 targetPackage = packageName,
-                targetFingerprint = snapshot.optString("fingerprint"),
-                selector = action.selector,
+                targetFingerprint = page.pageKey,
+                selector = action?.selector ?: JSONObject(),
             )
-            seenPaths += "$previousPkg->${packageName}"
+            seenPaths += "$previousPkg->$packageName"
         }
 
         previousPackage = packageName
-        previousFingerprint = snapshot.optString("fingerprint").takeIf { it.isNotBlank() }
+        previousPageKey = page.pageKey
         previousScreenId = screen.id
         pendingAction = null
         store.mirror(packageName)
@@ -253,7 +299,7 @@ object FollowMeLearnerRuntime {
             currentApp = label,
             currentPackage = packageName,
             currentScreen = screen.title,
-            message = "Learning while you navigate $label",
+            message = "Learned one semantic page in $label · ${page.controls.size} controls mapped",
         )
     }
 
