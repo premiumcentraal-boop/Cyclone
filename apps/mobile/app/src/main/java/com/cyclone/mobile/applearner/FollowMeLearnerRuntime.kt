@@ -15,6 +15,8 @@ import com.cyclone.mobile.ai.RoutineTeachingAnalyzer
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.uiSnapshotFromJson
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -24,8 +26,8 @@ import java.util.concurrent.atomic.AtomicLong
  * V2.9 user-driven whole-phone learning.
  *
  * HUMAN keeps control. Accessibility events are debounced and collapsed into stable PageContexts.
- * V2.9 also opens an explicit LEARN overlay, records a persistent screenshot/UI timeline, accepts
- * precise guided placements, and produces a reviewable teaching report when the user presses Stop.
+ * The LEARN overlay remains visible until Stop & review, while ordinary human taps/holds/scrolls and
+ * explicit guided placements feed one persistent teaching timeline and the existing App Graph.
  */
 data class FollowMeProgress(
     val active: Boolean = false,
@@ -46,6 +48,7 @@ data class FollowMeProgress(
 object FollowMeLearnerRuntime {
     private val executor = Executors.newSingleThreadExecutor()
     private val lastObservation = AtomicLong(0L)
+    private val lastScrollCapture = AtomicLong(0L)
     @Volatile private var state = FollowMeProgress()
     @Volatile private var appContext: Context? = null
     private var previousController = DeviceState.Controller.AGENT
@@ -85,6 +88,7 @@ object FollowMeLearnerRuntime {
         previousScreenId = null
         pendingAction = null
         lastObservation.set(0L)
+        lastScrollCapture.set(0L)
         seenApps.clear(); seenScreens.clear(); seenActions.clear(); seenPaths.clear()
 
         val prefs = app.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
@@ -102,13 +106,13 @@ object FollowMeLearnerRuntime {
         if (service != null) {
             RoutineTeachingOverlayRuntime.show(service, session)
         } else {
-            state = state.copy(message = "Cyclone Accessibility is not connected, so the teaching overlay cannot start yet.")
+            state = state.copy(message = "Enable Cyclone Accessibility so the teaching overlay and semantic page capture can run.")
         }
     }
 
     fun pause() {
         if (!state.active) return
-        state = state.copy(paused = true, message = "Teaching paused. Cyclone is not learning navigation until you resume.")
+        state = state.copy(paused = true, message = "Teaching paused. No navigation is being learned.")
     }
 
     fun resume() {
@@ -116,18 +120,14 @@ object FollowMeLearnerRuntime {
         state = state.copy(paused = false, message = "Teaching resumed. Keep using your phone normally.")
     }
 
-    /** UI/API stop requests are routed through the overlay so explicit guided steps are saved first. */
     @Synchronized
     fun stop() {
         if (!state.active) return
-        if (RoutineTeachingOverlayRuntime.isShowing()) {
-            RoutineTeachingOverlayRuntime.requestStop()
-            return
-        }
-        finishFromOverlay(null, null)
+        if (RoutineTeachingOverlayRuntime.isShowing()) RoutineTeachingOverlayRuntime.requestStop()
+        else finishFromOverlay(null, null)
     }
 
-    /** Called exactly once by the V2.9 overlay after its guided recorder has been saved/cancelled. */
+    /** Called by the V2.9 overlay after explicit guided steps have been compiled or cancelled. */
     @Synchronized
     fun finishFromOverlay(copiedAutomationId: String?, optimizedAutomationId: String?) {
         if (!state.active) return
@@ -151,13 +151,12 @@ object FollowMeLearnerRuntime {
             optimizedAutomationId = optimizedAutomationId,
         )
         if (finished != null) {
-            // Show the local report immediately. The optional selected-model analysis is one compact
-            // background request and refreshes the same persisted report when it returns.
             RoutineTeachingRuntime.launchReport(app, finished.id)
             if (OpenRouterSecretStore.hasKey(app) && finished.modelId.isNotBlank()) {
                 executor.submit {
-                    val analysis = RoutineTeachingAnalyzer.analyze(app, finished)
-                    if (!analysis.isNullOrBlank()) RoutineTeachingRuntime.saveAiAnalysis(finished.id, analysis)
+                    RoutineTeachingAnalyzer.analyze(app, finished)?.takeIf(String::isNotBlank)?.let {
+                        RoutineTeachingRuntime.saveAiAnalysis(finished.id, it)
+                    }
                 }
             }
         }
@@ -172,7 +171,8 @@ object FollowMeLearnerRuntime {
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> event.source?.let { captureUserAction(packageName, it, "click") }
             AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> event.source?.let { captureUserAction(packageName, it, "long_click") }
-            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> Unit // Never learn typed contents.
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> event.source?.let { captureScroll(packageName, it) }
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> Unit // typed contents are deliberately ignored
         }
 
         if (event.eventType in setOf(
@@ -180,6 +180,7 @@ object FollowMeLearnerRuntime {
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
                 AccessibilityEvent.TYPE_VIEW_SCROLLED,
                 AccessibilityEvent.TYPE_VIEW_CLICKED,
+                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
             )) {
             val now = System.currentTimeMillis()
             val previous = lastObservation.get()
@@ -188,10 +189,33 @@ object FollowMeLearnerRuntime {
                 Thread.sleep(180)
                 if (!state.active || state.paused) return@submit
                 val result = PhoneToolExecutor.execute(app, PhoneToolRequest("follow-me-observe-${UUID.randomUUID()}", "phone.observe", JSONObject()))
-                val snapshot = result.payload as? JSONObject ?: return@submit
-                learnSnapshot(snapshot)
+                (result.payload as? JSONObject)?.let(::learnSnapshot)
             }
         }
+    }
+
+    private fun captureScroll(packageName: String, node: AccessibilityNodeInfo) {
+        val now = System.currentTimeMillis()
+        val last = lastScrollCapture.get()
+        if (now - last < 900L || !lastScrollCapture.compareAndSet(last, now)) return
+        val json = nodeJson(node)
+        if (ActionSafetyPolicy.looksSensitiveField(json)) return
+        val selector = selectorFrom(json)
+        val actions = actionsFrom(json)
+        val label = json.optString("contentDescription").takeIf(String::isNotBlank)
+            ?: json.optString("resourceId").substringAfterLast('/').takeIf(String::isNotBlank)
+            ?: "this page"
+        seenActions += "$packageName|scroll|${previousPageKey.orEmpty()}"
+        RoutineTeachingRuntime.recordHumanAction(
+            packageName = packageName,
+            label = label.take(120),
+            kind = "scroll",
+            selector = selector,
+            advertisedActions = actions,
+            pageTitle = state.currentScreen.takeIf(String::isNotBlank),
+            pageKey = previousPageKey,
+        )
+        publish(message = "Saw you scroll · Cyclone is checking whether Android exposes a faster semantic scroll action")
     }
 
     private fun captureUserAction(packageName: String, node: AccessibilityNodeInfo, kind: String) {
@@ -201,15 +225,8 @@ object FollowMeLearnerRuntime {
             .ifBlank { json.optString("contentDescription").trim() }
             .ifBlank { json.optString("resourceId").substringAfterLast('/') }
         if (label.isBlank()) return
-        val selector = JSONObject().apply {
-            json.optString("resourceId").takeIf { it.isNotBlank() }?.let { put("resourceId", it.take(180)) }
-            json.optString("text").takeIf { it.isNotBlank() }?.let { put("text", it.take(180)) }
-            json.optString("contentDescription").takeIf { it.isNotBlank() }?.let { put("contentDescription", it.take(180)) }
-            json.optString("role").takeIf { it.isNotBlank() }?.let { put("role", it) }
-        }
-        val actions = json.optJSONArray("actions")?.let { array ->
-            (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
-        }.orEmpty()
+        val selector = selectorFrom(json)
+        val actions = actionsFrom(json)
         val risk = ActionSafetyPolicy.classify(label, json.optString("resourceId"), json.optString("contentDescription"))
         pendingAction = PendingUserAction(
             packageName = packageName,
@@ -238,8 +255,9 @@ object FollowMeLearnerRuntime {
         val packageName = snapshot.optString("package").takeIf { it.isNotBlank() } ?: return
         if (packageName == app.packageName) return
         val page = PageAwarenessRuntime.capture(app, snapshot)
-        val typedSnapshot = runCatching { com.cyclone.mobile.UiSnapshot.fromJson(snapshot) }.getOrNull()
-        if (typedSnapshot != null) RoutineTeachingRuntime.recordPage(typedSnapshot, page.pageKey, page.title)
+        runCatching { uiSnapshotFromJson(snapshot) }.getOrNull()?.let {
+            RoutineTeachingRuntime.recordPage(it, page.pageKey, page.title)
+        }
 
         if (packageName == previousPackage && page.pageKey == previousPageKey) {
             publish(
@@ -319,7 +337,6 @@ object FollowMeLearnerRuntime {
 
         seenApps += packageName
         seenScreens += page.pageKey
-
         val previousPkg = previousPackage
         val previousScreen = previousScreenId
         val previousPage = previousPageKey
@@ -395,6 +412,18 @@ object FollowMeLearnerRuntime {
         )
     }
 
+    private fun selectorFrom(json: JSONObject): JSONObject = JSONObject().apply {
+        json.optString("resourceId").takeIf(String::isNotBlank)?.let { put("resourceId", it.take(180)) }
+        json.optString("text").takeIf(String::isNotBlank)?.let { put("text", it.take(180)) }
+        json.optString("contentDescription").takeIf(String::isNotBlank)?.let { put("contentDescription", it.take(180)) }
+        json.optString("role").takeIf(String::isNotBlank)?.let { put("role", it) }
+        if (json.optBoolean("scrollable")) put("scrollable", true)
+    }
+
+    private fun actionsFrom(json: JSONObject): List<String> = json.optJSONArray("actions")?.let { array ->
+        (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
+    }.orEmpty()
+
     private fun appLabel(packageName: String): String {
         val app = appContext ?: return packageName
         return runCatching {
@@ -413,6 +442,19 @@ object FollowMeLearnerRuntime {
 
     private fun nodeJson(node: AccessibilityNodeInfo): JSONObject {
         val rect = Rect().also(node::getBoundsInScreen)
+        val actionNames = node.actionList.orEmpty().map { action ->
+            when (action.id) {
+                AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
+                AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
+                AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "ACTION_SCROLL_FORWARD"
+                AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "ACTION_SCROLL_BACKWARD"
+                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_TO_POSITION.id -> "ACTION_SCROLL_TO_POSITION"
+                AccessibilityNodeInfo.ACTION_SET_TEXT -> "ACTION_SET_TEXT"
+                AccessibilityNodeInfo.ACTION_EXPAND -> "ACTION_EXPAND"
+                AccessibilityNodeInfo.ACTION_COLLAPSE -> "ACTION_COLLAPSE"
+                else -> action.label?.toString()?.takeIf(String::isNotBlank) ?: "ACTION_${action.id}"
+            }
+        }.distinct()
         return JSONObject()
             .put("text", node.text?.toString().orEmpty())
             .put("contentDescription", node.contentDescription?.toString().orEmpty())
@@ -428,19 +470,7 @@ object FollowMeLearnerRuntime {
             .put("editable", node.isEditable)
             .put("scrollable", node.isScrollable)
             .put("password", node.isPassword)
-            .put("actions", org.json.JSONArray(node.actionList.orEmpty().map { action ->
-                when (action.id) {
-                    AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
-                    AccessibilityNodeInfo.ACTION_LONG_CLICK -> "ACTION_LONG_CLICK"
-                    AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "ACTION_SCROLL_FORWARD"
-                    AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "ACTION_SCROLL_BACKWARD"
-                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_TO_POSITION.id -> "ACTION_SCROLL_TO_POSITION"
-                    AccessibilityNodeInfo.ACTION_SET_TEXT -> "ACTION_SET_TEXT"
-                    AccessibilityNodeInfo.ACTION_EXPAND -> "ACTION_EXPAND"
-                    AccessibilityNodeInfo.ACTION_COLLAPSE -> "ACTION_COLLAPSE"
-                    else -> action.label?.toString()?.takeIf { it.isNotBlank() } ?: "ACTION_${action.id}"
-                }
-            }.distinct()))
+            .put("actions", JSONArray(actionNames))
             .put("bounds", JSONObject().put("left", rect.left).put("top", rect.top).put("right", rect.right).put("bottom", rect.bottom))
     }
 }
