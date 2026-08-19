@@ -1,4 +1,4 @@
-name: Cyclone Mobile 2.9.2 Beta APK
+name: Cyclone Mobile APK
 
 on:
   workflow_dispatch:
@@ -7,17 +7,7 @@ on:
       - main
       - feature/android-mobile-v0
       - feature/mobile-phone-toolbox-agent1
-      - release/cyclone-mobile-v2
-      - release/cyclone-mobile-v2.2
-      - release/cyclone-mobile-v2.3-openrouter-agent
-      - release/cyclone-mobile-v2.4-guided-recorder
-      - release/cyclone-mobile-v2.5-app-learner-beta
-      - release/cyclone-mobile-v2.6-ai-brain-rehaul
-      - release/cyclone-mobile-v2.7-adaptive-brain
-      - release/cyclone-mobile-v2.8-page-aware-agent
-      - release/cyclone-mobile-v2.9-unified-teaching
-      - release/cyclone-mobile-v2.9.1-teach-ux
-      - release/cyclone-mobile-v2.9.2-agentic-learning-overlay
+      - 'release/cyclone-mobile-v*'
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
@@ -31,40 +21,153 @@ on:
       - '.gitmodules'
       - '.github/workflows/android-mobile.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    env:
+      DIST_DIR: dist/mobile
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: android-actions/setup-android@v3
+
       - name: Install Android SDK 35
         run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Run Cyclone 2.9.2 mobile unit tests
+
+      - name: Read Cyclone Mobile version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_FILE='apps/mobile/app/build.gradle.kts'
+          VERSION_NAME=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"/\1/p' "$GRADLE_FILE" | head -1)
+          VERSION_CODE=$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)/\1/p' "$GRADLE_FILE" | head -1)
+          MOBILE_VERSION=$(printf '%s' "$VERSION_NAME" | sed -n 's/.*-v\([0-9][0-9.]*\)-.*/\1/p')
+          CHANNEL=$(printf '%s' "$VERSION_NAME" | sed -n 's/.*-v[0-9][0-9.]*-\(.*\)$/\1/p')
+
+          if [ -z "$VERSION_NAME" ] || [ -z "$MOBILE_VERSION" ] || [ -z "$CHANNEL" ]; then
+            echo "Could not derive mobile version from $VERSION_NAME" >&2
+            exit 1
+          fi
+
+          CHANNEL_TITLE=$(printf '%s' "$CHANNEL" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+          CHANNEL_SLUG=$(printf '%s' "$CHANNEL" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9._-' '-')
+          APK_NAME="Cyclone-Mobile-${MOBILE_VERSION}-${CHANNEL_TITLE}.apk"
+          ARTIFACT_NAME="Cyclone-Mobile-${MOBILE_VERSION}-${CHANNEL_TITLE}"
+          RELEASE_TAG="mobile-v${MOBILE_VERSION}-${CHANNEL_SLUG}"
+          RELEASE_NAME="Cyclone Mobile ${MOBILE_VERSION} ${CHANNEL_TITLE}"
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "mobile_version=$MOBILE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "Building $RELEASE_NAME ($VERSION_NAME, versionCode $VERSION_CODE)"
+
+      - name: Run mobile unit tests
         shell: bash
         run: |
           set -o pipefail
-          gradle -p apps/mobile :app:testDebugUnitTest --stacktrace 2>&1 | tee cyclone-2.9.2-gradle-test.log
-      - name: Upload Cyclone 2.9.2 diagnostic log
+          gradle -p apps/mobile :app:testDebugUnitTest --stacktrace 2>&1 | tee cyclone-mobile-gradle-test.log
+
+      - name: Upload diagnostic log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-2-9-2-build-log
-          path: cyclone-2.9.2-gradle-test.log
+          name: ${{ steps.version.outputs.artifact_name }}-Build-Log
+          path: cyclone-mobile-gradle-test.log
           if-no-files-found: warn
-      - name: Assemble Cyclone 2.9.2 Beta APK
+          retention-days: 30
+
+      - name: Assemble APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload Cyclone 2.9.2 Beta APK
+
+      - name: Prepare clean download package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$DIST_DIR"
+          cp apps/mobile/app/build/outputs/apk/debug/app-debug.apk "$DIST_DIR/${{ steps.version.outputs.apk_name }}"
+          (
+            cd "$DIST_DIR"
+            sha256sum "${{ steps.version.outputs.apk_name }}" > "${{ steps.version.outputs.apk_name }}.sha256"
+          )
+          ls -lh "$DIST_DIR"
+          cat "$DIST_DIR/${{ steps.version.outputs.apk_name }}.sha256"
+
+      - name: Upload versioned APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-2-9-2-beta-apk
-          path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
+          name: ${{ steps.version.outputs.artifact_name }}
+          path: |
+            ${{ env.DIST_DIR }}/${{ steps.version.outputs.apk_name }}
+            ${{ env.DIST_DIR }}/${{ steps.version.outputs.apk_name }}.sha256
           if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish stable GitHub prerelease download
+        if: ${{ (github.event_name == 'push' && startsWith(github.ref_name, 'release/cyclone-mobile-v')) || github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='${{ steps.version.outputs.release_tag }}'
+          RELEASE_NAME='${{ steps.version.outputs.release_name }}'
+          APK="$DIST_DIR/${{ steps.version.outputs.apk_name }}"
+          CHECKSUM="$APK.sha256"
+          NOTES_FILE="$RUNNER_TEMP/mobile-release-notes.md"
+
+          cat > "$NOTES_FILE" <<EOF
+          Automated Cyclone Android build.
+
+          - Version: `${{ steps.version.outputs.version_name }}`
+          - Version code: `${{ steps.version.outputs.version_code }}`
+          - Commit: `${GITHUB_SHA}`
+          - Branch: `${GITHUB_REF_NAME}`
+          - Workflow run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          Download the `.apk` asset directly. The `.sha256` asset is included for verification.
+          EOF
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_NAME" --notes-file "$NOTES_FILE" --prerelease
+            gh release upload "$TAG" "$APK" "$CHECKSUM" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$APK" "$CHECKSUM" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$RELEASE_NAME" --notes-file "$NOTES_FILE" --prerelease
+          fi
+
+      - name: Download summary
+        shell: bash
+        run: |
+          {
+            echo "## 📱 ${{ steps.version.outputs.release_name }}"
+            echo
+            echo "**APK:** `${{ steps.version.outputs.apk_name }}`"
+            echo
+            echo "**Actions artifact:** `${{ steps.version.outputs.artifact_name }}`"
+            echo
+            if [[ "${GITHUB_REF_NAME}" == release/cyclone-mobile-v* ]] || [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+              echo "**Stable release page:** https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ steps.version.outputs.release_tag }}"
+              echo
+              echo "**Direct APK:** https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.version.outputs.release_tag }}/${{ steps.version.outputs.apk_name }}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
