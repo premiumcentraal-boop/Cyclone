@@ -90,7 +90,7 @@ private fun TeachingHistoryScreen(initialSessionId: String?, onClose: () -> Unit
                 title = {
                     Column {
                         Text(if (selected == null) "Routine teaching history" else selected.name, fontWeight = FontWeight.SemiBold)
-                        Text("Cyclone V2.9 · learning evidence", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Cyclone 2.9.1 · learning evidence", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 navigationIcon = {
@@ -126,7 +126,7 @@ private fun TeachingSessionList(
             Card(shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(18.dp)) {
                     Text("No routine teachings yet", fontWeight = FontWeight.SemiBold)
-                    Text("Start Follow Me from Learn. V2.9 keeps the LEARN overlay visible until you press Stop & review.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Start Follow Me from Teach. Cyclone 2.9.1 keeps the LEARN overlay visible until you press Stop & review.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
