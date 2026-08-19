@@ -41,6 +41,12 @@ object OpenRouterModelPresets {
         vision = true,
         reasoningEffort = "high",
     )
+    val QWEN_3_8_27B = OpenRouterModelPreset(
+        id = "qwen/qwen3.8-27b",
+        label = "Qwen3.8 27B",
+        vision = false,
+        reasoningEffort = "medium",
+    )
     val DEEPSEEK_V4_FLASH = OpenRouterModelPreset(
         "deepseek/deepseek-v4-flash-0731",
         "DeepSeek V4 Flash 0731",
@@ -62,7 +68,7 @@ object OpenRouterModelPresets {
 
     /** Luna Max is the clean-install V2.8 default requested for Cyclone phone control. */
     val DEFAULT = GPT_5_6_LUNA
-    val all = listOf(GPT_5_6_LUNA, GEMINI_3_6_FLASH, DEEPSEEK_V4_FLASH, GEMMA_4_26B, GEMMA_4_31B)
+    val all = listOf(GPT_5_6_LUNA, GEMINI_3_6_FLASH, QWEN_3_8_27B, DEEPSEEK_V4_FLASH, GEMMA_4_26B, GEMMA_4_31B)
 
     // Unknown custom slugs are accepted, but vision support is not assumed until the user picks a
     // known vision preset. This preserves existing behavior and prevents accidental image requests
