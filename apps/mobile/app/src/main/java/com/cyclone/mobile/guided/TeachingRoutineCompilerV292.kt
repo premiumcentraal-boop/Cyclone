@@ -53,8 +53,6 @@ object TeachingRoutineCompilerV292 {
                 }
                 is Evidence.Step -> {
                     val s = evidence.value
-                    // A directional gesture record supersedes the generic TYPE_VIEW_SCROLLED row
-                    // produced at almost the same time.
                     if (s.kind == "scroll" && gestures.any { kotlin.math.abs(it.timestampMs - s.createdAt) < 1_200L }) return@forEach
                     stepFromTeaching(s)?.let(steps::add)
                 }
@@ -111,12 +109,30 @@ object TeachingRoutineCompilerV292 {
     private fun guidedStep(step: RoutineTeachingStep, selector: Selector?, recovery: RecoveryPolicy): StepDefinition? {
         val kind = step.kind.removePrefix("guided_")
         return when (kind) {
-            "tap" -> StepDefinition(step.title, StepType.PHONE_TOOL, mapOf("tool" to "phone.click"), selector = selector, recovery = recovery)
-            "hold" -> StepDefinition(step.title, StepType.PHONE_TOOL, mapOf("tool" to "phone.long_press", "durationMs" to (step.demonstratedDurationMs ?: 650L).toString()), selector = selector, recovery = recovery)
-            "back" -> StepDefinition(step.title, StepType.PHONE_TOOL, mapOf("tool" to "phone.back"), recovery = recovery)
-            "home" -> StepDefinition(step.title, StepType.PHONE_TOOL, mapOf("tool" to "phone.home"), recovery = recovery)
-            "wait" -> StepDefinition(step.title, StepType.DELAY, mapOf("ms" to (step.demonstratedDurationMs ?: 1000L).toString()))
-            "assert" -> StepDefinition(step.title, StepType.PHONE_TOOL, mapOf("tool" to "phone.assert", "type" to "selector_exists"), selector = selector, recovery = recovery)
+            "tap" -> StepDefinition(
+                name = step.title,
+                type = StepType.PHONE_TOOL,
+                parameters = mapOf("tool" to "phone.click"),
+                selector = selector,
+                recovery = recovery,
+            )
+            "hold" -> StepDefinition(
+                name = step.title,
+                type = StepType.PHONE_TOOL,
+                parameters = mapOf("tool" to "phone.long_press", "durationMs" to (step.demonstratedDurationMs ?: 650L).toString()),
+                selector = selector,
+                recovery = recovery,
+            )
+            "back" -> StepDefinition(name = step.title, type = StepType.PHONE_TOOL, parameters = mapOf("tool" to "phone.back"), recovery = recovery)
+            "home" -> StepDefinition(name = step.title, type = StepType.PHONE_TOOL, parameters = mapOf("tool" to "phone.home"), recovery = recovery)
+            "wait" -> StepDefinition(name = step.title, type = StepType.DELAY, parameters = mapOf("ms" to (step.demonstratedDurationMs ?: 1000L).toString()))
+            "assert" -> StepDefinition(
+                name = step.title,
+                type = StepType.PHONE_TOOL,
+                parameters = mapOf("tool" to "phone.assert", "type" to "selector_exists"),
+                selector = selector,
+                recovery = recovery,
+            )
             else -> null
         }
     }
