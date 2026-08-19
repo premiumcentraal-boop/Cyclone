@@ -117,9 +117,11 @@ object AppLearnerRuntime {
     fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (!initialized) return
 
-        // V2.7 Follow Me is a separate passive whole-phone observer. It gets the same Accessibility
-        // stream but never performs input actions and never receives typed field contents.
+        // Follow Me keeps its existing V2.9 page/click learner. V2.9.2 adds a second, additive
+        // observer that turns horizontal/vertical swipe demonstrations into real reusable graph and
+        // Brain transitions instead of losing their direction as a generic scroll event.
         FollowMeLearnerRuntime.onAccessibilityEvent(event)
+        FollowMeGestureIntelligenceV292.onAccessibilityEvent(appContext, event)
 
         val p = explorer.progress()
         if (p.mode != LearningMode.PASSIVE || p.state != LearnerSessionState.LEARNING) return
