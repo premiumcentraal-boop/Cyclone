@@ -8,6 +8,7 @@ internal object GatewayPrivacy {
     private const val REDACTED = "<redacted>"
     private val sensitiveKey = Regex("(?i)(password|passcode|passwd|secret|token|api.?key|otp|one.?time|verification.?code|cvv|card.?number|pin)")
     private val providerKeyPattern = Regex("(?i)\\b(sk-[A-Za-z0-9_-]{12,}|(?:api[_ -]?key|bearer|token)\\s*[:=]\\s*[A-Za-z0-9._-]{8,})")
+    private val inlineSecretPattern = Regex("(?i)\\b(password|passcode|passwd|pin|otp|verification\\s*code|api[_ -]?key|token|secret)\\s*(?:is|:|=)\\s*[^\\s,;]+")
 
     fun sanitizeAccessibilitySnapshot(snapshot: JSONObject): JSONObject {
         val out = JSONObject(snapshot.toString())
@@ -82,5 +83,8 @@ internal object GatewayPrivacy {
         return out
     }
 
-    private fun cleanString(value: String): String = providerKeyPattern.replace(value) { REDACTED }
+    private fun cleanString(value: String): String {
+        val inlineSafe = inlineSecretPattern.replace(value) { match -> "${match.groupValues[1]} $REDACTED" }
+        return providerKeyPattern.replace(inlineSafe) { REDACTED }
+    }
 }
