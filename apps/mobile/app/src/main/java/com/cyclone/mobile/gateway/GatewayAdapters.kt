@@ -1,0 +1,268 @@
+package com.cyclone.mobile.gateway
+
+import android.content.Context
+import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.DeviceState
+import com.cyclone.mobile.PhoneToolErrorCode
+import com.cyclone.mobile.PhoneToolExecutor
+import com.cyclone.mobile.PhoneToolRequest
+import com.cyclone.mobile.applearner.ActionRisk
+import com.cyclone.mobile.applearner.ActionSafetyPolicy
+import com.cyclone.mobile.applearner.AppLearnerRuntime
+import com.cyclone.mobile.applearner.FollowMeLearnerRuntime
+import com.cyclone.mobile.brain.AdaptiveBrainRuntime
+import com.cyclone.mobile.debug.PageDebugSandboxV293
+import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+
+internal object GatewayPageDebugAdapter {
+    fun capture(context: Context, args: JSONObject): JSONObject {
+        val reference = AtomicReference<Result<JSONObject>?>()
+        val latch = CountDownLatch(1)
+        PageDebugSandboxV293.captureAsync(context, "PC_CODEX_GATEWAY") {
+            reference.set(it)
+            latch.countDown()
+        }
+        if (!latch.await(20, TimeUnit.SECONDS)) {
+            throw GatewayProtocolException("TIMEOUT", "PageDebug capture did not finish in 20 seconds")
+        }
+        val capture = reference.get()?.getOrThrow()
+            ?: throw GatewayProtocolException("INTERNAL_ERROR", "PageDebug capture returned no result")
+        return safeExport(capture, args.optString("expected").takeIf(String::isNotBlank))
+    }
+
+    fun safeExport(capture: JSONObject, expectedOverride: String? = null): JSONObject {
+        val diagnosis = if (expectedOverride != null) PageDebugSandboxV293.reDiagnose(capture, expectedOverride)
+            else capture.optJSONObject("diagnosis") ?: JSONObject()
+        val metrics = capture.optJSONObject("metrics") ?: JSONObject()
+        val screenshot = capture.optJSONObject("screenshot")
+        return JSONObject()
+            .put("schema", capture.optString("schema", PageDebugSandboxV293.SCHEMA))
+            .put("captureId", capture.optString("captureId"))
+            .put("capturedAt", capture.optLong("capturedAt"))
+            .put("source", "PC_CODEX_GATEWAY")
+            .put("goal", GatewayPrivacy.sanitizeDeep(capture.optString("goal")))
+            .put("expectedNext", GatewayPrivacy.sanitizeDeep(expectedOverride ?: capture.optString("expectedNext")))
+            .put("package", capture.optString("package"))
+            .put("activity", capture.opt("class") ?: JSONObject.NULL)
+            .put("pageKey", capture.optString("pageKey"))
+            .put("pageTitle", capture.optString("pageTitle"))
+            .put("metrics", GatewayPrivacy.sanitizeDeep(metrics))
+            .put("funnel", JSONObject()
+                .put("rawAccessibilityCollectionLimit", metrics.optInt("rawAccessibilityCollectionLimit", 2500))
+                .put("semanticNodeScanLimit", metrics.optInt("semanticNodeScanLimit", 450))
+                .put("semanticControlStoreLimit", metrics.optInt("semanticControlStoreLimit", 80))
+                .put("agentControlLimit", metrics.optInt("agentControlLimit", 36))
+                .put("rawNodeCount", metrics.optInt("rawNodes"))
+                .put("visibleNodeCount", metrics.optInt("visibleNodes"))
+                .put("interactiveCount", metrics.optInt("visibleInteractive"))
+                .put("unlabeledInteractiveCount", metrics.optInt("unlabeledInteractive"))
+                .put("semanticControlCount", metrics.optInt("semanticControls"))
+                .put("agentPayloadControlCount", metrics.optInt("agentControls")))
+            .put("diagnosis", GatewayPrivacy.sanitizeDeep(diagnosis))
+            .put("rawAccessibility", GatewayPrivacy.sanitizeDeep(capture.optJSONObject("rawAccessibility") ?: JSONObject()))
+            .put("semanticPageFull", GatewayPrivacy.sanitizeDeep(capture.optJSONObject("semanticPageFull") ?: JSONObject()))
+            .put("productionAgentPayload", GatewayPrivacy.sanitizeDeep(capture.optJSONObject("agentInputCurrent") ?: JSONObject()))
+            .put("fullControlsComparison", GatewayPrivacy.sanitizeDeep(capture.optJSONObject("agentInputFullControls") ?: JSONObject()))
+            .put("pageTransitions", GatewayPrivacy.sanitizeDeep(capture.optJSONArray("pageTransitions") ?: JSONArray()))
+            .put("appGraphRetrieval", GatewayPrivacy.sanitizeDeep(capture.opt("appGraphRetrieval")))
+            .put("brainRecall", GatewayPrivacy.sanitizeDeep(capture.optJSONObject("brainRecall") ?: JSONObject()))
+            .put("screenshotMetadata", if (screenshot == null) JSONObject.NULL else JSONObject()
+                .put("width", screenshot.optInt("width"))
+                .put("height", screenshot.optInt("height"))
+                .put("bytes", screenshot.optLong("bytes"))
+                .put("timestampMs", screenshot.optLong("timestampMs")))
+            .put("reasoningDisclosure", "Deterministic pipeline evidence only; hidden chain-of-thought is not captured or exported.")
+    }
+}
+
+internal object GatewayAppGraphAdapter {
+    fun query(context: Context, args: JSONObject): JSONObject {
+        AppLearnerRuntime.initialize(context)
+        val latest = GatewayObservationStore.current()
+        val packageName = args.optString("package").ifBlank { latest?.page?.packageName.orEmpty() }
+        if (packageName.isBlank()) throw GatewayProtocolException("INVALID_REQUEST", "package is required when no current observation exists")
+        val goal = args.optString("goal").ifBlank { "Navigate the current app" }
+        val requestedPageKey = args.optString("pageKey").takeIf(String::isNotBlank) ?: latest?.page?.pageKey
+        val graph = AppLearnerRuntime.graph(packageName)
+        val matchedScreen = requestedPageKey?.let { key -> graph?.screens?.firstOrNull { it.recognition.semanticFingerprint == key } }
+        val retrieval = AppLearnerRuntime.retrieval(packageName, goal, matchedScreen?.id)
+        return JSONObject()
+            .put("query", JSONObject()
+                .put("package", packageName)
+                .put("goal", GatewayPrivacy.sanitizeDeep(goal))
+                .put("pageKey", requestedPageKey ?: JSONObject.NULL))
+            .put("relevance", JSONObject()
+                .put("packageMatched", graph != null)
+                .put("pageMatched", matchedScreen != null)
+                .put("matchedScreenId", matchedScreen?.id ?: JSONObject.NULL)
+                .put("matchedScreenTitle", matchedScreen?.title ?: JSONObject.NULL))
+            .put("graphSummary", JSONObject()
+                .put("screenCount", graph?.screens?.size ?: 0)
+                .put("actionCount", graph?.actions?.size ?: 0)
+                .put("transitionCount", graph?.transitions?.size ?: 0))
+            .put("retrieval", GatewayPrivacy.sanitizeDeep(retrieval ?: JSONObject()))
+    }
+}
+
+internal object GatewayBrainAdapter {
+    fun recall(context: Context, args: JSONObject): JSONObject {
+        AdaptiveBrainRuntime.initialize(context)
+        val latest = GatewayObservationStore.current()
+        val goal = args.optString("goal").ifBlank { "Navigate the current phone state" }
+        val packageName = args.optString("package").ifBlank { latest?.page?.packageName.orEmpty() }
+        val pageKey = args.optString("pageKey").takeIf(String::isNotBlank) ?: latest?.page?.pageKey
+        val fingerprint = latest?.payload?.optString("accessibilityFingerprint").orEmpty()
+        val environment = JSONObject()
+            .put("currentPackage", packageName)
+            .put("pageKey", pageKey ?: JSONObject.NULL)
+            .put("fingerprint", fingerprint)
+        val recall = AdaptiveBrainRuntime.recall(context, goal, environment)
+        return JSONObject()
+            .put("query", JSONObject()
+                .put("goal", GatewayPrivacy.sanitizeDeep(goal))
+                .put("package", packageName.ifBlank { JSONObject.NULL })
+                .put("pageKey", pageKey ?: JSONObject.NULL))
+            .put("recall", GatewayPrivacy.sanitizeDeep(recall))
+            .put("privacy", "Typed values, passwords, OTPs, provider keys and tokens are excluded or redacted.")
+    }
+}
+
+internal object GatewayActionAdapter {
+    val allowedTools = linkedSetOf(
+        "phone.observe",
+        "phone.find",
+        "phone.click",
+        "phone.long_press",
+        "phone.swipe",
+        "phone.scroll",
+        "phone.type",
+        "phone.back",
+        "phone.home",
+        "phone.open_app",
+        "phone.wait_for",
+    )
+    private val evidenceTools = setOf(
+        "phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type",
+        "phone.back", "phone.home", "phone.open_app",
+    )
+
+    fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
+        val tool = args.optString("tool")
+        if (tool !in allowedTools) throw GatewayProtocolException("TOOL_NOT_ALLOWED", "Tool is not enabled for the PC gateway")
+        val source = args.optString("source", "PC_CODEX")
+        if (source != "PC_CODEX") throw GatewayProtocolException("INVALID_SOURCE", "Gateway action source must be PC_CODEX")
+        val params = args.optJSONObject("params") ?: JSONObject()
+        val goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') }
+        enforcePolicy(tool, params)
+
+        val before = brainState()
+        val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, params))
+        val after = brainState()
+        if (tool in evidenceTools && shouldRecord(result.error?.code)) {
+            runCatching {
+                AdaptiveBrainRuntime.recordToolOutcome(
+                    context = context,
+                    goal = goal,
+                    tool = tool,
+                    params = params,
+                    before = before,
+                    after = after,
+                    ok = result.ok,
+                    source = "PC_CODEX",
+                )
+            }
+        }
+        return JSONObject()
+            .put("source", "PC_CODEX")
+            .put("tool", tool)
+            .put("sanitizedParams", GatewayPrivacy.redactActionParams(tool, params))
+            .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
+    }
+
+    private fun enforcePolicy(tool: String, params: JSONObject) {
+        val selector = params.optJSONObject("selector")
+        if (tool == "phone.type" && selector != null && ActionSafetyPolicy.looksSensitiveField(selector)) {
+            throw GatewayProtocolException("POLICY_BLOCKED", "PC gateway cannot type passwords, OTPs, PINs, tokens or other authentication secrets")
+        }
+        if (tool !in setOf("phone.click", "phone.long_press")) return
+        val label = selector?.optString("text").orEmpty().ifBlank { selector?.optString("textContains").orEmpty() }
+        val resource = selector?.optString("resourceId").orEmpty()
+        val description = selector?.optString("contentDescription").orEmpty()
+        val risk = ActionSafetyPolicy.classify(label, resource, description)
+        if (risk in setOf(ActionRisk.CONSEQUENTIAL, ActionRisk.AUTHENTICATION, ActionRisk.UNKNOWN)) {
+            throw GatewayProtocolException(
+                "POLICY_BLOCKED",
+                "PC_CODEX cannot bypass Cyclone policy for ${risk.name.lowercase()} controls; use the existing human approval/teaching flow",
+            )
+        }
+    }
+
+    private fun brainState(): JSONObject {
+        val service = CycloneAccessibilityService.instance
+        val snapshot = runCatching { service?.observe(markFresh = false) }.getOrNull()
+        return JSONObject()
+            .put("currentPackage", snapshot?.packageName ?: DeviceState.currentPackage ?: "")
+            .put("fingerprint", snapshot?.fingerprint ?: "")
+    }
+
+    private fun shouldRecord(error: PhoneToolErrorCode?): Boolean = error == null || error in setOf(
+        PhoneToolErrorCode.ACTION_FAILED,
+        PhoneToolErrorCode.TIMEOUT,
+        PhoneToolErrorCode.ELEMENT_NOT_FOUND,
+        PhoneToolErrorCode.STALE_ELEMENT,
+    )
+}
+
+internal object GatewayTeachingAdapter {
+    fun start(context: Context): JSONObject {
+        RoutineTeachingRuntime.initialize(context)
+        if (!FollowMeLearnerRuntime.progress().active) FollowMeLearnerRuntime.start(context)
+        return status(context).put("startedBy", "PC_CODEX")
+    }
+
+    fun status(context: Context): JSONObject {
+        RoutineTeachingRuntime.initialize(context)
+        val progress = FollowMeLearnerRuntime.progress()
+        val sessionId = progress.teachingSessionId ?: RoutineTeachingRuntime.activeSessionId()
+        val session = sessionId?.let(RoutineTeachingRuntime::load)
+        val gestureCount = sessionId?.let { TeachingGestureEvidenceV292.list(context, it).size } ?: 0
+        val currentPageKey = session?.steps?.asReversed()?.firstOrNull { !it.pageKey.isNullOrBlank() }?.pageKey
+            ?: GatewayObservationStore.current()?.page?.pageKey
+        return JSONObject()
+            .put("sessionId", sessionId ?: JSONObject.NULL)
+            .put("active", progress.active)
+            .put("paused", progress.paused)
+            .put("currentPackage", progress.currentPackage.ifBlank { DeviceState.currentPackage.orEmpty() })
+            .put("currentPageKey", currentPageKey ?: JSONObject.NULL)
+            .put("pageCount", progress.screensSeen)
+            .put("actionCount", progress.actionsSeen)
+            .put("gestureCount", gestureCount)
+            .put("appsSeen", progress.appsSeen)
+            .put("pathsLearned", progress.pathsLearned)
+            .put("message", progress.message)
+    }
+
+    fun stop(context: Context): JSONObject {
+        RoutineTeachingRuntime.initialize(context)
+        val before = FollowMeLearnerRuntime.progress()
+        val sessionId = before.teachingSessionId ?: RoutineTeachingRuntime.activeSessionId()
+        if (before.active) {
+            // Finish through the canonical Follow Me -> RoutineTeaching path. No second history is created.
+            FollowMeLearnerRuntime.finishFromOverlay(null, null)
+        }
+        val finished = sessionId?.let(RoutineTeachingRuntime::load)
+        return status(context)
+            .put("stoppedSessionId", sessionId ?: JSONObject.NULL)
+            .put("reportSessionId", finished?.id ?: JSONObject.NULL)
+            .put("summary", finished?.summary ?: "")
+            .put("sessionStatus", finished?.status ?: "INACTIVE")
+            .put("startedAt", finished?.startedAt ?: JSONObject.NULL)
+            .put("endedAt", finished?.endedAt ?: JSONObject.NULL)
+    }
+}
