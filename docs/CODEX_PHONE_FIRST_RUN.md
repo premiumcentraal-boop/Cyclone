@@ -28,16 +28,24 @@ The MCP package has no runtime Python dependencies beyond the standard library.
 
 ## 2. Register the local STDIO MCP with Codex
 
-Current Codex supports local STDIO MCP servers and project-scoped `.codex/config.toml`. The CLI registration form is the easiest setup.
+Current Codex supports local STDIO MCP servers and project-scoped `.codex/config.toml`.
 
-From the repository root, set the token in the environment, then register the server:
+For this repository, the most deterministic setup is the project-scoped config because Codex supports an MCP `cwd`. Copy `tools\codex-phone-mcp\codex-config.example.toml` into the trusted project's `.codex/config.toml` (or merge its table into your existing file) and replace the `cwd` with the absolute path on your PC.
+
+Set the local environment before starting/restarting Codex:
 
 ```powershell
 $env:CYCLONE_DEVICE_GATEWAY_TOKEN = "<same strong local token as Agent 1>"
-codex mcp add cyclone-phone --env CYCLONE_DEVICE_GATEWAY_TOKEN=$env:CYCLONE_DEVICE_GATEWAY_TOKEN --env CYCLONE_DEVICE_GATEWAY_URL=http://127.0.0.1:8765 -- python -m cyclone_phone_mcp
+$env:CYCLONE_DEVICE_GATEWAY_URL = "http://127.0.0.1:8765"
 ```
 
-Run that command while the working directory is `tools\codex-phone-mcp`, or use a Python/package installation whose `cyclone_phone_mcp` module is available from any directory.
+Codex also supports CLI registration of STDIO MCP servers. If `cyclone-phone-mcp` is installed into the Python environment used by Codex, you can instead use:
+
+```powershell
+cd tools\codex-phone-mcp
+python -m pip install -e .
+codex mcp add cyclone-phone --env CYCLONE_DEVICE_GATEWAY_TOKEN=$env:CYCLONE_DEVICE_GATEWAY_TOKEN --env CYCLONE_DEVICE_GATEWAY_URL=$env:CYCLONE_DEVICE_GATEWAY_URL -- cyclone-phone-mcp
+```
 
 Verify:
 
@@ -47,9 +55,7 @@ codex mcp list
 
 Inside Codex, `/mcp` should show `cyclone-phone` and its tools.
 
-### Optional project config
-
-Codex also supports project-scoped `.codex/config.toml` for trusted projects. A representative configuration is:
+### Project config example
 
 ```toml
 [mcp_servers.cyclone-phone]

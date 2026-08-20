@@ -46,5 +46,23 @@ class ToolTests(unittest.TestCase):
         result = self.tools.call("phone_inspect_element", {"element_id": "1"})[0]["text"]
         self.assertNotIn("should-not-leak", result)
 
+    def test_debug_classification_and_teaching_lifecycle(self):
+        debug = self.tools.call("phone_debug_bundle", {"expected": "Apps", "goal": "Open Apps"})[0]["text"]
+        self.assertIn("AGENT_CONTEXT_TRUNCATION", debug)
+        started = self.tools.call("phone_teach_start", {"goal": "Learn Settings"})[0]["text"]
+        status = self.tools.call("phone_teach_status", {})[0]["text"]
+        stopped = self.tools.call("phone_teach_stop", {"compile_for_review": True})[0]["text"]
+        self.assertIn('"active":true', started)
+        self.assertIn('"active":true', status)
+        self.assertIn('"active":false', stopped)
+
+    def test_session_report_counts_actions_and_searches(self):
+        self.tools.call("phone_ui_search", {"query": "Apps"})
+        self.tools.call("phone_act", {"tool": "phone.click", "params": {"selector": {"text": "Apps"}}, "goal": "Open Apps"})
+        report = self.recorder.snapshot()
+        self.assertEqual(report["uiSearches"], 1)
+        self.assertEqual(report["actions"], 1)
+        self.assertEqual(report["failedActions"], 0)
+
 
 if __name__ == "__main__": unittest.main()
