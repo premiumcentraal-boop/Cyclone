@@ -13,7 +13,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Cyclone 2.9.4"
+        android:label="Cyclone 2.9.5"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
@@ -34,13 +34,8 @@
 
         <activity
             android:name=".gateway.GatewaySettingsActivity"
-            android:exported="true"
-            android:label="Cyclone PC Gateway">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:exported="false"
+            android:label="Cyclone PC Gateway" />
 
         <activity
             android:name=".guided.RoutineTeachingHistoryActivity"
@@ -73,7 +68,7 @@
         <service
             android:name=".CycloneNotificationListener"
             android:exported="true"
-            android:label="Cyclone 2.9.4 notification listener"
+            android:label="Cyclone 2.9.5 notification listener"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
