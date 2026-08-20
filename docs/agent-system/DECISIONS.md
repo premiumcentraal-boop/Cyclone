@@ -1,0 +1,75 @@
+# Architectural Decisions
+
+These are current design decisions. Change them deliberately and document the reason rather than accidentally reversing them during feature work.
+
+## ADR-001 — One Cyclone Android app
+
+**Decision:** `com.cyclone.mobile` has one launcher (`.MainActivity`). Infrastructure such as PC Gateway is integrated inside the product UI.
+
+**Why:** Multiple launcher surfaces confused users and fragmented the app identity.
+
+## ADR-002 — Semantic-first control
+
+**Decision:** Accessibility/Page Awareness/semantic selectors are the default perception/control path; screenshots/vision are fallback evidence.
+
+**Why:** Structured state is cheaper, auditable, easier to learn from and more deterministic.
+
+## ADR-003 — One phone mutation engine
+
+**Decision:** AI, automation, learning and gateway paths ultimately route through the canonical `PhoneToolExecutor`/phone tool layer.
+
+**Why:** Parallel executors create inconsistent safety, logging and behavior.
+
+## ADR-004 — Learn durable knowledge, not prompt memory
+
+**Decision:** App navigation becomes structured App Graph/Brain knowledge with provenance/confidence. Runtime stores are separate from sanitized human-readable mirrors.
+
+## ADR-005 — Verify after every mutation
+
+**Decision:** Transport success is insufficient. Android execution outcome + stabilized semantic after-state determine success.
+
+## ADR-006 — Observation-scoped element IDs
+
+**Decision:** Element IDs from search/inspect refer to an observation and must resolve to stable selectors before action. Re-observe after page changes.
+
+## ADR-007 — USB/local external control
+
+**Decision:** Android PC gateway uses localabstract + ADB forwarding; PC API is loopback-only. No normal phone LAN listener is required for this gateway.
+
+## ADR-008 — No arbitrary model shell/root
+
+**Decision:** Root can support bounded telemetry/providers, but agents receive constrained typed tools rather than generic `su`, ADB shell or PowerShell execution.
+
+## ADR-009 — Sensitive typing is not learning data
+
+**Decision:** passwords, OTPs, tokens, API keys, payment credentials and typed secret values are redacted/omitted from learned/report stores.
+
+## ADR-010 — UI version has one source
+
+**Decision:** Android visible version text is derived from `BuildConfig.VERSION_NAME` through `CycloneRelease`. Internal persisted V292/V293 identifiers may remain for compatibility.
+
+## ADR-011 — CI is not physical verification
+
+**Decision:** mocks/unit tests can verify contracts but cannot mark real Android navigation/learning as physically VERIFIED.
+
+## ADR-012 — Release claims require artifact evidence
+
+**Decision:** a release is downloadable only after the artifact exists and its exact source SHA/hash is recorded. Source code or tags alone are not sufficient.
+
+## ADR-013 — Multi-agent work uses strict ownership
+
+**Decision:** parallel agents get exact base SHA, owned/forbidden paths and frozen contracts; integration is a separate role.
+
+## Adding a decision
+
+Use this template:
+
+```text
+## ADR-NNN — Title
+Status: proposed | accepted | superseded
+Context:
+Decision:
+Consequences:
+Tests/guards:
+Supersedes:
+```

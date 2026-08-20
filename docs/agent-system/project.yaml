@@ -1,0 +1,87 @@
+schema: cyclone-agent-project-v1
+project: Cyclone
+primary_direction: autonomous_android_phone_agent
+mission: >-
+  Let a user ask for phone goals or teach routines, then observe, understand,
+  act, verify, learn, reuse and self-heal across Android apps.
+
+canonical_docs:
+  agent_rules: AGENTS.md
+  hub: docs/agent-system/README.md
+  current_state: docs/agent-system/CURRENT_STATE.md
+  architecture: docs/agent-system/ARCHITECTURE_AND_CONTRACTS.md
+  multi_agent: docs/agent-system/MULTI_AGENT_PROTOCOL.md
+  releases: docs/agent-system/FAST_RELEASE_PLAYBOOK.md
+  roadmap: docs/agent-system/AUTONOMY_ROADMAP.md
+  decisions: docs/agent-system/DECISIONS.md
+
+mobile:
+  package: com.cyclone.mobile
+  launcher: .MainActivity
+  version_source: apps/mobile/app/build.gradle.kts#defaultConfig.versionName
+  ui_version_adapter: apps/mobile/app/src/main/java/com/cyclone/mobile/CycloneRelease.kt
+  product_surfaces:
+    - Home
+    - Teach
+    - AI
+    - Automations
+    - Brain
+    - Settings
+  canonical_action_engine: apps/mobile/app/src/main/java/com/cyclone/mobile/PhoneToolExecutor.kt
+  perception_service: apps/mobile/app/src/main/java/com/cyclone/mobile/CycloneAccessibilityService.kt
+
+layers:
+  android_control:
+    paths:
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/CycloneAccessibilityService.kt
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/PhoneToolExecutor.kt
+  page_learning:
+    paths:
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/applearner
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/brain
+  automation_teaching:
+    paths:
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/automation
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/guided
+  mobile_ai_ux:
+    paths:
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/ai
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/ui
+  android_gateway:
+    paths:
+      - apps/mobile/app/src/main/java/com/cyclone/mobile/gateway
+  pc_gateway:
+    paths:
+      - apps/device-gateway
+  codex_mcp:
+    paths:
+      - tools/codex-phone-mcp
+      - scripts/phone-gateway
+  desktop_core:
+    paths:
+      - apps/cyclone-core
+      - apps/desktop
+      - apps/host-bridge
+      - services
+      - packages
+
+invariants:
+  - one_android_launcher
+  - one_phone_mutation_engine
+  - semantic_first_vision_fallback
+  - verify_after_mutation
+  - no_generic_model_shell_or_root
+  - redact_sensitive_typed_values
+  - physical_verification_distinct_from_ci
+  - release_claim_requires_artifact_hash
+
+release:
+  verified_marker_pattern: releases/<version>/BUILD_VERIFIED.json
+  download_index: MOBILE_DOWNLOADS.md
+  artifact_host: github_actions_and_releases
+  signing_currently_expected: debug_beta_unless_release_says_otherwise
+
+agent_bootstrap:
+  command: python scripts/agent/cyclone-context.py --markdown
+  task_template: .github/ISSUE_TEMPLATE/agent-task.md
+  pr_template: .github/PULL_REQUEST_TEMPLATE.md
