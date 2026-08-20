@@ -7,7 +7,11 @@ on:
       - release/cyclone-mobile-v2.9.4-full-gateway
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: cyclone-v2.9.4-full-gateway
+  cancel-in-progress: true
 
 jobs:
   full-gateway:
@@ -17,6 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -89,6 +94,26 @@ jobs:
               for path in sorted((root / "pc").iterdir()):
                   archive.write(path, f"pc/{path.name}")
           PY
+
+      - name: Publish verified release files on the release branch
+        shell: bash
+        run: |
+          mkdir -p releases/2.9.4
+          cp dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk releases/2.9.4/
+          cp dist/Cyclone-2.9.4-Full-Gateway-Bundle.zip releases/2.9.4/
+          (
+            cd releases/2.9.4
+            sha256sum Cyclone-Mobile-2.9.4-Full-Gateway.apk Cyclone-2.9.4-Full-Gateway-Bundle.zip > SHA256SUMS.txt
+          )
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- releases/2.9.4
+          if git diff --cached --quiet; then
+            echo "Release files already published"
+          else
+            git commit -m "release: publish Cyclone 2.9.4 binaries [skip ci]"
+            git push origin HEAD:release/cyclone-mobile-v2.9.4-full-gateway
+          fi
 
       - name: Upload 2.9.4 APK
         uses: actions/upload-artifact@v4
