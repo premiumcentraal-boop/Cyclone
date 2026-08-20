@@ -33,13 +33,29 @@ class AcceptanceHarness:
 
     def _settings_apps_run(self, execute: bool, label: str) -> dict[str, Any]:
         started = time.perf_counter()
-        metrics = {"label": label, "actions": 0, "failedActions": 0, "uiSearches": 0, "screenshots": 0, "knownRouteHints": 0, "brainHints": 0, "pages": []}
+        metrics = {
+            "label": label,
+            "actions": 0,
+            "failedActions": 0,
+            "uiSearches": 0,
+            "screenshots": 0,
+            "knownRouteHints": 0,
+            "brainHints": 0,
+            "pages": [],
+        }
         obs = compact_observation(self.gateway.observe())
         self._observe_metrics(metrics, obs)
         if not execute:
-            metrics.update({"passed": True, "dryRun": True, "latencyMs": int((time.perf_counter() - started) * 1000)})
+            metrics.update({
+                "passed": True,
+                "dryRun": True,
+                "latencyMs": int((time.perf_counter() - started) * 1000),
+            })
             return metrics
-        self._act(metrics, "phone.open_app", {"package": "com.android.settings"}, "Open Android Settings")
+
+        if not self._act(metrics, "phone.open_app", {"package": "com.android.settings"}, "Open Android Settings"):
+            return self._failed(metrics, started, "Opening Android Settings failed")
+
         obs = compact_observation(self.gateway.observe())
         self._observe_metrics(metrics, obs)
         candidate = _find_control(obs, "apps")
@@ -48,26 +64,69 @@ class AcceptanceHarness:
             candidate = _first_candidate(self.gateway.ui_search("Apps"))
         if candidate is None:
             metrics["failedActions"] += 1
-            metrics["debug"] = self.gateway.debug_bundle("Apps", "Open Android Settings and navigate to Apps")
-            metrics.update({"passed": False, "latencyMs": int((time.perf_counter() - started) * 1000)})
-            return metrics
-        self._act(metrics, "phone.click", {"selector": _selector_for(candidate)}, "Open Apps in Android Settings")
+            metrics["debug"] = self.gateway.debug_bundle(
+                "Apps",
+                "Open Android Settings and navigate to Apps",
+            )
+            return self._failed(metrics, started, "Apps target was not found")
+
+        if not self._act(
+            metrics,
+            "phone.click",
+            {"selector": _selector_for(candidate)},
+            "Open Apps in Android Settings",
+        ):
+            metrics["debug"] = self.gateway.debug_bundle(
+                "Apps",
+                "Click the Apps control in Android Settings",
+            )
+            return self._failed(metrics, started, "Apps action returned failure")
+
         obs = compact_observation(self.gateway.observe())
         self._observe_metrics(metrics, obs)
-        apps_ok = "app" in str(obs.get("title") or "").lower() or "app" in str(obs.get("pageKey") or "").lower()
-        self._act(metrics, "phone.home", {}, "Return Home")
+        apps_ok = (
+            "app" in str(obs.get("title") or "").lower()
+            or "app" in str(obs.get("pageKey") or "").lower()
+        )
+
+        if not self._act(metrics, "phone.home", {}, "Return Home"):
+            return self._failed(metrics, started, "Home action returned failure")
+
         home = compact_observation(self.gateway.observe())
         self._observe_metrics(metrics, home)
-        metrics.update({"passed": bool(apps_ok), "latencyMs": int((time.perf_counter() - started) * 1000)})
+        metrics.update({
+            "passed": bool(apps_ok),
+            "latencyMs": int((time.perf_counter() - started) * 1000),
+        })
+        if not apps_ok:
+            metrics["failureReason"] = "Apps page verification did not match title/PageKey"
         return metrics
 
-    def _act(self, metrics: dict[str, Any], tool: str, params: dict[str, Any], goal: str) -> None:
+    def _act(self, metrics: dict[str, Any], tool: str, params: dict[str, Any], goal: str) -> bool:
         metrics["actions"] += 1
         try:
-            self.gateway.action(tool, params, goal)
-        except Exception:
+            result = self.gateway.action(tool, params, goal)
+        except Exception as exc:
             metrics["failedActions"] += 1
-            raise
+            metrics["lastActionFailure"] = {"exception": str(exc), "tool": tool}
+            return False
+        if _action_failed(result):
+            metrics["failedActions"] += 1
+            metrics["lastActionFailure"] = {
+                "tool": tool,
+                "result": result,
+            }
+            return False
+        return True
+
+    @staticmethod
+    def _failed(metrics: dict[str, Any], started: float, reason: str) -> dict[str, Any]:
+        metrics.update({
+            "passed": False,
+            "failureReason": reason,
+            "latencyMs": int((time.perf_counter() - started) * 1000),
+        })
+        return metrics
 
     @staticmethod
     def _observe_metrics(metrics: dict[str, Any], obs: dict[str, Any]) -> None:
@@ -83,12 +142,21 @@ class AcceptanceHarness:
 class MockGateway:
     def __init__(self):
         fixture_dir = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
-        self.fixtures = {name: json.loads((fixture_dir / f"{name}.json").read_text(encoding="utf-8")) for name in ("launcher", "settings", "settings_apps")}
+        self.fixtures = {
+            name: json.loads((fixture_dir / f"{name}.json").read_text(encoding="utf-8"))
+            for name in ("launcher", "settings", "settings_apps")
+        }
         self.state = "launcher"
         self.visits = 0
 
     def status(self) -> Any:
-        return {"device": {"model": "Pixel 8", "serial": "MOCKPIXEL8"}, "adbReady": True, "bridgeConnected": True, "accessibilityReady": True, "gatewayEnabled": True}
+        return {
+            "device": {"model": "Pixel 8", "serial": "MOCKPIXEL8"},
+            "adbReady": True,
+            "bridgeConnected": True,
+            "accessibilityReady": True,
+            "gatewayEnabled": True,
+        }
 
     def observe(self, **_: Any) -> Any:
         value = json.loads(json.dumps(self.fixtures[self.state]))
@@ -114,6 +182,12 @@ class MockGateway:
 
     def debug_bundle(self, expected: str, goal: str) -> Any:
         return {"stage": "AGENT_CONTEXT_TRUNCATION", "expected": expected, "goal": goal}
+
+
+def _action_failed(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    return result.get("success") is False or result.get("ok") is False or "error" in result
 
 
 def _find_control(obs: dict[str, Any], needle: str) -> dict[str, Any] | None:
