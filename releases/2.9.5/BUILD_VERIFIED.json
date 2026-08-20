@@ -1,0 +1,20 @@
+{
+  "release": "2.9.5",
+  "tag": "v2.9.5",
+  "verified": true,
+  "sourceSha": "996962334eba90c64248baeb35bec1f17564867b",
+  "runId": 32405464391,
+  "apk": {
+    "name": "Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk",
+    "bytes": 120265263,
+    "sha256": "5cf29d4dc6428df0476ff88c6ab0538d9d39c57555250f83c164b6113472d694",
+    "releaseAsset": "https://github.com/premiumcentraal-boop/Cyclone/releases/download/v2.9.5/Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk"
+  },
+  "bundle": {
+    "name": "Cyclone-2.9.5-Original-UI-Full-Gateway-Bundle.zip",
+    "sha256": "87084f76c0771b79ccca7dbfc62b34566794413e8a46d1415e94f3665077490f"
+  },
+  "originalUiBase": "c3684dfe2d74836826785eccafed4b6d218cffc1",
+  "singleLauncherVerified": true,
+  "signing": "debug-signed-beta"
+}
