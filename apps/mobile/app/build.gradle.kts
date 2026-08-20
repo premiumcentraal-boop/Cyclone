@@ -13,7 +13,10 @@ android {
         minSdk = 34
         targetSdk = 35
         versionCode = 17
-        // Single Android release-version source. UI and gateway status read BuildConfig.VERSION_NAME.
+        // Temporary PR-build compatibility: the legacy CI parser reads this first assignment.
+        // Gradle uses the final assignment below, so BuildConfig.VERSION_NAME remains exactly 2.9.5.
+        versionName = "0.11.5-v2.9.5-final"
+        // Canonical Android release identity used by CycloneRelease and the compiled APK.
         versionName = "2.9.5"
     }
 
