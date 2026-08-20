@@ -23,14 +23,18 @@ jobs:
         run: python scripts/release/apply-v295-ui-polish.py
       - name: Verify patch cleanliness
         run: git diff --check
-      - name: Commit transformed UI
+      - name: Commit transformed product UI
         run: |
-          if git diff --quiet -- apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt; then
+          FILES=(
+            apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt
+            apps/mobile/app/src/main/java/com/cyclone/mobile/debug/PageDebugSandboxV293.kt
+          )
+          if git diff --quiet -- "${FILES[@]}"; then
             echo "UI polish already applied"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt
-          git commit -m "ui: integrate Gateway into AI and unify settings/version"
+          git add -- "${FILES[@]}"
+          git commit -m "ui: apply unified 2.9.5 product labels"
           git push origin HEAD:release/cyclone-mobile-v2.9.5
