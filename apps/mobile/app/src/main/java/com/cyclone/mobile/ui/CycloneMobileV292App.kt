@@ -10,6 +10,7 @@ import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -96,6 +97,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.cyclone.mobile.BridgeClient
 import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
@@ -160,16 +162,16 @@ fun CycloneMobileV292App() {
                         else Surface(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(start = 12.dp).size(42.dp),
+                            modifier = Modifier.padding(start = 12.dp).size(42.dp).clickable { settingsOpen = true },
                         ) { Box(contentAlignment = Alignment.Center) { Text("C", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Black) } }
                     },
                     title = {
                         Column {
                             Text(if (settingsOpen) "Settings" else tab.label, fontWeight = FontWeight.SemiBold)
-                            Text("Cyclone 2.9.3", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(CycloneRelease.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
-                    actions = { if (!settingsOpen) IconButton(onClick = { settingsOpen = true }) { Icon(Icons.Rounded.SettingsIcon, "Settings") } },
+                    actions = {},
                 )
             },
             bottomBar = {
@@ -273,7 +275,7 @@ private fun V292TeachPage(context: Context, refreshTick: Int) {
     val gestureCount = follow.teachingSessionId?.let { TeachingGestureEvidenceV292.list(context, it).size } ?: 0
 
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-        item { V292Hero(Icons.Rounded.School, "Teach Cyclone", "2.9.3 adds a Page Awareness Sandbox so you can freeze a real page and inspect raw Android evidence, semantic controls, the exact Page Agent payload, Brain/App Graph recall and execution-free model probes.") }
+        item { V292Hero(Icons.Rounded.School, "Teach Cyclone", "Page Awareness Sandbox lets you freeze a real page and inspect raw Android evidence, semantic controls, the exact Page Agent payload, Brain/App Graph recall and execution-free model probes.") }
         item {
             Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -388,6 +390,7 @@ private fun V292AiPage(context: Context, refreshTick: Int) {
                 }
             }
         }
+        item { GatewayAiCard(context, refreshTick) }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 V292ModeCard(mode == V292AiMode.PHONE, Icons.Rounded.Visibility, "Control my phone", "Run an autonomous phone task with the transparent live decision HUD.") { mode = V292AiMode.PHONE; result = ""; status = "" }
@@ -523,7 +526,7 @@ private fun V292SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
     var token by rememberSaveable { mutableStateOf(prefs.getString("coreToken", "").orEmpty()) }
     var name by rememberSaveable { mutableStateOf(prefs.getString("deviceName", defaultName).orEmpty()) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-        item { V292Hero(Icons.Rounded.SettingsIcon, "Cyclone 2.9.2 settings", "Phone permissions, result notifications and optional Cyclone Core connection.") }
+        item { V292Hero(Icons.Rounded.SettingsIcon, "${CycloneRelease.label} settings", "Phone permissions, result notifications and optional Cyclone Core connection.") }
         item { V292Section("Permissions") { V292Status("Phone control", v292AccessibilityEnabled(context)); V292Status("Notification events", v292NotificationListenerEnabled(context)); V292Status("AI result notifications", v292ResultNotificationsEnabled(context)); V292Status("OpenRouter key", OpenRouterSecretStore.hasKey(context)) } }
         item { V292Section("Cyclone Core · optional") {
             OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text("WebSocket URL") })
