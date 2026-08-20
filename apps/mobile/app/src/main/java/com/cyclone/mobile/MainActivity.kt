@@ -13,7 +13,7 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
-import com.cyclone.mobile.ui.CycloneMobileV292App
+import com.cyclone.mobile.ui.CycloneMobileV295App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
         migrateModelDefault()
         migrateV292Learning()
         TaskResultNotifierV292.ensureChannel(this)
-        setContent { CycloneMobileV292App() }
+        setContent { CycloneMobileV295App() }
     }
 
     override fun onResume() {
