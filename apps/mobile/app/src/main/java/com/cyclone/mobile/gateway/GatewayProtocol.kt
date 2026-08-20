@@ -3,6 +3,7 @@ package com.cyclone.mobile.gateway
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.security.MessageDigest
 
 internal data class GatewayRequest(
     val id: String,
@@ -57,6 +58,10 @@ internal object GatewayProtocol {
         return GatewayRequest(id, op, argsValue as? JSONObject ?: JSONObject(), auth)
     }
 
+    fun requireKnownOperation(op: String, id: String = "") {
+        if (op !in operations) throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported gateway operation: $op", id)
+    }
+
     fun success(id: String, result: Any?): JSONObject = JSONObject()
         .put("id", id)
         .put("ok", true)
@@ -71,6 +76,13 @@ internal object GatewayProtocol {
             .put("code", code)
             .put("message", message.take(600))
             .put("details", details ?: JSONObject.NULL))
+}
+
+internal object GatewayAuth {
+    fun matches(expected: String?, supplied: String?): Boolean {
+        if (expected.isNullOrBlank() || supplied.isNullOrBlank()) return false
+        return MessageDigest.isEqual(expected.toByteArray(Charsets.UTF_8), supplied.toByteArray(Charsets.UTF_8))
+    }
 }
 
 /** Bounded line reader so a forwarded client cannot grow the phone process without limit. */
