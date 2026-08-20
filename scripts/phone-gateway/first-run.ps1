@@ -20,6 +20,11 @@ if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
 }
 Pass "adb is available"
 
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Fail "python was not found in this PowerShell session. Activate the Cyclone gateway virtual environment first."
+}
+Pass "Python is available"
+
 $deviceLines = adb devices | Select-Object -Skip 1 | Where-Object { $_ -match "\S+\s+\S+" }
 $authorized = @($deviceLines | Where-Object { $_ -match "\sdevice$" })
 $unauthorized = @($deviceLines | Where-Object { $_ -match "\sunauthorized$" })
@@ -87,7 +92,7 @@ $headers = @{ Authorization = "Bearer $HttpToken" }
 try {
     $status = Invoke-RestMethod -Uri "$GatewayUrl/v1/device/status" -Headers $headers -Method Get -TimeoutSec 10
 } catch {
-    Fail "PC Device Gateway is not reachable/authenticated at $GatewayUrl. Start apps/device-gateway with both token variables set. $($_.Exception.Message)"
+    Fail "PC Device Gateway is not reachable/authenticated at $GatewayUrl. Start the Cyclone PC Device Gateway with both token variables set. $($_.Exception.Message)"
 }
 Pass "PC Device Gateway is reachable"
 
@@ -112,30 +117,24 @@ if ($bridge.appVersion -and $bridge.appVersion -notmatch "2\.9\.4") {
     Pass "Cyclone 2.9.4 app version confirmed"
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$mcpDir = Join-Path $repoRoot "tools\codex-phone-mcp"
-Push-Location $mcpDir
-try {
-    python -m cyclone_phone_mcp --self-test | Write-Host
-    if ($LASTEXITCODE -ne 0) {
-        Fail "Cyclone Phone MCP self-test could not talk to Device Gateway."
-    }
-    Pass "Cyclone Phone MCP self-test passed"
-} finally {
-    Pop-Location
+$mcpOutput = python -m cyclone_phone_mcp --self-test 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) {
+    Fail "Cyclone Phone MCP self-test could not talk to Device Gateway. Activate/install the 2.9.4 MCP package first. $mcpOutput"
 }
+Write-Host $mcpOutput.Trim()
+Pass "Cyclone Phone MCP self-test passed"
 
 if (-not $SkipMcpCheck) {
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
-        Fail "codex CLI is not installed/on PATH. Install/open Codex, then register the MCP server as documented in docs/CODEX_PHONE_FIRST_RUN.md."
+        Fail "codex CLI is not installed/on PATH. Install/open Codex, then register the MCP server as documented in CODEX_PHONE_FIRST_RUN.md."
     }
     $mcpList = codex mcp list 2>&1 | Out-String
     if ($mcpList -notmatch "cyclone-phone") {
-        Fail "Codex does not list an MCP server named 'cyclone-phone'. Register it using docs/CODEX_PHONE_FIRST_RUN.md."
+        Fail "Codex does not list an MCP server named 'cyclone-phone'. Register it using the generated Codex config or CODEX_PHONE_FIRST_RUN.md."
     }
     Pass "Codex lists cyclone-phone MCP"
 }
 
 Write-Host ""
 Write-Host "Cyclone 2.9.4 Full Gateway is ready for the safe Pixel 8 acceptance run." -ForegroundColor Green
-Write-Host "Next: cd tools/codex-phone-mcp; python -m cyclone_phone_mcp.acceptance --live --execute" -ForegroundColor Yellow
+Write-Host "Next: python -m cyclone_phone_mcp.acceptance --live --execute" -ForegroundColor Yellow
