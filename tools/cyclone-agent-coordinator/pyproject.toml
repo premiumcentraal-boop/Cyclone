@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cyclone-agent-coordinator"
+version = "0.1.0"
+description = "Durable development task DAG and handoff coordinator for Cyclone agents"
+requires-python = ">=3.11"
+authors = [{name = "Cyclone"}]
+dependencies = []
+
+[project.scripts]
+cyclone-agent = "cyclone_agent_coordinator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cyclone_agent_coordinator*"]
