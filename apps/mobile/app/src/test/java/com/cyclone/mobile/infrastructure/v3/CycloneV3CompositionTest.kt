@@ -126,38 +126,43 @@ class CycloneV3CompositionTest {
     }
 
     @Test
-    fun policyTargetMustMatchRepresentablePhoneTargetBeforeGrantConsumption() {
-        val governor = governorWithGrant(maximumUses = 1)
+    fun policyTargetComesOnlyFromTrustedResolverAndNeverFromForgedActionParams() {
+        val allowedPackage = "com.cyclone.settings"
+        val governor = governorWithGrant(maximumUses = 1, packageName = allowedPackage)
         var proposals = 0
+        var trustedTarget: PolicyTarget? = null
         val composition = CycloneV3ActionComposition(
             governor,
             CanonicalPhoneExecutorProposalSink { proposals += 1; "handoff" },
             ContextLedger(InMemoryContextLedgerPersistence()),
             null,
+            TrustedPolicyTargetResolver { _, _ -> trustedTarget },
         )
         val evidence = DecisionEvidence("goal:1", emptyList(), "observation:1", "observation:1", DecisionSource.AI)
         val policy = request().copy(
-            target = PolicyTarget(
-                targetType = "selector",
-                targetId = "element:settings",
-                attributes = mapOf("resourceId" to "settings_row"),
-            ),
+            target = PolicyTarget(packageName = allowedPackage),
         )
-        val wrong = PhoneToolRequest(
+        val forgedAllowedPackage = PhoneToolRequest(
             "action:open",
             "phone.click",
-            JSONObject().put("targetType", "selector").put("elementId", "element:other")
-                .put("selector", JSONObject().put("resourceId", "settings_row")),
-        )
-        val correct = PhoneToolRequest(
-            "action:open",
-            "phone.click",
-            JSONObject().put("targetType", "selector").put("elementId", "element:settings")
-                .put("selector", JSONObject().put("resourceId", "settings_row")),
+            JSONObject().put("package", allowedPackage).put("elementId", "forged:settings"),
         )
 
-        assertEquals(ActionCompositionDecision.Blocked("TARGET_SCOPE_MISMATCH"), composition.propose(policy, wrong, evidence))
-        assertEquals(ActionCompositionDecision.Proposed("handoff"), composition.propose(policy, correct, evidence))
+        // Caller-controlled params cannot stand in for trusted target resolution.
+        assertEquals(
+            ActionCompositionDecision.Blocked("TARGET_SCOPE_MISMATCH"),
+            composition.propose(policy, forgedAllowedPackage, evidence),
+        )
+        trustedTarget = PolicyTarget(packageName = "com.attacker.other")
+        assertEquals(
+            ActionCompositionDecision.Blocked("TARGET_SCOPE_MISMATCH"),
+            composition.propose(policy, forgedAllowedPackage, evidence),
+        )
+
+        // Both failed attempts occurred before grant consumption. Trusted state is sufficient even
+        // when the action proposal deliberately omits package identity.
+        trustedTarget = PolicyTarget(packageName = allowedPackage, targetType = "resolved.selector")
+        assertEquals(ActionCompositionDecision.Proposed("handoff"), composition.propose(policy, clickRequest(), evidence))
         assertEquals(1, proposals)
     }
 
@@ -234,13 +239,20 @@ class CycloneV3CompositionTest {
         )
     }
 
-    private fun governorWithGrant(maximumUses: Int = 2) = InMemoryPolicyGovernor(PolicyClock { 100 }).also {
+    private fun governorWithGrant(
+        maximumUses: Int = 2,
+        packageName: String? = null,
+    ) = InMemoryPolicyGovernor(PolicyClock { 100 }).also {
         it.issueGrant(
             AuthorityGrant(
                 grantId = "grant:open",
                 subject = principal,
                 authority = AuthorityClaim(AuthorityOrigin.DIRECT_USER_MISSION, "mission:user"),
-                scope = ActionScope(setOf("phone.click"), missionId = "mission:settings"),
+                scope = ActionScope(
+                    setOf("phone.click"),
+                    missionId = "mission:settings",
+                    packageName = packageName,
+                ),
                 allowedRisks = setOf(ActionRisk.ROUTINE),
                 issuedAtEpochMillis = 50,
                 expiresAtEpochMillis = 1_000,

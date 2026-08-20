@@ -13,6 +13,7 @@ import com.cyclone.mobile.policy.PolicyAuthorization
 import com.cyclone.mobile.policy.PolicyGovernor
 import com.cyclone.mobile.policy.PolicyGuard
 import com.cyclone.mobile.policy.PolicyRequest
+import com.cyclone.mobile.policy.PolicyTarget
 
 enum class DecisionSource { AI, ROUTINE }
 
@@ -45,6 +46,14 @@ fun interface CanonicalPhoneExecutorProposalSink {
     fun propose(action: AuthorizedPhoneActionProposal): String
 }
 
+/**
+ * Resolves a normalized target from trusted page/selector state. Phone action parameters are
+ * intentionally absent from this interface because they are a proposal, never target authority.
+ */
+fun interface TrustedPolicyTargetResolver {
+    fun resolve(actionId: String, evidence: DecisionEvidence): PolicyTarget?
+}
+
 sealed interface ActionCompositionDecision {
     data class Proposed(val handoffId: String) : ActionCompositionDecision
     data class Blocked(val reasonCode: String) : ActionCompositionDecision
@@ -61,6 +70,7 @@ class CycloneV3ActionComposition(
     private val executorProposalSink: CanonicalPhoneExecutorProposalSink,
     private val ledger: ContextLedger,
     private val memory: CycloneMemoryService?,
+    private val targetResolver: TrustedPolicyTargetResolver = TrustedPolicyTargetResolver { _, _ -> null },
 ) {
     private val policy = PolicyGuard(policyGovernor)
 
@@ -72,7 +82,7 @@ class CycloneV3ActionComposition(
         if (evidence.selectorObservationId != evidence.pageObservationId) {
             return ActionCompositionDecision.Blocked("STALE_SELECTOR")
         }
-        actionBindingMismatch(policyRequest, phoneRequest)?.let {
+        actionBindingMismatch(policyRequest, phoneRequest, evidence)?.let {
             return ActionCompositionDecision.Blocked(it)
         }
         return when (val guarded = policy.authorizeThen(policyRequest) { authorization ->
@@ -134,43 +144,25 @@ class CycloneV3ActionComposition(
     }
 
     /** Validate the exact action before PolicyGovernor can consume a one-shot grant. */
-    private fun actionBindingMismatch(policyRequest: PolicyRequest, phoneRequest: PhoneToolRequest): String? {
+    private fun actionBindingMismatch(
+        policyRequest: PolicyRequest,
+        phoneRequest: PhoneToolRequest,
+        evidence: DecisionEvidence,
+    ): String? {
         if (phoneRequest.commandId != policyRequest.actionId) return "ACTION_ID_MISMATCH"
         if (phoneRequest.tool != policyRequest.capability) return "CAPABILITY_MISMATCH"
-        val target = policyRequest.target ?: return null
-        if (target.packageName != null && phoneTargetValue(phoneRequest, "packageName") != target.packageName) {
-            return "TARGET_SCOPE_MISMATCH"
-        }
-        if (target.targetType != null && phoneTargetValue(phoneRequest, "targetType") != target.targetType) {
-            return "TARGET_SCOPE_MISMATCH"
-        }
-        if (target.targetId != null && phoneTargetValue(phoneRequest, "targetId") != target.targetId) {
-            return "TARGET_SCOPE_MISMATCH"
-        }
-        if (target.attributes.any { (key, value) -> phoneTargetValue(phoneRequest, key) != value }) {
-            return "TARGET_SCOPE_MISMATCH"
-        }
-        return null
+        val requestedTarget = policyRequest.target ?: return null
+        val resolvedTarget = targetResolver.resolve(policyRequest.actionId, evidence)
+            ?: return "TARGET_SCOPE_MISMATCH"
+        return if (requestedTarget.contains(resolvedTarget)) null else "TARGET_SCOPE_MISMATCH"
     }
 
-    private fun phoneTargetValue(request: PhoneToolRequest, key: String): String? {
-        val aliases = when (key) {
-            "packageName" -> listOf("package", "packageName")
-            "targetId" -> listOf("targetId", "elementId")
-            else -> listOf(key)
-        }
-        val selector = request.params.optJSONObject("selector")
-        return aliases.asSequence()
-            .mapNotNull { alias -> jsonScalar(request.params.opt(alias)) ?: jsonScalar(selector?.opt(alias)) }
-            .firstOrNull()
-    }
-
-    private fun jsonScalar(value: Any?): String? = when (value) {
-        null, org.json.JSONObject.NULL -> null
-        is String -> value.takeIf { it.isNotBlank() }
-        is Number, is Boolean -> value.toString()
-        else -> null
-    }
+    /** The requested policy target may be broader than, but never conflict with, resolved state. */
+    private fun PolicyTarget.contains(resolved: PolicyTarget): Boolean =
+        (packageName == null || packageName == resolved.packageName) &&
+            (targetType == null || targetType == resolved.targetType) &&
+            (targetId == null || targetId == resolved.targetId) &&
+            attributes.all { (key, value) -> resolved.attributes[key] == value }
 
     private fun isSpecificEvidence(reference: com.cyclone.mobile.observability.events.EvidenceRef): Boolean =
         reference.sha256.any { it != '0' }

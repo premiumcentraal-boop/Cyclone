@@ -39,6 +39,12 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertIn(".conclusion", workflow)
         self.assertIn("EXPECTED_HEAD_SHA", workflow)
         self.assertIn("run-id.txt", workflow)
+        self.assertIn("'.event'", workflow)
+        self.assertIn('= "push"', workflow)
+        self.assertIn("'.head_repository.full_name'", workflow)
+        self.assertIn('= "$GITHUB_REPOSITORY"', workflow)
+        self.assertIn("main|release/cyclone-mobile-v*", workflow)
+        self.assertNotIn('= "pull_request"', workflow)
 
     def test_legacy_android_workflows_are_manual_only(self):
         legacy = (

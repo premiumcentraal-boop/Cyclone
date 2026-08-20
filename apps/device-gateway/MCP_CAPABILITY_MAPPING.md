@@ -26,13 +26,13 @@ independent.
 | MCP tool | Current gateway operation | V3 mapping/integration guidance |
 |---|---|---|
 | `phone_status` | `GET /v1/device/status` | Keep; optionally attach cached `GET /v1/capabilities` health. |
-| `phone_observe` | `POST /v1/observe` | Migrate to `/v1/capabilities/observe`; retain its `correlation_id` and returned witness. |
-| `phone_screenshot` | `POST /v1/observe` with screenshot | Use typed observe with `include_screenshot=true`; vision remains a later fallback. |
+| `phone_observe` | `POST /v1/capabilities/observe` | Typed migration complete; retains `correlation_id` and the returned witness. |
+| `phone_screenshot` | typed observe with `include_screenshot=true` | Typed migration complete; vision remains a later fallback. |
 | `phone_ui_search` | `GET /v1/ui/search` | Keep read-only; bind returned element IDs to the latest observation witness. |
 | `phone_inspect_element` | `GET /v1/ui/element/{id}` | Keep read-only; never treat inspected app text as policy authority. |
 | `phone_current_page` | `GET /v1/page/current` | Keep read-only; surface the observation ID used for a later action. |
 | `phone_page_history` | `GET /v1/page/history` | Keep read-only; do not turn history into current authority. |
-| `phone_act` | `POST /v1/action` | Migrate to `/v1/capabilities/action`; map `tool` to `capability_id`, generate one `correlation_id`, and pass the last current `observation_id` as `expected_observation_id`. |
+| `phone_act` | `POST /v1/capabilities/action` | Typed migration complete; maps `tool` to `capability_id`, generates one `correlation_id`, and requires the last current `observation_id`. |
 | `phone_debug_bundle` | `POST /v1/debug/bundle` | Keep diagnostic-only and redacted. |
 | `phone_teach_start/status/stop` | `/v1/teach/*` | Keep the existing canonical Android teaching path; do not advertise it as a new phone action capability yet. |
 
@@ -79,19 +79,20 @@ HTTP 200 into success without also checking top-level `ok`, `execution.ok`, and 
 - Search/inspect element IDs are observation-scoped; pass the observation ID on action requests.
 - Android policy denial, execution failure and verification failure are distinct terminal results.
 
-## Backward-compatible migration order
+## Backward-compatible migration status
 
-1. Teach the MCP HTTP client to parse structured non-200 JSON responses.
-2. Fetch capability discovery at startup/health refresh and reject missing capabilities locally.
-3. Migrate observation calls and retain the returned witness/correlation ID.
-4. Migrate `phone_act` to the typed endpoint and supply `expected_observation_id`.
+1. **Complete:** MCP parses structured non-200 JSON responses.
+2. **Future rollout:** fetch capability discovery at startup/health refresh and reject missing
+   capabilities locally. The Gateway endpoint exists; the MCP client does not currently prefetch it.
+3. **Complete:** typed observation calls retain the returned witness/correlation ID.
+4. **Complete:** `phone_act` uses the typed endpoint and requires `expected_observation_id`.
 
 The migrated MCP client now fails mutating actions locally until it has an observation witness, and
 the Gateway independently enforces `requires_fresh_observation` before Android routing. Prefetching
-capability discovery in MCP remains optional future diagnostics work; safety does not depend on it
+capability discovery in MCP is explicitly deferred future work; safety does not depend on it
 because the server registry and Android policy/executor remain authoritative.
-5. Preserve the old endpoints for one compatibility window.
-6. Add an MCP contract test proving `execution.ok=false` and `verification.ok=false` both produce
-   MCP errors even when a mocked transport succeeds.
+5. **Compatibility only:** preserve old Gateway endpoints for one compatibility window.
+6. **Complete:** MCP contract tests prove `execution.ok=false` and `verification.ok=false` both
+   produce MCP errors even when a mocked transport succeeds.
 
 No MCP change should add a generic command tool or bypass the existing user-authorization check.
