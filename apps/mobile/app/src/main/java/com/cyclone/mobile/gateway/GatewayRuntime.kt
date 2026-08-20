@@ -124,9 +124,8 @@ internal object GatewayDispatcher {
                 GatewayProtocol.error(id, "GATEWAY_DISABLED", "PC Gateway is disabled").toString()
             } else if (!GatewaySessionStore.authenticate(context, request.auth)) {
                 GatewayProtocol.error(id, "AUTH_REJECTED", "Session token is invalid or has been rotated").toString()
-            } else if (request.op !in GatewayProtocol.operations) {
-                GatewayProtocol.error(id, "UNKNOWN_OPERATION", "Unsupported gateway operation: ${request.op}").toString()
             } else {
+                GatewayProtocol.requireKnownOperation(request.op, request.id)
                 GatewayProtocol.success(id, dispatch(context, request)).toString()
             }
         } catch (error: GatewayProtocolException) {
@@ -171,7 +170,7 @@ internal object GatewayDispatcher {
         return JSONObject()
             .put("status", GatewayRuntime.status(context))
             .put("latestObservation", observation?.payload ?: JSONObject.NULL)
-            .put("latestPageDebug", latestPageDebug?.let(GatewayPageDebugAdapter::safeExport) ?: JSONObject.NULL)
+            .put("latestPageDebug", latestPageDebug?.let { GatewayPageDebugAdapter.safeExport(it) } ?: JSONObject.NULL)
             .put("teaching", GatewayTeachingAdapter.status(context))
             .put("recentActions", JSONArray().also { out ->
                 DeviceState.commandAudit.take(30).forEach { audit ->
