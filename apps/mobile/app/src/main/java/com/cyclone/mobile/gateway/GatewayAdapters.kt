@@ -145,17 +145,44 @@ internal object GatewayBrainAdapter {
 }
 
 internal object GatewayActionPolicy {
+    private val blockedRisk = setOf(ActionRisk.CONSEQUENTIAL, ActionRisk.AUTHENTICATION, ActionRisk.UNKNOWN)
+
     fun requireAllowed(tool: String, params: JSONObject) {
         val selector = params.optJSONObject("selector")
-        if (tool == "phone.type" && selector != null && ActionSafetyPolicy.looksSensitiveField(selector)) {
-            throw GatewayProtocolException("POLICY_BLOCKED", "PC gateway cannot type passwords, OTPs, PINs, tokens or other authentication secrets")
+        val semanticRisk = params.optString("_gatewayRisk")
+            .takeIf(String::isNotBlank)
+            ?.uppercase()
+            ?.let { runCatching { ActionRisk.valueOf(it) }.getOrNull() }
+
+        if (semanticRisk in blockedRisk && tool in setOf("phone.click", "phone.long_press", "phone.type")) {
+            throw GatewayProtocolException(
+                "POLICY_BLOCKED",
+                "PC_CODEX cannot bypass Cyclone semantic risk ${semanticRisk!!.name.lowercase()}; use the existing human approval/teaching flow",
+            )
         }
+
+        if (tool == "phone.type") {
+            if (selector == null || selector.length() == 0) {
+                throw GatewayProtocolException(
+                    "POLICY_BLOCKED",
+                    "PC gateway typing requires an explicit semantic selector; focused-field typing is not exposed",
+                )
+            }
+            if (ActionSafetyPolicy.looksSensitiveField(selector)) {
+                throw GatewayProtocolException(
+                    "POLICY_BLOCKED",
+                    "PC gateway cannot type passwords, OTPs, PINs, tokens or other authentication secrets",
+                )
+            }
+            return
+        }
+
         if (tool !in setOf("phone.click", "phone.long_press")) return
         val label = selector?.optString("text").orEmpty().ifBlank { selector?.optString("textContains").orEmpty() }
         val resource = selector?.optString("resourceId").orEmpty()
         val description = selector?.optString("contentDescription").orEmpty()
-        val risk = ActionSafetyPolicy.classify(label, resource, description)
-        if (risk in setOf(ActionRisk.CONSEQUENTIAL, ActionRisk.AUTHENTICATION, ActionRisk.UNKNOWN)) {
+        val risk = semanticRisk ?: ActionSafetyPolicy.classify(label, resource, description)
+        if (risk in blockedRisk) {
             throw GatewayProtocolException(
                 "POLICY_BLOCKED",
                 "PC_CODEX cannot bypass Cyclone policy for ${risk.name.lowercase()} controls; use the existing human approval/teaching flow",
@@ -191,9 +218,10 @@ internal object GatewayActionAdapter {
         val params = args.optJSONObject("params") ?: JSONObject()
         val goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') }
         GatewayActionPolicy.requireAllowed(tool, params)
+        val executableParams = JSONObject(params.toString()).apply { remove("_gatewayRisk") }
 
         val before = brainState()
-        val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, params))
+        val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, executableParams))
         val after = brainState()
         if (tool in evidenceTools && shouldRecord(result.error?.code)) {
             runCatching {
@@ -201,7 +229,7 @@ internal object GatewayActionAdapter {
                     context = context,
                     goal = goal,
                     tool = tool,
-                    params = params,
+                    params = executableParams,
                     before = before,
                     after = after,
                     ok = result.ok,
@@ -212,7 +240,7 @@ internal object GatewayActionAdapter {
         return JSONObject()
             .put("source", "PC_CODEX")
             .put("tool", tool)
-            .put("sanitizedParams", GatewayPrivacy.redactActionParams(tool, params))
+            .put("sanitizedParams", GatewayPrivacy.redactActionParams(tool, executableParams))
             .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
     }
 
