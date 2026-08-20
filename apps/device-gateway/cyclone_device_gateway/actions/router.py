@@ -24,6 +24,40 @@ ALLOWED_TOOLS = {
     "phone.wait_for",
 }
 FORBIDDEN_KEYS = {"command", "shell", "powershell", "su", "script"}
+SELECTOR_KEY_ALIASES = {
+    "resource_id": "resourceId",
+    "content_desc": "contentDescription",
+    "content_description": "contentDescription",
+    "content_description_contains": "contentDescriptionContains",
+    "text_contains": "textContains",
+    "class_name": "class",
+    "fuzzy_text": "fuzzyText",
+    "min_fuzzy_score": "minFuzzyScore",
+    "ancestor_text": "ancestorText",
+    "descendant_text": "descendantText",
+    "relative_to_text": "relativeToText",
+    "relative_direction": "relativeDirection",
+}
+TYPE_DIRECT_SELECTOR_KEYS = {
+    "resourceId",
+    "contentDescription",
+    "contentDescriptionContains",
+    "textContains",
+    "class",
+    "role",
+    "ancestorText",
+    "descendantText",
+    "x",
+    "y",
+    "relativeToText",
+    "relativeDirection",
+    "fuzzyText",
+    "minFuzzyScore",
+    "clickable",
+    "editable",
+    "scrollable",
+}
+EMBEDDED_SELECTOR_KEYS = TYPE_DIRECT_SELECTOR_KEYS | {"text"}
 
 
 class ActionValidationError(ValueError):
@@ -45,14 +79,35 @@ def _forbidden_paths(value: Any, prefix: str = "") -> list[str]:
     return found
 
 
+def _normalize_aliases(value: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for key, nested in value.items():
+        target = SELECTOR_KEY_ALIASES.get(str(key), str(key))
+        if target in normalized and normalized[target] != nested:
+            raise ActionValidationError(f"Conflicting selector aliases for {target}")
+        normalized[target] = nested
+    return normalized
+
+
 def validate_action(tool: str, params: dict[str, Any]) -> None:
     if tool not in ALLOWED_TOOLS:
         raise ActionValidationError(f"Unsupported phone tool: {tool}")
+    if not isinstance(params, dict):
+        raise ActionValidationError("params must be an object")
     bad = _forbidden_paths(params)
     if bad:
         raise ActionValidationError(f"Forbidden action parameter(s): {', '.join(sorted(bad))}")
-    if tool == "phone.type" and not isinstance(params.get("text", params.get("value", "")), str):
-        raise ActionValidationError("phone.type requires string text/value")
+    if tool == "phone.type":
+        has_text = "text" in params
+        has_value = "value" in params
+        if not has_text and not has_value:
+            raise ActionValidationError("phone.type requires string text/value")
+        if has_text and not isinstance(params.get("text"), str):
+            raise ActionValidationError("phone.type text must be a string")
+        if has_value and not isinstance(params.get("value"), str):
+            raise ActionValidationError("phone.type value must be a string")
+        if has_text and has_value and params.get("text") != params.get("value"):
+            raise ActionValidationError("phone.type text and value disagree; provide one value")
 
 
 def _android_execution(result: Any) -> dict[str, Any] | None:
@@ -63,19 +118,35 @@ def _android_execution(result: Any) -> dict[str, Any] | None:
 
 
 def _selector_from_element(element: dict[str, Any]) -> dict[str, Any]:
+    selector: dict[str, Any] = {}
+
+    embedded = element.get("selector")
+    if isinstance(embedded, dict):
+        for key, value in _normalize_aliases(embedded).items():
+            if key in EMBEDDED_SELECTOR_KEYS and value not in (None, ""):
+                selector[key] = value
+
     resource_id = element.get("resourceId") or element.get("resource_id")
-    text = element.get("text") or element.get("label")
+    actual_text = element.get("text")
     content_description = element.get("contentDescription") or element.get("content_desc")
     class_name = element.get("class")
     role = element.get("role")
 
-    selector: dict[str, Any] = {}
-    if resource_id:
+    if resource_id and "resourceId" not in selector:
         selector["resourceId"] = resource_id
-    elif content_description:
+    if actual_text and actual_text != "<redacted>" and not any(
+        key in selector for key in ("text", "textContains")
+    ):
+        selector["text"] = actual_text
+    if content_description and content_description != "<redacted>" and not any(
+        key in selector for key in ("contentDescription", "contentDescriptionContains")
+    ):
         selector["contentDescription"] = content_description
-    elif text:
-        selector["text"] = text
+
+    if not selector:
+        label = element.get("label")
+        if label and label != "<redacted>":
+            selector["text"] = label
 
     if not selector:
         bounds = element.get("bounds")
@@ -88,9 +159,9 @@ def _selector_from_element(element: dict[str, Any]) -> dict[str, Any]:
                 selector["x"] = int((left + right) / 2)
                 selector["y"] = int((top + bottom) / 2)
 
-    if class_name and not selector.get("resourceId"):
+    if class_name and "resourceId" not in selector and "class" not in selector:
         selector["class"] = class_name
-    if role and not selector.get("resourceId"):
+    if role and "resourceId" not in selector and "role" not in selector:
         selector["role"] = role
     if element.get("clickable") is True:
         selector["clickable"] = True
@@ -102,6 +173,49 @@ def _selector_from_element(element: dict[str, Any]) -> dict[str, Any]:
     if not selector:
         raise ActionValidationError("Element has no stable selector evidence")
     return selector
+
+
+def _normalize_action_params(tool: str, params: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(params)
+
+    selector = normalized.get("selector")
+    if selector is not None:
+        if not isinstance(selector, dict):
+            raise ActionValidationError("selector must be an object")
+        normalized["selector"] = _normalize_aliases(selector)
+
+    for alias, canonical in SELECTOR_KEY_ALIASES.items():
+        if alias in normalized:
+            value = normalized.pop(alias)
+            if canonical in normalized and normalized[canonical] != value:
+                raise ActionValidationError(f"Conflicting selector aliases for {canonical}")
+            normalized[canonical] = value
+
+    if tool != "phone.type":
+        return normalized
+
+    if "text" in normalized:
+        typed = normalized.pop("text")
+        if "value" in normalized and normalized["value"] != typed:
+            raise ActionValidationError("phone.type text and value disagree; provide one value")
+        normalized["value"] = typed
+
+    if not isinstance(normalized.get("value"), str):
+        raise ActionValidationError("phone.type requires string text/value")
+
+    if "selector" not in normalized:
+        direct_selector: dict[str, Any] = {}
+        for key in list(normalized):
+            if key in TYPE_DIRECT_SELECTOR_KEYS:
+                direct_selector[key] = normalized.pop(key)
+        if direct_selector:
+            normalized["selector"] = direct_selector
+
+    if not isinstance(normalized.get("selector"), dict) or not normalized["selector"]:
+        raise ActionValidationError(
+            "phone.type requires an explicit selector or elementId; focused-field typing is not exposed"
+        )
+    return normalized
 
 
 class ActionRouter:
@@ -146,8 +260,12 @@ class ActionRouter:
 
         stable_selector = _selector_from_element(element)
         if isinstance(selector, dict):
-            stable_selector.update(selector)
+            stable_selector.update(_normalize_aliases(selector))
         resolved["selector"] = stable_selector
+
+        risk = element.get("risk")
+        if isinstance(risk, str) and risk:
+            resolved["_gatewayRisk"] = risk.upper()
         return resolved
 
     def execute(
@@ -164,6 +282,7 @@ class ActionRouter:
             raise ActionValidationError("Action source must be PC_CODEX")
 
         resolved_params = self._resolve_element_ids(params)
+        resolved_params = _normalize_action_params(tool, resolved_params)
         validate_action(tool, resolved_params)
 
         request_id = request_id or str(uuid.uuid4())
