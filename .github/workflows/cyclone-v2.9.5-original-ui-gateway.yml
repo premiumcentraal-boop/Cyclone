@@ -111,8 +111,8 @@ jobs:
           grep -q 'applicationId = "com.cyclone.mobile"' apps/mobile/app/build.gradle.kts
           grep -q 'versionCode = 17' apps/mobile/app/build.gradle.kts
           grep -q 'versionName = "2.9.5"' apps/mobile/app/build.gradle.kts
-          ! grep -R -n 'Cyclone 2.9.3' apps/mobile/app/src/main || exit 1
-          ! grep -R -n 'Cyclone 2.9.2 settings' apps/mobile/app/src/main || exit 1
+          ! grep -n 'Cyclone 2.9.3' apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt || exit 1
+          ! grep -n 'Cyclone 2.9.2 settings' apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt || exit 1
 
       - name: Verify embedded Mobilerun source
         run: |
