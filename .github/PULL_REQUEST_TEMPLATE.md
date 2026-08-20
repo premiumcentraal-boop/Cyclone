@@ -40,6 +40,20 @@
 - Physical Android test performed: yes/no
 - Physical result / blocker:
 
+## APK impact and evidence
+
+- [ ] No APK required (explain why), or Android CI required
+- [ ] `versionCode` incremented if this APK will be distributed
+- [ ] `versionName` changed only for a new named product release/channel
+- [ ] `python scripts/ci/mobile_metadata.py` passed
+- [ ] Checked-in Gradle wrapper used; no version-specific workflow added
+- Authoritative `Cyclone Mobile CI` run ID:
+- Artifact name:
+- Source SHA in artifact:
+- APK SHA-256:
+- Signing mode (expected beta/debug unless separately proven):
+- Publication status (expected disabled/not run):
+
 ## Learning/autonomy impact
 
 <!-- Does this improve perception, route reuse, confidence, self-healing, automation or AI fallback behavior? -->

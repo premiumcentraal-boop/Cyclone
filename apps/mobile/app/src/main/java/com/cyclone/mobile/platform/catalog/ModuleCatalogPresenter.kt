@@ -195,7 +195,9 @@ class ModuleCatalogPresenter {
                 "$moduleName reached its bounded retry limit.",
                 "Review the cause before clearing quarantine.",
             )
-            ModuleDiagnosticCode.QUARANTINE_REASON -> Triple(
+            ModuleDiagnosticCode.QUARANTINE_REASON,
+            ModuleDiagnosticCode.RECOVERY_QUARANTINE,
+            -> Triple(
                 "Module quarantined",
                 "Cyclone isolated $moduleName so other modules can continue safely.",
                 "Resolve the problem before clearing quarantine.",

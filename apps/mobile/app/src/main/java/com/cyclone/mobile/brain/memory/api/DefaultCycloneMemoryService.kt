@@ -512,9 +512,19 @@ class DefaultCycloneMemoryService(
         return "sha256:" + digest.joinToString("") { "%02x".format(it) }
     }
 
-    private fun memoryOrder() = compareByDescending<MemoryRecord> { it.updatedAtEpochMillis }
+    private fun memoryOrder() = compareBy<MemoryRecord> { it.verificationState == MemoryVerificationState.STALE }
+        .thenByDescending { it.provenance.observedAtEpochMillis }
+        .thenByDescending { verificationRank(it.verificationState) }
+        .thenByDescending { it.updatedAtEpochMillis }
         .thenByDescending { it.confidence }
         .thenBy { it.recordId }
+
+    private fun verificationRank(state: MemoryVerificationState): Int = when (state) {
+        MemoryVerificationState.VERIFIED -> 3
+        MemoryVerificationState.OBSERVED -> 2
+        MemoryVerificationState.UNVERIFIED -> 1
+        MemoryVerificationState.STALE -> 0
+    }
 
     private fun validMutationId(value: String): Boolean = value.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:-]*"))
 

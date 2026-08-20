@@ -19,6 +19,11 @@ Its purpose is to make the repository **self-explanatory**: a fresh agent should
 | [`AUTONOMY_ROADMAP.md`](AUTONOMY_ROADMAP.md) | Path from current Cyclone to robust phone autonomy |
 | [`DECISIONS.md`](DECISIONS.md) | Architectural decisions agents should not casually reverse |
 | [`project.yaml`](project.yaml) | Compact machine-readable project map |
+| [`infrastructure-v3/README.md`](infrastructure-v3/README.md) | V3 services, owners, health and integration seams |
+
+For APK work, `FAST_RELEASE_PLAYBOOK.md` and `../../apps/mobile/AGENTS.md` are mandatory. They state
+when to change `versionCode`/`versionName`, which changes need an APK, and how to reuse one CI
+artifact instead of rebuilding or copying workflows.
 
 Run `python scripts/agent/cyclone-context.py --markdown` for an automatically generated snapshot of the current checkout.
 

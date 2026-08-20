@@ -29,6 +29,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.security.MessageDigest
 
 class ContextLedgerTest {
     @Test
@@ -120,6 +121,12 @@ class ContextLedgerTest {
         assertFalse(rendered.contains(secret))
         assertFalse(rendered.contains("hunter2"))
         assertFalse(rendered.contains("987654"))
+        val guessableDigest = MessageDigest.getInstance("SHA-256")
+            .digest(secret.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        assertFalse(rendered.contains(guessableDigest))
+        assertEquals(EvidenceRef.omitted("goal"), stored.payload.goal?.reference)
+        assertEquals(EvidenceRef.omitted("failure"), stored.payload.failure?.messageFingerprint)
         assertTrue(stored.redaction.containsSensitiveData)
         assertEquals(DataClassification.RESTRICTED, stored.redaction.classification)
         assertTrue("payload.goal" in stored.redaction.redactedFields)

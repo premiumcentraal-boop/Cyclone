@@ -146,6 +146,28 @@ class MemoryServiceMutationTest {
     }
 
     @Test
+    fun currentVerifiedObservationOutranksRecentlyUpdatedStaleHistory() {
+        val fixture = fixture()
+        val stale = draft(recordId = "memory:stale", content = mapOf("note" to "display stale route")).copy(
+            provenance = MemoryProvenance("app.learner", setOf("observation:old"), 10L),
+            verificationState = MemoryVerificationState.STALE,
+        )
+        val current = draft(recordId = "memory:current", content = mapOf("note" to "display current route")).copy(
+            provenance = MemoryProvenance("app.learner", setOf("observation:current"), 90L),
+            verificationState = MemoryVerificationState.VERIFIED,
+        )
+        fixture.service.proposeWrite(MemoryWriteProposalRequest("proposal:stale", stale))
+        fixture.service.commitApprovedWrite("proposal:stale")
+        fixture.service.proposeWrite(MemoryWriteProposalRequest("proposal:current", current))
+        fixture.service.commitApprovedWrite("proposal:current")
+
+        assertEquals(
+            listOf("memory:current", "memory:stale"),
+            fixture.service.recall(MemoryRecallRequest(scope, setOf("display"))).map { it.recordId },
+        )
+    }
+
+    @Test
     fun scopeBudgetIsAppliedAfterPolicyAndDedup() {
         var policyCalls = 0
         val fixture = fixture(

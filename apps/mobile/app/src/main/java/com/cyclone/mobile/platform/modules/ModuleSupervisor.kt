@@ -244,6 +244,73 @@ class ModuleSupervisor private constructor(
         return SupervisorCommandResult.Applied(status(record))
     }
 
+    /**
+     * Public recovery seam. Recovery may request isolation, but only this supervisor validates and
+     * mutates lifecycle state. Critical built-ins and active dependency roots remain protected.
+     */
+    @Synchronized
+    fun quarantineOptional(moduleId: ModuleId, reasonCode: String): SupervisorCommandResult {
+        val record = records[moduleId] ?: return SupervisorCommandResult.Missing(moduleId)
+        if (record.declaration.importance == ModuleImportance.CRITICAL_BUILT_IN) {
+            return SupervisorCommandResult.Rejected(
+                ModuleDiagnostic(
+                    ModuleDiagnosticCode.CRITICAL_MODULE,
+                    ModuleDiagnosticSeverity.ERROR,
+                    "Critical built-in module $moduleId cannot be quarantined",
+                    moduleId,
+                ),
+            )
+        }
+        val activeDependents = activeRequiredDependents(moduleId)
+        if (activeDependents.isNotEmpty()) {
+            return SupervisorCommandResult.Rejected(
+                ModuleDiagnostic(
+                    ModuleDiagnosticCode.ACTIVE_DEPENDENTS,
+                    ModuleDiagnosticSeverity.ERROR,
+                    "Module $moduleId is required by active modules: ${activeDependents.joinToString()}",
+                    moduleId,
+                    activeDependents,
+                ),
+            )
+        }
+        val safeReason = reasonCode.takeIf { it.matches(Regex("[A-Z][A-Z0-9_]{0,95}")) }
+            ?: return SupervisorCommandResult.Rejected(
+                ModuleDiagnostic(
+                    ModuleDiagnosticCode.RECOVERY_QUARANTINE,
+                    ModuleDiagnosticSeverity.ERROR,
+                    "Recovery quarantine reason must be a safe code",
+                    moduleId,
+                ),
+            )
+        if (record.state in ACTIVE_STATES) {
+            when (safeStop(record)) {
+                ModuleOperationResult.Success -> Unit
+                is ModuleOperationResult.Failure -> return SupervisorCommandResult.Rejected(
+                    ModuleDiagnostic(
+                        ModuleDiagnosticCode.STOP_FAILED,
+                        ModuleDiagnosticSeverity.ERROR,
+                        "Module $moduleId could not be stopped for recovery quarantine",
+                        moduleId,
+                    ),
+                )
+            }
+        }
+        record.enabled = false
+        record.state = ModuleState.QUARANTINED
+        record.nextRestartAtEpochMillis = null
+        record.quarantineReason = safeReason
+        replaceDiagnostic(
+            record,
+            ModuleDiagnostic(
+                ModuleDiagnosticCode.RECOVERY_QUARANTINE,
+                ModuleDiagnosticSeverity.ERROR,
+                "Recovery quarantined optional module $moduleId ($safeReason)",
+                moduleId,
+            ),
+        )
+        return SupervisorCommandResult.Applied(status(record))
+    }
+
     @Synchronized
     fun preflightUpdate(moduleId: ModuleId, candidate: ModuleUpdateCandidate): ModuleUpdatePreflightResult {
         val record = records[moduleId]

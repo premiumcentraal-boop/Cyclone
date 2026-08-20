@@ -1,6 +1,6 @@
 import unittest
 
-from cyclone_phone_mcp.acceptance import AcceptanceHarness, MockGateway
+from cyclone_phone_mcp.acceptance import AcceptanceHarness, MockGateway, _action_failed
 
 
 class FailedOpenGateway(MockGateway):
@@ -28,6 +28,17 @@ class AcceptanceTests(unittest.TestCase):
         self.assertFalse(report.runs[0]["passed"])
         self.assertEqual(report.runs[0]["failedActions"], 1)
         self.assertIn("Opening Android Settings failed", report.runs[0]["failureReason"])
+
+    def test_acceptance_uses_typed_execution_and_verification_classifier(self):
+        base = {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "capability_id": "phone.click",
+            "transport": {"ok": True},
+            "error": None,
+        }
+        self.assertTrue(_action_failed({**base, "ok": True, "execution": {"ok": False}, "verification": {"ok": True, "status": "verified"}}))
+        self.assertTrue(_action_failed({**base, "ok": True, "execution": {"ok": True}, "verification": {"ok": False, "status": "failed"}}))
+        self.assertFalse(_action_failed({**base, "ok": True, "execution": {"ok": True}, "verification": {"ok": True, "status": "verified"}}))
 
 
 if __name__ == "__main__": unittest.main()

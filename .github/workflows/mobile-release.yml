@@ -1,0 +1,43 @@
+name: Cyclone Mobile Release Candidate Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful Cyclone Mobile CI run ID to reuse (never rebuilt)
+        required: true
+        type: string
+      artifact_name:
+        description: Exact artifact name reported by that run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mobile-release-${{ inputs.build_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify-candidate:
+    environment: mobile-release-approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download authoritative CI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Verify checksum and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find candidate -maxdepth 1 -name '*.apk' -type f | wc -l)" -eq 1
+          test -s candidate/source-sha.txt
+          test -s candidate/mobile-metadata.json
+          (cd candidate && sha256sum --check ./*.apk.sha256)
+          echo "Publication is intentionally disabled; this job only verifies the reused CI artifact." >> "$GITHUB_STEP_SUMMARY"

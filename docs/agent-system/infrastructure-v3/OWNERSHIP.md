@@ -13,10 +13,10 @@ another service's contract or wire shared application files. Integration owns co
 | 5 | Routine Capsules | `automation/capsule/**`, `automation/run/**` | Declares required capabilities; execution stays on typed phone APIs. |
 | 6 | Memory Protocol | `brain/memory/**` | Defines the sole policy-enforced memory write seam. |
 | 7 | Tiered Memory | provider directories assigned by coordinator | Implements providers behind Agent 6's seam. |
-| 8 | Runtime Updater | `platform/update/**` | Uses module/runtime declarations; cannot replace the APK silently. |
-| 9 | Recovery / Safe Mode | `platform/recovery/**` | Observes lifecycle/health and performs bounded recovery. |
-| 10 | Context Ledger | `ai/context/**`, `platform/ledger/**` | Persists redacted event envelopes and bounded mission context. |
-| 11 | Policy Governor | `safety/policy/**` | Decides authority before any phone mutation. Events cannot self-authorize. |
+| 8 | Runtime Updater | `runtime/update/**` | Uses module/runtime declarations; cannot replace the APK silently. |
+| 9 | Recovery / Safe Mode | `runtime/recovery/**` | Observes lifecycle/health and performs bounded recovery. |
+| 10 | Context Ledger | `observability/context/**`, `observability/events/**` | Persists redacted event envelopes and bounded mission context. |
+| 11 | Policy Governor | `policy/**` | Decides authority before any phone mutation. Events cannot self-authorize. |
 | 12 | App Graph 2.0 | `brain/graphv2/**`, `applearner/graphv2/**` | Publishes typed knowledge capabilities; evidence remains fallible. |
 | 13 | Vision Router | `ai/vision/**` | Publishes fallback perception only; never actions. |
 | 14 | Gateway capability architecture | `apps/device-gateway/**` | Maps descriptors/errors without exposing shell or replacing Android authority. |

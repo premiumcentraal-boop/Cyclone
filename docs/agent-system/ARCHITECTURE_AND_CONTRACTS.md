@@ -172,3 +172,30 @@ Marketing/app versions and persistent protocol/schema versions are different con
 ## Cross-layer change rule
 
 If a change modifies JSON fields, action names, selector semantics, result semantics or auth behavior, treat it as a contract change. Update producer + consumer + tests in the same integration cycle. Do not “fix” one side with silent heuristics unless backwards compatibility is explicitly required.
+
+## Infrastructure V3 authority composition
+
+V3 services compose beside the existing product; they do not duplicate it:
+
+```text
+declared capability ──> Capability Registry (inventory/health only)
+action proposal ──────> Policy Governor ──> canonical PhoneToolExecutor handoff
+verified observation ─> Context Ledger ──> policy-gated Memory proposal
+runtime candidate ────> Recovery Manager ──> promote/rollback command
+recovery quarantine ──> public Module Supervisor command
+```
+
+- The Module Supervisor is the only module lifecycle authority. Catalog and Recovery use public
+  commands and cannot mutate its records.
+- The updater verifies and stages signed non-native data, but cannot activate, promote or roll back.
+- Memory and App Graph evidence never creates policy authority. Fresh verified observations outrank
+  stale historical records.
+- Vision is a bounded fallback. An unavailable provider degrades to structured evidence or human
+  takeover, never an unverified action.
+- Context evidence is bounded and redacted. Restricted/secret raw values have no stable unkeyed
+  fingerprint; a future correlatable secret reference requires a device-keyed HMAC adapter.
+- Gateway/MCP use `cyclone.gateway.capability.v1`, preserve correlation and observation witnesses,
+  and fail closed for transport, Android execution or required verification failure.
+
+The shared adapter source is `com.cyclone.mobile.infrastructure.v3`. It proposes actions to the
+canonical executor boundary but contains no executor implementation.

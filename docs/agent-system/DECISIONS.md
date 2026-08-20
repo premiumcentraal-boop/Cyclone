@@ -60,6 +60,18 @@ These are current design decisions. Change them deliberately and document the re
 
 **Decision:** parallel agents get exact base SHA, owned/forbidden paths and frozen contracts; integration is a separate role.
 
+## ADR-014 — Infrastructure V3 has one authority per mutable domain
+
+**Decision:** policy, module lifecycle, memory writes, runtime recovery and phone execution each
+have one authority. Inventory, catalog, updater, gateway, AI and evidence layers call public seams
+and cannot promote themselves into authorities.
+
+## ADR-015 — One Android build per source SHA
+
+**Decision:** normal mobile CI uses one generic reusable build, executes tests and assembly in one
+Gradle invocation, uploads one APK/checksum/provenance bundle, and release verification reuses it.
+Version-specific workflows remain manual compatibility only. See `ADR_INFRASTRUCTURE_V3.md`.
+
 ## Adding a decision
 
 Use this template:

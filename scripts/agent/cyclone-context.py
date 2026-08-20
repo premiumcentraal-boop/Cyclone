@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -70,13 +71,31 @@ def build_context() -> dict:
     ]
 
     dirty = git("status", "--porcelain")
+    changed_paths = [line[3:] for line in dirty.splitlines() if len(line) > 3]
+    v3_services = {
+        "capability_registry": "apps/mobile/app/src/main/java/com/cyclone/mobile/platform/capability",
+        "policy_governor": "apps/mobile/app/src/main/java/com/cyclone/mobile/policy",
+        "module_supervisor": "apps/mobile/app/src/main/java/com/cyclone/mobile/platform/modules",
+        "memory": "apps/mobile/app/src/main/java/com/cyclone/mobile/brain/memory",
+        "graph_v2": "apps/mobile/app/src/main/java/com/cyclone/mobile/brain/graphv2",
+        "routine_capsules": "apps/mobile/app/src/main/java/com/cyclone/mobile/automation/capsule",
+        "context_ledger": "apps/mobile/app/src/main/java/com/cyclone/mobile/observability",
+        "vision_router": "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/vision",
+        "runtime_updater": "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/update",
+        "recovery": "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/recovery",
+        "gateway": "apps/device-gateway/cyclone_device_gateway/capabilities",
+    }
+    android_blast_radius = any(
+        path.startswith(("apps/mobile/", "third_party/mobilerun-portal", ".github/workflows/mobile"))
+        for path in changed_paths
+    )
     return {
         "repo_root": str(ROOT),
         "git": {
             "branch": git("branch", "--show-current"),
             "sha": git("rev-parse", "HEAD"),
             "dirty": bool(dirty),
-            "changed_paths": [line[3:] for line in dirty.splitlines() if len(line) > 3],
+            "changed_paths": changed_paths,
         },
         "mobile": {
             "package": package,
@@ -86,6 +105,21 @@ def build_context() -> dict:
             "surfaces": ["Home", "Teach", "AI", "Automations", "Brain", "Settings"],
         },
         "mission": "observe -> understand -> act -> verify -> learn -> reuse -> self-heal",
+        "infrastructure_v3": {
+            "services": {
+                name: {"path": path, "present": (ROOT / path).exists()}
+                for name, path in v3_services.items()
+            },
+            "owners": "docs/agent-system/infrastructure-v3/OWNERSHIP.md",
+            "contracts": "docs/agent-system/ARCHITECTURE_AND_CONTRACTS.md",
+            "health": "service-local diagnostics; Recovery owns runtime promotion/rollback",
+            "test_count": len(list((ROOT / "apps/mobile/app/src/test").rglob("*Test.kt"))),
+            "blast_radius": "android_apk" if android_blast_radius else "non_android_or_docs",
+            "handoff_fields": [
+                "base/head SHA", "changed/owned paths", "contracts", "tests/results",
+                "health/failures", "blast radius", "CI/physical status",
+            ],
+        },
         "canonical_docs": [
             "AGENTS.md",
             "docs/agent-system/README.md",
@@ -121,6 +155,15 @@ def as_markdown(ctx: dict) -> str:
         "## Read first",
     ]
     lines += [f"- `{p}`" for p in ctx["canonical_docs"]]
+    v3 = ctx["infrastructure_v3"]
+    lines += [
+        "",
+        "## Infrastructure V3",
+        f"- Services present: `{sum(1 for item in v3['services'].values() if item['present'])}/{len(v3['services'])}`",
+        f"- Focused Kotlin test files: `{v3['test_count']}`",
+        f"- Current blast radius: `{v3['blast_radius']}`",
+        f"- Ownership: `{v3['owners']}`",
+    ]
     if ctx["warnings"]:
         lines += ["", "## Warnings"] + [f"- {w}" for w in ctx["warnings"]]
     if g["changed_paths"]:
@@ -129,6 +172,8 @@ def as_markdown(ctx: dict) -> str:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("--markdown", action="store_true", help="print compact Markdown instead of JSON")
     args = parser.parse_args()

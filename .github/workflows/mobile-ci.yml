@@ -1,0 +1,38 @@
+name: Cyclone Mobile CI
+
+on:
+  push:
+    branches: [main, 'release/cyclone-mobile-v*']
+    paths:
+      - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal/**'
+      - '.gitmodules'
+      - 'scripts/ci/mobile_metadata.py'
+      - 'scripts/ci/tests/**'
+      - 'scripts/agent/team/**'
+      - '.github/workflows/_mobile-build.yml'
+      - '.github/workflows/mobile-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal/**'
+      - '.gitmodules'
+      - 'scripts/ci/mobile_metadata.py'
+      - 'scripts/ci/tests/**'
+      - 'scripts/agent/team/**'
+      - '.github/workflows/_mobile-build.yml'
+      - '.github/workflows/mobile-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    uses: ./.github/workflows/_mobile-build.yml
+    permissions:
+      contents: read

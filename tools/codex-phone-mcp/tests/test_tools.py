@@ -24,10 +24,13 @@ class FakeGateway:
 class FailedActionGateway(FakeGateway):
     def action(self, tool, params, goal):
         return {
-            "success": False,
-            "error_class": "ELEMENT_NOT_FOUND",
-            "verification": "android_action_failed",
-            "result": {"execution": {"ok": False}},
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "capability_id": tool,
+            "ok": False,
+            "transport": {"ok": True},
+            "execution": {"ok": False},
+            "verification": {"ok": False, "status": "required"},
+            "error": {"code": "EXECUTION_FAILED", "layer": "execution"},
         }
 
 
@@ -83,11 +86,29 @@ class ToolTests(unittest.TestCase):
         )
         payload = json.loads(content[0]["text"])
         self.assertEqual(payload["error"], "Phone action failed")
-        self.assertEqual(payload["errorClass"], "ELEMENT_NOT_FOUND")
+        self.assertEqual(payload["errorClass"], "EXECUTION_FAILED")
         report = recorder.snapshot()
         self.assertEqual(report["actions"], 1)
         self.assertEqual(report["failedActions"], 1)
         self.assertEqual(report["successfulActions"], 0)
+
+    def test_required_verification_false_and_missing_execution_are_fail_closed(self):
+        for response in (
+            {"protocol_version": "cyclone.gateway.capability.v1", "capability_id": "phone.click", "ok": True, "transport": {"ok": True}, "execution": {"ok": True}, "verification": {"ok": False, "status": "failed"}, "error": None},
+            {"protocol_version": "cyclone.gateway.capability.v1", "capability_id": "phone.click", "ok": True, "transport": {"ok": True}, "verification": {"ok": True, "status": "verified"}, "error": None},
+        ):
+            gateway = FakeGateway()
+            gateway.action = lambda *_: response
+            tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
+            payload = json.loads(tools.call("phone_act", {"tool": "phone.click", "params": {}, "goal": "x"})[0]["text"])
+            self.assertEqual("Phone action failed", payload["error"])
+
+    def test_error_null_success_is_not_misclassified(self):
+        gateway = FakeGateway()
+        gateway.action = lambda *_: {"ok": True, "error": None}
+        tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
+        tools.call("phone_act", {"tool": "phone.click", "params": {}, "goal": "x"})
+        self.assertFalse(tools.last_call_failed)
 
 
 if __name__ == "__main__": unittest.main()

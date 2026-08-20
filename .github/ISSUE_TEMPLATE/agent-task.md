@@ -52,6 +52,14 @@ labels: agent-task
 - [ ] Relevant CI
 - [ ] Physical Android check if required
 
+## APK impact
+
+- [ ] No Android artifact impact, or `Cyclone Mobile CI` is required
+- [ ] `versionCode` increments if the APK will be distributed
+- [ ] `versionName` changes only for a new named release/channel
+- [ ] Agent will use `apps/mobile/gradlew`, not add/copy a version workflow
+- Required artifact evidence: run ID, artifact name, source SHA, APK SHA-256, signing and physical status
+
 ## Non-negotiable invariants
 
 Read root `AGENTS.md` and `docs/agent-system/DECISIONS.md` before coding.

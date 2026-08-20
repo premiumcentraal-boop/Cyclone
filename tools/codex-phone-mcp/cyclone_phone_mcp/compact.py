@@ -35,7 +35,10 @@ def compact_observation(payload: Any, control_limit: int = 12) -> dict[str, Any]
     if not isinstance(payload, dict):
         return {"raw": redact(payload)}
 
-    data = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+    if isinstance(payload.get("observation"), dict):
+        data = payload["observation"]
+    else:
+        data = payload.get("result") if isinstance(payload.get("result"), dict) else payload
     device = data.get("device") if isinstance(data.get("device"), dict) else {}
     page = data.get("page") if isinstance(data.get("page"), dict) else {}
     counts = data.get("counts") if isinstance(data.get("counts"), dict) else {}
@@ -66,6 +69,8 @@ def compact_observation(payload: Any, control_limit: int = 12) -> dict[str, Any]
     screenshot = data.get("screenshot") or data.get("screenshotRef") or data.get("screenshot_ref")
 
     return redact({
+        "correlationId": _first(payload, "correlation_id", "correlationId"),
+        "witness": payload.get("witness") or {},
         "device": {
             "serial": _first(device, "serial", default=data.get("serial")),
             "model": _first(device, "model", default=data.get("model")),

@@ -70,7 +70,8 @@ class LocalTieredMemoryProviderTest {
         assertEquals(listOf("memory:hot"), normal.map { it.recordId })
         assertEquals(listOf("memory:doc"), documents.map { it.recordId })
         assertEquals(listOf("memory:struct"), structural.map { it.recordId })
-        assertTrue(Files.readString(fixture.root.resolve("knowledge-documents.md")).contains("display teaching report"))
+        val mirror = String(Files.readAllBytes(fixture.root.resolve("knowledge-documents.md")), Charsets.UTF_8)
+        assertTrue(mirror.contains("display teaching report"))
     }
 
     @Test

@@ -1,50 +1,13 @@
-name: Cyclone Mobile Embedded Runtime
+name: Legacy Embedded APK (manual compatibility)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - 'release/cyclone-mobile-v*'
-      - feature/mobile-v2-modern-ui-mobilerun-embedded
-    paths:
-      - 'apps/mobile/**'
-      - 'third_party/mobilerun-portal'
-      - '.gitmodules'
-      - '.github/workflows/mobile-v2-embedded.yml'
-  pull_request:
-    paths:
-      - 'apps/mobile/**'
-      - 'third_party/mobilerun-portal'
-      - '.gitmodules'
-      - '.github/workflows/mobile-v2-embedded.yml'
+
+permissions:
+  contents: read
 
 jobs:
-  android-mobile-embedded:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install Android SDK 35
-        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-      - name: Verify Mobilerun source is present
-        run: test -f third_party/mobilerun-portal/LICENSE && test -f third_party/mobilerun-portal/app/src/main/java/com/mobilerun/portal/PortalApplication.kt
-      - name: Run embedded Android tests
-        run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
-      - name: Assemble embedded Cyclone Mobile APK
-        run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload embedded integration APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: cyclone-mobile-embedded-integration-apk
-          path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+  compatibility-build:
+    uses: ./.github/workflows/_mobile-build.yml
+    permissions:
+      contents: read

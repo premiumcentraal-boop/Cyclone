@@ -11,7 +11,12 @@ private val SAFE_CODE = Regex("[a-z][a-z0-9_.-]{0,95}")
 private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)+")
 private val SHA_256 = Regex("[0-9a-f]{64}")
 
-/** A content-addressed reference. The original value is never retained by this type. */
+/**
+ * A content-addressed reference for non-secret structural evidence.
+ *
+ * [fromRaw] must never receive credentials, user-entered text, or other low-entropy sensitive
+ * values. Those values use [omitted], because an unkeyed digest is guessable offline.
+ */
 class EvidenceRef private constructor(
     val namespace: String,
     val sha256: String,
@@ -34,6 +39,12 @@ class EvidenceRef private constructor(
 
         fun fromDigest(namespace: String, sha256: String): EvidenceRef =
             EvidenceRef(namespace, sha256.lowercase())
+
+        /** A deterministic marker that proves omission without fingerprinting the omitted value. */
+        fun omitted(namespace: String): EvidenceRef = EvidenceRef(namespace, OMITTED_DIGEST)
+
+        private const val OMITTED_DIGEST =
+            "0000000000000000000000000000000000000000000000000000000000000000"
     }
 }
 
@@ -50,13 +61,13 @@ data class RedactedTextDigest(
 }
 
 object ContextPrivacy {
-    const val REDACTION_POLICY_VERSION: Int = 1
+    const val REDACTION_POLICY_VERSION: Int = 2
     private const val MAX_COUNTED_CHARACTERS = 16_384
 
     fun redactText(namespace: String, rawText: CharSequence): RedactedTextDigest {
         val counted = rawText.length.coerceAtMost(MAX_COUNTED_CHARACTERS)
         return RedactedTextDigest(
-            reference = EvidenceRef.fromRaw(namespace, rawText.toString()),
+            reference = EvidenceRef.omitted(namespace),
             characterCount = counted,
             estimatedTokens = if (counted == 0) 0 else (counted + 3) / 4,
             inputTruncatedForCounting = rawText.length > MAX_COUNTED_CHARACTERS,
@@ -66,7 +77,7 @@ object ContextPrivacy {
     fun sanitizeFailure(code: String, rawMessage: CharSequence?): SanitizedFailure =
         SanitizedFailure(
             code = code,
-            messageFingerprint = rawMessage?.let { EvidenceRef.fromRaw("failure", it.toString()) },
+            messageFingerprint = rawMessage?.let { EvidenceRef.omitted("failure") },
             messageCharacterCount = rawMessage?.length?.coerceAtMost(MAX_COUNTED_CHARACTERS) ?: 0,
         )
 }
@@ -283,7 +294,7 @@ object ContextEventFactory {
             source.copy(evidenceRefs = refs.take(budget.maxEvidenceRefsPerSource))
         }
         val knowledge = original.knowledgeRefs.distinct().sortedBy(EvidenceRef::toString)
-        val payload = original.copy(
+        val boundedPayload = original.copy(
             contextSources = sources,
             knowledgeRefs = knowledge.take(budget.maxKnowledgeRefs),
             proposedAction = original.proposedAction?.copy(
@@ -295,15 +306,49 @@ object ContextEventFactory {
                 droppedKnowledgeRefs = (knowledge.size - budget.maxKnowledgeRefs).coerceAtLeast(0),
             ),
         )
+        val classification = boundedPayload.contextSources.maxOfOrNull { it.classification.ordinal }
+            ?.let { DataClassification.values()[it] }
+            ?: DataClassification.INTERNAL
+        val omitReferences = classification >= DataClassification.SENSITIVE
+        val payload = if (omitReferences) boundedPayload.copy(
+            pageRef = boundedPayload.pageRef?.let { EvidenceRef.omitted(it.namespace) },
+            routeRef = boundedPayload.routeRef?.let { EvidenceRef.omitted(it.namespace) },
+            contextSources = boundedPayload.contextSources.map { source ->
+                source.copy(evidenceRefs = source.evidenceRefs.map { EvidenceRef.omitted(it.namespace) })
+            },
+            knowledgeRefs = boundedPayload.knowledgeRefs.map { EvidenceRef.omitted(it.namespace) },
+            policy = boundedPayload.policy?.copy(
+                decisionRef = boundedPayload.policy.decisionRef?.let { EvidenceRef.omitted(it.namespace) },
+            ),
+            vision = boundedPayload.vision?.copy(
+                evidenceRefs = boundedPayload.vision.evidenceRefs.map { EvidenceRef.omitted(it.namespace) },
+            ),
+            model = boundedPayload.model?.copy(requestRef = EvidenceRef.omitted(boundedPayload.model.requestRef.namespace)),
+            proposedAction = boundedPayload.proposedAction?.copy(
+                targetRef = boundedPayload.proposedAction.targetRef?.let { EvidenceRef.omitted(it.namespace) },
+            ),
+            actionResult = boundedPayload.actionResult?.copy(
+                resultRef = boundedPayload.actionResult.resultRef?.let { EvidenceRef.omitted(it.namespace) },
+            ),
+            verification = boundedPayload.verification?.copy(
+                resultRef = boundedPayload.verification.resultRef?.let { EvidenceRef.omitted(it.namespace) },
+            ),
+            recovery = boundedPayload.recovery?.copy(
+                resultRef = boundedPayload.recovery.resultRef?.let { EvidenceRef.omitted(it.namespace) },
+            ),
+        ) else boundedPayload.copy(
+            proposedAction = boundedPayload.proposedAction?.let { action ->
+                if (action.actionCode in setOf("phone.type", "phone.replace_text")) {
+                    action.copy(targetRef = action.targetRef?.let { EvidenceRef.omitted(it.namespace) })
+                } else action
+            },
+        )
         val redactedFields = buildSet {
             if (payload.goal != null) add("payload.goal")
             if (payload.proposedAction?.targetRef != null) add("payload.proposedAction.target")
             if (payload.failure?.messageFingerprint != null) add("payload.failure.message")
             if (payload.contextSources.any { it.redactedValueCount > 0 }) add("payload.contextSources.values")
         }
-        val classification = payload.contextSources.maxOfOrNull { it.classification.ordinal }
-            ?.let { DataClassification.values()[it] }
-            ?: DataClassification.INTERNAL
         return EventEnvelope(
             eventId = request.eventId,
             eventType = "ai.context.${payload.stage.name.lowercase().replace('_', '-')}",

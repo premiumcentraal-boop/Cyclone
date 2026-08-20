@@ -10,6 +10,7 @@ from typing import Any, Callable
 from .compact import compact_observation, redact
 from .gateway import GatewayClient, GatewayError
 from .reports import SessionRecorder
+from .protocol import classify_failure
 
 ALLOWED_ACTIONS = {
     "phone.click",
@@ -32,22 +33,14 @@ FAILURE_CLASSES = {
 
 
 def _result_failed(result: Any) -> bool:
-    if not isinstance(result, dict):
-        return False
-    if "error" in result:
-        return True
-    if result.get("success") is False or result.get("ok") is False:
-        return True
-    action = result.get("action")
-    return isinstance(action, dict) and (
-        action.get("success") is False or action.get("ok") is False
-    )
+    return classify_failure(result) is not None
 
 
 class PhoneTools:
     def __init__(self, gateway: GatewayClient | None = None, recorder: SessionRecorder | None = None):
         self.gateway = gateway or GatewayClient()
         self.recorder = recorder or SessionRecorder()
+        self.last_call_failed = False
 
     def call(self, name: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
         started = time.perf_counter()
@@ -57,9 +50,12 @@ class PhoneTools:
             method: Callable[[dict[str, Any]], Any] = getattr(self, name)
             result = method(arguments)
             ok = not _result_failed(result)
+            self.last_call_failed = not ok
             return _to_mcp_content(result)
         except (AttributeError, GatewayError, ValueError, OSError) as exc:
-            result = {"error": str(exc)}
+            gateway_body = exc.body if isinstance(exc, GatewayError) else None
+            result = {"error": str(exc), "gateway": gateway_body}
+            self.last_call_failed = True
             return [{"type": "text", "text": _json_text(result)}]
         finally:
             self.recorder.record(name, arguments, result, ok, int((time.perf_counter() - started) * 1000))
@@ -122,12 +118,14 @@ class PhoneTools:
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true because it can enter consequential content")
         result = redact(self.gateway.action(tool, params, goal))
-        if _result_failed(result):
-            error_class = result.get("error_class") if isinstance(result, dict) else None
+        failure = classify_failure(result)
+        if failure:
+            error_class = failure.code
             verification = result.get("verification") if isinstance(result, dict) else None
             return {
                 "error": "Phone action failed",
                 "errorClass": error_class,
+                "failureLayer": failure.layer,
                 "verification": verification,
                 "action": result,
             }

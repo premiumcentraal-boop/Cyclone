@@ -8,4 +8,7 @@ Then run:
 python scripts/agent/cyclone-context.py --markdown
 ```
 
-Use `docs/agent-system/README.md` as the canonical knowledge hub. Do not duplicate those rules here; this file is only the GitHub Copilot entry point.
+Use `docs/agent-system/README.md` as the canonical knowledge hub. For any `apps/mobile/**` change,
+also read `apps/mobile/AGENTS.md` and `docs/agent-system/FAST_RELEASE_PLAYBOOK.md`. Use the checked-in
+Gradle wrapper, never create a version-specific workflow, and record whether the change requires a
+new distributed APK and `versionCode` increment.

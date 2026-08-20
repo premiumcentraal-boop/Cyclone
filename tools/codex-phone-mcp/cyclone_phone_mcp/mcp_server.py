@@ -5,6 +5,7 @@ import sys
 from typing import Any
 
 from .tools import PhoneTools
+from .protocol import classify_failure
 
 SERVER_NAME = "cyclone-phone"
 SERVER_VERSION = "2.9.5"
@@ -77,7 +78,7 @@ class McpServer:
             if name not in {tool["name"] for tool in TOOLS}:
                 return _error(request_id, -32602, f"Unknown tool: {name}")
             content = self.phone_tools.call(str(name), arguments if isinstance(arguments, dict) else {})
-            is_error = bool(content and content[0].get("type") == "text" and '"error"' in content[0].get("text", "")[:80])
+            is_error = bool(getattr(self.phone_tools, "last_call_failed", _content_failed(content)))
             return _result(request_id, {"content": content, "isError": is_error})
         return _error(request_id, -32601, f"Method not found: {method}")
 
@@ -107,3 +108,12 @@ def _result(request_id: Any, result: Any) -> dict[str, Any]:
 
 def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _content_failed(content: list[dict[str, Any]]) -> bool:
+    if not content or content[0].get("type") != "text":
+        return False
+    try:
+        return classify_failure(json.loads(content[0].get("text", ""))) is not None
+    except (TypeError, json.JSONDecodeError):
+        return True

@@ -1,9 +1,8 @@
 # Cyclone Infrastructure V3 Foundation
 
-This directory describes the small platform seam introduced for Infrastructure V3. The code is
-under `com.cyclone.mobile.platform`; it is deliberately not wired into the running application yet.
-Existing Cyclone behavior, navigation, Accessibility, `PhoneToolExecutor`, App Graph, Automations,
-AI providers and gateways remain authoritative until their owning agents add explicit adapters.
+This directory indexes Cyclone Infrastructure V3. Its services are compiled Cyclone-native code
+with tested shared adapters under `com.cyclone.mobile.infrastructure.v3`. Existing navigation,
+Accessibility and `PhoneToolExecutor` remain authoritative; V3 adds no second launcher or executor.
 
 ## Why this exists
 
@@ -33,7 +32,32 @@ platform/capability/  typed descriptors, providers, registry and deterministic c
 platform/event/       typed EventEnvelope and redaction metadata
 platform/module/      module identity, compatibility, dependencies and persistence declarations
 platform/lifecycle/   shared lifecycle states and allowed transitions
+platform/modules/     sole trusted module lifecycle supervisor
+policy/               Layer-0 action authority
+brain/memory/         sole policy-gated memory service and tiered provider
+brain/graphv2/        temporal knowledge and legacy adapter
+automation/capsule/   versioned routine declarations
+automation/run/       immutable durable run snapshots
+observability/        redacted causal context ledger
+ai/vision/            bounded vision fallback router
+runtime/update/       signed-data staging; never activation authority
+runtime/recovery/     last-known-good, rollback and Safe Mode decisions
+infrastructure/v3/    shared authority-preserving adapters
 ```
+
+## Operational index
+
+| Service | Authority | Health/failure behavior | Focused tests |
+|---|---|---|---|
+| Capability Registry | inventory only | conflict/unhealthy provider is locally unavailable | `platform/capability/**Test` |
+| Policy Governor | action authorization | fail closed; app/tool/memory text is evidence only | `policy/**Test` |
+| Module Supervisor | lifecycle/quarantine | dependency isolation and bounded restart budget | `platform/modules/**Test` |
+| Memory | write seam | policy gate, budgets, fresh verified ordering | `brain/memory/**Test` |
+| Context Ledger | event persistence | bounded/redacted; secret fingerprints omitted | `observability/context/**Test` |
+| Runtime Recovery | promotion/rollback | durable idempotence, last-known-good, no data erase | `runtime/recovery/**Test` |
+| Gateway/MCP | external typed adapter | structured errors and witness-preserving fail-closed mapping | Python gateway/MCP tests |
+
+Read `OWNERSHIP.md` before editing and `ADR_INFRASTRUCTURE_V3.md` for composition decisions.
 
 The existing root `com.cyclone.mobile.CapabilityRegistry` is a device-permission snapshot used by
 the current app. It is not replaced by this contract. A later capability agent may adapt its

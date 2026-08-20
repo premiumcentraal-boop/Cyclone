@@ -5,6 +5,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,7 +13,10 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 
 
 class GatewayError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, status: int | None = None, body: Any = None):
+        super().__init__(message)
+        self.status = status
+        self.body = body
 
 
 @dataclass(frozen=True)
@@ -28,6 +32,10 @@ class GatewayClient:
         self.base_url = (base_url or os.getenv("CYCLONE_DEVICE_GATEWAY_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.token = token if token is not None else os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "")
         self.timeout = timeout
+        parsed = urllib.parse.urlparse(self.base_url)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise GatewayError("Gateway URL must use loopback HTTP")
+        self._last_observation_id: str | None = None
 
     def _request(self, method: str, path: str, payload: Any | None = None) -> Any:
         if not self.token:
@@ -46,8 +54,12 @@ class GatewayClient:
                     return {}
                 return json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise GatewayError(f"Gateway HTTP {exc.code} for {path}: {body[:500]}") from exc
+            raw_body = exc.read().decode("utf-8", errors="replace")
+            try:
+                body: Any = json.loads(raw_body) if raw_body else {}
+            except json.JSONDecodeError:
+                body = {"error": {"code": "INVALID_GATEWAY_ERROR", "message": raw_body[:500]}}
+            raise GatewayError(f"Gateway HTTP {exc.code} for {path}", status=exc.code, body=body) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise GatewayError(f"Gateway unavailable at {self.base_url}: {exc}") from exc
         except json.JSONDecodeError as exc:
@@ -57,7 +69,16 @@ class GatewayClient:
         return self._request("GET", "/v1/device/status")
 
     def observe(self, *, include_screenshot: bool = False, mode: str = "compact") -> Any:
-        return self._request("POST", "/v1/observe", {"include_screenshot": include_screenshot, "mode": mode})
+        response = self._request("POST", "/v1/capabilities/observe", {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "correlation_id": str(uuid.uuid4()),
+            "include_screenshot": include_screenshot,
+            "mode": mode,
+        })
+        witness = response.get("witness") if isinstance(response, dict) else None
+        if isinstance(witness, dict) and isinstance(witness.get("observation_id"), str):
+            self._last_observation_id = witness["observation_id"]
+        return response
 
     def ui_search(self, query: str) -> Any:
         encoded = urllib.parse.urlencode({"q": query})
@@ -73,7 +94,15 @@ class GatewayClient:
         return self._request("GET", "/v1/page/history")
 
     def action(self, tool: str, params: dict[str, Any], goal: str) -> Any:
-        return self._request("POST", "/v1/action", {"tool": tool, "params": params, "goal": goal, "source": "PC_CODEX"})
+        return self._request("POST", "/v1/capabilities/action", {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "correlation_id": str(uuid.uuid4()),
+            "capability_id": tool,
+            "params": params,
+            "goal": goal,
+            "expected_observation_id": self._last_observation_id,
+            "source": "PC_CODEX",
+        })
 
     def debug_bundle(self, expected: str | None = None, goal: str | None = None) -> Any:
         return self._request("POST", "/v1/debug/bundle", {"expected": expected or "", "goal": goal or ""})

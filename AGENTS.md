@@ -29,6 +29,11 @@ Then run:
 python scripts/agent/cyclone-context.py --markdown
 ```
 
+For Android changes, the release instructions agents must follow are in
+`docs/agent-system/FAST_RELEASE_PLAYBOOK.md`. The short rule is: classify the changed paths first,
+increment `versionCode` for every distributed APK, change `versionName` only for a product release
+name, and use `Cyclone Mobile CI` once per source SHA. Never copy a workflow for a new version.
+
 For exact legacy/component details, follow links from the knowledge hub instead of guessing.
 
 ## Source-of-truth order
@@ -200,6 +205,11 @@ For large changes, use a feature branch and the multi-agent task contract.
 - Python gateway/MCP package versions must match the intended product release; the context script reports mismatches.
 - Large APKs belong in GitHub Actions/Release assets, not Git blobs.
 - A release is real only when tests pass and the exact artifact/hash is recorded.
+- `.github/workflows/mobile-ci.yml` is the only normal push/PR APK lane. Its reusable build runs
+  cheap guards before toolchain setup, then tests and assembles in one Gradle invocation.
+- `.github/workflows/mobile-release.yml` downloads and verifies that exact CI artifact; it never
+  recompiles. Publication remains disabled until signing and protected release policy are ready.
+- Existing version-named Android workflows are manual compatibility entry points, not templates.
 
 ## Coding rules that save future agent time
 

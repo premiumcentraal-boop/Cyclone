@@ -34,6 +34,8 @@ apps/desktop/src-tauri/target/
 # IDE / OS
 .vscode/
 .idea/
+.gradle/
+apps/mobile/**/build/
 .DS_Store
 Thumbs.db
 
@@ -43,4 +45,5 @@ services/n8n/local/
 # Test artifacts
 playwright-report/
 test-results/
+.cyclone/agent-runs/
 apps/desktop/.visual/

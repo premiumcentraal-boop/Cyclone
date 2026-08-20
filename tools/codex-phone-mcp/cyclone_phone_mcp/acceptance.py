@@ -9,6 +9,7 @@ from typing import Any
 
 from .compact import compact_observation
 from .gateway import GatewayClient
+from .protocol import classify_failure
 
 
 @dataclass
@@ -185,9 +186,7 @@ class MockGateway:
 
 
 def _action_failed(result: Any) -> bool:
-    if not isinstance(result, dict):
-        return False
-    return result.get("success") is False or result.get("ok") is False or "error" in result
+    return classify_failure(result) is not None
 
 
 def _find_control(obs: dict[str, Any], needle: str) -> dict[str, Any] | None:

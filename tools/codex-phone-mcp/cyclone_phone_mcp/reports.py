@@ -96,6 +96,8 @@ def _summary(result: Any) -> Any:
     keys = (
         "pageKey", "title", "package", "ok", "stage", "failureClassification",
         "knownRouteHints", "brainRecall", "screenshot", "sessionId", "active",
+        "correlation_id", "correlationId", "witness", "before", "after",
+        "transport", "execution", "verification", "error",
     )
     summary = {key: result.get(key) for key in keys if key in result}
     if not summary and isinstance(result.get("result"), dict):

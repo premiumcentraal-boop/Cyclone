@@ -2,11 +2,25 @@
 
 The release system should optimize for two things at the same time: **fast feedback** and **artifact truth**.
 
+## Current authoritative path
+
+`Cyclone Mobile CI` (`.github/workflows/mobile-ci.yml`) is the only normal push/PR APK workflow.
+It calls `_mobile-build.yml`: checkout without credentials/submodules, run cheap metadata and
+architecture guards, set up JDK 17/Android SDK 35, initialize the embedded runtime, then run
+`:app:testDebugUnitTest :app:assembleDebug` once. It uploads one APK with checksum, metadata and
+exact source SHA.
+
+`mobile-release.yml` is manual/protected verification. Supply the successful CI run ID and exact
+artifact name; it downloads and verifies the existing artifact. It never recompiles. Publication is
+currently disabled and these builds remain beta/debug-signed unless separately proven otherwise.
+
 ## 1. Classify the change first
 
 ### Docs/knowledge only
 
 No Android/PC build should be required once CI path filters are organized appropriately.
+
+Examples: `docs/**`, root guidance or agent templates only. Do not change Android version fields.
 
 ### UI-only
 
@@ -16,6 +30,9 @@ Run static product invariants + Android unit/compile gate. Do not rerun unrelate
 
 Run Android unit tests + assemble. Add gateway tests if Android gateway contracts changed.
 
+This includes any change under `apps/mobile/**`, the embedded runtime submodule pointer,
+`AndroidManifest.xml`, Gradle files, wrapper files or `_mobile-build.yml`.
+
 ### PC gateway only
 
 Run gateway tests/build. Android APK build is unnecessary unless the Android contract changed.
@@ -23,6 +40,18 @@ Run gateway tests/build. Android APK build is unnecessary unless the Android con
 ### MCP only
 
 Run MCP unit/protocol/mock acceptance. No APK build unless a contract dependency changed.
+
+### What version field changes when?
+
+| Update | `versionCode` | `versionName` | APK |
+|---|---:|---|---|
+| Docs/gateway/MCP only, no Android contract change | unchanged | unchanged | no |
+| Android code or resource test build, not distributed | unchanged | unchanged | CI artifact only |
+| Any APK handed to a user/device as a newer build | increment | keep if same product release | yes |
+| New named product release/channel | increment | change to canonical SemVer/channel | yes |
+
+There must be exactly one `versionName` and one `versionCode` assignment. Plain `2.9.5` and valid
+decorated SemVer such as `3.0.0-beta.1` are supported by `scripts/ci/mobile_metadata.py`.
 
 ### Cross-layer/release candidate
 
@@ -50,19 +79,19 @@ Until that migration is complete, `scripts/agent/cyclone-context.py` should be u
 
 If a polished rebuild is still called `2.9.5`, keep the marketing `versionName` if desired but increment Android `versionCode` so the new APK has a clear install ordering. Record a unique source SHA/run ID/hash in release metadata.
 
-## 3. Do not duplicate release workflows per version forever
+## 3. Never duplicate a workflow for a version
 
-The desired end state is a generic workflow such as:
+The implemented generic architecture is:
 
 ```text
-mobile-check.yml
+mobile-ci.yml → _mobile-build.yml
 mobile-release.yml
 physical-acceptance.md / manual gate
 ```
 
 The workflow should derive release names from canonical version metadata rather than copying `cyclone-v2.9.5-...yml` into `v2.9.6`, `v2.9.7`, etc.
 
-Version-specific workflows can remain as history until the generic workflow is proven.
+Version-specific workflows are manual compatibility entry points only. Do not add `v3.0.0.yml`.
 
 ## 4. CI structure
 
@@ -75,6 +104,9 @@ source SHA ─ guards                            ├─ package/release ─ veri
 ```
 
 Use caching and concurrency cancellation so obsolete branch pushes do not continue consuming build resources.
+
+PR/push builds share concurrency by PR/ref and cancel stale work. Release verification has its own
+non-cancelling concurrency key so artifact review cannot be replaced mid-run.
 
 ## 5. Artifact truth
 
@@ -139,3 +171,6 @@ Gateway/MCP tests:
 Physical-device acceptance:
 Known limitations:
 ```
+
+If CI is not green, do not call the APK ready. If no physical device was tested, write
+`Physical-device acceptance: NOT RUN`; never infer it from emulator, mock or unit results.

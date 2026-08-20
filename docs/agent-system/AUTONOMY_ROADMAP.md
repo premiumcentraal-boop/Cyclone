@@ -46,7 +46,7 @@ Exit criterion: first run learns; second run is materially more deterministic.
 
 ## Stage 4 — skill/routine compiler
 
-**Status: partial foundations exist.**
+**Status: V3 capsule and durable-run foundations implemented; product migration remains gradual.**
 
 Goals:
 
@@ -61,6 +61,9 @@ Goals:
 Exit criterion: a user can teach a routine and run it later without AI step-by-step control when the UI is known.
 
 ## Stage 5 — self-healing knowledge
+
+**Status: V3 temporal graph, bounded recovery primitives, module quarantine and runtime rollback
+contracts implemented; production adapters and physical acceptance remain.**
 
 Goals:
 

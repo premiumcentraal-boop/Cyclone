@@ -270,7 +270,8 @@ A better Cyclone should become **more deterministic, cheaper, faster and more re
 - break key UI/runtime god files into feature modules incrementally;
 - strengthen App Graph retrieval and selector self-healing;
 - compile learned routes into robust reviewed automations;
-- create a generic reusable release workflow instead of version-specific workflow growth;
+- keep the implemented `mobile-ci.yml` → `_mobile-build.yml` lane authoritative and reuse its one
+  APK/checksum/source-SHA artifact in `mobile-release.yml` without recompiling;
 - add stable signing for painless upgrades.
 
 ### Medium term

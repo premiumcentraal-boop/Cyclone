@@ -4,6 +4,7 @@ from cyclone_phone_mcp.mcp_server import McpServer
 
 
 class FakePhoneTools:
+    def __init__(self): self.last_call_failed = False
     def call(self, name, arguments): return [{"type": "text", "text": "{}"}]
 
 
@@ -24,6 +25,14 @@ class McpProtocolTests(unittest.TestCase):
     def test_unknown_tool_rejected(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "root_shell", "arguments": {}}})
         self.assertIn("error", response)
+
+    def test_tools_call_uses_canonical_failure_flag_not_error_substring(self):
+        self.server.phone_tools.last_call_failed = True
+        response = self.server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "phone_status", "arguments": {}}})
+        self.assertTrue(response["result"]["isError"])
+        self.server.phone_tools.last_call_failed = False
+        response = self.server.handle({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "phone_status", "arguments": {}}})
+        self.assertFalse(response["result"]["isError"])
 
 
 if __name__ == "__main__": unittest.main()

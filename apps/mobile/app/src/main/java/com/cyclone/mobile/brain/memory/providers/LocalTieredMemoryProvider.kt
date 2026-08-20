@@ -310,7 +310,7 @@ class LocalTieredMemoryProvider(
         documentMirrorFailureCode = runCatching {
             Files.createDirectories(root)
             val temporary = documentMirrorPath.resolveSibling("${documentMirrorPath.fileName}.staging")
-            Files.writeString(temporary, text, Charsets.UTF_8)
+            Files.write(temporary, text.toByteArray(Charsets.UTF_8))
             try {
                 Files.move(
                     temporary,

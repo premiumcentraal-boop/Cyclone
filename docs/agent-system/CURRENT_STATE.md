@@ -66,6 +66,17 @@ The Android bridge session token and PC HTTP bearer token are separate concepts.
 
 The model does not get generic shell/root tools.
 
+Infrastructure V3 is now present as compiled Cyclone-native services: capability registry, policy
+governor, memory service and tiered provider, Module Supervisor and offline catalog, Context Ledger,
+temporal App Graph V2, routine capsules/durable runs, vision routing, signed-data runtime staging,
+Recovery/Safe Mode and development agent teams. Shared integration preserves one policy authority,
+one module lifecycle authority, one memory write seam and the existing `PhoneToolExecutor`.
+
+Runtime staging hands candidates to Recovery; only Recovery promotes or rolls back. Recovery asks
+the public Module Supervisor seam to quarantine an optional module. Sensitive Context Ledger text
+is omitted rather than stored as a guessable unkeyed digest. These services are contract-composed,
+but no new product UI or second navigation shell was added merely to expose them.
+
 ## Release state / limitations
 
 - Builds are currently beta/debug-signed unless a later release explicitly changes signing.
@@ -78,7 +89,8 @@ The model does not get generic shell/root tools.
 - Historical version documents are numerous and can confuse new agents.
 - Some mobile files/classes retain V292/V293 names because they originated in earlier releases.
 - Some large Compose/runtime files are expensive to edit safely.
-- Release workflows have grown version-specific over time; a generic reusable mobile release workflow is a future cleanup target.
+- Normal Android push/PR builds are consolidated under `mobile-ci.yml` and `_mobile-build.yml`;
+  historical workflows are manual compatibility entry points.
 - Repo-wide product version synchronization across Android + Python packages should become generated from one release metadata source.
 
 These are organization/refactoring targets, not reasons to rewrite working subsystems wholesale.

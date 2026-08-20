@@ -15,6 +15,15 @@ class CompactTests(unittest.TestCase):
     def test_redacts_secret_keys(self):
         self.assertEqual(redact({"password": "x", "otp_code": "123456"}), {"password": "<redacted>", "otp_code": "<redacted>"})
 
+    def test_typed_observation_retains_correlation_and_witness(self):
+        result = compact_observation({
+            "correlation_id": "corr-1",
+            "witness": {"observation_id": "obs-1", "gateway_record_id": "record-1"},
+            "observation": {"pageKey": "home", "controls": []},
+        })
+        self.assertEqual("corr-1", result["correlationId"])
+        self.assertEqual("obs-1", result["witness"]["observation_id"])
+
 
 if __name__ == "__main__":
     unittest.main()
