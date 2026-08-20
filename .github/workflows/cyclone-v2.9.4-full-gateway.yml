@@ -94,36 +94,24 @@ jobs:
               for path in sorted((root / "pc").iterdir()):
                   archive.write(path, f"pc/{path.name}")
           PY
-
-      - name: Publish verified release files on the release branch
-        shell: bash
-        run: |
-          mkdir -p releases/2.9.4
-          cp dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk releases/2.9.4/
-          cp dist/Cyclone-2.9.4-Full-Gateway-Bundle.zip releases/2.9.4/
           (
-            cd releases/2.9.4
+            cd dist
             sha256sum Cyclone-Mobile-2.9.4-Full-Gateway.apk Cyclone-2.9.4-Full-Gateway-Bundle.zip > SHA256SUMS.txt
           )
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- releases/2.9.4
-          if git diff --cached --quiet; then
-            echo "Release files already published"
-          else
-            git commit -m "release: publish Cyclone 2.9.4 binaries [skip ci]"
-            git push origin HEAD:release/cyclone-mobile-v2.9.4-full-gateway
-          fi
 
-      - name: Upload 2.9.4 APK
+      # Upload Actions artifacts before publishing the GitHub Release. This keeps a
+      # downloadable build even if the release API has a transient failure.
+      - name: Upload 2.9.4 APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: Cyclone-Mobile-2.9.4-Full-Gateway-APK
-          path: dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk
+          path: |
+            dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk
+            dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload 2.9.4 PC Gateway
+      - name: Upload 2.9.4 PC Gateway artifact
         uses: actions/upload-artifact@v4
         with:
           name: Cyclone-2.9.4-Full-Gateway-PC
@@ -131,10 +119,46 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload complete 2.9.4 bundle
+      - name: Upload complete 2.9.4 bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: Cyclone-2.9.4-Full-Gateway-Bundle
-          path: dist/Cyclone-2.9.4-Full-Gateway-Bundle.zip
+          path: |
+            dist/Cyclone-2.9.4-Full-Gateway-Bundle.zip
+            dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub Release v2.9.4
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > dist/RELEASE_NOTES.md <<'EOF'
+          # Cyclone Mobile 2.9.4 — Full PC Gateway
+
+          This release integrates the Android `localabstract:cyclone_gateway`, the loopback-only Windows PC Device Gateway, and the Codex STDIO MCP adapter into one tested stack.
+
+          Release gate: PC gateway tests, Codex MCP tests, mocked acceptance route, Android unit tests, Mobilerun source verification, and Android APK assembly must all pass before these assets are published.
+
+          The APK is the installable debug-signed beta build used by the existing Cyclone mobile CI. Because GitHub runners use ephemeral debug signing keys, installing over an APK produced by a different CI run may require uninstalling the older debug build first. A persistent production signing key should be configured before public/stable distribution.
+          EOF
+
+          TAG="v2.9.4"
+          ASSETS=(
+            "dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk"
+            "dist/Cyclone-2.9.4-Full-Gateway-Bundle.zip"
+            "dist/SHA256SUMS.txt"
+          )
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --title "Cyclone Mobile 2.9.4 — Full Gateway" --notes-file dist/RELEASE_NOTES.md --latest --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "Cyclone Mobile 2.9.4 — Full Gateway" \
+              --notes-file dist/RELEASE_NOTES.md \
+              --latest \
+              --repo "$GITHUB_REPOSITORY"
+          fi
