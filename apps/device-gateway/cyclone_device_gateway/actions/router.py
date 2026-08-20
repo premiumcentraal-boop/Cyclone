@@ -3,9 +3,11 @@ from __future__ import annotations
 from copy import deepcopy
 import time
 import uuid
+import re
 from typing import Any, Callable
 
 from ..auth import AuditLog, redact_params
+from ..cyclone_bridge.client import BridgeOperationError, BridgeProtocolError
 from ..retrieval.service import RetrievalService
 from ..state.store import StateStore
 
@@ -23,6 +25,7 @@ ALLOWED_TOOLS = {
     "phone.open_app",
     "phone.wait_for",
 }
+NON_MUTATING_TOOLS = {"phone.observe", "phone.find", "phone.wait_for"}
 FORBIDDEN_KEYS = {"command", "shell", "powershell", "su", "script"}
 SELECTOR_KEY_ALIASES = {
     "resource_id": "resourceId",
@@ -58,10 +61,16 @@ TYPE_DIRECT_SELECTOR_KEYS = {
     "scrollable",
 }
 EMBEDDED_SELECTOR_KEYS = TYPE_DIRECT_SELECTOR_KEYS | {"text"}
+ERROR_CODE_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
 
 class ActionValidationError(ValueError):
     pass
+
+
+def _safe_error_code(value: Any, fallback: str) -> str:
+    normalized = str(value or "").upper()
+    return normalized if ERROR_CODE_PATTERN.fullmatch(normalized) else fallback
 
 
 def _forbidden_paths(value: Any, prefix: str = "") -> list[str]:
@@ -115,6 +124,24 @@ def _android_execution(result: Any) -> dict[str, Any] | None:
         return None
     execution = result.get("execution")
     return execution if isinstance(execution, dict) else None
+
+
+def _witness(observation: dict[str, Any]) -> dict[str, Any]:
+    semantic = observation.get("semantic")
+    semantic = semantic if isinstance(semantic, dict) else {}
+    return {
+        "observation_id": str(
+            semantic.get("observationId")
+            or semantic.get("observation_id")
+            or observation.get("id")
+        ),
+        "gateway_record_id": str(observation.get("id")),
+        "page_key": semantic.get("pageKey") or observation.get("page_key"),
+        "package": semantic.get("package") or observation.get("package"),
+        "accessibility_fingerprint": (
+            semantic.get("accessibilityFingerprint") or semantic.get("fingerprint")
+        ),
+    }
 
 
 def _selector_from_element(element: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +316,7 @@ class ActionRouter:
         before = self.observe()
         started = time.perf_counter()
         error_class: str | None = None
+        transport_ok = True
 
         try:
             result = self.bridge.request(
@@ -298,22 +326,38 @@ class ActionRouter:
                     "params": resolved_params,
                     "goal": goal,
                     "source": source,
+                    "requestId": request_id,
+                    "correlationId": request_id,
                 },
             )
             execution = _android_execution(result)
-            if execution is not None and "ok" in execution:
+            if execution is not None and isinstance(execution.get("ok"), bool):
                 success = bool(execution.get("ok"))
                 error = execution.get("error")
                 if not success and isinstance(error, dict):
-                    error_class = str(error.get("code") or "ANDROID_ACTION_FAILED")
+                    error_class = _safe_error_code(
+                        error.get("code"),
+                        "ANDROID_ACTION_FAILED",
+                    )
                 elif not success:
                     error_class = "ANDROID_ACTION_FAILED"
             else:
-                success = True
-        except Exception as exc:
-            result = {"error": str(exc)}
+                success = False
+                error_class = "PROTOCOL_MISMATCH"
+        except BridgeProtocolError:
+            result = {"error": {"code": "PROTOCOL_MISMATCH"}}
             success = False
-            error_class = "BridgeError"
+            error_class = "PROTOCOL_MISMATCH"
+        except BridgeOperationError as exc:
+            error_code = _safe_error_code(exc.code, "ANDROID_ACTION_FAILED")
+            result = {"error": {"code": error_code}}
+            success = False
+            error_class = error_code
+        except Exception:
+            result = {"error": {"code": "DEVICE_DISCONNECTED"}}
+            success = False
+            transport_ok = False
+            error_class = "DEVICE_DISCONNECTED"
 
         if self.stabilize is not None:
             try:
@@ -322,24 +366,61 @@ class ActionRouter:
                 if success:
                     error_class = error_class or "StabilizationWarning"
 
-        after = self.observe()
+        try:
+            after = self.observe()
+        except Exception:
+            after = before
+            transport_ok = False
+            success = False
+            error_class = "DEVICE_DISCONNECTED"
         duration_ms = int((time.perf_counter() - started) * 1000)
 
         execution = _android_execution(result)
         before_fingerprint = execution.get("beforeFingerprint") if execution else None
         after_fingerprint = execution.get("afterFingerprint") if execution else None
 
+        explicit_verification = None
+        if isinstance(result, dict):
+            explicit_verification = result.get("verification")
+        if not isinstance(explicit_verification, dict) and execution:
+            explicit_verification = execution.get("verification")
+
+        verification_error_class: str | None = None
         if not success:
             verification = "android_action_failed"
+            verification_ok = False
+        elif isinstance(explicit_verification, dict) and explicit_verification.get("ok") is False:
+            verification = "android_verification_failed"
+            verification_ok = False
+            raw_error = explicit_verification.get("error")
+            if isinstance(raw_error, dict):
+                verification_error_class = _safe_error_code(
+                    raw_error.get("code"),
+                    "VERIFICATION_FAILED",
+                )
+            else:
+                verification_error_class = "VERIFICATION_FAILED"
+        elif isinstance(explicit_verification, dict) and explicit_verification.get("ok") is True:
+            verification = "android_verified"
+            verification_ok = True
         elif before.get("page_key") != after.get("page_key"):
             verification = "page_changed"
+            verification_ok = True
         elif before_fingerprint and after_fingerprint and before_fingerprint != after_fingerprint:
             verification = "ui_changed"
+            verification_ok = True
         else:
             verification = "page_stable"
+            verification_ok = False
+
+        if tool in NON_MUTATING_TOOLS and success:
+            verification = "not_required"
+            verification_ok = True
+
+        overall_success = transport_ok and success and verification_ok
 
         stored_result = result if tool != "phone.type" else {
-            "success": success,
+            "success": overall_success,
             "typed_value_redacted": True,
             "error_class": error_class,
         }
@@ -356,7 +437,7 @@ class ActionRouter:
             after_id=after["id"],
             before_page=before.get("page_key"),
             after_page=after.get("page_key"),
-            success=success,
+            success=overall_success,
             latency_ms=duration_ms,
             verification=verification,
             backend="CYCLONE_ANDROID_BRIDGE",
@@ -369,19 +450,30 @@ class ActionRouter:
                 "operation": "action.execute",
                 "tool": tool,
                 "params": redact_params(tool, resolved_params),
-                "result": {"success": success, "error_class": error_class},
+                "result": {
+                    "success": overall_success,
+                    "execution_ok": success,
+                    "verification_ok": verification_ok,
+                    "error_class": error_class,
+                },
                 "duration_ms": duration_ms,
                 "source_client": source,
             }
         )
         return {
             "request_id": request_id,
-            "success": success,
+            "success": overall_success,
+            "transport_ok": transport_ok,
+            "execution_ok": success,
+            "verification_ok": verification_ok,
             "result": result,
             "transition_id": transition_id,
             "before_page": before.get("page_key"),
             "after_page": after.get("page_key"),
             "latency_ms": duration_ms,
             "verification": verification,
+            "verification_error_class": verification_error_class,
             "error_class": error_class,
+            "before_witness": _witness(before),
+            "after_witness": _witness(after),
         }

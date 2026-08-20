@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
 import uvicorn
 
 from .actions.router import ActionRouter, ActionValidationError
@@ -22,6 +23,13 @@ from .api.schemas import (
     TeachStopRequest,
 )
 from .auth import AuditLog, verify_bearer
+from .capabilities.models import (
+    CapabilityActionRequest,
+    CapabilityObserveRequest,
+    GatewayErrorCode,
+)
+from .capabilities.registry import CapabilityRegistry, OBSERVATION_CAPABILITIES
+from .capabilities.service import CapabilityService, ERROR_HTTP_STATUS
 from .config import Settings
 from .cyclone_bridge.client import CycloneBridgeClient
 from .retrieval.service import RetrievalService
@@ -54,7 +62,20 @@ class Gateway:
             self._observe_for_action,
             self.wait_for_stable,
         )
+        self.capability_registry = CapabilityRegistry()
+        self.capabilities = CapabilityService(
+            self.actions,
+            self.store,
+            self.capability_registry,
+        )
         self._device_status: dict[str, Any] | None = None
+
+    def discover_capabilities(self):
+        try:
+            self.adb.forward_bridge(self.settings.bridge_port)
+        except Exception:
+            pass
+        return self.capability_registry.discover(self.bridge)
 
     def device_status(self) -> dict:
         status = collect_device_status(self.adb, self.settings.device_serial)
@@ -306,7 +327,7 @@ class Gateway:
 def create_app(settings: Settings | None = None, gateway: Gateway | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     gateway = gateway or Gateway(settings)
-    app = FastAPI(title="Cyclone Device Gateway", version="2.9.4")
+    app = FastAPI(title="Cyclone Device Gateway", version="2.9.5")
 
     def auth(authorization: str | None = Header(default=None)):
         verify_bearer(authorization, settings.token)
@@ -363,9 +384,50 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     @app.post("/v1/action", dependencies=[Depends(auth)])
     def action(request: ActionRequest):
         try:
-            return gateway.actions.execute(**request.model_dump())
+            result = gateway.actions.execute(**request.model_dump())
         except ActionValidationError as exc:
             raise HTTPException(400, str(exc))
+        except Exception:
+            return JSONResponse(
+                status_code=ERROR_HTTP_STATUS[GatewayErrorCode.DEVICE_DISCONNECTED],
+                content={
+                    "request_id": request.request_id,
+                    "success": False,
+                    "transport_ok": False,
+                    "execution_ok": False,
+                    "verification_ok": False,
+                    "error_class": GatewayErrorCode.DEVICE_DISCONNECTED,
+                },
+            )
+        status = _legacy_action_http_status(request.tool, result)
+        if status != 200:
+            return JSONResponse(status_code=status, content=result)
+        return result
+
+    @app.get("/v1/capabilities", dependencies=[Depends(auth)])
+    def capability_discovery():
+        if hasattr(gateway, "discover_capabilities"):
+            discovery = gateway.discover_capabilities()
+        else:
+            discovery = gateway.capability_registry.discover(gateway.bridge)
+        return discovery.model_dump(mode="json")
+
+    @app.post("/v1/capabilities/action", dependencies=[Depends(auth)])
+    def capability_action(request: CapabilityActionRequest):
+        result = gateway.capabilities.execute(request)
+        status = 200 if result.ok else ERROR_HTTP_STATUS[result.error.code]
+        return JSONResponse(status_code=status, content=result.model_dump(mode="json"))
+
+    @app.post("/v1/capabilities/observe", dependencies=[Depends(auth)])
+    def capability_observe(request: CapabilityObserveRequest):
+        result = gateway.capabilities.observe(
+            request,
+            gateway.observe,
+            gateway.retrieval,
+            gateway.knowledge_context,
+        )
+        status = 200 if result.ok else ERROR_HTTP_STATUS[result.error.code]
+        return JSONResponse(status_code=status, content=result.model_dump(mode="json"))
 
     @app.post("/v1/debug/bundle", dependencies=[Depends(auth)])
     def debug_bundle(request: DebugBundleRequest):
@@ -393,9 +455,24 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
     return app
 
 
+def _legacy_action_http_status(tool: str, result: dict[str, Any]) -> int:
+    if result.get("transport_ok") is not True:
+        return ERROR_HTTP_STATUS[GatewayErrorCode.DEVICE_DISCONNECTED]
+    if result.get("execution_ok") is not True:
+        error_class = str(result.get("error_class") or "").upper()
+        if error_class == GatewayErrorCode.POLICY_DENIED:
+            return ERROR_HTTP_STATUS[GatewayErrorCode.POLICY_DENIED]
+        if error_class == GatewayErrorCode.PROTOCOL_MISMATCH:
+            return ERROR_HTTP_STATUS[GatewayErrorCode.PROTOCOL_MISMATCH]
+        return ERROR_HTTP_STATUS[GatewayErrorCode.EXECUTION_FAILED]
+    if tool not in OBSERVATION_CAPABILITIES and result.get("verification_ok") is not True:
+        return ERROR_HTTP_STATUS[GatewayErrorCode.VERIFICATION_FAILED]
+    return 200
+
+
 def main() -> None:
     settings = Settings.from_env()
-    uvicorn.run(create_app(settings), host="127.0.0.1", port=settings.port)
+    uvicorn.run(create_app(settings), host=settings.host, port=settings.port)
 
 
 if __name__ == "__main__":

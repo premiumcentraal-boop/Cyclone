@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 from pathlib import Path
 import os
 
@@ -16,6 +17,17 @@ class Settings:
     bridge_host: str = "127.0.0.1"
     bridge_port: int = 8766
     bridge_token: str = ""
+
+    def __post_init__(self) -> None:
+        for field_name, value in (("host", self.host), ("bridge_host", self.bridge_host)):
+            if value == "localhost":
+                continue
+            try:
+                is_loopback = ipaddress.ip_address(value).is_loopback
+            except ValueError as exc:
+                raise ValueError(f"{field_name} must be a loopback address") from exc
+            if not is_loopback:
+                raise ValueError(f"{field_name} must be a loopback address")
 
     @classmethod
     def from_env(cls) -> "Settings":
