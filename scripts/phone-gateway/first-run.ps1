@@ -64,7 +64,7 @@ if ($rootResult -match "uid=0") {
 }
 
 if (-not $AndroidBridgeToken) {
-    Fail "CYCLONE_ANDROID_BRIDGE_TOKEN is not set. On the phone open 'Cyclone PC Gateway', enable it, copy the Session token, then set `$env:CYCLONE_ANDROID_BRIDGE_TOKEN='<token>'."
+    Fail "CYCLONE_ANDROID_BRIDGE_TOKEN is not set. In the Cyclone app tap the PC Gateway button, enable it, copy the Session token, then set `$env:CYCLONE_ANDROID_BRIDGE_TOKEN='<token>'."
 }
 Pass "Android bridge session token is configured locally"
 
@@ -74,7 +74,7 @@ if (-not $HttpToken) {
 Pass "PC HTTP bearer token is configured locally"
 
 if ($HttpToken -eq $AndroidBridgeToken) {
-    Warn "The PC HTTP token and Android session token are identical. 2.9.4 supports this, but separate tokens are recommended."
+    Warn "The PC HTTP token and Android session token are identical. 2.9.5 supports this, but separate tokens are recommended."
 }
 
 $forward = adb -s $Serial forward --list | Where-Object { $_ -match "tcp:8766\s+localabstract:cyclone_gateway" }
@@ -104,22 +104,22 @@ Pass "PC -> ADB forward -> Android Cyclone bridge is authenticated"
 
 $bridge = $status.cyclone_bridge
 if (-not $bridge.gatewayEnabled) {
-    Fail "Android bridge reports gatewayEnabled=false. Enable 'PC Gateway (USB debugging)' in Cyclone."
+    Fail "Android bridge reports gatewayEnabled=false. Enable 'PC Gateway (USB debugging)' inside Cyclone."
 }
 if (-not $bridge.accessibilityConnected) {
     Fail "Cyclone Accessibility does not report connected. Enable Cyclone in Android Accessibility settings."
 }
 Pass "Cyclone Gateway + Accessibility report ready"
 
-if ($bridge.appVersion -and $bridge.appVersion -notmatch "2\.9\.4") {
-    Warn "Installed Cyclone reports '$($bridge.appVersion)'. This preflight is designed for the 2.9.4 full-gateway APK."
+if ($bridge.appVersion -and $bridge.appVersion -notmatch "2\.9\.5") {
+    Warn "Installed Cyclone reports '$($bridge.appVersion)'. This preflight is designed for the 2.9.5 integrated-gateway APK."
 } elseif ($bridge.appVersion) {
-    Pass "Cyclone 2.9.4 app version confirmed"
+    Pass "Cyclone 2.9.5 app version confirmed"
 }
 
 $mcpOutput = python -m cyclone_phone_mcp --self-test 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) {
-    Fail "Cyclone Phone MCP self-test could not talk to Device Gateway. Activate/install the 2.9.4 MCP package first. $mcpOutput"
+    Fail "Cyclone Phone MCP self-test could not talk to Device Gateway. Activate/install the 2.9.5 MCP package first. $mcpOutput"
 }
 Write-Host $mcpOutput.Trim()
 Pass "Cyclone Phone MCP self-test passed"
@@ -136,5 +136,5 @@ if (-not $SkipMcpCheck) {
 }
 
 Write-Host ""
-Write-Host "Cyclone 2.9.4 Full Gateway is ready for the safe Pixel 8 acceptance run." -ForegroundColor Green
+Write-Host "Cyclone 2.9.5 Original UI + Full Gateway is ready for the safe Pixel 8 acceptance run." -ForegroundColor Green
 Write-Host "Next: python -m cyclone_phone_mcp.acceptance --live --execute" -ForegroundColor Yellow
