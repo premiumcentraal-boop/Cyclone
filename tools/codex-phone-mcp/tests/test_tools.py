@@ -21,6 +21,16 @@ class FakeGateway:
     def teach_stop(self, compile_for_review): return {"active": False}
 
 
+class FailedActionGateway(FakeGateway):
+    def action(self, tool, params, goal):
+        return {
+            "success": False,
+            "error_class": "ELEMENT_NOT_FOUND",
+            "verification": "android_action_failed",
+            "result": {"execution": {"ok": False}},
+        }
+
+
 class ToolTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -63,6 +73,21 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(report["uiSearches"], 1)
         self.assertEqual(report["actions"], 1)
         self.assertEqual(report["failedActions"], 0)
+
+    def test_returned_android_action_failure_is_mcp_error_and_report_failure(self):
+        recorder = SessionRecorder(self.temp.name)
+        tools = PhoneTools(FailedActionGateway(), recorder)
+        content = tools.call(
+            "phone_act",
+            {"tool": "phone.click", "params": {"selector": {"text": "Missing"}}, "goal": "Open missing"},
+        )
+        payload = json.loads(content[0]["text"])
+        self.assertEqual(payload["error"], "Phone action failed")
+        self.assertEqual(payload["errorClass"], "ELEMENT_NOT_FOUND")
+        report = recorder.snapshot()
+        self.assertEqual(report["actions"], 1)
+        self.assertEqual(report["failedActions"], 1)
+        self.assertEqual(report["successfulActions"], 0)
 
 
 if __name__ == "__main__": unittest.main()
