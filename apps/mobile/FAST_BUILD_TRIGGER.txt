@@ -1,2 +1,3 @@
-Cyclone Mobile 2.9.5 fast APK build trigger.
+Cyclone Mobile 2.9.5 final PR APK build trigger.
 No runtime behavior is defined by this file.
+Purpose: force a non-draft pull_request synchronize event for Android CI artifact generation.
