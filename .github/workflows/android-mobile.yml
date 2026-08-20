@@ -56,10 +56,16 @@ jobs:
           GRADLE_FILE='apps/mobile/app/build.gradle.kts'
           VERSION_NAME=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"/\1/p' "$GRADLE_FILE" | head -1)
           VERSION_CODE=$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)/\1/p' "$GRADLE_FILE" | head -1)
-          MOBILE_VERSION=$(printf '%s' "$VERSION_NAME" | sed -n 's/.*-v\([0-9][0-9.]*\)-.*/\1/p')
-          CHANNEL=$(printf '%s' "$VERSION_NAME" | sed -n 's/.*-v[0-9][0-9.]*-\(.*\)$/\1/p')
 
-          if [ -z "$VERSION_NAME" ] || [ -z "$MOBILE_VERSION" ] || [ -z "$CHANNEL" ]; then
+          if printf '%s' "$VERSION_NAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            MOBILE_VERSION="$VERSION_NAME"
+            CHANNEL="final"
+          else
+            MOBILE_VERSION=$(printf '%s' "$VERSION_NAME" | sed -n 's/.*-v\([0-9][0-9.]*\)-.*/\1/p')
+            CHANNEL=$(printf '%s' "$VERSION_NAME" | sed -n 's/.*-v[0-9][0-9.]*-\(.*\)$/\1/p')
+          fi
+
+          if [ -z "$VERSION_NAME" ] || [ -z "$VERSION_CODE" ] || [ -z "$MOBILE_VERSION" ] || [ -z "$CHANNEL" ]; then
             echo "Could not derive mobile version from $VERSION_NAME" >&2
             exit 1
           fi
