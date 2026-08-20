@@ -1,0 +1,19 @@
+{
+  "release": "2.9.4",
+  "tag": "v2.9.4",
+  "verified": true,
+  "sourceSha": "121df53544cbce259f6b811498dacdd59c8a5327",
+  "runId": 32397394867,
+  "apk": {
+    "name": "Cyclone-Mobile-2.9.4-Full-Gateway.apk",
+    "bytes": 120265287,
+    "sha256": "1b887a03e7eea9a1a7d8337d9354dd8d1418212add0c3223c4b24854185bd823",
+    "releaseAsset": "https://github.com/premiumcentraal-boop/Cyclone/releases/download/v2.9.4/Cyclone-Mobile-2.9.4-Full-Gateway.apk"
+  },
+  "bundle": {
+    "name": "Cyclone-2.9.4-Full-Gateway-Bundle.zip",
+    "sha256": "1bf9cfe28eeb05e8e628bf4efffbe2eb4add3149ebc1ad6bdd3e9e817d1b6f9d",
+    "releaseAsset": "https://github.com/premiumcentraal-boop/Cyclone/releases/download/v2.9.4/Cyclone-2.9.4-Full-Gateway-Bundle.zip"
+  },
+  "signing": "debug-signed-beta"
+}
