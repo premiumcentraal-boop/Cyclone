@@ -1,17 +1,11 @@
-name: Cyclone Mobile V2.8 Integration
+name: Cyclone Mobile Integration
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      - release/cyclone-mobile-v2
-      - release/cyclone-mobile-v2.3-openrouter-agent
-      - release/cyclone-mobile-v2.4-guided-recorder
-      - release/cyclone-mobile-v2.5-app-learner-beta
-      - release/cyclone-mobile-v2.6-ai-brain-rehaul
-      - release/cyclone-mobile-v2.7-adaptive-brain
-      - release/cyclone-mobile-v2.8-page-aware-agent
+      - 'release/cyclone-mobile-v*'
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/cyclone-core/**'
@@ -51,7 +45,7 @@ jobs:
       - name: Import Core entrypoint
         run: python -c "from app.mobile_entry import app; assert any(getattr(r, 'path', '') == '/api/v1/mobile/connect' for r in app.routes)"
 
-  android-v2:
+  android-mobile:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,11 +63,11 @@ jobs:
           gradle-version: '8.9'
       - name: Run integrated Android tests
         run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
-      - name: Assemble Cyclone Mobile V2.8 Beta APK
+      - name: Assemble integrated Cyclone Mobile APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload Cyclone Mobile V2.8 Beta APK
+      - name: Upload integration APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-8-integration-apk
+          name: cyclone-mobile-integration-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
