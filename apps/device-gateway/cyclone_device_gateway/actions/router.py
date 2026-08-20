@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import time
 import uuid
 from typing import Any, Callable
@@ -60,6 +61,48 @@ def _android_execution(result: Any) -> dict[str, Any] | None:
     return execution if isinstance(execution, dict) else None
 
 
+def _selector_from_element(element: dict[str, Any]) -> dict[str, Any]:
+    resource_id = element.get("resourceId") or element.get("resource_id")
+    text = element.get("text") or element.get("label")
+    content_description = element.get("contentDescription") or element.get("content_desc")
+    class_name = element.get("class")
+    role = element.get("role")
+
+    selector: dict[str, Any] = {}
+    if resource_id:
+        selector["resourceId"] = resource_id
+    elif content_description:
+        selector["contentDescription"] = content_description
+    elif text:
+        selector["text"] = text
+
+    if not selector:
+        bounds = element.get("bounds")
+        if isinstance(bounds, dict):
+            left = bounds.get("left")
+            top = bounds.get("top")
+            right = bounds.get("right")
+            bottom = bounds.get("bottom")
+            if all(isinstance(value, (int, float)) for value in (left, top, right, bottom)):
+                selector["x"] = int((left + right) / 2)
+                selector["y"] = int((top + bottom) / 2)
+
+    if class_name and not selector.get("resourceId"):
+        selector["class"] = class_name
+    if role and not selector.get("resourceId"):
+        selector["role"] = role
+    if element.get("clickable") is True:
+        selector["clickable"] = True
+    if element.get("editable") is True:
+        selector["editable"] = True
+    if element.get("scrollable") is True:
+        selector["scrollable"] = True
+
+    if not selector:
+        raise ActionValidationError("Element has no stable selector evidence")
+    return selector
+
+
 class ActionRouter:
     def __init__(
         self,
@@ -68,12 +111,45 @@ class ActionRouter:
         audit: AuditLog,
         observe: Callable[[], dict],
         stabilize: Callable[[], dict | None] | None = None,
+        resolve_element: Callable[[str], dict | None] | None = None,
     ):
         self.bridge = bridge
         self.store = store
         self.audit = audit
         self.observe = observe
         self.stabilize = stabilize
+        self.resolve_element = resolve_element
+
+    def _resolve_element_ids(self, params: dict[str, Any]) -> dict[str, Any]:
+        resolved = deepcopy(params)
+        selector = resolved.get("selector")
+        if selector is not None and not isinstance(selector, dict):
+            raise ActionValidationError("selector must be an object")
+
+        element_id = resolved.pop("elementId", None) or resolved.pop("element_id", None)
+        if isinstance(selector, dict):
+            element_id = (
+                selector.pop("elementId", None)
+                or selector.pop("element_id", None)
+                or element_id
+            )
+
+        if not element_id:
+            return resolved
+        if self.resolve_element is None:
+            raise ActionValidationError("elementId cannot be resolved by this gateway")
+
+        element = self.resolve_element(str(element_id))
+        if element is None:
+            raise ActionValidationError(
+                "Unknown or stale elementId; observe/search the current page again"
+            )
+
+        stable_selector = _selector_from_element(element)
+        if isinstance(selector, dict):
+            stable_selector.update(selector)
+        resolved["selector"] = stable_selector
+        return resolved
 
     def execute(
         self,
@@ -88,6 +164,9 @@ class ActionRouter:
         if source != "PC_CODEX":
             raise ActionValidationError("Action source must be PC_CODEX")
 
+        resolved_params = self._resolve_element_ids(params)
+        validate_action(tool, resolved_params)
+
         request_id = request_id or str(uuid.uuid4())
         before = self.observe()
         started = time.perf_counter()
@@ -96,7 +175,12 @@ class ActionRouter:
         try:
             result = self.bridge.request(
                 "action.execute",
-                {"tool": tool, "params": params, "goal": goal, "source": source},
+                {
+                    "tool": tool,
+                    "params": resolved_params,
+                    "goal": goal,
+                    "source": source,
+                },
             )
             execution = _android_execution(result)
             if execution is not None and "ok" in execution:
@@ -144,7 +228,7 @@ class ActionRouter:
         action_id = self.store.add_action(
             request_id,
             tool,
-            redact_params(tool, params),
+            redact_params(tool, resolved_params),
             stored_result,
             duration_ms,
         )
@@ -166,7 +250,7 @@ class ActionRouter:
                 "request_id": request_id,
                 "operation": "action.execute",
                 "tool": tool,
-                "params": redact_params(tool, params),
+                "params": redact_params(tool, resolved_params),
                 "result": {"success": success, "error_class": error_class},
                 "duration_ms": duration_ms,
                 "source_client": source,
