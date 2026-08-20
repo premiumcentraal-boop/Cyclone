@@ -1,7 +1,6 @@
 package com.cyclone.mobile.gateway
 
 import android.content.Context
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
 
@@ -42,11 +41,7 @@ internal object GatewaySessionStore {
 
     fun rotatedAt(context: Context): Long = prefs(context).getLong(KEY_ROTATED_AT, 0L)
 
-    fun authenticate(context: Context, supplied: String): Boolean {
-        val expected = token(context) ?: return false
-        if (supplied.isBlank()) return false
-        return MessageDigest.isEqual(expected.toByteArray(Charsets.UTF_8), supplied.toByteArray(Charsets.UTF_8))
-    }
+    fun authenticate(context: Context, supplied: String): Boolean = GatewayAuth.matches(token(context), supplied)
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
