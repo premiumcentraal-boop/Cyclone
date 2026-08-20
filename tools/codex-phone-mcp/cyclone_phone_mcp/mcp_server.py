@@ -7,7 +7,7 @@ from typing import Any
 from .tools import PhoneTools
 
 SERVER_NAME = "cyclone-phone"
-SERVER_VERSION = "2.9.4"
+SERVER_VERSION = "2.9.5"
 
 INSTRUCTIONS = (
     "Control the phone semantic-first. Observe before acting; prefer known verified routes and semantic controls. "
@@ -41,7 +41,7 @@ TOOLS = [
     _tool("phone_current_page", "Read the gateway's current page record.", {"type": "object", "properties": {}, "additionalProperties": False}, read_only=True),
     _tool("phone_page_history", "Read recent page/action transition history for verification and recovery.", {"type": "object", "properties": {}, "additionalProperties": False}, read_only=True),
     _tool("phone_act", "Execute one typed Cyclone phone action. For click/long_press/scroll, params may contain a current elementId from search/inspect and the PC gateway will resolve it to a stable Android selector. phone.type requires user_authorized=true.", {"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object"}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}}, "required": ["tool", "params", "goal"], "additionalProperties": False}, read_only=False, destructive=True),
-    _tool("phone_debug_bundle", "Capture the 2.9.4 diagnostic bundle when perception, context, execution or verification disagree.", {"type": "object", "properties": {"goal": {"type": "string"}, "expected": {"type": "string"}}, "additionalProperties": False}, read_only=True),
+    _tool("phone_debug_bundle", "Capture the 2.9.5 diagnostic bundle when perception, context, execution or verification disagree.", {"type": "object", "properties": {"goal": {"type": "string"}, "expected": {"type": "string"}}, "additionalProperties": False}, read_only=True),
     _tool("phone_teach_start", "Start Cyclone's canonical Follow Me/Teach session; this does not create a second teaching store.", {"type": "object", "properties": {"goal": {"type": "string"}}, "additionalProperties": False}, read_only=False),
     _tool("phone_teach_status", "Read the active Cyclone teaching session state.", {"type": "object", "properties": {}, "additionalProperties": False}, read_only=True),
     _tool("phone_teach_stop", "Stop Cyclone teaching and optionally compile evidence into a disabled-for-review routine.", {"type": "object", "properties": {"compile_for_review": {"type": "boolean", "default": True}}, "additionalProperties": False}, read_only=False),
@@ -77,7 +77,7 @@ class McpServer:
             if name not in {tool["name"] for tool in TOOLS}:
                 return _error(request_id, -32602, f"Unknown tool: {name}")
             content = self.phone_tools.call(str(name), arguments if isinstance(arguments, dict) else {})
-            is_error = bool(content and content[0].get("type") == "text" and '\"error\"' in content[0].get("text", "")[:80])
+            is_error = bool(content and content[0].get("type") == "text" and '"error"' in content[0].get("text", "")[:80])
             return _result(request_id, {"content": content, "isError": is_error})
         return _error(request_id, -32601, f"Method not found: {method}")
 
