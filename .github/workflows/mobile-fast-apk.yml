@@ -1,0 +1,144 @@
+name: Cyclone Mobile Fast APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'release/cyclone-mobile-v*'
+    paths:
+      - 'apps/mobile/**'
+      - 'third_party/mobilerun-portal/**'
+      - '.gitmodules'
+      - '.github/workflows/mobile-fast-apk.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cyclone-mobile-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Read release identity
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE='apps/mobile/app/build.gradle.kts'
+          VERSION_NAME=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"/\1/p' "$FILE" | head -1)
+          VERSION_CODE=$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\)/\1/p' "$FILE" | head -1)
+          test -n "$VERSION_NAME"
+          test -n "$VERSION_CODE"
+          SAFE_VERSION=$(printf '%s' "$VERSION_NAME" | tr -cs 'A-Za-z0-9._-' '-')
+          APK_NAME="Cyclone-Mobile-${SAFE_VERSION}.apk"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "Release: $VERSION_NAME (versionCode $VERSION_CODE)"
+
+      - name: Fast Cyclone product guards
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          ui = Path('apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt').read_text()
+          required = [
+              'HOME("Home"', 'TEACH("Teach"', 'AI("AI"',
+              'AUTOMATIONS("Automations"', 'BRAIN("Brain"',
+              'GatewayAiCard(context, refreshTick)',
+              'CycloneRelease.label',
+              '.clickable { settingsOpen = true }',
+          ]
+          missing = [x for x in required if x not in ui]
+          assert not missing, f'Missing product surfaces: {missing}'
+          for stale in ('Cyclone 2.9.3', 'Cyclone 2.9.2 settings'):
+              assert stale not in ui, f'Stale visible version remains: {stale}'
+
+          release = Path('apps/mobile/app/src/main/java/com/cyclone/mobile/CycloneRelease.kt').read_text()
+          assert 'BuildConfig.VERSION_NAME' in release
+
+          root = ET.parse('apps/mobile/app/src/main/AndroidManifest.xml').getroot()
+          ns = '{http://schemas.android.com/apk/res/android}'
+          launchers = []
+          for activity in root.findall('./application/activity'):
+              for filt in activity.findall('intent-filter'):
+                  actions = {x.get(ns+'name') for x in filt.findall('action')}
+                  cats = {x.get(ns+'name') for x in filt.findall('category')}
+                  if 'android.intent.action.MAIN' in actions and 'android.intent.category.LAUNCHER' in cats:
+                      launchers.append(activity.get(ns+'name'))
+          assert launchers == ['.MainActivity'], f'Expected one .MainActivity launcher, got {launchers}'
+          print('Cyclone UI/version/single-launcher guards passed')
+          PY
+
+      - name: Test and assemble APK
+        run: gradle -p apps/mobile :app:testDebugUnitTest :app:assembleDebug --stacktrace --parallel
+
+      - name: Package APK and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp apps/mobile/app/build/outputs/apk/debug/app-debug.apk "dist/${{ steps.version.outputs.apk_name }}"
+          (cd dist && sha256sum "${{ steps.version.outputs.apk_name }}" > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cyclone-Mobile-${{ steps.version.outputs.version_name }}-APK
+          path: |
+            dist/${{ steps.version.outputs.apk_name }}
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish refreshed 2.9.5 APK release
+        if: ${{ startsWith(github.ref_name, 'release/cyclone-mobile-v') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="mobile-v${{ steps.version.outputs.version_name }}-refresh"
+          TITLE="Cyclone Mobile ${{ steps.version.outputs.version_name }} — Refreshed APK"
+          APK="dist/${{ steps.version.outputs.apk_name }}"
+          NOTES="$RUNNER_TEMP/notes.md"
+          cat > "$NOTES" <<EOF
+          Refreshed Cyclone Android APK built and unit-tested from `${GITHUB_SHA}`.
+
+          - Android version: `${{ steps.version.outputs.version_name }}`
+          - versionCode: `${{ steps.version.outputs.version_code }}`
+          - Package: `com.cyclone.mobile`
+          - One launcher: `.MainActivity`
+          - Includes Cyclone Home / Teach / AI / Automations / Brain and the Full PC + Codex Gateway Android bridge.
+          - Debug-signed beta APK.
+          EOF
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" dist/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --title "$TITLE" --notes-file "$NOTES" --prerelease --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$APK" dist/SHA256SUMS.txt --target "$GITHUB_SHA" --title "$TITLE" --notes-file "$NOTES" --prerelease --repo "$GITHUB_REPOSITORY"
+          fi
