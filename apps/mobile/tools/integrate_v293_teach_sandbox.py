@@ -2,9 +2,8 @@
 """One-time source integration for the 2.9.3 diagnostic Teach card.
 
 The active mobile shell is still intentionally kept in CycloneMobileV292App.kt for compatibility with
-2.9.x state/migrations. This helper performs a small, checked, idempotent edit rather than copying the
-~50KB shell into another version-named file. CI runs it before compilation and persists the resulting
-source on release-branch pushes.
+2.9.x state/migrations. This helper performs small, checked, idempotent edits rather than copying the
+large shell. CI runs it before compilation and persists the resulting source on release-branch pushes.
 """
 from pathlib import Path
 
@@ -61,4 +60,29 @@ if marker not in text:
     text = text.replace(anchor, card + anchor, 1)
 
 path.write_text(text, encoding="utf-8")
-print("Cyclone 2.9.3 Teach sandbox integration is present")
+
+# Keep the diagnostic inspector source compile-safe across PR merge checkouts. The first 2.9.3
+# implementation used a trailing lambda while `weight` was the final smallButton parameter, so Kotlin
+# interpreted the lambda as a Float argument. Reorder the callback to be last and provide the weighted
+# LinearLayout helper used by the inspector rows.
+sandbox_path = Path("apps/mobile/app/src/main/java/com/cyclone/mobile/debug/PageDebugSandboxV293.kt")
+sandbox = sandbox_path.read_text(encoding="utf-8")
+old_signature = 'private fun smallButton(label: String, onClick: () -> Unit, weight: Float? = null): Button = Button(this).apply {'
+new_signature = 'private fun smallButton(label: String, weight: Float? = null, onClick: () -> Unit): Button = Button(this).apply {'
+if old_signature in sandbox:
+    sandbox = sandbox.replace(old_signature, new_signature, 1)
+
+extension_marker = '    private fun LinearLayout.addView(view: View, weight: Float) {'
+if extension_marker not in sandbox:
+    anchor = '    private fun smallButton(label: String, weight: Float? = null, onClick: () -> Unit): Button = Button(this).apply {'
+    if anchor not in sandbox:
+        raise SystemExit("Could not locate PageDebugSandboxV293 smallButton helper")
+    extension = '''    private fun LinearLayout.addView(view: View, weight: Float) {
+        addView(view, LinearLayout.LayoutParams(0, dp(42), weight).apply { marginEnd = dp(5) })
+    }
+
+'''
+    sandbox = sandbox.replace(anchor, extension + anchor, 1)
+
+sandbox_path.write_text(sandbox, encoding="utf-8")
+print("Cyclone 2.9.3 Teach sandbox integration is present and compile-safe")
