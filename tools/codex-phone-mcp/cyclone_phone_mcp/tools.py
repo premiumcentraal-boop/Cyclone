@@ -31,6 +31,19 @@ FAILURE_CLASSES = {
 }
 
 
+def _result_failed(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if "error" in result:
+        return True
+    if result.get("success") is False or result.get("ok") is False:
+        return True
+    action = result.get("action")
+    return isinstance(action, dict) and (
+        action.get("success") is False or action.get("ok") is False
+    )
+
+
 class PhoneTools:
     def __init__(self, gateway: GatewayClient | None = None, recorder: SessionRecorder | None = None):
         self.gateway = gateway or GatewayClient()
@@ -43,7 +56,7 @@ class PhoneTools:
         try:
             method: Callable[[dict[str, Any]], Any] = getattr(self, name)
             result = method(arguments)
-            ok = True
+            ok = not _result_failed(result)
             return _to_mcp_content(result)
         except (AttributeError, GatewayError, ValueError, OSError) as exc:
             result = {"error": str(exc)}
@@ -108,7 +121,17 @@ class PhoneTools:
             raise ValueError("goal is required")
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true because it can enter consequential content")
-        return redact(self.gateway.action(tool, params, goal))
+        result = redact(self.gateway.action(tool, params, goal))
+        if _result_failed(result):
+            error_class = result.get("error_class") if isinstance(result, dict) else None
+            verification = result.get("verification") if isinstance(result, dict) else None
+            return {
+                "error": "Phone action failed",
+                "errorClass": error_class,
+                "verification": verification,
+                "action": result,
+            }
+        return result
 
     def phone_debug_bundle(self, args: dict[str, Any]) -> Any:
         result = redact(self.gateway.debug_bundle(str(args.get("expected") or ""), str(args.get("goal") or "")))
