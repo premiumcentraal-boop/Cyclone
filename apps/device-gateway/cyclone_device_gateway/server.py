@@ -160,6 +160,72 @@ class Gateway:
             time.sleep(poll_seconds)
         return last
 
+    def knowledge_context(self, goal: str | None = None) -> dict[str, Any]:
+        """Retrieve bounded canonical App Graph/Brain hints for the current observation.
+
+        The Android app remains the sole knowledge owner. The PC gateway only asks the
+        frozen app_graph.get and brain.recall operations and attaches their already-
+        sanitized results to model-facing page context.
+        """
+        current = self.store.current_observation()
+        semantic = current.get("semantic", {}) if current else {}
+        if not isinstance(semantic, dict):
+            semantic = {}
+        package_name = semantic.get("package") or (current or {}).get("package")
+        page_key = semantic.get("pageKey") or semantic.get("page_key") or (current or {}).get("page_key")
+        if not package_name:
+            return {"knownRouteHints": [], "brainRecall": None, "knowledgeProvenance": "ANDROID_CANONICAL"}
+
+        query_goal = (goal or "").strip() or "Navigate the current phone state"
+        args = {
+            "package": package_name,
+            "pageKey": page_key,
+            "goal": query_goal,
+        }
+
+        app_graph: dict[str, Any] | None = None
+        brain: dict[str, Any] | None = None
+        app_graph_error: str | None = None
+        brain_error: str | None = None
+        try:
+            value = self.bridge.request("app_graph.get", args)
+            app_graph = value if isinstance(value, dict) else {"value": value}
+        except Exception as exc:
+            app_graph_error = str(exc)
+        try:
+            value = self.bridge.request("brain.recall", args)
+            brain = value if isinstance(value, dict) else {"value": value}
+        except Exception as exc:
+            brain_error = str(exc)
+
+        route_hints: list[Any] = []
+        if app_graph:
+            retrieval = app_graph.get("retrieval")
+            if retrieval not in (None, {}, []):
+                if isinstance(retrieval, list):
+                    route_hints = retrieval[:5]
+                else:
+                    route_hints = [retrieval]
+
+        brain_recall: Any = None
+        if brain:
+            brain_recall = brain.get("recall") if "recall" in brain else brain
+
+        result: dict[str, Any] = {
+            "knownRouteHints": route_hints,
+            "brainRecall": brain_recall,
+            "appGraph": app_graph,
+            "knowledgeProvenance": "ANDROID_CANONICAL",
+        }
+        errors = {}
+        if app_graph_error:
+            errors["appGraph"] = app_graph_error
+        if brain_error:
+            errors["brain"] = brain_error
+        if errors:
+            result["knowledgeErrors"] = errors
+        return result
+
     def debug_bundle(self, expected: str = "", goal: str = "") -> dict:
         stamp = (
             time.strftime("%Y%m%d-%H%M%S", time.localtime())
@@ -259,6 +325,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         result = gateway.retrieval.get_page_context(request.mode, request.goal)
         if result is None:
             raise HTTPException(404, "No observation captured")
+        result.update(gateway.knowledge_context(request.goal))
         return result
 
     @app.get("/v1/ui/search", dependencies=[Depends(auth)])
@@ -283,6 +350,7 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
             raise HTTPException(400, str(exc))
         if result is None:
             raise HTTPException(404, "No observation captured")
+        result.update(gateway.knowledge_context(goal))
         return result
 
     @app.get("/v1/page/history", dependencies=[Depends(auth)])
