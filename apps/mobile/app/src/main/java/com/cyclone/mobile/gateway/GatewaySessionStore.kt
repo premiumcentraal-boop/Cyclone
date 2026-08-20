@@ -7,35 +7,35 @@ import java.util.Base64
 internal object GatewaySessionStore {
     private const val PREFS = "cyclone_pc_gateway_v293"
     private const val KEY_ENABLED = "enabled"
-    private const val KEY_TOKEN = "session_token"
     private const val KEY_ROTATED_AT = "rotated_at"
     private val random = SecureRandom()
+    @Volatile private var activeToken: String? = null
 
     fun enabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
 
-    fun token(context: Context): String? = prefs(context).getString(KEY_TOKEN, null)?.takeIf(String::isNotBlank)
+    /** Session credential is intentionally memory-only; a process restart rotates it automatically. */
+    fun token(context: Context): String? = if (enabled(context)) activeToken else null
 
     fun enable(context: Context): String {
         val token = newToken()
+        activeToken = token
         prefs(context).edit()
             .putBoolean(KEY_ENABLED, true)
-            .putString(KEY_TOKEN, token)
             .putLong(KEY_ROTATED_AT, System.currentTimeMillis())
             .apply()
         return token
     }
 
     fun disable(context: Context) {
-        prefs(context).edit().putBoolean(KEY_ENABLED, false).remove(KEY_TOKEN).apply()
+        activeToken = null
+        prefs(context).edit().putBoolean(KEY_ENABLED, false).apply()
     }
 
     fun rotate(context: Context): String {
         require(enabled(context)) { "PC Gateway is disabled" }
         val token = newToken()
-        prefs(context).edit()
-            .putString(KEY_TOKEN, token)
-            .putLong(KEY_ROTATED_AT, System.currentTimeMillis())
-            .apply()
+        activeToken = token
+        prefs(context).edit().putLong(KEY_ROTATED_AT, System.currentTimeMillis()).apply()
         return token
     }
 
