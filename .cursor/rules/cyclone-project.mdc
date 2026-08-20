@@ -1,0 +1,13 @@
+---
+description: Canonical Cyclone repository instructions
+globs: "**/*"
+alwaysApply: true
+---
+
+Read root `AGENTS.md` before editing this repository.
+
+Use `docs/agent-system/README.md` as the canonical knowledge hub and run:
+
+`python scripts/agent/cyclone-context.py --markdown`
+
+Do not duplicate or override Cyclone architecture, ownership, release, safety or multi-agent rules in this Cursor rule. `AGENTS.md` is the authority.
