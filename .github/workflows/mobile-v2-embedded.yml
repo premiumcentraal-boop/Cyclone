@@ -1,17 +1,11 @@
-name: Cyclone Mobile V2.8 Embedded Runtime
+name: Cyclone Mobile Embedded Runtime
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      - release/cyclone-mobile-v2.2
-      - release/cyclone-mobile-v2.3-openrouter-agent
-      - release/cyclone-mobile-v2.4-guided-recorder
-      - release/cyclone-mobile-v2.5-app-learner-beta
-      - release/cyclone-mobile-v2.6-ai-brain-rehaul
-      - release/cyclone-mobile-v2.7-adaptive-brain
-      - release/cyclone-mobile-v2.8-page-aware-agent
+      - 'release/cyclone-mobile-v*'
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/mobile/**'
@@ -26,7 +20,7 @@ on:
       - '.github/workflows/mobile-v2-embedded.yml'
 
 jobs:
-  android-v2-embedded:
+  android-mobile-embedded:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,13 +38,13 @@ jobs:
           gradle-version: '8.9'
       - name: Verify Mobilerun source is present
         run: test -f third_party/mobilerun-portal/LICENSE && test -f third_party/mobilerun-portal/app/src/main/java/com/mobilerun/portal/PortalApplication.kt
-      - name: Run Cyclone V2.8 Android tests
+      - name: Run embedded Android tests
         run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
-      - name: Assemble unified Cyclone V2.8 APK
+      - name: Assemble embedded Cyclone Mobile APK
         run: gradle -p apps/mobile :app:assembleDebug --stacktrace
-      - name: Upload unified APK
+      - name: Upload embedded integration APK
         uses: actions/upload-artifact@v4
         with:
-          name: cyclone-mobile-v2-8-embedded-apk
+          name: cyclone-mobile-embedded-integration-apk
           path: apps/mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
