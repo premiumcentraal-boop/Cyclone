@@ -287,7 +287,10 @@ def test_transition_recorded_and_type_redacted(tmp_path):
     router = ActionRouter(bridge, db, audit, observe, stabilize=lambda: None)
     result = router.execute(
         tool="phone.type",
-        params={"text": "super-secret"},
+        params={
+            "selector": {"resourceId": "id/search", "editable": True},
+            "text": "super-secret",
+        },
         goal="test",
     )
     assert result["before_page"] == "HOME"
