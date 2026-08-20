@@ -117,6 +117,7 @@ import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
+import com.cyclone.mobile.debug.PageDebugSandboxV293
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -165,7 +166,7 @@ fun CycloneMobileV292App() {
                     title = {
                         Column {
                             Text(if (settingsOpen) "Settings" else tab.label, fontWeight = FontWeight.SemiBold)
-                            Text("Cyclone 2.9.2", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Cyclone 2.9.3", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
                     actions = { if (!settingsOpen) IconButton(onClick = { settingsOpen = true }) { Icon(Icons.Rounded.SettingsIcon, "Settings") } },
@@ -272,7 +273,7 @@ private fun V292TeachPage(context: Context, refreshTick: Int) {
     val gestureCount = follow.teachingSessionId?.let { TeachingGestureEvidenceV292.list(context, it).size } ?: 0
 
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-        item { V292Hero(Icons.Rounded.School, "Teach Cyclone", "2.9.2 turns what you demonstrate into semantic pages, directional gestures, Brain evidence and a reviewable routine instead of leaving it as a passive recording.") }
+        item { V292Hero(Icons.Rounded.School, "Teach Cyclone", "2.9.3 adds a Page Awareness Sandbox so you can freeze a real page and inspect raw Android evidence, semantic controls, the exact Page Agent payload, Brain/App Graph recall and execution-free model probes.") }
         item {
             Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -314,6 +315,34 @@ private fun V292TeachPage(context: Context, refreshTick: Int) {
                         if (service == null) Toast.makeText(context, "Enable Cyclone Accessibility first", Toast.LENGTH_LONG).show()
                         else { service.showGuidedRecorderOverlay(); (context as? Activity)?.moveTaskToBack(true) }
                     }, enabled = !follow.active, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Gesture, null); Spacer(Modifier.width(5.dp)); Text("Open manual teacher") }
+                }
+            }
+        }
+        item {
+            Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Memory, null); Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Page Awareness Sandbox", fontWeight = FontWeight.Bold)
+                            Text("Freeze what Android sees, what PageContext keeps, what the Page Agent actually receives, and A/B-test the harness without executing actions.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Button(onClick = {
+                        val service = CycloneAccessibilityService.instance
+                        if (service == null) Toast.makeText(context, "Enable Cyclone Accessibility first", Toast.LENGTH_LONG).show()
+                        else {
+                            PageDebugSandboxV293.start(service)
+                            Toast.makeText(context, "PAGE DEBUG overlay started — capture the target app pages", Toast.LENGTH_SHORT).show()
+                            (context as? Activity)?.moveTaskToBack(true)
+                        }
+                    }, enabled = !follow.active, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.Visibility, null); Spacer(Modifier.width(5.dp)); Text("Start page sandbox")
+                    }
+                    OutlinedButton(onClick = { PageDebugSandboxV293.launchReport(context) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.Info, null); Spacer(Modifier.width(5.dp)); Text("Open sandbox inspector")
+                    }
+                    Text("Model A/B probes are opt-in, use the selected OpenRouter model, make five calls on one frozen page, and never execute their proposed actions.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
