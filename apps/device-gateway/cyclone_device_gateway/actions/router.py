@@ -6,6 +6,7 @@ import uuid
 from typing import Any, Callable
 
 from ..auth import AuditLog, redact_params
+from ..retrieval.service import RetrievalService
 from ..state.store import StateStore
 
 
@@ -118,7 +119,7 @@ class ActionRouter:
         self.audit = audit
         self.observe = observe
         self.stabilize = stabilize
-        self.resolve_element = resolve_element
+        self.resolve_element = resolve_element or RetrievalService(store).get_element
 
     def _resolve_element_ids(self, params: dict[str, Any]) -> dict[str, Any]:
         resolved = deepcopy(params)
@@ -136,8 +137,6 @@ class ActionRouter:
 
         if not element_id:
             return resolved
-        if self.resolve_element is None:
-            raise ActionValidationError("elementId cannot be resolved by this gateway")
 
         element = self.resolve_element(str(element_id))
         if element is None:
