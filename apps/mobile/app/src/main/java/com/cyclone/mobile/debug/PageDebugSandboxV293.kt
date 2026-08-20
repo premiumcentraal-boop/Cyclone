@@ -22,6 +22,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.ai.MobileContextHarness
@@ -45,7 +46,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
- * Cyclone 2.9.3 diagnostic sandbox.
+ * Cyclone Page Awareness diagnostic sandbox.
  *
  * The purpose is not to make the agent look smarter. It freezes the evidence pipeline so a human can
  * see where an apparently-obvious control disappears:
@@ -474,7 +475,7 @@ private class PageDebugHarnessProbeV293(private val context: Context) {
             .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")
             .header("HTTP-Referer", "https://github.com/premiumcentraal-boop/Cyclone")
-            .header("X-Title", "Cyclone Mobile 2.9.3 Page Debug Sandbox")
+            .header("X-Title", "${CycloneRelease.label} Page Debug Sandbox")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         return http.newCall(request).execute().use { response ->
@@ -559,7 +560,7 @@ private class PageDebugSandboxOverlayV293Controller(
                 elevation = dp(16).toFloat()
             }
             val title = TextView(service).apply {
-                text = "◉ PAGE DEBUG · 2.9.3"
+                text = "◉ PAGE DEBUG · ${CycloneRelease.version}"
                 setTextColor(Color.rgb(130, 207, 255))
                 setTypeface(typeface, Typeface.BOLD)
                 textSize = 12f
@@ -659,7 +660,7 @@ class PageDebugSandboxActivityV293 : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "Cyclone 2.9.3 Page Debug Sandbox"
+        title = "${CycloneRelease.label} Page Debug Sandbox"
         setContentView(buildUi())
         loadLatest()
     }
@@ -676,7 +677,7 @@ class PageDebugSandboxActivityV293 : Activity() {
             setBackgroundColor(Color.rgb(248, 249, 252))
         }
         root.addView(TextView(this).apply {
-            text = "Cyclone 2.9.3 · Page Awareness Sandbox"
+            text = "${CycloneRelease.label} · Page Awareness Sandbox"
             textSize = 22f
             setTextColor(Color.rgb(24, 28, 38))
             setTypeface(typeface, Typeface.BOLD)
@@ -861,7 +862,7 @@ class PageDebugSandboxActivityV293 : Activity() {
 
     private fun copyView() {
         val clipboard = getSystemService(ClipboardManager::class.java)
-        clipboard?.setPrimaryClip(ClipData.newPlainText("Cyclone 2.9.3 page debug", body.text))
+        clipboard?.setPrimaryClip(ClipData.newPlainText("${CycloneRelease.label} page debug", body.text))
         Toast.makeText(this, "Current debug view copied", Toast.LENGTH_SHORT).show()
     }
 
