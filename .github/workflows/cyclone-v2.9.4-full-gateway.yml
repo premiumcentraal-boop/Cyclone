@@ -162,3 +162,49 @@ jobs:
               --latest \
               --repo "$GITHUB_REPOSITORY"
           fi
+
+      - name: Commit verified build marker
+        shell: bash
+        run: |
+          APK_SHA="$(sha256sum dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk | awk '{print $1}')"
+          BUNDLE_SHA="$(sha256sum dist/Cyclone-2.9.4-Full-Gateway-Bundle.zip | awk '{print $1}')"
+          APK_BYTES="$(stat -c%s dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk)"
+          mkdir -p releases/2.9.4
+          python - <<PY
+          import json
+          from pathlib import Path
+
+          payload = {
+              "release": "2.9.4",
+              "tag": "v2.9.4",
+              "verified": True,
+              "sourceSha": "${GITHUB_SHA}",
+              "runId": int("${GITHUB_RUN_ID}"),
+              "apk": {
+                  "name": "Cyclone-Mobile-2.9.4-Full-Gateway.apk",
+                  "bytes": int("${APK_BYTES}"),
+                  "sha256": "${APK_SHA}",
+                  "releaseAsset": "https://github.com/${GITHUB_REPOSITORY}/releases/download/v2.9.4/Cyclone-Mobile-2.9.4-Full-Gateway.apk",
+              },
+              "bundle": {
+                  "name": "Cyclone-2.9.4-Full-Gateway-Bundle.zip",
+                  "sha256": "${BUNDLE_SHA}",
+                  "releaseAsset": "https://github.com/${GITHUB_REPOSITORY}/releases/download/v2.9.4/Cyclone-2.9.4-Full-Gateway-Bundle.zip",
+              },
+              "signing": "debug-signed-beta",
+          }
+          Path("releases/2.9.4/BUILD_VERIFIED.json").write_text(
+              json.dumps(payload, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          cp dist/SHA256SUMS.txt releases/2.9.4/SHA256SUMS.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- releases/2.9.4/BUILD_VERIFIED.json releases/2.9.4/SHA256SUMS.txt
+          if git diff --cached --quiet; then
+            echo "Verified build marker already current"
+          else
+            git commit -m "release: mark Cyclone 2.9.4 build verified [skip ci]"
+            git push origin HEAD:release/cyclone-mobile-v2.9.4-full-gateway
+          fi
