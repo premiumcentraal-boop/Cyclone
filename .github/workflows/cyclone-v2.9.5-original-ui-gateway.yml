@@ -83,6 +83,17 @@ jobs:
           forbidden = ['Cyclone 2.9.3', 'Cyclone 2.9.2 settings', '2.9.3 adds a Page Awareness Sandbox']
           stale = [x for x in forbidden if x in ui]
           assert not stale, f'Stale user-visible release labels remain: {stale}'
+
+          debug = Path('apps/mobile/app/src/main/java/com/cyclone/mobile/debug/PageDebugSandboxV293.kt').read_text()
+          debug_forbidden = [
+              'Cyclone 2.9.3 Page Debug Sandbox',
+              'PAGE DEBUG · 2.9.3',
+              'Cyclone 2.9.3 · Page Awareness Sandbox',
+          ]
+          debug_stale = [x for x in debug_forbidden if x in debug]
+          assert not debug_stale, f'Stale visible Page Debug release labels remain: {debug_stale}'
+          assert 'CycloneRelease.label' in debug and 'CycloneRelease.version' in debug
+
           release = Path('apps/mobile/app/src/main/java/com/cyclone/mobile/CycloneRelease.kt').read_text()
           assert 'BuildConfig.VERSION_NAME' in release
           print('Unified Cyclone UI + release identity verified')
@@ -179,7 +190,7 @@ jobs:
           - the Cyclone profile badge opens Cyclone Settings;
           - the redundant top-right settings button/floating gateway button are removed;
           - Full PC + Codex Gateway has a prominent AI-page control card with readiness, enable/disable, token copy and control-center access;
-          - Android release text uses one BuildConfig-backed release identity, eliminating stale 2.9.2/2.9.3 labels;
+          - Android release text, Settings and Page Awareness use one BuildConfig-backed release identity, eliminating stale 2.9.2/2.9.3 labels;
           - exactly one Cyclone launcher remains.
 
           The Android bridge, Device Gateway, App Graph/Brain retrieval, teaching, typed actions, screenshots, diagnostics and Codex MCP remain included.
@@ -222,7 +233,7 @@ jobs:
               "name": "Cyclone-2.9.5-Original-UI-Full-Gateway-Bundle.zip",
               "sha256": "$BUNDLE_HASH"
             },
-            "uiGuard": "home-teach-ai-automations-brain+gateway+profile-settings",
+            "uiGuard": "home-teach-ai-automations-brain+gateway+profile-settings+page-awareness",
             "singleLauncherVerified": true,
             "versionSource": "BuildConfig.VERSION_NAME",
             "signing": "debug-signed-beta"
