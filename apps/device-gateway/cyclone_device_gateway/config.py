@@ -30,10 +30,14 @@ class Settings:
                 "shown by the Cyclone PC Gateway screen on the phone."
             )
 
+        runtime_dir = Path(
+            os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", ".runtime/device-gateway")
+        ).expanduser().resolve()
+
         return cls(
             token=token,
             device_serial=os.getenv("CYCLONE_DEVICE_SERIAL") or None,
             adb_path=os.getenv("ADB_PATH", "adb"),
-            runtime_dir=Path(os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", ".runtime/device-gateway")),
+            runtime_dir=runtime_dir,
             bridge_token=bridge_token,
         )
