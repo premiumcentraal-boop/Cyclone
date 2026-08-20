@@ -880,7 +880,11 @@ class PageDebugSandboxActivityV293 : Activity() {
         setPadding(0, dp(5), 0, dp(5))
     }
 
-    private fun smallButton(label: String, onClick: () -> Unit, weight: Float? = null): Button = Button(this).apply {
+    private fun LinearLayout.addView(view: View, weight: Float) {
+        addView(view, LinearLayout.LayoutParams(0, dp(42), weight).apply { marginEnd = dp(5) })
+    }
+
+    private fun smallButton(label: String, weight: Float? = null, onClick: () -> Unit): Button = Button(this).apply {
         text = label
         textSize = 9.5f
         minHeight = 0
