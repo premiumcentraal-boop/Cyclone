@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
+NON_MUTATING_CAPABILITIES = {"phone.observe", "phone.find", "phone.wait_for"}
 
 
 class GatewayError(RuntimeError):
@@ -94,15 +95,31 @@ class GatewayClient:
         return self._request("GET", "/v1/page/history")
 
     def action(self, tool: str, params: dict[str, Any], goal: str) -> Any:
-        return self._request("POST", "/v1/capabilities/action", {
+        if tool not in NON_MUTATING_CAPABILITIES and self._last_observation_id is None:
+            raise GatewayError(
+                "A fresh phone observation is required before a mutating action",
+                body={
+                    "protocol_version": "cyclone.gateway.capability.v1",
+                    "capability_id": tool,
+                    "ok": False,
+                    "error": {
+                        "code": "STALE_OBSERVATION",
+                        "layer": "PROTOCOL",
+                        "retryable": True,
+                    },
+                },
+            )
+        payload = {
             "protocol_version": "cyclone.gateway.capability.v1",
             "correlation_id": str(uuid.uuid4()),
             "capability_id": tool,
             "params": params,
             "goal": goal,
-            "expected_observation_id": self._last_observation_id,
             "source": "PC_CODEX",
-        })
+        }
+        if self._last_observation_id is not None:
+            payload["expected_observation_id"] = self._last_observation_id
+        return self._request("POST", "/v1/capabilities/action", payload)
 
     def debug_bundle(self, expected: str | None = None, goal: str | None = None) -> Any:
         return self._request("POST", "/v1/debug/bundle", {"expected": expected or "", "goal": goal or ""})

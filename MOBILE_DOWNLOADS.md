@@ -4,11 +4,15 @@ Use **GitHub Releases** as the permanent download shelf for Cyclone Mobile build
 
 ## Current beta
 
-### Cyclone Mobile 2.9.2 Beta
+### Cyclone Mobile 2.9.5 Beta — repository-verified shelf record
 
-- Release page: https://github.com/premiumcentraal-boop/Cyclone/releases/tag/mobile-v2.9.2-beta
-- Direct APK: https://github.com/premiumcentraal-boop/Cyclone/releases/download/mobile-v2.9.2-beta/Cyclone-Mobile-2.9.2-Beta.apk
-- Checksum: https://github.com/premiumcentraal-boop/Cyclone/releases/download/mobile-v2.9.2-beta/Cyclone-Mobile-2.9.2-Beta.apk.sha256
+- Release page: https://github.com/premiumcentraal-boop/Cyclone/releases/tag/v2.9.5
+- Direct APK: https://github.com/premiumcentraal-boop/Cyclone/releases/download/v2.9.5/Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk
+- Recorded SHA-256: `b6ddfe9b67d16c322536d92ce8468a35cf3f311975b97948d5b9fa815d73300c`
+- Repository proof: `releases/2.9.5/BUILD_VERIFIED.json`
+
+This shelf entry describes the previously verified 2.9.5 beta. It does **not** claim that a local
+Infrastructure V3 build has been uploaded, published or physically tested.
 
 ## All mobile versions
 
@@ -16,44 +20,45 @@ Open the repository Releases page and choose the Cyclone Mobile version you want
 
 https://github.com/premiumcentraal-boop/Cyclone/releases
 
-Mobile release tags use this format:
+Mobile release tags should use one documented format per channel, for example:
 
 ```text
-mobile-v2.9.2-beta
-mobile-v2.9.3-beta
+v2.9.5
 mobile-v3.0.0-beta
 ```
 
 APK filenames use this format:
 
 ```text
-Cyclone-Mobile-2.9.2-Beta.apk
-Cyclone-Mobile-2.9.3-Beta.apk
-Cyclone-Mobile-3.0.0-Beta.apk
+Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk
+Cyclone-Mobile-3.0.0-beta.1.apk
 ```
 
 ## Publishing future updates
 
-The single `.github/workflows/android-mobile.yml` pipeline now reads the Android `versionName` from `apps/mobile/app/build.gradle.kts` automatically.
+`.github/workflows/mobile-ci.yml` is the only automatic Android lane. It calls the reusable
+`_mobile-build.yml`, which validates metadata, tests and assembles once, and stores one APK with its
+checksum, exact source SHA, run ID and metadata.
 
 For a new mobile release:
 
 1. Bump `versionCode` and `versionName` in `apps/mobile/app/build.gradle.kts`.
-2. Work on a branch beginning with `release/cyclone-mobile-v`.
-3. Push the mobile changes.
-4. GitHub Actions runs tests and assembles the APK.
-5. The APK is copied to a clean versioned filename.
-6. Actions stores a 90-day artifact as a backup.
-7. The workflow creates or updates the matching GitHub prerelease and uploads both the APK and SHA-256 file.
+2. Push the mobile change or open a pull request and require a successful `Cyclone Mobile CI` run.
+3. Review the run's APK, source SHA, run ID, metadata and checksum.
+4. Run `mobile-release.yml` manually with that run ID and artifact name. It verifies and reuses the
+   authoritative artifact; it never recompiles it.
+5. Follow `docs/agent-system/FAST_RELEASE_PLAYBOOK.md` for the release evidence and approval gates.
 
-This makes GitHub Releases the stable download location while Actions remains the build/diagnostic history.
+Publication is intentionally disabled. Version code `17`, debug-signed beta output, protected release
+signing and physical-device acceptance are explicit blockers before a new downloadable release can be
+claimed. Do not update this shelf from a local build alone.
 
 ## Build verification
 
 Each release includes a `.sha256` file. To verify a downloaded APK on Windows PowerShell:
 
 ```powershell
-Get-FileHash .\Cyclone-Mobile-2.9.2-Beta.apk -Algorithm SHA256
+Get-FileHash .\Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk -Algorithm SHA256
 ```
 
 Compare that value with the release checksum file.

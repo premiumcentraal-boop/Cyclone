@@ -5,6 +5,9 @@ on:
     branches: [main, 'release/cyclone-mobile-v*']
     paths:
       - 'apps/mobile/**'
+      - '!apps/mobile/AGENTS.md'
+      - '!apps/mobile/**/*.md'
+      - 'third_party/mobilerun-portal'
       - 'third_party/mobilerun-portal/**'
       - '.gitmodules'
       - 'scripts/ci/mobile_metadata.py'
@@ -15,6 +18,9 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - '!apps/mobile/AGENTS.md'
+      - '!apps/mobile/**/*.md'
+      - 'third_party/mobilerun-portal'
       - 'third_party/mobilerun-portal/**'
       - '.gitmodules'
       - 'scripts/ci/mobile_metadata.py'

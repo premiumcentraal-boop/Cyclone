@@ -25,8 +25,24 @@ jobs:
     environment: mobile-release-approval
     runs-on: ubuntu-latest
     steps:
+      - name: Validate authoritative successful build run
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID")"
+          test "$(jq -r '.name' <<< "$run_json")" = "Cyclone Mobile CI"
+          test "$(jq -r '.path' <<< "$run_json")" = ".github/workflows/mobile-ci.yml"
+          test "$(jq -r '.conclusion' <<< "$run_json")" = "success"
+          head_sha="$(jq -r '.head_sha' <<< "$run_json")"
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
       - name: Download authoritative CI artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ inputs.artifact_name }}
           run-id: ${{ inputs.build_run_id }}
@@ -34,10 +50,30 @@ jobs:
           path: candidate
       - name: Verify checksum and provenance
         shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ steps.source.outputs.head_sha }}
+          EXPECTED_RUN_ID: ${{ inputs.build_run_id }}
+          EXPECTED_ARTIFACT_NAME: ${{ inputs.artifact_name }}
         run: |
           set -euo pipefail
           test "$(find candidate -maxdepth 1 -name '*.apk' -type f | wc -l)" -eq 1
           test -s candidate/source-sha.txt
+          test -s candidate/run-id.txt
           test -s candidate/mobile-metadata.json
+          test "$(tr -d '\r\n' < candidate/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
+          test "$(tr -d '\r\n' < candidate/run-id.txt)" = "$EXPECTED_RUN_ID"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("candidate")
+          metadata = json.loads((root / "mobile-metadata.json").read_text(encoding="utf-8"))
+          apks = list(root.glob("*.apk"))
+          assert len(apks) == 1
+          assert metadata["artifact_name"] == os.environ["EXPECTED_ARTIFACT_NAME"]
+          assert metadata["apk_name"] == apks[0].name
+          assert metadata["application_id"] == "com.cyclone.mobile"
+          PY
           (cd candidate && sha256sum --check ./*.apk.sha256)
           echo "Publication is intentionally disabled; this job only verifies the reused CI artifact." >> "$GITHUB_STEP_SUMMARY"

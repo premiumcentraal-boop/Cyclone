@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 GRADLE = ROOT / "apps/mobile/app/build.gradle.kts"
 MANIFEST = ROOT / "apps/mobile/app/src/main/AndroidManifest.xml"
 SOURCES = ROOT / "apps/mobile/app/src/main/java"
+ANDROID_NAME = "{http://schemas.android.com/apk/res/android}name"
 
 
 def exactly_one(pattern: str, text: str, label: str) -> str:
@@ -32,23 +34,30 @@ def read_metadata() -> dict[str, str | int]:
         raise ValueError("versionCode must be positive")
     if application_id != "com.cyclone.mobile":
         raise ValueError(f"unexpected applicationId: {application_id}")
-    manifest = MANIFEST.read_text(encoding="utf-8")
-    launcher_activities = re.findall(
-        r'<activity\b[^>]*android:name="\.MainActivity"[^>]*>(.*?)</activity>',
-        manifest,
-        flags=re.DOTALL,
-    )
-    if len(launcher_activities) != 1:
-        raise ValueError("manifest must declare exactly one .MainActivity")
-    launcher = launcher_activities[0]
-    if launcher.count("android.intent.action.MAIN") != 1 or launcher.count("android.intent.category.LAUNCHER") != 1:
-        raise ValueError("manifest must declare exactly one MAIN/LAUNCHER entry")
+    application = ET.parse(MANIFEST).getroot().find("application")
+    if application is None:
+        raise ValueError("manifest must declare an application")
+    launchers: list[str] = []
+    for component_tag in ("activity", "activity-alias"):
+        for component in application.findall(component_tag):
+            for intent_filter in component.findall("intent-filter"):
+                actions = {item.get(ANDROID_NAME) for item in intent_filter.findall("action")}
+                categories = {item.get(ANDROID_NAME) for item in intent_filter.findall("category")}
+                if "android.intent.action.MAIN" in actions and "android.intent.category.LAUNCHER" in categories:
+                    launchers.append(component.get(ANDROID_NAME, ""))
+    if launchers != [".MainActivity"]:
+        raise ValueError(f"manifest must have one .MainActivity launcher, found {launchers}")
     executor_declarations = 0
     forbidden_rowscope_imports: list[str] = []
-    for source in SOURCES.rglob("*.kt"):
+    declaration = re.compile(
+        r"^\s*(?:(?:public|private|protected|internal|open|final|abstract|sealed|data|expect|actual|static)\s+)*"
+        r"(?:object|class|interface|enum\s+class|record)\s+PhoneToolExecutor\b",
+        re.MULTILINE,
+    )
+    for source in (*SOURCES.rglob("*.kt"), *SOURCES.rglob("*.java")):
         content = source.read_text(encoding="utf-8")
-        executor_declarations += len(re.findall(r"^\s*(?:object|class)\s+PhoneToolExecutor\b", content, re.MULTILINE))
-        if "import androidx.compose.material3.RowScope" in content:
+        executor_declarations += len(declaration.findall(content))
+        if source.suffix == ".kt" and "import androidx.compose.material3.RowScope" in content:
             forbidden_rowscope_imports.append(str(source.relative_to(ROOT)))
     if executor_declarations != 1:
         raise ValueError(f"expected one canonical PhoneToolExecutor, found {executor_declarations}")
@@ -71,7 +80,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         metadata = read_metadata()
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, ET.ParseError) as error:
         parser.error(str(error))
     rendered = json.dumps(metadata, indent=2, sort_keys=True) + "\n"
     if args.json:

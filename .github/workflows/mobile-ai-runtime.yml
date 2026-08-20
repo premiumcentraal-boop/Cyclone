@@ -9,18 +9,12 @@ on:
       - feature/mobile-v2-modern-ui-mobilerun-embedded
     paths:
       - 'apps/cyclone-core/**'
-      - 'apps/mobile/**'
-      - 'third_party/mobilerun-portal'
-      - '.gitmodules'
       - 'docker/**'
       - '.env.example'
       - '.github/workflows/mobile-ai-runtime.yml'
   pull_request:
     paths:
       - 'apps/cyclone-core/**'
-      - 'apps/mobile/**'
-      - 'third_party/mobilerun-portal'
-      - '.gitmodules'
       - 'docker/**'
       - '.env.example'
       - '.github/workflows/mobile-ai-runtime.yml'

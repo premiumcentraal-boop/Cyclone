@@ -67,6 +67,9 @@ class PhoneTools:
         mode = str(args.get("mode") or "compact")
         include_screenshot = bool(args.get("include_screenshot", False))
         raw = self.gateway.observe(include_screenshot=include_screenshot, mode=mode)
+        # Classify the complete typed response before compacting away protocol/error layers.
+        if classify_failure(raw):
+            return redact(raw)
         if mode == "full":
             return redact(raw)
         return compact_observation(raw)

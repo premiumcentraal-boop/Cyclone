@@ -85,6 +85,11 @@ HTTP 200 into success without also checking top-level `ok`, `execution.ok`, and 
 2. Fetch capability discovery at startup/health refresh and reject missing capabilities locally.
 3. Migrate observation calls and retain the returned witness/correlation ID.
 4. Migrate `phone_act` to the typed endpoint and supply `expected_observation_id`.
+
+The migrated MCP client now fails mutating actions locally until it has an observation witness, and
+the Gateway independently enforces `requires_fresh_observation` before Android routing. Prefetching
+capability discovery in MCP remains optional future diagnostics work; safety does not depend on it
+because the server registry and Android policy/executor remain authoritative.
 5. Preserve the old endpoints for one compatibility window.
 6. Add an MCP contract test proving `execution.ok=false` and `verification.ok=false` both produce
    MCP errors even when a mocked transport succeeds.

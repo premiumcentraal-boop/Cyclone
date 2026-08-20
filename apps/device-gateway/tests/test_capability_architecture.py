@@ -141,6 +141,19 @@ def test_stale_observation_is_explicit_and_action_is_not_called():
     assert router.calls == []
 
 
+def test_missing_required_observation_is_rejected_before_android_call():
+    router = Router()
+    result = CapabilityService(router, Store()).execute(
+        request(expected_observation_id=None),
+    )
+
+    assert result.ok is False
+    assert result.error.code == GatewayErrorCode.STALE_OBSERVATION
+    assert result.error.layer == FailureLayer.PROTOCOL
+    assert result.error.retryable is True
+    assert router.calls == []
+
+
 def test_schema_or_safety_validation_is_protocol_failure():
     router = Router(error=ActionValidationError("nested shell is forbidden"))
     result = CapabilityService(router, Store()).execute(request())

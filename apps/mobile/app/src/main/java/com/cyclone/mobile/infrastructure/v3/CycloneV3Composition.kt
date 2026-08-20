@@ -3,6 +3,7 @@ package com.cyclone.mobile.infrastructure.v3
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.brain.memory.api.CycloneMemoryService
 import com.cyclone.mobile.brain.memory.api.MemoryProposalStatus
+import com.cyclone.mobile.brain.memory.api.MemoryVerificationState
 import com.cyclone.mobile.brain.memory.api.MemoryWriteProposalRequest
 import com.cyclone.mobile.observability.context.ContextLedger
 import com.cyclone.mobile.observability.events.ContextEventRequest
@@ -71,6 +72,9 @@ class CycloneV3ActionComposition(
         if (evidence.selectorObservationId != evidence.pageObservationId) {
             return ActionCompositionDecision.Blocked("STALE_SELECTOR")
         }
+        actionBindingMismatch(policyRequest, phoneRequest)?.let {
+            return ActionCompositionDecision.Blocked(it)
+        }
         return when (val guarded = policy.authorizeThen(policyRequest) { authorization ->
             executorProposalSink.propose(AuthorizedPhoneActionProposal(phoneRequest, authorization, evidence))
         }) {
@@ -83,13 +87,93 @@ class CycloneV3ActionComposition(
         event: ContextEventRequest,
         memoryProposal: MemoryWriteProposalRequest,
     ): VerifiedCompletionDecision {
-        if (event.payload.verification?.status != VerificationStatus.VERIFIED) {
+        val payload = event.payload
+        if (payload.stage != com.cyclone.mobile.observability.events.DecisionStage.VERIFICATION_RESULT) {
+            return VerifiedCompletionDecision.Blocked("VERIFICATION_STAGE_REQUIRED")
+        }
+        val actionResult = payload.actionResult
+            ?: return VerifiedCompletionDecision.Blocked("ACTION_RESULT_REQUIRED")
+        if (actionResult.outcome != com.cyclone.mobile.observability.events.ActionOutcome.SUCCEEDED) {
+            return VerifiedCompletionDecision.Blocked("ACTION_NOT_SUCCEEDED")
+        }
+        val actionWitness = actionResult.resultRef
+            ?.takeIf(::isSpecificEvidence)
+            ?: return VerifiedCompletionDecision.Blocked("ACTION_WITNESS_REQUIRED")
+        val verification = payload.verification
+        if (verification?.status != VerificationStatus.VERIFIED) {
             return VerifiedCompletionDecision.Blocked("VERIFICATION_REQUIRED")
         }
-        ledger.append(event)
+        val verificationWitness = verification.resultRef
+            ?.takeIf(::isSpecificEvidence)
+            ?: return VerifiedCompletionDecision.Blocked("VERIFICATION_WITNESS_REQUIRED")
+        val action = payload.proposedAction
+            ?: return VerifiedCompletionDecision.Blocked("ACTION_CORRELATION_REQUIRED")
+        val draft = memoryProposal.draft
+        val requiredEvidence = setOf(
+            event.eventId,
+            payload.decisionId,
+            action.actionCode,
+            actionWitness.toString(),
+            verificationWitness.toString(),
+        )
+        val provenance = draft.provenance
+        if (
+            draft.verificationState != MemoryVerificationState.VERIFIED ||
+            provenance.sourceSystem != "context.ledger" ||
+            provenance.observedAtEpochMillis != event.timestampEpochMillis ||
+            !provenance.evidenceReferences.containsAll(requiredEvidence)
+        ) {
+            return VerifiedCompletionDecision.Blocked("MEMORY_PROVENANCE_MISMATCH")
+        }
+        val envelope = ledger.append(event).envelope
+        if (envelope.eventId != event.eventId || envelope.correlationId != payload.decisionId) {
+            return VerifiedCompletionDecision.Blocked("EVENT_CORRELATION_MISMATCH")
+        }
         val service = memory ?: return VerifiedCompletionDecision.Blocked("MEMORY_UNAVAILABLE")
         return VerifiedCompletionDecision.Recorded(service.proposeWrite(memoryProposal).status)
     }
+
+    /** Validate the exact action before PolicyGovernor can consume a one-shot grant. */
+    private fun actionBindingMismatch(policyRequest: PolicyRequest, phoneRequest: PhoneToolRequest): String? {
+        if (phoneRequest.commandId != policyRequest.actionId) return "ACTION_ID_MISMATCH"
+        if (phoneRequest.tool != policyRequest.capability) return "CAPABILITY_MISMATCH"
+        val target = policyRequest.target ?: return null
+        if (target.packageName != null && phoneTargetValue(phoneRequest, "packageName") != target.packageName) {
+            return "TARGET_SCOPE_MISMATCH"
+        }
+        if (target.targetType != null && phoneTargetValue(phoneRequest, "targetType") != target.targetType) {
+            return "TARGET_SCOPE_MISMATCH"
+        }
+        if (target.targetId != null && phoneTargetValue(phoneRequest, "targetId") != target.targetId) {
+            return "TARGET_SCOPE_MISMATCH"
+        }
+        if (target.attributes.any { (key, value) -> phoneTargetValue(phoneRequest, key) != value }) {
+            return "TARGET_SCOPE_MISMATCH"
+        }
+        return null
+    }
+
+    private fun phoneTargetValue(request: PhoneToolRequest, key: String): String? {
+        val aliases = when (key) {
+            "packageName" -> listOf("package", "packageName")
+            "targetId" -> listOf("targetId", "elementId")
+            else -> listOf(key)
+        }
+        val selector = request.params.optJSONObject("selector")
+        return aliases.asSequence()
+            .mapNotNull { alias -> jsonScalar(request.params.opt(alias)) ?: jsonScalar(selector?.opt(alias)) }
+            .firstOrNull()
+    }
+
+    private fun jsonScalar(value: Any?): String? = when (value) {
+        null, org.json.JSONObject.NULL -> null
+        is String -> value.takeIf { it.isNotBlank() }
+        is Number, is Boolean -> value.toString()
+        else -> null
+    }
+
+    private fun isSpecificEvidence(reference: com.cyclone.mobile.observability.events.EvidenceRef): Boolean =
+        reference.sha256.any { it != '0' }
 }
 
 data class CycloneV3Health(

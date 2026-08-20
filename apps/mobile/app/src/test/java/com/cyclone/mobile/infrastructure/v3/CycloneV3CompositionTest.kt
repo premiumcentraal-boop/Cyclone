@@ -28,6 +28,8 @@ import com.cyclone.mobile.observability.events.ActionResultTrace
 import com.cyclone.mobile.observability.events.ContextDecisionEvent
 import com.cyclone.mobile.observability.events.ContextEventRequest
 import com.cyclone.mobile.observability.events.DecisionStage
+import com.cyclone.mobile.observability.events.EvidenceRef
+import com.cyclone.mobile.observability.events.ProposedActionTrace
 import com.cyclone.mobile.observability.events.VerificationStatus
 import com.cyclone.mobile.observability.events.VerificationTrace
 import com.cyclone.mobile.policy.ActionRisk
@@ -39,6 +41,7 @@ import com.cyclone.mobile.policy.InMemoryPolicyGovernor
 import com.cyclone.mobile.policy.PolicyClock
 import com.cyclone.mobile.policy.PolicyPrincipal
 import com.cyclone.mobile.policy.PolicyRequest
+import com.cyclone.mobile.policy.PolicyTarget
 import com.cyclone.mobile.policy.PrincipalKind
 import com.cyclone.mobile.policy.PrincipalRef
 import org.json.JSONObject
@@ -78,12 +81,131 @@ class CycloneV3CompositionTest {
             PhoneToolRequest("action:open", "phone.click", JSONObject().put("selector", JSONObject().put("text", "Settings"))),
             evidence,
         )
-        val completion = composition.recordVerifiedCompletion(verifiedEvent(), memoryProposal())
+        val event = verifiedEvent()
+        val completion = composition.recordVerifiedCompletion(event, memoryProposal(event))
 
         assertEquals(ActionCompositionDecision.Proposed("handoff:1"), proposed)
         assertEquals(1, proposals)
         assertEquals(0, executorCalls)
         assertEquals(VerifiedCompletionDecision.Recorded(MemoryProposalStatus.READY), completion)
+        assertEquals(1, ledger.query().size)
+    }
+
+    @Test
+    fun mismatchedPhoneActionCannotConsumeGrantOrReachSink() {
+        val governor = governorWithGrant(maximumUses = 1)
+        var proposals = 0
+        val composition = CycloneV3ActionComposition(
+            governor,
+            CanonicalPhoneExecutorProposalSink { proposals += 1; "handoff" },
+            ContextLedger(InMemoryContextLedgerPersistence()),
+            null,
+        )
+        val evidence = DecisionEvidence("goal:1", emptyList(), "observation:1", "observation:1", DecisionSource.AI)
+        val clickPolicy = request()
+
+        assertEquals(
+            ActionCompositionDecision.Blocked("CAPABILITY_MISMATCH"),
+            composition.propose(clickPolicy, PhoneToolRequest("action:open", "phone.type"), evidence),
+        )
+        assertEquals(
+            ActionCompositionDecision.Blocked("CAPABILITY_MISMATCH"),
+            composition.propose(clickPolicy, PhoneToolRequest("action:open", "phone.home"), evidence),
+        )
+        assertEquals(
+            ActionCompositionDecision.Blocked("ACTION_ID_MISMATCH"),
+            composition.propose(clickPolicy, PhoneToolRequest("action:other", "phone.click"), evidence),
+        )
+
+        // The one-use grant remains available because all mismatches fail before policy evaluation.
+        assertEquals(
+            ActionCompositionDecision.Proposed("handoff"),
+            composition.propose(clickPolicy, clickRequest(), evidence),
+        )
+        assertEquals(1, proposals)
+    }
+
+    @Test
+    fun policyTargetMustMatchRepresentablePhoneTargetBeforeGrantConsumption() {
+        val governor = governorWithGrant(maximumUses = 1)
+        var proposals = 0
+        val composition = CycloneV3ActionComposition(
+            governor,
+            CanonicalPhoneExecutorProposalSink { proposals += 1; "handoff" },
+            ContextLedger(InMemoryContextLedgerPersistence()),
+            null,
+        )
+        val evidence = DecisionEvidence("goal:1", emptyList(), "observation:1", "observation:1", DecisionSource.AI)
+        val policy = request().copy(
+            target = PolicyTarget(
+                targetType = "selector",
+                targetId = "element:settings",
+                attributes = mapOf("resourceId" to "settings_row"),
+            ),
+        )
+        val wrong = PhoneToolRequest(
+            "action:open",
+            "phone.click",
+            JSONObject().put("targetType", "selector").put("elementId", "element:other")
+                .put("selector", JSONObject().put("resourceId", "settings_row")),
+        )
+        val correct = PhoneToolRequest(
+            "action:open",
+            "phone.click",
+            JSONObject().put("targetType", "selector").put("elementId", "element:settings")
+                .put("selector", JSONObject().put("resourceId", "settings_row")),
+        )
+
+        assertEquals(ActionCompositionDecision.Blocked("TARGET_SCOPE_MISMATCH"), composition.propose(policy, wrong, evidence))
+        assertEquals(ActionCompositionDecision.Proposed("handoff"), composition.propose(policy, correct, evidence))
+        assertEquals(1, proposals)
+    }
+
+    @Test
+    fun onlySuccessfulCorrelatedVerificationCanProposeVerifiedMemory() {
+        val ledger = ContextLedger(InMemoryContextLedgerPersistence())
+        val composition = CycloneV3ActionComposition(
+            governorWithGrant(),
+            CanonicalPhoneExecutorProposalSink { "unused" },
+            ledger,
+            memory(),
+        )
+        val notExecuted = verifiedEvent("event:not-executed", ActionOutcome.NOT_EXECUTED)
+        val failed = verifiedEvent("event:failed", ActionOutcome.FAILED)
+        val wrongStage = verifiedEvent("event:wrong-stage").copy(
+            payload = verifiedEvent("event:wrong-stage").payload.copy(stage = DecisionStage.ACTION_RESULT),
+        )
+        val missingWitness = verifiedEvent("event:missing-witness").let {
+            it.copy(payload = it.payload.copy(actionResult = ActionResultTrace(ActionOutcome.SUCCEEDED)))
+        }
+        val success = verifiedEvent("event:success")
+
+        assertEquals(
+            VerifiedCompletionDecision.Blocked("ACTION_NOT_SUCCEEDED"),
+            composition.recordVerifiedCompletion(notExecuted, memoryProposal(notExecuted)),
+        )
+        assertEquals(
+            VerifiedCompletionDecision.Blocked("ACTION_NOT_SUCCEEDED"),
+            composition.recordVerifiedCompletion(failed, memoryProposal(failed)),
+        )
+        assertEquals(
+            VerifiedCompletionDecision.Blocked("VERIFICATION_STAGE_REQUIRED"),
+            composition.recordVerifiedCompletion(wrongStage, memoryProposal(wrongStage)),
+        )
+        assertEquals(
+            VerifiedCompletionDecision.Blocked("ACTION_WITNESS_REQUIRED"),
+            composition.recordVerifiedCompletion(missingWitness, memoryProposal(missingWitness, verifiedEvent("event:missing-witness"))),
+        )
+        assertEquals(
+            VerifiedCompletionDecision.Blocked("MEMORY_PROVENANCE_MISMATCH"),
+            composition.recordVerifiedCompletion(success, memoryProposal(success, verifiedEvent("event:other"))),
+        )
+        assertEquals(0, ledger.query().size)
+
+        assertEquals(
+            VerifiedCompletionDecision.Recorded(MemoryProposalStatus.READY),
+            composition.recordVerifiedCompletion(success, memoryProposal(success)),
+        )
         assertEquals(1, ledger.query().size)
     }
 
@@ -112,7 +234,7 @@ class CycloneV3CompositionTest {
         )
     }
 
-    private fun governorWithGrant() = InMemoryPolicyGovernor(PolicyClock { 100 }).also {
+    private fun governorWithGrant(maximumUses: Int = 2) = InMemoryPolicyGovernor(PolicyClock { 100 }).also {
         it.issueGrant(
             AuthorityGrant(
                 grantId = "grant:open",
@@ -122,7 +244,7 @@ class CycloneV3CompositionTest {
                 allowedRisks = setOf(ActionRisk.ROUTINE),
                 issuedAtEpochMillis = 50,
                 expiresAtEpochMillis = 1_000,
-                maximumUses = 2,
+                maximumUses = maximumUses,
             ),
         )
     }
@@ -137,25 +259,49 @@ class CycloneV3CompositionTest {
         grantId = "grant:open",
     )
 
-    private fun verifiedEvent() = ContextEventRequest(
-        eventId = "event:verified",
+    private fun clickRequest() = PhoneToolRequest(
+        "action:open",
+        "phone.click",
+        JSONObject().put("selector", JSONObject().put("text", "Settings")),
+    )
+
+    private fun verifiedEvent(
+        eventId: String = "event:verified",
+        outcome: ActionOutcome = ActionOutcome.SUCCEEDED,
+    ): ContextEventRequest {
+        val actionWitness = EvidenceRef.fromRaw("action_result", "$eventId:action")
+        val verificationWitness = EvidenceRef.fromRaw("verification", "$eventId:verification")
+        return ContextEventRequest(
+        eventId = eventId,
         timestampEpochMillis = 110,
         missionId = "mission:settings",
         payload = ContextDecisionEvent(
             decisionId = "decision:settings",
             stage = DecisionStage.VERIFICATION_RESULT,
-            actionResult = ActionResultTrace(ActionOutcome.NOT_EXECUTED),
-            verification = VerificationTrace(VerificationStatus.VERIFIED),
+            proposedAction = ProposedActionTrace("phone.click"),
+            actionResult = ActionResultTrace(outcome, actionWitness),
+            verification = VerificationTrace(VerificationStatus.VERIFIED, verificationWitness),
         ),
     )
+    }
 
-    private fun memoryProposal() = MemoryWriteProposalRequest(
-        "proposal:settings",
+    private fun memoryProposal(event: ContextEventRequest, evidenceEvent: ContextEventRequest = event) = MemoryWriteProposalRequest(
+        "proposal:${event.eventId}",
         MemoryDraft(
-            "memory:settings",
+            "memory:${event.eventId}",
             1,
             MemoryActor("cyclone.runtime", MemorySourceKind.CYCLONE_RUNTIME),
-            MemoryProvenance("context.ledger", setOf("event:verified"), 110),
+            MemoryProvenance(
+                "context.ledger",
+                setOf(
+                    evidenceEvent.eventId,
+                    evidenceEvent.payload.decisionId,
+                    evidenceEvent.payload.proposedAction!!.actionCode,
+                    evidenceEvent.payload.actionResult!!.resultRef.toString(),
+                    evidenceEvent.payload.verification!!.resultRef.toString(),
+                ),
+                evidenceEvent.timestampEpochMillis,
+            ),
             0.9,
             MemoryVerificationState.VERIFIED,
             MemoryScope(MemoryScopeKind.ROUTINE, "routine:settings"),

@@ -25,6 +25,7 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertEqual(1, workflow.count("./apps/mobile/gradlew"))
         self.assertIn(":app:testDebugUnitTest :app:assembleDebug", workflow)
         self.assertIn("persist-credentials: false", workflow)
+        self.assertLess(workflow.index("wrapper-validation"), workflow.index("./apps/mobile/gradlew"))
 
     def test_release_reuses_and_verifies_without_build_or_publication(self):
         workflow = self.text("mobile-release.yml")
@@ -34,6 +35,10 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertNotIn("gh release", workflow)
         self.assertIn("contents: read", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn(".github/workflows/mobile-ci.yml", workflow)
+        self.assertIn(".conclusion", workflow)
+        self.assertIn("EXPECTED_HEAD_SHA", workflow)
+        self.assertIn("run-id.txt", workflow)
 
     def test_legacy_android_workflows_are_manual_only(self):
         legacy = (
@@ -58,6 +63,22 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertIn("paths:", workflow)
         self.assertIn("contents: read", workflow)
         self.assertIn("cancel-in-progress: true", workflow)
+        self.assertIn("'third_party/mobilerun-portal'", workflow)
+        self.assertIn("'third_party/mobilerun-portal/**'", workflow)
+        self.assertIn("'!apps/mobile/**/*.md'", workflow)
+
+    def test_new_workflow_actions_are_immutable_sha_pinned(self):
+        import re
+        for name in ("_mobile-build.yml", "mobile-release.yml"):
+            for action, ref in re.findall(r"uses:\s*([^\s@]+)@([^\s#]+)", self.text(name)):
+                if action.startswith("./"):
+                    continue
+                self.assertRegex(ref, r"^[0-9a-f]{40}$", f"{name}: {action}")
+
+    def test_core_mobile_runtime_does_not_run_for_android_only_changes(self):
+        workflow = self.text("mobile-ai-runtime.yml")
+        self.assertNotIn("apps/mobile/**", workflow)
+        self.assertNotIn("third_party/mobilerun-portal", workflow)
 
 
 if __name__ == "__main__":

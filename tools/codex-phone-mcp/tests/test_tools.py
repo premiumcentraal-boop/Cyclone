@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from cyclone_phone_mcp.reports import SessionRecorder
+from cyclone_phone_mcp.protocol import classify_failure
 from cyclone_phone_mcp.tools import PhoneTools
 
 
@@ -109,6 +110,45 @@ class ToolTests(unittest.TestCase):
         tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
         tools.call("phone_act", {"tool": "phone.click", "params": {}, "goal": "x"})
         self.assertFalse(tools.last_call_failed)
+
+    def test_typed_nested_reason_precedes_generic_top_level_failure(self):
+        failure = classify_failure({
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "capability_id": "phone.click",
+            "ok": False,
+            "transport": {"ok": True},
+            "execution": {
+                "ok": False,
+                "error": {"code": "POLICY_DENIED", "layer": "POLICY"},
+            },
+            "verification": {"ok": False, "status": "required"},
+            "error": {"code": "GATEWAY_REPORTED_FAILURE", "layer": "GATEWAY"},
+        })
+        self.assertEqual("POLICY_DENIED", failure.code)
+        self.assertEqual("POLICY", failure.layer)
+
+    def test_report_retains_nested_gateway_failure_evidence(self):
+        self.recorder.record(
+            "phone_act",
+            {"tool": "phone.click"},
+            {
+                "error": "Gateway HTTP 409",
+                "gateway": {
+                    "correlation_id": "corr-7",
+                    "before": {"observation_id": "obs-before"},
+                    "after": {"observation_id": "obs-after"},
+                    "error": {"code": "STALE_OBSERVATION", "layer": "PROTOCOL"},
+                },
+            },
+            False,
+            1,
+        )
+        summary = self.recorder.snapshot()["events"][-1]["resultSummary"]["gateway"]
+        self.assertEqual("corr-7", summary["correlation_id"])
+        self.assertEqual("obs-before", summary["before"]["observation_id"])
+        self.assertEqual("obs-after", summary["after"]["observation_id"])
+        self.assertEqual("STALE_OBSERVATION", summary["error"]["code"])
+        self.assertEqual("PROTOCOL", summary["error"]["layer"])
 
 
 if __name__ == "__main__": unittest.main()

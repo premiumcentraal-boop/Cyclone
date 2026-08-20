@@ -12,17 +12,22 @@ SPEC.loader.exec_module(mobile_metadata)
 
 
 class MobileMetadataTest(unittest.TestCase):
-    def read(self, gradle: str):
+    def read(self, gradle: str, *, extra_manifest: str = "", extra_executor: tuple[str, str] | None = None):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         source = root / "src"
         source.mkdir()
-        (source / "PhoneToolExecutor.kt").write_text("object PhoneToolExecutor {}", encoding="utf-8")
+        (source / "PhoneToolExecutor.kt").write_text("public object PhoneToolExecutor {}", encoding="utf-8")
+        if extra_executor:
+            (source / extra_executor[0]).write_text(extra_executor[1], encoding="utf-8")
         manifest = root / "AndroidManifest.xml"
         manifest.write_text(
-            '<activity android:name=".MainActivity"><action android:name="android.intent.action.MAIN"/>'
-            '<category android:name="android.intent.category.LAUNCHER"/></activity>',
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application>'
+            '<activity android:name=".MainActivity"><intent-filter>'
+            '<action android:name="android.intent.action.MAIN"/>'
+            '<category android:name="android.intent.category.LAUNCHER"/>'
+            f'</intent-filter></activity>{extra_manifest}</application></manifest>',
             encoding="utf-8",
         )
         gradle_file = root / "build.gradle.kts"
@@ -45,6 +50,26 @@ class MobileMetadataTest(unittest.TestCase):
     def test_malformed_version_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "malformed versionName"):
             self.read('applicationId = "com.cyclone.mobile"\nversionCode = 17\nversionName = "release-v3"\n')
+
+    def test_second_launcher_activity_or_alias_is_rejected(self):
+        gradle = 'applicationId = "com.cyclone.mobile"\nversionCode = 17\nversionName = "2.9.5"\n'
+        for extra in (
+            '<activity android:name=".Other"><intent-filter><action android:name="android.intent.action.MAIN"/>'
+            '<category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>',
+            '<activity-alias android:name=".Alias" android:targetActivity=".MainActivity"><intent-filter>'
+            '<action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/>'
+            '</intent-filter></activity-alias>',
+        ):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, "one .MainActivity launcher"):
+                self.read(gradle, extra_manifest=extra)
+
+    def test_modified_kotlin_and_java_executor_duplicates_are_detected(self):
+        gradle = 'applicationId = "com.cyclone.mobile"\nversionCode = 17\nversionName = "2.9.5"\n'
+        with self.assertRaisesRegex(ValueError, "one canonical PhoneToolExecutor"):
+            self.read(
+                gradle,
+                extra_executor=("PhoneToolExecutor.java", "public final class PhoneToolExecutor {}"),
+            )
 
 
 if __name__ == "__main__":

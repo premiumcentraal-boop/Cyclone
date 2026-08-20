@@ -100,6 +100,9 @@ def _summary(result: Any) -> Any:
         "transport", "execution", "verification", "error",
     )
     summary = {key: result.get(key) for key in keys if key in result}
+    if isinstance(result.get("gateway"), dict):
+        # GatewayError is wrapped by PhoneTools; keep its safe typed witnesses and reason.
+        summary["gateway"] = _summary(result["gateway"])
     if not summary and isinstance(result.get("result"), dict):
         return _summary(result["result"])
     return redact(summary or {"keys": sorted(result.keys())[:20]})

@@ -60,6 +60,15 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual("obs-7", payload["expected_observation_id"])
         self.assertNotIn("user_authorized", payload)
 
+    def test_mutating_action_before_observe_fails_locally_with_typed_stale_error(self):
+        before = len(Handler.posts)
+        client = GatewayClient(self.url, "test-token")
+        with self.assertRaises(GatewayError) as raised:
+            client.action("phone.home", {}, "Go home")
+        self.assertEqual(before, len(Handler.posts))
+        self.assertEqual("STALE_OBSERVATION", raised.exception.body["error"]["code"])
+        self.assertEqual("PROTOCOL", raised.exception.body["error"]["layer"])
+
     def test_structured_non_200_body_is_preserved(self):
         with self.assertRaises(GatewayError) as raised:
             GatewayClient(self.url, "test-token")._request("POST", "/structured-error", {})

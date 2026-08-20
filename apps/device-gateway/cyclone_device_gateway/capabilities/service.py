@@ -110,6 +110,12 @@ class CapabilityService:
                 request, safety, GatewayErrorCode.CAPABILITY_UNAVAILABLE,
                 FailureLayer.CAPABILITY, "Capability is not declared by the Android allowlist.",
             )
+        if safety.requires_fresh_observation and request.expected_observation_id is None:
+            return self._rejected(
+                request, safety, GatewayErrorCode.STALE_OBSERVATION,
+                FailureLayer.PROTOCOL, "A fresh observation witness is required before this action.",
+                retryable=True,
+            )
         if request.expected_observation_id is not None:
             current = self.store.current_observation()
             current_id = _observation_id(current)

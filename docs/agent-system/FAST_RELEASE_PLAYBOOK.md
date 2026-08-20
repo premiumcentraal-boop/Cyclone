@@ -14,6 +14,10 @@ exact source SHA.
 artifact name; it downloads and verifies the existing artifact. It never recompiles. Publication is
 currently disabled and these builds remain beta/debug-signed unless separately proven otherwise.
 
+Current release blockers are deliberate: Android `versionCode` is still `17`, the CI artifact is a
+debug-signed beta, protected release signing is not configured, and physical-device acceptance has
+not been run for Infrastructure V3. Do not enable publication until each is intentionally resolved.
+
 ## 1. Classify the change first
 
 ### Docs/knowledge only
