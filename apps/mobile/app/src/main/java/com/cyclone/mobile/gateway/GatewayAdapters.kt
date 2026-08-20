@@ -8,11 +8,14 @@ import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.applearner.ActionRisk
 import com.cyclone.mobile.applearner.ActionSafetyPolicy
+import com.cyclone.mobile.applearner.AppGraphSnapshot
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.FollowMeLearnerRuntime
+import com.cyclone.mobile.applearner.FollowMeProgress
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.debug.PageDebugSandboxV293
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.guided.RoutineTeachingSession
 import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
 import org.json.JSONArray
 import org.json.JSONObject
@@ -81,6 +84,13 @@ internal object GatewayPageDebugAdapter {
     }
 }
 
+internal object GatewayGraphQuery {
+    fun matchedScreenId(graph: AppGraphSnapshot?, pageKey: String?): String? {
+        if (graph == null || pageKey.isNullOrBlank()) return null
+        return graph.screens.firstOrNull { it.recognition.semanticFingerprint == pageKey }?.id
+    }
+}
+
 internal object GatewayAppGraphAdapter {
     fun query(context: Context, args: JSONObject): JSONObject {
         AppLearnerRuntime.initialize(context)
@@ -90,8 +100,9 @@ internal object GatewayAppGraphAdapter {
         val goal = args.optString("goal").ifBlank { "Navigate the current app" }
         val requestedPageKey = args.optString("pageKey").takeIf(String::isNotBlank) ?: latest?.page?.pageKey
         val graph = AppLearnerRuntime.graph(packageName)
-        val matchedScreen = requestedPageKey?.let { key -> graph?.screens?.firstOrNull { it.recognition.semanticFingerprint == key } }
-        val retrieval = AppLearnerRuntime.retrieval(packageName, goal, matchedScreen?.id)
+        val matchedScreenId = GatewayGraphQuery.matchedScreenId(graph, requestedPageKey)
+        val matchedScreen = matchedScreenId?.let { id -> graph?.screens?.firstOrNull { it.id == id } }
+        val retrieval = AppLearnerRuntime.retrieval(packageName, goal, matchedScreenId)
         return JSONObject()
             .put("query", JSONObject()
                 .put("package", packageName)
@@ -126,10 +137,30 @@ internal object GatewayBrainAdapter {
         return JSONObject()
             .put("query", JSONObject()
                 .put("goal", GatewayPrivacy.sanitizeDeep(goal))
-                .put("package", packageName.ifBlank { JSONObject.NULL })
+                .put("package", packageName.takeIf(String::isNotBlank) ?: JSONObject.NULL)
                 .put("pageKey", pageKey ?: JSONObject.NULL))
             .put("recall", GatewayPrivacy.sanitizeDeep(recall))
             .put("privacy", "Typed values, passwords, OTPs, provider keys and tokens are excluded or redacted.")
+    }
+}
+
+internal object GatewayActionPolicy {
+    fun requireAllowed(tool: String, params: JSONObject) {
+        val selector = params.optJSONObject("selector")
+        if (tool == "phone.type" && selector != null && ActionSafetyPolicy.looksSensitiveField(selector)) {
+            throw GatewayProtocolException("POLICY_BLOCKED", "PC gateway cannot type passwords, OTPs, PINs, tokens or other authentication secrets")
+        }
+        if (tool !in setOf("phone.click", "phone.long_press")) return
+        val label = selector?.optString("text").orEmpty().ifBlank { selector?.optString("textContains").orEmpty() }
+        val resource = selector?.optString("resourceId").orEmpty()
+        val description = selector?.optString("contentDescription").orEmpty()
+        val risk = ActionSafetyPolicy.classify(label, resource, description)
+        if (risk in setOf(ActionRisk.CONSEQUENTIAL, ActionRisk.AUTHENTICATION, ActionRisk.UNKNOWN)) {
+            throw GatewayProtocolException(
+                "POLICY_BLOCKED",
+                "PC_CODEX cannot bypass Cyclone policy for ${risk.name.lowercase()} controls; use the existing human approval/teaching flow",
+            )
+        }
     }
 }
 
@@ -159,7 +190,7 @@ internal object GatewayActionAdapter {
         if (source != "PC_CODEX") throw GatewayProtocolException("INVALID_SOURCE", "Gateway action source must be PC_CODEX")
         val params = args.optJSONObject("params") ?: JSONObject()
         val goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') }
-        enforcePolicy(tool, params)
+        GatewayActionPolicy.requireAllowed(tool, params)
 
         val before = brainState()
         val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, params))
@@ -185,24 +216,6 @@ internal object GatewayActionAdapter {
             .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
     }
 
-    private fun enforcePolicy(tool: String, params: JSONObject) {
-        val selector = params.optJSONObject("selector")
-        if (tool == "phone.type" && selector != null && ActionSafetyPolicy.looksSensitiveField(selector)) {
-            throw GatewayProtocolException("POLICY_BLOCKED", "PC gateway cannot type passwords, OTPs, PINs, tokens or other authentication secrets")
-        }
-        if (tool !in setOf("phone.click", "phone.long_press")) return
-        val label = selector?.optString("text").orEmpty().ifBlank { selector?.optString("textContains").orEmpty() }
-        val resource = selector?.optString("resourceId").orEmpty()
-        val description = selector?.optString("contentDescription").orEmpty()
-        val risk = ActionSafetyPolicy.classify(label, resource, description)
-        if (risk in setOf(ActionRisk.CONSEQUENTIAL, ActionRisk.AUTHENTICATION, ActionRisk.UNKNOWN)) {
-            throw GatewayProtocolException(
-                "POLICY_BLOCKED",
-                "PC_CODEX cannot bypass Cyclone policy for ${risk.name.lowercase()} controls; use the existing human approval/teaching flow",
-            )
-        }
-    }
-
     private fun brainState(): JSONObject {
         val service = CycloneAccessibilityService.instance
         val snapshot = runCatching { service?.observe(markFresh = false) }.getOrNull()
@@ -217,6 +230,29 @@ internal object GatewayActionAdapter {
         PhoneToolErrorCode.ELEMENT_NOT_FOUND,
         PhoneToolErrorCode.STALE_ELEMENT,
     )
+}
+
+internal object GatewayTeachingMapper {
+    fun toJson(
+        progress: FollowMeProgress,
+        sessionId: String?,
+        session: RoutineTeachingSession?,
+        gestureCount: Int,
+        currentPageKey: String?,
+        fallbackPackage: String?,
+    ): JSONObject = JSONObject()
+        .put("sessionId", sessionId ?: JSONObject.NULL)
+        .put("active", progress.active)
+        .put("paused", progress.paused)
+        .put("currentPackage", progress.currentPackage.ifBlank { fallbackPackage.orEmpty() })
+        .put("currentPageKey", currentPageKey ?: JSONObject.NULL)
+        .put("pageCount", progress.screensSeen)
+        .put("actionCount", progress.actionsSeen)
+        .put("gestureCount", gestureCount)
+        .put("appsSeen", progress.appsSeen)
+        .put("pathsLearned", progress.pathsLearned)
+        .put("message", progress.message)
+        .put("canonicalSessionStatus", session?.status ?: JSONObject.NULL)
 }
 
 internal object GatewayTeachingAdapter {
@@ -234,18 +270,7 @@ internal object GatewayTeachingAdapter {
         val gestureCount = sessionId?.let { TeachingGestureEvidenceV292.list(context, it).size } ?: 0
         val currentPageKey = session?.steps?.asReversed()?.firstOrNull { !it.pageKey.isNullOrBlank() }?.pageKey
             ?: GatewayObservationStore.current()?.page?.pageKey
-        return JSONObject()
-            .put("sessionId", sessionId ?: JSONObject.NULL)
-            .put("active", progress.active)
-            .put("paused", progress.paused)
-            .put("currentPackage", progress.currentPackage.ifBlank { DeviceState.currentPackage.orEmpty() })
-            .put("currentPageKey", currentPageKey ?: JSONObject.NULL)
-            .put("pageCount", progress.screensSeen)
-            .put("actionCount", progress.actionsSeen)
-            .put("gestureCount", gestureCount)
-            .put("appsSeen", progress.appsSeen)
-            .put("pathsLearned", progress.pathsLearned)
-            .put("message", progress.message)
+        return GatewayTeachingMapper.toJson(progress, sessionId, session, gestureCount, currentPageKey, DeviceState.currentPackage)
     }
 
     fun stop(context: Context): JSONObject {
