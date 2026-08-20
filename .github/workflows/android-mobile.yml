@@ -92,13 +92,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt
+          git add \
+            apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt \
+            apps/mobile/app/src/main/java/com/cyclone/mobile/debug/PageDebugSandboxV293.kt
           if git diff --cached --quiet; then
             echo "2.9.3 Teach sandbox source already integrated"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "mobile 2.9.3: surface page debug sandbox in Teach"
+            git commit -m "mobile 2.9.3: persist page debug sandbox integration"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
