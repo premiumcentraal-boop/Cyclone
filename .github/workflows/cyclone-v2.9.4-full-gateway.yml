@@ -1,0 +1,115 @@
+name: Cyclone 2.9.4 Full Gateway
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release/cyclone-mobile-v2.9.4-full-gateway
+
+permissions:
+  contents: read
+
+jobs:
+  full-gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Cyclone
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Install PC gateway and MCP test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m pip install -e "./apps/device-gateway[test]"
+          python -m pip install -e "./tools/codex-phone-mcp"
+
+      - name: Run PC Device Gateway tests
+        run: python -m pytest apps/device-gateway/tests -q
+
+      - name: Run Codex phone MCP tests
+        run: python -m unittest discover -s tools/codex-phone-mcp/tests -v
+
+      - name: Run mocked Codex phone acceptance route
+        run: python -m cyclone_phone_mcp.acceptance --mock
+
+      - name: Verify Mobilerun source
+        run: |
+          test -f third_party/mobilerun-portal/LICENSE
+          test -f third_party/mobilerun-portal/app/src/main/java/com/mobilerun/portal/PortalApplication.kt
+
+      - name: Run Android unit tests
+        run: gradle -p apps/mobile :app:testDebugUnitTest --stacktrace
+
+      - name: Assemble Cyclone 2.9.4 APK
+        run: gradle -p apps/mobile :app:assembleDebug --stacktrace
+
+      - name: Package 2.9.4 artifacts
+        shell: bash
+        run: |
+          mkdir -p dist/pc
+          cp apps/mobile/app/build/outputs/apk/debug/app-debug.apk dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk
+          python -m build --wheel --outdir dist/pc apps/device-gateway
+          python -m build --wheel --outdir dist/pc tools/codex-phone-mcp
+          cp scripts/phone-gateway/first-run.ps1 dist/pc/first-run.ps1
+          cp tools/codex-phone-mcp/codex-config.example.toml dist/pc/codex-config.example.toml
+          cp docs/CODEX_PHONE_FIRST_RUN.md dist/pc/CODEX_PHONE_FIRST_RUN.md
+          cp docs/CYCLONE_V2_9_4_FULL_GATEWAY.md dist/pc/CYCLONE_V2_9_4_FULL_GATEWAY.md
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+
+          root = Path("dist")
+          zip_path = root / "Cyclone-2.9.4-Full-Gateway-Bundle.zip"
+          with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
+              archive.write(root / "Cyclone-Mobile-2.9.4-Full-Gateway.apk", "Cyclone-Mobile-2.9.4-Full-Gateway.apk")
+              for path in sorted((root / "pc").iterdir()):
+                  archive.write(path, f"pc/{path.name}")
+          PY
+
+      - name: Upload 2.9.4 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cyclone-Mobile-2.9.4-Full-Gateway-APK
+          path: dist/Cyclone-Mobile-2.9.4-Full-Gateway.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload 2.9.4 PC Gateway
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cyclone-2.9.4-Full-Gateway-PC
+          path: dist/pc/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload complete 2.9.4 bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cyclone-2.9.4-Full-Gateway-Bundle
+          path: dist/Cyclone-2.9.4-Full-Gateway-Bundle.zip
+          if-no-files-found: error
+          retention-days: 30
