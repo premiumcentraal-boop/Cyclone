@@ -1,0 +1,36 @@
+name: Apply Cyclone 2.9.5 UI Polish
+
+on:
+  push:
+    branches:
+      - release/cyclone-mobile-v2.9.5
+    paths:
+      - scripts/release/apply-v295-ui-polish.py
+      - .github/workflows/apply-v295-ui-polish.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic UI transform
+        run: python scripts/release/apply-v295-ui-polish.py
+      - name: Verify patch cleanliness
+        run: git diff --check
+      - name: Commit transformed UI
+        run: |
+          if git diff --quiet -- apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt; then
+            echo "UI polish already applied"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- apps/mobile/app/src/main/java/com/cyclone/mobile/ui/CycloneMobileV292App.kt
+          git commit -m "ui: integrate Gateway into AI and unify settings/version"
+          git push origin HEAD:release/cyclone-mobile-v2.9.5
