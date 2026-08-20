@@ -13,16 +13,16 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
-import com.cyclone.mobile.ui.CycloneMobileV295App
+import com.cyclone.mobile.ui.CycloneMobileV292App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         initializeCyclone()
         migrateModelDefault()
-        migrateV292Learning()
+        migrateCanonicalLearning()
         TaskResultNotifierV292.ensureChannel(this)
-        setContent { CycloneMobileV295App() }
+        setContent { CycloneMobileV292App() }
     }
 
     override fun onResume() {
@@ -50,8 +50,8 @@ class MainActivity : ComponentActivity() {
         prefs.edit().putBoolean("model_default_migrated", true).apply()
     }
 
-    /** 2.9.2 has one canonical post-mission consolidator, so disable the old optional duplicate worker. */
-    private fun migrateV292Learning() {
+    /** Keep one canonical post-mission consolidator and disable the old optional duplicate worker. */
+    private fun migrateCanonicalLearning() {
         val prefs = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
         if (prefs.getBoolean("v292_learning_migrated", false)) return
         prefs.edit()
