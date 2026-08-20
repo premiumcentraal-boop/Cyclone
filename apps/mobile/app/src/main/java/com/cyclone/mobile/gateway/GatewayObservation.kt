@@ -1,0 +1,221 @@
+package com.cyclone.mobile.gateway
+
+import android.content.Context
+import android.content.res.Configuration
+import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.applearner.PageAwarenessRuntime
+import com.cyclone.mobile.applearner.PageContext
+import com.cyclone.mobile.applearner.PageControl
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.Locale
+import java.util.UUID
+import kotlin.math.max
+
+internal data class GatewayElement(
+    val id: String,
+    val source: String,
+    val label: String,
+    val semanticName: String,
+    val role: String,
+    val evidence: JSONObject,
+)
+
+internal data class GatewayObservation(
+    val id: String,
+    val capturedAt: Long,
+    val page: PageContext,
+    val payload: JSONObject,
+    val elements: Map<String, GatewayElement>,
+)
+
+internal object GatewayObservationStore {
+    @Volatile private var current: GatewayObservation? = null
+    fun current(): GatewayObservation? = current
+    fun replace(observation: GatewayObservation) { current = observation }
+    fun clear() { current = null }
+}
+
+internal object GatewayObservationAdapter {
+    fun capture(context: Context): GatewayObservation {
+        val service = CycloneAccessibilityService.instance
+            ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
+        PageAwarenessRuntime.initialize(context)
+        val snapshot = service.observe(markFresh = true)
+        val raw = snapshot.toJson()
+        val page = PageAwarenessRuntime.capture(context, raw)
+        val safeRaw = GatewayPrivacy.sanitizeAccessibilitySnapshot(raw)
+        val observationId = UUID.randomUUID().toString()
+        val rawNodes = safeRaw.optJSONArray("nodes") ?: JSONArray()
+        val elements = linkedMapOf<String, GatewayElement>()
+        val semanticControls = JSONArray()
+
+        page.controls.forEach { control ->
+            val matchingNode = bestNode(control, rawNodes)
+            val elementId = "semantic:$observationId:${control.key}"
+            val evidence = JSONObject()
+                .put("elementId", elementId)
+                .put("observationId", observationId)
+                .put("source", "semantic")
+                .put("controlKey", control.key)
+                .put("label", control.label)
+                .put("semanticName", control.semanticName)
+                .put("role", control.role)
+                .put("selector", GatewayPrivacy.sanitizeDeep(JSONObject(control.selector.toString())))
+                .put("androidActions", JSONArray(control.androidActions))
+                .put("risk", control.risk.name)
+                .put("expectedEffect", control.expectedEffect ?: JSONObject.NULL)
+                .put("confidence", control.confidence)
+                .put("resourceId", matchingNode?.optString("resourceId").orEmpty())
+                .put("contentDescription", matchingNode?.optString("contentDescription").orEmpty())
+                .put("bounds", matchingNode?.optJSONObject("bounds") ?: JSONObject.NULL)
+                .put("clickable", matchingNode?.optBoolean("clickable") ?: false)
+                .put("longClickable", matchingNode?.optBoolean("longClickable") ?: false)
+                .put("scrollable", matchingNode?.optBoolean("scrollable") ?: false)
+                .put("editable", matchingNode?.optBoolean("editable") ?: false)
+                .put("enabled", matchingNode?.optBoolean("enabled") ?: true)
+                .put("selected", matchingNode?.optBoolean("selected") ?: false)
+                .put("checked", matchingNode?.optBoolean("checked") ?: false)
+                .put("checkable", matchingNode?.optBoolean("checkable") ?: false)
+                .put("rawNodeId", matchingNode?.optString("id")?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
+            semanticControls.put(evidence)
+            elements[elementId] = GatewayElement(elementId, "semantic", control.label, control.semanticName, control.role, evidence)
+        }
+
+        for (index in 0 until rawNodes.length()) {
+            val node = rawNodes.optJSONObject(index) ?: continue
+            val rawId = node.optString("id").ifBlank { "index-$index" }
+            val elementId = "raw:$observationId:$rawId"
+            val label = node.optString("text").takeUnless { it == "<redacted>" }.orEmpty()
+                .ifBlank { node.optString("contentDescription").takeUnless { it == "<redacted>" }.orEmpty() }
+                .ifBlank { node.optString("resourceId").substringAfterLast('/').replace('_', ' ') }
+            val evidence = JSONObject(node.toString())
+                .put("elementId", elementId)
+                .put("observationId", observationId)
+                .put("source", "raw_accessibility")
+            elements[elementId] = GatewayElement(
+                id = elementId,
+                source = "raw_accessibility",
+                label = label,
+                semanticName = semanticize(label),
+                role = node.optString("role"),
+                evidence = evidence,
+            )
+        }
+
+        val fullPage = page.toAgentJson(maxControls = page.controls.size)
+            .put("structuralKey", page.structuralKey)
+            .put("contentKey", page.contentKey)
+            .put("firstSeenAt", page.firstSeenAt)
+            .put("lastSeenAt", page.lastSeenAt)
+            .put("previewPath", page.previewPath ?: JSONObject.NULL)
+        val orientation = when (context.resources.configuration.orientation) {
+            Configuration.ORIENTATION_LANDSCAPE -> "landscape"
+            Configuration.ORIENTATION_PORTRAIT -> "portrait"
+            else -> "undefined"
+        }
+        val payload = JSONObject()
+            .put("observationId", observationId)
+            .put("elementIdScope", "observation-local; IDs are valid only while this observation is current")
+            .put("timestamp", snapshot.timestampMs)
+            .put("package", snapshot.packageName ?: JSONObject.NULL)
+            .put("activity", snapshot.className ?: JSONObject.NULL)
+            .put("display", JSONObject()
+                .put("width", snapshot.screenWidth)
+                .put("height", snapshot.screenHeight)
+                .put("orientation", orientation))
+            .put("pageKey", page.pageKey)
+            .put("pageTitle", page.title)
+            .put("semanticFingerprint", page.pageKey)
+            .put("accessibilityFingerprint", snapshot.fingerprint)
+            .put("pageContext", fullPage)
+            .put("semanticControls", semanticControls)
+            .put("controlCount", page.controls.size)
+            .put("windows", safeRaw.optJSONArray("windows") ?: JSONArray())
+            .put("rawAccessibility", safeRaw)
+            .put("rawNodeCount", rawNodes.length())
+
+        return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements).also(GatewayObservationStore::replace)
+    }
+
+    fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray {
+        val normalized = normalize(query)
+        if (normalized.isBlank()) throw GatewayProtocolException("INVALID_REQUEST", "query is required")
+        val ranked = observation.elements.values.mapNotNull { element ->
+            val score = score(normalized, element)
+            if (score <= 0.0) null else score to element
+        }.sortedWith(compareByDescending<Pair<Double, GatewayElement>> { it.first }
+            .thenBy { if (it.second.source == "semantic") 0 else 1 }
+            .thenBy { it.second.label })
+            .take(limit.coerceIn(1, 100))
+        return JSONArray().also { out ->
+            ranked.forEach { (score, element) ->
+                val e = element.evidence
+                out.put(JSONObject()
+                    .put("elementId", element.id)
+                    .put("observationId", observation.id)
+                    .put("label", element.label)
+                    .put("semanticName", element.semanticName)
+                    .put("role", element.role)
+                    .put("resourceId", e.optString("resourceId"))
+                    .put("contentDescription", e.optString("contentDescription"))
+                    .put("bounds", e.optJSONObject("bounds") ?: JSONObject.NULL)
+                    .put("actions", e.optJSONArray("androidActions") ?: e.optJSONArray("actions") ?: JSONArray())
+                    .put("source", element.source)
+                    .put("relevance", score))
+            }
+        }
+    }
+
+    fun element(observation: GatewayObservation, elementId: String): JSONObject {
+        val embeddedObservation = elementId.split(':').getOrNull(1)
+        if (embeddedObservation != null && embeddedObservation != observation.id) {
+            throw GatewayProtocolException("STALE_ELEMENT", "Element ID belongs to a previous observation")
+        }
+        return observation.elements[elementId]?.evidence
+            ?: throw GatewayProtocolException("ELEMENT_NOT_FOUND", "Element ID is not present in the current observation")
+    }
+
+    private fun bestNode(control: PageControl, nodes: JSONArray): JSONObject? {
+        val selector = control.selector
+        var best: JSONObject? = null
+        var bestScore = -1
+        for (index in 0 until nodes.length()) {
+            val node = nodes.optJSONObject(index) ?: continue
+            var score = 0
+            val resource = selector.optString("resourceId")
+            val text = selector.optString("text")
+            val description = selector.optString("contentDescription")
+            val role = selector.optString("role")
+            if (resource.isNotBlank()) score += if (resource == node.optString("resourceId")) 8 else -5
+            if (text.isNotBlank()) score += if (normalize(text) == normalize(node.optString("text"))) 5 else 0
+            if (description.isNotBlank()) score += if (normalize(description) == normalize(node.optString("contentDescription"))) 5 else 0
+            if (role.isNotBlank() && role.equals(node.optString("role"), ignoreCase = true)) score += 2
+            if (score > bestScore) { bestScore = score; best = node }
+        }
+        return best?.takeIf { bestScore > 0 }
+    }
+
+    private fun score(query: String, element: GatewayElement): Double {
+        val label = normalize(element.label)
+        val semantic = normalize(element.semanticName)
+        val resource = normalize(element.evidence.optString("resourceId").substringAfterLast('/'))
+        val description = normalize(element.evidence.optString("contentDescription"))
+        val corpus = "$label $semantic $resource $description ${normalize(element.role)}"
+        if (label == query || semantic == query || resource == query || description == query) return 1.0
+        if (label.contains(query) || semantic.contains(query) || resource.contains(query) || description.contains(query)) return 0.92
+        val tokens = query.split(' ').filter { it.length >= 2 }.distinct()
+        if (tokens.isEmpty()) return 0.0
+        val matched = tokens.count(corpus::contains)
+        if (matched == 0) return 0.0
+        val ratio = matched.toDouble() / tokens.size
+        return (0.50 + ratio * 0.35 + if (element.source == "semantic") 0.05 else 0.0).coerceAtMost(0.89)
+    }
+
+    private fun normalize(value: String): String = value.lowercase(Locale.US)
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    private fun semanticize(value: String): String = normalize(value).replace(' ', '_').take(100)
+}
