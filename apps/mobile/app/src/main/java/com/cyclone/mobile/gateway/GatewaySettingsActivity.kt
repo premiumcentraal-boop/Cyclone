@@ -68,7 +68,7 @@ import kotlinx.coroutines.delay
 class GatewaySettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        GatewayRuntime.startIfEnabled(this)
+        GatewayRuntime.startPairingBootstrap(this)
         setContent {
             CycloneTheme {
                 GatewayControlCenter(
@@ -111,6 +111,9 @@ private fun GatewayControlCenter(
     val connected = session?.optBoolean("connected") == true
     val socketReady = status.optBoolean("socketListening")
     val productionAuthority = status.optBoolean("productionActionAuthorityBound")
+    val pairingCode = remember(refreshTick) { GatewayDesktopPairingManager.codeForUser() }
+    val pairingExpiresAt = remember(refreshTick) { GatewayDesktopPairingManager.expiresAtForUser() }
+    val clipboardEnabled = remember(refreshTick) { GatewayDesktopPreferences.clipboardEnabled(context) }
     val state = when (status.optString("gatewayState")) {
         "CONNECTED" -> GatewayUiState.CONNECTED
         "WAITING_FOR_PC" -> GatewayUiState.WAITING
@@ -184,10 +187,56 @@ private fun GatewayControlCenter(
                             value = when {
                                 connected -> "Connected"
                                 enabled -> "Waiting"
-                                else -> "Off"
+                                else -> "Ready to pair"
                             },
                             ready = connected,
                         )
+                        HorizontalDivider()
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Clipboard paste", fontWeight = FontWeight.Medium)
+                                Text(
+                                    "Opt in to PC → phone clipboard. Password, OTP and token-like values are blocked.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = clipboardEnabled,
+                                onCheckedChange = {
+                                    GatewayDesktopPreferences.setClipboardEnabled(context, it)
+                                    refreshTick++
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (pairingCode != null) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("Desktop pairing code", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                pairingCode,
+                                style = MaterialTheme.typography.displaySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            val seconds = (((pairingExpiresAt ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L) / 1000L)
+                            Text(
+                                "Enter this on your PC. Expires in about ${seconds}s. The four letters are only a confirmation challenge, not your real credential.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 }
             }
@@ -237,9 +286,9 @@ private fun GatewayControlCenter(
                                 }
                                 Spacer(Modifier.width(11.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text("Connection code", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text("Legacy session token", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                     Text(
-                                        if (tokenReady) "Ready to copy for this trusted PC session." else "Creating a secure connection code…",
+                                        if (tokenReady) "Kept for the existing PC/Codex bridge. Desktop fleet pairing does not require copying it." else "Creating a secure session token…",
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                 }
@@ -251,19 +300,19 @@ private fun GatewayControlCenter(
                             ) {
                                 Icon(Icons.Rounded.ContentCopy, null)
                                 Spacer(Modifier.width(7.dp))
-                                Text("Copy connection code")
+                                Text("Copy legacy session token")
                             }
                             OutlinedButton(
                                 onClick = {
                                     GatewayRuntime.rotateToken(context)
                                     refreshTick++
-                                    Toast.makeText(context, "New connection code created", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "New session token created", Toast.LENGTH_SHORT).show()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Icon(Icons.Rounded.Refresh, null)
                                 Spacer(Modifier.width(7.dp))
-                                Text("Create new code")
+                                Text("Rotate session token")
                             }
                             if (connected) {
                                 OutlinedButton(
@@ -284,8 +333,8 @@ private fun GatewayControlCenter(
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
                         Text("Connect your PC", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         GatewayStep("1", "Connect USB", "Plug this phone into your Windows PC and allow USB debugging.")
-                        GatewayStep("2", "Set up Cyclone Bridge", "On Windows, run setup-cyclone-bridge.ps1 once.")
-                        GatewayStep("3", "Start the connection", "Copy the connection code above, then run start-cyclone-bridge.ps1.")
+                        GatewayStep("2", "Pair from Cyclone Desktop", "Choose this phone and click Pair. Cyclone will show a four-letter code here.")
+                        GatewayStep("3", "Confirm the code", "Enter the four letters on your PC. Cyclone then creates a separate strong session credential automatically.")
                     }
                 }
             }
@@ -322,13 +371,15 @@ private fun GatewayControlCenter(
                     Card(shape = RoundedCornerShape(20.dp)) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Bridge diagnostics", fontWeight = FontWeight.Bold)
-                            DiagnosticLine("Android bridge", if (socketReady) "READY" else "OFF")
+                            DiagnosticLine("Pairing bootstrap", if (status.optBoolean("pairingBootstrapListening")) "READY" else "OFF")
+                            DiagnosticLine("Android bridge", if (socketReady) "READY" else if (enabled) "STARTING" else "PAIRING ONLY")
                             DiagnosticLine("ADB clients", (session?.optInt("clientCount") ?: 0).toString())
                             DiagnosticLine("Action policy", if (productionAuthority) "V3.1 ACTIVE" else "SAFE / NOT BOUND")
+                            DiagnosticLine("Clipboard", if (clipboardEnabled) "PC → PHONE" else "OFF")
                             DiagnosticLine("Protocol", status.optString("protocolVersion").ifBlank { "Unknown" })
                             HorizontalDivider()
                             Text(
-                                "USB only · 127.0.0.1 on the PC · no arbitrary shell/root tools · sensitive typed values are excluded from Gateway diagnostics.",
+                                "USB only · no phone LAN listener · no arbitrary shell/root tools · pairing codes, clipboard content and typed values are excluded from Gateway diagnostics.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -362,7 +413,7 @@ private fun GatewayHero(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("PC Gateway", fontWeight = FontWeight.SemiBold)
-                    Text("Only active when you choose to use it.", style = MaterialTheme.typography.bodySmall)
+                    Text("Only active after you enable it or confirm Desktop pairing.", style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(checked = enabled, onCheckedChange = onEnabledChange)
             }
@@ -417,6 +468,6 @@ private fun DiagnosticLine(label: String, value: String) {
 private fun copySessionToken(context: Context) {
     val token = GatewayRuntime.tokenForUser(context)?.takeIf(String::isNotBlank) ?: return
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText("Cyclone Gateway connection code", token))
-    Toast.makeText(context, "Connection code copied", Toast.LENGTH_SHORT).show()
+    clipboard.setPrimaryClip(ClipData.newPlainText("Cyclone Gateway legacy session token", token))
+    Toast.makeText(context, "Legacy session token copied", Toast.LENGTH_SHORT).show()
 }
