@@ -1,12 +1,13 @@
 from pathlib import Path
 
 repo = Path(SPECPATH).resolve().parents[2]
+entrypoints = repo / "scripts" / "pc-companion" / "entrypoints"
 a = Analysis(
-    [str(repo / "scripts" / "pc-companion" / "entrypoints" / "pc_runtime.py")],
-    pathex=[str(repo / "apps" / "device-gateway")],
+    [str(entrypoints / "pc_runtime.py")],
+    pathex=[str(repo / "apps" / "device-gateway"), str(entrypoints)],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=["secure_gateway_token"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -22,5 +23,5 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,
+    console=False,
 )
