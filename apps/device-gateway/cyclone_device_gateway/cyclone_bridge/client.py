@@ -65,8 +65,10 @@ class CycloneBridgeClient:
         if op not in ALLOWED_OPS:
             raise BridgeError(f"Unknown bridge operation: {op}")
         self._prepare_usb_bridge()
-        correlation_id = request_id or str(uuid.uuid4())
-        payload = {"id": correlation_id, "op": op, "args": args or {}, "auth": self.token}
+        request_args = args or {}
+        inherited_id = request_args.get("correlationId") if isinstance(request_args, dict) else None
+        correlation_id = request_id or (str(inherited_id) if inherited_id else None) or str(uuid.uuid4())
+        payload = {"id": correlation_id, "op": op, "args": request_args, "auth": self.token}
         try:
             with socket.create_connection((self.host, self.port), timeout=self.timeout) as s:
                 f = s.makefile("rwb")
