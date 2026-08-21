@@ -63,6 +63,9 @@ class PhoneTools:
     def phone_status(self, _: dict[str, Any]) -> Any:
         return redact(self.gateway.status())
 
+    def phone_capabilities(self, args: dict[str, Any]) -> Any:
+        return redact(self.gateway.capabilities(refresh=bool(args.get("refresh", False))))
+
     def phone_observe(self, args: dict[str, Any]) -> Any:
         mode = str(args.get("mode") or "compact")
         include_screenshot = bool(args.get("include_screenshot", False))
@@ -119,7 +122,9 @@ class PhoneTools:
         if not goal:
             raise ValueError("goal is required")
         if tool == "phone.type" and args.get("user_authorized") is not True:
-            raise ValueError("phone.type requires user_authorized=true because it can enter consequential content")
+            # This is only an MCP-side intent/UX guard. It is never Android policy authority;
+            # the V3 GatewayActionAuthority must still authorize the actual handoff.
+            raise ValueError("phone.type requires user_authorized=true as an explicit MCP intent acknowledgement")
         result = redact(self.gateway.action(tool, params, goal))
         failure = classify_failure(result)
         if failure:
