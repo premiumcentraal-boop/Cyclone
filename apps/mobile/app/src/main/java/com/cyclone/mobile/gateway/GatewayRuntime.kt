@@ -13,7 +13,8 @@ import java.io.File
 object GatewayRuntime {
     @Volatile private var appContext: Context? = null
     @Volatile private var server: GatewaySocketServer? = null
-    @Volatile private var lastError: String? = null
+    @Volatile private var listenerError: String? = null
+    @Volatile private var lastSafeError: String? = null
 
     @Synchronized
     fun startIfEnabled(context: Context) {
@@ -28,6 +29,7 @@ object GatewayRuntime {
         appContext = context.applicationContext
         val token = GatewaySessionStore.enable(context)
         startLocked(context.applicationContext)
+        lastSafeError = null
         return token
     }
 
@@ -38,7 +40,8 @@ object GatewayRuntime {
         server = null
         GatewayObservationStore.clear()
         GatewaySessionStore.disable(context)
-        lastError = null
+        listenerError = null
+        lastSafeError = null
     }
 
     @Synchronized
@@ -46,16 +49,26 @@ object GatewayRuntime {
         appContext = context.applicationContext
         val token = GatewaySessionStore.rotate(context)
         server?.disconnectClients()
+        lastSafeError = "Session token rotated. Reconnect the PC with the new token."
         return token
     }
 
     @Synchronized
     fun disconnect() {
         server?.disconnectClients()
+        lastSafeError = null
     }
 
     fun isEnabled(context: Context): Boolean = GatewaySessionStore.enabled(context)
     fun tokenForUser(context: Context): String? = GatewaySessionStore.token(context)
+
+    internal fun reportSafeError(message: String?) {
+        lastSafeError = message?.take(240)
+    }
+
+    internal fun clearSafeError() {
+        lastSafeError = null
+    }
 
     fun status(context: Context): JSONObject {
         val current = GatewayObservationStore.current()
@@ -64,12 +77,20 @@ object GatewayRuntime {
         val enabled = GatewaySessionStore.enabled(context)
         val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
         val connected = socket?.connectedClients() ?: 0
+        val listening = enabled && socket?.isRunning() == true
+        val state = when {
+            !enabled -> "OFF"
+            !listening || !DeviceState.accessibilityConnected || listenerError != null -> "ATTENTION_NEEDED"
+            connected > 0 -> "CONNECTED"
+            else -> "WAITING_FOR_PC"
+        }
         return JSONObject()
             .put("protocolVersion", GatewayProtocol.VERSION)
             .put("appVersion", packageInfo?.versionName ?: BuildConfig.VERSION_NAME)
             .put("package", context.packageName)
+            .put("gatewayState", state)
             .put("gatewayEnabled", enabled)
-            .put("socketListening", enabled && socket?.isRunning() == true)
+            .put("socketListening", listening)
             .put("socketName", GatewayProtocol.SOCKET_NAME)
             .put("networkListener", false)
             .put("accessibilityConnected", DeviceState.accessibilityConnected)
@@ -79,6 +100,8 @@ object GatewayRuntime {
             .put("currentPageKey", current?.page?.pageKey ?: JSONObject.NULL)
             .put("rootAppearsAvailable", rootAppearsAvailable())
             .put("rootShellExposed", false)
+            .put("actionAuthorityBinding", GatewayActionAuthorityRegistry.bindingName())
+            .put("productionActionAuthorityBound", GatewayActionAuthorityRegistry.isProductionAuthorityBound())
             .put("connectedSession", JSONObject()
                 .put("connected", connected > 0)
                 .put("clientCount", connected)
@@ -94,7 +117,8 @@ object GatewayRuntime {
                 .put("adaptiveBrainRecall", true)
                 .put("canonicalTeaching", true))
             .put("adbForward", "adb forward tcp:${GatewayProtocol.DEFAULT_FORWARD_PORT} localabstract:${GatewayProtocol.SOCKET_NAME}")
-            .put("lastError", lastError ?: JSONObject.NULL)
+            .put("lastError", listenerError ?: JSONObject.NULL)
+            .put("lastSafeError", lastSafeError ?: JSONObject.NULL)
     }
 
     private fun rootAppearsAvailable(): Boolean = listOf(
@@ -106,10 +130,10 @@ object GatewayRuntime {
         if (server?.isRunning() == true) return
         try {
             server = GatewaySocketServer { line -> GatewayDispatcher.handle(context, line) }.also { it.start() }
-            lastError = null
+            listenerError = null
         } catch (error: Exception) {
             server = null
-            lastError = (error.message ?: error.javaClass.simpleName).take(240)
+            listenerError = (error.message ?: error.javaClass.simpleName).take(240)
         }
     }
 }
@@ -121,17 +145,23 @@ internal object GatewayDispatcher {
             val request = GatewayProtocol.parse(line)
             id = request.id
             if (!GatewaySessionStore.enabled(context)) {
-                GatewayProtocol.error(id, "GATEWAY_DISABLED", "PC Gateway is disabled").toString()
+                GatewayRuntime.reportSafeError("Full PC + Codex Gateway is off on this phone.")
+                GatewayProtocol.error(id, "CAPABILITY_UNAVAILABLE", "PC Gateway is disabled").toString()
             } else if (!GatewaySessionStore.authenticate(context, request.auth)) {
+                GatewayRuntime.reportSafeError("PC authentication failed. Copy the current session token and reconnect.")
                 GatewayProtocol.error(id, "AUTH_REJECTED", "Session token is invalid or has been rotated").toString()
             } else {
                 GatewayProtocol.requireKnownOperation(request.op, request.id)
-                GatewayProtocol.success(id, dispatch(context, request)).toString()
+                val result = dispatch(context, request)
+                GatewayRuntime.clearSafeError()
+                GatewayProtocol.success(id, result).toString()
             }
         } catch (error: GatewayProtocolException) {
+            GatewayRuntime.reportSafeError(error.message)
             GatewayProtocol.error(error.requestId.ifBlank { id }, error.code, error.message).toString()
         } catch (error: Exception) {
-            GatewayProtocol.error(id, "INTERNAL_ERROR", error.message ?: "Gateway operation failed").toString()
+            GatewayRuntime.reportSafeError("Gateway operation failed safely. Open diagnostics or reconnect the USB session.")
+            GatewayProtocol.error(id, "INTERNAL_ERROR", "Gateway operation failed").toString()
         }
     }
 
@@ -149,9 +179,9 @@ internal object GatewayDispatcher {
         }
         "ui.element" -> {
             val observation = GatewayObservationStore.current()
-                ?: throw GatewayProtocolException("NO_OBSERVATION", "Call observe.semantic before ui.element")
+                ?: throw GatewayProtocolException("STALE_OBSERVATION", "Call observe.semantic before ui.element")
             val elementId = request.args.optString("elementId", request.args.optString("id"))
-            if (elementId.isBlank()) throw GatewayProtocolException("INVALID_REQUEST", "elementId is required")
+            if (elementId.isBlank()) throw GatewayProtocolException("PROTOCOL_MISMATCH", "elementId is required")
             GatewayObservationAdapter.element(observation, elementId)
         }
         "app_graph.get" -> GatewayAppGraphAdapter.query(context, request.args)
@@ -161,7 +191,7 @@ internal object GatewayDispatcher {
         "teach.status" -> GatewayTeachingAdapter.status(context)
         "teach.stop" -> GatewayTeachingAdapter.stop(context)
         "debug.snapshot" -> debugSnapshot(context)
-        else -> throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported gateway operation: ${request.op}", request.id)
+        else -> throw GatewayProtocolException("PROTOCOL_MISMATCH", "Unsupported gateway operation: ${request.op}", request.id)
     }
 
     private fun debugSnapshot(context: Context): JSONObject {
