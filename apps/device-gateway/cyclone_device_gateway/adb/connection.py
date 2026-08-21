@@ -110,3 +110,24 @@ class BridgeConnectionManager:
                 "Cyclone Accessibility is off. Enable the Cyclone accessibility service in Android Settings.",
             )
         return BridgeReadiness(device=device, bridge_status=status, forward_recreated=recreated)
+
+
+class ManagedCycloneBridge:
+    """Reconnect-aware facade with the same request interface as CycloneBridgeClient."""
+
+    def __init__(self, raw_bridge, connection: BridgeConnectionManager):
+        self.raw_bridge = raw_bridge
+        self.connection = connection
+
+    def request(self, op: str, args: dict | None = None) -> dict:
+        try:
+            readiness = self.connection.ensure_ready(
+                require_accessibility=op not in {"bridge.status", "debug.snapshot"}
+            )
+        except BridgeReadinessError as exc:
+            if exc.code == "DEVICE_DISCONNECTED":
+                raise BridgeDisconnectedError(exc.safe_message) from exc
+            raise BridgeOperationError(exc.code) from exc
+        if op == "bridge.status":
+            return readiness.bridge_status
+        return self.raw_bridge.request(op, args or {})
