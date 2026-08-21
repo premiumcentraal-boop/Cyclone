@@ -22,6 +22,15 @@ jobs:
           python3 scripts/ci/mobile_metadata.py --github-output "$GITHUB_OUTPUT" --json mobile-metadata.json
           python3 -m unittest discover -s scripts/ci/tests -v
           PYTHONPATH=tools/cyclone-agent-coordinator python3 -m unittest discover -s tools/cyclone-agent-coordinator/tests -v
+      - name: Verify Cyclone PC Gateway and MCP
+        shell: bash
+        run: |
+          python3 -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp
+          python3 -m pytest apps/device-gateway/tests -q
+          python3 -m unittest discover -s tools/codex-phone-mcp/tests -v
+      - name: Dry-run Windows bridge setup
+        shell: pwsh
+        run: ./scripts/phone-gateway/setup-cyclone-bridge.ps1 -DryRun
       - name: Validate Gradle wrapper supply chain
         uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - name: Set up JDK 17
