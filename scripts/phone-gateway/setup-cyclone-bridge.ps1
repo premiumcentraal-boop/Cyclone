@@ -120,7 +120,10 @@ if ($Adb) {
     }
     if ($DeviceSerial) { $env:CYCLONE_DEVICE_SERIAL = $DeviceSerial }
     if (-not $DryRun -and $Devices -match "\sdevice(\s|$)") {
-        & adb @($(if ($DeviceSerial) { @("-s", $DeviceSerial) } else { @() })) forward tcp:8766 localabstract:cyclone_gateway
+        $ForwardArgs = @()
+        if ($DeviceSerial) { $ForwardArgs += @("-s", $DeviceSerial) }
+        $ForwardArgs += @("forward", "tcp:8766", "localabstract:cyclone_gateway")
+        & adb @ForwardArgs
         if ($LASTEXITCODE -ne 0) { throw "Could not create ADB forward." }
         Write-Host "ADB Forward READY: tcp:8766 -> localabstract:cyclone_gateway"
     }
@@ -128,7 +131,7 @@ if ($Adb) {
 
 Write-Step "Android session token"
 Write-Host "One phone action is still required for V3.1 Beta:"
-Write-Host "Cyclone -> AI -> Full PC + Codex Gateway -> Enable -> Copy session token"
+Write-Host "Cyclone -> AI -> Full PC + Codex Gateway -> Enable -> Copy connection code"
 Write-Host "Do NOT save that Android token in the repo. start-cyclone-bridge.ps1 prompts for it and keeps it session-only."
 
 Write-Step "Bridge doctor"
