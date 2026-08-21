@@ -22,8 +22,12 @@ jobs:
       VERIFIED_RUN_ID: '32534283707'
       DESKTOP_ARTIFACT: cyclone-pc-companion-v1-3c23634e5765f7da5f9d18a78281a0704d35004b
       MOBILE_ARTIFACT: Cyclone-Mobile-3.1.0-beta.1
+      STATUS_BRANCH: release/cyclone-mobile-v3.1-beta
+      STATUS_PATH: .release-status/v31-desktop-v1.json
     steps:
       - name: Download verified green artifacts
+        id: download
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -38,7 +42,9 @@ jobs:
           fi
           test -f release-assets/desktop/Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe
           test -f release-assets/mobile/Cyclone-Mobile-3.1.0-beta.1.apk
+
       - name: Write beta release notes
+        if: steps.download.outcome == 'success'
         shell: bash
         run: |
           cat > release-notes.md <<'EOF'
@@ -70,12 +76,17 @@ jobs:
 
           This remains a beta test release; physical multi-phone USB/video throughput is not yet certified as production-ready.
           EOF
+
       - name: Publish GitHub prerelease
+        id: publish
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            echo "Release $RELEASE_TAG already exists; keeping the existing prerelease."
+            exit 0
           fi
           mapfile -t assets < <(find release-assets -type f -print | sort)
           test ${#assets[@]} -gt 0
@@ -85,3 +96,43 @@ jobs:
             --title "$RELEASE_TITLE" \
             --notes-file release-notes.md \
             --prerelease
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+      - name: Record publisher status
+        if: always()
+        shell: bash
+        env:
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        run: |
+          set -euo pipefail
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg release_target "$RELEASE_TARGET" \
+            --arg verified_run_id "$VERIFIED_RUN_ID" \
+            --arg workflow_run_id "$GITHUB_RUN_ID" \
+            --arg workflow_sha "$GITHUB_SHA" \
+            --arg download "$DOWNLOAD_OUTCOME" \
+            --arg publish "$PUBLISH_OUTCOME" \
+            --arg updated_at "$now" \
+            '{release_tag:$release_tag,release_target:$release_target,verified_run_id:$verified_run_id,workflow_run_id:$workflow_run_id,workflow_sha:$workflow_sha,download:$download,publish:$publish,updated_at:$updated_at}' > status.json
+          encoded="$(base64 -w0 status.json)"
+          api_path="repos/$GITHUB_REPOSITORY/contents/$STATUS_PATH"
+          existing_sha="$(gh api "$api_path?ref=$STATUS_BRANCH" --jq '.sha' 2>/dev/null || true)"
+          args=(--method PUT "$api_path" -f message="release: record V3.1 Desktop V1 publisher status" -f content="$encoded" -f branch="$STATUS_BRANCH")
+          if [[ -n "$existing_sha" ]]; then
+            args+=(-f sha="$existing_sha")
+          fi
+          gh api "${args[@]}" >/dev/null
+
+      - name: Fail if publication did not succeed
+        if: always()
+        shell: bash
+        env:
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        run: |
+          set -euo pipefail
+          test "$DOWNLOAD_OUTCOME" = success
+          test "$PUBLISH_OUTCOME" = success
