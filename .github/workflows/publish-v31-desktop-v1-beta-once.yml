@@ -1,0 +1,87 @@
+name: Publish Cyclone V3.1 + Desktop V1 Beta Once
+
+on:
+  push:
+    branches:
+      - release/cyclone-mobile-v3.1-beta
+    paths:
+      - .github/workflows/publish-v31-desktop-v1-beta-once.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v3.1.0-beta.1-desktop-v1
+      RELEASE_TITLE: Cyclone V3.1 + PC Companion V1 Beta
+      RELEASE_TARGET: 846496d2321e8f843a41ff09a975dbe3ce0ad6e8
+      VERIFIED_RUN_ID: '32534283707'
+      DESKTOP_ARTIFACT: cyclone-pc-companion-v1-3c23634e5765f7da5f9d18a78281a0704d35004b
+      MOBILE_ARTIFACT: Cyclone-Mobile-3.1.0-beta.1
+    steps:
+      - name: Download verified green artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets/desktop release-assets/mobile
+          gh run download "$VERIFIED_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$DESKTOP_ARTIFACT" --dir release-assets/desktop
+          gh run download "$VERIFIED_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$MOBILE_ARTIFACT" --dir release-assets/mobile
+          if [[ -f release-assets/desktop/source-sha.txt ]]; then
+            mv release-assets/desktop/source-sha.txt release-assets/desktop/Cyclone-PC-source-sha.txt
+          fi
+          if [[ -f release-assets/mobile/source-sha.txt ]]; then
+            mv release-assets/mobile/source-sha.txt release-assets/mobile/Cyclone-Mobile-source-sha.txt
+          fi
+          test -f release-assets/desktop/Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe
+          test -f release-assets/mobile/Cyclone-Mobile-3.1.0-beta.1.apk
+      - name: Write beta release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          # Cyclone V3.1 + PC Companion V1 Beta
+
+          This prerelease pairs Cyclone Mobile V3.1 beta with Cyclone PC Companion V1 beta for end-to-end USB Gateway testing.
+
+          ## Downloads
+          - **Windows:** `Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe`
+          - **Android:** `Cyclone-Mobile-3.1.0-beta.1.apk`
+          - Checksums, source-SHA provenance, release provenance, and third-party notices are included as release assets.
+
+          ## Included
+          - Cyclone Mobile 3.1.0-beta.1 with Desktop V1 USB pairing/Gateway support.
+          - Cyclone PC Companion 1.0.0-beta.1 Windows installer.
+          - Multi-phone USB fleet discovery and per-phone pairing.
+          - Live phone views, focused manual controls, keyboard input, and PC-to-phone clipboard support.
+          - Cyclone Agent MCP for Codex, OpenCode/DeepSeek-compatible MCP harnesses, Copilot CLI-compatible generic MCP profiles, and other MCP clients.
+          - Authenticated loopback-only PC Gateway; no arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed.
+
+          ## Beta requirements
+          - Windows desktop PC.
+          - Android phone running the included Cyclone V3.1 beta APK.
+          - Developer options and USB debugging enabled for USB Gateway use.
+          - Cyclone Accessibility enabled on the phone for phone control.
+
+          ## Verification
+          The Windows installer and Android APK passed the automated Desktop V1, MCP, Gateway, desktop UI, Android unit, Gradle assembly, checksum, and provenance gates before publication. The verified artifact build tree is identical to release target `846496d2321e8f843a41ff09a975dbe3ce0ad6e8`.
+
+          This remains a beta test release; physical multi-phone USB/video throughput is not yet certified as production-ready.
+          EOF
+      - name: Publish GitHub prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+          mapfile -t assets < <(find release-assets -type f -print | sort)
+          test ${#assets[@]} -gt 0
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_TARGET" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release-notes.md \
+            --prerelease
