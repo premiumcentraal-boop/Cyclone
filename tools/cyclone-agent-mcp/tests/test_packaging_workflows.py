@@ -14,7 +14,7 @@ def load_script(name: str):
 
 def test_sidecar_lock_is_exact_and_specs_exist():
     lock = json.loads((REPO / "packaging/pc-companion/sidecar-build.lock.json").read_text())
-    assert lock["python"] == "3.14.7"
+    assert lock["python"] == "3.13.7"
     assert lock["pyinstaller"] == "6.22.0"
     assert lock["mcp"] == "2.0.0"
     assert {x["name"] for x in lock["sidecars"]} == {"CyclonePCRuntime.exe", "CycloneAgentMCP.exe"}
