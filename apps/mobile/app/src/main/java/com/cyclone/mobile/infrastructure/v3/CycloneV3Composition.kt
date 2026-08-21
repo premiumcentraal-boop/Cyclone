@@ -54,6 +54,14 @@ fun interface TrustedPolicyTargetResolver {
     fun resolve(actionId: String, evidence: DecisionEvidence): PolicyTarget?
 }
 
+/**
+ * Optional production seam for freshness checks that need more than observation-id equality.
+ * Implementations must be read-only and fail closed; they cannot grant authority or execute.
+ */
+fun interface TrustedDecisionEvidenceValidator {
+    fun invalidReason(actionId: String, evidence: DecisionEvidence): String?
+}
+
 sealed interface ActionCompositionDecision {
     data class Proposed(val handoffId: String) : ActionCompositionDecision
     data class Blocked(val reasonCode: String) : ActionCompositionDecision
@@ -71,6 +79,7 @@ class CycloneV3ActionComposition(
     private val ledger: ContextLedger,
     private val memory: CycloneMemoryService?,
     private val targetResolver: TrustedPolicyTargetResolver = TrustedPolicyTargetResolver { _, _ -> null },
+    private val evidenceValidator: TrustedDecisionEvidenceValidator = TrustedDecisionEvidenceValidator { _, _ -> null },
 ) {
     private val policy = PolicyGuard(policyGovernor)
 
@@ -81,6 +90,9 @@ class CycloneV3ActionComposition(
     ): ActionCompositionDecision {
         if (evidence.selectorObservationId != evidence.pageObservationId) {
             return ActionCompositionDecision.Blocked("STALE_SELECTOR")
+        }
+        evidenceValidator.invalidReason(policyRequest.actionId, evidence)?.let {
+            return ActionCompositionDecision.Blocked(it)
         }
         actionBindingMismatch(policyRequest, phoneRequest, evidence)?.let {
             return ActionCompositionDecision.Blocked(it)

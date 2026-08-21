@@ -13,13 +13,34 @@ interface PolicyGovernor {
     fun evaluate(request: PolicyRequest): PolicyEvaluation
 }
 
+enum class PolicyAuthorizationClaimFailure {
+    NOT_ISSUED,
+    MISMATCH,
+    EXPIRED,
+    REPLAYED,
+}
+
+sealed interface PolicyAuthorizationClaimResult {
+    data object Claimed : PolicyAuthorizationClaimResult
+    data class Rejected(val reason: PolicyAuthorizationClaimFailure) : PolicyAuthorizationClaimResult
+}
+
 /**
- * Thread-safe, fail-closed Layer-0 authority engine. Evaluation and use consumption happen in one
- * monitor so two callers cannot reuse a one-time grant.
+ * Production executor handoff seam. A policy evaluation issues an authorization, but only an
+ * exact, atomically claimed authorization may cross into the canonical phone executor.
+ */
+fun interface PolicyAuthorizationClaimer {
+    fun claimAuthorization(authorization: PolicyAuthorization): PolicyAuthorizationClaimResult
+}
+
+/**
+ * Thread-safe, fail-closed Layer-0 authority engine. Grant evaluation and use consumption happen in
+ * one monitor. Issued executor authorizations are separately claimable exactly once so a captured
+ * handoff cannot be replayed or forged by reconstructing its public fields.
  */
 class InMemoryPolicyGovernor(
     private val clock: PolicyClock = PolicyClock(System::currentTimeMillis),
-) : PolicyGovernor {
+) : PolicyGovernor, PolicyAuthorizationClaimer {
     private data class StoredGrant(
         val grant: AuthorityGrant,
         var usesConsumed: Int = 0,
@@ -27,6 +48,8 @@ class InMemoryPolicyGovernor(
     )
 
     private val grants = linkedMapOf<String, StoredGrant>()
+    private val issuedAuthorizations = linkedMapOf<String, PolicyAuthorization>()
+    private val claimedAuthorizations = linkedSetOf<String>()
 
     @Synchronized
     override fun issueGrant(grant: AuthorityGrant): AuthorityGrantSnapshot {
@@ -51,6 +74,7 @@ class InMemoryPolicyGovernor(
     @Synchronized
     override fun evaluate(request: PolicyRequest): PolicyEvaluation {
         val evaluatedAt = clock.nowEpochMillis()
+        pruneAuthorizations(evaluatedAt)
         if (request.authorityClaims.any { !it.origin.canIssueGrant }) {
             return blocked(request, PolicyDecision.DENY, PolicyReason.UNTRUSTED_AUTHORITY, evaluatedAt)
         }
@@ -108,11 +132,35 @@ class InMemoryPolicyGovernor(
             expiresAtEpochMillis = selected.grant.expiresAtEpochMillis,
             singleUse = singleUse,
         )
+        issuedAuthorizations[authorization.authorizationId] = authorization
+        trimAuthorizationHistory()
         return PolicyEvaluation(
             decision = decision,
             authorization = authorization,
             audit = audit(request, decision, PolicyReason.AUTHORITY_ACCEPTED, evaluatedAt, selected.grant),
         )
+    }
+
+    @Synchronized
+    override fun claimAuthorization(authorization: PolicyAuthorization): PolicyAuthorizationClaimResult {
+        val now = clock.nowEpochMillis()
+        pruneAuthorizations(now)
+        if (authorization.authorizationId in claimedAuthorizations) {
+            return PolicyAuthorizationClaimResult.Rejected(PolicyAuthorizationClaimFailure.REPLAYED)
+        }
+        val issued = issuedAuthorizations[authorization.authorizationId]
+            ?: return PolicyAuthorizationClaimResult.Rejected(PolicyAuthorizationClaimFailure.NOT_ISSUED)
+        if (issued != authorization) {
+            return PolicyAuthorizationClaimResult.Rejected(PolicyAuthorizationClaimFailure.MISMATCH)
+        }
+        if (now >= issued.expiresAtEpochMillis) {
+            issuedAuthorizations.remove(authorization.authorizationId)
+            return PolicyAuthorizationClaimResult.Rejected(PolicyAuthorizationClaimFailure.EXPIRED)
+        }
+        issuedAuthorizations.remove(authorization.authorizationId)
+        claimedAuthorizations += authorization.authorizationId
+        trimAuthorizationHistory()
+        return PolicyAuthorizationClaimResult.Claimed
     }
 
     private fun candidateCouldApply(stored: StoredGrant, request: PolicyRequest, now: Long): Boolean =
@@ -178,6 +226,24 @@ class InMemoryPolicyGovernor(
         evaluatedAtEpochMillis = evaluatedAt,
     )
 
+    private fun pruneAuthorizations(now: Long) {
+        issuedAuthorizations.entries.removeAll { (_, authorization) -> now >= authorization.expiresAtEpochMillis }
+        trimAuthorizationHistory()
+    }
+
+    private fun trimAuthorizationHistory() {
+        while (issuedAuthorizations.size > MAX_AUTHORIZATION_HISTORY) {
+            val key = issuedAuthorizations.keys.firstOrNull() ?: break
+            issuedAuthorizations.remove(key)
+        }
+        while (claimedAuthorizations.size > MAX_AUTHORIZATION_HISTORY) {
+            val iterator = claimedAuthorizations.iterator()
+            if (!iterator.hasNext()) break
+            iterator.next()
+            iterator.remove()
+        }
+    }
+
     private fun safeReference(value: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
         return "sha256:" + digest.take(6).joinToString("") { "%02x".format(it) }
@@ -196,6 +262,10 @@ class InMemoryPolicyGovernor(
         ActionRisk.PRIVACY_SENSITIVE,
         ActionRisk.EXTERNAL_COMMUNICATION,
         -> false
+    }
+
+    private companion object {
+        const val MAX_AUTHORIZATION_HISTORY = 2_048
     }
 }
 
