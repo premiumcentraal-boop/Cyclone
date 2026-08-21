@@ -12,9 +12,9 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 18
+        versionCode = 19
         // Single Android release-version source. UI and gateway status read BuildConfig.VERSION_NAME.
-        versionName = "3.0.0-beta.1"
+        versionName = "3.1.0-beta.1"
     }
 
     buildTypes {
