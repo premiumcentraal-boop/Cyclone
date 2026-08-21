@@ -9,11 +9,27 @@ from cyclone_phone_mcp.gateway import GatewayClient, GatewayError
 class Handler(BaseHTTPRequestHandler):
     token = "test-token"
     posts = []
+
     def do_GET(self):
         if self.headers.get("Authorization") != "Bearer test-token":
             self.send_response(401); self.end_headers(); return
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
-        self.wfile.write(json.dumps({"path": self.path}).encode())
+        if self.path == "/v1/capabilities":
+            response = {
+                "protocol_version": "cyclone.gateway.capability.v1",
+                "capabilities": [
+                    {"capability_id": "phone.observe"},
+                    {"capability_id": "phone.find"},
+                    {"capability_id": "phone.wait_for"},
+                    {"capability_id": "phone.click"},
+                    {"capability_id": "phone.home"},
+                ],
+                "gateway_health": {"state": "READY"},
+            }
+        else:
+            response = {"path": self.path}
+        self.wfile.write(json.dumps(response).encode())
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length) or b"{}")
@@ -28,6 +44,7 @@ class Handler(BaseHTTPRequestHandler):
             response = {"protocol_version": "cyclone.gateway.capability.v1", "correlation_id": payload["correlation_id"], "capability_id": payload["capability_id"], "ok": True, "transport": {"ok": True}, "execution": {"ok": True}, "verification": {"ok": True, "status": "verified"}, "error": None}
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(json.dumps(response).encode())
+
     def log_message(self, *args):
         pass
 
