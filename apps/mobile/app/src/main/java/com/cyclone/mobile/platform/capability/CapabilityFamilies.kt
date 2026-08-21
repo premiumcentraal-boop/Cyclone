@@ -45,12 +45,19 @@ data class KnownCapability(
  */
 object CycloneCapabilityFamilies {
     val PHONE_OBSERVE = CapabilityId("phone.observe")
-    val PHONE_SEARCH = CapabilityId("phone.search")
+    val PHONE_FIND = CapabilityId("phone.find")
     val PHONE_CLICK = CapabilityId("phone.click")
-    val PHONE_TYPE = CapabilityId("phone.type")
+    val PHONE_LONG_PRESS = CapabilityId("phone.long_press")
     val PHONE_SWIPE = CapabilityId("phone.swipe")
+    val PHONE_SCROLL = CapabilityId("phone.scroll")
+    val PHONE_TYPE = CapabilityId("phone.type")
     val PHONE_BACK = CapabilityId("phone.back")
-    val PHONE_OPEN_APP = CapabilityId("phone.open-app")
+    val PHONE_HOME = CapabilityId("phone.home")
+    val PHONE_OPEN_APP = CapabilityId("phone.open_app")
+    val PHONE_WAIT_FOR = CapabilityId("phone.wait_for")
+
+    /** Compatibility name for source that still refers to the old search label. */
+    val PHONE_SEARCH = PHONE_FIND
 
     val PAGE_OBSERVE = CapabilityId("page.observe")
     val PAGE_IDENTIFY = CapabilityId("page.identify")
@@ -67,17 +74,21 @@ object CycloneCapabilityFamilies {
 
     val known: List<KnownCapability> = listOf(
         known(PHONE_OBSERVE, CapabilityFamily.PHONE, "Observe the current phone state"),
-        known(PHONE_SEARCH, CapabilityFamily.PHONE, "Search the current phone state semantically"),
+        known(PHONE_FIND, CapabilityFamily.PHONE, "Find a semantic target in the current phone state"),
         known(PHONE_CLICK, CapabilityFamily.PHONE, "Request a typed click through the canonical action path"),
+        known(PHONE_LONG_PRESS, CapabilityFamily.PHONE, "Request a typed long press through the canonical action path"),
+        known(PHONE_SWIPE, CapabilityFamily.PHONE, "Request a typed swipe through the canonical action path"),
+        known(PHONE_SCROLL, CapabilityFamily.PHONE, "Request canonical semantic scrolling"),
         KnownCapability(
             PHONE_TYPE,
             CapabilityFamily.PHONE,
             "Request redacted text entry through the canonical action path",
             CyclonePolicyCategories.PRIVACY_SENSITIVE,
         ),
-        known(PHONE_SWIPE, CapabilityFamily.PHONE, "Request a typed swipe through the canonical action path"),
         known(PHONE_BACK, CapabilityFamily.PHONE, "Request canonical Android back navigation"),
+        known(PHONE_HOME, CapabilityFamily.PHONE, "Request canonical Android home navigation"),
         known(PHONE_OPEN_APP, CapabilityFamily.PHONE, "Request opening an installed application"),
+        known(PHONE_WAIT_FOR, CapabilityFamily.PHONE, "Wait for a bounded semantic condition"),
         known(PAGE_OBSERVE, CapabilityFamily.PAGE, "Read compact semantic page evidence"),
         known(PAGE_IDENTIFY, CapabilityFamily.PAGE, "Identify the current semantic page"),
         known(PAGE_SEARCH, CapabilityFamily.PAGE, "Search semantic controls on the current page"),
@@ -97,7 +108,7 @@ object CycloneCapabilityFamilies {
             CyclonePolicyCategories.PRIVACY_SENSITIVE,
         ),
         known(GATEWAY_STATUS, CapabilityFamily.GATEWAY, "Read authenticated local gateway health"),
-    ).sortedBy { it.id }
+    ).distinctBy { it.id }.sortedBy { it.id }
 
     private val byId = known.associateBy { it.id }
 
