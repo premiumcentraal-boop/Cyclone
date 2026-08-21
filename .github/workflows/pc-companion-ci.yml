@@ -38,7 +38,7 @@ jobs:
           submodules: false
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.14.7'
+          python-version: '3.13.7'
       - name: Test fleet runtime and agent MCP
         shell: pwsh
         run: |
@@ -78,7 +78,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/pc-companion | Out-Null
           Copy-Item $Installer.FullName 'dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe' -Force
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
-          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sh '${{ github.sha }}' --version '1.0.0-beta.1' --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
+          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version '1.0.0-beta.1' --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
       - uses: actions/upload-artifact@v4
         with:
           name: cyclone-pc-companion-v1-${{ github.sha }}
