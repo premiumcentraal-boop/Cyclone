@@ -6,11 +6,13 @@ import queue
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, ConfigDict
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import verify_bearer
 from ..config import Settings
 from ..server import create_app as create_legacy_app
+from .agent import DesktopAgentService
 from .controls import ClipboardService, ManualControlService
 from .fleet import DeviceFleetManager
 from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES
@@ -21,6 +23,7 @@ from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 class PairCompleteBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
+    pairing_id: str | None = None
 
 
 class ManualControlBody(BaseModel):
@@ -36,6 +39,36 @@ class ClipboardBody(BaseModel):
     text: str
 
 
+class AgentObserveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["compact", "full"] = "compact"
+    include_screenshot: bool = False
+
+
+class AgentActionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    capability_id: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    goal: str = ""
+    expected_observation_id: str | None = None
+
+
+class AgentDebugBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected: str = ""
+    goal: str = ""
+
+
+class AgentTeachStartBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    goal: str = ""
+
+
+class AgentTeachStopBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    compile_for_review: bool = True
+
+
 class DesktopRuntime:
     def __init__(self, settings: Settings, *, fleet: DeviceFleetManager | None = None):
         self.settings = settings
@@ -43,6 +76,7 @@ class DesktopRuntime:
         self.pairing = PairingCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
+        self.agent = DesktopAgentService(self.fleet)
         self.video_limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
         self.fleet.set_video_factory(lambda session: VideoStreamController(session, self.video_limiter))
 
@@ -60,14 +94,29 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
         verify_bearer(authorization, token)
 
     @router.get("/v1/fleet", dependencies=[Depends(auth)])
+    @router.get("/v1/devices", dependencies=[Depends(auth)], include_in_schema=False)
     def fleet() -> dict[str, Any]:
         return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": runtime.fleet.list_public()}
+
+    @router.get("/v1/diagnostics/status", dependencies=[Depends(auth)])
+    def diagnostics_status() -> dict[str, Any]:
+        devices = runtime.fleet.list_public()
+        paired = sum(1 for device in devices if device.get("paired") is True)
+        attention = sum(1 for device in devices if device.get("state") in {"ATTENTION", "UNAUTHORIZED"})
+        return {
+            "backendReachable": True,
+            "deviceCount": len(devices),
+            "pairedDeviceCount": paired,
+            "recoveryActive": attention > 0,
+            "message": "Ready" if attention == 0 else f"{attention} phone(s) need attention",
+        }
 
     @router.post("/v1/devices/{device_id}/pair/begin", dependencies=[Depends(auth)])
     def pair_begin(device_id: str):
         return _call(lambda: runtime.pairing.begin(device_id))
 
     @router.post("/v1/devices/{device_id}/pair/complete", dependencies=[Depends(auth)])
+    @router.post("/v1/devices/{device_id}/pair/confirm", dependencies=[Depends(auth)], include_in_schema=False)
     def pair_complete(device_id: str, body: PairCompleteBody):
         return _call(lambda: runtime.pairing.complete(device_id, body.code))
 
@@ -87,12 +136,62 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     def clipboard_set(device_id: str, body: ClipboardBody):
         return _call(lambda: runtime.clipboard.set(device_id, body.text))
 
+    # Device-scoped agent surface. This is deliberately typed; there is no bridge-op, shell or ADB
+    # passthrough endpoint.
+    @router.get("/v1/devices/{device_id}/agent/status", dependencies=[Depends(auth)])
+    def agent_status(device_id: str):
+        return _call(lambda: runtime.agent.status(device_id))
+
+    @router.get("/v1/devices/{device_id}/agent/capabilities", dependencies=[Depends(auth)])
+    def agent_capabilities(device_id: str):
+        return _call(lambda: runtime.agent.capabilities(device_id))
+
+    @router.post("/v1/devices/{device_id}/agent/observe", dependencies=[Depends(auth)])
+    def agent_observe(device_id: str, body: AgentObserveBody):
+        return _call(lambda: runtime.agent.observe(device_id, mode=body.mode, include_screenshot=body.include_screenshot))
+
+    @router.get("/v1/devices/{device_id}/agent/ui/search", dependencies=[Depends(auth)])
+    def agent_ui_search(device_id: str, q: str = Query(min_length=1, max_length=300)):
+        return _call(lambda: runtime.agent.ui_search(device_id, q))
+
+    @router.get("/v1/devices/{device_id}/agent/ui/element/{element_id}", dependencies=[Depends(auth)])
+    def agent_ui_element(device_id: str, element_id: str):
+        return _call(lambda: runtime.agent.ui_element(device_id, element_id))
+
+    @router.get("/v1/devices/{device_id}/agent/page/current", dependencies=[Depends(auth)])
+    def agent_current_page(device_id: str):
+        return _call(lambda: runtime.agent.current_page(device_id))
+
+    @router.get("/v1/devices/{device_id}/agent/page/history", dependencies=[Depends(auth)])
+    def agent_page_history(device_id: str):
+        return _call(lambda: runtime.agent.page_history(device_id))
+
+    @router.post("/v1/devices/{device_id}/agent/action", dependencies=[Depends(auth)])
+    def agent_action(device_id: str, body: AgentActionBody):
+        return _call(lambda: runtime.agent.action(device_id, body.model_dump(exclude_none=True)))
+
+    @router.post("/v1/devices/{device_id}/agent/debug", dependencies=[Depends(auth)])
+    def agent_debug(device_id: str, body: AgentDebugBody):
+        return _call(lambda: runtime.agent.debug_bundle(device_id, expected=body.expected, goal=body.goal))
+
+    @router.post("/v1/devices/{device_id}/agent/teach/start", dependencies=[Depends(auth)])
+    def agent_teach_start(device_id: str, body: AgentTeachStartBody):
+        return _call(lambda: runtime.agent.teach_start(device_id, goal=body.goal))
+
+    @router.get("/v1/devices/{device_id}/agent/teach/status", dependencies=[Depends(auth)])
+    def agent_teach_status(device_id: str):
+        return _call(lambda: runtime.agent.teach_status(device_id))
+
+    @router.post("/v1/devices/{device_id}/agent/teach/stop", dependencies=[Depends(auth)])
+    def agent_teach_stop(device_id: str, body: AgentTeachStopBody):
+        return _call(lambda: runtime.agent.teach_stop(device_id, compile_for_review=body.compile_for_review))
+
     @router.websocket("/v1/fleet/events")
     async def fleet_events(websocket: WebSocket):
         if not _websocket_authorized(websocket, token):
             await websocket.close(code=4401)
             return
-        await websocket.accept()
+        await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
         q = runtime.fleet.events.subscribe()
         try:
             await websocket.send_json({
@@ -129,7 +228,7 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
         except DesktopRuntimeError:
             await websocket.close(code=4404)
             return
-        await websocket.accept()
+        await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
         q = controller.subscribe(profile)
         try:
             while True:
@@ -152,6 +251,19 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
 def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     app = create_legacy_app(settings)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:1420",
+            "http://localhost:1420",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "tauri://localhost",
+        ],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+    )
     desktop = runtime or DesktopRuntime(settings)
     app.state.desktop_runtime = desktop
     app.include_router(create_desktop_router(desktop, settings.token))
@@ -162,10 +274,27 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
 
 def _websocket_authorized(websocket: WebSocket, token: str) -> bool:
     value = websocket.headers.get("authorization", "")
-    if not value.startswith("Bearer "):
-        return False
-    supplied = value[7:]
-    return bool(supplied and hmac.compare_digest(supplied.encode(), token.encode()))
+    if value.startswith("Bearer "):
+        supplied = value[7:]
+        if supplied and hmac.compare_digest(supplied.encode(), token.encode()):
+            return True
+    for protocol in _requested_subprotocols(websocket):
+        prefix = "cyclone-token."
+        if protocol.startswith(prefix):
+            supplied = protocol[len(prefix):]
+            if supplied and hmac.compare_digest(supplied.encode(), token.encode()):
+                return True
+    return False
+
+
+def _requested_subprotocols(websocket: WebSocket) -> list[str]:
+    raw = websocket.headers.get("sec-websocket-protocol", "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _accepted_subprotocol(websocket: WebSocket) -> str | None:
+    requested = _requested_subprotocols(websocket)
+    return "cyclone-v1" if "cyclone-v1" in requested else None
 
 
 def _call(fn):
