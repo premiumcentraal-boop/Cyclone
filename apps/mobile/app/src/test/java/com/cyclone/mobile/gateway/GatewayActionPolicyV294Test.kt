@@ -1,6 +1,6 @@
 package com.cyclone.mobile.gateway
 
-import android.test.mock.MockContext
+import android.content.ContextWrapper
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -10,7 +10,9 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class GatewayActionPolicyV294Test {
-    private val context = MockContext()
+    // The compatibility authority under test never dereferences Context. ContextWrapper is part of
+    // the normal Android API surface and keeps this a plain local JVM unit test without android.test.
+    private val context = object : ContextWrapper(null) {}
 
     @After
     fun resetAuthority() {

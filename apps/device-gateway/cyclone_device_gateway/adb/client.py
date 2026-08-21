@@ -32,11 +32,7 @@ class ADBClient:
 
     def run(self, args: Sequence[str], *, binary: bool = False, timeout: float = 15, use_serial: bool = True):
         try:
-            p = subprocess.run(
-                self._base(use_serial) + list(args),
-                capture_output=True,
-                timeout=timeout,
-            )
+            p = subprocess.run(self._base(use_serial) + list(args), capture_output=True, timeout=timeout)
         except FileNotFoundError as exc:
             raise ADBError("ADB executable was not found. Install Android Platform Tools and add adb to PATH.") from exc
         except subprocess.TimeoutExpired as exc:
@@ -123,19 +119,23 @@ class ADBClient:
                 mappings.append((bits[0], bits[1], bits[2]))
         return mappings
 
+    def remove_forward(self, local_port: int) -> None:
+        if not self.serial:
+            raise ADBError("A device serial is required to remove an isolated forward")
+        self.run(["forward", "--remove", f"tcp:{local_port}"])
+
     def ensure_bridge_forward(self, local_port: int = 8766) -> bool:
         device = self.select_device(self.serial)
         local = f"tcp:{local_port}"
         remote = "localabstract:cyclone_gateway"
-        for serial, existing_local, existing_remote in self.forward_mappings():
+        mappings = self.forward_mappings()
+        for serial, existing_local, existing_remote in mappings:
             if serial == device.serial and existing_local == local and existing_remote == remote:
                 return False
-        # A stale mapping on this local port can survive an unplug. Remove only this known bridge
-        # listener, then recreate it for the currently selected authorized device.
-        try:
-            self.run(["forward", "--remove", local], use_serial=False)
-        except ADBError:
-            pass
+            if serial != device.serial and existing_local == local:
+                raise ADBError("Cyclone local forward port is already owned by another device")
+        if any(serial == device.serial and existing_local == local for serial, existing_local, _ in mappings):
+            self.remove_forward(local_port)
         self.run(["forward", local, remote])
         return True
 

@@ -1,0 +1,44 @@
+import type { VideoRenderer, VideoRendererFactoryInput } from "./decoder.js";
+
+export class FallbackFrameRenderer implements VideoRenderer {
+  private timer: number | null = null;
+  private stopped = false;
+
+  constructor(private readonly input: VideoRendererFactoryInput) {}
+
+  start(): void {
+    this.stopped = false;
+    const image = this.input.target.fallbackImage;
+    image.hidden = false;
+    this.input.target.canvas.hidden = true;
+    image.onload = () => this.input.callbacks.onState("LIVE");
+    image.onerror = () => {
+      if (this.stopped) return;
+      this.input.callbacks.onState("STREAM_ERROR");
+      this.input.callbacks.onError(new Error("Fallback phone frame unavailable"));
+    };
+
+    if (this.input.device.video.mode === "MJPEG") {
+      image.src = this.input.fallbackUrl;
+      this.input.callbacks.onState("CONNECTING");
+      return;
+    }
+    this.refreshScreenshot();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer != null) window.clearTimeout(this.timer);
+    this.timer = null;
+    this.input.target.fallbackImage.onload = null;
+    this.input.target.fallbackImage.onerror = null;
+  }
+
+  private refreshScreenshot(): void {
+    if (this.stopped) return;
+    this.input.callbacks.onState("CONNECTING");
+    const separator = this.input.fallbackUrl.includes("?") ? "&" : "?";
+    this.input.target.fallbackImage.src = `${this.input.fallbackUrl}${separator}t=${Date.now()}`;
+    this.timer = window.setTimeout(() => this.refreshScreenshot(), this.input.profile === "focus" ? 750 : 1400);
+  }
+}

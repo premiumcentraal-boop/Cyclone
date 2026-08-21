@@ -7,8 +7,7 @@ import socket
 import uuid
 
 from ..adb.client import ADBClient, ADBError
-from .protocol import ALLOWED_OPS
-
+from .protocol import ALLOWED_OPS, UNAUTHENTICATED_OPS
 
 ERROR_CODE_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
@@ -57,18 +56,26 @@ class CycloneBridgeClient:
         try:
             self.adb.ensure_bridge_forward(self.port)
         except ADBError as exc:
-            # Do not leak raw subprocess commands. ADBClient messages contain only device/readiness
-            # context and are safe to surface to diagnostics.
             raise BridgeDisconnectedError(str(exc)) from exc
 
     def request(self, op: str, args: dict | None = None, *, request_id: str | None = None) -> dict:
+        if op in UNAUTHENTICATED_OPS:
+            raise BridgeError("Pairing bootstrap operations require request_unauthenticated")
+        return self._request(op, args, self.token, request_id=request_id)
+
+    def request_unauthenticated(self, op: str, args: dict | None = None, *, request_id: str | None = None) -> dict:
+        if op not in UNAUTHENTICATED_OPS:
+            raise BridgeError("Only fixed pairing bootstrap operations may omit authentication")
+        return self._request(op, args, "", request_id=request_id)
+
+    def _request(self, op: str, args: dict | None, auth: str, *, request_id: str | None = None) -> dict:
         if op not in ALLOWED_OPS:
             raise BridgeError(f"Unknown bridge operation: {op}")
         self._prepare_usb_bridge()
         request_args = args or {}
         inherited_id = request_args.get("correlationId") if isinstance(request_args, dict) else None
         correlation_id = request_id or (str(inherited_id) if inherited_id else None) or str(uuid.uuid4())
-        payload = {"id": correlation_id, "op": op, "args": request_args, "auth": self.token}
+        payload = {"id": correlation_id, "op": op, "args": request_args, "auth": auth}
         try:
             with socket.create_connection((self.host, self.port), timeout=self.timeout) as s:
                 f = s.makefile("rwb")
@@ -76,8 +83,6 @@ class CycloneBridgeClient:
                 f.flush()
                 line = f.readline()
         except OSError as exc:
-            # The next request reruns the fixed ADB forward preparation, making USB reconnect
-            # recoverable without reinstalling or restarting the gateway process.
             raise BridgeDisconnectedError("Android bridge transport unavailable") from exc
         if not line:
             raise BridgeDisconnectedError("Android bridge closed without response")

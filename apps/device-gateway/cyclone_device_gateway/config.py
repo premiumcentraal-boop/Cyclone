@@ -36,11 +36,16 @@ class Settings:
             raise RuntimeError("CYCLONE_DEVICE_GATEWAY_TOKEN is required")
 
         bridge_token = os.getenv("CYCLONE_ANDROID_BRIDGE_TOKEN", "").strip()
-        if not bridge_token:
-            raise RuntimeError(
-                "CYCLONE_ANDROID_BRIDGE_TOKEN is required. Copy the session token "
-                "shown by the Cyclone PC Gateway screen on the phone."
-            )
+        pairing_bootstrap = os.getenv("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        # Legacy single-device routes still require an independent Android bridge token.
+        # The packaged Desktop V1 Companion explicitly opts into the zero-authority USB
+        # pairing bootstrap; per-device credentials are then exchanged and kept in memory.
+        if not bridge_token and not pairing_bootstrap:
+            raise RuntimeError("CYCLONE_ANDROID_BRIDGE_TOKEN is required")
 
         runtime_dir = Path(
             os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", ".runtime/device-gateway")

@@ -1,0 +1,176 @@
+name: Cyclone Desktop V1 CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/device-gateway/**'
+      - 'apps/mobile/**'
+      - 'apps/pc-companion/**'
+      - 'tools/cyclone-agent-mcp/**'
+      - 'tools/codex-phone-mcp/**'
+      - 'packaging/pc-companion/**'
+      - 'scripts/pc-companion/**'
+      - '.github/workflows/pc-companion-ci.yml'
+      - '.github/workflows/pc-companion-release.yml'
+  push:
+    branches:
+      - 'release/cyclone-desktop-v1'
+      - 'release/cyclone-mobile-v3.1-beta'
+    paths:
+      - 'apps/device-gateway/**'
+      - 'apps/mobile/**'
+      - 'apps/pc-companion/**'
+      - 'tools/cyclone-agent-mcp/**'
+      - 'tools/codex-phone-mcp/**'
+      - 'packaging/pc-companion/**'
+      - 'scripts/pc-companion/**'
+      - '.github/workflows/pc-companion-ci.yml'
+      - '.github/workflows/pc-companion-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-companion:
+    name: Windows PC Companion
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.7'
+      - name: Test fleet runtime and agent MCP
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -e 'apps/device-gateway[test]' -e 'tools/cyclone-agent-mcp[test]'
+          python -m pytest -q apps/device-gateway/tests/test_desktop_fleet_runtime.py
+          python -m pytest -q tools/cyclone-agent-mcp/tests
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test and compile PC UI
+        shell: pwsh
+        run: |
+          Push-Location apps/pc-companion
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
+          Pop-Location
+      - name: Build and stage frozen Python sidecars
+        shell: pwsh
+        run: ./scripts/pc-companion/build-sidecars.ps1
+      - name: Verify Rust toolchain
+        shell: pwsh
+        run: |
+          rustc --version
+          cargo --version
+      - name: Build Cyclone PC Companion NSIS installer
+        shell: pwsh
+        run: |
+          Push-Location apps/pc-companion
+          npm run tauri build -- --bundles nsis
+          Pop-Location
+      - name: Collect installer and release metadata
+        shell: pwsh
+        run: |
+          $Installer = Get-ChildItem 'apps/pc-companion/src-tauri/target/release/bundle/nsis/*.exe' | Select-Object -First 1
+          if ($null -eq $Installer) { throw 'Cyclone NSIS installer was not produced.' }
+          New-Item -ItemType Directory -Force -Path dist/pc-companion | Out-Null
+          Copy-Item $Installer.FullName 'dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe' -Force
+          python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
+          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version '1.0.0-beta.1' --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyclone-pc-companion-v1-${{ github.sha }}
+          path: |
+            dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe
+            dist/pc-companion/SHA256SUMS.txt
+            dist/pc-companion/source-sha.txt
+            dist/pc-companion/release-provenance.json
+            dist/pc-companion/THIRD_PARTY_NOTICES
+          if-no-files-found: error
+          retention-days: 30
+
+  mobile-companion:
+    name: Matching Cyclone Mobile V3.1
+    uses: ./.github/workflows/_mobile-build.yml
+
+  publish-beta:
+    name: Publish combined beta release
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' }}
+    needs:
+      - windows-companion
+      - mobile-companion
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v3.1.0-beta.1-desktop-v1
+      RELEASE_TITLE: Cyclone V3.1 + PC Companion V1 Beta
+    steps:
+      - name: Download desktop and mobile build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets/desktop release-assets/mobile
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "cyclone-pc-companion-v1-$GITHUB_SHA" \
+            --dir release-assets/desktop
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "Cyclone-Mobile-3.1.0-beta.1" \
+            --dir release-assets/mobile
+          if [[ -f release-assets/desktop/source-sha.txt ]]; then
+            mv release-assets/desktop/source-sha.txt release-assets/desktop/Cyclone-PC-source-sha.txt
+          fi
+          if [[ -f release-assets/mobile/source-sha.txt ]]; then
+            mv release-assets/mobile/source-sha.txt release-assets/mobile/Cyclone-Mobile-source-sha.txt
+          fi
+      - name: Write beta release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          # Cyclone V3.1 + PC Companion V1 Beta
+
+          This prerelease pairs the latest Cyclone Mobile V3.1 beta with the first Cyclone PC Companion V1 beta.
+
+          ## Included
+          - Cyclone Mobile 3.1.0-beta.1 APK with Desktop V1 USB pairing/Gateway support.
+          - Cyclone PC Companion 1.0.0-beta.1 Windows installer.
+          - Multi-phone USB fleet discovery and per-phone pairing.
+          - Live phone views, focused manual controls, keyboard input, and PC-to-phone clipboard support.
+          - Cyclone Agent MCP for Codex, OpenCode/DeepSeek-compatible MCP harnesses, Copilot CLI-compatible generic MCP profiles, and other MCP clients.
+          - Authenticated loopback-only PC Gateway. No arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed.
+
+          ## Beta requirements
+          - Windows desktop PC.
+          - Android phone running the included Cyclone V3.1 beta APK.
+          - Developer options and USB debugging enabled for USB Gateway use.
+          - Cyclone Accessibility enabled on the phone for phone control.
+
+          ## Beta status
+          This is a test release. Automated Windows, MCP, desktop UI, Gateway, Android unit, and APK build gates passed for the exact release source before publication. Physical multi-phone USB/video throughput has not yet been certified as production-ready.
+          EOF
+      - name: Create GitHub prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+          mapfile -t assets < <(find release-assets -type f -print | sort)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo 'No beta assets were produced.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release-notes.md \
+            --prerelease

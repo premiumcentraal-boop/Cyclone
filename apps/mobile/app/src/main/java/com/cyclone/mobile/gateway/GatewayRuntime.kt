@@ -16,12 +16,22 @@ object GatewayRuntime {
     @Volatile private var listenerError: String? = null
     @Volatile private var lastSafeError: String? = null
 
+    /**
+     * Desktop V1 keeps the localabstract socket available as an ADB-only pairing bootstrap.
+     * When the full gateway is disabled, only pair.begin/pair.complete can pass the dispatcher.
+     */
+    @Synchronized
+    fun startPairingBootstrap(context: Context) {
+        appContext = context.applicationContext
+        startLocked(context.applicationContext)
+        if (GatewaySessionStore.enabled(context) && GatewaySessionStore.token(context) == null) {
+            GatewaySessionStore.rotate(context)
+        }
+    }
+
     @Synchronized
     fun startIfEnabled(context: Context) {
-        appContext = context.applicationContext
-        if (!GatewaySessionStore.enabled(context)) return
-        if (GatewaySessionStore.token(context) == null) GatewaySessionStore.rotate(context)
-        startLocked(context.applicationContext)
+        startPairingBootstrap(context)
     }
 
     @Synchronized
@@ -36,12 +46,13 @@ object GatewayRuntime {
     @Synchronized
     fun disable(context: Context) {
         appContext = context.applicationContext
-        server?.close()
-        server = null
+        server?.disconnectClients()
         GatewayObservationStore.clear()
         GatewaySessionStore.disable(context)
         listenerError = null
         lastSafeError = null
+        // Keep the ADB-only listener available for zero-authority Desktop pairing bootstrap.
+        startLocked(context.applicationContext)
     }
 
     @Synchronized
@@ -77,7 +88,8 @@ object GatewayRuntime {
         val enabled = GatewaySessionStore.enabled(context)
         val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
         val connected = socket?.connectedClients() ?: 0
-        val listening = enabled && socket?.isRunning() == true
+        val bootstrapListening = socket?.isRunning() == true
+        val listening = enabled && bootstrapListening
         val state = when {
             !enabled -> "OFF"
             !listening || !DeviceState.accessibilityConnected || listenerError != null -> "ATTENTION_NEEDED"
@@ -91,6 +103,8 @@ object GatewayRuntime {
             .put("gatewayState", state)
             .put("gatewayEnabled", enabled)
             .put("socketListening", listening)
+            .put("pairingBootstrapListening", bootstrapListening)
+            .put("pairingActive", GatewayDesktopPairingManager.active())
             .put("socketName", GatewayProtocol.SOCKET_NAME)
             .put("networkListener", false)
             .put("accessibilityConnected", DeviceState.accessibilityConnected)
@@ -102,6 +116,7 @@ object GatewayRuntime {
             .put("rootShellExposed", false)
             .put("actionAuthorityBinding", GatewayActionAuthorityRegistry.bindingName())
             .put("productionActionAuthorityBound", GatewayActionAuthorityRegistry.isProductionAuthorityBound())
+            .put("desktopClipboard", GatewayClipboardAdapter.capability(context))
             .put("connectedSession", JSONObject()
                 .put("connected", connected > 0)
                 .put("clientCount", connected)
@@ -111,6 +126,7 @@ object GatewayRuntime {
             .put("capabilities", JSONObject()
                 .put("operations", JSONArray(GatewayProtocol.operations.toList()))
                 .put("phoneTools", JSONArray(GatewayActionAdapter.allowedTools.toList()))
+                .put("manualDesktopKinds", JSONArray(DesktopManualControlContract.allowedKinds.toList()))
                 .put("fullSemanticControls", true)
                 .put("pageDebugFunnel", true)
                 .put("appGraphRetrieval", true)
@@ -144,14 +160,15 @@ internal object GatewayDispatcher {
         return try {
             val request = GatewayProtocol.parse(line)
             id = request.id
-            if (!GatewaySessionStore.enabled(context)) {
+            GatewayProtocol.requireKnownOperation(request.op, request.id)
+            val pairingBootstrap = request.op in GatewayProtocol.unauthenticatedOperations
+            if (!pairingBootstrap && !GatewaySessionStore.enabled(context)) {
                 GatewayRuntime.reportSafeError("Full PC + Codex Gateway is off on this phone.")
                 GatewayProtocol.error(id, "CAPABILITY_UNAVAILABLE", "PC Gateway is disabled").toString()
-            } else if (!GatewaySessionStore.authenticate(context, request.auth)) {
-                GatewayRuntime.reportSafeError("PC authentication failed. Copy the current session token and reconnect.")
+            } else if (!pairingBootstrap && !GatewaySessionStore.authenticate(context, request.auth)) {
+                GatewayRuntime.reportSafeError("PC authentication failed. Pair again or use the current session token.")
                 GatewayProtocol.error(id, "AUTH_REJECTED", "Session token is invalid or has been rotated").toString()
             } else {
-                GatewayProtocol.requireKnownOperation(request.op, request.id)
                 val result = dispatch(context, request)
                 GatewayRuntime.clearSafeError()
                 GatewayProtocol.success(id, result).toString()
@@ -166,6 +183,12 @@ internal object GatewayDispatcher {
     }
 
     private fun dispatch(context: Context, request: GatewayRequest): Any = when (request.op) {
+        "pair.begin" -> GatewayDesktopPairingManager.begin(context, request.args)
+        "pair.complete" -> GatewayDesktopPairingManager.complete(context, request.args)
+        "pair.revoke" -> GatewayDesktopPairingManager.revoke(context)
+        "manual.execute" -> GatewayManualDesktopAdapter.execute(context, request.id, request.args)
+        "clipboard.get" -> GatewayClipboardAdapter.capability(context)
+        "clipboard.set" -> GatewayClipboardAdapter.set(context, request.id, request.args)
         "bridge.status" -> GatewayRuntime.status(context)
         "observe.semantic" -> GatewayObservationAdapter.capture(context).payload
         "observe.page_debug" -> GatewayPageDebugAdapter.capture(context, request.args)
@@ -215,6 +238,6 @@ internal object GatewayDispatcher {
                         .put("errorCode", audit.errorCode ?: JSONObject.NULL))
                 }
             })
-            .put("privacy", "No session token, API key, password, OTP or typed phone.type value is included.")
+            .put("privacy", "No session token, pairing code, API key, password, OTP, clipboard content or typed phone.type value is included.")
     }
 }

@@ -24,6 +24,8 @@ internal object GatewayProtocol {
     const val DEFAULT_FORWARD_PORT = 8766
     const val MAX_LINE_BYTES = 1024 * 1024
 
+    val unauthenticatedOperations = setOf("pair.begin", "pair.complete")
+
     val operations = linkedSetOf(
         "bridge.status",
         "observe.semantic",
@@ -37,6 +39,12 @@ internal object GatewayProtocol {
         "teach.status",
         "teach.stop",
         "debug.snapshot",
+        "pair.begin",
+        "pair.complete",
+        "pair.revoke",
+        "manual.execute",
+        "clipboard.get",
+        "clipboard.set",
     )
 
     fun parse(line: String): GatewayRequest {
@@ -50,7 +58,9 @@ internal object GatewayProtocol {
         val op = json.optString("op").trim()
         if (op.isBlank()) throw GatewayProtocolException("INVALID_REQUEST", "op is required", id)
         val auth = json.optString("auth")
-        if (auth.isBlank()) throw GatewayProtocolException("AUTH_REQUIRED", "auth is required", id)
+        if (auth.isBlank() && op !in unauthenticatedOperations) {
+            throw GatewayProtocolException("AUTH_REQUIRED", "auth is required", id)
+        }
         val argsValue = json.opt("args")
         if (argsValue != null && argsValue !== JSONObject.NULL && argsValue !is JSONObject) {
             throw GatewayProtocolException("INVALID_REQUEST", "args must be a JSON object", id)

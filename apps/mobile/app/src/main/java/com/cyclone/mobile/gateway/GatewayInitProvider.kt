@@ -6,12 +6,15 @@ import android.database.Cursor
 import android.net.Uri
 
 /**
- * Process bootstrap only. It starts no listener unless the user has explicitly enabled PC Gateway.
- * This lets the localabstract listener recover when Android recreates Cyclone for Accessibility.
+ * Process bootstrap for the USB-only localabstract gateway.
+ *
+ * Desktop V1 keeps the listener alive in a zero-authority pairing mode even when full PC control
+ * is disabled. In that state only pair.begin/pair.complete are accepted; every observation,
+ * control, clipboard, teaching and debug operation still requires the strong session credential.
  */
 class GatewayInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
-        context?.let(GatewayRuntime::startIfEnabled)
+        context?.let(GatewayRuntime::startPairingBootstrap)
         return true
     }
 
