@@ -92,21 +92,35 @@ def host_installed(host: str) -> bool:
     return True if executable is None else shutil.which(executable) is not None
 
 
-async def _verify_async(command: ServerCommand) -> list[str]:
+async def _verify_async(command: ServerCommand) -> dict[str, dict[str, Any]]:
     from mcp import Client, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
     params = StdioServerParameters(command=command.command, args=command.args)
     async with Client(stdio_client(params)) as client:
         result = await client.list_tools()
-        return sorted(tool.name for tool in result.tools)
+        return {tool.name: dict(tool.input_schema) for tool in result.tools}
 
 
 def verify_tools_list(executable: str | None = None) -> dict[str, Any]:
     command = resolve_server_command(executable)
-    discovered = asyncio.run(_verify_async(command))
+    definitions = asyncio.run(_verify_async(command))
+    discovered = sorted(definitions)
     expected = sorted(TOOL_NAMES)
-    return {"ok": discovered == expected, "tools": discovered, "expected": expected}
+    schema_errors: list[str] = []
+    for name, schema in sorted(definitions.items()):
+        properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        if name == "phone_list":
+            if "device_id" in properties:
+                schema_errors.append("phone_list_must_not_accept_device_id")
+        elif name in expected and "device_id" not in properties:
+            schema_errors.append(f"{name}_missing_device_id")
+    return {
+        "ok": discovered == expected and not schema_errors,
+        "tools": discovered,
+        "expected": expected,
+        "schema_errors": schema_errors,
+    }
 
 
 def _write_codex_block(path: Path, snippet: str) -> None:

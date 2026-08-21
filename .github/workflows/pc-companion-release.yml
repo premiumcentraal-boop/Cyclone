@@ -41,6 +41,16 @@ jobs:
           npm ci
           npm run tauri build
           Pop-Location
+      - name: Collect Tauri installer assets
+        if: ${{ inputs.build_tauri }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/pc-companion | Out-Null
+          $nsis = Get-ChildItem 'apps/pc-companion/src-tauri/target/release/bundle/nsis/*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $nsis) { throw 'Tauri NSIS installer was not produced.' }
+          Copy-Item $nsis.FullName ("dist/pc-companion/Cyclone-PC-Companion-${{ inputs.version }}-Setup.exe")
+          $msi = Get-ChildItem 'apps/pc-companion/src-tauri/target/release/bundle/msi/*.msi' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $msi) { Copy-Item $msi.FullName ("dist/pc-companion/Cyclone-PC-Companion-${{ inputs.version }}.msi") }
       - name: Sign when credentials are configured
         shell: pwsh
         env:

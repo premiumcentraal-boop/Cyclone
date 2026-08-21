@@ -63,3 +63,16 @@ def test_generic_mcp_profile_uses_same_server_surface():
     profile = generic_profile("CycloneAgentMCP.exe", ["serve"])
     assert set(profile["mcpServers"]) == {"cyclone-phone"}
     assert profile == copilot_profile("CycloneAgentMCP.exe", ["serve"])
+
+
+def test_connection_status_contract_values(monkeypatch):
+    import cyclone_agent_mcp.status as status
+    monkeypatch.setattr(status, "_command_exists", lambda _: True)
+    monkeypatch.setattr(status.shutil, "which", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(status, "_codex_configured", lambda _: True)
+    monkeypatch.setattr(status, "_json_opencode_configured", lambda _: True)
+    monkeypatch.setattr(status, "_json_copilot_configured", lambda _: False)
+    result = status.connection_status()
+    assert result["codex"] in status.HOST_STATES
+    assert result["deepseek_harness"] in status.HOST_STATES
+    assert result["generic_mcp"] in status.GENERIC_STATES
