@@ -61,10 +61,11 @@ class BridgeConnectionManager:
                 f"Cyclone APK ({CYCLONE_PACKAGE}) is not installed on the selected phone.",
             )
 
+        recreated = False
         try:
-            if hasattr(self.adb, "ensure_bridge_forward"):
+            try:
                 recreated = bool(self.adb.ensure_bridge_forward(self.local_port))
-            else:
+            except (AttributeError, NotImplementedError):
                 self.adb.forward_bridge(self.local_port)
                 recreated = True
         except ADBError as exc:
