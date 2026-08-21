@@ -27,6 +27,7 @@ ERROR_HTTP_STATUS = {
     GatewayErrorCode.VERIFICATION_FAILED: 409,
     GatewayErrorCode.DEVICE_DISCONNECTED: 503,
     GatewayErrorCode.PROTOCOL_MISMATCH: 409,
+    GatewayErrorCode.AUTH_REJECTED: 401,
 }
 
 
@@ -73,20 +74,41 @@ class CapabilityService:
                 witness=witness,
                 observation=observation,
             )
-        except Exception:
-            error = _error(
-                GatewayErrorCode.DEVICE_DISCONNECTED,
-                FailureLayer.TRANSPORT,
-                "Android device observation transport is unavailable.",
-                retryable=True,
-            )
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if code == GatewayErrorCode.AUTH_REJECTED or code == "AUTH_REJECTED":
+                error = _error(
+                    GatewayErrorCode.AUTH_REJECTED,
+                    FailureLayer.PROTOCOL,
+                    "Android bridge authentication was rejected.",
+                )
+            elif code == GatewayErrorCode.PROTOCOL_MISMATCH or code == "PROTOCOL_MISMATCH":
+                error = _error(
+                    GatewayErrorCode.PROTOCOL_MISMATCH,
+                    FailureLayer.PROTOCOL,
+                    "Android bridge protocol is incompatible.",
+                )
+            elif code == GatewayErrorCode.CAPABILITY_UNAVAILABLE or code == "CAPABILITY_UNAVAILABLE":
+                error = _error(
+                    GatewayErrorCode.CAPABILITY_UNAVAILABLE,
+                    FailureLayer.CAPABILITY,
+                    "Required Android observation capability is unavailable.",
+                    retryable=True,
+                )
+            else:
+                error = _error(
+                    GatewayErrorCode.DEVICE_DISCONNECTED,
+                    FailureLayer.TRANSPORT,
+                    "Android device observation transport is unavailable.",
+                    retryable=True,
+                )
             return CapabilityObservationResponse(
                 correlation_id=request.correlation_id,
                 ok=False,
                 transport=LayerOutcome(
-                    ok=False,
-                    status="disconnected",
-                    error=error,
+                    ok=error.code not in {GatewayErrorCode.DEVICE_DISCONNECTED},
+                    status="disconnected" if error.code == GatewayErrorCode.DEVICE_DISCONNECTED else "connected",
+                    error=error if error.layer == FailureLayer.TRANSPORT else None,
                 ),
                 error=error,
             )
@@ -139,7 +161,19 @@ class CapabilityService:
                 request, safety, GatewayErrorCode.PROTOCOL_MISMATCH,
                 FailureLayer.PROTOCOL, "Action request failed schema or safety validation.",
             )
-        except Exception:
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if code == "AUTH_REJECTED":
+                return self._rejected(
+                    request, safety, GatewayErrorCode.AUTH_REJECTED,
+                    FailureLayer.PROTOCOL, "Android bridge authentication was rejected.",
+                )
+            if code == "CAPABILITY_UNAVAILABLE":
+                return self._rejected(
+                    request, safety, GatewayErrorCode.CAPABILITY_UNAVAILABLE,
+                    FailureLayer.CAPABILITY, "Android action capability is unavailable.",
+                    retryable=True,
+                )
             return self._rejected(
                 request, safety, GatewayErrorCode.DEVICE_DISCONNECTED,
                 FailureLayer.TRANSPORT, "Android device transport is unavailable.",
@@ -154,6 +188,7 @@ class CapabilityService:
         error = self._map_error(raw, transport_ok, execution_ok, verification_ok)
         transport_error = error if error and error.layer == FailureLayer.TRANSPORT else None
         execution_error = error if error and error.layer in {
+            FailureLayer.CAPABILITY,
             FailureLayer.POLICY,
             FailureLayer.EXECUTION,
             FailureLayer.PROTOCOL,
@@ -186,6 +221,7 @@ class CapabilityService:
             ),
             before=_parse_witness(raw.get("before_witness")),
             after=_parse_witness(raw.get("after_witness")),
+            android_execution=_safe_android_execution(raw),
             safety=safety,
             latency_ms=max(0, int(raw.get("latency_ms") or 0)),
             transition_id=raw.get("transition_id"),
@@ -208,6 +244,19 @@ class CapabilityService:
             )
         if not execution_ok:
             error_class = str(raw.get("error_class") or "").upper()
+            if error_class == GatewayErrorCode.AUTH_REJECTED:
+                return _error(
+                    GatewayErrorCode.AUTH_REJECTED,
+                    FailureLayer.PROTOCOL,
+                    "Android bridge authentication was rejected.",
+                )
+            if error_class == GatewayErrorCode.CAPABILITY_UNAVAILABLE:
+                return _error(
+                    GatewayErrorCode.CAPABILITY_UNAVAILABLE,
+                    FailureLayer.CAPABILITY,
+                    "Android action capability is unavailable.",
+                    retryable=True,
+                )
             if error_class == GatewayErrorCode.POLICY_DENIED:
                 return _error(
                     GatewayErrorCode.POLICY_DENIED,
@@ -323,6 +372,17 @@ def _parse_observation_witness(observation: dict | None) -> Witness | None:
         ),
     }
     return _parse_witness(value)
+
+
+def _safe_android_execution(raw: dict) -> dict | None:
+    result = raw.get("result")
+    if not isinstance(result, dict):
+        return None
+    execution = result.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    allowed = ("ok", "beforeFingerprint", "afterFingerprint", "error", "verification")
+    return {key: execution[key] for key in allowed if key in execution}
 
 
 def _error(
