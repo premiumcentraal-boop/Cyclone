@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
+CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
 NON_MUTATING_CAPABILITIES = {"phone.observe", "phone.find", "phone.wait_for"}
 
 
@@ -27,7 +28,7 @@ class GatewayResponse:
 
 
 class GatewayClient:
-    """Small authenticated client for Agent 1's frozen loopback API."""
+    """Authenticated V3 capability client for Cyclone's loopback-only PC gateway."""
 
     def __init__(self, base_url: str | None = None, token: str | None = None, timeout: float = 30.0):
         self.base_url = (base_url or os.getenv("CYCLONE_DEVICE_GATEWAY_URL") or DEFAULT_BASE_URL).rstrip("/")
@@ -37,10 +38,15 @@ class GatewayClient:
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise GatewayError("Gateway URL must use loopback HTTP")
         self._last_observation_id: str | None = None
+        self._capability_ids: frozenset[str] | None = None
+        self._capability_discovery: dict[str, Any] | None = None
 
     def _request(self, method: str, path: str, payload: Any | None = None) -> Any:
         if not self.token:
-            raise GatewayError("CYCLONE_DEVICE_GATEWAY_TOKEN is not set")
+            raise GatewayError(
+                "CYCLONE_DEVICE_GATEWAY_TOKEN is not set",
+                body={"error": {"code": "AUTH_REJECTED", "layer": "PROTOCOL"}},
+            )
         url = f"{self.base_url}{path}"
         data = None
         headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
@@ -60,18 +66,60 @@ class GatewayClient:
                 body: Any = json.loads(raw_body) if raw_body else {}
             except json.JSONDecodeError:
                 body = {"error": {"code": "INVALID_GATEWAY_ERROR", "message": raw_body[:500]}}
+            if exc.code in {401, 403} and not (isinstance(body, dict) and isinstance(body.get("error"), dict)):
+                body = {
+                    "error": {
+                        "code": "AUTH_REJECTED",
+                        "layer": "PROTOCOL",
+                        "message": "PC Gateway authentication rejected.",
+                        "retryable": False,
+                    }
+                }
             raise GatewayError(f"Gateway HTTP {exc.code} for {path}", status=exc.code, body=body) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise GatewayError(f"Gateway unavailable at {self.base_url}: {exc}") from exc
+            raise GatewayError(
+                f"Gateway unavailable at {self.base_url}",
+                body={"error": {"code": "DEVICE_DISCONNECTED", "layer": "TRANSPORT", "retryable": True}},
+            ) from exc
         except json.JSONDecodeError as exc:
-            raise GatewayError(f"Gateway returned invalid JSON for {path}") from exc
+            raise GatewayError(
+                f"Gateway returned invalid JSON for {path}",
+                body={"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}},
+            ) from exc
 
     def status(self) -> Any:
         return self._request("GET", "/v1/device/status")
 
+    def capabilities(self, *, refresh: bool = False) -> dict[str, Any]:
+        if self._capability_discovery is not None and not refresh:
+            return self._capability_discovery
+        response = self._request("GET", "/v1/capabilities")
+        if not isinstance(response, dict) or response.get("protocol_version") != CAPABILITY_PROTOCOL_VERSION:
+            raise GatewayError(
+                "PC Gateway capability protocol mismatch",
+                body={"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}},
+            )
+        descriptors = response.get("capabilities")
+        if not isinstance(descriptors, list):
+            raise GatewayError(
+                "PC Gateway capability discovery is malformed",
+                body={"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}},
+            )
+        ids = []
+        for descriptor in descriptors:
+            if not isinstance(descriptor, dict) or not isinstance(descriptor.get("capability_id"), str):
+                raise GatewayError(
+                    "PC Gateway capability descriptor is malformed",
+                    body={"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}},
+                )
+            ids.append(descriptor["capability_id"])
+        self._capability_ids = frozenset(ids)
+        self._capability_discovery = response
+        return response
+
     def observe(self, *, include_screenshot: bool = False, mode: str = "compact") -> Any:
         response = self._request("POST", "/v1/capabilities/observe", {
-            "protocol_version": "cyclone.gateway.capability.v1",
+            "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "correlation_id": str(uuid.uuid4()),
             "include_screenshot": include_screenshot,
             "mode": mode,
@@ -95,11 +143,28 @@ class GatewayClient:
         return self._request("GET", "/v1/page/history")
 
     def action(self, tool: str, params: dict[str, Any], goal: str) -> Any:
+        discovery = self.capabilities()
+        if self._capability_ids is None or tool not in self._capability_ids:
+            raise GatewayError(
+                f"Capability {tool} is not advertised by the connected Cyclone gateway",
+                body={
+                    "protocol_version": CAPABILITY_PROTOCOL_VERSION,
+                    "capability_id": tool,
+                    "ok": False,
+                    "error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY", "retryable": False},
+                },
+            )
+        gateway_health = discovery.get("gateway_health") if isinstance(discovery, dict) else None
+        if isinstance(gateway_health, dict) and gateway_health.get("state") == "UNAVAILABLE":
+            raise GatewayError(
+                "Connected Cyclone gateway reports unavailable capabilities",
+                body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY", "retryable": True}},
+            )
         if tool not in NON_MUTATING_CAPABILITIES and self._last_observation_id is None:
             raise GatewayError(
                 "A fresh phone observation is required before a mutating action",
                 body={
-                    "protocol_version": "cyclone.gateway.capability.v1",
+                    "protocol_version": CAPABILITY_PROTOCOL_VERSION,
                     "capability_id": tool,
                     "ok": False,
                     "error": {
@@ -110,7 +175,7 @@ class GatewayClient:
                 },
             )
         payload = {
-            "protocol_version": "cyclone.gateway.capability.v1",
+            "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "correlation_id": str(uuid.uuid4()),
             "capability_id": tool,
             "params": params,
@@ -119,7 +184,12 @@ class GatewayClient:
         }
         if self._last_observation_id is not None:
             payload["expected_observation_id"] = self._last_observation_id
-        return self._request("POST", "/v1/capabilities/action", payload)
+        response = self._request("POST", "/v1/capabilities/action", payload)
+        if tool not in NON_MUTATING_CAPABILITIES:
+            # Element IDs and action evidence are observation-scoped. Force a re-observe after a
+            # mutation instead of letting Codex accidentally reuse stale authority.
+            self._last_observation_id = None
+        return response
 
     def debug_bundle(self, expected: str | None = None, goal: str | None = None) -> Any:
         return self._request("POST", "/v1/debug/bundle", {"expected": expected or "", "goal": goal or ""})
