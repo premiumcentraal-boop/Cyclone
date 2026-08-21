@@ -13,7 +13,7 @@ android {
         minSdk = 34
         targetSdk = 35
         versionCode = 19
-        // Single Android release-version source. UI and gateway status read BuildConfig.VERSION_NAME.
+        // Cyclone V3.1 integrated beta: UI and Gateway status read this single version source.
         versionName = "3.1.0-beta.1"
     }
 
