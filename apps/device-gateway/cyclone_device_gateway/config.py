@@ -35,13 +35,9 @@ class Settings:
         if not token:
             raise RuntimeError("CYCLONE_DEVICE_GATEWAY_TOKEN is required")
 
+        # Desktop V1 pairing owns per-device Android credentials in memory. The historical
+        # single-device bridge token remains optional for legacy /v1/device and Codex routes.
         bridge_token = os.getenv("CYCLONE_ANDROID_BRIDGE_TOKEN", "").strip()
-        if not bridge_token:
-            raise RuntimeError(
-                "CYCLONE_ANDROID_BRIDGE_TOKEN is required. Copy the session token "
-                "shown by the Cyclone PC Gateway screen on the phone."
-            )
-
         runtime_dir = Path(
             os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", ".runtime/device-gateway")
         ).expanduser().resolve()
