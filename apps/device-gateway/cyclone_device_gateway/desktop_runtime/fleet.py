@@ -57,26 +57,58 @@ class DeviceSession:
 
     def public(self) -> dict[str, Any]:
         suffix = self.serial[-4:] if len(self.serial) >= 4 else self.serial
+        model = self.adb_device.model or self.adb_device.device or "Android phone"
+        width = self.display_width or 1080
+        height = self.display_height or 2400
+        paired = self.credential is not None
+        state = self.state.value
+        connection_label = {
+            DeviceFleetState.READY: "Ready",
+            DeviceFleetState.SLEEPING: "Sleeping",
+            DeviceFleetState.UNPAIRED: "Not paired",
+            DeviceFleetState.PAIRING: "Pairing",
+            DeviceFleetState.UNAUTHORIZED: "Authorize USB debugging",
+            DeviceFleetState.ATTENTION: "Needs attention",
+            DeviceFleetState.DISCONNECTED: "Reconnecting",
+        }.get(self.state, state.replace("_", " ").title())
         return {
+            # Canonical Desktop V1 names.
             "deviceId": self.device_id,
-            "state": self.state.value,
+            "id": self.device_id,
+            "state": state,
+            "name": model,
             "model": self.adb_device.model,
+            "manufacturer": None,
             "product": self.adb_device.product,
             "device": self.adb_device.device,
             "serialSuffix": suffix,
-            "paired": self.credential is not None,
+            "paired": paired,
             "pairing": self.pending_pairing is not None,
             "screen": "AWAKE" if self.screen_awake else "SLEEPING",
-            "display": (
-                {"width": self.display_width, "height": self.display_height}
-                if self.display_width and self.display_height
-                else None
-            ),
+            "screenState": "AWAKE" if self.screen_awake else "SLEEPING",
+            "display": {"width": width, "height": height},
+            "displayWidth": width,
+            "displayHeight": height,
             "lastSeenMs": self.last_seen_ms,
+            "lastSeenEpochMs": self.last_seen_ms,
             "lastSafeError": self.last_safe_error,
+            "connectionLabel": connection_label,
+            # The V1 release uses the authenticated binary image WebSocket for both profiles.
+            # Experimental AVC can be enabled by the backend later without changing this UI contract.
+            "video": {
+                "mode": "SCREENSHOT",
+                "width": width,
+                "height": height,
+                "rotationDegrees": 0,
+                "codec": "image/jpeg",
+            },
             "capabilities": {
-                "manualControl": self.credential is not None,
-                "clipboard": "PC_TO_PHONE" if self.credential is not None else "PAIRING_REQUIRED",
+                "manualControl": paired,
+                "keyboard": paired,
+                "clipboard": paired,
+                "clipboardSync": False,
+                "reconnect": True,
+                "clipboardMode": "PC_TO_PHONE" if paired else "PAIRING_REQUIRED",
                 "video": ["thumbnail", "focus"],
             },
         }
@@ -258,111 +290,71 @@ class DeviceFleetManager:
         try:
             if hasattr(session.adb, "remove_forward"):
                 session.adb.remove_forward(session.local_port)
-            else:
-                session.adb.run(["forward", "--remove", f"tcp:{session.local_port}"])
         except Exception:
             pass
 
     def _refresh_authorized(self, session: DeviceSession) -> None:
-        session.last_seen_ms = now_ms()
-        try:
-            package_path = session.adb.shell("pm", "path", CYCLONE_PACKAGE, timeout=5).strip()
-        except ADBError:
-            self._set_state(session, DeviceFleetState.ATTENTION, "Selected phone disconnected during Cyclone package check.")
-            return
-        if not package_path.startswith("package:"):
-            self._set_state(session, DeviceFleetState.ATTENTION, "Cyclone is not installed on this phone.")
-            return
         try:
             session.adb.ensure_bridge_forward(session.local_port)
-        except ADBError:
-            self._set_state(session, DeviceFleetState.ATTENTION, "Could not create the isolated Cyclone USB forward.")
-            return
+            package_present = self._package_present(session)
+            if not package_present:
+                self._set_state(session, DeviceFleetState.ATTENTION, "Install the Cyclone mobile app on this phone.")
+                return
+            session.screen_awake = self._screen_awake(session)
+            self._refresh_display(session)
+            session.last_seen_ms = now_ms()
+            target = DeviceFleetState.SLEEPING if not session.screen_awake and session.credential else (
+                DeviceFleetState.READY if session.credential else DeviceFleetState.UNPAIRED
+            )
+            self._set_state(session, target, None)
+        except Exception:
+            self._set_state(session, DeviceFleetState.ATTENTION, "Cyclone USB bridge is not ready.")
 
-        awake = self._screen_awake(session)
-        self._set_screen_state(session, awake)
-        self._refresh_display(session)
-        if session.pending_pairing is not None:
-            self._set_state(session, DeviceFleetState.PAIRING, None)
-            return
-        if session.credential is None:
-            self._set_state(session, DeviceFleetState.UNPAIRED, None)
-            return
-
+    def _package_present(self, session: DeviceSession) -> bool:
         try:
-            status = session.bridge().request("bridge.status", {})
-        except BridgeOperationError as exc:
-            if exc.code == "AUTH_REJECTED":
-                session.credential = None
-                self._remembered[session.serial].credential = None
-                self._set_state(session, DeviceFleetState.UNPAIRED, "Pairing credential was rotated or revoked on the phone.")
-            else:
-                self._set_state(session, DeviceFleetState.ATTENTION, f"Android Gateway returned {exc.code}.")
-            return
-        except (BridgeDisconnectedError, BridgeProtocolError):
-            self._set_state(session, DeviceFleetState.ATTENTION, "Cyclone Android Gateway is not reachable.")
-            return
-
-        ready = bool(
-            isinstance(status, dict)
-            and status.get("gatewayEnabled") is True
-            and status.get("socketListening") is True
-            and status.get("accessibilityConnected") is True
-        )
-        if not ready:
-            self._set_state(session, DeviceFleetState.ATTENTION, "Cyclone Gateway or Accessibility needs attention.")
-        elif not awake:
-            self._set_state(session, DeviceFleetState.SLEEPING, None)
-        else:
-            self._set_state(session, DeviceFleetState.READY, None)
+            output = session.adb.shell("pm", "path", CYCLONE_PACKAGE, timeout=4)
+            return "package:" in output
+        except Exception:
+            return False
 
     def _screen_awake(self, session: DeviceSession) -> bool:
         try:
-            text = session.adb.shell("dumpsys", "power", timeout=5)
-        except ADBError:
-            return session.screen_awake
-        lowered = text.lower()
-        if "mwakefulness=asleep" in lowered or "display power: state=off" in lowered:
-            return False
-        if "mwakefulness=awake" in lowered or "display power: state=on" in lowered:
+            output = session.adb.shell("dumpsys", "power", timeout=4).lower()
+            return "minteractive=true" in output or "wakefulness=awake" in output or "display power: state=on" in output
+        except Exception:
             return True
-        return session.screen_awake
 
     def _refresh_display(self, session: DeviceSession) -> None:
         try:
-            text = session.adb.shell("wm", "size", timeout=5)
-        except ADBError:
-            return
-        matches = _SIZE_RE.findall(text)
-        if matches:
-            width, height = matches[-1]
-            session.display_width, session.display_height = int(width), int(height)
-
-    def _set_screen_state(self, session: DeviceSession, awake: bool) -> None:
-        if session.screen_awake == awake:
-            return
-        session.screen_awake = awake
-        self.events.publish(FleetEventType.SCREEN_STATE_CHANGED, session.device_id, screen="AWAKE" if awake else "SLEEPING")
-
-    def _set_state(self, session: DeviceSession, state: DeviceFleetState, safe_error: str | None) -> None:
-        old = session.state
-        session.state = state
-        session.last_safe_error = safe_error
-        if old != state:
-            self.events.publish(FleetEventType.STATE_CHANGED, session.device_id, previous=old.value, state=state.value)
-
-    def set_pairing(self, session: DeviceSession, pending: Any | None) -> None:
-        session.pending_pairing = pending
-        self.events.publish(
-            FleetEventType.PAIRING_CHANGED,
-            session.device_id,
-            pairing=pending is not None,
-            state=DeviceFleetState.PAIRING.value if pending is not None else session.state.value,
-        )
-        if pending is not None:
-            self._set_state(session, DeviceFleetState.PAIRING, None)
+            output = session.adb.shell("wm", "size", timeout=4)
+            matches = _SIZE_RE.findall(output)
+            if matches:
+                width, height = matches[-1]
+                session.display_width, session.display_height = int(width), int(height)
+        except Exception:
+            pass
 
     def remember_credential(self, session: DeviceSession, credential: str | None) -> None:
-        session.credential = credential
-        remembered = self._remembered.setdefault(session.serial, RememberedSession(session.device_id, local_port=session.local_port))
-        remembered.credential = credential
+        with self._lock:
+            session.credential = credential
+            remembered = self._remembered.setdefault(session.serial, RememberedSession(session.device_id, None, session.local_port))
+            remembered.credential = credential
+            remembered.local_port = session.local_port
+
+    def set_pairing(self, session: DeviceSession, pending: Any) -> None:
+        with self._lock:
+            session.pending_pairing = pending
+        if pending is not None:
+            self._set_state(session, DeviceFleetState.PAIRING, None)
+        elif session.credential:
+            self._set_state(session, DeviceFleetState.SLEEPING if not session.screen_awake else DeviceFleetState.READY, None)
+        else:
+            self._set_state(session, DeviceFleetState.UNPAIRED, None)
+        self.events.publish(FleetEventType.PAIRING_CHANGED, session.device_id, pairing=pending is not None)
+
+    def _set_state(self, session: DeviceSession, state: DeviceFleetState, error: str | None) -> None:
+        changed = session.state != state
+        session.state = state
+        session.last_safe_error = error
+        if changed:
+            self.events.publish(FleetEventType.STATE_CHANGED, session.device_id, state=state.value, device=session.public())
