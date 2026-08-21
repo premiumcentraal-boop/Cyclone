@@ -6,7 +6,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$RuntimeRoot = Join-Path $env:LOCALAPPDATA "Cyclone\bridge-v31"
+$LocalAppData = $env:LOCALAPPDATA
+if ([string]::IsNullOrWhiteSpace($LocalAppData)) {
+    if ($DryRun) {
+        $LocalAppData = Join-Path ([IO.Path]::GetTempPath()) "Cyclone-DryRun"
+    } else {
+        throw "LOCALAPPDATA is unavailable. Cyclone bridge setup must run on Windows."
+    }
+}
+$RuntimeRoot = Join-Path $LocalAppData "Cyclone\bridge-v31"
 $Venv = Join-Path $RuntimeRoot "venv"
 $TokenFile = Join-Path $RuntimeRoot "pc-token.clixml"
 $McpRunner = Join-Path $RuntimeRoot "run-cyclone-phone-mcp.ps1"
