@@ -6,8 +6,6 @@ import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.PhoneToolErrorCode
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
-import com.cyclone.mobile.applearner.ActionRisk
-import com.cyclone.mobile.applearner.ActionSafetyPolicy
 import com.cyclone.mobile.applearner.AppGraphSnapshot
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.FollowMeLearnerRuntime
@@ -144,53 +142,6 @@ internal object GatewayBrainAdapter {
     }
 }
 
-internal object GatewayActionPolicy {
-    private val blockedRisk = setOf(ActionRisk.CONSEQUENTIAL, ActionRisk.AUTHENTICATION, ActionRisk.UNKNOWN)
-
-    fun requireAllowed(tool: String, params: JSONObject) {
-        val selector = params.optJSONObject("selector")
-        val semanticRisk = params.optString("_gatewayRisk")
-            .takeIf(String::isNotBlank)
-            ?.uppercase()
-            ?.let { runCatching { ActionRisk.valueOf(it) }.getOrNull() }
-
-        if (semanticRisk in blockedRisk && tool in setOf("phone.click", "phone.long_press", "phone.type")) {
-            throw GatewayProtocolException(
-                "POLICY_BLOCKED",
-                "PC_CODEX cannot bypass Cyclone semantic risk ${semanticRisk!!.name.lowercase()}; use the existing human approval/teaching flow",
-            )
-        }
-
-        if (tool == "phone.type") {
-            if (selector == null || selector.length() == 0) {
-                throw GatewayProtocolException(
-                    "POLICY_BLOCKED",
-                    "PC gateway typing requires an explicit semantic selector; focused-field typing is not exposed",
-                )
-            }
-            if (ActionSafetyPolicy.looksSensitiveField(selector)) {
-                throw GatewayProtocolException(
-                    "POLICY_BLOCKED",
-                    "PC gateway cannot type passwords, OTPs, PINs, tokens or other authentication secrets",
-                )
-            }
-            return
-        }
-
-        if (tool !in setOf("phone.click", "phone.long_press")) return
-        val label = selector?.optString("text").orEmpty().ifBlank { selector?.optString("textContains").orEmpty() }
-        val resource = selector?.optString("resourceId").orEmpty()
-        val description = selector?.optString("contentDescription").orEmpty()
-        val risk = semanticRisk ?: ActionSafetyPolicy.classify(label, resource, description)
-        if (risk in blockedRisk) {
-            throw GatewayProtocolException(
-                "POLICY_BLOCKED",
-                "PC_CODEX cannot bypass Cyclone policy for ${risk.name.lowercase()} controls; use the existing human approval/teaching flow",
-            )
-        }
-    }
-}
-
 internal object GatewayActionAdapter {
     val allowedTools = linkedSetOf(
         "phone.observe",
@@ -212,14 +163,28 @@ internal object GatewayActionAdapter {
 
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
         val tool = args.optString("tool")
-        if (tool !in allowedTools) throw GatewayProtocolException("TOOL_NOT_ALLOWED", "Tool is not enabled for the PC gateway")
+        if (tool !in allowedTools) throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Tool is not enabled for the PC gateway", requestId)
         val source = args.optString("source", "PC_CODEX")
-        if (source != "PC_CODEX") throw GatewayProtocolException("INVALID_SOURCE", "Gateway action source must be PC_CODEX")
+        if (source != "PC_CODEX") throw GatewayProtocolException("PROTOCOL_MISMATCH", "Gateway action source must be PC_CODEX", requestId)
         val params = args.optJSONObject("params") ?: JSONObject()
         val goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') }
-        GatewayActionPolicy.requireAllowed(tool, params)
-        val executableParams = JSONObject(params.toString()).apply { remove("_gatewayRisk") }
+        val currentObservationId = args.optString("currentObservationId")
+            .takeIf(String::isNotBlank)
+            ?: GatewayObservationStore.current()?.id
+        val missionMetadata = args.optJSONObject("missionMetadata") ?: JSONObject()
+        val authorityRequest = GatewayActionAuthorityRequest(
+            requestId = requestId,
+            capability = tool,
+            parameters = JSONObject(params.toString()),
+            currentObservationId = currentObservationId,
+            source = source,
+            goal = goal,
+            missionMetadata = JSONObject(missionMetadata.toString()),
+        )
+        val authorityDecision = GatewayActionAuthorityRegistry.authorize(context, authorityRequest)
+        authorityDecision.requireAuthorized(requestId)
 
+        val executableParams = JSONObject(params.toString()).apply { remove("_gatewayRisk") }
         val before = brainState()
         val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, executableParams))
         val after = brainState()
@@ -240,6 +205,10 @@ internal object GatewayActionAdapter {
         return JSONObject()
             .put("source", "PC_CODEX")
             .put("tool", tool)
+            .put("authority", JSONObject()
+                .put("binding", GatewayActionAuthorityRegistry.bindingName())
+                .put("outcome", authorityDecision.outcome.name)
+                .put("reasonCode", authorityDecision.reasonCode))
             .put("sanitizedParams", GatewayPrivacy.redactActionParams(tool, executableParams))
             .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
     }
