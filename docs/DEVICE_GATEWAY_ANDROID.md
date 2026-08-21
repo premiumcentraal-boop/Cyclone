@@ -1,238 +1,137 @@
-# Cyclone 2.9.3 Android Device Gateway Provider
+# Cyclone Android Gateway — V3.1 USB bridge
 
-This document describes the **Android provider only** for Cyclone's PC Device Gateway. The PC gateway and Codex/MCP layers are separate components owned by other agents.
+## Scope
 
-## Security and transport
+The Android Gateway is the authenticated, localabstract transport adapter between the PC Device Gateway and Cyclone Mobile. It is **not** a second controller and it is **not** a policy authority.
 
-Cyclone does **not** open an HTTP server or a LAN port. When the user explicitly enables **Cyclone PC Gateway (USB debugging)**, the app listens only on Android's local abstract Unix socket:
+The only phone mutation path remains:
 
 ```text
-cyclone_gateway
+Codex / PC agent
+  -> Cyclone Phone MCP
+  -> PC Device Gateway (127.0.0.1 only)
+  -> ADB forward tcp:8766
+  -> localabstract:cyclone_gateway
+  -> Android Gateway
+  -> GatewayActionAuthority
+  -> V3.1 policy/action composition
+  -> PhoneToolExecutor
+  -> after-state verification
 ```
 
-A trusted USB-connected PC exposes that socket locally with ADB:
+No Android TCP/LAN listener, arbitrary shell, arbitrary ADB, `su`, root command, PowerShell or generic command capability is exposed.
+
+## Transport
+
+Android listens only on:
+
+```text
+LocalServerSocket("cyclone_gateway")
+```
+
+Windows reaches it through the fixed forward:
 
 ```powershell
 adb forward tcp:8766 localabstract:cyclone_gateway
 ```
 
-The PC then connects to `127.0.0.1:8766`. ADB performs the forwarding; the APK itself never binds TCP port 8766.
+The PC Gateway now repairs/checks this forward before Android bridge requests. USB unplug causes the active operation to fail as `DEVICE_DISCONNECTED`; a later request reselects the same configured/previously approved device and recreates the forward.
 
-The gateway is **OFF by default**. Enabling it creates a random 256-bit session token. Rotating the token immediately disconnects current clients. Disabling the gateway closes the listener and removes the token. The token is shown only in the explicit user settings surface and is never included in gateway status, debug snapshots, command audit logs, or action logs.
-
-The launcher contains a second Cyclone entry named **Cyclone PC Gateway** so the developer surface is easy to find without changing the production 2.9.3 Compose navigation. It is still an Activity in the same `com.cyclone.mobile` APK and uses the same runtimes/stores.
-
-## Wire protocol
-
-Transport is newline-delimited UTF-8 JSON. One request produces one response.
-
-Request:
+Protocol remains newline-delimited JSON:
 
 ```json
-{"id":"uuid","op":"observe.semantic","args":{},"auth":"session-token"}
+{"id":"correlation-id","op":"observe.semantic","args":{},"auth":"<session token>"}
 ```
-
-Response:
 
 ```json
-{"id":"uuid","ok":true,"result":{},"error":null}
+{"id":"correlation-id","ok":true,"result":{}}
 ```
 
-Errors preserve the request ID where possible and use:
+The request `id` is the transport correlation ID. Action requests inherit the V3 capability correlation ID into the Android bridge envelope.
 
-```json
-{"id":"uuid","ok":false,"result":null,"error":{"code":"AUTH_REJECTED","message":"...","details":null}}
+## Session authentication
+
+The phone Gateway is off by default. Enabling **Cyclone -> AI -> Full PC + Codex Gateway** creates a memory-only session token. Rotating the token disconnects current clients; the old token is rejected as `AUTH_REJECTED`.
+
+The session token is never included in bridge status, diagnostics, App Graph/Brain records or action audits. The Windows setup flow does not persist the Android token in the project. V3.1 Beta keeps it session-only in the launching process.
+
+## Frozen Android operations
+
+- `bridge.status`
+- `observe.semantic`
+- `observe.page_debug`
+- `ui.search`
+- `ui.element`
+- `app_graph.get`
+- `brain.recall`
+- `action.execute`
+- `teach.start`
+- `teach.status`
+- `teach.stop`
+- `debug.snapshot`
+
+No generic command operation exists.
+
+## V3.1 action authority seam
+
+`GatewayActionAuthority` is the sole Android Gateway authorization seam for PC-originated actions. The Gateway supplies request/correlation ID, typed capability, parameters, current observation ID, `source = PC_CODEX`, goal and bounded mission metadata.
+
+The authority returns one of:
+
+- `AUTHORIZED_HANDOFF`
+- `POLICY_DENIED`
+- `STALE_OBSERVATION`
+- `CAPABILITY_UNAVAILABLE`
+- `VALIDATION_FAILURE`
+
+Only `AUTHORIZED_HANDOFF` reaches `PhoneToolExecutor`.
+
+### Compatibility fallback
+
+Until the integration owner binds Agent 1's V3.1 policy/action composition, `GatewayCompatibilityActionAuthority` is deliberately **fail closed** for every mutating capability. It authorizes only existing read-only executor helpers (`phone.observe`, `phone.find`, `phone.wait_for`). It does not classify consequence risk and cannot invent approval.
+
+Final integration must bind the production adapter during normal Cyclone startup:
+
+```kotlin
+GatewayActionAuthorityRegistry.bind("V31_POLICY_GOVERNOR", GatewayActionAuthority { context, request ->
+    // Adapter only: convert request to Agent 1's typed V3 proposal/policy composition,
+    // return a GatewayActionAuthorityDecision, and do not execute the phone here.
+})
 ```
 
-Input lines are bounded to 1 MiB to prevent a forwarded client from growing the phone process without limit.
+The adapter must map Agent 1 policy outcomes to the five Gateway outcomes and must not call `PhoneToolExecutor` itself. After `AUTHORIZED_HANDOFF`, `GatewayActionAdapter` performs the one canonical executor call.
 
-## Frozen operations
+## Error contract
 
-The Android provider implements exactly these protocol operations:
+End-to-end public errors are `CAPABILITY_UNAVAILABLE`, `STALE_OBSERVATION`, `POLICY_DENIED`, `EXECUTION_FAILED`, `VERIFICATION_FAILED`, `DEVICE_DISCONNECTED`, `PROTOCOL_MISMATCH` and `AUTH_REJECTED`.
 
-| Operation | Android source of truth |
-| --- | --- |
-| `bridge.status` | `DeviceState`, `FollowMeLearnerRuntime`, gateway runtime |
-| `observe.semantic` | `CycloneAccessibilityService.observe` + `PageAwarenessRuntime` |
-| `observe.page_debug` | `PageDebugSandboxV293` + deterministic `PageDebugDiagnosisV293` evidence |
-| `ui.search` | deterministic local search over the latest complete semantic/raw observation |
-| `ui.element` | latest observation-local element map |
-| `app_graph.get` | `AppLearnerRuntime.graph/retrieval` |
-| `brain.recall` | `AdaptiveBrainRuntime.recall` |
-| `action.execute` | `PhoneToolExecutor` |
-| `teach.start` | `FollowMeLearnerRuntime.start` |
-| `teach.status` | Follow Me + `RoutineTeachingRuntime` + gesture evidence |
-| `teach.stop` | canonical Follow Me/Routine Teaching finish path |
-| `debug.snapshot` | sanitized gateway, observation, PageDebug, teaching and command-audit metadata |
+`VALIDATION_FAILURE` is an authority outcome and is mapped to `PROTOCOL_MISMATCH` at the gateway protocol boundary.
 
-Unknown operations are rejected. Every operation, including `bridge.status`, requires the current session token.
+Transport, Android execution and verification remain separate. Socket/HTTP success alone never means an action succeeded.
 
-## Semantic observation
+## Observation and privacy
 
-`observe.semantic` runs the production Accessibility observation path and then the production Page Awareness path. It exports:
+`observe.semantic` continues to expose the full current PageContext control store rather than the 36-control production prompt slice. Raw Accessibility evidence stays separately named and sanitized. `ui.search` is deterministic and element IDs remain observation-scoped.
 
-- observation ID and explicit observation-local element-ID scope;
-- timestamp, foreground package/activity, display size and orientation;
-- Accessibility fingerprint and semantic PageKey/fingerprint;
-- full `PageContext` controls retained by Page Awareness, up to the existing **80-control store limit**;
-- enriched semantic controls with Android actions, resource IDs, content descriptions, bounds and state flags when a matching raw node is available;
-- relevant Accessibility windows;
-- a separately named, sanitized raw Accessibility snapshot for PC-side acquisition.
-
-The gateway does **not** reapply the Page Agent's 36-control cap. It also does not change Page Awareness's existing 450-node scan or 80-control store behavior.
-
-Element IDs have forms similar to:
+Page Debug preserves the deterministic funnel:
 
 ```text
-semantic:<observation-id>:<control-key>
-raw:<observation-id>:<raw-node-id>
+raw Accessibility collection: up to 2500 nodes
+semantic scan:             up to 450 nodes
+PageContext store:         up to 80 semantic controls
+production agent payload: up to 36 controls
 ```
 
-They are intentionally observation-scoped. `ui.element` rejects an ID from an older observation with `STALE_ELEMENT`.
+Passwords, OTPs, PINs, provider/API keys, session tokens and `phone.type` plaintext are excluded or redacted. Hidden chain-of-thought is not captured or exported.
 
-## PageDebug export
+## Phone UX
 
-`observe.page_debug` captures through the existing 2.9.3 sandbox and exports deterministic evidence for the current funnel:
+The AI card and control center use four user-facing states: `OFF`, `WAITING FOR PC`, `CONNECTED` and `ATTENTION NEEDED`.
 
-```text
-raw Accessibility collection: 2500 max
-              ↓
-semantic node scan:             450 max
-              ↓
-semantic control store:          80 max
-              ↓
-production Page Agent payload:   36 max
-```
+The control center provides enable/disable, copy token, rotate token, disconnect, Accessibility status, USB/ADB client status, last safe error and setup instructions. Technical socket/authority details stay behind **Show diagnostics**.
 
-The response includes raw/visible/interactive/unlabelled counts, semantic and production-agent control counts, deterministic diagnosis, sanitized raw Accessibility, full semantic page, production agent payload and full-controls comparison.
+The Gateway remains part of the single Cyclone app. Agent 3 made no `AndroidManifest.xml` or launcher changes.
 
-The gateway intentionally does **not** export hidden chain-of-thought or provider-private reasoning. It also omits the sandbox's system-prompt field and screenshot filesystem path; only harmless screenshot metadata is exposed.
+## Focused verification
 
-Diagnosis stages remain the existing 2.9.3 values:
-
-- `ACCESSIBILITY_PERCEPTION`
-- `SEMANTICIZATION_LOSS`
-- `AGENT_CONTEXT_TRUNCATION`
-- `AGENT_REASONING_OR_MEMORY`
-
-## UI search
-
-`ui.search` does not call an LLM. It searches the latest complete semantic/raw observation using deterministic normalized matching. Exact matches rank above substring matches, token overlap ranks below those, and semantic candidates receive a small deterministic tie-break advantage.
-
-Example:
-
-```json
-{"id":"2","op":"ui.search","args":{"query":"Continue","limit":30},"auth":"..."}
-```
-
-Candidates expose element ID, label, semantic name, role, resource ID, content description, bounds, Android actions, source and a deterministic relevance score.
-
-## App Graph and Adaptive Brain
-
-`app_graph.get` uses `AppLearnerRuntime` rather than creating a second graph. If a PageKey is supplied, the adapter maps it to a learned screen using the screen's semantic fingerprint and passes that screen into the existing retrieval path. The response includes query/relevance metadata and graph counts, but not a dump of the lifelong graph database.
-
-`brain.recall` uses `AdaptiveBrainRuntime.recall` with goal/package/PageKey and the latest Accessibility fingerprint when available. The result is passed through the gateway privacy boundary before export.
-
-## Action execution
-
-`action.execute` accepts only the first-run phone tools:
-
-```text
-phone.observe
-phone.find
-phone.click
-phone.long_press
-phone.swipe
-phone.scroll
-phone.type
-phone.back
-phone.home
-phone.open_app
-phone.wait_for
-```
-
-The adapter calls the existing `PhoneToolExecutor`; it does not implement ADB taps, a second Accessibility engine, or direct root execution.
-
-The source label must be `PC_CODEX`. This label does not bypass `DeviceState` controller ownership, fresh-observation requirements, selector resolution, semantic Android actions or verification in the existing executor.
-
-As an additional boundary, the USB gateway refuses high-risk/authentication/unknown click/long-press targets instead of inventing a remote approval bypass. Sensitive `phone.type` selectors (password, OTP, PIN, token, etc.) are rejected. Successful/meaningful attempted actions are recorded through the existing `AdaptiveBrainRuntime.recordToolOutcome(..., source="PC_CODEX")`; the existing Brain sanitizer deliberately omits typed values.
-
-A human-demonstrated long press still benefits from the production Accessibility service's optimization: `ACTION_LONG_CLICK` is preferred when Android exposes it, with a timed hold only as fallback.
-
-## Teaching
-
-Remote teaching uses the existing Follow Me and Routine Teaching history. No second teaching database exists.
-
-`teach.start` starts `FollowMeLearnerRuntime` if it is not already active. `teach.status` returns:
-
-- session ID;
-- active/paused state;
-- current package and most recent PageKey;
-- page, action and gesture counts;
-- apps and reusable paths seen;
-- canonical session status.
-
-`teach.stop` completes through the canonical Follow Me/Routine Teaching finish path and returns the stopped session/report identifier and summary metadata.
-
-Typed text is still ignored by Follow Me, matching existing Cyclone privacy behavior.
-
-## Privacy boundary
-
-The Android provider never exports or logs:
-
-- the PC gateway session token;
-- password/passcode/PIN field contents;
-- OTP / verification-code contents;
-- API/provider keys or token fields;
-- the value supplied to `phone.type`.
-
-For editable Accessibility nodes, text is redacted before PC export while structural metadata remains available. Sensitive node descriptions are also redacted. `debug.snapshot` contains command IDs/tools/outcomes only, not action parameters.
-
-## Rooted Pixel 8 scope
-
-Root is not required by the Android provider. `bridge.status` may report a heuristic `rootAppearsAvailable` flag, but the protocol deliberately has no `su.execute`, `root.shell`, `runCommand`, or equivalent arbitrary shell operation.
-
-Root-only telemetry such as `getevent`, `dumpsys` and `logcat` belongs on the PC/Agent 1 side over ADB.
-
-## Lifecycle
-
-`GatewayInitProvider` is an unexported process initializer. It starts nothing while the gateway is disabled. If the user enabled the gateway previously and Android later recreates the Cyclone process for MainActivity, Accessibility or another component, it recreates the localabstract listener.
-
-USB/ADB disconnects are treated as normal socket disconnects. The listener remains available for a later `adb forward`/reconnect. Disable closes clients and listener; rotate/disconnect closes clients without opening any network socket.
-
-## Agent 1 integration
-
-1. Ensure the Pixel 8 has Cyclone 2.9.3 installed and Cyclone Accessibility enabled.
-2. On the phone open **Cyclone PC Gateway** and explicitly enable **PC Gateway (USB debugging)**.
-3. Read the session token from the phone UI.
-4. On Windows verify the phone is visible with `adb devices`.
-5. Run `adb forward tcp:8766 localabstract:cyclone_gateway`.
-6. Connect Agent 1's PC gateway client to `127.0.0.1:8766`.
-7. Send `bridge.status` with the token before acquisition.
-8. Use `observe.semantic` as the full acquisition interface. Store the full returned state on the PC; do not assume the 36-control Page Agent payload is complete.
-9. Use `observe.page_debug` when investigating a lost target.
-10. Send only the typed `action.execute` phone tools listed above. Root telemetry remains a separate PC-side ADB concern.
-
-For the harmless acceptance route, Agent 1 should drive:
-
-```text
-Pixel Launcher -> Settings -> Apps -> Home
-```
-
-and repeat it. The second pass should be able to query the App Graph/Brain evidence created by Cyclone's existing execution/learning paths.
-
-## Agent 3 / MCP integration
-
-Agent 3 should talk only to Agent 1's PC Device Gateway abstraction. It should not connect directly to the APK socket or implement another phone controller.
-
-The MCP layer can surface the frozen operations/typed tools from Agent 1, preserving:
-
-- `PC_CODEX` source labeling;
-- observation-local element-ID scope;
-- PageDebug's deterministic diagnosis rather than chain-of-thought;
-- no arbitrary root shell;
-- no raw gateway token in model-visible logs.
-
-## Unit-test coverage
-
-`GatewayBridgeV293Test` covers protocol parsing, unknown-op validation, auth comparison, Accessibility sanitization, `phone.type` redaction, deterministic UI search/stale IDs, action-tool mapping and risk policy, teaching mapping, PageDebug funnel export, App Graph PageKey matching, Brain credential privacy, and bounded socket-line lifecycle behavior without requiring a physical phone.
+Agent 3's focused JVM tests live under `apps/mobile/app/src/test/java/com/cyclone/mobile/gateway/`. They cover protocol/auth/privacy, observation-scoped IDs, action authority outcomes and fail-closed compatibility behavior. A physical USB test is still required before claiming device acceptance.
