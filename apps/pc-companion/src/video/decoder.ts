@@ -20,6 +20,7 @@ export interface VideoRendererFactoryInput {
   device: DesktopDevice;
   profile: StreamProfile;
   streamUrl: string;
+  streamProtocols: string[];
   fallbackUrl: string;
   target: VideoRenderTarget;
   callbacks: VideoRendererCallbacks;
