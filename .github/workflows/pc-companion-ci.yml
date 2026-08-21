@@ -1,0 +1,50 @@
+name: PC Companion CI
+
+on:
+  pull_request:
+    paths:
+      - 'tools/cyclone-agent-mcp/**'
+      - 'tools/codex-phone-mcp/**'
+      - 'packaging/pc-companion/**'
+      - 'scripts/pc-companion/**'
+      - '.github/workflows/pc-companion-ci.yml'
+      - '.github/workflows/pc-companion-release.yml'
+      - 'apps/pc-companion/**'
+  push:
+    paths:
+      - 'tools/cyclone-agent-mcp/**'
+      - 'tools/codex-phone-mcp/**'
+      - 'packaging/pc-companion/**'
+      - 'scripts/pc-companion/**'
+      - '.github/workflows/pc-companion-ci.yml'
+      - '.github/workflows/pc-companion-release.yml'
+      - 'apps/pc-companion/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-sidecars:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.7'
+      - name: Test Cyclone Agent MCP
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -e 'tools/cyclone-agent-mcp[test]'
+          python -m pytest -q tools/cyclone-agent-mcp/tests
+      - name: Generate third-party notices
+        shell: pwsh
+        run: python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
+      - name: Build Windows Python sidecars
+        shell: pwsh
+        run: ./scripts/pc-companion/build-sidecars.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyclone-pc-sidecars-${{ github.sha }}
+          path: dist/pc-companion/
+          if-no-files-found: error

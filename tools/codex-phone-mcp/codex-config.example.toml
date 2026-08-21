@@ -1,11 +1,7 @@
-# Copy this table into a trusted project's .codex/config.toml and replace the cwd.
-# CYCLONE_DEVICE_GATEWAY_TOKEN and CYCLONE_DEVICE_GATEWAY_URL are read from the local environment.
+# Generated equivalent: CycloneAgentMCP.exe connect codex --dry-run
+# Copy this block to the user's Codex config and replace the command with the installed absolute path.
+# No gateway token belongs in this TOML.
 [mcp_servers.cyclone-phone]
-command = "python"
-args = ["-m", "cyclone_phone_mcp"]
-cwd = "C:\\path\\to\\Cyclone\\tools\\codex-phone-mcp"
-env_vars = ["CYCLONE_DEVICE_GATEWAY_TOKEN", "CYCLONE_DEVICE_GATEWAY_URL"]
+command = "C:\\Program Files\\Cyclone\\CycloneAgentMCP.exe"
+args = ["serve"]
 enabled = true
-required = true
-default_tools_approval_mode = "writes"
-tool_timeout_sec = 60
