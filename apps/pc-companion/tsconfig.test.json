@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": ".test-dist",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/core/**/*.ts",
+    "src/services/types.ts",
+    "src/services/mockDesktopService.ts"
+  ]
+}
