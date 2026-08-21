@@ -23,7 +23,6 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -48,6 +47,13 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
     val session = status.optJSONObject("connectedSession")
     val pcConnected = session?.optBoolean("connected") == true
     val token = if (enabled) GatewayRuntime.tokenForUser(context).orEmpty() else ""
+    val state = when (status.optString("gatewayState")) {
+        "CONNECTED" -> "CONNECTED"
+        "WAITING_FOR_PC" -> "WAITING FOR PC"
+        "ATTENTION_NEEDED" -> "ATTENTION NEEDED"
+        else -> "OFF"
+    }
+    val healthy = state == "CONNECTED" || state == "WAITING FOR PC"
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -59,8 +65,9 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
                 Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("SPECIAL AI FEATURE", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text("CYCLONE AI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text("Full PC + Codex Gateway", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(state, style = MaterialTheme.typography.labelLarge, color = if (healthy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                 }
                 Switch(
                     checked = enabled,
@@ -75,13 +82,18 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
             }
 
             Text(
-                "Connect ${CycloneRelease.label} to a trusted PC over USB so Codex can observe semantic UI, use learned App Graph/Brain knowledge, run typed phone actions, teach routes, and request screenshots when needed. This stays inside the same Cyclone app and never opens a LAN listener.",
+                "Connect ${CycloneRelease.label} to a trusted Windows PC over USB. Codex can use Cyclone's structured phone controls while Android policy and verification stay authoritative.",
                 style = MaterialTheme.typography.bodyMedium,
             )
 
-            GatewayStatusRow("Gateway", enabled, if (enabled) "Ready on USB" else "Off")
-            GatewayStatusRow("Phone control", accessibilityReady, if (accessibilityReady) "Accessibility ready" else "Enable Accessibility")
-            GatewayStatusRow("PC session", pcConnected, if (pcConnected) "Connected" else if (enabled) "Waiting for USB PC" else "Gateway is off")
+            GatewayStatusRow("Gateway", enabled, if (enabled) "On" else "Off")
+            GatewayStatusRow("Phone control", accessibilityReady, if (accessibilityReady) "Ready" else "Accessibility off")
+            GatewayStatusRow("USB / PC session", pcConnected, if (pcConnected) "Connected" else if (enabled) "Waiting for PC" else "Off")
+            GatewayStatusRow("PC Gateway health", pcConnected, if (pcConnected) "Session active" else "Known after PC connects")
+
+            status.optString("lastSafeError").takeIf { it.isNotBlank() && it != "null" }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
 
             Button(
                 onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java)) },
@@ -97,21 +109,14 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
                     onClick = {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText("Cyclone Gateway session token", token))
-                        Toast.makeText(context, "Gateway session token copied", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Session token copied", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Rounded.ContentCopy, null)
                     Spacer(Modifier.width(7.dp))
-                    Text("Copy current session token")
+                    Text("Copy session token")
                 }
-            }
-
-            FilledTonalButton(
-                onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java)) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("USB-only · authenticated · no arbitrary shell")
             }
         }
     }
