@@ -5,7 +5,6 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -80,6 +79,10 @@ class GatewayClient:
                 body: Any = json.loads(raw) if raw else {}
             except json.JSONDecodeError:
                 body = {"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}}
+            # FastAPI wraps typed Desktop errors as {detail:{code,...}}. Normalize for MCP callers.
+            if isinstance(body, dict) and isinstance(body.get("detail"), dict):
+                detail = body["detail"]
+                body = {"error": {"code": detail.get("code", "GATEWAY_ERROR"), "message": detail.get("message", "Gateway request failed"), "retryable": detail.get("retryable", False)}}
             raise GatewayError(f"Gateway HTTP {exc.code}", status=exc.code, body=body) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise GatewayError(
@@ -94,33 +97,28 @@ class GatewayClient:
 
     def list_devices(self) -> list[DeviceSummary]:
         try:
-            raw = self._request("GET", "/v1/devices")
+            raw = self._request("GET", "/v1/fleet")
         except GatewayError as exc:
             if exc.status != 404:
                 raise
             return self._legacy_single_device()
         items = raw.get("devices") if isinstance(raw, dict) else None
         if not isinstance(items, list):
-            raise GatewayError(
-                "Device inventory is malformed",
-                body={"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}},
-            )
+            raise GatewayError("Device inventory is malformed", body={"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}})
         devices: list[DeviceSummary] = []
         for item in items:
             if not isinstance(item, dict):
                 continue
-            device_id = item.get("device_id") or item.get("id") or item.get("serial")
+            device_id = item.get("deviceId") or item.get("device_id") or item.get("id")
             if not isinstance(device_id, str) or not device_id.strip():
                 continue
-            state = item.get("state") or item.get("readiness") or ("READY" if item.get("ready") is True else "ATTENTION")
-            devices.append(
-                DeviceSummary(
-                    device_id=device_id.strip(),
-                    state=str(state).upper(),
-                    label=str(item.get("label") or item.get("model") or "").strip() or None,
-                    transport=str(item.get("transport") or "").strip() or None,
-                )
-            )
+            state = item.get("state") or ("READY" if item.get("ready") is True else "ATTENTION")
+            devices.append(DeviceSummary(
+                device_id=device_id.strip(),
+                state=str(state).upper(),
+                label=str(item.get("name") or item.get("model") or "").strip() or None,
+                transport="USB",
+            ))
         return sorted(devices, key=lambda item: item.device_id)
 
     def _legacy_single_device(self) -> list[DeviceSummary]:
@@ -138,55 +136,43 @@ class GatewayClient:
         if device_id:
             matches = [item for item in devices if item.device_id == device_id]
             if not matches:
-                raise GatewayError(
-                    "Requested device is not available",
-                    body={"error": {"code": "DEVICE_NOT_FOUND", "layer": "DEVICE"}},
-                )
+                raise GatewayError("Requested device is not available", body={"error": {"code": "DEVICE_NOT_FOUND", "layer": "DEVICE"}})
             selected = matches[0]
             if not selected.ready:
-                raise GatewayError(
-                    "Requested device is not ready",
-                    body={"error": {"code": "DEVICE_NOT_READY", "layer": "DEVICE"}, "device": selected.safe_dict()},
-                )
+                raise GatewayError("Requested device is not ready", body={"error": {"code": "DEVICE_NOT_READY", "layer": "DEVICE"}, "device": selected.safe_dict()})
             return selected
         if len(ready) == 1:
             return ready[0]
         if len(ready) > 1:
             raise GatewayError(
                 "Multiple READY devices require explicit selection",
-                body={
-                    "error": {"code": "DEVICE_SELECTION_REQUIRED", "layer": "DEVICE", "retryable": True},
-                    "available_devices": [item.safe_dict() for item in ready],
-                },
+                body={"error": {"code": "DEVICE_SELECTION_REQUIRED", "layer": "DEVICE", "retryable": True}, "available_devices": [item.safe_dict() for item in ready]},
             )
         raise GatewayError(
             "No READY Cyclone device is available",
             body={"error": {"code": "DEVICE_NOT_READY", "layer": "DEVICE", "retryable": True}, "available_devices": [item.safe_dict() for item in devices]},
         )
 
-    def _scope(self, selected: DeviceSummary, path: str, *, params: dict[str, str] | None = None) -> str:
+    def _agent_path(self, selected: DeviceSummary, suffix: str) -> str:
         if selected.legacy_unscoped:
-            return path
-        query = dict(params or {})
-        query["device_id"] = selected.device_id
-        return f"{path}?{urllib.parse.urlencode(query)}"
-
-    def _payload(self, selected: DeviceSummary, payload: dict[str, Any]) -> dict[str, Any]:
-        if not selected.legacy_unscoped:
-            payload = dict(payload)
-            payload["device_id"] = selected.device_id
-        return payload
+            raise GatewayError("Desktop device-scoped API is unavailable on this older Gateway", body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "DEVICE"}})
+        return f"/v1/devices/{urllib.parse.quote(selected.device_id, safe='')}/agent{suffix}"
 
     def status(self, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
-        return self._request("GET", self._scope(selected, "/v1/device/status"))
+        if selected.legacy_unscoped:
+            return self._request("GET", "/v1/device/status")
+        return self._request("GET", self._agent_path(selected, "/status"))
 
     def capabilities(self, device_id: str | None = None, *, refresh: bool = False) -> dict[str, Any]:
         selected = self.select_device(device_id)
         key = selected.device_id
         if key in self._capability_discovery and not refresh:
             return self._capability_discovery[key]
-        response = self._request("GET", self._scope(selected, "/v1/capabilities"))
+        if selected.legacy_unscoped:
+            response = self._request("GET", "/v1/capabilities")
+        else:
+            response = self._request("GET", self._agent_path(selected, "/capabilities"))
         if not isinstance(response, dict) or response.get("protocol_version") != CAPABILITY_PROTOCOL_VERSION:
             raise GatewayError("Capability protocol mismatch", body={"error": {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}})
         descriptors = response.get("capabilities")
@@ -199,16 +185,15 @@ class GatewayClient:
 
     def observe(self, device_id: str | None = None, *, include_screenshot: bool = False, mode: str = "compact") -> Any:
         selected = self.select_device(device_id)
-        response = self._request(
-            "POST",
-            "/v1/capabilities/observe",
-            self._payload(selected, {
+        if selected.legacy_unscoped:
+            response = self._request("POST", "/v1/capabilities/observe", {
                 "protocol_version": CAPABILITY_PROTOCOL_VERSION,
-                "correlation_id": str(uuid.uuid4()),
+                "correlation_id": os.urandom(16).hex(),
                 "include_screenshot": include_screenshot,
                 "mode": mode,
-            }),
-        )
+            })
+        else:
+            response = self._request("POST", self._agent_path(selected, "/observe"), {"include_screenshot": include_screenshot, "mode": mode})
         witness = response.get("witness") if isinstance(response, dict) else None
         if isinstance(witness, dict) and isinstance(witness.get("observation_id"), str):
             self._last_observation_id[selected.device_id] = witness["observation_id"]
@@ -216,66 +201,73 @@ class GatewayClient:
 
     def ui_search(self, query: str, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
-        return self._request("GET", self._scope(selected, "/v1/ui/search", params={"q": query}))
+        if selected.legacy_unscoped:
+            return self._request("GET", f"/v1/ui/search?q={urllib.parse.quote(query)}")
+        return self._request("GET", self._agent_path(selected, f"/ui/search?q={urllib.parse.quote(query)}"))
 
     def ui_element(self, element_id: str, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
-        path = f"/v1/ui/element/{urllib.parse.quote(element_id, safe='')}"
-        return self._request("GET", self._scope(selected, path))
+        quoted = urllib.parse.quote(element_id, safe="")
+        if selected.legacy_unscoped:
+            return self._request("GET", f"/v1/ui/element/{quoted}")
+        return self._request("GET", self._agent_path(selected, f"/ui/element/{quoted}"))
 
     def current_page(self, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
-        return self._request("GET", self._scope(selected, "/v1/page/current"))
+        return self._request("GET", "/v1/page/current" if selected.legacy_unscoped else self._agent_path(selected, "/page/current"))
 
     def page_history(self, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
-        return self._request("GET", self._scope(selected, "/v1/page/history"))
+        return self._request("GET", "/v1/page/history" if selected.legacy_unscoped else self._agent_path(selected, "/page/history"))
 
     def action(self, tool: str, params: dict[str, Any], goal: str, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
         discovery = self.capabilities(selected.device_id)
         capability_ids = self._capability_ids.get(selected.device_id, frozenset())
         if tool not in capability_ids:
-            raise GatewayError(
-                f"Capability {tool} is unavailable",
-                body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY"}, "capability_id": tool},
-            )
-        gateway_health = discovery.get("gateway_health") if isinstance(discovery, dict) else None
-        if isinstance(gateway_health, dict) and gateway_health.get("state") == "UNAVAILABLE":
-            raise GatewayError("Gateway capabilities are unavailable", body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY"}})
+            raise GatewayError(f"Capability {tool} is unavailable", body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY"}, "capability_id": tool})
         observation_id = self._last_observation_id.get(selected.device_id)
         if tool not in NON_MUTATING_CAPABILITIES and observation_id is None:
-            raise GatewayError(
-                "A fresh phone observation is required before mutation",
-                body={"error": {"code": "STALE_OBSERVATION", "layer": "PROTOCOL", "retryable": True}},
-            )
-        payload: dict[str, Any] = {
-            "protocol_version": CAPABILITY_PROTOCOL_VERSION,
-            "correlation_id": str(uuid.uuid4()),
-            "capability_id": tool,
-            "params": params,
-            "goal": goal,
-            "source": "PC_AGENT_MCP",
-        }
-        if observation_id:
-            payload["expected_observation_id"] = observation_id
-        response = self._request("POST", "/v1/capabilities/action", self._payload(selected, payload))
+            raise GatewayError("A fresh phone observation is required before mutation", body={"error": {"code": "STALE_OBSERVATION", "layer": "PROTOCOL", "retryable": True}})
+        if selected.legacy_unscoped:
+            payload = {
+                "protocol_version": CAPABILITY_PROTOCOL_VERSION,
+                "correlation_id": os.urandom(16).hex(),
+                "capability_id": tool,
+                "params": params,
+                "goal": goal,
+                "source": "PC_AGENT_MCP",
+            }
+            if observation_id:
+                payload["expected_observation_id"] = observation_id
+            response = self._request("POST", "/v1/capabilities/action", payload)
+        else:
+            payload = {"capability_id": tool, "params": params, "goal": goal}
+            if observation_id:
+                payload["expected_observation_id"] = observation_id
+            response = self._request("POST", self._agent_path(selected, "/action"), payload)
         if tool not in NON_MUTATING_CAPABILITIES:
             self._last_observation_id.pop(selected.device_id, None)
         return response
 
     def debug_bundle(self, device_id: str | None = None, *, expected: str = "", goal: str = "") -> Any:
         selected = self.select_device(device_id)
-        return self._request("POST", "/v1/debug/bundle", self._payload(selected, {"expected": expected, "goal": goal}))
+        if selected.legacy_unscoped:
+            return self._request("POST", "/v1/debug/bundle", {"expected": expected, "goal": goal})
+        return self._request("POST", self._agent_path(selected, "/debug"), {"expected": expected, "goal": goal})
 
     def teach_start(self, device_id: str | None = None, *, goal: str = "") -> Any:
         selected = self.select_device(device_id)
-        return self._request("POST", "/v1/teach/start", self._payload(selected, {"goal": goal, "source": "PC_AGENT_MCP"}))
+        if selected.legacy_unscoped:
+            return self._request("POST", "/v1/teach/start", {"goal": goal, "source": "PC_AGENT_MCP"})
+        return self._request("POST", self._agent_path(selected, "/teach/start"), {"goal": goal})
 
     def teach_status(self, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
-        return self._request("GET", self._scope(selected, "/v1/teach/status"))
+        return self._request("GET", "/v1/teach/status" if selected.legacy_unscoped else self._agent_path(selected, "/teach/status"))
 
     def teach_stop(self, device_id: str | None = None, *, compile_for_review: bool = True) -> Any:
         selected = self.select_device(device_id)
-        return self._request("POST", "/v1/teach/stop", self._payload(selected, {"compileForReview": compile_for_review, "source": "PC_AGENT_MCP"}))
+        if selected.legacy_unscoped:
+            return self._request("POST", "/v1/teach/stop", {"compileForReview": compile_for_review, "source": "PC_AGENT_MCP"})
+        return self._request("POST", self._agent_path(selected, "/teach/stop"), {"compile_for_review": compile_for_review})
