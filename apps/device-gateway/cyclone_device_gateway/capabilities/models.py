@@ -41,6 +41,7 @@ class GatewayErrorCode(StrEnum):
     VERIFICATION_FAILED = "VERIFICATION_FAILED"
     DEVICE_DISCONNECTED = "DEVICE_DISCONNECTED"
     PROTOCOL_MISMATCH = "PROTOCOL_MISMATCH"
+    AUTH_REJECTED = "AUTH_REJECTED"
 
 
 class GatewayError(BaseModel):
@@ -134,6 +135,7 @@ class CapabilityActionResponse(BaseModel):
     verification: LayerOutcome
     before: Witness | None = None
     after: Witness | None = None
+    android_execution: dict[str, Any] | None = None
     safety: SafetyMetadata
     latency_ms: int = Field(ge=0)
     transition_id: str | None = None
