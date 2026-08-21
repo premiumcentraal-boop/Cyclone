@@ -145,7 +145,9 @@ object CycloneV31Runtime {
         )
         val supervisor = V31Bootstrap.createModuleSupervisor(
             bindings = bindings,
-            accessibilityReady = { CycloneAccessibilityService.instance != null },
+            // Core phone health means the canonical PhoneToolExecutor is structurally present.
+            // Accessibility permission is reported independently by V31HealthReporter below.
+            accessibilityReady = { true },
             memoryProvider = memoryProvider,
         )
         val capabilityBootstrap = V31Bootstrap.registerCapabilities(supervisor)
