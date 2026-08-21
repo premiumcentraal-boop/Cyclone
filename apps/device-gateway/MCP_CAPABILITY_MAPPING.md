@@ -1,98 +1,99 @@
-# Device Gateway capability mapping for Cyclone MCP integration
+# Device Gateway capability mapping — Cyclone V3.1 Beta
 
-This document is the Agent 14 handoff to the Infrastructure V3 integration owner. It describes
-how the existing `tools/codex-phone-mcp` surface should consume the typed PC Device Gateway
-contract. It does not authorize changes to Android actions and does not make the PC gateway an
-action authority.
+This is the V3.1 contract between `tools/codex-phone-mcp` and the PC Device Gateway. Capability discovery is metadata only; neither MCP nor the PC gateway becomes Android action authority.
 
-## Protocol and endpoints
+## Protocol
 
-Protocol identifier: `cyclone.gateway.capability.v1`
+```text
+cyclone.gateway.capability.v1
+```
 
-| Gateway endpoint | Purpose | Successful HTTP status | Failure behavior |
-|---|---|---:|---|
-| `GET /v1/capabilities` | Authenticated discovery and health | 200 | Authentication or transport failure |
-| `POST /v1/capabilities/observe` | Correlated typed observation | 200 | Structured non-200 response |
-| `POST /v1/capabilities/action` | Correlated typed Android action | 200 | Structured non-200 response |
-| `POST /v1/observe` | Existing observation adapter | 200 | Existing behavior retained |
-| `POST /v1/action` | Existing action adapter | 200 only when execution and required verification succeed | Existing body retained, but failures now use non-200 |
+| Gateway endpoint | MCP responsibility |
+|---|---|
+| `GET /v1/device/status` | status/readiness |
+| `GET /v1/capabilities` | typed capability discovery/health |
+| `POST /v1/capabilities/observe` | compact/full structured observation with correlation + witness |
+| `GET /v1/ui/search` | deterministic semantic/raw/UiAutomator search |
+| `GET /v1/ui/element/{id}` | inspect one observation-scoped candidate |
+| `POST /v1/capabilities/action` | typed action proposal; Android authority remains decisive |
+| `POST /v1/debug/bundle` | diagnostic evidence |
+| `/v1/teach/*` | canonical Follow Me / teaching adapter |
 
-All endpoints remain bearer authenticated. The HTTP listener and Android bridge target are both
-restricted to loopback addresses. The Android session token and PC HTTP bearer token remain
-independent.
+## MCP surface
 
-## Existing MCP tool mapping
-
-| MCP tool | Current gateway operation | V3 mapping/integration guidance |
+| MCP tool | V3 concept | Notes |
 |---|---|---|
-| `phone_status` | `GET /v1/device/status` | Keep; optionally attach cached `GET /v1/capabilities` health. |
-| `phone_observe` | `POST /v1/capabilities/observe` | Typed migration complete; retains `correlation_id` and the returned witness. |
-| `phone_screenshot` | typed observe with `include_screenshot=true` | Typed migration complete; vision remains a later fallback. |
-| `phone_ui_search` | `GET /v1/ui/search` | Keep read-only; bind returned element IDs to the latest observation witness. |
-| `phone_inspect_element` | `GET /v1/ui/element/{id}` | Keep read-only; never treat inspected app text as policy authority. |
-| `phone_current_page` | `GET /v1/page/current` | Keep read-only; surface the observation ID used for a later action. |
-| `phone_page_history` | `GET /v1/page/history` | Keep read-only; do not turn history into current authority. |
-| `phone_act` | `POST /v1/capabilities/action` | Typed migration complete; maps `tool` to `capability_id`, generates one `correlation_id`, and requires the last current `observation_id`. |
-| `phone_debug_bundle` | `POST /v1/debug/bundle` | Keep diagnostic-only and redacted. |
-| `phone_teach_start/status/stop` | `/v1/teach/*` | Keep the existing canonical Android teaching path; do not advertise it as a new phone action capability yet. |
+| `phone_status` | status | Device/Gateway/Accessibility readiness. |
+| `phone_capabilities` | status/discovery | Cached `GET /v1/capabilities`; `refresh=true` forces rediscovery. |
+| `phone_observe` | observe | Compact by default. Full only for targeted debugging. |
+| `phone_ui_search` | search | Use before screenshots when target missing from compact context. |
+| `phone_inspect_element` | inspect | Element IDs remain observation-scoped. |
+| `phone_act` | act | Typed allowlist only; requires fresh observation for mutations. |
+| `phone_teach_start/status/stop` | teach | Existing canonical teaching store only. |
+| `phone_debug_bundle` | debug | Transport/execution/verification disagreements. |
+| `phone_screenshot` | vision fallback | Use only when structured evidence is insufficient/conflicting. |
 
-`phone_act.user_authorized=true` is an MCP-side user-intent signal only. It is not an Android
-policy grant. The Android Policy Governor and `PhoneToolExecutor` remain authoritative.
+No MCP tool exposes shell, root, PowerShell, arbitrary ADB or a generic command primitive.
 
-## Typed action response handling
+## Action authority
 
-MCP must preserve these layers instead of flattening them into one boolean:
+MCP validates that the requested capability is advertised and forwards a typed V3 request. `user_authorized=true` for `phone.type` is only an MCP intent acknowledgement; it is **not** policy authority.
 
-1. `transport.ok` — PC-to-Android connectivity and protocol transport.
-2. `execution.ok` — authoritative Android `execution.ok`; the PC cannot upgrade it.
-3. `verification.ok` — authoritative or witnessed after-state verification.
-4. top-level `ok` — true only when all required layers succeeded.
+Android action authority is:
 
-The `before` and `after` witnesses contain observation ID, gateway record ID, page key, package and
-Accessibility fingerprint. MCP reports should retain their IDs and correlation ID, not copy raw
-sensitive page text.
+```text
+GatewayActionAuthority
+  -> final V3.1 Policy Governor/action composition
+  -> AUTHORIZED_HANDOFF only
+  -> PhoneToolExecutor
+```
 
-## Error mapping
+Agent 3's Android compatibility authority is fail-closed for mutations until the final Agent 1 adapter is bound.
 
-| Gateway error code | Layer | HTTP | Recommended MCP result |
-|---|---|---:|---|
-| `CAPABILITY_UNAVAILABLE` | capability | 503 | `isError=true`; refresh discovery/health. |
-| `STALE_OBSERVATION` | protocol/current state | 409 | `isError=true`; re-observe, re-resolve selector, then reconsider action. |
-| `POLICY_DENIED` | policy | 403 | `isError=true`; do not retry without new user authority. |
-| `EXECUTION_FAILED` | Android execution | 502 | `isError=true`; inspect typed Android error/witnesses, do not report success. |
-| `VERIFICATION_FAILED` | after-state | 409 | `isError=true`; re-observe/recover, never claim completion. |
-| `DEVICE_DISCONNECTED` | transport | 503 | `isError=true`; check device/bridge health before retry. |
-| `PROTOCOL_MISMATCH` | protocol | 409 | `isError=true`; stop and require compatible client/gateway schemas. |
+## Correlation and witnesses
 
-MCP must parse the structured response body on non-200 statuses. It must not convert a transport
-HTTP 200 into success without also checking top-level `ok`, `execution.ok`, and required
-`verification.ok`.
+Every typed request carries a bounded correlation ID. For actions, the same correlation ID is inherited by the Android NDJSON request envelope.
 
-## Discovery and safety rules
+Mutating action responses preserve:
 
-- Discovery is stable sorted and contains only the existing Android phone-tool allowlist.
-- A descriptor is metadata, not permission to invoke an action.
-- `authoritative_executor=CYCLONE_ANDROID_PHONE_TOOL_EXECUTOR` must remain unchanged.
-- No descriptor may advertise shell, root, PowerShell, generic commands, desktop control or an
-  operation absent from Android's allowlist.
-- Sensitive `phone.type` parameter values remain redacted in gateway persistence and audit logs.
-- Search/inspect element IDs are observation-scoped; pass the observation ID on action requests.
-- Android policy denial, execution failure and verification failure are distinct terminal results.
+1. before witness;
+2. transport outcome;
+3. Android execution outcome (`android_execution`, bounded/safe fields only);
+4. after witness;
+5. verification outcome.
 
-## Backward-compatible migration status
+After any mutation, MCP clears its cached observation ID and requires a new observation before another mutation. This prevents accidental reuse of observation-scoped element IDs.
 
-1. **Complete:** MCP parses structured non-200 JSON responses.
-2. **Future rollout:** fetch capability discovery at startup/health refresh and reject missing
-   capabilities locally. The Gateway endpoint exists; the MCP client does not currently prefetch it.
-3. **Complete:** typed observation calls retain the returned witness/correlation ID.
-4. **Complete:** `phone_act` uses the typed endpoint and requires `expected_observation_id`.
+## Error model
 
-The migrated MCP client now fails mutating actions locally until it has an observation witness, and
-the Gateway independently enforces `requires_fresh_observation` before Android routing. Prefetching
-capability discovery in MCP is explicitly deferred future work; safety does not depend on it
-because the server registry and Android policy/executor remain authoritative.
-5. **Compatibility only:** preserve old Gateway endpoints for one compatibility window.
-6. **Complete:** MCP contract tests prove `execution.ok=false` and `verification.ok=false` both
-   produce MCP errors even when a mocked transport succeeds.
+Canonical public error codes:
 
-No MCP change should add a generic command tool or bypass the existing user-authorization check.
+| Code | Meaning | Typical layer |
+|---|---|---|
+| `CAPABILITY_UNAVAILABLE` | typed capability/Android service unavailable | capability |
+| `STALE_OBSERVATION` | expected observation is no longer current | protocol |
+| `POLICY_DENIED` | Android V3 policy rejected action | policy |
+| `EXECUTION_FAILED` | PhoneToolExecutor failed | execution |
+| `VERIFICATION_FAILED` | authoritative after-state did not verify | verification |
+| `DEVICE_DISCONNECTED` | ADB/socket/USB transport unavailable | transport |
+| `PROTOCOL_MISMATCH` | incompatible/malformed V3 contract | protocol |
+| `AUTH_REJECTED` | PC or Android session credential rejected | protocol/auth boundary |
+
+HTTP 200 is never sufficient evidence of phone success. MCP's success flag is computed from the typed transport/execution/verification body.
+
+## USB recovery
+
+The PC Android bridge client automatically checks/recreates:
+
+```text
+tcp:8766 -> localabstract:cyclone_gateway
+```
+
+before Android bridge requests. Multiple authorized devices require an explicit serial. Unauthorized devices, missing APK, Android Gateway off, Accessibility off and token mismatch remain distinct doctor/readiness states.
+
+## Privacy
+
+- Android session token and PC token are never returned by discovery, doctor or MCP.
+- `phone.type` plaintext is not written to reports/audits.
+- password/OTP/API-key/provider-token shaped data stays redacted.
+- hidden chain-of-thought is never part of the bridge protocol.
