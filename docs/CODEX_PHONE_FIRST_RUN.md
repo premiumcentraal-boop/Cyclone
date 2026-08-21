@@ -1,136 +1,165 @@
-# Cyclone 2.9.4 Full Gateway — First Codex / Pixel 8 Run
-
-Cyclone 2.9.4 joins the Android localabstract bridge, the Windows PC Device Gateway, and the Codex MCP adapter into one release contract.
+# Cyclone V3.1 Beta — First Codex / Android USB Run
 
 ## Prerequisites
 
-- Windows PC with Python 3.11+.
-- Android Platform Tools (`adb`) on PATH.
-- Google Pixel 8 connected by USB with USB debugging authorized.
-- Cyclone 2.9.4 Full Gateway APK installed.
+- Windows with Python 3.11+.
+- Android Platform Tools (`adb`).
+- Cyclone V3 beta installed as `com.cyclone.mobile`.
+- USB debugging enabled and authorized on the phone.
 - Cyclone Accessibility enabled.
-- **Cyclone PC Gateway (USB debugging)** explicitly enabled on the phone.
-- Current Codex CLI/Desktop/IDE host.
-- Root is optional for normal Accessibility control. A rooted Pixel 8 additionally enables the PC gateway's allowlisted input/dumpsys/logcat telemetry.
+- Current Codex host with MCP support.
 
-## 1. Configure the two local tokens
+Root is not required and no root/shell capability is exposed by this bridge.
 
-Cyclone intentionally uses two different trust boundaries.
+## 1. One-time PC setup
 
-1. On the Pixel 8 open **Cyclone PC Gateway**.
-2. Enable the gateway.
-3. Copy the **Session token** shown on the phone.
-4. In PowerShell set it as the Android bridge token.
-5. Choose a separate strong token for the PC HTTP API.
+From the Cyclone repository root:
 
 ```powershell
-$env:CYCLONE_ANDROID_BRIDGE_TOKEN = "<session token copied from the phone>"
-$env:CYCLONE_DEVICE_GATEWAY_TOKEN = "<separate strong local HTTP token>"
-$env:CYCLONE_DEVICE_GATEWAY_URL = "http://127.0.0.1:8765"
+.\scripts\phone-gateway\setup-cyclone-bridge.ps1
 ```
 
-Neither token is sent to Codex as phone content. The PC HTTP service binds only to loopback.
+The setup script:
 
-## 2. Install the Windows gateway and MCP packages
+1. checks Python 3.11+;
+2. checks ADB and guides/attempts Platform Tools installation when missing;
+3. creates a user-local bridge venv under `%LOCALAPPDATA%\Cyclone\bridge-v31`;
+4. installs `cyclone-device-gateway` and `cyclone-phone-mcp`;
+5. checks phone USB authorization;
+6. configures `tcp:8766 -> localabstract:cyclone_gateway`;
+7. generates a separate 256-bit PC Gateway token;
+8. protects the PC token with Windows CurrentUser encryption (`Export-Clixml` / DPAPI);
+9. creates a token-free Codex MCP launcher + config snippet;
+10. runs Bridge Doctor.
 
-From the repository root:
+Dry/error-path inspection is available without making setup changes:
 
 ```powershell
-python -m venv .venv-gateway
-.\.venv-gateway\Scripts\Activate.ps1
-python -m pip install -e "apps\device-gateway[test,uiautomator2]"
-python -m pip install -e "tools\codex-phone-mcp"
+.\scripts\phone-gateway\setup-cyclone-bridge.ps1 -DryRun
 ```
 
-The 2.9.4 CI artifact also contains installable wheels if you prefer not to use editable installs.
+## 2. Enable the phone session
 
-## 3. Connect and forward the Pixel 8
+In the single Cyclone app:
+
+```text
+AI
+-> Full PC + Codex Gateway
+-> Enable Gateway
+-> Copy session token
+```
+
+The phone card/control center should show one of:
+
+- `OFF`
+- `WAITING FOR PC`
+- `CONNECTED`
+- `ATTENTION NEEDED`
+
+If phone control says Accessibility is off, use **Open Accessibility settings** and enable Cyclone before continuing.
+
+## 3. Start the bridge
 
 ```powershell
-adb devices
-adb -s <PIXEL_SERIAL> forward tcp:8766 localabstract:cyclone_gateway
-$env:CYCLONE_DEVICE_SERIAL = "<PIXEL_SERIAL>"
+.\scripts\phone-gateway\start-cyclone-bridge.ps1
 ```
 
-The APK never binds a LAN TCP port. ADB maps the Android local abstract socket to the PC's local `127.0.0.1:8766`.
+Paste the Android session token when prompted. The prompt is hidden. The token is placed only in the launched PC Gateway process environment and is not written to the project or PC token file.
 
-## 4. Start the PC Device Gateway
-
-Keep this PowerShell window open:
+For multiple authorized phones, choose one explicitly:
 
 ```powershell
-cyclone-device-gateway
+.\scripts\phone-gateway\start-cyclone-bridge.ps1 -DeviceSerial <adb-serial>
 ```
 
-It listens only on `http://127.0.0.1:8765`.
+The start command creates/checks the fixed ADB forward, launches the loopback PC Gateway and runs doctor again.
 
-## 5. Register the local STDIO MCP with Codex
+## 4. Doctor
 
-Project-scoped configuration is deterministic. Copy `tools\codex-phone-mcp\codex-config.example.toml` into the trusted project's `.codex/config.toml`, replace `cwd`, and start Codex from an environment containing:
+Human-readable:
 
 ```powershell
-$env:CYCLONE_DEVICE_GATEWAY_TOKEN = "<same PC HTTP token>"
-$env:CYCLONE_DEVICE_GATEWAY_URL = "http://127.0.0.1:8765"
+%LOCALAPPDATA%\Cyclone\bridge-v31\venv\Scripts\cyclone-device-gateway.exe doctor
 ```
 
-Or, after installing the MCP package:
+Machine-readable:
 
 ```powershell
-codex mcp add cyclone-phone --env CYCLONE_DEVICE_GATEWAY_TOKEN=$env:CYCLONE_DEVICE_GATEWAY_TOKEN --env CYCLONE_DEVICE_GATEWAY_URL=$env:CYCLONE_DEVICE_GATEWAY_URL -- cyclone-phone-mcp
-codex mcp list
+%LOCALAPPDATA%\Cyclone\bridge-v31\venv\Scripts\cyclone-device-gateway.exe doctor --json
 ```
 
-## 6. Run the 2.9.4 preflight
+Expected healthy output includes:
 
-From the repository root:
-
-```powershell
-.\scripts\phone-gateway\first-run.ps1 -Serial <PIXEL_SERIAL> -ConfigureForward
+```text
+ADB                  READY
+Phone                CONNECTED
+Cyclone APK          READY
+Android Gateway      READY
+Accessibility        READY
+ADB Forward          READY
+PC Gateway           READY
+Authentication       READY
+Capabilities         READY
+MCP                   READY
 ```
 
-The preflight verifies:
+Doctor never prints the PC token or Android session token.
 
-- exact Pixel 8 ADB selection;
-- `com.cyclone.mobile` installation;
-- optional root availability;
-- both token variables;
-- ADB localabstract forwarding;
-- authenticated PC HTTP gateway;
-- authenticated Android bridge;
-- Android gateway enabled;
-- Cyclone Accessibility connected;
-- MCP self-test;
-- Codex MCP registration unless `-SkipMcpCheck` is used.
+## 5. Codex MCP config
 
-## 7. Safe acceptance route
+Setup writes a token-free snippet to:
 
-Mock first:
-
-```powershell
-cd tools\codex-phone-mcp
-python -m cyclone_phone_mcp.acceptance --mock
+```text
+%LOCALAPPDATA%\Cyclone\bridge-v31\codex-mcp.generated.toml
 ```
 
-Then run the harmless live route:
+The snippet launches a user-local PowerShell wrapper which decrypts only the PC Gateway token at runtime, sets `CYCLONE_DEVICE_GATEWAY_URL=http://127.0.0.1:8765`, and starts `cyclone-phone-mcp` over STDIO. Copy/merge the generated MCP server section into your Codex configuration as appropriate for the host.
 
-```powershell
-python -m cyclone_phone_mcp.acceptance --live --execute
-```
+The Android session token is not part of Codex MCP configuration.
 
-The route is:
+## 6. Recommended Codex acceptance route
 
-`Home -> Android Settings -> Apps -> Home`, then repeat.
+After Agent 1's production `GatewayActionAuthority` adapter is bound in the final APK:
 
-The report is written under `.runtime/codex-phone/`.
+1. `phone_status`
+2. `phone_capabilities`
+3. `phone_observe` in compact mode
+4. search/inspect **Apps** if needed
+5. `phone_act` to open Apps
+6. `phone_observe` again and verify the new page
+7. `phone_act` `phone.home`
+8. `phone_observe` again and verify Home
 
-## 8. Interactive Codex prompt
+Do not reuse an element ID across a page-changing action. Re-observe first.
 
-> Use the cyclone-phone tools to inspect the connected Pixel 8. Open Android Settings, navigate to Apps, verify the Apps page, return Home, then repeat once. Prefer semantic controls, use deeper UI search only when necessary, use screenshots when structured evidence is insufficient, and report whether verified Cyclone knowledge helped the second run.
+Use `phone_screenshot` only if the compact structured evidence cannot resolve the target. Use `phone_debug_bundle` when transport, execution or verification disagree.
 
-## Troubleshooting
+## Failure recovery
 
-If an obvious control is missing, use `phone_ui_search`, inspect its element ID, compare Cyclone Accessibility with UiAutomator evidence, then create a debug bundle. The PC gateway stores full raw Accessibility state locally while exposing compact reasoning context by default.
+### Phone says UNAUTHORIZED
 
-If the HTTP gateway is reachable but `cyclone_bridge_reachable` is false, the most common cause is a mismatched `CYCLONE_ANDROID_BRIDGE_TOKEN`.
+Unlock the phone and accept the Android USB debugging prompt, then rerun start/doctor.
 
-If an action request reaches Android but `PhoneToolExecutor` returns `ok=false`, 2.9.4 records the transition as failed; it no longer mistakes transport success for phone-action success.
+### Multiple devices
+
+Pass `-DeviceSerial` or set `CYCLONE_DEVICE_SERIAL`.
+
+### Android Gateway OFF
+
+Cyclone -> AI -> Full PC + Codex Gateway -> Enable.
+
+### Accessibility OFF
+
+Enable Cyclone Accessibility in Android Settings.
+
+### TOKEN MISMATCH
+
+Copy the current phone token again. If you rotated the token, current Android bridge clients are disconnected and the old token is intentionally rejected.
+
+### USB unplug/reconnect
+
+The current action fails as `DEVICE_DISCONNECTED`. Reconnect the same approved phone. The next PC bridge request checks/recreates the fixed ADB forward; reinstalling the PC environment is not required.
+
+### Mutating action returns CAPABILITY_UNAVAILABLE with `V31_ACTION_AUTHORITY_NOT_BOUND`
+
+This is the intentional Agent 3 compatibility fallback. The integration owner must bind Agent 1's V3.1 policy/action adapter to `GatewayActionAuthorityRegistry` before physical action acceptance.
