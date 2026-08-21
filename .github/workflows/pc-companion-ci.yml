@@ -90,36 +90,3 @@ jobs:
             dist/pc-companion/THIRD_PARTY_NOTICES
           if-no-files-found: error
           retention-days: 30
-
-  android-companion:
-    name: Matching Cyclone Android Gateway
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          submodules: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install pinned Android SDK packages
-        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0' 'build-tools;34.0.0'
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Initialize embedded runtime source
-        run: git submodule update --init --recursive --depth 1
-      - name: Test and assemble matching Android Gateway once
-        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:assembleDebug --stacktrace
-      - name: Package Android companion
-        run: |
-          mkdir -p dist/android
-          cp apps/mobile/app/build/outputs/apk/debug/app-debug.apk dist/android/Cyclone-Mobile-3.1-Desktop-V1.apk
-          (cd dist/android && sha256sum Cyclone-Mobile-3.1-Desktop-V1.apk > Cyclone-Mobile-3.1-Desktop-V1.apk.sha256)
-          printf '%s\n' "$GITHUB_SHA" > dist/android/source-sha.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cyclone-mobile-desktop-v1-${{ github.sha }}
-          path: dist/android/
-          if-no-files-found: error
-          retention-days: 30
