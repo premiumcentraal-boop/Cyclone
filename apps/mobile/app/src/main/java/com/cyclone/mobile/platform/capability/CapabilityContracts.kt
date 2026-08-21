@@ -3,7 +3,7 @@ package com.cyclone.mobile.platform.capability
 import com.cyclone.mobile.platform.module.ModuleId
 import kotlin.reflect.KClass
 
-private val CAPABILITY_ID_PATTERN = Regex("[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+")
+private val CAPABILITY_ID_PATTERN = Regex("[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+")
 private val PERMISSION_ID_PATTERN = Regex("[A-Za-z][A-Za-z0-9_.-]*")
 
 @JvmInline
