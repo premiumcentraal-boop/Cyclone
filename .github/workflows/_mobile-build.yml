@@ -35,7 +35,7 @@ jobs:
         shell: bash
         # The app targets 35; the embedded Mobilerun module still selects 34.0.0.
         # Pin both here so Gradle never performs a surprise SDK download mid-build.
-        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'build-tools;34.0.0'
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0' 'build-tools;34.0.0'
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
       - name: Initialize embedded runtime source
