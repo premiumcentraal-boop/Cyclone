@@ -50,8 +50,10 @@ class PairingCoordinator:
         self.fleet.set_pairing(session, pending)
         return {
             "deviceId": device_id,
+            "pairingId": challenge_id,
             "pairing": True,
             "expiresAtMs": expires_at,
+            "expiresAtEpochMs": expires_at,
             "attemptsRemaining": self.MAX_ATTEMPTS,
         }
 
@@ -69,6 +71,7 @@ class PairingCoordinator:
         if now > pending.expires_at_ms:
             self.fleet.set_pairing(session, None)
             raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_EXPIRED, "Pairing code expired; begin pairing again.", retryable=True)
+        code = code.strip().upper()
         if not _CODE_RE.fullmatch(code):
             self._failed_attempt(session, pending)
             raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_CODE_REJECTED, "Pairing code must be exactly four uppercase letters.")
@@ -95,7 +98,7 @@ class PairingCoordinator:
         self.fleet.remember_credential(session, credential)
         self.fleet.set_pairing(session, None)
         session.state = DeviceFleetState.READY if session.screen_awake else DeviceFleetState.SLEEPING
-        return {"deviceId": device_id, "paired": True, "state": session.state.value}
+        return {"deviceId": device_id, "paired": True, "state": session.state.value, "device": session.public()}
 
     def revoke(self, device_id: str) -> dict:
         session = self.fleet.get(device_id)
