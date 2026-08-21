@@ -99,7 +99,8 @@ pub fn run() {
                 .arg("serve")
                 .env("CYCLONE_DEVICE_GATEWAY_TOKEN", &runtime_token)
                 .env("CYCLONE_DEVICE_GATEWAY_URL", "http://127.0.0.1:8765")
-                .env("CYCLONE_DEVICE_GATEWAY_RUNTIME", runtime_dir.to_string_lossy().to_string());
+                .env("CYCLONE_DEVICE_GATEWAY_RUNTIME", runtime_dir.to_string_lossy().to_string())
+                .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1");
             let (mut events, _child) = command.spawn()?;
             tauri::async_runtime::spawn(async move {
                 // Drain sidecar output so pipes can never fill and stall the Gateway. Output is not
