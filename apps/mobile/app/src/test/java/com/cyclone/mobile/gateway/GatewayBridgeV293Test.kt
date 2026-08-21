@@ -1,6 +1,5 @@
 package com.cyclone.mobile.gateway
 
-import com.cyclone.mobile.applearner.ActionRisk
 import com.cyclone.mobile.applearner.AppGraphSnapshot
 import com.cyclone.mobile.applearner.FollowMeProgress
 import com.cyclone.mobile.applearner.KnowledgeState
@@ -13,7 +12,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -138,7 +136,7 @@ class GatewayBridgeV293Test {
     }
 
     @Test
-    fun actionMappingAllowsOnlyFrozenPhoneToolsAndBlocksRiskBypass() {
+    fun actionMappingUsesFrozenPhoneToolsAndNoLongerOwnsPolicy() {
         assertEquals(
             setOf(
                 "phone.observe", "phone.find", "phone.click", "phone.long_press", "phone.swipe",
@@ -146,27 +144,17 @@ class GatewayBridgeV293Test {
             ),
             GatewayActionAdapter.allowedTools.toSet(),
         )
-        GatewayActionPolicy.requireAllowed(
-            "phone.click",
-            JSONObject().put("selector", JSONObject().put("text", "Apps").put("resourceId", "android:id/apps")),
+        assertFalse(GatewayActionAuthorityRegistry.isProductionAuthorityBound())
+        val denied = GatewayActionAuthorityDecision(
+            GatewayActionAuthorityOutcome.POLICY_DENIED,
+            "V31_POLICY_DENY",
+            "Denied by V3 policy.",
         )
         try {
-            GatewayActionPolicy.requireAllowed(
-                "phone.click",
-                JSONObject().put("selector", JSONObject().put("text", "Delete account")),
-            )
-            fail("Consequential control should be blocked")
+            denied.requireAuthorized("req-policy")
+            fail("Policy denial must stop the action handoff")
         } catch (error: GatewayProtocolException) {
-            assertEquals("POLICY_BLOCKED", error.code)
-        }
-        try {
-            GatewayActionPolicy.requireAllowed(
-                "phone.type",
-                JSONObject().put("selector", JSONObject().put("resourceId", "com.example:id/password")),
-            )
-            fail("Sensitive typed field should be blocked")
-        } catch (error: GatewayProtocolException) {
-            assertEquals("POLICY_BLOCKED", error.code)
+            assertEquals("POLICY_DENIED", error.code)
         }
     }
 
