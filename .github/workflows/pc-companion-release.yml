@@ -1,0 +1,60 @@
+name: PC Companion Release Preparation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Desktop version label'
+        required: true
+        type: string
+      build_tauri:
+        description: 'Final integration only: build Agent 2 Tauri application'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.7'
+      - name: Test agent MCP and connector contracts
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -e 'tools/cyclone-agent-mcp[test]'
+          python -m pytest -q tools/cyclone-agent-mcp/tests
+      - name: Build Python sidecars
+        shell: pwsh
+        run: ./scripts/pc-companion/build-sidecars.ps1
+      - name: Build Tauri after final integration
+        if: ${{ inputs.build_tauri }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'apps/pc-companion/package.json')) { throw 'Agent 2 Tauri app is not integrated.' }
+          Push-Location apps/pc-companion
+          npm ci
+          npm run tauri build
+          Pop-Location
+      - name: Sign when credentials are configured
+        shell: pwsh
+        env:
+          CYCLONE_WINDOWS_SIGN_PFX_BASE64: ${{ secrets.CYCLONE_WINDOWS_SIGN_PFX_BASE64 }}
+          CYCLONE_WINDOWS_SIGN_PFX_PASSWORD: ${{ secrets.CYCLONE_WINDOWS_SIGN_PFX_PASSWORD }}
+        run: ./scripts/pc-companion/sign-artifacts.ps1 -ArtifactDirectory dist/pc-companion
+      - name: Generate notices
+        shell: pwsh
+        run: python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
+      - name: Generate checksum and provenance
+        shell: pwsh
+        run: python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version '${{ inputs.version }}' --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyclone-pc-release-prep-${{ inputs.version }}-${{ github.sha }}
+          path: dist/pc-companion/
+          if-no-files-found: error
