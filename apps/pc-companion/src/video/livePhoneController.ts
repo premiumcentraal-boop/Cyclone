@@ -19,15 +19,15 @@ export class LivePhoneController {
   start(): void {
     if (this.device.state === "SLEEPING") {
       this.setState("SLEEPING");
-      this.startFallback();
+      if (this.service.mode === "mock") this.startFallback();
       return;
     }
     if (this.device.state === "DISCONNECTED") {
       this.setState("RECONNECTING");
-      this.startFallback();
+      if (this.service.mode === "mock") this.startFallback();
       return;
     }
-    if (this.device.video.mode === "H264") {
+    if (this.service.mode === "real") {
       const renderer = new WebCodecsH264Renderer(this.input());
       this.renderer = renderer;
       renderer.start();
@@ -41,9 +41,7 @@ export class LivePhoneController {
     this.renderer = null;
   }
 
-  currentState(): StreamUiState {
-    return this.state;
-  }
+  currentState(): StreamUiState { return this.state; }
 
   private startFallback(): void {
     const renderer = new FallbackFrameRenderer(this.input());
@@ -56,6 +54,7 @@ export class LivePhoneController {
       device: this.device,
       profile: this.profile,
       streamUrl: this.service.getVideoUrl(this.device.id, this.profile),
+      streamProtocols: this.service.getVideoProtocols(),
       fallbackUrl: this.device.lastFrameUrl ?? this.service.getFallbackFrameUrl(this.device.id, this.profile),
       target: this.target,
       callbacks: {
@@ -64,7 +63,6 @@ export class LivePhoneController {
           else if (state === "LIVE" && this.device.state === "DISCONNECTED") this.setState("RECONNECTING");
           else this.setState(state);
         },
-        // Errors are isolated to this controller/card. No global throw.
         onError: (_error: unknown) => undefined,
       },
     };
