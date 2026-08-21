@@ -3,7 +3,9 @@ export type DeviceLifecycleState =
   | "UNPAIRED"
   | "PAIRING"
   | "SLEEPING"
-  | "DISCONNECTED";
+  | "DISCONNECTED"
+  | "UNAUTHORIZED"
+  | "ATTENTION";
 
 export type StreamUiState =
   | "CONNECTING"
@@ -98,6 +100,7 @@ export interface DesktopService {
   pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult>;
   sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult>;
   getVideoUrl(deviceId: string, profile: StreamProfile): string;
+  getVideoProtocols(): string[];
   getFallbackFrameUrl(deviceId: string, profile: StreamProfile): string;
   listConnectors(): Promise<ConnectorCard[]>;
   runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<void>;
