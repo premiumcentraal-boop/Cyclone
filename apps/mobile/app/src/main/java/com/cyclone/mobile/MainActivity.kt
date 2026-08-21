@@ -13,6 +13,8 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.infrastructure.v31.CycloneV31ProductIntegration
+import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
 import com.cyclone.mobile.ui.CycloneMobileV292App
 
 class MainActivity : ComponentActivity() {
@@ -28,8 +30,14 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         initializeCyclone()
+        CycloneV31Runtime.servicesOrNull()?.refreshHealth()
     }
 
+    /**
+     * Keep the proven Cyclone product runtimes as compatibility providers, then install V3.1 as the
+     * single supervising policy/capability/memory/recovery layer around them. All calls are
+     * idempotent, so Activity resume cannot create duplicate runtimes or phone action engines.
+     */
     private fun initializeCyclone() {
         AutomationRuntime.initialize(this)
         AppLearnerRuntime.initialize(this)
@@ -40,6 +48,10 @@ class MainActivity : ComponentActivity() {
         BrainChatRuntime.initialize(this)
         RoutineTeachingRuntime.initialize(this)
         BridgeClient.start(this)
+
+        val v31 = CycloneV31Runtime.initialize(this)
+        CycloneV31ProductIntegration.install(this, v31)
+        CycloneV31ProductIntegration.finalizeStartupWhenReady(v31)
     }
 
     private fun migrateModelDefault() {
