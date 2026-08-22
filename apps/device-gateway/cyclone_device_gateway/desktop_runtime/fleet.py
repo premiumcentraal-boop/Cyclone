@@ -5,17 +5,14 @@ from dataclasses import dataclass, field
 import hashlib
 import re
 import secrets
+import subprocess
 import threading
+import time
 from typing import Any, Callable
 
 from ..adb.client import ADBClient, ADBDevice, ADBError
 from ..adb.device import CYCLONE_PACKAGE
-from ..cyclone_bridge.client import (
-    BridgeDisconnectedError,
-    BridgeOperationError,
-    BridgeProtocolError,
-    CycloneBridgeClient,
-)
+from ..cyclone_bridge.client import CycloneBridgeClient
 from .events import FleetEventBroker
 from .models import (
     DesktopRuntimeError,
@@ -72,7 +69,6 @@ class DeviceSession:
             DeviceFleetState.DISCONNECTED: "Reconnecting",
         }.get(self.state, state.replace("_", " ").title())
         return {
-            # Canonical Desktop V1 names.
             "deviceId": self.device_id,
             "id": self.device_id,
             "state": state,
@@ -93,8 +89,6 @@ class DeviceSession:
             "lastSeenEpochMs": self.last_seen_ms,
             "lastSafeError": self.last_safe_error,
             "connectionLabel": connection_label,
-            # The V1 release uses the authenticated binary image WebSocket for both profiles.
-            # Experimental AVC can be enabled by the backend later without changing this UI contract.
             "video": {
                 "mode": "SCREENSHOT",
                 "width": width,
@@ -124,7 +118,12 @@ class DeviceSession:
 
 
 class DeviceFleetManager:
-    """Bounded, failure-isolated inventory of USB-connected Android devices."""
+    """Bounded, failure-isolated inventory of USB-connected Android devices.
+
+    Normal discovery is event-driven through `adb track-devices -l`. A low-frequency fallback scan
+    remains active so Cyclone recovers from a dead tracker or unusual Windows/ADB behavior. Manual
+    scans use the exact same canonical `adb devices -l` path.
+    """
 
     def __init__(
         self,
@@ -132,7 +131,7 @@ class DeviceFleetManager:
         adb_path: str = "adb",
         inventory_adb: ADBClient | None = None,
         adb_factory: Callable[[str], ADBClient] | None = None,
-        poll_seconds: float = 1.0,
+        poll_seconds: float = 20.0,
         max_devices: int = MAX_FLEET_DEVICES,
         max_workers: int = 8,
         event_broker: FleetEventBroker | None = None,
@@ -140,17 +139,28 @@ class DeviceFleetManager:
         self.adb_path = adb_path
         self.inventory_adb = inventory_adb or ADBClient(adb_path, None)
         self.adb_factory = adb_factory or (lambda serial: ADBClient(adb_path, serial))
-        self.poll_seconds = max(0.2, min(float(poll_seconds), 10.0))
+        self.poll_seconds = max(5.0, min(float(poll_seconds), 30.0))
         self.max_devices = max(1, min(int(max_devices), 32))
         self.max_workers = max(1, min(int(max_workers), self.max_devices, 8))
         self.events = event_broker or FleetEventBroker()
         self._lock = threading.RLock()
+        self._refresh_lock = threading.Lock()
         self._sessions: dict[str, DeviceSession] = {}
         self._serial_to_device: dict[str, str] = {}
         self._remembered: dict[str, RememberedSession] = {}
-        self._thread: threading.Thread | None = None
+        self._fallback_thread: threading.Thread | None = None
+        self._track_thread: threading.Thread | None = None
+        self._tracker_process: subprocess.Popen | None = None
         self._stop = threading.Event()
         self._video_factory: Callable[[DeviceSession], Any] | None = None
+        self._tracker_active = False
+        self._tracker_restarts = 0
+        self._last_scan_at_ms: int | None = None
+        self._last_scan_duration_ms: int | None = None
+        self._last_scan_source = "never"
+        self._last_adb_error: str | None = None
+        self._last_raw_device_count = 0
+        self._last_authorized_device_count = 0
 
     def set_video_factory(self, factory: Callable[[DeviceSession], Any]) -> None:
         self._video_factory = factory
@@ -161,33 +171,119 @@ class DeviceFleetManager:
 
     def start(self) -> None:
         with self._lock:
-            if self._thread and self._thread.is_alive():
+            if self._fallback_thread and self._fallback_thread.is_alive():
                 return
             self._stop.clear()
-            self._thread = threading.Thread(target=self._monitor_loop, name="cyclone-device-fleet", daemon=True)
-            self._thread.start()
+            self._fallback_thread = threading.Thread(
+                target=self._fallback_loop,
+                name="cyclone-device-fleet-fallback",
+                daemon=True,
+            )
+            self._track_thread = threading.Thread(
+                target=self._track_loop,
+                name="cyclone-device-fleet-adb-events",
+                daemon=True,
+            )
+            self._fallback_thread.start()
+            self._track_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
-        thread = self._thread
-        if thread and thread.is_alive():
-            thread.join(timeout=3.0)
+        self._stop_tracker()
+        for thread in (self._track_thread, self._fallback_thread):
+            if thread and thread.is_alive():
+                thread.join(timeout=3.0)
         with self._lock:
             sessions = tuple(self._sessions.values())
         for session in sessions:
             self._cleanup_session(session)
 
-    def _monitor_loop(self) -> None:
+    def _fallback_loop(self) -> None:
+        # The first scan happens immediately on startup. Afterwards this is only a recovery net;
+        # normal USB plug/unplug latency comes from `adb track-devices`.
         while not self._stop.is_set():
             try:
-                self.refresh_once()
+                self.refresh_once(source="startup" if self._last_scan_at_ms is None else "fallback")
             except Exception:
                 pass
             self._stop.wait(self.poll_seconds)
 
+    def _track_loop(self) -> None:
+        while not self._stop.is_set():
+            process = None
+            try:
+                process = self.inventory_adb.start_track_devices()
+                with self._lock:
+                    self._tracker_process = process
+                    self._tracker_active = True
+                stdout = process.stdout
+                if stdout is None:
+                    raise ADBError("ADB device tracker has no output stream")
+
+                # ADB writes only when the device topology/state changes. We deliberately treat the
+                # output as a signal and re-read through `adb devices -l`, keeping one parser.
+                while not self._stop.is_set():
+                    line = stdout.readline()
+                    if line == b"":
+                        break
+                    try:
+                        self.refresh_once(source="adb-event")
+                    except Exception:
+                        pass
+            except Exception as exc:
+                with self._lock:
+                    self._last_adb_error = self._safe_error(exc)
+            finally:
+                with self._lock:
+                    self._tracker_active = False
+                    if self._tracker_process is process:
+                        self._tracker_process = None
+                if process is not None:
+                    try:
+                        process.terminate()
+                    except Exception:
+                        pass
+            if self._stop.wait(2.0):
+                break
+            with self._lock:
+                self._tracker_restarts += 1
+
+    def _stop_tracker(self) -> None:
+        with self._lock:
+            process = self._tracker_process
+            self._tracker_process = None
+            self._tracker_active = False
+        if process is None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=1.0)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+
     def list_public(self) -> list[dict[str, Any]]:
         with self._lock:
             return [self._sessions[key].public() for key in sorted(self._sessions)]
+
+    def diagnostics(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "adbPath": self.adb_path,
+                "adbAvailable": self._last_scan_at_ms is not None and self._last_adb_error is None,
+                "rawAdbDeviceCount": self._last_raw_device_count,
+                "authorizedAdbDeviceCount": self._last_authorized_device_count,
+                "fleetDeviceCount": len(self._sessions),
+                "trackerActive": self._tracker_active,
+                "trackerRestarts": self._tracker_restarts,
+                "fallbackIntervalSeconds": self.poll_seconds,
+                "lastScanAtEpochMs": self._last_scan_at_ms,
+                "lastScanDurationMs": self._last_scan_duration_ms,
+                "lastScanSource": self._last_scan_source,
+                "lastScanError": self._last_adb_error,
+            }
 
     def get(self, device_id: str) -> DeviceSession:
         with self._lock:
@@ -196,39 +292,58 @@ class DeviceFleetManager:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "Device is not connected.", retryable=True)
         return session
 
-    def refresh_once(self) -> list[dict[str, Any]]:
-        try:
-            devices = self.inventory_adb.devices()
-        except ADBError as exc:
-            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, str(exc), retryable=True) from exc
+    def refresh_once(self, *, source: str = "manual") -> list[dict[str, Any]]:
+        started = time.perf_counter()
+        with self._refresh_lock:
+            try:
+                devices = self.inventory_adb.devices()
+            except ADBError as exc:
+                with self._lock:
+                    self._last_scan_at_ms = now_ms()
+                    self._last_scan_duration_ms = int((time.perf_counter() - started) * 1000)
+                    self._last_scan_source = source
+                    self._last_adb_error = self._safe_error(exc)
+                    self._last_raw_device_count = 0
+                    self._last_authorized_device_count = 0
+                raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, str(exc), retryable=True) from exc
 
-        devices = devices[: self.max_devices]
-        seen_serials = {d.serial for d in devices}
-        with self._lock:
-            known_serials = set(self._serial_to_device)
-        for serial in known_serials - seen_serials:
-            self._remove_serial(serial)
+            devices = devices[: self.max_devices]
+            with self._lock:
+                self._last_scan_at_ms = now_ms()
+                self._last_scan_source = source
+                self._last_adb_error = None
+                self._last_raw_device_count = len(devices)
+                self._last_authorized_device_count = sum(1 for item in devices if item.state == "device")
 
-        refresh_targets: list[DeviceSession] = []
-        for device in devices:
-            session = self._upsert(device)
-            if device.state == "unauthorized":
-                self._set_state(session, DeviceFleetState.UNAUTHORIZED, "Authorize USB debugging on the phone.")
-            elif device.state != "device":
-                self._set_state(session, DeviceFleetState.ATTENTION, f"ADB state is {device.state}.")
-            else:
-                refresh_targets.append(session)
+            seen_serials = {d.serial for d in devices}
+            with self._lock:
+                known_serials = set(self._serial_to_device)
+            for serial in known_serials - seen_serials:
+                self._remove_serial(serial)
 
-        if refresh_targets:
-            with ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="cyclone-fleet") as pool:
-                futures = {pool.submit(self._refresh_authorized, session): session for session in refresh_targets}
-                for future in as_completed(futures):
-                    session = futures[future]
-                    try:
-                        future.result()
-                    except Exception:
-                        self._set_state(session, DeviceFleetState.ATTENTION, "Device health check failed safely.")
-        return self.list_public()
+            refresh_targets: list[DeviceSession] = []
+            for device in devices:
+                session = self._upsert(device)
+                if device.state == "unauthorized":
+                    self._set_state(session, DeviceFleetState.UNAUTHORIZED, "Authorize USB debugging on the phone.")
+                elif device.state != "device":
+                    self._set_state(session, DeviceFleetState.ATTENTION, f"ADB state is {device.state}.")
+                else:
+                    refresh_targets.append(session)
+
+            if refresh_targets:
+                with ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="cyclone-fleet") as pool:
+                    futures = {pool.submit(self._refresh_authorized, session): session for session in refresh_targets}
+                    for future in as_completed(futures):
+                        session = futures[future]
+                        try:
+                            future.result()
+                        except Exception:
+                            self._set_state(session, DeviceFleetState.ATTENTION, "Device health check failed safely.")
+
+            with self._lock:
+                self._last_scan_duration_ms = int((time.perf_counter() - started) * 1000)
+            return self.list_public()
 
     def _upsert(self, device: ADBDevice) -> DeviceSession:
         with self._lock:
@@ -296,8 +411,7 @@ class DeviceFleetManager:
     def _refresh_authorized(self, session: DeviceSession) -> None:
         try:
             session.adb.ensure_bridge_forward(session.local_port)
-            package_present = self._package_present(session)
-            if not package_present:
+            if not self._package_present(session):
                 self._set_state(session, DeviceFleetState.ATTENTION, "Install the Cyclone mobile app on this phone.")
                 return
             session.screen_awake = self._screen_awake(session)
@@ -358,3 +472,8 @@ class DeviceFleetManager:
         session.last_safe_error = error
         if changed:
             self.events.publish(FleetEventType.STATE_CHANGED, session.device_id, state=state.value, device=session.public())
+
+    @staticmethod
+    def _safe_error(error: Exception) -> str:
+        value = str(error).strip().replace("\r", " ").replace("\n", " ")
+        return value[:240] or error.__class__.__name__
