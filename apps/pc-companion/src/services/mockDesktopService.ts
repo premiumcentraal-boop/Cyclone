@@ -23,6 +23,7 @@ export class MockDesktopService implements DesktopService {
 
   async listDevices(): Promise<DesktopDevice[]> { return this.devices.map(copyDevice); }
   async scanDevices(): Promise<DesktopDevice[]> { return this.listDevices(); }
+  watchFleet(_onChange: () => void): () => void { return () => undefined; }
 
   async pairBegin(deviceId: string): Promise<PairBeginResult> {
     const device = this.requireDevice(deviceId);
@@ -67,7 +68,22 @@ export class MockDesktopService implements DesktopService {
   }
   async runConnectorAction(_connectorId: string, _action: "connect" | "install" | "repair"): Promise<void> { return; }
   async getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
-    return { backendReachable: true, deviceCount: this.devices.length, pairedDeviceCount: this.devices.filter((device) => device.paired).length, recoveryActive: this.devices.some((device) => device.state === "DISCONNECTED"), message: "Mock development backend" };
+    return {
+      backendReachable: true,
+      deviceCount: this.devices.length,
+      pairedDeviceCount: this.devices.filter((device) => device.paired).length,
+      recoveryActive: this.devices.some((device) => device.state === "DISCONNECTED"),
+      message: "Mock development backend",
+      discovery: {
+        adbPath: "mock-adb",
+        adbAvailable: true,
+        rawAdbDeviceCount: this.devices.length,
+        authorizedAdbDeviceCount: this.devices.length,
+        fleetDeviceCount: this.devices.length,
+        trackerActive: true,
+        lastScanSource: "mock",
+      },
+    };
   }
   private requireDevice(deviceId: string): DesktopDevice {
     const device = this.devices.find((candidate) => candidate.id === deviceId);
