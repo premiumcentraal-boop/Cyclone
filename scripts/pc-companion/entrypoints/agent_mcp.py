@@ -3,13 +3,13 @@ from __future__ import annotations
 import os
 
 from cyclone_agent_mcp.__main__ import main
-from secure_gateway_token import load_token
+from secure_gateway_token import DEFAULT_GATEWAY_URL, load_connection
 
 
 if __name__ == "__main__":
-    if not os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "").strip():
-        token = load_token()
-        if token:
-            os.environ["CYCLONE_DEVICE_GATEWAY_TOKEN"] = token
-    os.environ.setdefault("CYCLONE_DEVICE_GATEWAY_URL", "http://127.0.0.1:8765")
+    connection = load_connection()
+    if not os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "").strip() and connection:
+        os.environ["CYCLONE_DEVICE_GATEWAY_TOKEN"] = connection["token"]
+    if not os.getenv("CYCLONE_DEVICE_GATEWAY_URL", "").strip():
+        os.environ["CYCLONE_DEVICE_GATEWAY_URL"] = connection["url"] if connection else DEFAULT_GATEWAY_URL
     raise SystemExit(main())
