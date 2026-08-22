@@ -143,16 +143,20 @@ class ADBClient:
         self.run(["forward", "--remove", f"tcp:{local_port}"])
 
     def ensure_bridge_forward(self, local_port: int = 8766) -> bool:
-        device = self.select_device(self.serial)
+        # Fleet discovery already supplied this ADBClient with a concrete connected serial. Avoid
+        # re-running the entire device inventory for every phone just to create its isolated port.
+        if not self.serial:
+            raise ADBError("A device serial is required to create an isolated forward")
+        device_serial = self.serial
         local = f"tcp:{local_port}"
         remote = "localabstract:cyclone_gateway"
         mappings = self.forward_mappings()
         for serial, existing_local, existing_remote in mappings:
-            if serial == device.serial and existing_local == local and existing_remote == remote:
+            if serial == device_serial and existing_local == local and existing_remote == remote:
                 return False
-            if serial != device.serial and existing_local == local:
+            if serial != device_serial and existing_local == local:
                 raise ADBError("Cyclone local forward port is already owned by another device")
-        if any(serial == device.serial and existing_local == local for serial, existing_local, _ in mappings):
+        if any(serial == device_serial and existing_local == local for serial, existing_local, _ in mappings):
             self.remove_forward(local_port)
         self.run(["forward", local, remote])
         return True
