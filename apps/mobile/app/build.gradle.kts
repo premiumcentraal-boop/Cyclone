@@ -12,9 +12,9 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 19
-        // Cyclone V3.1 integrated beta: UI and Gateway status read this single version source.
-        versionName = "3.1.0-beta.1"
+        versionCode = 20
+        // Cyclone V3.1 desktop-pairing crash hotfix beta.
+        versionName = "3.1.0-beta.2"
     }
 
     buildTypes {
