@@ -46,7 +46,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check -e 'apps/device-gateway[test]' -e 'tools/cyclone-agent-mcp[test]'
-          python -m pytest -q apps/device-gateway/tests/test_desktop_fleet_runtime.py apps/device-gateway/tests/test_desktop_discovery_hotfix.py
+          python -m pytest -q apps/device-gateway/tests/test_desktop_fleet_runtime.py apps/device-gateway/tests/test_desktop_discovery_hotfix.py apps/device-gateway/tests/test_desktop_discovery_v2.py
           python -m pytest -q tools/cyclone-agent-mcp/tests
       - uses: actions/setup-node@v4
         with:
@@ -79,14 +79,14 @@ jobs:
           $Installer = Get-ChildItem 'apps/pc-companion/src-tauri/target/release/bundle/nsis/*.exe' | Select-Object -First 1
           if ($null -eq $Installer) { throw 'Cyclone NSIS installer was not produced.' }
           New-Item -ItemType Directory -Force -Path dist/pc-companion | Out-Null
-          Copy-Item $Installer.FullName 'dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe' -Force
+          Copy-Item $Installer.FullName 'dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.2-Setup.exe' -Force
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
-          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version '1.0.0-beta.1' --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
+          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version '1.0.0-beta.2' --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
       - uses: actions/upload-artifact@v4
         with:
           name: cyclone-pc-companion-v1-${{ github.sha }}
           path: |
-            dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.1-Setup.exe
+            dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.2-Setup.exe
             dist/pc-companion/SHA256SUMS.txt
             dist/pc-companion/source-sha.txt
             dist/pc-companion/release-provenance.json
@@ -109,8 +109,8 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: v3.1.0-beta.1-desktop-v1
-      RELEASE_TITLE: Cyclone V3.1 + PC Companion V1 Beta
+      RELEASE_TAG: v3.1.0-beta.1-desktop-v1-beta.2
+      RELEASE_TITLE: Cyclone V3.1 + PC Companion V1 Beta 2
     steps:
       - name: Download desktop and mobile build artifacts
         shell: bash
@@ -135,13 +135,20 @@ jobs:
         shell: bash
         run: |
           cat > release-notes.md <<'EOF'
-          # Cyclone V3.1 + PC Companion V1 Beta
+          # Cyclone V3.1 + PC Companion V1 Beta 2
 
-          This prerelease pairs the latest Cyclone Mobile V3.1 beta with the first Cyclone PC Companion V1 beta.
+          This prerelease pairs Cyclone Mobile V3.1 beta with the second Cyclone PC Companion V1 beta.
+
+          ## Discovery hotfix
+          - Fixed a concrete stale-Gateway failure mode where a previous Python sidecar could remain on the fixed loopback port while a new Companion launch used a different credential.
+          - Each Companion launch now uses its own authenticated dynamic loopback port and the sidecar watches its parent process so it exits with the desktop app.
+          - Added event-driven USB discovery using ADB device-change notifications, with a low-rate 20-second fallback instead of constant polling.
+          - Added an immediate Scan for phones action and safe discovery diagnostics showing whether Cyclone can reach ADB and how many USB devices ADB reports.
+          - Added Windows ADB auto-resolution for common Android Platform Tools locations.
 
           ## Included
           - Cyclone Mobile 3.1.0-beta.1 APK with Desktop V1 USB pairing/Gateway support.
-          - Cyclone PC Companion 1.0.0-beta.1 Windows installer.
+          - Cyclone PC Companion 1.0.0-beta.2 Windows installer.
           - Multi-phone USB fleet discovery and per-phone pairing.
           - Live phone views, focused manual controls, keyboard input, and PC-to-phone clipboard support.
           - Cyclone Agent MCP for Codex, OpenCode/DeepSeek-compatible MCP harnesses, Copilot CLI-compatible generic MCP profiles, and other MCP clients.
@@ -154,7 +161,7 @@ jobs:
           - Cyclone Accessibility enabled on the phone for phone control.
 
           ## Beta status
-          This is a test release. Automated Windows, MCP, desktop UI, Gateway, Android unit, and APK build gates passed for the exact release source before publication. Physical multi-phone USB/video throughput has not yet been certified as production-ready.
+          This remains a test release. Automated Windows, MCP, desktop UI, Gateway, Android unit, and APK build gates must pass for the exact release source before publication.
           EOF
       - name: Create GitHub prerelease
         shell: bash
