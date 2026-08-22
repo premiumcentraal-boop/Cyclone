@@ -36,12 +36,68 @@ export class HttpDesktopService implements DesktopService {
     this.token = options.token;
   }
 
+  async waitUntilReady(timeoutMs = 12_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let lastError: unknown = null;
+    while (Date.now() < deadline) {
+      try {
+        const status = await this.getRuntimeStatus();
+        if (status.backendReachable) return;
+      } catch (error) {
+        lastError = error;
+      }
+      await sleep(180);
+    }
+    if (lastError instanceof Error) throw lastError;
+    throw new Error("Cyclone local Gateway did not become ready in time");
+  }
+
   listDevices(): Promise<DesktopDevice[]> {
     return this.request<{ devices: DesktopDevice[] }>("/v1/fleet").then((value) => value.devices);
   }
 
   scanDevices(): Promise<DesktopDevice[]> {
     return this.request<{ devices: DesktopDevice[] }>("/v1/fleet/scan", { method: "POST" }).then((value) => value.devices);
+  }
+
+  watchFleet(onChange: () => void): () => void {
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+
+    const connect = () => {
+      if (disposed) return;
+      try {
+        socket = new WebSocket(`${this.wsBase}/v1/fleet/events`, this.getVideoProtocols());
+      } catch {
+        scheduleReconnect();
+        return;
+      }
+      socket.addEventListener("message", () => {
+        if (!disposed) onChange();
+      });
+      socket.addEventListener("error", () => {
+        try { socket?.close(); } catch { /* noop */ }
+      });
+      socket.addEventListener("close", () => scheduleReconnect());
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer != null) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 2000);
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      try { socket?.close(); } catch { /* noop */ }
+      socket = null;
+    };
   }
 
   pairBegin(deviceId: string): Promise<PairBeginResult> {
@@ -154,19 +210,21 @@ export class HttpDesktopService implements DesktopService {
     });
     if (!response.ok) {
       let code = "HTTP_ERROR";
+      let detail = "Cyclone backend request failed";
       try {
-        const body = await response.json() as { detail?: { code?: string } };
+        const body = await response.json() as { detail?: { code?: string; message?: string } };
         code = body.detail?.code ?? code;
+        detail = body.detail?.message ?? detail;
       } catch { /* safe fallback */ }
-      throw new DesktopHttpError(response.status, code);
+      throw new DesktopHttpError(response.status, code, detail);
     }
     return (await response.json()) as T;
   }
 }
 
 class DesktopHttpError extends Error {
-  constructor(readonly status: number, readonly code: string) {
-    super(`Cyclone backend request failed (${status})`);
+  constructor(readonly status: number, readonly code: string, message: string) {
+    super(message);
   }
 }
 
@@ -189,4 +247,8 @@ function connector(id: ConnectorCard["id"], name: string, description: string, r
 
 function stripSlash(value: string): string {
   return value.replace(/\/$/, "");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
