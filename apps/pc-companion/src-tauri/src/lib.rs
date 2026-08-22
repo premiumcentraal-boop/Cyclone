@@ -101,12 +101,13 @@ fn reserve_loopback_port() -> Result<u16, String> {
 /// Older Cyclone setup scripts installed `cyclone-device-gateway.exe` in a Python venv and could
 /// leave it running with a visible console window. The packaged Companion now owns its own hidden
 /// `CyclonePCRuntime` sidecar, so the legacy executable is incompatible and safe to retire when the
-/// modern Companion starts. `taskkill` itself is also launched without a console window.
+/// modern Companion starts. `taskkill` itself is also launched without a console window and `/T`
+/// removes any legacy ADB child it owns at the same time.
 #[cfg(windows)]
 fn cleanup_legacy_gateway_processes() {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let _ = Command::new("taskkill")
-        .args(["/F", "/IM", "cyclone-device-gateway.exe"])
+        .args(["/F", "/T", "/IM", "cyclone-device-gateway.exe"])
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 }
