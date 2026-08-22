@@ -21,6 +21,8 @@ export class CyclonePcCompanionApp {
   private state: CompanionState = initialCompanionState();
   private currentPage: PageHandle | null = null;
   private pollTimer: number | null = null;
+  private eventRefreshTimer: number | null = null;
+  private fleetUnsubscribe: (() => void) | null = null;
   private pairingModal: PairingModal | null = null;
   private deviceSignature = "";
   private readonly content = el("main", "app-content");
@@ -31,19 +33,32 @@ export class CyclonePcCompanionApp {
   async start(): Promise<void> {
     this.renderShell();
     await this.refreshDevices(true);
-    // This polls only the already-cached local fleet list. Actual ADB discovery runs at a much
-    // lower frequency in the backend, so keeping the UI responsive costs almost nothing.
-    this.pollTimer = window.setInterval(() => void this.refreshDevices(false), 5000);
+    // Normal updates are pushed from ADB's topology event stream. The 20 second list refresh is
+    // only a very cheap UI recovery net and does not itself execute ADB commands.
+    this.fleetUnsubscribe = this.service.watchFleet(() => this.scheduleEventRefresh());
+    this.pollTimer = window.setInterval(() => void this.refreshDevices(false), 20_000);
   }
 
   destroy(): void {
     if (this.pollTimer != null) window.clearInterval(this.pollTimer);
+    if (this.eventRefreshTimer != null) window.clearTimeout(this.eventRefreshTimer);
     this.pollTimer = null;
+    this.eventRefreshTimer = null;
+    this.fleetUnsubscribe?.();
+    this.fleetUnsubscribe = null;
     this.currentPage?.destroy();
     this.currentPage = null;
     this.pairingModal?.close();
     this.pairingModal = null;
     this.root.replaceChildren();
+  }
+
+  private scheduleEventRefresh(): void {
+    if (this.eventRefreshTimer != null) return;
+    this.eventRefreshTimer = window.setTimeout(() => {
+      this.eventRefreshTimer = null;
+      void this.refreshDevices(false);
+    }, 100);
   }
 
   private renderShell(): void {
