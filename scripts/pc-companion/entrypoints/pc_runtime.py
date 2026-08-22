@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 import os
+import subprocess
 import threading
 import time
 
@@ -11,6 +12,7 @@ from secure_gateway_token import save_connection
 
 _STILL_ACTIVE = 259
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_CREATE_NO_WINDOW = 0x08000000
 
 
 def _windows_kernel32():
@@ -46,14 +48,31 @@ def _parent_alive(pid: int) -> bool:
         return False
 
 
+def _terminate_own_process_tree() -> None:
+    if os.name == "nt":
+        # Terminate the frozen runtime and every helper it owns (notably adb track-devices).
+        # The previous os._exit() path skipped cleanup and could leave a visible orphaned ADB
+        # console after the Companion window closed.
+        try:
+            subprocess.Popen(
+                ["taskkill", "/F", "/T", "/PID", str(os.getpid())],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+        except Exception:
+            os._exit(0)
+        return
+    os._exit(0)
+
+
 def _watch_parent(pid: int) -> None:
     while True:
         time.sleep(2.0)
         if not _parent_alive(pid):
-            # The Gateway is a child of the desktop product. It must never linger after the
-            # Companion disappears, because a stale authenticated loopback process can otherwise
-            # occupy the old port and make a later launch look healthy while rejecting its token.
-            os._exit(0)
+            _terminate_own_process_tree()
+            return
 
 
 def _start_parent_watch() -> None:
