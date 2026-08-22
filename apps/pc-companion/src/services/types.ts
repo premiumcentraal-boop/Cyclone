@@ -85,18 +85,37 @@ export interface ConnectorCard {
   actionLabel?: string;
 }
 
+export interface DesktopDiscoveryStatus {
+  adbPath?: string;
+  adbAvailable: boolean;
+  rawAdbDeviceCount: number;
+  authorizedAdbDeviceCount: number;
+  fleetDeviceCount: number;
+  trackerActive: boolean;
+  trackerRestarts?: number;
+  fallbackIntervalSeconds?: number;
+  lastScanAtEpochMs?: number | null;
+  lastScanDurationMs?: number | null;
+  lastScanSource?: string;
+  lastScanError?: string | null;
+}
+
 export interface DesktopRuntimeStatus {
   backendReachable: boolean;
+  runtimeInstanceId?: string;
+  runtimePort?: number;
   deviceCount: number;
   pairedDeviceCount: number;
   recoveryActive: boolean;
   message?: string;
+  discovery?: DesktopDiscoveryStatus;
 }
 
 export interface DesktopService {
   readonly mode: "real" | "mock";
   listDevices(): Promise<DesktopDevice[]>;
   scanDevices(): Promise<DesktopDevice[]>;
+  watchFleet(onChange: () => void): () => void;
   pairBegin(deviceId: string): Promise<PairBeginResult>;
   pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult>;
   sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult>;
