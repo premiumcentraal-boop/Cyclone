@@ -2,6 +2,7 @@ package com.cyclone.mobile.gateway
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,6 +18,24 @@ class GatewayDesktopRuntimeV1Test {
         assertEquals(
             DesktopPairingCompletion.Failure(DesktopPairingFailure.EXPIRED),
             engine.complete(challenge.challengeId, challenge.usbSessionId, challenge.pcNonce, challenge.code),
+        )
+    }
+
+    @Test
+    fun requestingNewPairingCodeSafelySupersedesPreviousChallenge() {
+        val engine = DesktopPairingEngine()
+        val first = engine.begin("usb-session", "pc-nonce-abcdefghijklmnop")
+        val second = engine.begin("usb-session", "pc-nonce-ponmlkjihgfedcba")
+
+        assertNotEquals(first.challengeId, second.challengeId)
+        assertEquals(second.challengeId, engine.activeForUser()?.challengeId)
+        assertEquals(
+            DesktopPairingCompletion.Failure(DesktopPairingFailure.REPLAY),
+            engine.complete(first.challengeId, first.usbSessionId, first.pcNonce, first.code),
+        )
+        assertEquals(
+            DesktopPairingCompletion.Success,
+            engine.complete(second.challengeId, second.usbSessionId, second.pcNonce, second.code),
         )
     }
 
