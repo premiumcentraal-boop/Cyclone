@@ -1,7 +1,7 @@
 import { computeVirtualRange, fleetColumnCount } from "../core/grid.js";
 import type { DesktopDevice, DesktopService } from "../services/types.js";
 import { createLivePhoneView, type LivePhoneViewHandle } from "../ui/livePhoneView.js";
-import { el } from "../ui/dom.js";
+import { button, el } from "../ui/dom.js";
 
 export interface FleetPageHandle {
   element: HTMLElement;
@@ -13,17 +13,45 @@ export function createFleetPage(
   devices: DesktopDevice[],
   onFocus: (device: DesktopDevice) => void,
   onPair: (device: DesktopDevice) => void,
+  onScan: () => Promise<number>,
 ): FleetPageHandle {
   const page = el("section", "page fleet-page");
   const header = el("header", "page-header fleet-header");
   const titleGroup = el("div");
   titleGroup.append(el("h1", "page-title", "Phones"), el("p", "page-subtitle", fleetSubtitle(devices)));
-  header.append(titleGroup);
+
+  const scanArea = el("div", "fleet-scan-area");
+  const scanStatus = el("span", "fleet-scan-status", "Auto-detect is on");
+  const scanButton = button("Scan for phones", "button secondary scan-button");
+  scanButton.setAttribute("aria-label", "Scan for connected Android phones now");
+  scanButton.addEventListener("click", async () => {
+    if (scanButton.disabled) return;
+    scanButton.disabled = true;
+    scanButton.classList.add("scanning");
+    scanButton.textContent = "Scanning…";
+    scanStatus.textContent = "Checking USB devices";
+    try {
+      const count = await onScan();
+      scanStatus.textContent = count === 0 ? "No phones found yet" : count === 1 ? "1 phone detected" : `${count} phones detected`;
+    } catch {
+      scanStatus.textContent = "Couldn't scan · check USB debugging";
+    } finally {
+      scanButton.disabled = false;
+      scanButton.classList.remove("scanning");
+      scanButton.textContent = "Scan for phones";
+    }
+  });
+  scanArea.append(scanStatus, scanButton);
+  header.append(titleGroup, scanArea);
   page.append(header);
 
   if (devices.length === 0) {
     const empty = el("div", "empty-state");
-    empty.append(el("div", "empty-orbit"), el("h2", "empty-title", "Looking for Cyclone phones"), el("p", "empty-copy", "Detected phones appear here automatically."));
+    empty.append(
+      el("div", "empty-orbit"),
+      el("h2", "empty-title", "Looking for Cyclone phones"),
+      el("p", "empty-copy", "Plug in a phone with USB debugging enabled. Cyclone checks automatically, or use Scan for phones."),
+    );
     page.append(empty);
     return { element: page, destroy: () => undefined };
   }
