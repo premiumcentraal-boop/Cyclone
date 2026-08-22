@@ -31,7 +31,9 @@ export class CyclonePcCompanionApp {
   async start(): Promise<void> {
     this.renderShell();
     await this.refreshDevices(true);
-    this.pollTimer = window.setInterval(() => void this.refreshDevices(false), 3000);
+    // This polls only the already-cached local fleet list. Actual ADB discovery runs at a much
+    // lower frequency in the backend, so keeping the UI responsive costs almost nothing.
+    this.pollTimer = window.setInterval(() => void this.refreshDevices(false), 5000);
   }
 
   destroy(): void {
@@ -75,14 +77,24 @@ export class CyclonePcCompanionApp {
   private async refreshDevices(forceRender: boolean): Promise<void> {
     try {
       const devices = await this.service.listDevices();
-      const signature = devices.map(deviceSignature).join("|");
-      const changed = signature !== this.deviceSignature;
-      this.deviceSignature = signature;
-      this.state = reduceCompanionState(this.state, { type: "devices_updated", devices });
-      if (forceRender || changed) this.renderPage();
+      this.applyDevices(devices, forceRender);
     } catch {
       if (forceRender && this.state.devices.length === 0) this.renderPage();
     }
+  }
+
+  private async scanForPhones(): Promise<number> {
+    const devices = await this.service.scanDevices();
+    this.applyDevices(devices, true);
+    return devices.length;
+  }
+
+  private applyDevices(devices: DesktopDevice[], forceRender: boolean): void {
+    const signature = devices.map(deviceSignature).join("|");
+    const changed = signature !== this.deviceSignature;
+    this.deviceSignature = signature;
+    this.state = reduceCompanionState(this.state, { type: "devices_updated", devices });
+    if (forceRender || changed) this.renderPage();
   }
 
   private navigate(route: Exclude<AppRoute, "focused">): void {
@@ -134,7 +146,13 @@ export class CyclonePcCompanionApp {
       this.currentPage = createSettingsPage(this.service, this.state.devices);
     }
     if (!this.currentPage) {
-      this.currentPage = createFleetPage(this.service, this.state.devices, (device) => this.focusDevice(device), (device) => this.openPairing(device));
+      this.currentPage = createFleetPage(
+        this.service,
+        this.state.devices,
+        (device) => this.focusDevice(device),
+        (device) => this.openPairing(device),
+        () => this.scanForPhones(),
+      );
     }
     this.content.replaceChildren(this.currentPage.element);
   }
