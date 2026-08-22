@@ -56,7 +56,7 @@ def test_manual_scan_refreshes_fleet_immediately(tmp_path):
     fleet = DeviceFleetManager(
         inventory_adb=inventory,
         adb_factory=lambda serial: FakeADB(serial),
-        poll_seconds=8.0,
+        poll_seconds=20.0,
     )
     settings = Settings("pc-secret", None, "adb", tmp_path)
     runtime = DesktopRuntime(settings, fleet=fleet)
@@ -72,9 +72,11 @@ def test_manual_scan_refreshes_fleet_immediately(tmp_path):
         assert len(devices) == 1
         assert devices[0]["model"] == "Pixel_8"
         assert devices[0]["state"] == "UNPAIRED"
+        assert response.json()["discovery"]["rawAdbDeviceCount"] == 1
+        assert response.json()["discovery"]["lastScanSource"] == "manual"
 
 
-def test_default_desktop_runtime_uses_low_frequency_discovery(tmp_path):
+def test_default_desktop_runtime_uses_event_driven_discovery_with_low_rate_fallback(tmp_path):
     settings = Settings("pc-secret", None, "adb", tmp_path)
     runtime = DesktopRuntime(settings)
-    assert runtime.fleet.poll_seconds == 8.0
+    assert runtime.fleet.poll_seconds == 20.0
