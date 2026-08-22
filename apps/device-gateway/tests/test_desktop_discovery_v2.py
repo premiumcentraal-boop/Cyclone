@@ -1,6 +1,10 @@
+import os
 from pathlib import Path
+import subprocess
 
-from cyclone_device_gateway.adb.client import ADBDevice
+import pytest
+
+from cyclone_device_gateway.adb.client import ADBDevice, _hidden_process_kwargs
 from cyclone_device_gateway.config import resolve_adb_path, resolve_gateway_port
 from cyclone_device_gateway.desktop_runtime.fleet import DeviceFleetManager
 
@@ -79,3 +83,12 @@ def test_tracker_unavailable_does_not_make_successful_adb_scan_unhealthy():
     diagnostic = fleet.diagnostics()
     assert diagnostic["adbAvailable"] is True
     assert diagnostic["rawAdbDeviceCount"] == 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows console suppression contract")
+def test_windows_adb_helpers_are_created_without_console_windows():
+    kwargs = _hidden_process_kwargs()
+    assert int(kwargs["creationflags"]) & subprocess.CREATE_NO_WINDOW
+    startupinfo = kwargs["startupinfo"]
+    assert startupinfo.dwFlags & subprocess.STARTF_USESHOWWINDOW
+    assert startupinfo.wShowWindow == subprocess.SW_HIDE
