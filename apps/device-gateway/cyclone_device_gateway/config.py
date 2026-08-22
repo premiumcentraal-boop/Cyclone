@@ -5,6 +5,7 @@ import ipaddress
 from pathlib import Path
 import os
 import shutil
+from urllib.parse import urlparse
 
 
 def resolve_adb_path() -> str:
@@ -29,7 +30,6 @@ def resolve_adb_path() -> str:
         candidates.extend(
             [
                 local / "Android" / "Sdk" / "platform-tools" / "adb.exe",
-                # This is also where Cyclone's earlier standalone Platform Tools setup installs it.
                 local / "Android" / "platform-tools" / "adb.exe",
             ]
         )
@@ -42,9 +42,30 @@ def resolve_adb_path() -> str:
         if candidate.is_file():
             return str(candidate)
 
-    # Keep the conventional command name as the final fallback so diagnostics can return the
-    # existing friendly "ADB executable was not found" error instead of failing configuration.
     return "adb"
+
+
+def resolve_gateway_port() -> int:
+    explicit = os.getenv("CYCLONE_DEVICE_GATEWAY_PORT", "").strip()
+    if explicit:
+        try:
+            port = int(explicit)
+        except ValueError as exc:
+            raise RuntimeError("CYCLONE_DEVICE_GATEWAY_PORT must be an integer") from exc
+        if not 1 <= port <= 65535:
+            raise RuntimeError("CYCLONE_DEVICE_GATEWAY_PORT is out of range")
+        return port
+
+    configured_url = os.getenv("CYCLONE_DEVICE_GATEWAY_URL", "").strip()
+    if configured_url:
+        try:
+            parsed = urlparse(configured_url)
+            if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"} and parsed.port:
+                return parsed.port
+        except ValueError:
+            pass
+
+    return 8765
 
 
 @dataclass(frozen=True)
@@ -69,6 +90,8 @@ class Settings:
                 raise ValueError(f"{field_name} must be a loopback address") from exc
             if not is_loopback:
                 raise ValueError(f"{field_name} must be a loopback address")
+        if not 1 <= int(self.port) <= 65535:
+            raise ValueError("port must be in range 1..65535")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -82,9 +105,6 @@ class Settings:
             "true",
             "yes",
         }
-        # Legacy single-device routes still require an independent Android bridge token.
-        # The packaged Desktop V1 Companion explicitly opts into the zero-authority USB
-        # pairing bootstrap; per-device credentials are then exchanged and kept in memory.
         if not bridge_token and not pairing_bootstrap:
             raise RuntimeError("CYCLONE_ANDROID_BRIDGE_TOKEN is required")
 
@@ -97,5 +117,6 @@ class Settings:
             device_serial=os.getenv("CYCLONE_DEVICE_SERIAL") or None,
             adb_path=resolve_adb_path(),
             runtime_dir=runtime_dir,
+            port=resolve_gateway_port(),
             bridge_token=bridge_token,
         )
