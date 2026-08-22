@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import subprocess
 from typing import Sequence
 
@@ -19,6 +20,24 @@ class ADBError(RuntimeError):
     pass
 
 
+def _hidden_process_kwargs() -> dict[str, object]:
+    """Windows-only subprocess options that keep adb and helper binaries off the desktop.
+
+    Cyclone is a GUI product. ADB is an implementation detail and must never create a visible
+    console window when the packaged Companion scans, tracks devices, forwards ports, captures
+    frames, or runs bounded diagnostics.
+    """
+    if os.name != "nt":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "startupinfo": startupinfo,
+    }
+
+
 class ADBClient:
     def __init__(self, adb_path: str = "adb", serial: str | None = None):
         self.adb_path = adb_path
@@ -32,7 +51,12 @@ class ADBClient:
 
     def run(self, args: Sequence[str], *, binary: bool = False, timeout: float = 15, use_serial: bool = True):
         try:
-            p = subprocess.run(self._base(use_serial) + list(args), capture_output=True, timeout=timeout)
+            p = subprocess.run(
+                self._base(use_serial) + list(args),
+                capture_output=True,
+                timeout=timeout,
+                **_hidden_process_kwargs(),
+            )
         except FileNotFoundError as exc:
             raise ADBError("ADB executable was not found. Install Android Platform Tools and add adb to PATH.") from exc
         except subprocess.TimeoutExpired as exc:
@@ -46,8 +70,10 @@ class ADBClient:
         try:
             return subprocess.Popen(
                 self._base(use_serial) + list(args),
+                stdin=subprocess.DEVNULL,
                 stdout=stdout or subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                **_hidden_process_kwargs(),
             )
         except FileNotFoundError as exc:
             raise ADBError("ADB executable was not found") from exc
@@ -57,7 +83,7 @@ class ADBClient:
 
         The stream is used only as a wake-up signal. Device data is still read through the normal
         `adb devices -l` parser so there is one canonical inventory parser and no caller-supplied
-        ADB command surface.
+        ADB command surface. On Windows the tracker is always created without a console window.
         """
         try:
             return subprocess.Popen(
@@ -66,6 +92,7 @@ class ADBClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0,
+                **_hidden_process_kwargs(),
             )
         except FileNotFoundError as exc:
             raise ADBError("ADB executable was not found") from exc
