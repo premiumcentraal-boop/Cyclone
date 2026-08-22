@@ -72,7 +72,10 @@ class AgentTeachStopBody(BaseModel):
 class DesktopRuntime:
     def __init__(self, settings: Settings, *, fleet: DeviceFleetManager | None = None):
         self.settings = settings
-        self.fleet = fleet or DeviceFleetManager(adb_path=settings.adb_path)
+        # ADB discovery itself is cheap, but the fleet refresh also checks bridge/package/display
+        # health. Eight seconds keeps plug-in discovery comfortably below 30 seconds without the
+        # old once-per-second command churn. The UI can always request an immediate scan.
+        self.fleet = fleet or DeviceFleetManager(adb_path=settings.adb_path, poll_seconds=8.0)
         self.pairing = PairingCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
@@ -97,6 +100,11 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.get("/v1/devices", dependencies=[Depends(auth)], include_in_schema=False)
     def fleet() -> dict[str, Any]:
         return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": runtime.fleet.list_public()}
+
+    @router.post("/v1/fleet/scan", dependencies=[Depends(auth)])
+    def fleet_scan() -> dict[str, Any]:
+        devices = _call(runtime.fleet.refresh_once)
+        return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": devices}
 
     @router.get("/v1/diagnostics/status", dependencies=[Depends(auth)])
     def diagnostics_status() -> dict[str, Any]:

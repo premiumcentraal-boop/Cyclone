@@ -96,6 +96,7 @@ export interface DesktopRuntimeStatus {
 export interface DesktopService {
   readonly mode: "real" | "mock";
   listDevices(): Promise<DesktopDevice[]>;
+  scanDevices(): Promise<DesktopDevice[]>;
   pairBegin(deviceId: string): Promise<PairBeginResult>;
   pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult>;
   sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult>;

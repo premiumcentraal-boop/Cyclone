@@ -40,6 +40,10 @@ export class HttpDesktopService implements DesktopService {
     return this.request<{ devices: DesktopDevice[] }>("/v1/fleet").then((value) => value.devices);
   }
 
+  scanDevices(): Promise<DesktopDevice[]> {
+    return this.request<{ devices: DesktopDevice[] }>("/v1/fleet/scan", { method: "POST" }).then((value) => value.devices);
+  }
+
   pairBegin(deviceId: string): Promise<PairBeginResult> {
     return this.request<Record<string, unknown>>(`/v1/devices/${encodeURIComponent(deviceId)}/pair/begin`, { method: "POST" })
       .then((value) => ({
@@ -66,8 +70,6 @@ export class HttpDesktopService implements DesktopService {
 
   async sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult> {
     if (action.type === "clipboard_sync") {
-      // Desktop V1 exposes safe PC -> phone paste; reverse continuous sync is intentionally not
-      // enabled until Android can provide it without leaking sensitive clipboard contents.
       return { ok: !action.enabled, deviceId, verification: action.enabled ? "PC_TO_PHONE_ONLY" : "DISABLED" };
     }
     if (action.type === "clipboard_paste") {
@@ -102,8 +104,6 @@ export class HttpDesktopService implements DesktopService {
   }
 
   getVideoUrl(deviceId: string, profile: StreamProfile): string {
-    // V1 defaults to the proven JPEG binary stream even in focused view. Experimental raw AVC is
-    // deliberately not the release default because screenrecord chunks are not access-unit framed.
     const stableProfile = profile === "focus" ? "thumbnail" : profile;
     return `${this.wsBase}/v1/devices/${encodeURIComponent(deviceId)}/video?profile=${stableProfile}`;
   }

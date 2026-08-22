@@ -4,6 +4,47 @@ from dataclasses import dataclass
 import ipaddress
 from pathlib import Path
 import os
+import shutil
+
+
+def resolve_adb_path() -> str:
+    """Resolve adb without requiring the desktop app to inherit a freshly edited PATH."""
+    configured = os.getenv("ADB_PATH", "").strip()
+    if configured:
+        return configured
+
+    discovered = shutil.which("adb")
+    if discovered:
+        return discovered
+
+    candidates: list[Path] = []
+    for env_name in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        root = os.getenv(env_name, "").strip()
+        if root:
+            candidates.append(Path(root) / "platform-tools" / "adb.exe")
+
+    local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        local = Path(local_app_data)
+        candidates.extend(
+            [
+                local / "Android" / "Sdk" / "platform-tools" / "adb.exe",
+                # This is also where Cyclone's earlier standalone Platform Tools setup installs it.
+                local / "Android" / "platform-tools" / "adb.exe",
+            ]
+        )
+
+    user_profile = os.getenv("USERPROFILE", "").strip()
+    if user_profile:
+        candidates.append(Path(user_profile) / "AppData" / "Local" / "Android" / "Sdk" / "platform-tools" / "adb.exe")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    # Keep the conventional command name as the final fallback so diagnostics can return the
+    # existing friendly "ADB executable was not found" error instead of failing configuration.
+    return "adb"
 
 
 @dataclass(frozen=True)
@@ -54,7 +95,7 @@ class Settings:
         return cls(
             token=token,
             device_serial=os.getenv("CYCLONE_DEVICE_SERIAL") or None,
-            adb_path=os.getenv("ADB_PATH", "adb"),
+            adb_path=resolve_adb_path(),
             runtime_dir=runtime_dir,
             bridge_token=bridge_token,
         )

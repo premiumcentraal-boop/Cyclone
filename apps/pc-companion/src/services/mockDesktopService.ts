@@ -22,6 +22,7 @@ export class MockDesktopService implements DesktopService {
   }
 
   async listDevices(): Promise<DesktopDevice[]> { return this.devices.map(copyDevice); }
+  async scanDevices(): Promise<DesktopDevice[]> { return this.listDevices(); }
 
   async pairBegin(deviceId: string): Promise<PairBeginResult> {
     const device = this.requireDevice(deviceId);
