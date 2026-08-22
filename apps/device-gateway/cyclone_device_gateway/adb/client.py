@@ -42,12 +42,30 @@ class ADBClient:
             raise ADBError(err or f"adb exited {p.returncode}")
         return p.stdout if binary else p.stdout.decode("utf-8", "replace")
 
-    def start_process(self, args: Sequence[str], *, stdout=None):
+    def start_process(self, args: Sequence[str], *, stdout=None, use_serial: bool = True):
         try:
             return subprocess.Popen(
-                self._base() + list(args),
+                self._base(use_serial) + list(args),
                 stdout=stdout or subprocess.PIPE,
                 stderr=subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            raise ADBError("ADB executable was not found") from exc
+
+    def start_track_devices(self):
+        """Start ADB's low-cost topology notification stream.
+
+        The stream is used only as a wake-up signal. Device data is still read through the normal
+        `adb devices -l` parser so there is one canonical inventory parser and no caller-supplied
+        ADB command surface.
+        """
+        try:
+            return subprocess.Popen(
+                self._base(use_serial=False) + ["track-devices", "-l"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
             )
         except FileNotFoundError as exc:
             raise ADBError("ADB executable was not found") from exc
