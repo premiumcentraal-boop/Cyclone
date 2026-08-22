@@ -1,5 +1,6 @@
 name: Cyclone Desktop V1 CI
 
+# Dedicated release/beta branches publish a GitHub prerelease after both build gates pass.
 on:
   pull_request:
     paths:
