@@ -33,14 +33,18 @@ internal object GatewayDesktopPairingManager {
         } catch (_: IllegalArgumentException) {
             throw GatewayProtocolException("PROTOCOL_MISMATCH", "Pairing request is invalid")
         }
-        val main = Handler(Looper.getMainLooper())
-        repeat(3) { repeatIndex ->
-            main.postDelayed({
-                if (engine.activeForUser()?.challengeId == challenge.challengeId) {
-                    Toast.makeText(context, "Cyclone pairing code: ${challenge.code}", Toast.LENGTH_LONG).show()
-                }
-            }, repeatIndex * 3_500L)
+
+        // Pairing is protocol state first and UI second. Never let a Toast/window lifecycle problem
+        // crash the Gateway process or invalidate a perfectly good pairing challenge. Use only the
+        // application context and one best-effort notification; the Gateway control center polls
+        // the same engine and will render the code normally when it is open.
+        val appContext = context.applicationContext
+        Handler(Looper.getMainLooper()).post {
+            runCatching {
+                Toast.makeText(appContext, "Cyclone pairing code: ${challenge.code}", Toast.LENGTH_LONG).show()
+            }
         }
+
         return JSONObject()
             .put("challengeId", challenge.challengeId)
             .put("expiresAtMs", challenge.expiresAtMs)
