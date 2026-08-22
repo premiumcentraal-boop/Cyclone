@@ -27,9 +27,14 @@ export async function createDesktopService(locationSearch = window.location.sear
       ws_base: import.meta.env.VITE_CYCLONE_WS_BASE || "ws://127.0.0.1:8765",
     };
   }
-  return new HttpDesktopService({
+  const service = new HttpDesktopService({
     httpBaseUrl: session.http_base,
     wsBaseUrl: session.ws_base,
     token: session.token,
   });
+  // Tauri starts the frozen Python Gateway concurrently with the WebView. Do not mistake the
+  // normal sidecar startup window for "zero phones"; wait until this exact authenticated runtime
+  // responds before mounting the fleet UI.
+  await service.waitUntilReady();
+  return service;
 }
