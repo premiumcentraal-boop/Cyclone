@@ -32,9 +32,28 @@ export function createFleetPage(
     scanStatus.textContent = "Checking USB devices";
     try {
       const count = await onScan();
-      scanStatus.textContent = count === 0 ? "No phones found yet" : count === 1 ? "1 phone detected" : `${count} phones detected`;
+      if (count > 0) {
+        scanStatus.textContent = count === 1 ? "1 phone detected" : `${count} phones detected`;
+      } else {
+        const status = await service.getRuntimeStatus();
+        const discovery = status.discovery;
+        if (discovery?.rawAdbDeviceCount && discovery.rawAdbDeviceCount > 0) {
+          scanStatus.textContent = `ADB sees ${discovery.rawAdbDeviceCount} phone${discovery.rawAdbDeviceCount === 1 ? "" : "s"} · opening connection`;
+        } else if (discovery && !discovery.adbAvailable) {
+          scanStatus.textContent = "Cyclone can't reach ADB · open Diagnostics";
+        } else {
+          scanStatus.textContent = "No USB phones found";
+        }
+      }
     } catch {
-      scanStatus.textContent = "Couldn't scan · check USB debugging";
+      try {
+        const status = await service.getRuntimeStatus();
+        scanStatus.textContent = status.discovery?.lastScanError
+          ? "ADB scan failed · open Diagnostics"
+          : "Couldn't scan · check USB debugging";
+      } catch {
+        scanStatus.textContent = "Local Gateway isn't responding";
+      }
     } finally {
       scanButton.disabled = false;
       scanButton.classList.remove("scanning");
@@ -50,7 +69,7 @@ export function createFleetPage(
     empty.append(
       el("div", "empty-orbit"),
       el("h2", "empty-title", "Looking for Cyclone phones"),
-      el("p", "empty-copy", "Plug in a phone with USB debugging enabled. Cyclone checks automatically, or use Scan for phones."),
+      el("p", "empty-copy", "Plug in a phone with USB debugging enabled. Cyclone reacts to USB changes automatically, or use Scan for phones."),
     );
     page.append(empty);
     return { element: page, destroy: () => undefined };
