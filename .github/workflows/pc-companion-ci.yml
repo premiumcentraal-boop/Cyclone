@@ -16,6 +16,7 @@ on:
     branches:
       - 'release/cyclone-desktop-v1'
       - 'release/cyclone-mobile-v3.1-beta'
+      - 'release/beta/**'
     paths:
       - 'apps/device-gateway/**'
       - 'apps/mobile/**'
@@ -78,15 +79,17 @@ jobs:
         run: |
           $Installer = Get-ChildItem 'apps/pc-companion/src-tauri/target/release/bundle/nsis/*.exe' | Select-Object -First 1
           if ($null -eq $Installer) { throw 'Cyclone NSIS installer was not produced.' }
+          $PcVersion = (Get-Content 'apps/pc-companion/package.json' | ConvertFrom-Json).version
+          $InstallerName = "Cyclone-PC-Companion-$PcVersion-Setup.exe"
           New-Item -ItemType Directory -Force -Path dist/pc-companion | Out-Null
-          Copy-Item $Installer.FullName 'dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.3-Setup.exe' -Force
+          Copy-Item $Installer.FullName (Join-Path 'dist/pc-companion' $InstallerName) -Force
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
-          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version '1.0.0-beta.3' --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
+          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
       - uses: actions/upload-artifact@v4
         with:
           name: cyclone-pc-companion-v1-${{ github.sha }}
           path: |
-            dist/pc-companion/Cyclone-PC-Companion-1.0.0-beta.3-Setup.exe
+            dist/pc-companion/Cyclone-PC-Companion-*-Setup.exe
             dist/pc-companion/SHA256SUMS.txt
             dist/pc-companion/source-sha.txt
             dist/pc-companion/release-provenance.json
@@ -100,7 +103,7 @@ jobs:
 
   publish-beta:
     name: Publish combined beta release
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' }}
+    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/')) }}
     needs:
       - windows-companion
       - mobile-companion
@@ -109,11 +112,40 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: v3.1.0-beta.2-desktop-v1-beta.3
-      RELEASE_TITLE: Cyclone V3.1 Beta 2 + PC Companion V1 Beta 3
     steps:
+      - name: Checkout exact beta source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - name: Resolve beta versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          PC_VERSION="$(node -p "require('./apps/pc-companion/package.json').version")"
+          MOBILE_VERSION="$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path('apps/mobile/app/build.gradle.kts').read_text(encoding='utf-8')
+          match = re.search(r'versionName\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit('Could not resolve Android versionName')
+          print(match.group(1))
+          PY
+          )"
+          RELEASE_TAG="v${MOBILE_VERSION}-pc-${PC_VERSION}"
+          RELEASE_TITLE="Cyclone Mobile ${MOBILE_VERSION} + PC Companion ${PC_VERSION}"
+          echo "pc_version=$PC_VERSION" >> "$GITHUB_OUTPUT"
+          echo "mobile_version=$MOBILE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_title=$RELEASE_TITLE" >> "$GITHUB_OUTPUT"
+
       - name: Download desktop and mobile build artifacts
         shell: bash
+        env:
+          MOBILE_VERSION: ${{ steps.versions.outputs.mobile_version }}
         run: |
           set -euo pipefail
           mkdir -p release-assets/desktop release-assets/mobile
@@ -123,7 +155,7 @@ jobs:
             --dir release-assets/desktop
           gh run download "$GITHUB_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
-            --name "Cyclone-Mobile-3.1.0-beta.2" \
+            --name "Cyclone-Mobile-$MOBILE_VERSION" \
             --dir release-assets/mobile
           if [[ -f release-assets/desktop/source-sha.txt ]]; then
             mv release-assets/desktop/source-sha.txt release-assets/desktop/Cyclone-PC-source-sha.txt
@@ -131,36 +163,32 @@ jobs:
           if [[ -f release-assets/mobile/source-sha.txt ]]; then
             mv release-assets/mobile/source-sha.txt release-assets/mobile/Cyclone-Mobile-source-sha.txt
           fi
+
       - name: Write beta release notes
         shell: bash
+        env:
+          PC_VERSION: ${{ steps.versions.outputs.pc_version }}
+          MOBILE_VERSION: ${{ steps.versions.outputs.mobile_version }}
         run: |
-          cat > release-notes.md <<'EOF'
-          # Cyclone V3.1 Beta 2 + PC Companion V1 Beta 3
+          cat > release-notes.md <<EOF
+          # Cyclone Mobile ${MOBILE_VERSION} + PC Companion ${PC_VERSION}
 
-          This hotfix release addresses two concrete beta issues reported on Windows + Pixel 8 testing.
+          This is an automated Cyclone beta prerelease produced only after the matching Windows and Android build gates passed for the same source revision.
 
-          ## Windows console-window hotfix
-          - All ADB subprocesses now use Windows no-console creation flags, including the event-driven `track-devices` watcher.
-          - Closing Cyclone now terminates the Companion-owned sidecar process tree so ADB tracker/helper processes are not orphaned.
-          - The modern Companion automatically retires the superseded developer-era `cyclone-device-gateway.exe` process on startup.
-          - The PC Gateway remains background-only; no command prompt is part of the normal product UI.
+          ## Downloads
+          - **Windows:** Cyclone PC Companion ${PC_VERSION} installer.
+          - **Android:** Cyclone Mobile ${MOBILE_VERSION} APK.
+          - Checksums, source SHA/provenance, and third-party notices are attached where applicable.
 
-          ## Android pairing/session hotfix
-          - Requesting/replacing a pairing challenge is safe and a new challenge cleanly supersedes the old one.
-          - Pairing-code notification is best-effort UI only and can no longer crash the Gateway process.
-          - Session-token refresh no longer throws if UI state races with a disabled Gateway; it safely creates a fresh session.
-          - Added regression coverage for replacement pairing challenges.
-
-          ## Included
-          - Cyclone Mobile 3.1.0-beta.2 APK.
-          - Cyclone PC Companion 1.0.0-beta.3 Windows installer.
-          - Multi-phone USB discovery, pairing, live views, manual controls, keyboard and PC-to-phone clipboard.
-          - Cyclone Agent MCP for Codex and generic/DeepSeek-powered MCP harnesses.
-
-          This remains a beta. No arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed to agents.
+          ## Beta status
+          This is a test release. The PC Gateway remains loopback/USB-oriented and agent actions stay behind Cyclone's typed control and Android policy boundaries. No arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed to agents.
           EOF
-      - name: Create GitHub prerelease
+
+      - name: Create or replace GitHub prerelease
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
+          RELEASE_TITLE: ${{ steps.versions.outputs.release_title }}
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
