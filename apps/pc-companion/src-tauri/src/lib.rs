@@ -1,25 +1,28 @@
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
+use std::net::TcpListener;
 use tauri::{Manager, State};
 use tauri_plugin_shell::ShellExt;
 
 struct GatewayState {
     token: String,
+    http_base: String,
+    ws_base: String,
 }
 
 #[derive(Serialize)]
 struct GatewaySession {
     token: String,
-    http_base: &'static str,
-    ws_base: &'static str,
+    http_base: String,
+    ws_base: String,
 }
 
 #[tauri::command]
 fn gateway_session(state: State<'_, GatewayState>) -> GatewaySession {
     GatewaySession {
         token: state.token.clone(),
-        http_base: "http://127.0.0.1:8765",
-        ws_base: "ws://127.0.0.1:8765",
+        http_base: state.http_base.clone(),
+        ws_base: state.ws_base.clone(),
     }
 }
 
@@ -82,13 +85,31 @@ fn strong_token() -> String {
     bytes.iter().map(|value| format!("{value:02x}")).collect()
 }
 
+fn reserve_loopback_port() -> Result<u16, String> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|error| error.to_string())?;
+    let port = listener.local_addr().map_err(|error| error.to_string())?.port();
+    drop(listener);
+    Ok(port)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let token = strong_token();
+    let gateway_port = reserve_loopback_port().expect("Cyclone could not reserve a local Gateway port");
+    let http_base = format!("http://127.0.0.1:{gateway_port}");
+    let ws_base = format!("ws://127.0.0.1:{gateway_port}");
+
     let runtime_token = token.clone();
+    let runtime_http_base = http_base.clone();
+    let runtime_port = gateway_port.to_string();
+    let parent_pid = std::process::id().to_string();
 
     tauri::Builder::default()
-        .manage(GatewayState { token })
+        .manage(GatewayState {
+            token,
+            http_base,
+            ws_base,
+        })
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
             let runtime_dir = app.path().app_local_data_dir()?.join("runtime");
@@ -98,13 +119,15 @@ pub fn run() {
                 .sidecar("CyclonePCRuntime")?
                 .arg("serve")
                 .env("CYCLONE_DEVICE_GATEWAY_TOKEN", &runtime_token)
-                .env("CYCLONE_DEVICE_GATEWAY_URL", "http://127.0.0.1:8765")
+                .env("CYCLONE_DEVICE_GATEWAY_URL", &runtime_http_base)
+                .env("CYCLONE_DEVICE_GATEWAY_PORT", &runtime_port)
                 .env("CYCLONE_DEVICE_GATEWAY_RUNTIME", runtime_dir.to_string_lossy().to_string())
-                .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1");
+                .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1")
+                .env("CYCLONE_PC_PARENT_PID", &parent_pid);
             let (mut events, _child) = command.spawn()?;
             tauri::async_runtime::spawn(async move {
-                // Drain sidecar output so pipes can never fill and stall the Gateway. Output is not
-                // surfaced to the UI because it may contain low-level diagnostic text.
+                // Drain sidecar output so pipes can never fill and stall the Gateway. The Python
+                // runtime also watches the parent PID and exits if this Companion process ends.
                 while events.recv().await.is_some() {}
             });
             Ok(())
