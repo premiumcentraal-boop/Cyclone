@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import queue
+import secrets
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -72,10 +73,10 @@ class AgentTeachStopBody(BaseModel):
 class DesktopRuntime:
     def __init__(self, settings: Settings, *, fleet: DeviceFleetManager | None = None):
         self.settings = settings
-        # ADB discovery itself is cheap, but the fleet refresh also checks bridge/package/display
-        # health. Eight seconds keeps plug-in discovery comfortably below 30 seconds without the
-        # old once-per-second command churn. The UI can always request an immediate scan.
-        self.fleet = fleet or DeviceFleetManager(adb_path=settings.adb_path, poll_seconds=8.0)
+        self.instance_id = secrets.token_hex(8)
+        # USB topology changes are normally event-driven through adb track-devices. A 20 second
+        # fallback is intentionally retained for recovery if that stream dies on a particular PC.
+        self.fleet = fleet or DeviceFleetManager(adb_path=settings.adb_path, poll_seconds=20.0)
         self.pairing = PairingCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
@@ -103,21 +104,44 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
 
     @router.post("/v1/fleet/scan", dependencies=[Depends(auth)])
     def fleet_scan() -> dict[str, Any]:
-        devices = _call(runtime.fleet.refresh_once)
-        return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": devices}
+        devices = _call(lambda: runtime.fleet.refresh_once(source="manual"))
+        return {
+            "protocol": DESKTOP_PROTOCOL_VERSION,
+            "devices": devices,
+            "discovery": runtime.fleet.diagnostics(),
+        }
 
     @router.get("/v1/diagnostics/status", dependencies=[Depends(auth)])
     def diagnostics_status() -> dict[str, Any]:
         devices = runtime.fleet.list_public()
+        discovery = runtime.fleet.diagnostics()
         paired = sum(1 for device in devices if device.get("paired") is True)
         attention = sum(1 for device in devices if device.get("state") in {"ATTENTION", "UNAUTHORIZED"})
+        adb_available = discovery.get("adbAvailable") is True
+        if not adb_available and discovery.get("lastScanError"):
+            message = "ADB is not available to Cyclone"
+        elif discovery.get("rawAdbDeviceCount", 0) > 0 and not devices:
+            message = "ADB sees a phone, but Cyclone has not added it to the fleet"
+        elif attention:
+            message = f"{attention} phone(s) need attention"
+        elif devices:
+            message = "Ready"
+        else:
+            message = "Waiting for a USB phone"
         return {
             "backendReachable": True,
+            "runtimeInstanceId": runtime.instance_id,
+            "runtimePort": runtime.settings.port,
             "deviceCount": len(devices),
             "pairedDeviceCount": paired,
-            "recoveryActive": attention > 0,
-            "message": "Ready" if attention == 0 else f"{attention} phone(s) need attention",
+            "recoveryActive": attention > 0 or not adb_available,
+            "message": message,
+            "discovery": discovery,
         }
+
+    @router.get("/v1/diagnostics/discovery", dependencies=[Depends(auth)])
+    def diagnostics_discovery() -> dict[str, Any]:
+        return runtime.fleet.diagnostics()
 
     @router.post("/v1/devices/{device_id}/pair/begin", dependencies=[Depends(auth)])
     def pair_begin(device_id: str):
@@ -144,8 +168,6 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     def clipboard_set(device_id: str, body: ClipboardBody):
         return _call(lambda: runtime.clipboard.set(device_id, body.text))
 
-    # Device-scoped agent surface. This is deliberately typed; there is no bridge-op, shell or ADB
-    # passthrough endpoint.
     @router.get("/v1/devices/{device_id}/agent/status", dependencies=[Depends(auth)])
     def agent_status(device_id: str):
         return _call(lambda: runtime.agent.status(device_id))
