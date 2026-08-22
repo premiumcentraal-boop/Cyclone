@@ -155,6 +155,7 @@ class DeviceFleetManager:
         self._video_factory: Callable[[DeviceSession], Any] | None = None
         self._tracker_active = False
         self._tracker_restarts = 0
+        self._last_tracker_error: str | None = None
         self._last_scan_at_ms: int | None = None
         self._last_scan_duration_ms: int | None = None
         self._last_scan_source = "never"
@@ -199,8 +200,6 @@ class DeviceFleetManager:
             self._cleanup_session(session)
 
     def _fallback_loop(self) -> None:
-        # The first scan happens immediately on startup. Afterwards this is only a recovery net;
-        # normal USB plug/unplug latency comes from `adb track-devices`.
         while not self._stop.is_set():
             try:
                 self.refresh_once(source="startup" if self._last_scan_at_ms is None else "fallback")
@@ -209,6 +208,10 @@ class DeviceFleetManager:
             self._stop.wait(self.poll_seconds)
 
     def _track_loop(self) -> None:
+        if not hasattr(self.inventory_adb, "start_track_devices"):
+            with self._lock:
+                self._last_tracker_error = "ADB event tracking is unavailable; fallback scanning is active."
+            return
         while not self._stop.is_set():
             process = None
             try:
@@ -216,12 +219,11 @@ class DeviceFleetManager:
                 with self._lock:
                     self._tracker_process = process
                     self._tracker_active = True
+                    self._last_tracker_error = None
                 stdout = process.stdout
                 if stdout is None:
                     raise ADBError("ADB device tracker has no output stream")
 
-                # ADB writes only when the device topology/state changes. We deliberately treat the
-                # output as a signal and re-read through `adb devices -l`, keeping one parser.
                 while not self._stop.is_set():
                     line = stdout.readline()
                     if line == b"":
@@ -232,7 +234,7 @@ class DeviceFleetManager:
                         pass
             except Exception as exc:
                 with self._lock:
-                    self._last_adb_error = self._safe_error(exc)
+                    self._last_tracker_error = self._safe_error(exc)
             finally:
                 with self._lock:
                     self._tracker_active = False
@@ -278,6 +280,7 @@ class DeviceFleetManager:
                 "fleetDeviceCount": len(self._sessions),
                 "trackerActive": self._tracker_active,
                 "trackerRestarts": self._tracker_restarts,
+                "trackerError": self._last_tracker_error,
                 "fallbackIntervalSeconds": self.poll_seconds,
                 "lastScanAtEpochMs": self._last_scan_at_ms,
                 "lastScanDurationMs": self._last_scan_duration_ms,
