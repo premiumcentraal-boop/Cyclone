@@ -64,9 +64,6 @@ class PairingCoordinator:
                         "Cyclone pairing transport is unavailable.",
                         retryable=True,
                     ) from exc
-                # pair.begin only creates/replaces a short-lived challenge and carries no credential.
-                # It is safe to repair the isolated ADB forward and retry once. pair.complete below is
-                # intentionally never retried because it consumes pairing state and returns a credential.
                 time.sleep(self.BEGIN_RETRY_DELAY_SECONDS)
                 try:
                     session.adb.ensure_bridge_forward(session.local_port)
@@ -201,7 +198,7 @@ class PairingCoordinator:
             )
             if latest.get("gatewayEnabled") is not True:
                 raise BridgeProtocolError("Phone Gateway did not stay enabled after pairing")
-            if latest.get("pairingBootstrapListening") is not True:
+            if latest.get("pairingBootstrapListening") is not True and latest.get("socketListening") is not True:
                 raise BridgeProtocolError("Phone Gateway listener disappeared after pairing")
         return latest
 
@@ -219,7 +216,6 @@ class PairingCoordinator:
                         "phase": phase,
                         "capturedAtEpochMs": int(time.time() * 1000),
                         "deviceId": session.device_id,
-                        "usbSessionIdHash": secrets.token_hex(0),
                         "android": snapshot,
                     },
                     indent=2,
