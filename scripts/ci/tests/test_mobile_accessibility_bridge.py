@@ -107,14 +107,41 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         fleet = (ROOT / "apps/pc-companion/src/pages/fleetPage.ts").read_text(encoding="utf-8")
         live = (ROOT / "apps/pc-companion/src/ui/livePhoneView.ts").read_text(encoding="utf-8")
         pairing = (ROOT / "apps/device-gateway/cyclone_device_gateway/desktop_runtime/pairing.py").read_text(encoding="utf-8")
+        diagnostics = (ROOT / "apps/device-gateway/cyclone_device_gateway/desktop_runtime/diagnostics.py").read_text(encoding="utf-8")
+        api = (ROOT / "apps/device-gateway/cyclone_device_gateway/desktop_runtime/api.py").read_text(encoding="utf-8")
         adb = (ROOT / "apps/device-gateway/cyclone_device_gateway/adb/client.py").read_text(encoding="utf-8")
         self.assertIn("autoStart: false", fleet)
         self.assertIn("options.autoStart === false", live)
         self.assertIn("_verify_post_pair_health", pairing)
         self.assertIn("_capture_pairing_diagnostics", pairing)
+        self.assertIn("pair.complete.pc_submit", pairing)
+        self.assertIn("FleetDiagnosticSupervisor", diagnostics)
+        self.assertIn("ADB_READ_ONLY_PROCESS_MONITOR", diagnostics)
+        self.assertIn("self.live_diagnostics.start()", api)
         self.assertIn("collect_cyclone_crash_diagnostics", adb)
         self.assertIn('"dumpsys", "activity", "exit-info"', adb)
         self.assertIn('"logcat", "-b", "crash"', adb)
+
+    def test_pair_begin_is_protocol_only_and_gateway_boundary_contains_nonfatal_throwables(self):
+        pairing = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/gateway/GatewayDesktopRuntime.kt").read_text(encoding="utf-8")
+        runtime = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/gateway/GatewayRuntime.kt").read_text(encoding="utf-8")
+        begin = pairing.split("fun begin(context: Context, args: JSONObject)", 1)[1].split("fun complete", 1)[0]
+        self.assertNotIn("Toast", begin)
+        self.assertNotIn("Handler", begin)
+        self.assertIn("protocol-only", begin)
+        self.assertIn("catch (error: Throwable)", runtime)
+        self.assertIn("gateway.dispatch.boundary", runtime)
+        self.assertIn("VirtualMachineError", runtime)
+
+    def test_windows_release_has_no_console_subsystems(self):
+        main = (ROOT / "apps/pc-companion/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        pc_runtime = (ROOT / "packaging/pc-companion/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
+        agent = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
+        self.assertIn('windows_subsystem = "windows"', main)
+        self.assertIn("console=False", pc_runtime)
+        self.assertIn("console=False", agent)
+        self.assertNotIn("console=True", pc_runtime)
+        self.assertNotIn("console=True", agent)
 
 
 if __name__ == "__main__":
