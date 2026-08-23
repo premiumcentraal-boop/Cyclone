@@ -13,6 +13,7 @@ fun wrapGeneratedCallback(
     stage: String,
     afterStatement: String? = null,
     disableOnFailure: Boolean = false,
+    markEntry: Boolean = true,
 ): String {
     val methodStart = source.indexOf(signature)
     require(methodStart >= 0) { "Pinned Mobilerun callback not found: $signature" }
@@ -29,9 +30,12 @@ fun wrapGeneratedCallback(
     val protectedBody = rawBody.substring(prefixEnd)
     val guard = buildString {
         append(prefix)
-        append("\n        com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.markStage(this, \"")
-        append(stage)
-        append("\")\n        try {")
+        if (markEntry) {
+            append("\n        com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.markStage(this, \"")
+            append(stage)
+            append("\")")
+        }
+        append("\n        try {")
         append(protectedBody)
         append("\n        } catch (error: Throwable) {\n")
         append("            com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.recordNonFatal(this, \"")
@@ -115,6 +119,7 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
             "    override fun onConfigurationChanged(newConfig: Configuration)",
             "enhanced.accessibility.event",
             disableOnFailure = false,
+            markEntry = false,
         )
         serviceFile.writeText(serviceSource, Charsets.UTF_8)
     }
