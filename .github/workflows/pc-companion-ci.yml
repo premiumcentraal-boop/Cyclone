@@ -1,6 +1,7 @@
 name: Cyclone Desktop V1 CI
 
 # Dedicated release/beta branches publish a GitHub prerelease after both build gates pass.
+# Mobile accessibility/bridge guards are part of the paired desktop+phone beta gate.
 on:
   pull_request:
     paths:
@@ -11,6 +12,7 @@ on:
       - 'tools/codex-phone-mcp/**'
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
+      - 'scripts/ci/tests/**'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   push:
@@ -26,6 +28,7 @@ on:
       - 'tools/codex-phone-mcp/**'
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
+      - 'scripts/ci/tests/**'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   workflow_dispatch:
