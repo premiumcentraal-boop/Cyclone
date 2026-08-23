@@ -105,6 +105,9 @@ export class HttpDesktopService implements DesktopService {
       .then((value) => ({
         pairingId: String(value.pairingId ?? ""),
         expiresAtEpochMs: Number(value.expiresAtEpochMs ?? value.expiresAtMs ?? Date.now() + 60_000),
+        diagnosticsActive: value.diagnosticsActive === true,
+        diagnosticsPath: typeof value.diagnosticsPath === "string" ? value.diagnosticsPath : null,
+        diagnosticsMode: typeof value.diagnosticsMode === "string" ? value.diagnosticsMode : null,
       }));
   }
 
