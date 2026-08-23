@@ -10,7 +10,7 @@ import time
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .fleet import DeviceSession
+    from .fleet import DeviceFleetManager, DeviceSession
 
 _PACKAGE = "com.cyclone.mobile"
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -57,7 +57,8 @@ class DeviceDiagnosticRecorder:
             self._stop.clear()
             self._thread = threading.Thread(target=self._watch_loop, name=f"cyclone-diag-{self.session.device_id[:8]}", daemon=True)
             self._thread.start()
-        self.mark("usb.authorized.monitor_started", snapshot=True)
+        self.mark("usb.authorized.monitor_started")
+        self.capture_async("usb.authorized.baseline")
 
     def stop(self) -> None:
         self.mark("usb.monitor_stopping")
@@ -67,7 +68,7 @@ class DeviceDiagnosticRecorder:
         if thread and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=2.0)
 
-    def mark(self, stage: str, *, snapshot: bool = False) -> str | None:
+    def mark(self, stage: str) -> None:
         normalized = _safe_stage(stage)
         with self._lock:
             self._last_stage = normalized
@@ -76,9 +77,16 @@ class DeviceDiagnosticRecorder:
                 "stage": normalized,
                 "pid": self._pid,
             })
-        if snapshot:
-            return self.capture_snapshot(normalized)
-        return None
+
+    def capture_async(self, label: str) -> None:
+        if self._stop.is_set():
+            return
+        thread = threading.Thread(
+            target=lambda: self.capture_snapshot(label),
+            name=f"cyclone-diag-snapshot-{self.session.device_id[:8]}",
+            daemon=True,
+        )
+        thread.start()
 
     def capture_snapshot(self, label: str) -> str | None:
         normalized = _safe_stage(label)
@@ -134,7 +142,7 @@ class DeviceDiagnosticRecorder:
                 if current_pid:
                     self.mark("android.cyclone_process_started")
                     self._start_logcat(current_pid)
-                    self.capture_snapshot("android.process_started")
+                    self.capture_async("android.process_started")
                 elif last_pid:
                     self.mark("android.cyclone_process_disappeared")
                     self.capture_snapshot("android.process_gone_immediate")
@@ -151,6 +159,7 @@ class DeviceDiagnosticRecorder:
             return None
 
     def _start_logcat(self, pid: str) -> None:
+        handle = None
         try:
             self.path.mkdir(parents=True, exist_ok=True)
             if self.logcat_path.exists() and self.logcat_path.stat().st_size > self.MAX_LOG_BYTES:
@@ -173,10 +182,11 @@ class DeviceDiagnosticRecorder:
                 self._logcat_process = process
             self.mark("android.logcat_attached")
         except Exception as exc:
-            try:
-                handle.close()  # type: ignore[name-defined]
-            except Exception:
-                pass
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
             self._append_timeline({
                 "atEpochMs": int(time.time() * 1000),
                 "stage": "android.logcat_attach_failed",
@@ -212,7 +222,7 @@ class DeviceDiagnosticRecorder:
                 value = str(action()).replace("\x00", "")
                 return value[-64_000:]
             except Exception as exc:
-                return f"<unavailable: {exc.__class__.__Name__}: {str(exc)[:240]}>"
+                return f"<unavailable: {exc.__class__.__name__}: {str(exc)[:240]}>"
 
         crash = adb.collect_cyclone_crash_diagnostics() if hasattr(adb, "collect_cyclone_crash_diagnostics") else {}
         return {
@@ -241,6 +251,105 @@ class DeviceDiagnosticRecorder:
                 handle.write(json.dumps(item, sort_keys=True) + "\n")
         except Exception:
             pass
+
+
+class FleetDiagnosticSupervisor:
+    """Starts a recorder automatically for every authorized USB phone in Cyclone's fleet."""
+
+    SYNC_SECONDS = 0.50
+
+    def __init__(self, fleet: "DeviceFleetManager"):
+        self.fleet = fleet
+        self._lock = threading.RLock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._recorders: dict[str, DeviceDiagnosticRecorder] = {}
+
+    def start(self) -> None:
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._loop, name="cyclone-live-diagnostics", daemon=True)
+            self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
+        with self._lock:
+            recorders = list(self._recorders.values())
+            self._recorders.clear()
+        for recorder in recorders:
+            recorder.stop()
+
+    def ensure(self, device_id: str) -> DeviceDiagnosticRecorder | None:
+        try:
+            session = self.fleet.get(device_id)
+        except Exception:
+            return None
+        if session.adb_device.state != "device":
+            return None
+        with self._lock:
+            recorder = self._recorders.get(device_id)
+            if recorder is None:
+                recorder = DeviceDiagnosticRecorder(session)
+                self._recorders[device_id] = recorder
+                recorder.start()
+            return recorder
+
+    def mark(self, device_id: str, stage: str, *, snapshot: bool = False) -> dict[str, Any] | None:
+        recorder = self.ensure(device_id)
+        if recorder is None:
+            return None
+        recorder.mark(stage)
+        if snapshot:
+            recorder.capture_async(stage)
+        return recorder.public_status()
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            devices = {device_id: recorder.public_status() for device_id, recorder in self._recorders.items()}
+        active = sum(1 for item in devices.values() if item.get("active") is True)
+        latest = max(
+            (item for item in devices.values() if item.get("startedAtEpochMs")),
+            key=lambda item: int(item.get("startedAtEpochMs") or 0),
+            default=None,
+        )
+        return {
+            "active": active > 0,
+            "activeDeviceCount": active,
+            "deviceCount": len(devices),
+            "latestSessionPath": latest.get("sessionPath") if latest else None,
+            "devices": devices,
+            "rootRequired": False,
+            "mode": "ADB_READ_ONLY_PROCESS_MONITOR",
+        }
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                public_devices = self.fleet.list_public()
+                seen = {str(item.get("deviceId") or item.get("id") or "") for item in public_devices}
+                for item in public_devices:
+                    device_id = str(item.get("deviceId") or item.get("id") or "")
+                    if not device_id:
+                        continue
+                    try:
+                        session = self.fleet.get(device_id)
+                    except Exception:
+                        continue
+                    if session.adb_device.state == "device":
+                        self.ensure(device_id)
+                with self._lock:
+                    stale = [device_id for device_id in self._recorders if device_id not in seen]
+                    recorders = [(device_id, self._recorders.pop(device_id)) for device_id in stale]
+                for _, recorder in recorders:
+                    recorder.stop()
+            except Exception:
+                pass
+            self._stop.wait(self.SYNC_SECONDS)
 
 
 def _safe_component(value: str) -> str:
