@@ -49,6 +49,9 @@ export interface DesktopDevice {
 export interface PairBeginResult {
   pairingId: string;
   expiresAtEpochMs: number;
+  diagnosticsActive?: boolean;
+  diagnosticsPath?: string | null;
+  diagnosticsMode?: string | null;
 }
 
 export type PairConfirmResult =
@@ -100,6 +103,28 @@ export interface DesktopDiscoveryStatus {
   lastScanError?: string | null;
 }
 
+export interface DeviceLiveDiagnosticsStatus {
+  active: boolean;
+  sessionPath: string;
+  timelinePath?: string;
+  latestSnapshotPath?: string | null;
+  lastStage?: string;
+  appPid?: string | null;
+  startedAtEpochMs?: number | null;
+  rootRequired?: boolean;
+  mode?: string;
+}
+
+export interface DesktopLiveDiagnosticsStatus {
+  active: boolean;
+  activeDeviceCount: number;
+  deviceCount: number;
+  latestSessionPath?: string | null;
+  rootRequired?: boolean;
+  mode?: string;
+  devices?: Record<string, DeviceLiveDiagnosticsStatus>;
+}
+
 export interface DesktopRuntimeStatus {
   backendReachable: boolean;
   runtimeInstanceId?: string;
@@ -109,6 +134,7 @@ export interface DesktopRuntimeStatus {
   recoveryActive: boolean;
   message?: string;
   discovery?: DesktopDiscoveryStatus;
+  liveDiagnostics?: DesktopLiveDiagnosticsStatus;
 }
 
 export interface DesktopService {
