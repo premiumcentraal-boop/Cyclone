@@ -6,20 +6,30 @@ plugins {
 val upstreamMobilerun = file("${rootDir}/../../third_party/mobilerun-portal/app/src/main")
 val adaptedSources = layout.buildDirectory.dir("generated/mobilerun-src")
 
-// Keep the upstream git submodule pristine and reproducible. Kotlin 2 tightens
-// the nullability of PackageInfo.versionName compared with the Kotlin version
-// used by the pinned upstream app, so make the one compatibility adaptation in
-// generated build input instead of silently editing vendored source.
+// Keep the upstream git submodule pristine and reproducible. Cyclone adapts only the build input:
+// - Kotlin 2 makes PackageInfo.versionName nullable.
+// - Cyclone Enhanced Control does not need touch-exploration/two-finger-passthrough modes. Those
+//   modes are accessibility-user interaction features, not requirements for observation, gestures
+//   or screenshots, and requesting them can make service startup device/OEM-sensitive.
 val prepareMobilerunSources by tasks.registering(Copy::class) {
     from(upstreamMobilerun.resolve("java"))
     into(adaptedSources)
     filteringCharset = "UTF-8"
     filesMatching("**/MobilerunAccessibilityService.kt") {
         filter { line: String ->
-            line.replace(
-                "packageManager.getPackageInfo(packageName, 0).versionName",
-                "packageManager.getPackageInfo(packageName, 0).versionName ?: \"unknown\"",
-            )
+            line
+                .replace(
+                    "packageManager.getPackageInfo(packageName, 0).versionName",
+                    "packageManager.getPackageInfo(packageName, 0).versionName ?: \"unknown\"",
+                )
+                .replace(
+                    "AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE",
+                    "0",
+                )
+                .replace(
+                    "flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_2_FINGER_PASSTHROUGH",
+                    "flags = flags",
+                )
         }
     }
 }
