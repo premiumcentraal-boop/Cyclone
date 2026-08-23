@@ -46,6 +46,8 @@ fun wrapGeneratedCallback(
 // Keep the upstream git submodule pristine and reproducible. Cyclone adapts only generated input:
 // - Kotlin 2 makes PackageInfo.versionName nullable.
 // - Enhanced Control does not request touch-exploration/two-finger-passthrough modes.
+// - Enhanced Control subscribes only to the event classes it actually consumes, avoiding a second
+//   typeAllMask firehose across the entire phone.
 // - Android-owned accessibility callbacks are guarded so an embedded optional subsystem cannot
 //   crash the shared Cyclone process or leave Android reporting "service is malfunctioning".
 val prepareMobilerunSources by tasks.registering(Copy::class) {
@@ -66,6 +68,10 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
                 .replace(
                     "flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_2_FINGER_PASSTHROUGH",
                     "flags = flags",
+                )
+                .replace(
+                    "eventTypes = AccessibilityEvent.TYPES_ALL_MASK",
+                    "eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or AccessibilityEvent.TYPE_VIEW_SCROLLED",
                 )
         }
     }
