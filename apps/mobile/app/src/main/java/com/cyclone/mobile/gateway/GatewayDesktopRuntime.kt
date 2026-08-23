@@ -8,6 +8,7 @@ import android.widget.Toast
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
+import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONObject
 
 internal object GatewayDesktopPreferences {
@@ -28,11 +29,13 @@ internal object GatewayDesktopPairingManager {
     private val engine = DesktopPairingEngine()
 
     fun begin(context: Context, args: JSONObject): JSONObject {
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.begin.received")
         val challenge = try {
             engine.begin(args.optString("usbSessionId"), args.optString("pcNonce"))
         } catch (_: IllegalArgumentException) {
             throw GatewayProtocolException("PROTOCOL_MISMATCH", "Pairing request is invalid")
         }
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.begin.challenge_ready")
 
         // Pairing is protocol state first and UI second. Never let a Toast/window lifecycle problem
         // crash the Gateway process or invalidate a perfectly good pairing challenge. Use only the
@@ -42,9 +45,12 @@ internal object GatewayDesktopPairingManager {
         Handler(Looper.getMainLooper()).post {
             runCatching {
                 Toast.makeText(appContext, "Cyclone pairing code: ${challenge.code}", Toast.LENGTH_LONG).show()
+            }.onFailure {
+                CycloneProcessDiagnostics.recordNonFatal(appContext, "gateway.pair.begin.toast", it)
             }
         }
 
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.begin.returning")
         return JSONObject()
             .put("challengeId", challenge.challengeId)
             .put("expiresAtMs", challenge.expiresAtMs)
@@ -53,6 +59,7 @@ internal object GatewayDesktopPairingManager {
     }
 
     fun complete(context: Context, args: JSONObject): JSONObject {
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.received")
         val completion = engine.complete(
             challengeId = args.optString("challengeId"),
             usbSessionId = args.optString("usbSessionId"),
@@ -68,17 +75,24 @@ internal object GatewayDesktopPairingManager {
                 DesktopPairingFailure.SESSION_MISMATCH -> "PAIRING_SESSION_MISMATCH"
                 DesktopPairingFailure.INVALID_REQUEST -> "PROTOCOL_MISMATCH"
             }
+            CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.rejected.$code")
             throw GatewayProtocolException(code, "Pairing could not be completed")
         }
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.code_accepted")
         val credential = if (GatewaySessionStore.enabled(context)) {
+            CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.credential_rotate")
             GatewaySessionStore.rotate(context)
         } else {
+            CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.credential_enable")
             GatewaySessionStore.enable(context)
         }
-        return JSONObject()
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.credential_ready")
+        val response = JSONObject()
             .put("paired", true)
             .put("credential", credential)
             .put("credentialBits", 256)
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.returning")
+        return response
     }
 
     fun revoke(context: Context): JSONObject {
