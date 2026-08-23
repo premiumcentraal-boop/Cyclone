@@ -42,7 +42,10 @@ class PairingCoordinator:
 
     def begin(self, device_id: str) -> dict:
         session = self._pairable(device_id)
-        live = self._mark_live(device_id, "pair.begin.pc_request", snapshot=True)
+        # Normal pairing writes only timeline markers. The live process log is already attached before
+        # Pair is pressed; heavy dumpsys snapshots are reserved for an actual failure/process death so
+        # diagnostics cannot create the ADB load they are trying to observe.
+        live = self._mark_live(device_id, "pair.begin.pc_request")
         pc_nonce = secrets.token_urlsafe(32)
         response = None
         for attempt in range(self.BEGIN_TRANSPORT_ATTEMPTS):
@@ -54,21 +57,23 @@ class PairingCoordinator:
                 )
                 break
             except BridgeOperationError as exc:
-                self._mark_live(device_id, "pair.begin.phone_rejected", snapshot=True)
+                self._mark_live(device_id, "pair.begin.phone_rejected")
                 self._map_bridge_error(exc)
             except BridgeProtocolError as exc:
-                self._mark_live(device_id, "pair.begin.invalid_response", snapshot=True)
+                self._mark_live(device_id, "pair.begin.invalid_response")
+                diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.invalid_response")
                 raise DesktopRuntimeError(
                     RuntimeErrorCode.DEVICE_DISCONNECTED,
-                    "Cyclone pairing returned an invalid response.",
+                    self._diagnostic_message("Cyclone pairing returned an invalid response.", diagnostics),
                     retryable=True,
                 ) from exc
             except BridgeDisconnectedError as exc:
-                self._mark_live(device_id, f"pair.begin.transport_disconnected.{attempt + 1}", snapshot=True)
+                self._mark_live(device_id, f"pair.begin.transport_disconnected.{attempt + 1}")
                 if attempt + 1 >= self.BEGIN_TRANSPORT_ATTEMPTS:
+                    diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.transport")
                     raise DesktopRuntimeError(
                         RuntimeErrorCode.DEVICE_DISCONNECTED,
-                        "Cyclone pairing transport is unavailable.",
+                        self._diagnostic_message("Cyclone pairing transport is unavailable.", diagnostics),
                         retryable=True,
                     ) from exc
                 time.sleep(self.BEGIN_RETRY_DELAY_SECONDS)
@@ -78,17 +83,22 @@ class PairingCoordinator:
                     pass
 
         if response is None:
+            diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.no_response")
             raise DesktopRuntimeError(
                 RuntimeErrorCode.DEVICE_DISCONNECTED,
-                "Cyclone pairing transport is unavailable.",
+                self._diagnostic_message("Cyclone pairing transport is unavailable.", diagnostics),
                 retryable=True,
             )
         challenge_id = str(response.get("challengeId") or "")
         expires_at = int(response.get("expiresAtMs") or 0)
         now = int(time.time() * 1000)
         if not challenge_id or expires_at <= now or expires_at - now > self.MAX_LIFETIME_MS:
-            self._mark_live(device_id, "pair.begin.challenge_invalid", snapshot=True)
-            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Phone returned an invalid pairing challenge.")
+            self._mark_live(device_id, "pair.begin.challenge_invalid")
+            diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.challenge_invalid")
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
+                self._diagnostic_message("Phone returned an invalid pairing challenge.", diagnostics),
+            )
         pending = PairingChallenge(challenge_id, pc_nonce, session.usb_session_id, expires_at)
         self.fleet.set_pairing(session, pending)
         live = self._mark_live(device_id, "pair.begin.challenge_ready") or live
@@ -122,7 +132,7 @@ class PairingCoordinator:
         if not _CODE_RE.fullmatch(code):
             self._failed_attempt(session, pending)
             raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_CODE_REJECTED, "Pairing code must be exactly four uppercase letters.")
-        self._mark_live(device_id, "pair.complete.pc_submit", snapshot=True)
+        self._mark_live(device_id, "pair.complete.pc_submit")
         try:
             response = session.bridge(token="").request_unauthenticated(
                 "pair.complete",
@@ -135,12 +145,12 @@ class PairingCoordinator:
                 request_id=secrets.token_urlsafe(18),
             )
         except BridgeOperationError as exc:
-            self._mark_live(device_id, f"pair.complete.phone_rejected.{exc.code}", snapshot=True)
+            self._mark_live(device_id, f"pair.complete.phone_rejected.{exc.code}")
             if exc.code in {"PAIRING_CODE_REJECTED", "PAIRING_ATTEMPTS_EXCEEDED"}:
                 self._failed_attempt(session, pending, force_exhausted=exc.code == "PAIRING_ATTEMPTS_EXCEEDED")
             self._map_bridge_error(exc)
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
-            self._mark_live(device_id, "pair.complete.transport_lost", snapshot=True)
+            self._mark_live(device_id, "pair.complete.transport_lost")
             diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.transport")
             raise DesktopRuntimeError(
                 RuntimeErrorCode.DEVICE_DISCONNECTED,
@@ -151,7 +161,7 @@ class PairingCoordinator:
         self._mark_live(device_id, "pair.complete.response_received")
         credential = str(response.get("credential") or "")
         if len(credential) < 43:
-            self._mark_live(device_id, "pair.complete.invalid_credential", snapshot=True)
+            self._mark_live(device_id, "pair.complete.invalid_credential")
             diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.invalid_credential")
             raise DesktopRuntimeError(
                 RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
@@ -164,7 +174,7 @@ class PairingCoordinator:
         try:
             health = self._verify_post_pair_health(session, credential)
         except (BridgeDisconnectedError, BridgeProtocolError, BridgeOperationError, OSError) as exc:
-            self._mark_live(device_id, "pair.complete.post_health_failed", snapshot=True)
+            self._mark_live(device_id, "pair.complete.post_health_failed")
             diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.post_health")
             self.fleet.remember_credential(session, None)
             self.fleet.set_pairing(session, None)
@@ -180,7 +190,7 @@ class PairingCoordinator:
         self.fleet.remember_credential(session, credential)
         self.fleet.set_pairing(session, None)
         session.state = DeviceFleetState.READY if session.screen_awake else DeviceFleetState.SLEEPING
-        live = self._mark_live(device_id, "pair.complete.health_verified", snapshot=True)
+        live = self._mark_live(device_id, "pair.complete.health_verified")
         return {
             "deviceId": device_id,
             "paired": True,
@@ -225,7 +235,9 @@ class PairingCoordinator:
         return latest
 
     def _capture_pairing_diagnostics(self, session: DeviceSession, phase: str) -> str | None:
-        self._mark_live(session.device_id, phase, snapshot=True)
+        # Heavy collection starts only after the operation has already failed. The live recorder has
+        # the pre-failure timeline/logcat, so we do not launch a second concurrent dumpsys snapshot.
+        self._mark_live(session.device_id, phase)
         collector = getattr(session.adb, "collect_cyclone_crash_diagnostics", None)
         if not callable(collector):
             live = self._live_status(session.device_id)
