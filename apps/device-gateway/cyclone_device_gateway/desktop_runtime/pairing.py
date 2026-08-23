@@ -24,6 +24,8 @@ class PairingChallenge:
 class PairingCoordinator:
     MAX_ATTEMPTS = 5
     MAX_LIFETIME_MS = 60_000
+    BEGIN_TRANSPORT_ATTEMPTS = 2
+    BEGIN_RETRY_DELAY_SECONDS = 0.2
 
     def __init__(self, fleet: DeviceFleetManager):
         self.fleet = fleet
@@ -31,16 +33,46 @@ class PairingCoordinator:
     def begin(self, device_id: str) -> dict:
         session = self._pairable(device_id)
         pc_nonce = secrets.token_urlsafe(32)
-        try:
-            response = session.bridge(token="").request_unauthenticated(
-                "pair.begin",
-                {"usbSessionId": session.usb_session_id, "pcNonce": pc_nonce},
-                request_id=secrets.token_urlsafe(18),
+        response = None
+        for attempt in range(self.BEGIN_TRANSPORT_ATTEMPTS):
+            try:
+                response = session.bridge(token="").request_unauthenticated(
+                    "pair.begin",
+                    {"usbSessionId": session.usb_session_id, "pcNonce": pc_nonce},
+                    request_id=secrets.token_urlsafe(18),
+                )
+                break
+            except BridgeOperationError as exc:
+                self._map_bridge_error(exc)
+            except BridgeProtocolError as exc:
+                # A malformed response is not a transient USB race; do not duplicate requests.
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.DEVICE_DISCONNECTED,
+                    "Cyclone pairing returned an invalid response.",
+                    retryable=True,
+                ) from exc
+            except BridgeDisconnectedError as exc:
+                if attempt + 1 >= self.BEGIN_TRANSPORT_ATTEMPTS:
+                    raise DesktopRuntimeError(
+                        RuntimeErrorCode.DEVICE_DISCONNECTED,
+                        "Cyclone pairing transport is unavailable.",
+                        retryable=True,
+                    ) from exc
+                # pair.begin only creates/replaces a short-lived challenge and carries no credential.
+                # It is safe to repair the isolated ADB forward and retry once. pair.complete below is
+                # intentionally never retried because it consumes pairing state and returns a credential.
+                time.sleep(self.BEGIN_RETRY_DELAY_SECONDS)
+                try:
+                    session.adb.ensure_bridge_forward(session.local_port)
+                except Exception:
+                    pass
+
+        if response is None:
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.DEVICE_DISCONNECTED,
+                "Cyclone pairing transport is unavailable.",
+                retryable=True,
             )
-        except BridgeOperationError as exc:
-            self._map_bridge_error(exc)
-        except (BridgeDisconnectedError, BridgeProtocolError) as exc:
-            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Cyclone pairing transport is unavailable.", retryable=True) from exc
         challenge_id = str(response.get("challengeId") or "")
         expires_at = int(response.get("expiresAtMs") or 0)
         now = int(time.time() * 1000)
