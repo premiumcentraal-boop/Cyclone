@@ -52,6 +52,8 @@ fun wrapGeneratedCallback(
 // - Enhanced Control does not request touch-exploration/two-finger-passthrough modes.
 // - Enhanced Control subscribes only to the event classes it actually consumes, avoiding a second
 //   typeAllMask firehose across the entire phone.
+// - Enhanced Control ignores Cyclone's own UI events so showing pairing/status UI cannot feed the
+//   embedded automation stack back into the host process.
 // - Android-owned accessibility callbacks are guarded so an embedded optional subsystem cannot
 //   crash the shared Cyclone process or leave Android reporting "service is malfunctioning".
 val prepareMobilerunSources by tasks.registering(Copy::class) {
@@ -97,6 +99,13 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
 
         val serviceFile = root.resolve("com/mobilerun/portal/service/MobilerunAccessibilityService.kt")
         var serviceSource = serviceFile.readText(Charsets.UTF_8)
+        val eventSignature = "    override fun onAccessibilityEvent(event: AccessibilityEvent?) {\n"
+        require(serviceSource.contains(eventSignature)) { "Pinned Mobilerun accessibility-event callback changed upstream" }
+        serviceSource = serviceSource.replaceFirst(
+            eventSignature,
+            eventSignature +
+                "        if (event?.packageName?.toString() == applicationContext.packageName) return\n",
+        )
         serviceSource = wrapGeneratedCallback(
             serviceSource,
             "    override fun onCreate()",
