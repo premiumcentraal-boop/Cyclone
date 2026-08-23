@@ -267,8 +267,9 @@ class FleetDiagnosticSupervisor:
 
     SYNC_SECONDS = 0.50
 
-    def __init__(self, fleet: "DeviceFleetManager"):
+    def __init__(self, fleet: "DeviceFleetManager", runtime_root: Path | None = None):
         self.fleet = fleet
+        self.runtime_root = runtime_root
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -309,7 +310,7 @@ class FleetDiagnosticSupervisor:
                 recorder = None
                 self._recorders.pop(device_id, None)
             if recorder is None:
-                recorder = DeviceDiagnosticRecorder(session)
+                recorder = DeviceDiagnosticRecorder(session, self.runtime_root)
                 self._recorders[device_id] = recorder
         if old is not None:
             old.stop()
