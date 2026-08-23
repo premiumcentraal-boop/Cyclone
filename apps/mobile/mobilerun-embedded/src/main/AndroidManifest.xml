@@ -33,10 +33,14 @@
         android:name="com.mobilerun.portal.PortalApplication"
         android:usesCleartextTraffic="true">
 
+        <!-- AccessibilityManager is external to Cyclone's process, so the service must be exported.
+             BIND_ACCESSIBILITY_SERVICE still makes the endpoint system-only. Use a separate config
+             resource so Cyclone's primary and enhanced services cannot accidentally override each
+             other's capability declarations during manifest/resource merging. -->
         <service
             android:name="com.mobilerun.portal.service.MobilerunAccessibilityService"
             android:enabled="true"
-            android:exported="false"
+            android:exported="true"
             android:label="Cyclone Enhanced Control"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
@@ -44,7 +48,7 @@
             </intent-filter>
             <meta-data
                 android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
+                android:resource="@xml/cyclone_enhanced_accessibility_service_config" />
         </service>
 
         <service
