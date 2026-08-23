@@ -108,6 +108,7 @@ export function createFleetPage(
         service,
         device,
         profile: "thumbnail",
+        autoStart: false,
         onOpen: device.paired ? onFocus : undefined,
         onPair,
       });
