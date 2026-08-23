@@ -6,6 +6,7 @@ import com.cyclone.mobile.BuildConfig
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.applearner.FollowMeLearnerRuntime
 import com.cyclone.mobile.debug.PageDebugSandboxV293
+import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -176,7 +177,9 @@ internal object GatewayDispatcher {
         } catch (error: GatewayProtocolException) {
             GatewayRuntime.reportSafeError(error.message)
             GatewayProtocol.error(error.requestId.ifBlank { id }, error.code, error.message).toString()
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
+            if (error is VirtualMachineError || error is ThreadDeath) throw error
+            CycloneProcessDiagnostics.recordNonFatal(context, "gateway.dispatch.boundary", error)
             GatewayRuntime.reportSafeError("Gateway operation failed safely. Open diagnostics or reconnect the USB session.")
             GatewayProtocol.error(id, "INTERNAL_ERROR", "Gateway operation failed").toString()
         }
