@@ -12,6 +12,7 @@ export class PairingModal {
   private inputs: HTMLInputElement[] = [];
   private message = el("div", "pair-message");
   private countdown = el("div", "pair-countdown");
+  private diagnostics = el("div", "pair-countdown");
   private submitButton = button("Pair phone", "button primary wide");
 
   constructor(
@@ -70,24 +71,32 @@ export class PairingModal {
     const retry = button("Get a new code", "button ghost wide");
     retry.addEventListener("click", () => void this.begin());
 
-    this.dialog.replaceChildren(header, title, copy, boxes, this.message, this.countdown, this.submitButton, retry);
+    this.dialog.replaceChildren(header, title, copy, boxes, this.message, this.countdown, this.diagnostics, this.submitButton, retry);
   }
 
   private async begin(): Promise<void> {
     this.message.textContent = "Starting secure pairing…";
     this.message.className = "pair-message";
+    this.diagnostics.textContent = "Checking live Android diagnostics…";
     this.submitButton.disabled = true;
     this.code = "";
     this.syncInputs();
     try {
       this.pairing = await this.service.pairBegin(this.device.id);
       this.message.textContent = "Code ready";
+      if (this.pairing.diagnosticsActive) {
+        this.diagnostics.textContent = "● Live crash monitor active before pairing";
+        if (this.pairing.diagnosticsPath) this.diagnostics.setAttribute("title", this.pairing.diagnosticsPath);
+      } else {
+        this.diagnostics.textContent = "Live monitor unavailable · fixed crash capture will still run on failure";
+      }
       this.startCountdown();
       this.inputs[0]?.focus();
     } catch {
       this.pairing = null;
       this.message.textContent = "Pairing isn't available right now. Try again.";
       this.message.classList.add("error");
+      this.diagnostics.textContent = "Open Settings & diagnostics to inspect the USB monitor.";
     }
   }
 
@@ -144,23 +153,25 @@ export class PairingModal {
     this.submitting = true;
     this.submitButton.disabled = true;
     this.submitButton.textContent = "Pairing…";
+    if (this.pairing.diagnosticsActive) this.diagnostics.textContent = "● Recording pairing transition and Cyclone process health…";
     try {
       const result = await this.service.pairConfirm(this.device.id, this.pairing.pairingId, this.code);
       if (!result.ok) {
         if (result.reason === "INVALID_CODE") this.showError("That code doesn't match. Try again.");
         else if (result.reason === "EXPIRED") this.showError("That code expired. Get a new code.");
-        else this.showError(result.message || "Pairing couldn't finish. Crash diagnostics were saved automatically; open Settings & diagnostics.");
+        else this.showError(result.message || "Pairing couldn't finish. The live Android session and crash snapshot were saved; open Settings & diagnostics.");
         return;
       }
       this.dialog.classList.add("success");
       this.message.textContent = "Phone paired · Gateway health verified";
       this.message.className = "pair-message success";
+      this.diagnostics.textContent = "Live monitor remains active while this USB phone is connected.";
       window.setTimeout(() => {
         this.onPaired(result.device);
         this.close();
       }, 380);
     } catch {
-      this.showError("Pairing couldn't finish. Crash diagnostics were saved automatically; open Settings & diagnostics.");
+      this.showError("Pairing couldn't finish. The live Android session and crash snapshot were saved; open Settings & diagnostics.");
     } finally {
       this.submitting = false;
       this.submitButton.textContent = "Pair phone";
