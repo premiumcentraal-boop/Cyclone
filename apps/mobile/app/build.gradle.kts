@@ -12,9 +12,9 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 21
-        // Cyclone V3.1 accessibility + PC pairing crash-resilience hotfix beta.
-        versionName = "3.1.0-beta.3"
+        versionCode = 22
+        // Cyclone V3.1 pairing isolation + persistent crash diagnostics beta.
+        versionName = "3.1.0-beta.4"
     }
 
     buildTypes {
