@@ -133,15 +133,14 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         self.assertIn("gateway.dispatch.boundary", runtime)
         self.assertIn("VirtualMachineError", runtime)
 
-    def test_windows_release_has_no_console_subsystems(self):
+    def test_windows_release_hides_all_console_windows_without_breaking_agent_stdio(self):
         main = (ROOT / "apps/pc-companion/src-tauri/src/main.rs").read_text(encoding="utf-8")
         pc_runtime = (ROOT / "packaging/pc-companion/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
         agent = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
         self.assertIn('windows_subsystem = "windows"', main)
         self.assertIn("console=False", pc_runtime)
-        self.assertIn("console=False", agent)
-        self.assertNotIn("console=True", pc_runtime)
-        self.assertNotIn("console=True", agent)
+        self.assertIn("console=True", agent)
+        self.assertIn('hide_console="hide-early"', agent)
 
 
 if __name__ == "__main__":
