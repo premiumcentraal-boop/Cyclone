@@ -131,20 +131,26 @@ fn reserve_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
-/// Remove only the superseded developer-era Cyclone gateway executable.
+/// Remove only superseded developer-era Cyclone gateway executables.
 ///
-/// Older Cyclone setup scripts installed `cyclone-device-gateway.exe` in a Python venv and could
-/// leave it running with a visible console window. The packaged Companion now owns its own hidden
-/// `CyclonePCRuntime` sidecar, so the legacy executable is incompatible and safe to retire when the
-/// modern Companion starts. `taskkill` itself is also launched without a console window and `/T`
-/// removes any legacy ADB child it owns at the same time.
+/// Older setup scripts used a few fixed gateway image names and could leave one running with a
+/// visible console window across an in-place update. The packaged Companion owns the hidden
+/// `CyclonePCRuntime` sidecar now. Only these known legacy image names are retired; this is not a
+/// wildcard process kill and does not touch the current Companion process.
 #[cfg(windows)]
 fn cleanup_legacy_gateway_processes() {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let _ = Command::new("taskkill")
-        .args(["/F", "/T", "/IM", "cyclone-device-gateway.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    const LEGACY_IMAGES: [&str; 3] = [
+        "cyclone-device-gateway.exe",
+        "Cyclone Device Gateway.exe",
+        "CycloneDeviceGateway.exe",
+    ];
+    for image in LEGACY_IMAGES {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/IM", image])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
 }
 
 #[cfg(not(windows))]
