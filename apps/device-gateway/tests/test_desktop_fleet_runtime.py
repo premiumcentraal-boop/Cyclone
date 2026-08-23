@@ -57,6 +57,15 @@ class FakeDeviceADB:
     def start_process(self, args, stdout=None):
         raise RuntimeError("h264 unavailable in unit test")
 
+    def collect_cyclone_crash_diagnostics(self):
+        return {
+            "pid": "",
+            "exit_info": "ApplicationExitInfo reason=REASON_CRASH lastStage=gateway.pair.complete.returning",
+            "crash_logcat": "FATAL EXCEPTION: cyclone-test",
+            "enabled_accessibility_services": "com.cyclone.mobile/.CycloneAccessibilityService",
+            "accessibility_enabled": "1",
+        }
+
 
 class FakeBridge:
     def __init__(self, credentials=None):
@@ -99,6 +108,14 @@ class FlakyBeginBridge(FakeBridge):
             self.calls.append((op, args or {}))
             raise BridgeDisconnectedError("simulated transient USB race")
         return super().request_unauthenticated(op, args, request_id)
+
+
+class DiesAfterPairBridge(FakeBridge):
+    def request(self, op, args=None, request_id=None):
+        self.calls.append((op, args or {}))
+        if op == "bridge.status":
+            raise BridgeDisconnectedError("simulated phone process death after pair.complete")
+        return super().request(op, args, request_id)
 
 
 def make_fleet(devices, failures=()):
@@ -189,9 +206,10 @@ def test_one_device_failure_isolation():
 
 
 def test_pairing_timeout_replay_attempt_limit_and_token_rotation():
-    fleet, session, _ = paired_session_for_services()
+    fleet, session, bridge = paired_session_for_services()
     session.credential = None
     pairing = PairingCoordinator(fleet)
+    pairing.POST_PAIR_HEALTH_DELAY_SECONDS = 0
     begin = pairing.begin(session.device_id)
     assert begin["pairing"] is True and "credential" not in begin
     session.pending_pairing.expires_at_ms = int(time.time() * 1000) - 1
@@ -211,7 +229,8 @@ def test_pairing_timeout_replay_attempt_limit_and_token_rotation():
     pairing.begin(session.device_id)
     first = pairing.complete(session.device_id, "NOVA")
     first_token = session.credential
-    assert first["paired"] is True and "credential" not in first
+    assert first["paired"] is True and first["gatewayHealthy"] is True and "credential" not in first
+    assert [op for op, _ in bridge.calls].count("bridge.status") >= 2
     with pytest.raises(DesktopRuntimeError) as err:
         pairing.complete(session.device_id, "NOVA")
     assert err.value.code == "PAIRING_REPLAY"
@@ -233,6 +252,30 @@ def test_pair_begin_repairs_forward_and_recovers_one_transient_transport_drop():
     assert result["pairing"] is True
     assert [op for op, _ in bridge.calls].count("pair.begin") == 2
     assert session.adb.forwards.count(session.local_port) >= 2
+
+
+def test_pair_complete_never_marks_ready_until_phone_survives_health_probe_and_writes_diagnostics(tmp_path):
+    fleet, session, _ = paired_session_for_services()
+    session.credential = None
+    bridge = DiesAfterPairBridge()
+    session.bridge = lambda token=None, auto_forward=False: bridge
+    pairing = PairingCoordinator(fleet)
+    pairing.POST_PAIR_HEALTH_DELAY_SECONDS = 0
+    pairing.diagnostics_dir = tmp_path
+    pairing.begin(session.device_id)
+
+    with pytest.raises(DesktopRuntimeError) as err:
+        pairing.complete(session.device_id, "NOVA")
+
+    assert err.value.code == "DEVICE_DISCONNECTED"
+    assert session.credential is None
+    assert session.state == DeviceFleetState.UNPAIRED
+    logs = list(tmp_path.glob("pairing-*.json"))
+    assert len(logs) == 1
+    text = logs[0].read_text(encoding="utf-8")
+    assert "pair.complete.post_health" in text
+    assert "FATAL EXCEPTION: cyclone-test" in text
+    assert "Diagnostic file:" in err.value.safe_message
 
 
 def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
@@ -261,7 +304,7 @@ def test_clipboard_is_pc_to_phone_and_sensitive_values_are_rejected_without_echo
 
 def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses():
     assert VIDEO_PROFILES["thumbnail"].max_long_edge <= 540
-    assert VIDEO_PROFILES["thumbnail"].target_fps <= 15
+    assert VIDEO_PROFILES["thumbnail"].target_fps <= 4
     assert VIDEO_PROFILES["thumbnail"].cpu_weight < VIDEO_PROFILES["focus"].cpu_weight
     assert VIDEO_PROFILES["focus"].max_long_edge <= 1080
     assert VIDEO_PROFILES["focus"].target_fps == 30
