@@ -31,6 +31,7 @@ class PairingCoordinator:
     BEGIN_RETRY_DELAY_SECONDS = 0.2
     POST_PAIR_HEALTH_PROBES = 2
     POST_PAIR_HEALTH_DELAY_SECONDS = 0.25
+    DIAGNOSTIC_SETTLE_DELAY_SECONDS = 0.4
 
     def __init__(self, fleet: DeviceFleetManager):
         self.fleet = fleet
@@ -207,16 +208,22 @@ class PairingCoordinator:
         if not callable(collector):
             return None
         try:
-            snapshot = collector()
+            captured_at = int(time.time() * 1000)
+            immediate = collector()
+            if self.DIAGNOSTIC_SETTLE_DELAY_SECONDS > 0:
+                time.sleep(self.DIAGNOSTIC_SETTLE_DELAY_SECONDS)
+            settled = collector()
             self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
-            path = self.diagnostics_dir / f"pairing-{session.device_id}-{int(time.time() * 1000)}.json"
+            path = self.diagnostics_dir / f"pairing-{session.device_id}-{captured_at}.json"
             path.write_text(
                 json.dumps(
                     {
                         "phase": phase,
-                        "capturedAtEpochMs": int(time.time() * 1000),
+                        "capturedAtEpochMs": captured_at,
+                        "settledCaptureAtEpochMs": int(time.time() * 1000),
                         "deviceId": session.device_id,
-                        "android": snapshot,
+                        "androidImmediate": immediate,
+                        "androidSettled": settled,
                     },
                     indent=2,
                     sort_keys=True,
