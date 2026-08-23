@@ -190,3 +190,28 @@ class ADBClient:
 
     def forward_bridge(self, local_port: int = 8766) -> None:
         self.ensure_bridge_forward(local_port)
+
+    def collect_cyclone_crash_diagnostics(self) -> dict[str, str]:
+        """Collect a fixed, read-only Android crash snapshot for Cyclone.
+
+        This deliberately exposes no caller-supplied ADB or shell surface. It is used only after a
+        pairing/health failure so the Windows app can preserve evidence even when the Android process
+        died before its own crash journal could be read.
+        """
+        package = "com.cyclone.mobile"
+
+        def capture(label: str, action) -> tuple[str, str]:
+            try:
+                value = str(action()).replace("\x00", "")
+                return label, value[-64_000:]
+            except Exception as exc:
+                return label, f"<unavailable: {exc.__class__.__name__}: {str(exc)[:240]}>"
+
+        items = [
+            capture("pid", lambda: self.shell("pidof", package, timeout=4).strip()),
+            capture("exit_info", lambda: self.shell("dumpsys", "activity", "exit-info", package, timeout=8)),
+            capture("crash_logcat", lambda: self.run(["logcat", "-b", "crash", "-d", "-v", "threadtime", "-t", "200"], timeout=8)),
+            capture("enabled_accessibility_services", lambda: self.shell("settings", "get", "secure", "enabled_accessibility_services", timeout=4)),
+            capture("accessibility_enabled", lambda: self.shell("settings", "get", "secure", "accessibility_enabled", timeout=4)),
+        ]
+        return dict(items)
