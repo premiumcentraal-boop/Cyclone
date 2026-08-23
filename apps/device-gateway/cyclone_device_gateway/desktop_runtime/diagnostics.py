@@ -167,7 +167,6 @@ class DeviceDiagnosticRecorder:
             process = self.session.adb.start_process(
                 ["logcat", f"--pid={pid}", "-v", "threadtime", "*:W"],
                 stdout=handle,
-                stderr=subprocess.STDOUT,
             )
             with self._lock:
                 self._logcat_file = handle
@@ -213,7 +212,7 @@ class DeviceDiagnosticRecorder:
                 value = str(action()).replace("\x00", "")
                 return value[-64_000:]
             except Exception as exc:
-                return f"<unavailable: {exc.__class__.__name__}: {str(exc)[:240]}>"
+                return f"<unavailable: {exc.__class__.__Name__}: {str(exc)[:240]}>"
 
         crash = adb.collect_cyclone_crash_diagnostics() if hasattr(adb, "collect_cyclone_crash_diagnostics") else {}
         return {
