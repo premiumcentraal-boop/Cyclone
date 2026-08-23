@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { DesktopDevice, DesktopService } from "../services/types.js";
+import type { DesktopDevice, DesktopRuntimeStatus, DesktopService } from "../services/types.js";
 import { button, el } from "../ui/dom.js";
 
 export interface SettingsPageHandle {
@@ -27,6 +27,8 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     devices.length === 0 ? "No phones are currently in Cyclone's fleet." : "Phone screens and controls stay isolated per device.",
   );
   const adb = statusCard("ADB connection", "Checking…", "Cyclone is checking Android Platform Tools and USB devices.");
+  const adbPath = el("div", "diagnostic-path", "");
+  adb.append(adbPath);
   const autoDetect = statusCard("Auto-detect", "Checking…", "Cyclone listens for USB device changes and keeps a low-rate fallback scan.");
   const crashDiagnostics = statusCard(
     "Live USB crash monitor",
@@ -62,31 +64,51 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   }
 
   let active = true;
-  void service.getRuntimeStatus().then((status) => {
+  let diagnosticsTimer: number | null = null;
+
+  const applyLiveDiagnostics = (status: DesktopRuntimeStatus): void => {
+    if (!active) return;
+    const live = status.liveDiagnostics;
+    if (!live) {
+      setCard(crashDiagnostics, "Legacy diagnostics", "This backend can save failure snapshots but does not expose the Beta 5 always-on USB monitor.");
+      diagnosticsDetail.textContent = "Update both Cyclone Mobile and PC Companion to the current paired beta.";
+      return;
+    }
+
+    const entries = Object.values(live.devices ?? {});
+    const latest = entries.reduce((best, item) =>
+      !best || Number(item.startedAtEpochMs ?? 0) > Number(best.startedAtEpochMs ?? 0) ? item : best,
+    undefined as (typeof entries)[number] | undefined);
+
+    if (live.active && live.activeDeviceCount > 0) {
+      const count = live.activeDeviceCount;
+      setCard(
+        crashDiagnostics,
+        `Monitoring ${count} phone${count === 1 ? "" : "s"}`,
+        "Process-scoped logcat and lightweight state are already recording. Full Android exit/crash snapshots are collected only after a pairing failure or Cyclone process death.",
+      );
+      if (latest?.sessionPath) {
+        diagnosticsPath.textContent = latest.sessionPath;
+        diagnosticsPath.setAttribute("title", "Newest live diagnostic session");
+      } else if (live.latestSessionPath) {
+        diagnosticsPath.textContent = live.latestSessionPath;
+      }
+      const stage = latest?.lastStage || "monitor starting";
+      const pid = latest?.appPid ? ` · Cyclone PID ${latest.appPid}` : " · Cyclone process not currently visible";
+      diagnosticsDetail.textContent = `Last stage: ${stage}${pid}`;
+    } else if ((status.discovery?.authorizedAdbDeviceCount ?? 0) > 0) {
+      setCard(crashDiagnostics, "Starting monitor…", "An authorized USB phone is visible. Cyclone is attaching the process-specific Android monitor.");
+      diagnosticsDetail.textContent = "The monitor starts before secure pairing and does not require root/su.";
+    } else {
+      setCard(crashDiagnostics, "Waiting for USB phone", "Connect and authorize USB debugging. Monitoring begins automatically before pairing.");
+      diagnosticsDetail.textContent = "No root/su is required. Cyclone uses fixed read-only ADB diagnostics only.";
+    }
+  };
+
+  const applyFullStatus = (status: DesktopRuntimeStatus): void => {
     if (!active) return;
     setCard(companion, status.backendReachable ? "Ready" : "Needs attention", status.message || "Desktop services are responding.");
-
-    const live = status.liveDiagnostics;
-    if (live) {
-      if (live.active && live.activeDeviceCount > 0) {
-        const count = live.activeDeviceCount;
-        setCard(
-          crashDiagnostics,
-          `Monitoring ${count} phone${count === 1 ? "" : "s"}`,
-          "Recording Cyclone process warnings, PID changes, Android exit-info, crash buffer, accessibility state, and bounded snapshots before/during pairing.",
-        );
-        if (live.latestSessionPath) {
-          diagnosticsPath.textContent = live.latestSessionPath;
-          diagnosticsPath.setAttribute("title", "Newest live diagnostic session");
-        }
-      } else if ((status.discovery?.authorizedAdbDeviceCount ?? 0) > 0) {
-        setCard(crashDiagnostics, "Starting monitor…", "An authorized USB phone is visible. Cyclone is attaching the process-specific Android monitor.");
-      } else {
-        setCard(crashDiagnostics, "Waiting for USB phone", "Connect and authorize USB debugging. Monitoring begins automatically before pairing.");
-      }
-    } else {
-      setCard(crashDiagnostics, "Legacy diagnostics", "This backend can save failure snapshots but does not expose the Beta 5 always-on USB monitor.");
-    }
+    applyLiveDiagnostics(status);
 
     const discovery = status.discovery;
     if (!discovery) {
@@ -111,12 +133,11 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     const interval = discovery.fallbackIntervalSeconds ? ` A fallback check runs every ${Math.round(discovery.fallbackIntervalSeconds)} seconds.` : "";
     setCard(autoDetect, trackerLabel, `${source}.${interval}`.trim());
 
-    if (discovery.adbPath) {
-      const path = el("div", "diagnostic-path", discovery.adbPath);
-      path.setAttribute("title", "ADB executable used by Cyclone");
-      adb.append(path);
-    }
-  }).catch(() => {
+    adbPath.textContent = discovery.adbPath || "";
+    if (discovery.adbPath) adbPath.setAttribute("title", "ADB executable used by Cyclone");
+  };
+
+  void service.getRuntimeStatus().then(applyFullStatus).catch(() => {
     if (!active) return;
     setCard(companion, "Needs attention", "The local Cyclone Gateway isn't responding.");
     setCard(adb, "Unknown", "Cyclone could not read ADB diagnostics from the local Gateway.");
@@ -124,7 +145,20 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     setCard(crashDiagnostics, "Unknown", "Cyclone could not confirm whether the live Android monitor is running.");
   });
 
-  return { element: page, destroy: () => { active = false; } };
+  if (service.mode === "real") {
+    diagnosticsTimer = window.setInterval(() => {
+      void service.getRuntimeStatus().then(applyLiveDiagnostics).catch(() => { /* keep last known diagnostic state */ });
+    }, 1200);
+  }
+
+  return {
+    element: page,
+    destroy: () => {
+      active = false;
+      if (diagnosticsTimer != null) window.clearInterval(diagnosticsTimer);
+      diagnosticsTimer = null;
+    },
+  };
 }
 
 function statusCard(title: string, value: string, copy: string): HTMLElement {
