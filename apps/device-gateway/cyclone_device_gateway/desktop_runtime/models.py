@@ -78,11 +78,14 @@ class VideoProfileSpec:
 
 
 VIDEO_PROFILES: dict[str, VideoProfileSpec] = {
+    # Thumbnail capture is deliberately conservative. Fleet cards do not auto-start it; callers that
+    # explicitly request a thumbnail get a low-frequency preview rather than a 12 adb-screencap/sec
+    # workload that can obscure pairing/USB failures on real devices.
     "thumbnail": VideoProfileSpec(
         name="thumbnail",
         max_long_edge=540,
-        target_fps=12,
-        bitrate_bps=1_200_000,
+        target_fps=4,
+        bitrate_bps=800_000,
         preferred_codec="image/jpeg",
         cpu_weight=1,
     ),
