@@ -1,10 +1,7 @@
 package com.cyclone.mobile.gateway
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
-import android.widget.Toast
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
@@ -37,19 +34,10 @@ internal object GatewayDesktopPairingManager {
         }
         CycloneProcessDiagnostics.markStage(context, "gateway.pair.begin.challenge_ready")
 
-        // Pairing is protocol state first and UI second. Never let a Toast/window lifecycle problem
-        // crash the Gateway process or invalidate a perfectly good pairing challenge. Use only the
-        // application context and one best-effort notification; the Gateway control center polls
-        // the same engine and will render the code normally when it is open.
-        val appContext = context.applicationContext
-        Handler(Looper.getMainLooper()).post {
-            runCatching {
-                Toast.makeText(appContext, "Cyclone pairing code: ${challenge.code}", Toast.LENGTH_LONG).show()
-            }.onFailure {
-                CycloneProcessDiagnostics.recordNonFatal(appContext, "gateway.pair.begin.toast", it)
-            }
-        }
-
+        // Pairing begin is intentionally protocol-only. Do not post Toasts, create windows, start
+        // capture, initialize Accessibility runtimes, or perform any other UI/process transition
+        // from the ADB socket worker. GatewaySettingsActivity already polls this engine and displays
+        // the active code in-app, so the worker can return immediately with minimal crash surface.
         CycloneProcessDiagnostics.markStage(context, "gateway.pair.begin.returning")
         return JSONObject()
             .put("challengeId", challenge.challengeId)
