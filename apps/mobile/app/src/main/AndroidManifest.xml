@@ -53,9 +53,11 @@
             android:name=".automation.AutomationAlarmReceiver"
             android:exported="false" />
 
+        <!-- AccessibilityManager is a system process and must be able to bind this service.
+             BIND_ACCESSIBILITY_SERVICE keeps the exported endpoint system-only. -->
         <service
             android:name=".CycloneAccessibilityService"
-            android:exported="false"
+            android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
