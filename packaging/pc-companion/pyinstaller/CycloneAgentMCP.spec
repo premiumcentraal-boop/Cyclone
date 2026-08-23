@@ -23,5 +23,9 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,
+    # AgentMCP is a CLI protocol sidecar and Tauri captures its stdout JSON. Keep the console
+    # subsystem for working stdio, but have the PyInstaller bootloader hide an owned console before
+    # Python starts so users never see a command-prompt window.
+    console=True,
+    hide_console="hide-early",
 )
