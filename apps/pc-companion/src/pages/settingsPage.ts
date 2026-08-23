@@ -1,5 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { DesktopDevice, DesktopService } from "../services/types.js";
-import { el } from "../ui/dom.js";
+import { button, el } from "../ui/dom.js";
 
 export interface SettingsPageHandle {
   element: HTMLElement;
@@ -27,9 +28,37 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   );
   const adb = statusCard("ADB connection", "Checking…", "Cyclone is checking Android Platform Tools and USB devices.");
   const autoDetect = statusCard("Auto-detect", "Checking…", "Cyclone listens for USB device changes and keeps a low-rate fallback scan.");
+  const crashDiagnostics = statusCard(
+    "Pairing crash diagnostics",
+    "Ready",
+    "If a phone dies during pairing, Cyclone stores Android exit-info, crash logcat and the beta app crash journal here.",
+  );
+  const diagnosticsPath = el("div", "diagnostic-path", "Resolving diagnostics folder…");
+  const openDiagnostics = button("Open diagnostics folder", "button secondary wide");
+  openDiagnostics.addEventListener("click", () => {
+    void invoke<string>("open_diagnostics_folder").then((path) => {
+      diagnosticsPath.textContent = path;
+    }).catch(() => {
+      diagnosticsPath.textContent = "Could not open the diagnostics folder.";
+    });
+  });
+  crashDiagnostics.append(diagnosticsPath, openDiagnostics);
+
   const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI.");
-  cards.append(companion, phones, adb, autoDetect, privacy);
+  cards.append(companion, phones, adb, autoDetect, crashDiagnostics, privacy);
   page.append(header, cards);
+
+  if (service.mode === "real") {
+    void invoke<string>("diagnostics_folder").then((path) => {
+      diagnosticsPath.textContent = path;
+      diagnosticsPath.setAttribute("title", "Cyclone crash-diagnostics folder");
+    }).catch(() => {
+      diagnosticsPath.textContent = "Diagnostics folder is unavailable.";
+    });
+  } else {
+    diagnosticsPath.textContent = "Available in the packaged PC Companion.";
+    openDiagnostics.disabled = true;
+  }
 
   let active = true;
   void service.getRuntimeStatus().then((status) => {
