@@ -147,18 +147,20 @@ export class PairingModal {
     try {
       const result = await this.service.pairConfirm(this.device.id, this.pairing.pairingId, this.code);
       if (!result.ok) {
-        this.showError(result.reason === "INVALID_CODE" ? "That code doesn't match. Try again." : result.reason === "EXPIRED" ? "That code expired. Get a new code." : "Pairing couldn't finish. Try again.");
+        if (result.reason === "INVALID_CODE") this.showError("That code doesn't match. Try again.");
+        else if (result.reason === "EXPIRED") this.showError("That code expired. Get a new code.");
+        else this.showError(result.message || "Pairing couldn't finish. Crash diagnostics were saved automatically; open Settings & diagnostics.");
         return;
       }
       this.dialog.classList.add("success");
-      this.message.textContent = "Phone paired";
+      this.message.textContent = "Phone paired · Gateway health verified";
       this.message.className = "pair-message success";
       window.setTimeout(() => {
         this.onPaired(result.device);
         this.close();
       }, 380);
     } catch {
-      this.showError("Pairing couldn't finish. Try again.");
+      this.showError("Pairing couldn't finish. Crash diagnostics were saved automatically; open Settings & diagnostics.");
     } finally {
       this.submitting = false;
       this.submitButton.textContent = "Pair phone";
