@@ -116,6 +116,10 @@ object AppLearnerRuntime {
 
     fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (!initialized) return
+        // Cyclone's own Gateway/settings UI is not an app-learning target. Ignoring host-app events
+        // prevents the pairing-code Compose update from feeding Follow Me / gesture intelligence back
+        // into the same process while the secure challenge is being created.
+        if (event.packageName?.toString() == appContext.packageName) return
 
         // Follow Me keeps its existing V2.9 page/click learner. V2.9.2 adds a second, additive
         // observer that turns horizontal/vertical swipe demonstrations into real reusable graph and
