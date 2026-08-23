@@ -37,6 +37,23 @@ permissions:
   contents: read
 
 jobs:
+  mark-beta-pending:
+    name: Mark paired beta pending
+    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Publish pending commit status
+        shell: bash
+        run: |
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state='pending' \
+            -f context='cyclone/paired-beta-release' \
+            -f description='Windows + Android beta gates are running'
+
   windows-companion:
     name: Windows PC Companion
     runs-on: windows-latest
@@ -209,3 +226,33 @@ jobs:
             --title "$RELEASE_TITLE" \
             --notes-file release-notes.md \
             --prerelease
+
+  report-beta-status:
+    name: Report paired beta result
+    if: ${{ always() && github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/')) }}
+    needs:
+      - windows-companion
+      - mobile-companion
+      - publish-beta
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Publish final commit status
+        shell: bash
+        env:
+          WINDOWS_RESULT: ${{ needs.windows-companion.result }}
+          MOBILE_RESULT: ${{ needs.mobile-companion.result }}
+          PUBLISH_RESULT: ${{ needs.publish-beta.result }}
+        run: |
+          STATE='failure'
+          DESCRIPTION="Windows=$WINDOWS_RESULT Android=$MOBILE_RESULT Publish=$PUBLISH_RESULT"
+          if [[ "$WINDOWS_RESULT" == 'success' && "$MOBILE_RESULT" == 'success' && "$PUBLISH_RESULT" == 'success' ]]; then
+            STATE='success'
+          fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state="$STATE" \
+            -f context='cyclone/paired-beta-release' \
+            -f description="${DESCRIPTION:0:140}"
