@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
+from pathlib import Path
 import re
 import secrets
 import time
@@ -26,9 +29,13 @@ class PairingCoordinator:
     MAX_LIFETIME_MS = 60_000
     BEGIN_TRANSPORT_ATTEMPTS = 2
     BEGIN_RETRY_DELAY_SECONDS = 0.2
+    POST_PAIR_HEALTH_PROBES = 2
+    POST_PAIR_HEALTH_DELAY_SECONDS = 0.25
 
     def __init__(self, fleet: DeviceFleetManager):
         self.fleet = fleet
+        runtime_root = Path(os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", ".runtime/device-gateway")).expanduser().resolve()
+        self.diagnostics_dir = runtime_root / "diagnostics"
 
     def begin(self, device_id: str) -> dict:
         session = self._pairable(device_id)
@@ -45,7 +52,6 @@ class PairingCoordinator:
             except BridgeOperationError as exc:
                 self._map_bridge_error(exc)
             except BridgeProtocolError as exc:
-                # A malformed response is not a transient USB race; do not duplicate requests.
                 raise DesktopRuntimeError(
                     RuntimeErrorCode.DEVICE_DISCONNECTED,
                     "Cyclone pairing returned an invalid response.",
@@ -123,14 +129,50 @@ class PairingCoordinator:
                 self._failed_attempt(session, pending, force_exhausted=exc.code == "PAIRING_ATTEMPTS_EXCEEDED")
             self._map_bridge_error(exc)
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
-            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Cyclone pairing transport disconnected.", retryable=True) from exc
+            diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.transport")
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.DEVICE_DISCONNECTED,
+                self._diagnostic_message("Cyclone pairing transport disconnected before completion.", diagnostics),
+                retryable=True,
+            ) from exc
+
         credential = str(response.get("credential") or "")
         if len(credential) < 43:
-            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Phone returned an invalid pairing credential.")
+            diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.invalid_credential")
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
+                self._diagnostic_message("Phone returned an invalid pairing credential.", diagnostics),
+            )
+
+        # A pairing response is not enough proof that the Android process survived the transition.
+        # Verify the strong credential twice before changing desktop state or starting any richer UX.
+        # This deliberately keeps live video/control out of the pairing transaction.
+        try:
+            health = self._verify_post_pair_health(session, credential)
+        except (BridgeDisconnectedError, BridgeProtocolError, BridgeOperationError, OSError) as exc:
+            diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.post_health")
+            self.fleet.remember_credential(session, None)
+            self.fleet.set_pairing(session, None)
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.DEVICE_DISCONNECTED,
+                self._diagnostic_message(
+                    "The phone stopped responding immediately after pairing. Cyclone captured Android crash diagnostics.",
+                    diagnostics,
+                ),
+                retryable=True,
+            ) from exc
+
         self.fleet.remember_credential(session, credential)
         self.fleet.set_pairing(session, None)
         session.state = DeviceFleetState.READY if session.screen_awake else DeviceFleetState.SLEEPING
-        return {"deviceId": device_id, "paired": True, "state": session.state.value, "device": session.public()}
+        return {
+            "deviceId": device_id,
+            "paired": True,
+            "state": session.state.value,
+            "gatewayHealthy": True,
+            "accessibilityConnected": bool(health.get("accessibilityConnected")),
+            "device": session.public(),
+        }
 
     def revoke(self, device_id: str) -> dict:
         session = self.fleet.get(device_id)
@@ -145,6 +187,55 @@ class PairingCoordinator:
         self.fleet.set_pairing(session, None)
         session.state = DeviceFleetState.UNPAIRED
         return {"deviceId": device_id, "paired": False, "state": session.state.value}
+
+    def _verify_post_pair_health(self, session: DeviceSession, credential: str) -> dict:
+        latest: dict = {}
+        for probe in range(self.POST_PAIR_HEALTH_PROBES):
+            if probe:
+                time.sleep(self.POST_PAIR_HEALTH_DELAY_SECONDS)
+            session.adb.ensure_bridge_forward(session.local_port)
+            latest = session.bridge(token=credential).request(
+                "bridge.status",
+                {},
+                request_id=secrets.token_urlsafe(18),
+            )
+            if latest.get("gatewayEnabled") is not True:
+                raise BridgeProtocolError("Phone Gateway did not stay enabled after pairing")
+            if latest.get("pairingBootstrapListening") is not True:
+                raise BridgeProtocolError("Phone Gateway listener disappeared after pairing")
+        return latest
+
+    def _capture_pairing_diagnostics(self, session: DeviceSession, phase: str) -> str | None:
+        collector = getattr(session.adb, "collect_cyclone_crash_diagnostics", None)
+        if not callable(collector):
+            return None
+        try:
+            snapshot = collector()
+            self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+            path = self.diagnostics_dir / f"pairing-{session.device_id}-{int(time.time() * 1000)}.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "phase": phase,
+                        "capturedAtEpochMs": int(time.time() * 1000),
+                        "deviceId": session.device_id,
+                        "usbSessionIdHash": secrets.token_hex(0),
+                        "android": snapshot,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            return str(path)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _diagnostic_message(message: str, diagnostics: str | None) -> str:
+        if diagnostics:
+            return f"{message} Diagnostic file: {diagnostics}"
+        return message
 
     def _failed_attempt(self, session: DeviceSession, pending: PairingChallenge, *, force_exhausted: bool = False) -> None:
         pending.attempts += 1
