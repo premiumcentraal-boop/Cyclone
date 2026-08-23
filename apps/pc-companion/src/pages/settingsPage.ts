@@ -12,7 +12,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   const header = el("header", "page-header");
   header.append(
     el("h1", "page-title", "Settings & diagnostics"),
-    el("p", "page-subtitle", "A simple view of Cyclone's desktop connection health."),
+    el("p", "page-subtitle", "USB health, live Android crash monitoring, and Cyclone desktop status."),
   );
   const cards = el("div", "settings-grid");
 
@@ -29,11 +29,12 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   const adb = statusCard("ADB connection", "Checking…", "Cyclone is checking Android Platform Tools and USB devices.");
   const autoDetect = statusCard("Auto-detect", "Checking…", "Cyclone listens for USB device changes and keeps a low-rate fallback scan.");
   const crashDiagnostics = statusCard(
-    "Pairing crash diagnostics",
-    "Ready",
-    "If a phone dies during pairing, Cyclone stores Android exit-info, crash logcat and the beta app crash journal here.",
+    "Live USB crash monitor",
+    "Checking…",
+    "Starts automatically when an authorized Android phone is detected, before you press Pair.",
   );
   const diagnosticsPath = el("div", "diagnostic-path", "Resolving diagnostics folder…");
+  const diagnosticsDetail = el("p", "setting-copy", "Fixed read-only ADB diagnostics only · no root/su required · no pairing code or credential is intentionally recorded.");
   const openDiagnostics = button("Open diagnostics folder", "button secondary wide");
   openDiagnostics.addEventListener("click", () => {
     void invoke<string>("open_diagnostics_folder").then((path) => {
@@ -42,9 +43,9 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
       diagnosticsPath.textContent = "Could not open the diagnostics folder.";
     });
   });
-  crashDiagnostics.append(diagnosticsPath, openDiagnostics);
+  crashDiagnostics.append(diagnosticsPath, diagnosticsDetail, openDiagnostics);
 
-  const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI.");
+  const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI or live crash monitor.");
   cards.append(companion, phones, adb, autoDetect, crashDiagnostics, privacy);
   page.append(header, cards);
 
@@ -64,6 +65,28 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   void service.getRuntimeStatus().then((status) => {
     if (!active) return;
     setCard(companion, status.backendReachable ? "Ready" : "Needs attention", status.message || "Desktop services are responding.");
+
+    const live = status.liveDiagnostics;
+    if (live) {
+      if (live.active && live.activeDeviceCount > 0) {
+        const count = live.activeDeviceCount;
+        setCard(
+          crashDiagnostics,
+          `Monitoring ${count} phone${count === 1 ? "" : "s"}`,
+          "Recording Cyclone process warnings, PID changes, Android exit-info, crash buffer, accessibility state, and bounded snapshots before/during pairing.",
+        );
+        if (live.latestSessionPath) {
+          diagnosticsPath.textContent = live.latestSessionPath;
+          diagnosticsPath.setAttribute("title", "Newest live diagnostic session");
+        }
+      } else if ((status.discovery?.authorizedAdbDeviceCount ?? 0) > 0) {
+        setCard(crashDiagnostics, "Starting monitor…", "An authorized USB phone is visible. Cyclone is attaching the process-specific Android monitor.");
+      } else {
+        setCard(crashDiagnostics, "Waiting for USB phone", "Connect and authorize USB debugging. Monitoring begins automatically before pairing.");
+      }
+    } else {
+      setCard(crashDiagnostics, "Legacy diagnostics", "This backend can save failure snapshots but does not expose the Beta 5 always-on USB monitor.");
+    }
 
     const discovery = status.discovery;
     if (!discovery) {
@@ -98,6 +121,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     setCard(companion, "Needs attention", "The local Cyclone Gateway isn't responding.");
     setCard(adb, "Unknown", "Cyclone could not read ADB diagnostics from the local Gateway.");
     setCard(autoDetect, "Unknown", "Restart Cyclone PC Companion and try Scan for phones again.");
+    setCard(crashDiagnostics, "Unknown", "Cyclone could not confirm whether the live Android monitor is running.");
   });
 
   return { element: page, destroy: () => { active = false; } };
