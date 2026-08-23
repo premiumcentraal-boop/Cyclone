@@ -31,6 +31,41 @@ fn gateway_session(state: State<'_, GatewayState>) -> GatewaySession {
 }
 
 #[tauri::command]
+fn diagnostics_folder(app: tauri::AppHandle) -> Result<String, String> {
+    let path = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("runtime")
+        .join("diagnostics");
+    std::fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_diagnostics_folder(app: tauri::AppHandle) -> Result<String, String> {
+    let path = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("runtime")
+        .join("diagnostics");
+    std::fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        Command::new("explorer.exe")
+            .arg(&path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 async fn connector_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let output = app
         .shell()
@@ -157,7 +192,13 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![gateway_session, connector_status, connector_action])
+        .invoke_handler(tauri::generate_handler![
+            gateway_session,
+            diagnostics_folder,
+            open_diagnostics_folder,
+            connector_status,
+            connector_action
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Cyclone PC Companion");
 }
