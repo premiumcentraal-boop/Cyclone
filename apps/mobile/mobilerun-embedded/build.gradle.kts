@@ -12,6 +12,7 @@ fun wrapGeneratedCallback(
     nextSignature: String,
     stage: String,
     afterStatement: String? = null,
+    disableOnFailure: Boolean = false,
 ): String {
     val methodStart = source.indexOf(signature)
     require(methodStart >= 0) { "Pinned Mobilerun callback not found: $signature" }
@@ -36,7 +37,7 @@ fun wrapGeneratedCallback(
         append("            com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.recordNonFatal(this, \"")
         append(stage)
         append("\", error)\n")
-        append("            runCatching { disableSelf() }\n")
+        if (disableOnFailure) append("            runCatching { disableSelf() }\n")
         append("        }\n")
     }
     return source.substring(0, bodyStart) + guard + source.substring(methodEnd)
@@ -92,6 +93,7 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
             "    override fun onServiceConnected()",
             "enhanced.accessibility.onCreate",
             "\n        super.onCreate()",
+            disableOnFailure = true,
         )
         serviceSource = wrapGeneratedCallback(
             serviceSource,
@@ -99,12 +101,14 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
             "    override fun onAccessibilityEvent(event: AccessibilityEvent?)",
             "enhanced.accessibility.onServiceConnected",
             "\n        super.onServiceConnected()",
+            disableOnFailure = true,
         )
         serviceSource = wrapGeneratedCallback(
             serviceSource,
             "    override fun onAccessibilityEvent(event: AccessibilityEvent?)",
             "    override fun onConfigurationChanged(newConfig: Configuration)",
             "enhanced.accessibility.event",
+            disableOnFailure = false,
         )
         serviceFile.writeText(serviceSource, Charsets.UTF_8)
     }
