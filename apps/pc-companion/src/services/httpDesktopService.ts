@@ -120,7 +120,8 @@ export class HttpDesktopService implements DesktopService {
       const codeValue = error instanceof DesktopHttpError ? error.code : "";
       if (codeValue === "PAIRING_EXPIRED") return { ok: false, reason: "EXPIRED" };
       if (codeValue === "PAIRING_CODE_REJECTED" || codeValue === "PAIRING_ATTEMPTS_EXCEEDED") return { ok: false, reason: "INVALID_CODE" };
-      return { ok: false, reason: "UNAVAILABLE" };
+      const message = error instanceof DesktopHttpError ? error.message : undefined;
+      return { ok: false, reason: "UNAVAILABLE", message };
     }
   }
 
