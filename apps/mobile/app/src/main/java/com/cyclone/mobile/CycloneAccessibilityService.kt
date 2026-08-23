@@ -15,6 +15,7 @@ import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
+import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -39,6 +40,9 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
+    private val runtimeInitExecutor = Executors.newSingleThreadExecutor()
+    @Volatile private var automationRuntimeReady = false
+    @Volatile private var appLearnerRuntimeReady = false
     private var lastAutomationPackage: String? = null
     private var guidedOverlay: GuidedRecorderOverlayController? = null
 
@@ -48,45 +52,111 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     override fun onServiceConnected() {
+        super.onServiceConnected()
+        CycloneProcessDiagnostics.install(applicationContext)
+        CycloneProcessDiagnostics.markStage(this, "primary.accessibility.onServiceConnected")
         instance = this
         DeviceState.accessibilityConnected = true
         DeviceState.addLog("Accessibility connected")
-        AutomationRuntime.initialize(this)
-        AppLearnerRuntime.initialize(this)
-        BridgeClient.start(this)
+
+        // Android owns this callback boundary. Optional Cyclone runtimes are deliberately initialized
+        // away from it so a corrupt DB, migration issue, legacy bridge config, or app-learning bug can
+        // never make the AccessibilityService itself fail to connect.
+        runCatching {
+            runtimeInitExecutor.execute {
+                automationRuntimeReady = runCatching {
+                    CycloneProcessDiagnostics.markStage(applicationContext, "primary.runtime.automation.init")
+                    AutomationRuntime.initialize(applicationContext)
+                    true
+                }.onFailure {
+                    CycloneProcessDiagnostics.recordNonFatal(applicationContext, "primary.runtime.automation.init", it)
+                    DeviceState.addLog("Automation runtime disabled after safe initialization failure")
+                }.getOrDefault(false)
+
+                appLearnerRuntimeReady = runCatching {
+                    CycloneProcessDiagnostics.markStage(applicationContext, "primary.runtime.applearner.init")
+                    AppLearnerRuntime.initialize(applicationContext)
+                    true
+                }.onFailure {
+                    CycloneProcessDiagnostics.recordNonFatal(applicationContext, "primary.runtime.applearner.init", it)
+                    DeviceState.addLog("App Learner disabled after safe initialization failure")
+                }.getOrDefault(false)
+
+                runCatching {
+                    CycloneProcessDiagnostics.markStage(applicationContext, "primary.runtime.legacy_bridge.init")
+                    BridgeClient.start(applicationContext)
+                }.onFailure {
+                    CycloneProcessDiagnostics.recordNonFatal(applicationContext, "primary.runtime.legacy_bridge.init", it)
+                    DeviceState.addLog("Legacy Core bridge disabled after safe initialization failure")
+                }
+                CycloneProcessDiagnostics.markStage(
+                    applicationContext,
+                    "primary.runtime.ready.a${if (automationRuntimeReady) 1 else 0}.l${if (appLearnerRuntimeReady) 1 else 0}",
+                )
+            }
+        }.onFailure {
+            CycloneProcessDiagnostics.recordNonFatal(this, "primary.runtime.executor.submit", it)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
-        val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
-        packageName?.let { DeviceState.currentPackage = it }
-        event.className?.toString()?.takeIf { it.isNotBlank() }?.let { DeviceState.currentClassName = it }
-        DeviceState.lastUiEventAtMs = System.currentTimeMillis()
+        try {
+            val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
+            packageName?.let { DeviceState.currentPackage = it }
+            event.className?.toString()?.takeIf { it.isNotBlank() }?.let { DeviceState.currentClassName = it }
+            DeviceState.lastUiEventAtMs = System.currentTimeMillis()
 
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && packageName != null && packageName != lastAutomationPackage) {
-            lastAutomationPackage = packageName
-            AutomationRuntime.onAppOpened(this, packageName)
-        }
-        if (AutomationRuntime.recorder.isRecording()) {
-            when (event.eventType) {
-                AccessibilityEvent.TYPE_VIEW_CLICKED -> event.source?.let { AutomationRuntime.recorder.recordClick(automationSelector(it)) }
-                AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> event.source?.let { AutomationRuntime.recorder.recordText(automationSelector(it)) }
-                AccessibilityEvent.TYPE_VIEW_SCROLLED -> AutomationRuntime.recorder.recordScroll("forward")
+            if (automationRuntimeReady) {
+                runCatching {
+                    if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && packageName != null && packageName != lastAutomationPackage) {
+                        lastAutomationPackage = packageName
+                        AutomationRuntime.onAppOpened(this, packageName)
+                    }
+                    if (AutomationRuntime.recorder.isRecording()) {
+                        when (event.eventType) {
+                            AccessibilityEvent.TYPE_VIEW_CLICKED -> event.source?.let { AutomationRuntime.recorder.recordClick(automationSelector(it)) }
+                            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> event.source?.let { AutomationRuntime.recorder.recordText(automationSelector(it)) }
+                            AccessibilityEvent.TYPE_VIEW_SCROLLED -> AutomationRuntime.recorder.recordScroll("forward")
+                        }
+                    }
+                }.onFailure {
+                    CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.event.automation", it)
+                    DeviceState.addLog("Automation accessibility event failed safely")
+                }
             }
+
+            if (appLearnerRuntimeReady) {
+                runCatching { AppLearnerRuntime.onAccessibilityEvent(event) }
+                    .onFailure {
+                        CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.event.applearner", it)
+                        DeviceState.addLog("App Learner accessibility event failed safely")
+                    }
+            }
+        } catch (error: Throwable) {
+            // Never let application logic escape an Android AccessibilityService callback. A failure is
+            // diagnosable and feature-local; the phone-control service remains bound and usable.
+            CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.event.boundary", error)
+            DeviceState.addLog("Accessibility event rejected safely")
         }
-        AppLearnerRuntime.onAccessibilityEvent(event)
     }
 
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
-        guidedOverlay?.dismiss()
+        CycloneProcessDiagnostics.markStage(this, "primary.accessibility.onDestroy")
+        runCatching { guidedOverlay?.dismiss() }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.guided", it) }
         guidedOverlay = null
-        RoutineTeachingOverlayRuntime.dismiss()
+        runCatching { RoutineTeachingOverlayRuntime.dismiss() }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.teaching", it) }
         instance = null
+        automationRuntimeReady = false
+        appLearnerRuntimeReady = false
         DeviceState.accessibilityConnected = false
-        BridgeClient.stop()
-        screenshotExecutor.shutdownNow()
+        runCatching { BridgeClient.stop() }
+        runCatching { runtimeInitExecutor.shutdownNow() }
+        runCatching { screenshotExecutor.shutdownNow() }
         super.onDestroy()
     }
 
