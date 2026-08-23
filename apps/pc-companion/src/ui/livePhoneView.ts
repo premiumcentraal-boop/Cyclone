@@ -9,6 +9,7 @@ export interface LivePhoneViewOptions {
   profile: StreamProfile;
   interactive?: boolean;
   showLabel?: boolean;
+  autoStart?: boolean;
   onOpen?: (device: DesktopDevice) => void;
   onPair?: (device: DesktopDevice) => void;
 }
@@ -64,6 +65,30 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
       options.onPair?.(device);
     });
     overlay.append(pairButton);
+    return { element: card, destroy: () => undefined };
+  }
+
+  // Fleet cards are intentionally connection-only. Pairing must never implicitly start a continuous
+  // adb screencap/video workload. The live stream starts only after the user opens a paired phone.
+  if (options.autoStart === false) {
+    canvas.hidden = true;
+    image.hidden = true;
+    overlay.classList.add("visible", "passive");
+    overlay.append(
+      el("div", "state-kicker", "Connected"),
+      el("div", "state-title", device.state === "SLEEPING" ? "Phone sleeping" : "Phone ready"),
+      el("div", "state-copy", "Open this phone to start the live view."),
+    );
+    if (options.onOpen) {
+      card.classList.add("clickable");
+      card.addEventListener("click", () => options.onOpen?.(device));
+      const open = button("Open phone", "button primary");
+      open.addEventListener("click", (event) => {
+        event.stopPropagation();
+        options.onOpen?.(device);
+      });
+      overlay.append(open);
+    }
     return { element: card, destroy: () => undefined };
   }
 
