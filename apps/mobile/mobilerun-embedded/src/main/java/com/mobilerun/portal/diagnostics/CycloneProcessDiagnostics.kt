@@ -101,7 +101,7 @@ object CycloneProcessDiagnostics {
         exits.sortedBy { it.timestamp }.forEach { exit ->
             if (exit.timestamp <= lastRecorded) return@forEach
             newest = maxOf(newest, exit.timestamp)
-            val state = exit.processStateSummary?.toString(Charsets.UTF_8)?.let { safe(it, 128) }.orEmpty()
+            val state = exit.processStateSummary?.let { String(it, Charsets.UTF_8) }?.let { safe(it, 128) }.orEmpty()
             write(
                 context,
                 "PREVIOUS_EXIT",
