@@ -15,6 +15,7 @@ from ..config import Settings
 from ..server import create_app as create_legacy_app
 from .agent import DesktopAgentService
 from .controls import ClipboardService, ManualControlService
+from .diagnostics import FleetDiagnosticSupervisor
 from .fleet import DeviceFleetManager
 from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES
 from .pairing import PairingCoordinator
@@ -77,7 +78,8 @@ class DesktopRuntime:
         # USB topology changes are normally event-driven through adb track-devices. A 20 second
         # fallback is intentionally retained for recovery if that stream dies on a particular PC.
         self.fleet = fleet or DeviceFleetManager(adb_path=settings.adb_path, poll_seconds=20.0)
-        self.pairing = PairingCoordinator(self.fleet)
+        self.live_diagnostics = FleetDiagnosticSupervisor(self.fleet)
+        self.pairing = PairingCoordinator(self.fleet, self.live_diagnostics)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
         self.agent = DesktopAgentService(self.fleet)
@@ -86,8 +88,12 @@ class DesktopRuntime:
 
     def start(self) -> None:
         self.fleet.start()
+        # The diagnostic supervisor is deliberately independent of pairing. As soon as ADB reports
+        # an authorized phone, it records a bounded baseline and follows only the Cyclone app PID.
+        self.live_diagnostics.start()
 
     def stop(self) -> None:
+        self.live_diagnostics.stop()
         self.fleet.stop()
 
 
@@ -109,12 +115,14 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             "protocol": DESKTOP_PROTOCOL_VERSION,
             "devices": devices,
             "discovery": runtime.fleet.diagnostics(),
+            "liveDiagnostics": runtime.live_diagnostics.status(),
         }
 
     @router.get("/v1/diagnostics/status", dependencies=[Depends(auth)])
     def diagnostics_status() -> dict[str, Any]:
         devices = runtime.fleet.list_public()
         discovery = runtime.fleet.diagnostics()
+        live_diagnostics = runtime.live_diagnostics.status()
         paired = sum(1 for device in devices if device.get("paired") is True)
         attention = sum(1 for device in devices if device.get("state") in {"ATTENTION", "UNAUTHORIZED"})
         adb_available = discovery.get("adbAvailable") is True
@@ -137,11 +145,15 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             "recoveryActive": attention > 0 or not adb_available,
             "message": message,
             "discovery": discovery,
+            "liveDiagnostics": live_diagnostics,
         }
 
     @router.get("/v1/diagnostics/discovery", dependencies=[Depends(auth)])
     def diagnostics_discovery() -> dict[str, Any]:
-        return runtime.fleet.diagnostics()
+        return {
+            "discovery": runtime.fleet.diagnostics(),
+            "liveDiagnostics": runtime.live_diagnostics.status(),
+        }
 
     @router.post("/v1/devices/{device_id}/pair/begin", dependencies=[Depends(auth)])
     def pair_begin(device_id: str):
