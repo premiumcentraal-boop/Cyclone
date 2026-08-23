@@ -51,13 +51,50 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         self.assertEqual("true", root.get(f"{ANDROID}canRetrieveWindowContent"))
         self.assertEqual("true", root.get(f"{ANDROID}canTakeScreenshot"))
 
-    def test_embedded_source_adapter_does_not_request_touch_exploration_modes(self):
+    def test_accessibility_services_do_not_subscribe_to_type_all_mask(self):
+        configs = [
+            ROOT / "apps/mobile/app/src/main/res/xml/accessibility_service_config.xml",
+            ROOT / "apps/mobile/mobilerun-embedded/src/main/res/xml/cyclone_enhanced_accessibility_service_config.xml",
+        ]
+        for config in configs:
+            root = ET.parse(config).getroot()
+            events = root.get(f"{ANDROID}accessibilityEventTypes", "")
+            self.assertNotIn("typeAllMask", events, config)
+            self.assertIn("typeWindowStateChanged", events, config)
+
+    def test_embedded_source_adapter_is_bounded_and_callback_guarded(self):
         gradle = (ROOT / "apps/mobile/mobilerun-embedded/build.gradle.kts").read_text(encoding="utf-8")
         self.assertIn('"AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE",\n                    "0"', gradle)
         self.assertIn(
             '"flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_2_FINGER_PASSTHROUGH",\n                    "flags = flags"',
             gradle,
         )
+        self.assertIn('"eventTypes = AccessibilityEvent.TYPES_ALL_MASK"', gradle)
+        self.assertIn("CycloneProcessDiagnostics.recordNonFatal", gradle)
+        self.assertIn("enhanced.accessibility.onServiceConnected", gradle)
+        self.assertIn("disableOnFailure = false", gradle)
+
+    def test_primary_accessibility_callback_boundary_cannot_run_heavy_init_directly(self):
+        source = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/CycloneAccessibilityService.kt").read_text(encoding="utf-8")
+        self.assertIn("super.onServiceConnected()", source)
+        self.assertIn("runtimeInitExecutor.execute", source)
+        self.assertIn("automationRuntimeReady", source)
+        self.assertIn("appLearnerRuntimeReady", source)
+        self.assertIn("primary.accessibility.event.boundary", source)
+        self.assertIn("CycloneProcessDiagnostics.recordNonFatal", source)
+        connected_body = source.split("override fun onServiceConnected()", 1)[1].split("override fun onAccessibilityEvent", 1)[0]
+        before_executor = connected_body.split("runtimeInitExecutor.execute", 1)[0]
+        self.assertNotIn("AutomationRuntime.initialize(this)", before_executor)
+        self.assertNotIn("AppLearnerRuntime.initialize(this)", before_executor)
+
+    def test_process_crash_journal_captures_uncaught_and_historical_exit_reason(self):
+        source = (ROOT / "apps/mobile/mobilerun-embedded/src/main/java/com/mobilerun/portal/diagnostics/CycloneProcessDiagnostics.kt").read_text(encoding="utf-8")
+        self.assertIn("setDefaultUncaughtExceptionHandler", source)
+        self.assertIn("getHistoricalProcessExitReasons", source)
+        self.assertIn("setProcessStateSummary", source)
+        self.assertIn("process-crash-journal.log", source)
+        self.assertIn("REASON_CRASH_NATIVE", source)
+        self.assertIn("REASON_ANR", source)
 
     def test_bridge_startup_has_url_validation_and_nonfatal_construction(self):
         source = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/BridgeClient.kt").read_text(encoding="utf-8")
@@ -65,6 +102,19 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         self.assertIn("val started = runCatching", source)
         self.assertIn("Core bridge could not start; accessibility remains available", source)
         self.assertNotIn('DeviceState.addLog("Bridge failure: ${t.message}")', source)
+
+    def test_desktop_pairing_does_not_auto_start_fleet_video_and_has_crash_capture(self):
+        fleet = (ROOT / "apps/pc-companion/src/pages/fleetPage.ts").read_text(encoding="utf-8")
+        live = (ROOT / "apps/pc-companion/src/ui/livePhoneView.ts").read_text(encoding="utf-8")
+        pairing = (ROOT / "apps/device-gateway/cyclone_device_gateway/desktop_runtime/pairing.py").read_text(encoding="utf-8")
+        adb = (ROOT / "apps/device-gateway/cyclone_device_gateway/adb/client.py").read_text(encoding="utf-8")
+        self.assertIn("autoStart: false", fleet)
+        self.assertIn("options.autoStart === false", live)
+        self.assertIn("_verify_post_pair_health", pairing)
+        self.assertIn("_capture_pairing_diagnostics", pairing)
+        self.assertIn("collect_cyclone_crash_diagnostics", adb)
+        self.assertIn('"dumpsys", "activity", "exit-info"', adb)
+        self.assertIn('"logcat", "-b", "crash"', adb)
 
 
 if __name__ == "__main__":
