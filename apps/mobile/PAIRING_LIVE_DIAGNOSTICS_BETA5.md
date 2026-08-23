@@ -25,7 +25,8 @@ The monitor does not require root or `su` and does not expose arbitrary ADB/shel
 ## Windows application packaging
 
 - Tauri release builds use the Windows GUI subsystem.
-- `CyclonePCRuntime` is packaged without a console.
-- `CycloneAgentMCP` is packaged without a console.
+- `CyclonePCRuntime` uses PyInstaller's no-console Windows bootloader.
+- `CycloneAgentMCP` retains captured standard I/O for its JSON protocol, while PyInstaller hides its owned console at boot (`hide-early`).
+- Known developer-era `Cyclone Device Gateway` executable names are retired on Companion startup after an in-place update.
 
 The installed Companion should therefore behave as one GUI application without separate command-prompt windows for its bundled processes.
