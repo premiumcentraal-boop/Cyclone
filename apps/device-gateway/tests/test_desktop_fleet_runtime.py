@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from cyclone_device_gateway.adb.client import ADBDevice, ADBError
 from cyclone_device_gateway.config import Settings
+from cyclone_device_gateway.cyclone_bridge.client import BridgeDisconnectedError
 from cyclone_device_gateway.desktop_runtime.api import DesktopRuntime, create_desktop_app
 from cyclone_device_gateway.desktop_runtime.controls import MANUAL_KINDS, ClipboardService, ManualControlService, clipboard_looks_sensitive
 from cyclone_device_gateway.desktop_runtime.fleet import DeviceFleetManager
@@ -85,6 +86,19 @@ class FakeBridge:
         if op == "clipboard.set":
             return {"updated": True}
         raise AssertionError(op)
+
+
+class FlakyBeginBridge(FakeBridge):
+    def __init__(self):
+        super().__init__()
+        self.fail_begin_once = True
+
+    def request_unauthenticated(self, op, args=None, request_id=None):
+        if op == "pair.begin" and self.fail_begin_once:
+            self.fail_begin_once = False
+            self.calls.append((op, args or {}))
+            raise BridgeDisconnectedError("simulated transient USB race")
+        return super().request_unauthenticated(op, args, request_id)
 
 
 def make_fleet(devices, failures=()):
@@ -204,6 +218,21 @@ def test_pairing_timeout_replay_attempt_limit_and_token_rotation():
     pairing.begin(session.device_id)
     pairing.complete(session.device_id, "NOVA")
     assert session.credential != first_token
+
+
+def test_pair_begin_repairs_forward_and_recovers_one_transient_transport_drop():
+    fleet, session, _ = paired_session_for_services()
+    session.credential = None
+    bridge = FlakyBeginBridge()
+    session.bridge = lambda token=None, auto_forward=False: bridge
+    pairing = PairingCoordinator(fleet)
+    pairing.BEGIN_RETRY_DELAY_SECONDS = 0
+
+    result = pairing.begin(session.device_id)
+
+    assert result["pairing"] is True
+    assert [op for op, _ in bridge.calls].count("pair.begin") == 2
+    assert session.adb.forwards.count(session.local_port) >= 2
 
 
 def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
