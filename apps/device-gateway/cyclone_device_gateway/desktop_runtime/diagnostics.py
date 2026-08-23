@@ -19,10 +19,10 @@ _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 class DeviceDiagnosticRecorder:
     """Bounded, read-only Android monitor for a detected Cyclone phone.
 
-    The recorder starts as soon as an authorized USB device enters the fleet. It never exposes a
-    caller-supplied shell/ADB surface and never requires root/su. It watches the Cyclone process,
-    keeps warning/error logcat for that PID, and writes fixed Android snapshots around process and
-    pairing transitions so a physical-device crash is explainable after the fact.
+    The recorder starts as soon as an authorized USB device enters the fleet. Before pairing it uses
+    only low-impact process/state reads plus a Cyclone-PID logcat stream. Expensive crash/package
+    snapshots are reserved for a real failure or process death, so observation does not perturb the
+    pairing transition it is meant to diagnose.
     """
 
     POLL_SECONDS = 0.75
@@ -38,6 +38,7 @@ class DeviceDiagnosticRecorder:
         self.timeline_path = self.path / "timeline.jsonl"
         self.logcat_path = self.path / "cyclone-process.logcat.txt"
         self._lock = threading.RLock()
+        self._capture_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._logcat_process: subprocess.Popen | None = None
@@ -58,7 +59,7 @@ class DeviceDiagnosticRecorder:
             self._thread = threading.Thread(target=self._watch_loop, name=f"cyclone-diag-{self.session.device_id[:8]}", daemon=True)
             self._thread.start()
         self.mark("usb.authorized.monitor_started")
-        self.capture_async("usb.authorized.baseline")
+        self.capture_async("usb.authorized.baseline", heavy=False)
 
     def stop(self) -> None:
         self.mark("usb.monitor_stopping")
@@ -78,43 +79,45 @@ class DeviceDiagnosticRecorder:
                 "pid": self._pid,
             })
 
-    def capture_async(self, label: str) -> None:
+    def capture_async(self, label: str, *, heavy: bool = False) -> None:
         if self._stop.is_set():
             return
         thread = threading.Thread(
-            target=lambda: self.capture_snapshot(label),
+            target=lambda: self.capture_snapshot(label, heavy=heavy),
             name=f"cyclone-diag-snapshot-{self.session.device_id[:8]}",
             daemon=True,
         )
         thread.start()
 
-    def capture_snapshot(self, label: str) -> str | None:
+    def capture_snapshot(self, label: str, *, heavy: bool = True) -> str | None:
         normalized = _safe_stage(label)
-        try:
-            snapshot = self._fixed_snapshot()
-            with self._lock:
-                self._snapshot_counter += 1
-                name = f"snapshot-{self._snapshot_counter:03d}-{_safe_component(normalized)}.json"
-                target = self.path / name
-                target.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
-                self._latest_snapshot = str(target)
-                self._append_timeline({
-                    "atEpochMs": int(time.time() * 1000),
-                    "stage": "diagnostics.snapshot",
-                    "label": normalized,
-                    "path": str(target),
-                    "pid": self._pid,
-                })
-                return str(target)
-        except Exception as exc:
-            with self._lock:
-                self._append_timeline({
-                    "atEpochMs": int(time.time() * 1000),
-                    "stage": "diagnostics.snapshot_failed",
-                    "label": normalized,
-                    "error": f"{exc.__class__.__name__}: {str(exc)[:240]}",
-                })
-            return None
+        with self._capture_lock:
+            try:
+                snapshot = self._fixed_snapshot(heavy=heavy)
+                with self._lock:
+                    self._snapshot_counter += 1
+                    name = f"snapshot-{self._snapshot_counter:03d}-{_safe_component(normalized)}.json"
+                    target = self.path / name
+                    target.write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
+                    self._latest_snapshot = str(target)
+                    self._append_timeline({
+                        "atEpochMs": int(time.time() * 1000),
+                        "stage": "diagnostics.snapshot",
+                        "label": normalized,
+                        "kind": "heavy" if heavy else "baseline",
+                        "path": str(target),
+                        "pid": self._pid,
+                    })
+                    return str(target)
+            except Exception as exc:
+                with self._lock:
+                    self._append_timeline({
+                        "atEpochMs": int(time.time() * 1000),
+                        "stage": "diagnostics.snapshot_failed",
+                        "label": normalized,
+                        "error": f"{exc.__class__.__name__}: {str(exc)[:240]}",
+                    })
+                return None
 
     def public_status(self) -> dict[str, Any]:
         thread = self._thread
@@ -142,12 +145,12 @@ class DeviceDiagnosticRecorder:
                 if current_pid:
                     self.mark("android.cyclone_process_started")
                     self._start_logcat(current_pid)
-                    self.capture_async("android.process_started")
+                    self.capture_async("android.process_started", heavy=False)
                 elif last_pid:
                     self.mark("android.cyclone_process_disappeared")
-                    self.capture_snapshot("android.process_gone_immediate")
+                    self.capture_snapshot("android.process_gone_immediate", heavy=True)
                     if not self._stop.wait(self.SETTLE_SECONDS):
-                        self.capture_snapshot("android.process_gone_settled")
+                        self.capture_snapshot("android.process_gone_settled", heavy=True)
                 last_pid = current_pid
             self._stop.wait(self.POLL_SECONDS)
 
@@ -174,7 +177,7 @@ class DeviceDiagnosticRecorder:
                     pass
             handle = self.logcat_path.open("ab", buffering=0)
             process = self.session.adb.start_process(
-                ["logcat", f"--pid={pid}", "-v", "threadtime", "*:W"],
+                ["logcat", f"--pid={pid}", "-v", "threadtime", "*:I"],
                 stdout=handle,
             )
             with self._lock:
@@ -214,7 +217,7 @@ class DeviceDiagnosticRecorder:
             except Exception:
                 pass
 
-    def _fixed_snapshot(self) -> dict[str, Any]:
+    def _fixed_snapshot(self, *, heavy: bool) -> dict[str, Any]:
         adb = self.session.adb
 
         def capture(action) -> str:
@@ -224,9 +227,9 @@ class DeviceDiagnosticRecorder:
             except Exception as exc:
                 return f"<unavailable: {exc.__class__.__name__}: {str(exc)[:240]}>"
 
-        crash = adb.collect_cyclone_crash_diagnostics() if hasattr(adb, "collect_cyclone_crash_diagnostics") else {}
-        return {
+        snapshot: dict[str, Any] = {
             "capturedAtEpochMs": int(time.time() * 1000),
+            "snapshotKind": "heavy" if heavy else "baseline",
             "deviceId": self.session.device_id,
             "adbState": self.session.adb_device.state,
             "model": self.session.adb_device.model,
@@ -237,12 +240,18 @@ class DeviceDiagnosticRecorder:
             "androidSdk": capture(lambda: adb.shell("getprop", "ro.build.version.sdk", timeout=3).strip()),
             "bootReason": capture(lambda: adb.shell("getprop", "ro.boot.bootreason", timeout=3).strip()),
             "uptime": capture(lambda: adb.shell("cat", "/proc/uptime", timeout=3).strip()),
-            "packageState": capture(lambda: adb.shell("dumpsys", "package", _PACKAGE, timeout=8)),
-            "processMemory": capture(lambda: adb.shell("dumpsys", "meminfo", _PACKAGE, timeout=8)),
-            "accessibilityState": capture(lambda: adb.shell("dumpsys", "accessibility", timeout=8)),
-            "crash": crash,
+            "enabledAccessibilityServices": capture(lambda: adb.shell("settings", "get", "secure", "enabled_accessibility_services", timeout=3).strip()),
+            "accessibilityEnabled": capture(lambda: adb.shell("settings", "get", "secure", "accessibility_enabled", timeout=3).strip()),
             "privacy": "Fixed read-only ADB diagnostics only. No root/su, arbitrary shell, pairing code, credential, clipboard content, password, OTP, or typed value is intentionally recorded.",
         }
+        if heavy:
+            snapshot.update({
+                "packageState": capture(lambda: adb.shell("dumpsys", "package", _PACKAGE, timeout=8)),
+                "processMemory": capture(lambda: adb.shell("dumpsys", "meminfo", _PACKAGE, timeout=8)),
+                "accessibilityState": capture(lambda: adb.shell("dumpsys", "accessibility", timeout=8)),
+                "crash": adb.collect_cyclone_crash_diagnostics() if hasattr(adb, "collect_cyclone_crash_diagnostics") else {},
+            })
+        return snapshot
 
     def _append_timeline(self, item: dict[str, Any]) -> None:
         try:
@@ -290,14 +299,22 @@ class FleetDiagnosticSupervisor:
         except Exception:
             return None
         if session.adb_device.state != "device":
+            self._retire(device_id)
             return None
+        old: DeviceDiagnosticRecorder | None = None
         with self._lock:
             recorder = self._recorders.get(device_id)
+            if recorder is not None and recorder.session is not session:
+                old = recorder
+                recorder = None
+                self._recorders.pop(device_id, None)
             if recorder is None:
                 recorder = DeviceDiagnosticRecorder(session)
                 self._recorders[device_id] = recorder
-                recorder.start()
-            return recorder
+        if old is not None:
+            old.stop()
+        recorder.start()
+        return recorder
 
     def mark(self, device_id: str, stage: str, *, snapshot: bool = False) -> dict[str, Any] | None:
         recorder = self.ensure(device_id)
@@ -305,7 +322,7 @@ class FleetDiagnosticSupervisor:
             return None
         recorder.mark(stage)
         if snapshot:
-            recorder.capture_async(stage)
+            recorder.capture_async(stage, heavy=True)
         return recorder.public_status()
 
     def status(self) -> dict[str, Any]:
@@ -331,25 +348,34 @@ class FleetDiagnosticSupervisor:
         while not self._stop.is_set():
             try:
                 public_devices = self.fleet.list_public()
-                seen = {str(item.get("deviceId") or item.get("id") or "") for item in public_devices}
+                seen: set[str] = set()
                 for item in public_devices:
                     device_id = str(item.get("deviceId") or item.get("id") or "")
                     if not device_id:
                         continue
+                    seen.add(device_id)
                     try:
                         session = self.fleet.get(device_id)
                     except Exception:
+                        self._retire(device_id)
                         continue
                     if session.adb_device.state == "device":
                         self.ensure(device_id)
+                    else:
+                        self._retire(device_id)
                 with self._lock:
                     stale = [device_id for device_id in self._recorders if device_id not in seen]
-                    recorders = [(device_id, self._recorders.pop(device_id)) for device_id in stale]
-                for _, recorder in recorders:
-                    recorder.stop()
+                for device_id in stale:
+                    self._retire(device_id)
             except Exception:
                 pass
             self._stop.wait(self.SYNC_SECONDS)
+
+    def _retire(self, device_id: str) -> None:
+        with self._lock:
+            recorder = self._recorders.pop(device_id, None)
+        if recorder is not None:
+            recorder.stop()
 
 
 def _safe_component(value: str) -> str:
