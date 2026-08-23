@@ -10,6 +10,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.net.URI
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -19,59 +20,110 @@ object BridgeClient {
     @Volatile private var socket: WebSocket? = null
     @Volatile private var appContext: Context? = null
 
+    /**
+     * The legacy Core websocket is optional and must never be able to take down AccessibilityService.
+     * A stale/malformed saved URL is treated as an offline bridge, not as a process-fatal error.
+     */
     fun start(context: Context) {
-        appContext = context.applicationContext
-        val prefs = context.getSharedPreferences("cyclone", Context.MODE_PRIVATE)
-        val url = prefs.getString("coreWsUrl", "").orEmpty()
-        if (url.isBlank() || socket != null) return
+        val app = context.applicationContext
+        appContext = app
+        if (socket != null) return
+
+        val prefs = app.getSharedPreferences("cyclone", Context.MODE_PRIVATE)
+        val url = prefs.getString("coreWsUrl", "").orEmpty().trim()
+        if (url.isBlank()) return
+        if (!isSupportedWebSocketUrl(url)) {
+            DeviceState.bridgeConnected = false
+            DeviceState.addLog("Core bridge configuration is invalid; accessibility remains available")
+            SetupReminderState.request(
+                SetupNeed.CORE,
+                "Reconnect Cyclone Core before using Hermes or AI-generated automations.",
+            )
+            return
+        }
+
         val deviceId = prefs.getString("deviceId", "").orEmpty().ifBlank {
-            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+            Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID)
                 ?.let { "android-$it" } ?: "android-${Build.FINGERPRINT.hashCode()}"
         }
         val deviceName = prefs.getString("deviceName", "").orEmpty().ifBlank {
             listOf(Build.MANUFACTURER, Build.MODEL).filter { it.isNotBlank() }.joinToString(" ").ifBlank { "Android device" }
         }
-        val requestBuilder = Request.Builder().url(url)
-            .header("X-Cyclone-Device-Id", deviceId)
-            .header("X-Cyclone-Device-Name", deviceName)
-            .header("X-Cyclone-Device-Platform", "android")
-        prefs.getString("coreToken", "")?.takeIf { it.isNotBlank() }
-            ?.let { requestBuilder.header("Authorization", "Bearer $it") }
-        socket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                DeviceState.bridgeConnected = true
-                SetupReminderState.clear()
-                send(JSONObject()
-                    .put("type", "mobile.hello")
-                    .put("protocol", "phone-tool-v1")
-                    .put("deviceId", deviceId)
-                    .put("deviceName", deviceName)
-                    .put("platform", "android")
-                    .put("androidApi", Build.VERSION.SDK_INT)
-                    .put("tools", PhoneToolRegistry.toJson())
-                    .put("capabilities", CapabilityRegistry.toJson(context)))
-            }
 
-            override fun onMessage(webSocket: WebSocket, text: String) = handleMessage(text)
+        val started = runCatching {
+            val requestBuilder = Request.Builder().url(url)
+                .header("X-Cyclone-Device-Id", deviceId)
+                .header("X-Cyclone-Device-Name", deviceName)
+                .header("X-Cyclone-Device-Platform", "android")
+            prefs.getString("coreToken", "")?.takeIf { it.isNotBlank() }
+                ?.let { requestBuilder.header("Authorization", "Bearer $it") }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                DeviceState.bridgeConnected = false
-                socket = null
-            }
+            client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    val helloSent = runCatching {
+                        DeviceState.bridgeConnected = true
+                        SetupReminderState.clear()
+                        val hello = JSONObject()
+                            .put("type", "mobile.hello")
+                            .put("protocol", "phone-tool-v1")
+                            .put("deviceId", deviceId)
+                            .put("deviceName", deviceName)
+                            .put("platform", "android")
+                            .put("androidApi", Build.VERSION.SDK_INT)
+                            .put("tools", PhoneToolRegistry.toJson())
+                            .put("capabilities", CapabilityRegistry.toJson(app))
+                        webSocket.send(hello.toString())
+                    }.getOrDefault(false)
+                    if (!helloSent) {
+                        DeviceState.bridgeConnected = false
+                        DeviceState.addLog("Core bridge handshake failed safely")
+                        runCatching { webSocket.close(1011, "handshake failed") }
+                    }
+                }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                DeviceState.bridgeConnected = false
-                DeviceState.addLog("Bridge failure: ${t.message}")
-                socket = null
-            }
-        })
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    runCatching { handleMessage(text) }
+                        .onFailure { DeviceState.addLog("Core bridge message was rejected safely") }
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    DeviceState.bridgeConnected = false
+                    if (socket === webSocket) socket = null
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    DeviceState.bridgeConnected = false
+                    DeviceState.addLog("Core bridge connection failed safely")
+                    if (socket === webSocket) socket = null
+                }
+            })
+        }.getOrNull()
+
+        if (started == null) {
+            socket = null
+            DeviceState.bridgeConnected = false
+            DeviceState.addLog("Core bridge could not start; accessibility remains available")
+            SetupReminderState.request(
+                SetupNeed.CORE,
+                "Reconnect Cyclone Core before using Hermes or AI-generated automations.",
+            )
+            return
+        }
+        socket = started
     }
 
     fun stop() {
-        socket?.close(1000, "service stopped")
+        val current = socket
         socket = null
+        runCatching { current?.close(1000, "service stopped") }
         DeviceState.bridgeConnected = false
     }
+
+    internal fun isSupportedWebSocketUrl(raw: String): Boolean = runCatching {
+        val uri = URI(raw)
+        val scheme = uri.scheme?.lowercase()
+        (scheme == "ws" || scheme == "wss") && !uri.host.isNullOrBlank()
+    }.getOrDefault(false)
 
     private fun handleMessage(raw: String) {
         val msg = runCatching { JSONObject(raw) }.getOrNull() ?: return
@@ -159,7 +211,7 @@ object BridgeClient {
     fun sendAutomationEvent(type: String, payload: Map<String, String>): Boolean {
         val json = JSONObject().put("type", type)
         payload.forEach { (key, value) -> json.put(key, value) }
-        val sent = socket?.send(json.toString()) == true
+        val sent = runCatching { socket?.send(json.toString()) == true }.getOrDefault(false)
         if (!sent) {
             SetupReminderState.request(
                 SetupNeed.CORE,
@@ -169,5 +221,6 @@ object BridgeClient {
         return sent
     }
 
-    private fun send(json: JSONObject) { socket?.send(json.toString()) }
+    private fun send(json: JSONObject): Boolean =
+        runCatching { socket?.send(json.toString()) == true }.getOrDefault(false)
 }
