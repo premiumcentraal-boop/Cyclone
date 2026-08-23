@@ -6,11 +6,47 @@ plugins {
 val upstreamMobilerun = file("${rootDir}/../../third_party/mobilerun-portal/app/src/main")
 val adaptedSources = layout.buildDirectory.dir("generated/mobilerun-src")
 
-// Keep the upstream git submodule pristine and reproducible. Cyclone adapts only the build input:
+fun wrapGeneratedCallback(
+    source: String,
+    signature: String,
+    nextSignature: String,
+    stage: String,
+    afterStatement: String? = null,
+): String {
+    val methodStart = source.indexOf(signature)
+    require(methodStart >= 0) { "Pinned Mobilerun callback not found: $signature" }
+    val bodyStart = source.indexOf('{', methodStart) + 1
+    val nextStart = source.indexOf(nextSignature, bodyStart)
+    require(nextStart > bodyStart) { "Pinned Mobilerun next callback not found: $nextSignature" }
+    val methodEnd = source.lastIndexOf("\n    }", nextStart)
+    require(methodEnd > bodyStart) { "Pinned Mobilerun callback end not found: $signature" }
+
+    val rawBody = source.substring(bodyStart, methodEnd)
+    val statement = afterStatement?.let { rawBody.indexOf(it) } ?: -1
+    val prefixEnd = if (statement >= 0) statement + afterStatement!!.length else 0
+    val prefix = rawBody.substring(0, prefixEnd)
+    val protectedBody = rawBody.substring(prefixEnd)
+    val guard = buildString {
+        append(prefix)
+        append("\n        com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.markStage(this, \"")
+        append(stage)
+        append("\")\n        try {")
+        append(protectedBody)
+        append("\n        } catch (error: Throwable) {\n")
+        append("            com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.recordNonFatal(this, \"")
+        append(stage)
+        append("\", error)\n")
+        append("            runCatching { disableSelf() }\n")
+        append("        }\n")
+    }
+    return source.substring(0, bodyStart) + guard + source.substring(methodEnd)
+}
+
+// Keep the upstream git submodule pristine and reproducible. Cyclone adapts only generated input:
 // - Kotlin 2 makes PackageInfo.versionName nullable.
-// - Cyclone Enhanced Control does not need touch-exploration/two-finger-passthrough modes. Those
-//   modes are accessibility-user interaction features, not requirements for observation, gestures
-//   or screenshots, and requesting them can make service startup device/OEM-sensitive.
+// - Enhanced Control does not request touch-exploration/two-finger-passthrough modes.
+// - Android-owned accessibility callbacks are guarded so an embedded optional subsystem cannot
+//   crash the shared Cyclone process or leave Android reporting "service is malfunctioning".
 val prepareMobilerunSources by tasks.registering(Copy::class) {
     from(upstreamMobilerun.resolve("java"))
     into(adaptedSources)
@@ -31,6 +67,46 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
                     "flags = flags",
                 )
         }
+    }
+
+    doLast {
+        val root = adaptedSources.get().asFile
+
+        val applicationFile = root.resolve("com/mobilerun/portal/PortalApplication.kt")
+        var applicationSource = applicationFile.readText(Charsets.UTF_8)
+        val applicationNeedle = "        super.onCreate()\n"
+        require(applicationSource.contains(applicationNeedle)) { "Pinned PortalApplication onCreate changed upstream" }
+        applicationSource = applicationSource.replaceFirst(
+            applicationNeedle,
+            applicationNeedle +
+                "        com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.install(this)\n" +
+                "        com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics.markStage(this, \"portal.application.onCreate\")\n",
+        )
+        applicationFile.writeText(applicationSource, Charsets.UTF_8)
+
+        val serviceFile = root.resolve("com/mobilerun/portal/service/MobilerunAccessibilityService.kt")
+        var serviceSource = serviceFile.readText(Charsets.UTF_8)
+        serviceSource = wrapGeneratedCallback(
+            serviceSource,
+            "    override fun onCreate()",
+            "    override fun onServiceConnected()",
+            "enhanced.accessibility.onCreate",
+            "\n        super.onCreate()",
+        )
+        serviceSource = wrapGeneratedCallback(
+            serviceSource,
+            "    override fun onServiceConnected()",
+            "    override fun onAccessibilityEvent(event: AccessibilityEvent?)",
+            "enhanced.accessibility.onServiceConnected",
+            "\n        super.onServiceConnected()",
+        )
+        serviceSource = wrapGeneratedCallback(
+            serviceSource,
+            "    override fun onAccessibilityEvent(event: AccessibilityEvent?)",
+            "    override fun onConfigurationChanged(newConfig: Configuration)",
+            "enhanced.accessibility.event",
+        )
+        serviceFile.writeText(serviceSource, Charsets.UTF_8)
     }
 }
 
