@@ -170,8 +170,6 @@ class ADBClient:
         self.run(["forward", "--remove", f"tcp:{local_port}"])
 
     def ensure_bridge_forward(self, local_port: int = 8766) -> bool:
-        # Fleet discovery already supplied this ADBClient with a concrete connected serial. Avoid
-        # re-running the entire device inventory for every phone just to create its isolated port.
         if not self.serial:
             raise ADBError("A device serial is required to create an isolated forward")
         device_serial = self.serial
@@ -211,6 +209,16 @@ class ADBClient:
             capture("pid", lambda: self.shell("pidof", package, timeout=4).strip()),
             capture("exit_info", lambda: self.shell("dumpsys", "activity", "exit-info", package, timeout=8)),
             capture("crash_logcat", lambda: self.run(["logcat", "-b", "crash", "-d", "-v", "threadtime", "-t", "200"], timeout=8)),
+            # Beta APKs are debuggable, so run-as can retrieve Cyclone's exact local journal even
+            # after the process died. Production builds still retain exit-info + crash logcat above.
+            capture(
+                "cyclone_process_journal",
+                lambda: self.shell("run-as", package, "cat", "files/cyclone-diagnostics/process-crash-journal.log", timeout=5),
+            ),
+            capture(
+                "cyclone_process_journal_previous",
+                lambda: self.shell("run-as", package, "cat", "files/cyclone-diagnostics/process-crash-journal.log.previous", timeout=5),
+            ),
             capture("enabled_accessibility_services", lambda: self.shell("settings", "get", "secure", "enabled_accessibility_services", timeout=4)),
             capture("accessibility_enabled", lambda: self.shell("settings", "get", "secure", "accessibility_enabled", timeout=4)),
         ]
