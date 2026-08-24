@@ -31,4 +31,4 @@ Start the Tauri development shell after Rust/Tauri prerequisites are installed:
 npm run tauri dev
 ```
 
-This package intentionally contains no ADB implementation, pairing cryptography, MCP configuration, Device Gateway backend implementation, or installer publishing logic.
+This package intentionally contains no ADB implementation, pairing cryptography, Device Gateway backend implementation, or installer publishing logic. It does own the user-facing one-click connector that asks the packaged `CycloneAgentMCP.exe` sidecar to update and verify Codex's shared MCP configuration. Gateway credentials remain outside the UI and Codex configuration.

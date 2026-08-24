@@ -1,4 +1,5 @@
 import type {
+  ConnectorActionResult,
   ConnectorCard,
   ControlResult,
   DesktopDevice,
@@ -62,12 +63,25 @@ export class MockDesktopService implements DesktopService {
 
   async listConnectors(): Promise<ConnectorCard[]> {
     return [
-      { id: "codex", name: "Codex", description: "Use Cyclone phones from Codex.", state: "READY_TO_CONNECT", actionLabel: "Connect" },
+      {
+        id: "codex", name: "Codex", description: "Use Cyclone phones from Codex.", state: "READY_TO_CONNECT", actionLabel: "Connect",
+        detected: true, configured: false, gatewayState: "READY", gatewayReachable: true,
+        readyDeviceCount: 3, deviceCount: 4, toolCount: 14, transport: "stdio", approvalMode: "writes",
+      },
       { id: "deepseek-mcp", name: "DeepSeek / MCP harness", description: "Connect an MCP-capable reasoning harness.", state: "CONNECTED" },
       { id: "generic-mcp", name: "Generic MCP", description: "Use a compatible MCP client.", state: "NOT_INSTALLED", actionLabel: "Set up" },
     ];
   }
-  async runConnectorAction(_connectorId: string, _action: "connect" | "install" | "repair"): Promise<void> { return; }
+  async runConnectorAction(_connectorId: string, _action: "connect" | "install" | "repair"): Promise<ConnectorActionResult> {
+    return {
+      ok: true,
+      changed: true,
+      restartRequired: true,
+      message: "Codex is connected to Cyclone with 3 ready phones. Restart Codex once, then use the Cyclone phone tools.",
+      readyDeviceCount: 3,
+      toolCount: 14,
+    };
+  }
   async getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return {
       backendReachable: true,

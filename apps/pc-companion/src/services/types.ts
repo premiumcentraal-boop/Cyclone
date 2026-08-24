@@ -86,6 +86,26 @@ export interface ConnectorCard {
   description: string;
   state: ConnectorState;
   actionLabel?: string;
+  detected?: boolean;
+  configured?: boolean;
+  configPath?: string;
+  gatewayState?: "READY" | "NO_READY_PHONE" | "OFFLINE" | string;
+  gatewayReachable?: boolean;
+  readyDeviceCount?: number;
+  deviceCount?: number;
+  toolCount?: number;
+  transport?: string;
+  approvalMode?: string;
+}
+
+export interface ConnectorActionResult {
+  ok: boolean;
+  changed?: boolean;
+  restartRequired?: boolean;
+  message: string;
+  path?: string;
+  readyDeviceCount?: number;
+  toolCount?: number;
 }
 
 export interface DesktopDiscoveryStatus {
@@ -149,6 +169,6 @@ export interface DesktopService {
   getVideoProtocols(): string[];
   getFallbackFrameUrl(deviceId: string, profile: StreamProfile): string;
   listConnectors(): Promise<ConnectorCard[]>;
-  runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<void>;
+  runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<ConnectorActionResult>;
   getRuntimeStatus(): Promise<DesktopRuntimeStatus>;
 }

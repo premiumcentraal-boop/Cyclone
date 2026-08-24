@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ConnectorActionResult,
   ConnectorCard,
   ControlResult,
   DesktopDevice,
@@ -21,6 +22,42 @@ type ConnectorStatusPayload = {
   codex?: string;
   deepseek_harness?: string;
   generic_mcp?: string;
+  details?: {
+    codex?: {
+      state?: string;
+      detected?: boolean;
+      configured?: boolean;
+      config_path?: string;
+      server_ready?: boolean;
+      approval_mode?: string;
+    };
+    gateway?: {
+      state?: string;
+      reachable?: boolean;
+      ready_device_count?: number;
+      device_count?: number;
+    };
+    mcp?: {
+      server?: string;
+      tool_count?: number;
+      transport?: string;
+    };
+  };
+};
+
+type ConnectorActionPayload = {
+  changed?: boolean;
+  restart_required?: boolean;
+  message?: string;
+  path?: string;
+  verification?: {
+    ok?: boolean;
+    tools?: string[];
+    gateway?: {
+      reachable?: boolean;
+      ready_device_count?: number;
+    };
+  };
 };
 
 /** The single real-backend adapter used by the Cyclone PC Companion UI. */
@@ -180,8 +217,28 @@ export class HttpDesktopService implements DesktopService {
   async listConnectors(): Promise<ConnectorCard[]> {
     try {
       const status = await invoke<ConnectorStatusPayload>("connector_status");
+      const codexDetails = status.details?.codex;
+      const gatewayDetails = status.details?.gateway;
+      const mcpDetails = status.details?.mcp;
+      const codexConnector = connector("codex", "Codex", "Give Codex instant, typed access to every paired Cyclone phone.", status.codex);
+      if (codexConnector.state === "CONNECTED" && gatewayDetails?.reachable === false) {
+        codexConnector.state = "NEEDS_ATTENTION";
+        codexConnector.actionLabel = "Recheck";
+      }
       return [
-        connector("codex", "Codex", "Use your Cyclone phones directly from Codex.", status.codex),
+        {
+          ...codexConnector,
+          detected: codexDetails?.detected,
+          configured: codexDetails?.configured,
+          configPath: codexDetails?.config_path,
+          gatewayState: gatewayDetails?.state,
+          gatewayReachable: gatewayDetails?.reachable,
+          readyDeviceCount: gatewayDetails?.ready_device_count,
+          deviceCount: gatewayDetails?.device_count,
+          toolCount: mcpDetails?.tool_count,
+          transport: mcpDetails?.transport,
+          approvalMode: codexDetails?.approval_mode,
+        },
         connector("deepseek-mcp", "DeepSeek / MCP harness", "Use Cyclone from OpenCode or another DeepSeek-powered MCP harness.", status.deepseek_harness),
         connector("generic-mcp", "Generic MCP", "Connect any compatible local MCP client.", status.generic_mcp),
       ];
@@ -194,8 +251,18 @@ export class HttpDesktopService implements DesktopService {
     }
   }
 
-  async runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<void> {
-    await invoke("connector_action", { connectorId, action });
+  async runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<ConnectorActionResult> {
+    const value = await invoke<ConnectorActionPayload>("connector_action", { connectorId, action });
+    const gateway = value.verification?.gateway;
+    return {
+      ok: value.verification?.ok !== false,
+      changed: value.changed,
+      restartRequired: value.restart_required,
+      message: value.message ?? "Cyclone connection updated.",
+      path: value.path,
+      readyDeviceCount: gateway?.ready_device_count,
+      toolCount: value.verification?.tools?.length,
+    };
   }
 
   getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
@@ -246,7 +313,7 @@ function connector(id: ConnectorCard["id"], name: string, description: string, r
     name,
     description,
     state,
-    actionLabel: state === "CONNECTED" ? undefined : state === "NOT_INSTALLED" ? "Install harness" : "Connect",
+    actionLabel: state === "CONNECTED" ? "Recheck" : state === "NOT_INSTALLED" ? "Prepare connection" : "Connect",
   };
 }
 

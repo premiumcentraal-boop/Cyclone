@@ -5,6 +5,8 @@ import json
 import os
 import shutil
 import sys
+import tomllib
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,9 +52,18 @@ def connect(host: str, *, dry_run: bool = False, executable: str | None = None) 
     if host == "codex":
         path = codex_config_path()
         snippet = codex_toml(server.command, server.args)
+        changed = _codex_candidate(path, snippet) != (path.read_text(encoding="utf-8") if path.exists() else "")
         if not dry_run:
-            _write_codex_block(path, snippet)
-        return {"host": host, "installed": host_installed(host), "path": str(path), "dry_run": dry_run, "configuration": snippet}
+            changed = _write_codex_block(path, snippet)
+        return {
+            "host": host,
+            "installed": host_installed(host),
+            "path": str(path),
+            "dry_run": dry_run,
+            "changed": changed,
+            "restart_required": changed and not dry_run,
+            "configuration": snippet,
+        }
     if host == "opencode":
         path = opencode_config_path()
         profile = opencode_profile(server.command, server.args)
@@ -76,7 +87,11 @@ def disconnect(host: str, *, dry_run: bool = False) -> dict[str, Any]:
         before = path.read_text(encoding="utf-8") if path.exists() else ""
         after = _remove_codex_block(before)
         if not dry_run and before != after:
-            path.write_text(after, encoding="utf-8")
+            try:
+                tomllib.loads(after)
+            except tomllib.TOMLDecodeError as exc:
+                raise ValueError(f"Codex configuration is not valid TOML; Cyclone left it unchanged: {exc}") from exc
+            _write_text_atomic(path, after)
         return {"host": host, "path": str(path), "dry_run": dry_run, "changed": before != after}
     if host == "opencode":
         return _disconnect_json(host, opencode_config_path(), ("mcp", "servers", SERVER_KEY), dry_run)
@@ -89,6 +104,16 @@ def disconnect(host: str, *, dry_run: bool = False) -> dict[str, Any]:
 
 def host_installed(host: str) -> bool:
     executable = {"codex": "codex", "opencode": "opencode", "copilot": "copilot"}.get(host)
+    if host == "codex":
+        if shutil.which("codex") is not None or codex_config_path().parent.exists():
+            return True
+        local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+        packages = Path(local_app_data) / "Packages" if local_app_data else None
+        if packages and packages.is_dir():
+            try:
+                return any(packages.glob("OpenAI.Codex_*"))
+            except OSError:
+                return False
     return True if executable is None else shutil.which(executable) is not None
 
 
@@ -123,12 +148,24 @@ def verify_tools_list(executable: str | None = None) -> dict[str, Any]:
     }
 
 
-def _write_codex_block(path: Path, snippet: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _codex_candidate(path: Path, snippet: str) -> str:
     current = path.read_text(encoding="utf-8") if path.exists() else ""
     without = _remove_codex_block(current).rstrip()
-    text = (without + "\n\n" if without else "") + snippet
-    path.write_text(text, encoding="utf-8")
+    return (without + "\n\n" if without else "") + snippet
+
+
+def _write_codex_block(path: Path, snippet: str) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    current = path.read_text(encoding="utf-8") if path.exists() else ""
+    text = _codex_candidate(path, snippet)
+    if text == current:
+        return False
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"Codex configuration is not valid TOML; Cyclone left it unchanged: {exc}") from exc
+    _write_text_atomic(path, text)
+    return True
 
 
 def _remove_codex_block(text: str) -> str:
@@ -144,6 +181,18 @@ def _remove_codex_block(text: str) -> str:
     else:
         end += 1
     return (text[:start] + text[end:]).strip() + ("\n" if text[:start] + text[end:] else "")
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _merge_json(path: Path, overlay: dict[str, Any]) -> None:

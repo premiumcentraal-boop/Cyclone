@@ -4,6 +4,21 @@
 
 Primary transport is MCP STDIO. No LAN MCP listener is enabled. The V1 package intentionally does not expose an HTTP MCP mode until a separate loopback authentication design is integrated and tested.
 
+## One-click Codex connection
+
+The PC Companion's **AI connections** page is the normal setup path:
+
+1. Keep Cyclone PC Companion open and pair at least one phone.
+2. Open **AI connections** and select **Connect Codex now**.
+3. Cyclone atomically adds its managed `mcp_servers.cyclone-phone` block to the user's shared Codex `config.toml` and launches the packaged MCP server to verify the exact tool inventory.
+4. Restart Codex once, then open a new task and ask it to list the connected Cyclone phones.
+
+The page reports Gateway reachability, ready-phone count, configuration state, and tool count. Re-running **Verify connection** is safe and idempotent. Cyclone never rewrites unrelated Codex settings; malformed existing TOML fails without changing the file.
+
+The generated Codex block uses `default_tools_approval_mode = "writes"`: read-only inventory, observation, page, screenshot, and diagnostic tools are available immediately, while phone mutations and teaching lifecycle tools require Codex approval. Android policy and the canonical phone executor remain the final authority.
+
+If PC Companion restarts while Codex still has the MCP subprocess open, the subprocess rejects the stale loopback session, reloads the current DPAPI-protected port/token record, clears observation/capability caches, and retries once. It never falls back to LAN, unauthenticated access, or a generic command channel.
+
 ## Device selection
 
 Call `phone_list` to inspect safe device readiness. A phone-scoped tool may omit `device_id` only when exactly one device is READY. If more than one is READY, Cyclone returns `DEVICE_SELECTION_REQUIRED` and a safe list of device IDs; the agent must choose explicitly.

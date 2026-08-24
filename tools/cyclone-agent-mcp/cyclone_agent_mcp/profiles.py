@@ -17,6 +17,11 @@ def codex_toml(command: str, args: list[str]) -> str:
         f"command = {q(command)}",
         f"args = [{', '.join(q(item) for item in args)}]",
         "enabled = true",
+        "required = false",
+        "startup_timeout_sec = 20",
+        "tool_timeout_sec = 120",
+        'default_tools_approval_mode = "writes"',
+        "# Read-only phone inspection is immediate; Codex asks before mutating tools.",
         "# Gateway credentials are inherited at runtime; no token is stored in TOML.",
         "# END CYCLONE AGENT MCP",
     ]

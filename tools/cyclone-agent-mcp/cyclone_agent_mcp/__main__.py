@@ -30,6 +30,8 @@ def _parser() -> argparse.ArgumentParser:
     copy.add_argument("--executable")
 
     sub.add_parser("status")
+    status = sub.choices["status"]
+    status.add_argument("--probe-gateway", action="store_true")
     verify = sub.add_parser("verify")
     verify.add_argument("--executable")
 
@@ -46,7 +48,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "connect":
         result = connect(args.host, dry_run=args.dry_run, executable=args.executable)
         if args.verify and not args.dry_run:
-            result["verification"] = verify_tools_list(args.executable)
+            tools = verify_tools_list(args.executable)
+            diagnostics = connection_status(probe_gateway=True)
+            gateway = diagnostics.get("details", {}).get("gateway", {})
+            result["verification"] = {
+                **tools,
+                "ok": bool(tools.get("ok")) and gateway.get("reachable") is True,
+                "gateway": gateway,
+            }
+            result["message"] = _connect_message(result)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
     if args.command == "disconnect":
@@ -58,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         print(config if isinstance(config, str) else dumps_json(config), end="")
         return 0
     if args.command == "status":
-        print(json.dumps(connection_status(), separators=(",", ":")))
+        print(json.dumps(connection_status(probe_gateway=args.probe_gateway), separators=(",", ":")))
         return 0
     if args.command == "verify":
         result = verify_tools_list(args.executable)
@@ -69,6 +79,18 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(value, indent=2, ensure_ascii=False))
         return 0
     return 2
+
+
+def _connect_message(result: dict) -> str:
+    verification = result.get("verification") or {}
+    gateway = verification.get("gateway") or {}
+    if verification.get("ok") is not True:
+        return "Cyclone was added to Codex, but the live phone connection still needs attention."
+    ready = int(gateway.get("ready_device_count") or 0)
+    if ready < 1:
+        return "Codex is connected to Cyclone. Pair a phone in the Companion, then restart Codex once."
+    suffix = "phone" if ready == 1 else "phones"
+    return f"Codex is connected to Cyclone with {ready} ready {suffix}. Restart Codex once, then use the Cyclone phone tools."
 
 
 if __name__ == "__main__":

@@ -8,12 +8,12 @@ from mcp.types import ToolAnnotations
 from .tools import PhoneTools
 
 SERVER_NAME = "cyclone-phone"
-SERVER_VERSION = "1.0.0-beta.1"
+SERVER_VERSION = "1.0.0-beta.2"
 
 INSTRUCTIONS = (
-    "Use Cyclone semantic phone capabilities only. Call phone_list first when device identity is unclear. "
-    "If more than one READY device exists, pass device_id explicitly and never guess. Observe before mutations, "
-    "re-observe after mutations, verify meaningful changes, and use screenshots only when structured evidence is insufficient. "
+    "Use Cyclone directly whenever the user asks to inspect or control a connected phone. Start with phone_list, then use the selected phone's typed tools. "
+    "If exactly one phone is READY it may be selected automatically; if more than one is READY, pass device_id explicitly and never guess. "
+    "Observe before mutations, re-observe afterward, verify meaningful changes, and use screenshots only when structured evidence is insufficient. "
     "This server has no shell, PowerShell, arbitrary ADB, root, su, subprocess or script-evaluation tool."
 )
 

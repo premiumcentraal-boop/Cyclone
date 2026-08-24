@@ -71,7 +71,7 @@ async fn connector_status(app: tauri::AppHandle) -> Result<serde_json::Value, St
         .shell()
         .sidecar("CycloneAgentMCP")
         .map_err(|error| error.to_string())?
-        .arg("status")
+        .args(["status", "--probe-gateway"])
         .output()
         .await
         .map_err(|error| error.to_string())?;
@@ -126,7 +126,10 @@ fn strong_token() -> String {
 
 fn reserve_loopback_port() -> Result<u16, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|error| error.to_string())?;
-    let port = listener.local_addr().map_err(|error| error.to_string())?.port();
+    let port = listener
+        .local_addr()
+        .map_err(|error| error.to_string())?
+        .port();
     drop(listener);
     Ok(port)
 }
@@ -161,7 +164,8 @@ pub fn run() {
     cleanup_legacy_gateway_processes();
 
     let token = strong_token();
-    let gateway_port = reserve_loopback_port().expect("Cyclone could not reserve a local Gateway port");
+    let gateway_port =
+        reserve_loopback_port().expect("Cyclone could not reserve a local Gateway port");
     let http_base = format!("http://127.0.0.1:{gateway_port}");
     let ws_base = format!("ws://127.0.0.1:{gateway_port}");
 
@@ -187,7 +191,10 @@ pub fn run() {
                 .env("CYCLONE_DEVICE_GATEWAY_TOKEN", &runtime_token)
                 .env("CYCLONE_DEVICE_GATEWAY_URL", &runtime_http_base)
                 .env("CYCLONE_DEVICE_GATEWAY_PORT", &runtime_port)
-                .env("CYCLONE_DEVICE_GATEWAY_RUNTIME", runtime_dir.to_string_lossy().to_string())
+                .env(
+                    "CYCLONE_DEVICE_GATEWAY_RUNTIME",
+                    runtime_dir.to_string_lossy().to_string(),
+                )
                 .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1")
                 .env("CYCLONE_PC_PARENT_PID", &parent_pid);
             let (mut events, _child) = command.spawn()?;

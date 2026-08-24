@@ -48,20 +48,63 @@ class GatewayClient:
         self.base_url = (base_url or os.getenv("CYCLONE_DEVICE_GATEWAY_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.token = token if token is not None else os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "")
         self.timeout = timeout
-        parsed = urllib.parse.urlparse(self.base_url)
-        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
-            raise GatewayError("Gateway URL must use loopback HTTP")
+        self._validate_loopback(self.base_url)
         self._last_observation_id: dict[str, str] = {}
         self._capability_ids: dict[str, frozenset[str]] = {}
         self._capability_discovery: dict[str, dict[str, Any]] = {}
         self._legacy_device_id: str | None = None
 
+    @staticmethod
+    def _validate_loopback(base_url: str) -> None:
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise GatewayError("Gateway URL must use loopback HTTP")
+
+    def _reload_secure_connection(self) -> bool:
+        try:
+            from secure_gateway_token import load_connection
+        except ImportError:
+            return False
+        try:
+            connection = load_connection()
+        except Exception:
+            return False
+        if not isinstance(connection, dict):
+            return False
+        token = str(connection.get("token") or "").strip()
+        base_url = str(connection.get("url") or "").strip().rstrip("/")
+        if not token or not base_url:
+            return False
+        self._validate_loopback(base_url)
+        changed = token != self.token or base_url != self.base_url
+        self.token = token
+        self.base_url = base_url
+        return changed
+
     def _request(self, method: str, path: str, payload: Any | None = None) -> Any:
-        if not self.token:
-            raise GatewayError(
-                "Cyclone Device Gateway credential is unavailable",
-                body={"error": {"code": "AUTH_REJECTED", "layer": "PROTOCOL"}},
+        try:
+            return self._request_once(method, path, payload)
+        except GatewayError as exc:
+            recoverable = exc.status in {401, 403} or (
+                isinstance(exc.body, dict)
+                and isinstance(exc.body.get("error"), dict)
+                and exc.body["error"].get("code") in {"AUTH_REJECTED", "DEVICE_DISCONNECTED"}
             )
+            if recoverable and self._reload_secure_connection():
+                self._capability_ids.clear()
+                self._capability_discovery.clear()
+                self._last_observation_id.clear()
+                return self._request_once(method, path, payload)
+            raise
+
+    def _request_once(self, method: str, path: str, payload: Any | None = None) -> Any:
+        if not self.token:
+            self._reload_secure_connection()
+            if not self.token:
+                raise GatewayError(
+                    "Cyclone Device Gateway credential is unavailable",
+                    body={"error": {"code": "AUTH_REJECTED", "layer": "PROTOCOL"}},
+                )
         url = f"{self.base_url}{path}"
         data = None
         headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
