@@ -12,9 +12,9 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 23
-        // Cyclone V3.1 live USB diagnostics + pairing crash isolation beta.
-        versionName = "3.1.0-beta.5"
+        versionCode = 24
+        // Cyclone V3.1 gateway socket crash fix + live USB diagnostics beta.
+        versionName = "3.1.0-beta.6"
     }
 
     buildTypes {
