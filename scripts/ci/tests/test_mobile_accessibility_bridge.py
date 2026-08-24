@@ -135,6 +135,14 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         self.assertIn("gateway.dispatch.boundary", runtime)
         self.assertIn("VirtualMachineError", runtime)
 
+    def test_gateway_socket_worker_avoids_android_isclosed_crash_and_contains_transport_failures(self):
+        source = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/gateway/GatewaySocketServer.kt").read_text(encoding="utf-8")
+        self.assertNotIn("socket.isClosed", source)
+        self.assertIn("while (running.get())", source)
+        self.assertIn("catch (error: Throwable)", source)
+        self.assertIn("rethrowFatal(error)", source)
+        self.assertIn("VirtualMachineError", source)
+
     def test_windows_release_hides_all_console_windows_without_breaking_agent_stdio(self):
         main = (ROOT / "apps/pc-companion/src-tauri/src/main.rs").read_text(encoding="utf-8")
         pc_runtime = (ROOT / "packaging/pc-companion/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
