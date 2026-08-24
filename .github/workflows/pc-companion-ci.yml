@@ -49,10 +49,12 @@ jobs:
       - name: Publish pending commit status
         shell: bash
         run: |
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             -f state='pending' \
             -f context='cyclone/paired-beta-release' \
-            -f description='Windows + Android beta gates are running'
+            -f description='Windows + Android beta gates are running' \
+            -f target_url="$RUN_URL"
 
   windows-companion:
     name: Windows PC Companion
@@ -252,7 +254,12 @@ jobs:
           if [[ "$WINDOWS_RESULT" == 'success' && "$MOBILE_RESULT" == 'success' && "$PUBLISH_RESULT" == 'success' ]]; then
             STATE='success'
           fi
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$WINDOWS_RESULT" -f context='cyclone/windows-companion' -f description="Windows PC Companion: $WINDOWS_RESULT" -f target_url="$RUN_URL"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$MOBILE_RESULT" -f context='cyclone/mobile-companion' -f description="Matching Cyclone Mobile: $MOBILE_RESULT" -f target_url="$RUN_URL"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$PUBLISH_RESULT" -f context='cyclone/publish-beta' -f description="Combined prerelease: $PUBLISH_RESULT" -f target_url="$RUN_URL"
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             -f state="$STATE" \
             -f context='cyclone/paired-beta-release' \
-            -f description="${DESCRIPTION:0:140}"
+            -f description="${DESCRIPTION:0:140}" \
+            -f target_url="$RUN_URL"
