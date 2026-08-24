@@ -2,6 +2,10 @@
 
 Tauri 2 + TypeScript desktop presentation shell for controlling one or many Cyclone phones.
 
+## Beta 1.0.0-beta.10
+
+The **AI connections** page now provides the supported one-click Codex setup. It configures the packaged Cyclone MCP server without copying a Gateway token, reports live Gateway/phone/tool readiness, and recovers a long-running Codex session after the Companion rotates its protected local connection. Restart Codex once after the first connection.
+
 ## Development
 
 ```bash
