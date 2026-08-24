@@ -18,7 +18,7 @@ import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.gateway.GatewayDesktopPairingManager
 import com.cyclone.mobile.infrastructure.v31.CycloneV31ProductIntegration
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
-import com.cyclone.mobile.ui.CycloneMobileV292App
+import com.cyclone.mobile.ui.v32.CycloneMobileV32App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
         migrateModelDefault()
         migrateCanonicalLearning()
         TaskResultNotifierV292.ensureChannel(this)
-        setContent { CycloneMobileV292App() }
+        setContent { CycloneMobileV32App() }
         handlePairingIntent(intent)
     }
 

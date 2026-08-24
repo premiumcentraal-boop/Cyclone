@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Cyclone Mobile V3.2 overview</title>
+  <desc id="desc">Three phone screens show the calm pastel Home page, readable routine list and When Then Check routine builder.</desc>
+  <defs>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#1a2448" flood-opacity="0.18"/>
+    </filter>
+    <style>
+      .label { font: 700 24px Arial, sans-serif; fill: #182038; }
+      .title { font: 700 19px Arial, sans-serif; fill: #182038; }
+      .body { font: 400 12px Arial, sans-serif; fill: #69708a; }
+      .small { font: 700 10px Arial, sans-serif; fill: #69708a; letter-spacing: .7px; }
+      .white { fill: #ffffff; }
+      .nav { font: 600 9px Arial, sans-serif; fill: #69708a; }
+      .button { font: 700 11px Arial, sans-serif; fill: #ffffff; }
+    </style>
+  </defs>
+  <rect width="1200" height="760" fill="#eef0f9"/>
+  <circle cx="107" cy="88" r="92" fill="#efcbff" opacity=".48"/>
+  <circle cx="1118" cy="672" r="136" fill="#cff4df" opacity=".54"/>
+  <path d="M0 650 C230 570 350 760 610 670 S980 570 1200 630 V760 H0Z" fill="#dde3ff" opacity=".65"/>
+
+  <text x="196" y="62" text-anchor="middle" class="label">Home</text>
+  <text x="600" y="62" text-anchor="middle" class="label">Routines</text>
+  <text x="1004" y="62" text-anchor="middle" class="label">Create routine</text>
+
+  <!-- Home phone -->
+  <g filter="url(#shadow)">
+    <rect x="62" y="88" width="268" height="592" rx="44" fill="#141b33"/>
+    <rect x="72" y="98" width="248" height="572" rx="36" fill="#f5f6fc"/>
+  </g>
+  <rect x="151" y="108" width="90" height="22" rx="11" fill="#141b33"/>
+  <circle cx="91" cy="154" r="19" fill="#6675e8"/><text x="91" y="160" text-anchor="middle" class="button">C</text>
+  <text x="119" y="151" class="title">Home</text><text x="119" y="167" class="small">CYCLONE V3.2</text>
+  <rect x="260" y="143" width="42" height="24" rx="12" fill="#cff4df"/><circle cx="273" cy="155" r="4" fill="#397b67"/><text x="281" y="159" class="small" fill="#153b30">READY</text>
+  <text x="90" y="211" class="small" fill="#6675e8">YOUR PHONE, SIMPLIFIED</text>
+  <text x="90" y="239" class="title">Good morning</text>
+  <text x="90" y="258" class="body">Automate the repetitive parts.</text>
+  <rect x="90" y="280" width="212" height="162" rx="28" fill="#efcbff"/>
+  <circle cx="118" cy="312" r="20" fill="#3a1848" opacity=".12"/><text x="118" y="318" text-anchor="middle" class="title">✦</text>
+  <text x="108" y="350" class="title" style="font: 700 14px Arial">What should Cyclone do?</text>
+  <text x="108" y="370" class="body" fill="#3a1848">Describe a phone task or show it once.</text>
+  <rect x="108" y="392" width="86" height="33" rx="15" fill="#6675e8"/><text x="151" y="413" text-anchor="middle" class="button">Ask Cyclone</text>
+  <rect x="202" y="392" width="82" height="33" rx="15" fill="#ffffff" opacity=".72"/><text x="243" y="413" text-anchor="middle" class="small" fill="#3a1848">TEACH</text>
+  <text x="90" y="477" class="title">Your routines</text><text x="273" y="476" class="small" fill="#6675e8">SEE ALL</text>
+  <rect x="90" y="496" width="100" height="105" rx="23" fill="#cff4df"/>
+  <circle cx="111" cy="518" r="13" fill="#153b30" opacity=".12"/><text x="111" y="522" text-anchor="middle" class="small">⚡</text>
+  <text x="103" y="555" class="body" fill="#153b30">Morning check-in</text><text x="103" y="576" class="small" fill="#397b67">3 ACTIONS</text>
+  <rect x="202" y="496" width="100" height="105" rx="23" fill="#cdeaff"/>
+  <circle cx="223" cy="518" r="13" fill="#14364b" opacity=".12"/><text x="223" y="522" text-anchor="middle" class="small">⚡</text>
+  <text x="215" y="555" class="body" fill="#14364b">Focus mode</text><text x="215" y="576" class="small" fill="#294d64">2 ACTIONS</text>
+  <rect x="72" y="620" width="248" height="50" rx="0" fill="#ffffff"/><text x="93" y="650" class="nav">⌂  HOME</text><text x="151" y="650" class="nav">TEACH</text><circle cx="198" cy="644" r="18" fill="#6675e8"/><text x="198" y="649" text-anchor="middle" class="white">✦</text><text x="230" y="650" class="nav">ROUTINES</text><text x="287" y="650" class="nav">BRAIN</text>
+
+  <!-- Routines phone -->
+  <g filter="url(#shadow)">
+    <rect x="466" y="88" width="268" height="592" rx="44" fill="#141b33"/>
+    <rect x="476" y="98" width="248" height="572" rx="36" fill="#f5f6fc"/>
+  </g>
+  <rect x="555" y="108" width="90" height="22" rx="11" fill="#141b33"/>
+  <circle cx="495" cy="154" r="19" fill="#6675e8"/><text x="495" y="160" text-anchor="middle" class="button">C</text>
+  <text x="523" y="151" class="title">Routines</text><text x="523" y="167" class="small">CYCLONE V3.2</text>
+  <text x="494" y="211" class="small" fill="#6675e8">WHEN → THEN → CHECK</text>
+  <text x="494" y="239" class="title">Routines</text>
+  <text x="494" y="258" class="body">Easy to read, review and stop.</text>
+  <rect x="494" y="278" width="212" height="40" rx="18" fill="#eef0fa"/>
+  <rect x="498" y="282" width="105" height="32" rx="15" fill="#6675e8"/><text x="551" y="302" text-anchor="middle" class="button">Automations</text><text x="655" y="302" text-anchor="middle" class="small">ONE TAP</text>
+  <rect x="494" y="338" width="212" height="112" rx="26" fill="#cff4df"/>
+  <circle cx="521" cy="369" r="18" fill="#153b30" opacity=".12"/><text x="521" y="374" text-anchor="middle" class="small">⚡</text>
+  <text x="550" y="367" class="title" style="font: 700 15px Arial">Morning prep</text><text x="550" y="385" class="body" fill="#153b30">At 08:00 every day</text>
+  <rect x="659" y="353" width="29" height="17" rx="9" fill="#397b67"/><circle cx="679" cy="361.5" r="7" fill="#ffffff"/>
+  <text x="512" y="425" class="small" fill="#153b30">3 ACTIONS</text><text x="674" y="425" class="small" fill="#153b30">ON</text>
+  <rect x="494" y="464" width="212" height="112" rx="26" fill="#cdeaff"/>
+  <circle cx="521" cy="495" r="18" fill="#14364b" opacity=".12"/><text x="521" y="500" text-anchor="middle" class="small">⚡</text>
+  <text x="550" y="493" class="title" style="font: 700 15px Arial">Save receipts</text><text x="550" y="511" class="body" fill="#14364b">Notification from Mail</text>
+  <rect x="659" y="479" width="29" height="17" rx="9" fill="#69708a" opacity=".35"/><circle cx="668" cy="487.5" r="7" fill="#ffffff"/>
+  <text x="512" y="551" class="small" fill="#14364b">2 ACTIONS</text><text x="668" y="551" class="small" fill="#14364b">OFF</text>
+  <circle cx="683" cy="603" r="25" fill="#6675e8"/><text x="683" y="611" text-anchor="middle" class="white" style="font: 400 25px Arial">+</text>
+  <rect x="476" y="620" width="248" height="50" fill="#ffffff"/><text x="497" y="650" class="nav">HOME</text><text x="555" y="650" class="nav">TEACH</text><circle cx="602" cy="644" r="18" fill="#6675e8"/><text x="602" y="649" text-anchor="middle" class="white">✦</text><text x="632" y="650" class="nav" fill="#6675e8">ROUTINES</text><text x="691" y="650" class="nav">BRAIN</text>
+
+  <!-- Builder phone -->
+  <g filter="url(#shadow)">
+    <rect x="870" y="88" width="268" height="592" rx="44" fill="#141b33"/>
+    <rect x="880" y="98" width="248" height="572" rx="36" fill="#f5f6fc"/>
+  </g>
+  <rect x="959" y="108" width="90" height="22" rx="11" fill="#141b33"/>
+  <text x="902" y="160" class="title">‹</text><text x="929" y="151" class="title">Add actions</text><text x="929" y="168" class="small" fill="#6675e8">3 OF 4 · THEN</text><text x="1097" y="159" class="title">×</text>
+  <rect x="898" y="202" width="212" height="118" rx="28" fill="#cff4df"/>
+  <circle cx="927" cy="231" r="19" fill="#153b30" opacity=".12"/><text x="927" y="236" text-anchor="middle" class="small">☝</text>
+  <text x="916" y="272" class="title">Add the first action</text><text x="916" y="292" class="body" fill="#153b30">Start small. Add more when needed.</text>
+  <text x="898" y="354" class="title">Add an action</text>
+  <rect x="898" y="374" width="212" height="48" rx="17" fill="#ffffff"/><circle cx="924" cy="398" r="15" fill="#dde3ff"/><text x="924" y="403" text-anchor="middle" class="small">▦</text><text x="950" y="402" class="body" fill="#182038">Open an app</text><text x="1085" y="404" class="title" fill="#6675e8">+</text>
+  <rect x="898" y="432" width="212" height="48" rx="17" fill="#ffffff"/><circle cx="924" cy="456" r="15" fill="#dde3ff"/><text x="924" y="461" text-anchor="middle" class="small">⌂</text><text x="950" y="460" class="body" fill="#182038">Go Home</text><text x="1085" y="462" class="title" fill="#6675e8">+</text>
+  <rect x="898" y="490" width="212" height="48" rx="17" fill="#ffffff"/><circle cx="924" cy="514" r="15" fill="#dde3ff"/><text x="924" y="519" text-anchor="middle" class="small">◷</text><text x="950" y="518" class="body" fill="#182038">Wait a moment</text><text x="1085" y="520" class="title" fill="#6675e8">+</text>
+  <rect x="898" y="554" width="212" height="44" rx="18" fill="#6675e8"/><text x="1004" y="581" text-anchor="middle" class="button">Review routine</text>
+  <rect x="880" y="620" width="248" height="50" fill="#ffffff"/><text x="916" y="650" class="small">WHEN</text><path d="M956 645h27" stroke="#b8bdd0" stroke-width="2"/><text x="992" y="650" class="small">THEN</text><path d="M1029 645h27" stroke="#b8bdd0" stroke-width="2"/><text x="1065" y="650" class="small">CHECK</text>
+</svg>

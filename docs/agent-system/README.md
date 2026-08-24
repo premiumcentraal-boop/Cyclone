@@ -17,6 +17,7 @@ Its purpose is to make the repository **self-explanatory**: a fresh agent should
 | [`FAST_RELEASE_PLAYBOOK.md`](FAST_RELEASE_PLAYBOOK.md) | Versioning, testing, packaging and fast-update rules |
 | [`QUALITY_GATES.md`](QUALITY_GATES.md) | Required validation by change type |
 | [`AUTONOMY_ROADMAP.md`](AUTONOMY_ROADMAP.md) | Path from current Cyclone to robust phone autonomy |
+| [`../design/mobile-v32/README.md`](../design/mobile-v32/README.md) | Current mobile UX, visual system and redesign delivery plan |
 | [`DECISIONS.md`](DECISIONS.md) | Architectural decisions agents should not casually reverse |
 | [`project.yaml`](project.yaml) | Compact machine-readable project map |
 | [`infrastructure-v3/README.md`](infrastructure-v3/README.md) | V3 services, owners, health and integration seams |

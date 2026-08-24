@@ -1,0 +1,53 @@
+{
+  "schema": "cyclone.mobile.design-tokens.v1",
+  "name": "Cyclone Calm",
+  "color": {
+    "light": {
+      "background": "#F5F6FC",
+      "surface": "#FFFFFF",
+      "surfaceSoft": "#EEF0FA",
+      "ink": "#182038",
+      "inkMuted": "#69708A",
+      "primary": "#6675E8",
+      "primarySoft": "#DDE3FF",
+      "lilac": "#EFCBFF",
+      "mint": "#CFF4DF",
+      "lemon": "#F4F7B2",
+      "peach": "#FFD8BC",
+      "sky": "#CDEAFF",
+      "danger": "#BA4052",
+      "dangerSoft": "#FFD9DE"
+    },
+    "dark": {
+      "background": "#11172B",
+      "surface": "#1A223A",
+      "surfaceSoft": "#242D49",
+      "ink": "#F5F6FF",
+      "inkMuted": "#B9C0D9",
+      "primary": "#9EA9FF",
+      "primarySoft": "#303C70",
+      "lilac": "#563D69",
+      "mint": "#264E43",
+      "lemon": "#53552E",
+      "peach": "#5B4034",
+      "sky": "#294D64",
+      "danger": "#FFB2BD",
+      "dangerSoft": "#652D3A"
+    }
+  },
+  "radiusDp": {
+    "small": 14,
+    "control": 18,
+    "card": 26,
+    "hero": 32,
+    "pill": 999
+  },
+  "spaceDp": [4, 8, 12, 16, 20, 24, 32],
+  "touchTargetDp": 48,
+  "contentMaxWidthDp": 720,
+  "motionMs": {
+    "quick": 120,
+    "standard": 220,
+    "emphasis": 320
+  }
+}

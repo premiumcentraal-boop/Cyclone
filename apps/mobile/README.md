@@ -1,4 +1,8 @@
-# Cyclone Mobile v0
+# Cyclone Mobile
+
+The current product interface follows the Cyclone V3.2 calm mobile redesign. Read
+[`../../docs/design/mobile-v32/README.md`](../../docs/design/mobile-v32/README.md) before changing
+navigation, routine creation, visual tokens or user-facing automation language.
 
 Cyclone Mobile is the first non-root Android device node for Cyclone. It targets Android 14+ (`minSdk 34`) and deliberately separates **implemented** from **verified on a real device**.
 

@@ -12,6 +12,18 @@ This document describes the current source architecture around the Cyclone Mobil
 - Full PC + Codex Gateway is represented inside the AI experience rather than as a second launcher.
 - User-visible release text is derived from `BuildConfig.VERSION_NAME` through `CycloneRelease`.
 
+## Mobile product experience
+
+`MainActivity` now launches the Cyclone V3.2 calm mobile shell. The canonical UX direction,
+screen hierarchy, visual tokens and staged routine-builder plan live in
+`docs/design/mobile-v32/README.md`.
+
+The shell preserves Home, Teach, AI, Routines/Automations, Brain and Settings while replacing the
+older dense presentation with progressive detail and readable **When → Then → Check** routine
+language. The Phase A builder saves into the existing `AutomationStore` and uses existing typed
+trigger/action contracts; it is not a second automation runtime or phone executor. Rich selector,
+condition, branch and custom verification editing remains a documented follow-up phase.
+
 ## Device control/perception
 
 The app contains `CycloneAccessibilityService` and a canonical `PhoneToolExecutor` path. This is the base capability layer for phone observation and typed actions.
