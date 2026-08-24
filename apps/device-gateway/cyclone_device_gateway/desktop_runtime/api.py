@@ -25,7 +25,7 @@ from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 class PairCompleteBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str
-    pairing_id: str | None = None
+    pairing_id: str = Field(min_length=1, max_length=160)
 
 
 class ManualControlBody(BaseModel):
@@ -162,7 +162,7 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.post("/v1/devices/{device_id}/pair/complete", dependencies=[Depends(auth)])
     @router.post("/v1/devices/{device_id}/pair/confirm", dependencies=[Depends(auth)], include_in_schema=False)
     def pair_complete(device_id: str, body: PairCompleteBody):
-        return _call(lambda: runtime.pairing.complete(device_id, body.code))
+        return _call(lambda: runtime.pairing.complete(device_id, body.pairing_id, body.code))
 
     @router.post("/v1/devices/{device_id}/pair/revoke", dependencies=[Depends(auth)])
     def pair_revoke(device_id: str):

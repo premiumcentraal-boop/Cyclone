@@ -16,6 +16,7 @@ export class MockDesktopService implements DesktopService {
   readonly mode = "mock" as const;
   private devices: DesktopDevice[];
   private pairings = new Map<string, PairBeginResult>();
+  private pairingSequence = 0;
 
   constructor(deviceCount = 4) {
     this.devices = createMockDevices(deviceCount);
@@ -28,14 +29,14 @@ export class MockDesktopService implements DesktopService {
   async pairBegin(deviceId: string): Promise<PairBeginResult> {
     const device = this.requireDevice(deviceId);
     device.state = "PAIRING";
-    const result = { pairingId: `mock-${deviceId}-${Date.now()}`, expiresAtEpochMs: Date.now() + 60_000 };
+    const result = { pairingId: `mock-${deviceId}-${++this.pairingSequence}`, expiresAtEpochMs: Date.now() + 60_000 };
     this.pairings.set(deviceId, result);
     return result;
   }
 
   async pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult> {
     const pairing = this.pairings.get(deviceId);
-    if (!pairing || pairing.pairingId !== pairingId) return { ok: false, reason: "UNAVAILABLE" };
+    if (!pairing || pairing.pairingId !== pairingId) return { ok: false, reason: "STALE_CODE" };
     if (Date.now() >= pairing.expiresAtEpochMs) return { ok: false, reason: "EXPIRED" };
     if (code.toUpperCase() !== MOCK_CODE) return { ok: false, reason: "INVALID_CODE" };
     const device = this.requireDevice(deviceId);

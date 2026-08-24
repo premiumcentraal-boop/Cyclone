@@ -189,8 +189,8 @@ button { color: inherit; }
 .icon-button { width: 32px; height: 32px; border-radius: 10px; background: transparent; font-size: 19px; line-height: 1; }
 .pair-title { margin: 19px 0 5px; font-size: 21px; letter-spacing: -.025em; }
 .pair-copy { margin: 0; color: var(--muted); line-height: 1.45; font-size: 12px; max-width: 320px; }
-.pair-code-boxes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 23px 0 12px; }
-.pair-code-input { min-width: 0; height: 64px; border: 1px solid var(--border-strong); border-radius: 15px; background: #0b0d12; color: #f7f3ff; text-align: center; font-size: 27px; font-weight: 760; text-transform: uppercase; outline: none; caret-color: var(--purple-bright); transition: border-color var(--transition), box-shadow var(--transition), background var(--transition); }
+.pair-code-field { margin: 23px 0 12px; }
+.pair-code-input { width: 100%; min-width: 0; height: 64px; border: 1px solid var(--border-strong); border-radius: 15px; background: #0b0d12; color: #f7f3ff; text-align: center; font-size: 27px; font-weight: 760; letter-spacing: .55em; padding-left: .55em; text-transform: uppercase; outline: none; caret-color: var(--purple-bright); transition: border-color var(--transition), box-shadow var(--transition), background var(--transition); }
 .pair-code-input:focus { border-color: rgba(139,92,246,.58); box-shadow: 0 0 0 3px rgba(139,92,246,.1); background: #0f1018; }
 .pair-message, .pair-countdown { min-height: 17px; color: var(--muted); font-size: 10px; }
 .pair-message.error { color: var(--danger); }

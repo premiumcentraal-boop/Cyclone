@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import threading
 import time
 
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
@@ -39,8 +40,17 @@ class PairingCoordinator:
         self.live_diagnostics = diagnostics
         runtime_root = Path(os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", ".runtime/device-gateway")).expanduser().resolve()
         self.diagnostics_dir = runtime_root / "diagnostics"
+        # FastAPI runs synchronous handlers in worker threads. Serialize pairing operations per
+        # device so repeated code requests cannot install responses out of order, while a slow
+        # phone still cannot block another phone.
+        self._locks_guard = threading.Lock()
+        self._device_locks: dict[str, threading.RLock] = {}
 
     def begin(self, device_id: str) -> dict:
+        with self._device_lock(device_id):
+            return self._begin_locked(device_id)
+
+    def _begin_locked(self, device_id: str) -> dict:
         session = self._pairable(device_id)
         # Normal pairing writes only timeline markers. The live process log is already attached before
         # Pair is pressed; heavy dumpsys snapshots are reserved for an actual failure/process death so
@@ -114,13 +124,26 @@ class PairingCoordinator:
             "diagnosticsMode": live.get("mode") if live else None,
         }
 
-    def complete(self, device_id: str, code: str) -> dict:
+    def complete(self, device_id: str, pairing_id: str, code: str) -> dict:
+        with self._device_lock(device_id):
+            return self._complete_locked(device_id, pairing_id, code)
+
+    def _complete_locked(self, device_id: str, pairing_id: str, code: str) -> dict:
         session = self.fleet.get(device_id)
         pending = session.pending_pairing
         if pending is None:
             raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_REPLAY, "No active pairing challenge exists.")
         if not isinstance(pending, PairingChallenge):
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Pairing state is invalid.")
+        if not pairing_id or pairing_id != pending.challenge_id:
+            self._mark_live(device_id, "pair.complete.stale_challenge")
+            # A stale PC response is not a mistyped phone code. Keep the latest challenge active
+            # and do not consume one of its attempts.
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.PAIRING_REPLAY,
+                "Pairing challenge changed; use the newest code.",
+                retryable=True,
+            )
         now = int(time.time() * 1000)
         if pending.usb_session_id != session.usb_session_id:
             self.fleet.set_pairing(session, None)
@@ -203,6 +226,10 @@ class PairingCoordinator:
         }
 
     def revoke(self, device_id: str) -> dict:
+        with self._device_lock(device_id):
+            return self._revoke_locked(device_id)
+
+    def _revoke_locked(self, device_id: str) -> dict:
         session = self.fleet.get(device_id)
         self._mark_live(device_id, "pair.revoke.pc_request")
         if session.credential:
@@ -216,6 +243,10 @@ class PairingCoordinator:
         self.fleet.set_pairing(session, None)
         session.state = DeviceFleetState.UNPAIRED
         return {"deviceId": device_id, "paired": False, "state": session.state.value}
+
+    def _device_lock(self, device_id: str) -> threading.RLock:
+        with self._locks_guard:
+            return self._device_locks.setdefault(device_id, threading.RLock())
 
     def _verify_post_pair_health(self, session: DeviceSession, credential: str) -> dict:
         latest: dict = {}

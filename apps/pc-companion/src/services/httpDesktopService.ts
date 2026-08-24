@@ -111,17 +111,18 @@ export class HttpDesktopService implements DesktopService {
       }));
   }
 
-  async pairConfirm(deviceId: string, _pairingId: string, code: string): Promise<PairConfirmResult> {
+  async pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult> {
     try {
       const value = await this.request<{ device?: DesktopDevice }>(`/v1/devices/${encodeURIComponent(deviceId)}/pair/complete`, {
         method: "POST",
-        body: JSON.stringify({ code: code.toUpperCase() }),
+        body: JSON.stringify({ pairing_id: pairingId, code: code.trim().toUpperCase() }),
       });
       const device = value.device ?? (await this.listDevices()).find((candidate) => candidate.id === deviceId);
       return device ? { ok: true, device } : { ok: false, reason: "UNAVAILABLE" };
     } catch (error) {
       const codeValue = error instanceof DesktopHttpError ? error.code : "";
       if (codeValue === "PAIRING_EXPIRED") return { ok: false, reason: "EXPIRED" };
+      if (codeValue === "PAIRING_REPLAY" || codeValue === "PAIRING_SESSION_MISMATCH") return { ok: false, reason: "STALE_CODE" };
       if (codeValue === "PAIRING_CODE_REJECTED" || codeValue === "PAIRING_ATTEMPTS_EXCEEDED") return { ok: false, reason: "INVALID_CODE" };
       const message = error instanceof DesktopHttpError ? error.message : undefined;
       return { ok: false, reason: "UNAVAILABLE", message };

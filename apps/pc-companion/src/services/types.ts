@@ -56,7 +56,7 @@ export interface PairBeginResult {
 
 export type PairConfirmResult =
   | { ok: true; device: DesktopDevice }
-  | { ok: false; reason: "INVALID_CODE" | "EXPIRED" | "UNAVAILABLE"; message?: string };
+  | { ok: false; reason: "INVALID_CODE" | "EXPIRED" | "STALE_CODE" | "UNAVAILABLE"; message?: string };
 
 export type DeviceControlAction =
   | { type: "tap"; x: number; y: number }

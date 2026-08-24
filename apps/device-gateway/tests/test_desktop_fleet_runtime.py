@@ -214,28 +214,28 @@ def test_pairing_timeout_replay_attempt_limit_and_token_rotation():
     assert begin["pairing"] is True and "credential" not in begin
     session.pending_pairing.expires_at_ms = int(time.time() * 1000) - 1
     with pytest.raises(DesktopRuntimeError) as err:
-        pairing.complete(session.device_id, "NOVA")
+        pairing.complete(session.device_id, begin["pairingId"], "NOVA")
     assert err.value.code == "PAIRING_EXPIRED"
 
-    pairing.begin(session.device_id)
+    begin = pairing.begin(session.device_id)
     for _ in range(4):
         with pytest.raises(DesktopRuntimeError) as err:
-            pairing.complete(session.device_id, "bad")
+            pairing.complete(session.device_id, begin["pairingId"], "bad")
         assert err.value.code == "PAIRING_CODE_REJECTED"
     with pytest.raises(DesktopRuntimeError) as err:
-        pairing.complete(session.device_id, "bad")
+        pairing.complete(session.device_id, begin["pairingId"], "bad")
     assert err.value.code == "PAIRING_ATTEMPTS_EXCEEDED"
 
-    pairing.begin(session.device_id)
-    first = pairing.complete(session.device_id, "NOVA")
+    begin = pairing.begin(session.device_id)
+    first = pairing.complete(session.device_id, begin["pairingId"], "NOVA")
     first_token = session.credential
     assert first["paired"] is True and first["gatewayHealthy"] is True and "credential" not in first
     assert [op for op, _ in bridge.calls].count("bridge.status") >= 2
     with pytest.raises(DesktopRuntimeError) as err:
-        pairing.complete(session.device_id, "NOVA")
+        pairing.complete(session.device_id, begin["pairingId"], "NOVA")
     assert err.value.code == "PAIRING_REPLAY"
-    pairing.begin(session.device_id)
-    pairing.complete(session.device_id, "NOVA")
+    begin = pairing.begin(session.device_id)
+    pairing.complete(session.device_id, begin["pairingId"], "NOVA")
     assert session.credential != first_token
 
 
@@ -262,10 +262,10 @@ def test_pair_complete_never_marks_ready_until_phone_survives_health_probe_and_w
     pairing = PairingCoordinator(fleet)
     pairing.POST_PAIR_HEALTH_DELAY_SECONDS = 0
     pairing.diagnostics_dir = tmp_path
-    pairing.begin(session.device_id)
+    begin = pairing.begin(session.device_id)
 
     with pytest.raises(DesktopRuntimeError) as err:
-        pairing.complete(session.device_id, "NOVA")
+        pairing.complete(session.device_id, begin["pairingId"], "NOVA")
 
     assert err.value.code == "DEVICE_DISCONNECTED"
     assert session.credential is None
@@ -276,6 +276,23 @@ def test_pair_complete_never_marks_ready_until_phone_survives_health_probe_and_w
     assert "pair.complete.post_health" in text
     assert "FATAL EXCEPTION: cyclone-test" in text
     assert "Diagnostic file:" in err.value.safe_message
+
+
+def test_pairing_confirmation_is_bound_to_latest_challenge_without_consuming_it():
+    fleet, session, _ = paired_session_for_services()
+    session.credential = None
+    pairing = PairingCoordinator(fleet)
+    pairing.POST_PAIR_HEALTH_DELAY_SECONDS = 0
+    first = pairing.begin(session.device_id)
+    latest = pairing.begin(session.device_id)
+
+    with pytest.raises(DesktopRuntimeError) as err:
+        pairing.complete(session.device_id, first["pairingId"], "NOVA")
+    assert err.value.code == "PAIRING_REPLAY"
+    assert session.pending_pairing.challenge_id == latest["pairingId"]
+    assert session.pending_pairing.attempts == 0
+
+    assert pairing.complete(session.device_id, latest["pairingId"], "NOVA")["paired"] is True
 
 
 def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
@@ -358,6 +375,20 @@ def test_frozen_http_and_websocket_routes_are_authenticated(tmp_path):
         assert response.status_code == 200
         assert len(response.json()["devices"]) == 1
         device_id = response.json()["devices"][0]["deviceId"]
+        begin = client.post(f"/v1/devices/{device_id}/pair/begin", headers=headers)
+        assert begin.status_code == 200
+        assert client.post(
+            f"/v1/devices/{device_id}/pair/complete",
+            headers=headers,
+            json={"code": "NOVA"},
+        ).status_code == 422
+        complete = client.post(
+            f"/v1/devices/{device_id}/pair/complete",
+            headers=headers,
+            json={"pairing_id": begin.json()["pairingId"], "code": "nova"},
+        )
+        assert complete.status_code == 200
+        assert complete.json()["paired"] is True
         assert client.post(
             f"/v1/devices/{device_id}/control",
             headers=headers,

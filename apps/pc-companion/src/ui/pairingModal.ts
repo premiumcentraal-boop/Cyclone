@@ -9,11 +9,15 @@ export class PairingModal {
   private pairing: PairBeginResult | null = null;
   private countdownTimer: number | null = null;
   private submitting = false;
-  private inputs: HTMLInputElement[] = [];
+  private beginning = false;
+  private closed = false;
+  private beginSequence = 0;
+  private input: HTMLInputElement | null = null;
   private message = el("div", "pair-message");
   private countdown = el("div", "pair-countdown");
   private diagnostics = el("div", "pair-countdown");
   private submitButton = button("Pair phone", "button primary wide");
+  private retryButton = button("Get a new code", "button ghost wide");
 
   constructor(
     private readonly service: DesktopService,
@@ -28,12 +32,17 @@ export class PairingModal {
   }
 
   async open(): Promise<HTMLElement> {
+    this.closed = false;
     this.render();
-    await this.begin();
+    // Show the dialog immediately. The phone can create its code while the user sees progress,
+    // and focus is applied only after the input has been attached to the document.
+    void this.begin();
     return this.backdrop;
   }
 
   close(): void {
+    this.closed = true;
+    this.beginSequence += 1;
     if (this.countdownTimer != null) window.clearInterval(this.countdownTimer);
     this.countdownTimer = null;
     this.backdrop.remove();
@@ -49,40 +58,52 @@ export class PairingModal {
     header.append(el("div", "pair-device-name", this.device.name), close);
 
     const title = el("h2", "pair-title", "Pair this phone");
-    const copy = el("p", "pair-copy", "Enter the 4-letter code shown in Cyclone on this phone");
-    const boxes = el("div", "pair-code-boxes");
-    this.inputs = Array.from({ length: 4 }, (_, index) => {
-      const input = el("input", "pair-code-input") as HTMLInputElement;
-      input.maxLength = 1;
-      input.autocomplete = "off";
-      input.autocapitalize = "characters";
-      input.spellcheck = false;
-      input.inputMode = "text";
-      input.setAttribute("aria-label", `Pairing code character ${index + 1}`);
-      input.addEventListener("input", () => this.updateFromInput(index, input.value));
-      input.addEventListener("keydown", (event) => this.handleKeyDown(event, index));
-      input.addEventListener("paste", (event) => this.handlePaste(event));
-      boxes.append(input);
-      return input;
+    const copy = el("p", "pair-copy", "Type or paste the 4-letter code shown in Cyclone on this phone. Everything stays inside this window.");
+    const field = el("div", "pair-code-field");
+    this.input = el("input", "pair-code-input") as HTMLInputElement;
+    // Keep enough room for a formatted paste such as "N O-V A"; normalize immediately.
+    this.input.maxLength = 32;
+    this.input.autocomplete = "one-time-code";
+    this.input.autocapitalize = "characters";
+    this.input.spellcheck = false;
+    this.input.inputMode = "text";
+    this.input.placeholder = "ABCD";
+    this.input.setAttribute("aria-label", "Four-letter phone pairing code");
+    this.input.addEventListener("input", () => this.updateCode(this.input?.value ?? ""));
+    this.input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && isPairCodeComplete(this.code)) {
+        event.preventDefault();
+        void this.confirm();
+      }
     });
+    field.append(this.input);
 
     this.submitButton.disabled = true;
     this.submitButton.addEventListener("click", () => void this.confirm());
-    const retry = button("Get a new code", "button ghost wide");
-    retry.addEventListener("click", () => void this.begin());
+    this.retryButton.addEventListener("click", () => void this.begin());
 
-    this.dialog.replaceChildren(header, title, copy, boxes, this.message, this.countdown, this.diagnostics, this.submitButton, retry);
+    this.dialog.replaceChildren(header, title, copy, field, this.message, this.countdown, this.diagnostics, this.submitButton, this.retryButton);
   }
 
   private async begin(): Promise<void> {
+    if (this.closed || this.beginning) return;
+    this.beginning = true;
+    const sequence = ++this.beginSequence;
     this.message.textContent = "Starting secure pairing…";
     this.message.className = "pair-message";
     this.diagnostics.textContent = "Checking live Android diagnostics…";
     this.submitButton.disabled = true;
+    this.retryButton.disabled = true;
+    this.pairing = null;
     this.code = "";
-    this.syncInputs();
+    if (this.input) this.input.value = "";
+    if (this.countdownTimer != null) window.clearInterval(this.countdownTimer);
+    this.countdownTimer = null;
+    this.countdown.textContent = "";
     try {
-      this.pairing = await this.service.pairBegin(this.device.id);
+      const pairing = await this.service.pairBegin(this.device.id);
+      if (this.closed || sequence !== this.beginSequence) return;
+      this.pairing = pairing;
       this.message.textContent = "Code ready";
       if (this.pairing.diagnosticsActive) {
         this.diagnostics.textContent = "● Live crash monitor active before pairing";
@@ -91,57 +112,29 @@ export class PairingModal {
         this.diagnostics.textContent = "Live monitor unavailable · fixed crash capture will still run on failure";
       }
       this.startCountdown();
-      this.inputs[0]?.focus();
+      this.input?.focus();
     } catch {
+      if (this.closed || sequence !== this.beginSequence) return;
       this.pairing = null;
       this.message.textContent = "Pairing isn't available right now. Try again.";
       this.message.classList.add("error");
       this.diagnostics.textContent = "Open Settings & diagnostics to inspect the USB monitor.";
+    } finally {
+      if (!this.closed && sequence === this.beginSequence) {
+        this.beginning = false;
+        this.retryButton.disabled = false;
+      }
     }
   }
 
-  private updateFromInput(index: number, raw: string): void {
-    const char = normalizePairCode(raw).slice(-1);
-    const chars = this.code.padEnd(4, " ").split("");
-    chars[index] = char || " ";
-    this.code = chars.join("").replace(/ /g, "").slice(0, 4);
-    this.syncInputs();
-    if (char && index < 3) this.inputs[index + 1]?.focus();
+  private updateCode(raw: string): void {
+    this.code = normalizePairCode(raw);
+    if (this.input && this.input.value !== this.code) {
+      this.input.value = this.code;
+      this.input.setSelectionRange(this.code.length, this.code.length);
+    }
     this.submitButton.disabled = !isPairCodeComplete(this.code) || !this.pairing || this.submitting;
     this.clearInvalidMessage();
-  }
-
-  private handleKeyDown(event: KeyboardEvent, index: number): void {
-    if (event.key === "Backspace" && !this.inputs[index]?.value && index > 0) {
-      event.preventDefault();
-      const chars = this.code.padEnd(4, " ").split("");
-      chars[index - 1] = " ";
-      this.code = chars.join("").replace(/ /g, "").slice(0, 4);
-      this.syncInputs();
-      this.inputs[index - 1]?.focus();
-    }
-    if (event.key === "Enter" && isPairCodeComplete(this.code)) {
-      event.preventDefault();
-      void this.confirm();
-    }
-  }
-
-  private handlePaste(event: ClipboardEvent): void {
-    event.preventDefault();
-    const pasted = normalizePairCode(event.clipboardData?.getData("text") ?? "");
-    if (!pasted) return;
-    this.code = pasted;
-    this.syncInputs();
-    this.inputs[Math.min(3, pasted.length - 1)]?.focus();
-    this.submitButton.disabled = !isPairCodeComplete(this.code) || !this.pairing;
-    this.clearInvalidMessage();
-  }
-
-  private syncInputs(): void {
-    const chars = this.code.split("");
-    this.inputs.forEach((input, index) => {
-      input.value = chars[index] ?? "";
-    });
   }
 
   private async confirm(): Promise<void> {
@@ -157,8 +150,10 @@ export class PairingModal {
     try {
       const result = await this.service.pairConfirm(this.device.id, this.pairing.pairingId, this.code);
       if (!result.ok) {
+        if (result.reason === "EXPIRED" || result.reason === "STALE_CODE") this.pairing = null;
         if (result.reason === "INVALID_CODE") this.showError("That code doesn't match. Try again.");
         else if (result.reason === "EXPIRED") this.showError("That code expired. Get a new code.");
+        else if (result.reason === "STALE_CODE") this.showError("A newer code was requested. Get a new code and enter the latest one.");
         else this.showError(result.message || "Pairing couldn't finish. The live Android session and crash snapshot were saved; open Settings & diagnostics.");
         return;
       }
@@ -175,7 +170,8 @@ export class PairingModal {
     } finally {
       this.submitting = false;
       this.submitButton.textContent = "Pair phone";
-      this.submitButton.disabled = !isPairCodeComplete(this.code);
+      this.submitButton.disabled = this.closed || !this.pairing || !isPairCodeComplete(this.code)
+        || pairSecondsRemaining(this.pairing.expiresAtEpochMs, Date.now()) === 0;
     }
   }
 
