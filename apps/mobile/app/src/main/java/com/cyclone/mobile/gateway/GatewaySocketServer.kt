@@ -45,6 +45,9 @@ internal class GatewaySocketServer(
                 server?.accept() ?: break
             } catch (_: IOException) {
                 if (!running.get()) break else continue
+            } catch (error: Throwable) {
+                rethrowFatal(error)
+                if (!running.get()) break else continue
             }
             clients += socket
             lastClientConnectedAt = System.currentTimeMillis()
@@ -56,7 +59,12 @@ internal class GatewaySocketServer(
         try {
             val input = socket.inputStream
             val output = socket.outputStream.bufferedWriter(Charsets.UTF_8)
-            while (running.get() && !socket.isClosed) {
+
+            // Do not call LocalSocket.isClosed here. On current Android builds that API can throw
+            // UnsupportedOperationException, and an uncaught exception on this worker kills the
+            // entire Cyclone process. EOF/IOException from the streams is the portable disconnect
+            // signal, while `running` remains the server-owned lifecycle flag.
+            while (running.get()) {
                 val line = try {
                     GatewayLineReader.readUtf8Line(input)
                 } catch (error: GatewayProtocolException) {
@@ -65,10 +73,12 @@ internal class GatewaySocketServer(
                     output.flush()
                     continue
                 } ?: break
+
                 val response = try {
                     onLine(line)
-                } catch (error: Exception) {
-                    GatewayProtocol.error("", "INTERNAL_ERROR", error.message ?: "Gateway request failed").toString()
+                } catch (error: Throwable) {
+                    rethrowFatal(error)
+                    GatewayProtocol.error("", "INTERNAL_ERROR", "Gateway request failed").toString()
                 }
                 output.write(response)
                 output.newLine()
@@ -76,10 +86,18 @@ internal class GatewaySocketServer(
             }
         } catch (_: IOException) {
             // ADB forwards disappear abruptly on USB disconnect; that is a normal lifecycle event.
+        } catch (error: Throwable) {
+            // A client transport must never be able to crash the Android app process. Android's
+            // LocalSocket implementation has device/version-specific RuntimeException behavior.
+            rethrowFatal(error)
         } finally {
             clients -= socket
             runCatching { socket.close() }
         }
+    }
+
+    private fun rethrowFatal(error: Throwable) {
+        if (error is VirtualMachineError || error is ThreadDeath) throw error
     }
 
     override fun close() {
