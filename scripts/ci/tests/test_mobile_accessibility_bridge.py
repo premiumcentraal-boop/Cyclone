@@ -126,8 +126,10 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         pairing = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/gateway/GatewayDesktopRuntime.kt").read_text(encoding="utf-8")
         runtime = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/gateway/GatewayRuntime.kt").read_text(encoding="utf-8")
         begin = pairing.split("fun begin(context: Context, args: JSONObject)", 1)[1].split("fun complete", 1)[0]
-        self.assertNotIn("Toast", begin)
-        self.assertNotIn("Handler", begin)
+        self.assertNotIn("android.widget.Toast", pairing)
+        self.assertNotIn("Toast.makeText", begin)
+        self.assertNotIn("android.os.Handler", pairing)
+        self.assertNotIn("Handler(", begin)
         self.assertIn("protocol-only", begin)
         self.assertIn("catch (error: Throwable)", runtime)
         self.assertIn("gateway.dispatch.boundary", runtime)
