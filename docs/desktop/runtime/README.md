@@ -68,7 +68,9 @@ Pairing constraints:
 - the strong credential stays only in PC runtime memory and Android gateway memory;
 - pairing codes and credentials are excluded from normal logs and public fleet metadata.
 
-The Android localabstract listener may remain alive while full PC control is OFF, but in that state only `pair.begin` and `pair.complete` are accepted. Successful user-confirmed pairing enables the authenticated session. There is still no phone LAN listener.
+The Android localabstract listener may remain alive while full PC control is OFF, but in that state only `pair.begin`, manual `pair.complete`, and locally approved `pair.qr.complete` are accepted. The QR contains only the current one-time challenge and PC nonce; the phone must approve it by camera/deep link before Android returns a credential. Successful user-confirmed pairing enables the authenticated session. There is still no phone LAN listener.
+
+The PC renders the code locally with the pinned MIT-licensed `qrcode` 1.5.4 package. The phone can use Android's permission-free Google Code Scanner from **Cyclone → PC Gateway → Scan PC QR**, a normal camera deep link, or the four-letter fallback. QR scan images remain on the phone; no QR image is uploaded to Cyclone.
 
 ## Manual human controls
 

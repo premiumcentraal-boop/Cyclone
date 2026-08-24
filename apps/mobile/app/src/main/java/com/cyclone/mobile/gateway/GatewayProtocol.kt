@@ -24,7 +24,7 @@ internal object GatewayProtocol {
     const val DEFAULT_FORWARD_PORT = 8766
     const val MAX_LINE_BYTES = 1024 * 1024
 
-    val unauthenticatedOperations = setOf("pair.begin", "pair.complete")
+    val unauthenticatedOperations = setOf("pair.begin", "pair.complete", "pair.qr.complete")
 
     val operations = linkedSetOf(
         "bridge.status",
@@ -41,6 +41,7 @@ internal object GatewayProtocol {
         "debug.snapshot",
         "pair.begin",
         "pair.complete",
+        "pair.qr.complete",
         "pair.revoke",
         "manual.execute",
         "clipboard.get",

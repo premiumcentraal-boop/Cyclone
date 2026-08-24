@@ -8,6 +8,7 @@ import re
 import secrets
 import threading
 import time
+from urllib.parse import urlencode
 
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .diagnostics import FleetDiagnosticSupervisor
@@ -119,6 +120,8 @@ class PairingCoordinator:
             "expiresAtMs": expires_at,
             "expiresAtEpochMs": expires_at,
             "attemptsRemaining": self.MAX_ATTEMPTS,
+            "qrAvailable": True,
+            "qrPayload": "cyclone://pair?" + urlencode({"challenge": challenge_id, "nonce": pc_nonce}),
             "diagnosticsActive": bool(live and live.get("active")),
             "diagnosticsPath": live.get("sessionPath") if live else None,
             "diagnosticsMode": live.get("mode") if live else None,
@@ -181,11 +184,62 @@ class PairingCoordinator:
                 retryable=True,
             ) from exc
 
-        self._mark_live(device_id, "pair.complete.response_received")
+        return self._accept_completion(session, pending, response, "pair.complete")
+
+    def complete_qr(self, device_id: str, pairing_id: str) -> dict:
+        with self._device_lock(device_id):
+            session = self.fleet.get(device_id)
+            pending = self._validated_pending(session, pairing_id, "pair.qr.complete")
+            self._mark_live(device_id, "pair.qr.complete.pc_poll")
+            try:
+                response = session.bridge(token="").request_unauthenticated(
+                    "pair.qr.complete",
+                    {
+                        "challengeId": pending.challenge_id,
+                        "usbSessionId": pending.usb_session_id,
+                        "pcNonce": pending.pc_nonce,
+                    },
+                    request_id=secrets.token_urlsafe(18),
+                )
+            except BridgeOperationError as exc:
+                self._mark_live(device_id, f"pair.qr.complete.phone_rejected.{exc.code}")
+                self._map_bridge_error(exc)
+            except (BridgeDisconnectedError, BridgeProtocolError) as exc:
+                self._mark_live(device_id, "pair.qr.complete.transport_lost")
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.DEVICE_DISCONNECTED,
+                    "QR pairing transport is temporarily unavailable.",
+                    retryable=True,
+                ) from exc
+            if response.get("pending") is True:
+                return {"deviceId": device_id, "paired": False, "pending": True}
+            return self._accept_completion(session, pending, response, "pair.qr.complete")
+
+    def _validated_pending(self, session: DeviceSession, pairing_id: str, phase: str) -> PairingChallenge:
+        pending = session.pending_pairing
+        if pending is None:
+            raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_REPLAY, "No active pairing challenge exists.")
+        if not isinstance(pending, PairingChallenge):
+            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Pairing state is invalid.")
+        if not pairing_id or pairing_id != pending.challenge_id:
+            self._mark_live(session.device_id, f"{phase}.stale_challenge")
+            raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_REPLAY, "Pairing challenge changed; request a new one.", retryable=True)
+        now = int(time.time() * 1000)
+        if pending.usb_session_id != session.usb_session_id:
+            self.fleet.set_pairing(session, None)
+            raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_SESSION_MISMATCH, "USB session changed; begin pairing again.", retryable=True)
+        if now > pending.expires_at_ms:
+            self.fleet.set_pairing(session, None)
+            raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_EXPIRED, "Pairing challenge expired; begin pairing again.", retryable=True)
+        return pending
+
+    def _accept_completion(self, session: DeviceSession, pending: PairingChallenge, response: dict, phase: str) -> dict:
+        device_id = session.device_id
+        self._mark_live(device_id, f"{phase}.response_received")
         credential = str(response.get("credential") or "")
         if len(credential) < 43:
-            self._mark_live(device_id, "pair.complete.invalid_credential")
-            diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.invalid_credential")
+            self._mark_live(device_id, f"{phase}.invalid_credential")
+            diagnostics = self._capture_pairing_diagnostics(session, f"{phase}.invalid_credential")
             raise DesktopRuntimeError(
                 RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
                 self._diagnostic_message("Phone returned an invalid pairing credential.", diagnostics),
@@ -197,8 +251,8 @@ class PairingCoordinator:
         try:
             health = self._verify_post_pair_health(session, credential)
         except (BridgeDisconnectedError, BridgeProtocolError, BridgeOperationError, OSError) as exc:
-            self._mark_live(device_id, "pair.complete.post_health_failed")
-            diagnostics = self._capture_pairing_diagnostics(session, "pair.complete.post_health")
+            self._mark_live(device_id, f"{phase}.post_health_failed")
+            diagnostics = self._capture_pairing_diagnostics(session, f"{phase}.post_health")
             self.fleet.remember_credential(session, None)
             self.fleet.set_pairing(session, None)
             raise DesktopRuntimeError(
@@ -213,7 +267,7 @@ class PairingCoordinator:
         self.fleet.remember_credential(session, credential)
         self.fleet.set_pairing(session, None)
         session.state = DeviceFleetState.READY if session.screen_awake else DeviceFleetState.SLEEPING
-        live = self._mark_live(device_id, "pair.complete.health_verified")
+        live = self._mark_live(device_id, f"{phase}.health_verified")
         return {
             "deviceId": device_id,
             "paired": True,

@@ -134,20 +134,41 @@ fn reserve_loopback_port() -> Result<u16, String> {
     Ok(port)
 }
 
-/// Remove only superseded developer-era Cyclone gateway executables.
+/// Remove only superseded developer-era Cyclone gateway monitors and executables.
 ///
-/// Older setup scripts used a few fixed gateway image names and could leave one running with a
-/// visible console window across an in-place update. The packaged Companion owns the hidden
-/// `CyclonePCRuntime` sidecar now. Only these known legacy image names are retired; this is not a
-/// wildcard process kill and does not touch the current Companion process.
+/// The monitor must be stopped first because it otherwise respawns the visible console process.
+/// Selection is restricted to PowerShell processes whose command line names the exact legacy
+/// `monitor-pc-console.ps1` script, followed by three fixed gateway image names.
 #[cfg(windows)]
 fn cleanup_legacy_gateway_processes() {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const STOP_LEGACY_MONITOR: &str = r#"
+$selfPid = $PID
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.ProcessId -ne $selfPid -and
+    $_.Name -in @('powershell.exe', 'pwsh.exe') -and
+    $_.CommandLine -match '(?i)(?:^|[\\/\s])monitor-pc-console\.ps1(?:[\"\s]|$)'
+  } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+"#;
     const LEGACY_IMAGES: [&str; 3] = [
         "cyclone-device-gateway.exe",
         "Cyclone Device Gateway.exe",
         "CycloneDeviceGateway.exe",
     ];
+    let _ = Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            STOP_LEGACY_MONITOR,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     for image in LEGACY_IMAGES {
         let _ = Command::new("taskkill")
             .args(["/F", "/T", "/IM", image])

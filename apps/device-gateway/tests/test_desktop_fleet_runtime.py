@@ -72,6 +72,7 @@ class FakeBridge:
         self.credentials = list(credentials or ["A" * 43, "B" * 43, "C" * 43])
         self.challenge = 0
         self.calls = []
+        self.qr_approved = False
 
     def request_unauthenticated(self, op, args=None, request_id=None):
         self.calls.append((op, args or {}))
@@ -79,6 +80,10 @@ class FakeBridge:
             self.challenge += 1
             return {"challengeId": f"ch-{self.challenge}", "expiresAtMs": int(time.time() * 1000) + 60_000}
         if op == "pair.complete":
+            return {"credential": self.credentials.pop(0), "paired": True}
+        if op == "pair.qr.complete":
+            if not self.qr_approved:
+                return {"paired": False, "pending": True}
             return {"credential": self.credentials.pop(0), "paired": True}
         raise AssertionError(op)
 
@@ -295,6 +300,32 @@ def test_pairing_confirmation_is_bound_to_latest_challenge_without_consuming_it(
     assert pairing.complete(session.device_id, latest["pairingId"], "NOVA")["paired"] is True
 
 
+def test_qr_pairing_is_one_time_pending_until_phone_scan_approval():
+    fleet, session, bridge = paired_session_for_services()
+    session.credential = None
+    pairing = PairingCoordinator(fleet)
+    pairing.POST_PAIR_HEALTH_DELAY_SECONDS = 0
+    begin = pairing.begin(session.device_id)
+
+    assert begin["qrAvailable"] is True
+    assert begin["qrPayload"].startswith("cyclone://pair?challenge=")
+    assert "credential" not in begin["qrPayload"]
+    assert pairing.complete_qr(session.device_id, begin["pairingId"]) == {
+        "deviceId": session.device_id,
+        "paired": False,
+        "pending": True,
+    }
+    assert session.credential is None
+
+    bridge.qr_approved = True
+    completed = pairing.complete_qr(session.device_id, begin["pairingId"])
+    assert completed["paired"] is True
+    assert session.credential is not None
+    with pytest.raises(DesktopRuntimeError) as err:
+        pairing.complete_qr(session.device_id, begin["pairingId"])
+    assert err.value.code == "PAIRING_REPLAY"
+
+
 def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
     fleet, session, bridge = paired_session_for_services()
     service = ManualControlService(fleet)
@@ -377,6 +408,13 @@ def test_frozen_http_and_websocket_routes_are_authenticated(tmp_path):
         device_id = response.json()["devices"][0]["deviceId"]
         begin = client.post(f"/v1/devices/{device_id}/pair/begin", headers=headers)
         assert begin.status_code == 200
+        qr_pending = client.post(
+            f"/v1/devices/{device_id}/pair/qr/complete",
+            headers=headers,
+            json={"pairing_id": begin.json()["pairingId"]},
+        )
+        assert qr_pending.status_code == 200
+        assert qr_pending.json()["pending"] is True
         assert client.post(
             f"/v1/devices/{device_id}/pair/complete",
             headers=headers,

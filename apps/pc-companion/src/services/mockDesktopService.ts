@@ -8,6 +8,7 @@ import type {
   DeviceControlAction,
   PairBeginResult,
   PairConfirmResult,
+  PairQrConfirmResult,
   StreamProfile,
 } from "./types.js";
 
@@ -30,7 +31,13 @@ export class MockDesktopService implements DesktopService {
   async pairBegin(deviceId: string): Promise<PairBeginResult> {
     const device = this.requireDevice(deviceId);
     device.state = "PAIRING";
-    const result = { pairingId: `mock-${deviceId}-${++this.pairingSequence}`, expiresAtEpochMs: Date.now() + 60_000 };
+    const pairingId = `mock-${deviceId}-${++this.pairingSequence}`;
+    const result = {
+      pairingId,
+      expiresAtEpochMs: Date.now() + 60_000,
+      qrAvailable: true,
+      qrPayload: `cyclone://pair?challenge=${encodeURIComponent(pairingId)}&nonce=mock-nonce-abcdefghijklmnop`,
+    };
     this.pairings.set(deviceId, result);
     return result;
   }
@@ -81,6 +88,12 @@ export class MockDesktopService implements DesktopService {
       readyDeviceCount: 3,
       toolCount: 14,
     };
+  }
+
+  async pairQrConfirm(deviceId: string, pairingId: string): Promise<PairQrConfirmResult> {
+    const pairing = this.pairings.get(deviceId);
+    if (!pairing || pairing.pairingId !== pairingId) return { ok: false, pending: false, reason: "STALE_CODE" };
+    return { ok: false, pending: true };
   }
   async getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return {

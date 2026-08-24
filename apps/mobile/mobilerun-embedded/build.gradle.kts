@@ -86,7 +86,9 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
         val root = adaptedSources.get().asFile
 
         val applicationFile = root.resolve("com/mobilerun/portal/PortalApplication.kt")
-        var applicationSource = applicationFile.readText(Charsets.UTF_8)
+        // Git may materialize the pinned submodule with CRLF on Windows. Normalize the generated
+        // copy so the exact-source guards remain reproducible without modifying the submodule.
+        var applicationSource = applicationFile.readText(Charsets.UTF_8).replace("\r\n", "\n")
         val applicationNeedle = "        super.onCreate()\n"
         require(applicationSource.contains(applicationNeedle)) { "Pinned PortalApplication onCreate changed upstream" }
         applicationSource = applicationSource.replaceFirst(
@@ -98,7 +100,7 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
         applicationFile.writeText(applicationSource, Charsets.UTF_8)
 
         val serviceFile = root.resolve("com/mobilerun/portal/service/MobilerunAccessibilityService.kt")
-        var serviceSource = serviceFile.readText(Charsets.UTF_8)
+        var serviceSource = serviceFile.readText(Charsets.UTF_8).replace("\r\n", "\n")
         val eventSignature = "    override fun onAccessibilityEvent(event: AccessibilityEvent?) {\n"
         require(serviceSource.contains(eventSignature)) { "Pinned Mobilerun accessibility-event callback changed upstream" }
         serviceSource = serviceSource.replaceFirst(

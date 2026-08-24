@@ -1,6 +1,7 @@
 package com.cyclone.mobile.gateway
 
 import android.content.Context
+import android.net.Uri
 import android.os.PowerManager
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.PhoneToolExecutor
@@ -67,20 +68,62 @@ internal object GatewayDesktopPairingManager {
             throw GatewayProtocolException(code, "Pairing could not be completed")
         }
         CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.code_accepted")
+        return pairingSuccess(context, "gateway.pair.complete")
+    }
+
+    fun approveQr(challengeId: String, pcNonce: String): Boolean =
+        engine.approveQr(challengeId.trim(), pcNonce.trim())
+
+    fun approveQrPayload(payload: String): Boolean {
+        if (payload.length !in 32..1024) return false
+        val uri = runCatching { Uri.parse(payload) }.getOrNull() ?: return false
+        if (uri.scheme != "cyclone" || uri.host != "pair") return false
+        val challenge = uri.getQueryParameter("challenge")?.takeIf { it.length in 8..160 } ?: return false
+        val nonce = uri.getQueryParameter("nonce")?.takeIf { it.length in 16..200 } ?: return false
+        return approveQr(challenge, nonce)
+    }
+
+    fun completeQr(context: Context, args: JSONObject): JSONObject {
+        CycloneProcessDiagnostics.markStage(context, "gateway.pair.qr.complete.received")
+        return when (val completion = engine.completeQr(
+            challengeId = args.optString("challengeId"),
+            usbSessionId = args.optString("usbSessionId"),
+            pcNonce = args.optString("pcNonce"),
+        )) {
+            DesktopQrPairingCompletion.Pending -> JSONObject().put("paired", false).put("pending", true)
+            DesktopQrPairingCompletion.Success -> pairingSuccess(context, "gateway.pair.qr.complete")
+            is DesktopQrPairingCompletion.Failure -> {
+                val code = failureCode(completion.reason)
+                CycloneProcessDiagnostics.markStage(context, "gateway.pair.qr.complete.rejected.$code")
+                throw GatewayProtocolException(code, "QR pairing could not be completed")
+            }
+        }
+    }
+
+    private fun pairingSuccess(context: Context, stage: String): JSONObject {
         val credential = if (GatewaySessionStore.enabled(context)) {
-            CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.credential_rotate")
+            CycloneProcessDiagnostics.markStage(context, "$stage.credential_rotate")
             GatewaySessionStore.rotate(context)
         } else {
-            CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.credential_enable")
+            CycloneProcessDiagnostics.markStage(context, "$stage.credential_enable")
             GatewaySessionStore.enable(context)
         }
-        CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.credential_ready")
+        CycloneProcessDiagnostics.markStage(context, "$stage.credential_ready")
         val response = JSONObject()
             .put("paired", true)
             .put("credential", credential)
             .put("credentialBits", 256)
-        CycloneProcessDiagnostics.markStage(context, "gateway.pair.complete.returning")
+        CycloneProcessDiagnostics.markStage(context, "$stage.returning")
         return response
+    }
+
+    private fun failureCode(reason: DesktopPairingFailure): String = when (reason) {
+        DesktopPairingFailure.EXPIRED -> "PAIRING_EXPIRED"
+        DesktopPairingFailure.REPLAY -> "PAIRING_REPLAY"
+        DesktopPairingFailure.CODE_REJECTED -> "PAIRING_CODE_REJECTED"
+        DesktopPairingFailure.ATTEMPTS_EXCEEDED -> "PAIRING_ATTEMPTS_EXCEEDED"
+        DesktopPairingFailure.SESSION_MISMATCH -> "PAIRING_SESSION_MISMATCH"
+        DesktopPairingFailure.INVALID_REQUEST -> "PROTOCOL_MISMATCH"
     }
 
     fun revoke(context: Context): JSONObject {

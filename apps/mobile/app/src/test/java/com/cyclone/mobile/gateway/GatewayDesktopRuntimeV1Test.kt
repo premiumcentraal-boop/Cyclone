@@ -70,6 +70,31 @@ class GatewayDesktopRuntimeV1Test {
     }
 
     @Test
+    fun qrPairingRequiresLocalScanAndKeepsInvalidLinksFromApproving() {
+        val engine = DesktopPairingEngine()
+        val challenge = engine.begin("usb", "pc-nonce-abcdefghijklmnop")
+
+        assertEquals(
+            DesktopQrPairingCompletion.Pending,
+            engine.completeQr(challenge.challengeId, challenge.usbSessionId, challenge.pcNonce),
+        )
+        assertFalse(engine.approveQr(challenge.challengeId, "forged-nonce-abcdefghijklmnop"))
+        assertEquals(
+            DesktopQrPairingCompletion.Pending,
+            engine.completeQr(challenge.challengeId, challenge.usbSessionId, challenge.pcNonce),
+        )
+        assertTrue(engine.approveQr(challenge.challengeId, challenge.pcNonce))
+        assertEquals(
+            DesktopQrPairingCompletion.Success,
+            engine.completeQr(challenge.challengeId, challenge.usbSessionId, challenge.pcNonce),
+        )
+        assertEquals(
+            DesktopQrPairingCompletion.Failure(DesktopPairingFailure.REPLAY),
+            engine.completeQr(challenge.challengeId, challenge.usbSessionId, challenge.pcNonce),
+        )
+    }
+
+    @Test
     fun normalizedTapMapsToCurrentDisplayBounds() {
         assertEquals(0, DesktopManualControlContract.normalizedPixel(0.0, 1080))
         assertEquals(1079, DesktopManualControlContract.normalizedPixel(1.0, 1080))
@@ -91,7 +116,7 @@ class GatewayDesktopRuntimeV1Test {
 
     @Test
     fun onlyPairingBootstrapMayOmitAuthAndNoShellOperationExists() {
-        assertEquals(setOf("pair.begin", "pair.complete"), GatewayProtocol.unauthenticatedOperations)
+        assertEquals(setOf("pair.begin", "pair.complete", "pair.qr.complete"), GatewayProtocol.unauthenticatedOperations)
         val lower = GatewayProtocol.operations.map(String::lowercase)
         assertFalse(lower.any { "shell" in it || "powershell" in it || "root" in it || it == "adb" })
     }

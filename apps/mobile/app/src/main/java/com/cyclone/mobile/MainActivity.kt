@@ -1,6 +1,8 @@
 package com.cyclone.mobile
 
+import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.cyclone.mobile.ai.AgentTraceRuntime
@@ -13,6 +15,7 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.gateway.GatewayDesktopPairingManager
 import com.cyclone.mobile.infrastructure.v31.CycloneV31ProductIntegration
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
 import com.cyclone.mobile.ui.CycloneMobileV292App
@@ -25,6 +28,13 @@ class MainActivity : ComponentActivity() {
         migrateCanonicalLearning()
         TaskResultNotifierV292.ensureChannel(this)
         setContent { CycloneMobileV292App() }
+        handlePairingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairingIntent(intent)
     }
 
     override fun onResume() {
@@ -52,6 +62,19 @@ class MainActivity : ComponentActivity() {
         val v31 = CycloneV31Runtime.initialize(this)
         CycloneV31ProductIntegration.install(this, v31)
         CycloneV31ProductIntegration.finalizeStartupWhenReady(v31)
+    }
+
+    private fun handlePairingIntent(value: Intent?) {
+        val uri = value?.data ?: return
+        if (value.action != Intent.ACTION_VIEW || uri.scheme != "cyclone" || uri.host != "pair") return
+        val approved = GatewayDesktopPairingManager.approveQrPayload(uri.toString())
+        Toast.makeText(
+            this,
+            if (approved) "PC pairing approved. Return to Cyclone on your PC."
+            else "This pairing QR code is invalid or expired. Request a new code on your PC.",
+            Toast.LENGTH_LONG,
+        ).show()
+        value.data = null
     }
 
     private fun migrateModelDefault() {

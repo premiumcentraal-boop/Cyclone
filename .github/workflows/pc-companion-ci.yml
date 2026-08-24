@@ -79,7 +79,7 @@ jobs:
         shell: pwsh
         run: |
           Push-Location apps/pc-companion
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm test
           npm run build
           Pop-Location
@@ -202,6 +202,11 @@ jobs:
           - **Windows:** Cyclone PC Companion ${PC_VERSION} installer.
           - **Android:** Cyclone Mobile ${MOBILE_VERSION} APK.
           - Checksums, source SHA/provenance, and third-party notices are attached where applicable.
+
+          ## Beta 10 pairing fixes
+          - The **Pair phone** button now activates only for a live, unexpired phone challenge and reliably submits a valid four-letter code.
+          - New one-scan **QR pairing** opens Cyclone on the phone and completes automatically; manual code entry remains available.
+          - The packaged Companion retires the old PowerShell monitor before it can respawn a visible command window.
 
           ## Beta status
           This is a test release. The PC Gateway remains loopback/USB-oriented and agent actions stay behind Cyclone's typed control and Android policy boundaries. No arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed to agents.

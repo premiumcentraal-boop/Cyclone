@@ -28,6 +28,11 @@ class PairCompleteBody(BaseModel):
     pairing_id: str = Field(min_length=1, max_length=160)
 
 
+class PairQrCompleteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pairing_id: str = Field(min_length=1, max_length=160)
+
+
 class ManualControlBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["tap", "back", "home", "scroll_up", "scroll_down", "text", "wake"]
@@ -163,6 +168,10 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.post("/v1/devices/{device_id}/pair/confirm", dependencies=[Depends(auth)], include_in_schema=False)
     def pair_complete(device_id: str, body: PairCompleteBody):
         return _call(lambda: runtime.pairing.complete(device_id, body.pairing_id, body.code))
+
+    @router.post("/v1/devices/{device_id}/pair/qr/complete", dependencies=[Depends(auth)])
+    def pair_qr_complete(device_id: str, body: PairQrCompleteBody):
+        return _call(lambda: runtime.pairing.complete_qr(device_id, body.pairing_id))
 
     @router.post("/v1/devices/{device_id}/pair/revoke", dependencies=[Depends(auth)])
     def pair_revoke(device_id: str):

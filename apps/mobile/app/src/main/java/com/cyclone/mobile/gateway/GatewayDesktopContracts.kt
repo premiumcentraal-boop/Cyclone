@@ -15,11 +15,18 @@ internal data class DesktopPairingChallenge(
     val code: String,
     val expiresAtMs: Long,
     var attempts: Int = 0,
+    var qrApproved: Boolean = false,
 )
 
 internal sealed class DesktopPairingCompletion {
     data object Success : DesktopPairingCompletion()
     data class Failure(val reason: DesktopPairingFailure) : DesktopPairingCompletion()
+}
+
+internal sealed class DesktopQrPairingCompletion {
+    data object Pending : DesktopQrPairingCompletion()
+    data object Success : DesktopQrPairingCompletion()
+    data class Failure(val reason: DesktopPairingFailure) : DesktopQrPairingCompletion()
 }
 
 internal class DesktopPairingEngine(
@@ -76,6 +83,42 @@ internal class DesktopPairingEngine(
         active = null
         consumed(current.challengeId)
         return DesktopPairingCompletion.Success
+    }
+
+    /** Approves only the currently displayed one-time challenge after the user scans it locally. */
+    @Synchronized
+    fun approveQr(challengeId: String, pcNonce: String): Boolean {
+        if (challengeId in consumed) return false
+        val current = active ?: return false
+        if (nowMs() > current.expiresAtMs) {
+            active = null
+            consumed(current.challengeId)
+            return false
+        }
+        if (current.challengeId != challengeId || !constantTimeEquals(current.pcNonce, pcNonce)) return false
+        current.qrApproved = true
+        return true
+    }
+
+    @Synchronized
+    fun completeQr(challengeId: String, usbSessionId: String, pcNonce: String): DesktopQrPairingCompletion {
+        if (challengeId in consumed) return DesktopQrPairingCompletion.Failure(DesktopPairingFailure.REPLAY)
+        val current = active ?: return DesktopQrPairingCompletion.Failure(DesktopPairingFailure.REPLAY)
+        if (current.challengeId != challengeId) return DesktopQrPairingCompletion.Failure(DesktopPairingFailure.REPLAY)
+        if (nowMs() > current.expiresAtMs) {
+            active = null
+            consumed(current.challengeId)
+            return DesktopQrPairingCompletion.Failure(DesktopPairingFailure.EXPIRED)
+        }
+        if (current.usbSessionId != usbSessionId || !constantTimeEquals(current.pcNonce, pcNonce)) {
+            active = null
+            consumed(current.challengeId)
+            return DesktopQrPairingCompletion.Failure(DesktopPairingFailure.SESSION_MISMATCH)
+        }
+        if (!current.qrApproved) return DesktopQrPairingCompletion.Pending
+        active = null
+        consumed(current.challengeId)
+        return DesktopQrPairingCompletion.Success
     }
 
     @Synchronized

@@ -9,6 +9,7 @@ import type {
   DeviceControlAction,
   PairBeginResult,
   PairConfirmResult,
+  PairQrConfirmResult,
   StreamProfile,
 } from "./types.js";
 
@@ -142,10 +143,34 @@ export class HttpDesktopService implements DesktopService {
       .then((value) => ({
         pairingId: String(value.pairingId ?? ""),
         expiresAtEpochMs: Number(value.expiresAtEpochMs ?? value.expiresAtMs ?? Date.now() + 60_000),
+        qrPayload: typeof value.qrPayload === "string" ? value.qrPayload : null,
+        qrAvailable: value.qrAvailable === true,
         diagnosticsActive: value.diagnosticsActive === true,
         diagnosticsPath: typeof value.diagnosticsPath === "string" ? value.diagnosticsPath : null,
         diagnosticsMode: typeof value.diagnosticsMode === "string" ? value.diagnosticsMode : null,
       }));
+  }
+
+  async pairQrConfirm(deviceId: string, pairingId: string): Promise<PairQrConfirmResult> {
+    try {
+      const value = await this.request<{ paired?: boolean; pending?: boolean; device?: DesktopDevice }>(
+        `/v1/devices/${encodeURIComponent(deviceId)}/pair/qr/complete`,
+        { method: "POST", body: JSON.stringify({ pairing_id: pairingId }) },
+      );
+      if (value.pending === true) return { ok: false, pending: true };
+      const device = value.device ?? (await this.listDevices()).find((candidate) => candidate.id === deviceId);
+      return value.paired === true && device
+        ? { ok: true, device }
+        : { ok: false, pending: false, reason: "UNAVAILABLE" };
+    } catch (error) {
+      const codeValue = error instanceof DesktopHttpError ? error.code : "";
+      if (codeValue === "PAIRING_EXPIRED") return { ok: false, pending: false, reason: "EXPIRED" };
+      if (codeValue === "PAIRING_REPLAY" || codeValue === "PAIRING_SESSION_MISMATCH") {
+        return { ok: false, pending: false, reason: "STALE_CODE" };
+      }
+      const message = error instanceof DesktopHttpError ? error.message : undefined;
+      return { ok: false, pending: false, reason: "UNAVAILABLE", message };
+    }
   }
 
   async pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult> {

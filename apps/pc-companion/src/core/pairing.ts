@@ -18,3 +18,16 @@ export function pairSecondsRemaining(expiresAtEpochMs: number, nowEpochMs: numbe
 export function isPairCodeComplete(code: string): boolean {
   return normalizePairCode(code).length === PAIR_CODE_LENGTH;
 }
+
+export function canSubmitPairCode(
+  code: string,
+  hasActivePairing: boolean,
+  submitting: boolean,
+  expiresAtEpochMs: number,
+  nowEpochMs: number,
+): boolean {
+  return hasActivePairing
+    && !submitting
+    && isPairCodeComplete(code)
+    && pairSecondsRemaining(expiresAtEpochMs, nowEpochMs) > 0;
+}

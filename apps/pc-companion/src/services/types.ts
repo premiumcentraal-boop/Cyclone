@@ -49,6 +49,8 @@ export interface DesktopDevice {
 export interface PairBeginResult {
   pairingId: string;
   expiresAtEpochMs: number;
+  qrPayload?: string | null;
+  qrAvailable?: boolean;
   diagnosticsActive?: boolean;
   diagnosticsPath?: string | null;
   diagnosticsMode?: string | null;
@@ -57,6 +59,10 @@ export interface PairBeginResult {
 export type PairConfirmResult =
   | { ok: true; device: DesktopDevice }
   | { ok: false; reason: "INVALID_CODE" | "EXPIRED" | "STALE_CODE" | "UNAVAILABLE"; message?: string };
+
+export type PairQrConfirmResult =
+  | { ok: true; device: DesktopDevice }
+  | { ok: false; pending: boolean; reason?: "EXPIRED" | "STALE_CODE" | "UNAVAILABLE"; message?: string };
 
 export type DeviceControlAction =
   | { type: "tap"; x: number; y: number }
@@ -164,6 +170,7 @@ export interface DesktopService {
   watchFleet(onChange: () => void): () => void;
   pairBegin(deviceId: string): Promise<PairBeginResult>;
   pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult>;
+  pairQrConfirm(deviceId: string, pairingId: string): Promise<PairQrConfirmResult>;
   sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult>;
   getVideoUrl(deviceId: string, profile: StreamProfile): string;
   getVideoProtocols(): string[];

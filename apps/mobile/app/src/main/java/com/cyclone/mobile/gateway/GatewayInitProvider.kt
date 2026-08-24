@@ -9,7 +9,7 @@ import android.net.Uri
  * Process bootstrap for the USB-only localabstract gateway.
  *
  * Desktop V1 keeps the listener alive in a zero-authority pairing mode even when full PC control
- * is disabled. In that state only pair.begin/pair.complete are accepted; every observation,
+ * is disabled. In that state only pair.begin/pair.complete/pair.qr.complete are accepted; every observation,
  * control, clipboard, teaching and debug operation still requires the strong session credential.
  *
  * A ContentProvider runs during process creation, before normal app UI. Any exception escaping

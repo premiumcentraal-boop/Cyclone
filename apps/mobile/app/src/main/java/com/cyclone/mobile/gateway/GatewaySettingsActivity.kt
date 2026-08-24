@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Usb
@@ -63,6 +64,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ui.CycloneTheme
 import kotlinx.coroutines.delay
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 /** Polished in-app control center for Cyclone's USB-only PC/Codex bridge. */
 class GatewaySettingsActivity : ComponentActivity() {
@@ -224,7 +228,16 @@ private fun GatewayControlCenter(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text("Desktop pairing code", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Pair this PC", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Button(
+                                onClick = { scanDesktopPairingQr(context) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Scan PC QR")
+                            }
+                            Text("Or enter this code on the PC", style = MaterialTheme.typography.labelMedium)
                             Text(
                                 pairingCode,
                                 style = MaterialTheme.typography.displaySmall,
@@ -389,6 +402,27 @@ private fun GatewayControlCenter(
             }
         }
     }
+}
+
+private fun scanDesktopPairingQr(context: Context) {
+    val activity = context as? ComponentActivity ?: return
+    val options = GmsBarcodeScannerOptions.Builder()
+        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+        .enableAutoZoom()
+        .build()
+    GmsBarcodeScanning.getClient(activity, options).startScan()
+        .addOnSuccessListener { barcode ->
+            val approved = barcode.rawValue?.let(GatewayDesktopPairingManager::approveQrPayload) == true
+            Toast.makeText(
+                context,
+                if (approved) "PC pairing approved. Return to Cyclone on your PC."
+                else "That QR code is invalid or expired. Request a new code on your PC.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+        .addOnFailureListener {
+            Toast.makeText(context, "QR scanner unavailable. Use the four-letter code below.", Toast.LENGTH_LONG).show()
+        }
 }
 
 @Composable

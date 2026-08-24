@@ -19,7 +19,7 @@ object GatewayRuntime {
 
     /**
      * Desktop V1 keeps the localabstract socket available as an ADB-only pairing bootstrap.
-     * When the full gateway is disabled, only pair.begin/pair.complete can pass the dispatcher.
+     * When full control is disabled, only pair.begin/pair.complete/pair.qr.complete can pass.
      */
     @Synchronized
     fun startPairingBootstrap(context: Context) {
@@ -188,6 +188,7 @@ internal object GatewayDispatcher {
     private fun dispatch(context: Context, request: GatewayRequest): Any = when (request.op) {
         "pair.begin" -> GatewayDesktopPairingManager.begin(context, request.args)
         "pair.complete" -> GatewayDesktopPairingManager.complete(context, request.args)
+        "pair.qr.complete" -> GatewayDesktopPairingManager.completeQr(context, request.args)
         "pair.revoke" -> GatewayDesktopPairingManager.revoke(context)
         "manual.execute" -> GatewayManualDesktopAdapter.execute(context, request.id, request.args)
         "clipboard.get" -> GatewayClipboardAdapter.capability(context)

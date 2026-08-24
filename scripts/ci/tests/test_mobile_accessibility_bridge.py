@@ -145,12 +145,17 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
 
     def test_windows_release_hides_all_console_windows_without_breaking_agent_stdio(self):
         main = (ROOT / "apps/pc-companion/src-tauri/src/main.rs").read_text(encoding="utf-8")
+        runtime = (ROOT / "apps/pc-companion/src-tauri/src/lib.rs").read_text(encoding="utf-8")
         pc_runtime = (ROOT / "packaging/pc-companion/pyinstaller/CyclonePCRuntime.spec").read_text(encoding="utf-8")
         agent = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
         self.assertIn('windows_subsystem = "windows"', main)
         self.assertIn("console=False", pc_runtime)
         self.assertIn("console=True", agent)
         self.assertIn('hide_console="hide-early"', agent)
+        self.assertIn("monitor-pc-console\\.ps1", runtime)
+        self.assertIn("CREATE_NO_WINDOW", runtime)
+        self.assertIn('Command::new("powershell.exe")', runtime)
+        self.assertNotIn('Command::new("cmd.exe")', runtime)
 
 
 if __name__ == "__main__":
