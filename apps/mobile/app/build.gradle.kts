@@ -12,9 +12,9 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 26
+        versionCode = 27
         // Cyclone V3.1 QR/manual pairing reliability + hidden PC runtime beta.
-        versionName = "3.1.0-beta.7"
+        versionName = "3.1.0-beta.8"
     }
 
     buildTypes {

@@ -82,7 +82,11 @@ export class CyclonePcCompanionApp {
       this.navButtons.set(route, item);
     }
     const footer = el("div", "sidebar-footer");
-    footer.append(el("span", `backend-dot ${this.service.mode}`), el("span", "sidebar-status", this.service.mode === "mock" ? "Mock phones" : "Local companion"));
+    footer.append(
+      el("span", `backend-dot ${this.service.mode}`),
+      el("span", "sidebar-status", this.service.mode === "mock" ? "Mock phones" : "Local companion"),
+      el("span", "sidebar-status", `v${__CYCLONE_PC_VERSION__}`),
+    );
     sidebar.append(brand, nav, footer);
     shell.append(sidebar, this.content);
     this.root.replaceChildren(shell);

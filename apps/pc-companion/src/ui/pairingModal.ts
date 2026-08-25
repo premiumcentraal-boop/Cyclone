@@ -1,5 +1,5 @@
 import QRCode from "qrcode";
-import { canSubmitPairCode, isPairCodeComplete, normalizePairCode, pairSecondsRemaining } from "../core/pairing.js";
+import { normalizePairCode, pairSecondsRemaining, pairSubmissionState } from "../core/pairing.js";
 import type { DesktopDevice, DesktopService, PairBeginResult } from "../services/types.js";
 import { button, el } from "./dom.js";
 
@@ -62,7 +62,9 @@ export class PairingModal {
     const close = button("×", "icon-button");
     close.setAttribute("aria-label", "Close pairing");
     close.addEventListener("click", () => this.close());
-    header.append(el("div", "pair-device-name", this.device.name), close);
+    const identity = el("div", "pair-device-name", this.device.name);
+    identity.setAttribute("title", `Cyclone PC Companion ${__CYCLONE_PC_VERSION__}`);
+    header.append(identity, close);
 
     const title = el("h2", "pair-title", "Pair this phone");
     const copy = el("p", "pair-copy", "Scan the QR with this phone's camera or Cyclone › PC Gateway, or enter the 4-letter code shown on the phone.");
@@ -81,7 +83,7 @@ export class PairingModal {
     this.input.setAttribute("aria-label", "Four-letter phone pairing code");
     this.input.addEventListener("input", () => this.updateCode(this.input?.value ?? ""));
     this.input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && isPairCodeComplete(this.code)) {
+      if (event.key === "Enter" && this.currentSubmissionState().ready) {
         event.preventDefault();
         void this.confirm();
       }
@@ -118,8 +120,11 @@ export class PairingModal {
     try {
       const pairing = await this.service.pairBegin(this.device.id);
       if (this.closed || sequence !== this.beginSequence) return;
+      if (!pairing.pairingId.trim() || !Number.isFinite(pairing.expiresAtEpochMs)
+        || pairSecondsRemaining(pairing.expiresAtEpochMs, Date.now()) === 0) {
+        throw new Error("Invalid pairing challenge");
+      }
       this.pairing = pairing;
-      this.message.textContent = pairing.qrAvailable ? "Pairing ready · scan or enter the code" : "Code ready";
       if (this.input) this.input.disabled = false;
       if (this.pairing.diagnosticsActive) {
         this.diagnostics.textContent = "● Live crash monitor active before pairing";
@@ -128,6 +133,7 @@ export class PairingModal {
         this.diagnostics.textContent = "Live monitor unavailable · fixed crash capture will still run on failure";
       }
       this.startCountdown();
+      this.syncSubmissionUi();
       void this.renderQr(pairing);
       this.startQrPolling();
       this.input?.focus();
@@ -152,28 +158,33 @@ export class PairingModal {
       this.input.value = this.code;
       this.input.setSelectionRange(this.code.length, this.code.length);
     }
-    this.submitButton.disabled = !canSubmitPairCode(
-      this.code,
-      this.pairing != null,
-      this.submitting,
-      this.pairing?.expiresAtEpochMs ?? 0,
-      Date.now(),
-    );
-    this.clearInvalidMessage();
+    this.syncSubmissionUi(true);
   }
 
   private async confirm(): Promise<void> {
-    if (!this.pairing || !isPairCodeComplete(this.code) || this.submitting) return;
-    if (pairSecondsRemaining(this.pairing.expiresAtEpochMs, Date.now()) === 0) {
+    const state = this.currentSubmissionState();
+    if (!state.ready) {
+      if (state.reason === "EXPIRED") {
+        this.showError("That code expired. Get a new code and try again.");
+      } else if (state.reason === "NO_CHALLENGE") {
+        this.showError("Pairing is not ready. Select Get a new code before entering the phone code.");
+      } else if (state.reason === "INCOMPLETE_CODE") {
+        this.showError("Enter all 4 letters shown on the phone.");
+      }
+      return;
+    }
+    const pairing = this.pairing;
+    if (!pairing) return;
+    if (pairSecondsRemaining(pairing.expiresAtEpochMs, Date.now()) === 0) {
       this.showError("That code expired. Get a new code and try again.");
       return;
     }
     this.submitting = true;
     this.submitButton.disabled = true;
     this.submitButton.textContent = "Pairing…";
-    if (this.pairing.diagnosticsActive) this.diagnostics.textContent = "● Recording pairing transition and Cyclone process health…";
+    if (pairing.diagnosticsActive) this.diagnostics.textContent = "● Recording pairing transition and Cyclone process health…";
     try {
-      const result = await this.service.pairConfirm(this.device.id, this.pairing.pairingId, this.code);
+      const result = await this.service.pairConfirm(this.device.id, pairing.pairingId, this.code);
       if (!result.ok) {
         if (result.reason === "EXPIRED" || result.reason === "STALE_CODE") this.pairing = null;
         if (result.reason === "INVALID_CODE") this.showError("That code doesn't match. Try again.");
@@ -188,13 +199,7 @@ export class PairingModal {
     } finally {
       this.submitting = false;
       this.submitButton.textContent = "Pair phone";
-      this.submitButton.disabled = this.closed || !canSubmitPairCode(
-        this.code,
-        this.pairing != null,
-        this.submitting,
-        this.pairing?.expiresAtEpochMs ?? 0,
-        Date.now(),
-      );
+      this.syncSubmissionUi();
     }
   }
 
@@ -204,8 +209,8 @@ export class PairingModal {
       if (!this.pairing) return;
       const remaining = pairSecondsRemaining(this.pairing.expiresAtEpochMs, Date.now());
       this.countdown.textContent = remaining > 0 ? `Code expires in ${remaining}s` : "Code expired";
+      this.syncSubmissionUi();
       if (remaining === 0) {
-        this.submitButton.disabled = true;
         this.stopQrPolling();
         if (this.countdownTimer != null) window.clearInterval(this.countdownTimer);
         this.countdownTimer = null;
@@ -220,10 +225,41 @@ export class PairingModal {
     this.message.className = "pair-message error";
   }
 
-  private clearInvalidMessage(): void {
-    if (this.pairing && this.message.classList.contains("error")) {
-      this.message.textContent = this.pairing.qrAvailable ? "Pairing ready · scan or enter the code" : "Code ready";
-      this.message.className = "pair-message";
+  private currentSubmissionState() {
+    return pairSubmissionState(
+      this.code,
+      Boolean(this.pairing?.pairingId.trim()),
+      this.submitting,
+      this.pairing?.expiresAtEpochMs ?? 0,
+      Date.now(),
+    );
+  }
+
+  private syncSubmissionUi(clearInputError = false): void {
+    const state = this.currentSubmissionState();
+    this.submitButton.disabled = this.closed || !state.ready;
+    this.submitButton.setAttribute("aria-disabled", String(this.submitButton.disabled));
+    this.submitButton.title = state.ready
+      ? "Pair this phone now"
+      : state.reason === "NO_CHALLENGE"
+        ? "Request a live pairing code first"
+        : state.reason === "EXPIRED"
+          ? "This code expired; request a new one"
+          : state.reason === "INCOMPLETE_CODE"
+            ? "Enter all 4 letters"
+            : "Pairing is already in progress";
+
+    if (this.message.classList.contains("error") && !clearInputError) return;
+    this.message.className = "pair-message";
+    if (state.reason === "READY") {
+      this.message.textContent = "Ready to pair · select Pair phone or press Enter";
+    } else if (state.reason === "INCOMPLETE_CODE") {
+      this.message.textContent = this.pairing?.qrAvailable
+        ? "Scan the QR or enter all 4 letters"
+        : "Enter all 4 letters shown on the phone";
+    } else if (state.reason === "EXPIRED") {
+      this.message.textContent = "Code expired · select Get a new code";
+      this.message.classList.add("error");
     }
   }
 
@@ -268,6 +304,7 @@ export class PairingModal {
           this.showError(result.reason === "EXPIRED"
             ? "That QR code expired. Get a new code."
             : result.message || "QR pairing paused. Enter the phone code or request a new challenge.");
+          this.syncSubmissionUi();
         }
       } catch {
         // A transient poll failure must never disable the manual-code fallback.
@@ -287,6 +324,8 @@ export class PairingModal {
     this.submitting = true;
     this.pairing = null;
     this.stopQrPolling();
+    this.submitButton.disabled = true;
+    if (this.input) this.input.disabled = true;
     this.dialog.classList.add("success");
     this.message.textContent = "Phone paired · Gateway health verified";
     this.message.className = "pair-message success";
