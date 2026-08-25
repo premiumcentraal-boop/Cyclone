@@ -115,6 +115,27 @@ class FlakyBeginBridge(FakeBridge):
         return super().request_unauthenticated(op, args, request_id)
 
 
+class ClockSkewBeginBridge(FakeBridge):
+    def __init__(self, skew_ms, include_relative_lifetime=True, relative_lifetime_ms=60_000):
+        super().__init__()
+        self.skew_ms = skew_ms
+        self.include_relative_lifetime = include_relative_lifetime
+        self.relative_lifetime_ms = relative_lifetime_ms
+
+    def request_unauthenticated(self, op, args=None, request_id=None):
+        if op != "pair.begin":
+            return super().request_unauthenticated(op, args, request_id)
+        self.calls.append((op, args or {}))
+        self.challenge += 1
+        result = {
+            "challengeId": f"skew-{self.challenge}",
+            "expiresAtMs": int(time.time() * 1000) + 60_000 + self.skew_ms,
+        }
+        if self.include_relative_lifetime:
+            result["expiresInMs"] = self.relative_lifetime_ms
+        return result
+
+
 class DiesAfterPairBridge(FakeBridge):
     def request(self, op, args=None, request_id=None):
         self.calls.append((op, args or {}))
@@ -257,6 +278,48 @@ def test_pair_begin_repairs_forward_and_recovers_one_transient_transport_drop():
     assert result["pairing"] is True
     assert [op for op, _ in bridge.calls].count("pair.begin") == 2
     assert session.adb.forwards.count(session.local_port) >= 2
+
+
+@pytest.mark.parametrize("skew_ms", [-120_000, -2_000, 2_000, 120_000])
+def test_pair_begin_uses_bounded_relative_lifetime_instead_of_cross_device_epoch(skew_ms):
+    fleet, session, _ = paired_session_for_services()
+    session.credential = None
+    bridge = ClockSkewBeginBridge(skew_ms)
+    session.bridge = lambda token=None, auto_forward=False: bridge
+    pairing = PairingCoordinator(fleet)
+
+    before = int(time.time() * 1000)
+    result = pairing.begin(session.device_id)
+    after = int(time.time() * 1000)
+
+    assert result["pairing"] is True
+    assert before + 60_000 <= result["expiresAtEpochMs"] <= after + 60_000
+    assert session.pending_pairing.expires_at_ms == result["expiresAtEpochMs"]
+
+
+def test_pair_begin_keeps_legacy_mobile_compatible_when_phone_clock_is_ahead():
+    fleet, session, _ = paired_session_for_services()
+    session.credential = None
+    bridge = ClockSkewBeginBridge(2_000, include_relative_lifetime=False)
+    session.bridge = lambda token=None, auto_forward=False: bridge
+
+    result = PairingCoordinator(fleet).begin(session.device_id)
+
+    assert result["pairing"] is True
+    assert result["qrAvailable"] is True
+
+
+def test_pair_begin_rejects_unbounded_relative_lifetime():
+    fleet, session, _ = paired_session_for_services()
+    session.credential = None
+    bridge = ClockSkewBeginBridge(0, relative_lifetime_ms=60_001)
+    session.bridge = lambda token=None, auto_forward=False: bridge
+    pairing = PairingCoordinator(fleet)
+
+    with pytest.raises(DesktopRuntimeError) as error:
+        pairing.begin(session.device_id)
+
+    assert error.value.code == "CAPABILITY_UNAVAILABLE"
 
 
 def test_pair_complete_never_marks_ready_until_phone_survives_health_probe_and_writes_diagnostics(tmp_path):

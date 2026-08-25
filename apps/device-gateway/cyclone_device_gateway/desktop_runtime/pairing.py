@@ -101,15 +101,26 @@ class PairingCoordinator:
                 retryable=True,
             )
         challenge_id = str(response.get("challengeId") or "")
-        expires_at = int(response.get("expiresAtMs") or 0)
+        phone_expires_at = int(response.get("expiresAtMs") or 0)
+        expires_in_ms = int(response.get("expiresInMs") or self.MAX_LIFETIME_MS)
         now = int(time.time() * 1000)
-        if not challenge_id or expires_at <= now or expires_at - now > self.MAX_LIFETIME_MS:
+        # Never compare the phone's epoch directly with the PC's epoch. Real phones routinely differ
+        # by a few seconds, which previously made a valid 60-second Android challenge look longer
+        # than MAX_LIFETIME_MS and caused the PC to reject it before showing the code or QR. The phone
+        # enforces phone_expires_at; the PC independently enforces the bounded relative lifetime.
+        if (
+            not challenge_id
+            or phone_expires_at <= 0
+            or expires_in_ms <= 0
+            or expires_in_ms > self.MAX_LIFETIME_MS
+        ):
             self._mark_live(device_id, "pair.begin.challenge_invalid")
             diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.challenge_invalid")
             raise DesktopRuntimeError(
                 RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
                 self._diagnostic_message("Phone returned an invalid pairing challenge.", diagnostics),
             )
+        expires_at = now + expires_in_ms
         pending = PairingChallenge(challenge_id, pc_nonce, session.usb_session_id, expires_at)
         self.fleet.set_pairing(session, pending)
         live = self._mark_live(device_id, "pair.begin.challenge_ready") or live

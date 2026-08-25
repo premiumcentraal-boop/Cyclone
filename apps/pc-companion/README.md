@@ -2,11 +2,11 @@
 
 Tauri 2 + TypeScript desktop presentation shell for controlling one or many Cyclone phones.
 
-## Beta 1.0.0-beta.11
+## Beta 1.0.0-beta.12
 
-The pairing modal now has one canonical state for its message, **Pair phone** button, Enter key, expiry countdown, and submit handler. It cannot report a code as ready without a live phone challenge, and it visibly identifies the installed Companion version so an old Beta 9 installation cannot be mistaken for the current build. QR pairing remains the fastest path; manual four-letter pairing is fully supported.
+The final pairing reliability update removes wall-clock comparison between the PC and Android phone. Each device independently enforces the same bounded relative challenge lifetime, so ordinary clock drift can no longer reject a valid challenge before the code or QR appears. The modal uses one canonical state for its message, **Pair phone** button, Enter key, expiry countdown, and submit handler, and now surfaces the Gateway's safe diagnostic reason when a challenge truly cannot start.
 
-After installing an update, close any still-open Companion window and launch **Cyclone PC Companion** again. Confirm `v1.0.0-beta.11` is visible at the bottom of the sidebar before pairing; the obsolete dialog has no QR panel or visible version and must not be used.
+After installing an update, close any still-open Companion window and launch **Cyclone PC Companion** again. Confirm `v1.0.0-beta.12` is visible at the bottom of the sidebar before pairing. QR pairing is available from Cyclone Mobile under **Settings → PC Gateway & QR pairing → Scan PC QR**; secure four-letter pairing remains available beside it.
 
 The **AI connections** page provides one-click Codex setup. It configures the packaged Cyclone MCP server without copying a Gateway token, reports live Gateway/phone/tool readiness, and recovers a long-running Codex session after the Companion rotates its protected local connection. Restart Codex once after the first connection.
 

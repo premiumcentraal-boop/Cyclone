@@ -43,6 +43,10 @@ internal object GatewayDesktopPairingManager {
         return JSONObject()
             .put("challengeId", challenge.challengeId)
             .put("expiresAtMs", challenge.expiresAtMs)
+            // The PC and phone have independent wall clocks. Send the protocol-bounded relative
+            // lifetime as the cross-device authority; expiresAtMs remains for older companions and
+            // the phone continues enforcing its own absolute deadline locally.
+            .put("expiresInMs", DesktopPairingEngine.LIFETIME_MS)
             .put("attemptsAllowed", DesktopPairingEngine.MAX_ATTEMPTS)
             .put("credentialAuthority", false)
     }

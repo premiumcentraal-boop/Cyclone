@@ -204,9 +204,10 @@ jobs:
           - Checksums, source SHA/provenance, and third-party notices are attached where applicable.
 
           ## V3.1 Beta pairing and mobile overhaul
-          - The **Pair phone** label, button, Enter key, expiry countdown, and submit handler now share one canonical state. A valid four-letter code visibly becomes **Ready to pair** and cannot be silently ignored.
+          - Final Gateway fix: PC and Android no longer compare independent wall clocks. Both enforce a bounded relative challenge lifetime, preventing a valid phone challenge from being rejected before code entry.
+          - The **Pair phone** label, button, Enter key, expiry countdown, and submit handler share one canonical state. A valid four-letter code visibly becomes **Ready to pair** and cannot be silently ignored.
           - The Companion identifies its installed version in the sidebar, preventing an older false-ready dialog from being mistaken for this build.
-          - One-scan **QR pairing** opens Cyclone on the phone and completes automatically; secure manual pairing remains available.
+          - One-scan **QR pairing** is generated from the same live challenge. In Mobile, open **Settings → PC Gateway & QR pairing → Scan PC QR**; manual pairing remains available.
           - Cyclone Mobile ships the calm, pastel V3.1 experience: a simpler Home, routine library, guided trigger/action builder, AI coach, Brain, and Settings surfaces.
 
           ## Beta status

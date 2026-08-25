@@ -137,11 +137,14 @@ export class PairingModal {
       void this.renderQr(pairing);
       this.startQrPolling();
       this.input?.focus();
-    } catch {
+    } catch (error) {
       if (this.closed || sequence !== this.beginSequence) return;
       this.pairing = null;
       this.qrPanel.hidden = true;
-      this.message.textContent = "Cyclone could not create a pairing challenge. Select Get a new code to retry.";
+      const detail = error instanceof Error ? error.message.trim().slice(0, 220) : "";
+      this.message.textContent = detail
+        ? `Cyclone could not create a pairing challenge: ${detail}`
+        : "Cyclone could not create a pairing challenge. Select Get a new code to retry.";
       this.message.classList.add("error");
       this.diagnostics.textContent = "Open Settings & diagnostics to inspect the USB monitor.";
     } finally {
