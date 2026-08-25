@@ -204,7 +204,10 @@ jobs:
           - Checksums, source SHA/provenance, and third-party notices are attached where applicable.
 
           ## V3.1 Beta pairing and mobile overhaul
-          - Final Gateway fix: PC and Android no longer compare independent wall clocks. Both enforce a bounded relative challenge lifetime, preventing a valid phone challenge from being rejected before code entry.
+          - Live-session recovery: opening a paired phone safely wakes the display (never unlocks it), verifies the authenticated phone session, and starts capture without waiting for the fallback scanner.
+          - Mobile now recognizes the Companion's bounded authenticated heartbeat, so **USB / PC session** and **PC Gateway health** no longer incorrectly stay on **Waiting for PC** between short bridge requests.
+          - Stream errors are surfaced and reconnect attempts are bounded; the Companion can no longer spin forever on **Reconnecting**. Android's lock screen remains authoritative and must be unlocked by the user before protected content can be shown.
+          - PC and Android do not compare independent wall clocks. Both enforce a bounded relative challenge lifetime, preventing a valid phone challenge from being rejected before code entry.
           - The **Pair phone** label, button, Enter key, expiry countdown, and submit handler share one canonical state. A valid four-letter code visibly becomes **Ready to pair** and cannot be silently ignored.
           - The Companion identifies its installed version in the sidebar, preventing an older false-ready dialog from being mistaken for this build.
           - One-scan **QR pairing** is generated from the same live challenge. In Mobile, open **Settings → PC Gateway & QR pairing → Scan PC QR**; manual pairing remains available.
