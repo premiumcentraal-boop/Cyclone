@@ -12,9 +12,9 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 28
-        // Cyclone V3.1 final cross-device-clock-safe PC/QR pairing beta.
-        versionName = "3.1.0-beta.9"
+        versionCode = 29
+        // Cyclone V3.1 authenticated PC heartbeat and live-session recovery beta.
+        versionName = "3.1.0-beta.10"
     }
 
     buildTypes {

@@ -58,6 +58,7 @@ export class MockDesktopService implements DesktopService {
   async sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult> {
     const device = this.requireDevice(deviceId);
     if (!device.paired || device.state === "DISCONNECTED") return { ok: false, deviceId };
+    if (action.type === "wake") { device.state = "READY"; device.connectionLabel = "Ready"; }
     if (action.type === "disconnect") { device.state = "DISCONNECTED"; device.connectionLabel = "Reconnecting"; }
     else if (action.type === "reconnect") { device.state = "READY"; device.connectionLabel = "Ready"; }
     else if (action.type === "clipboard_sync") device.capabilities.clipboardSync = action.enabled;

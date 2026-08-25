@@ -17,6 +17,27 @@ object GatewayRuntime {
     @Volatile private var listenerError: String? = null
     @Volatile private var lastSafeError: String? = null
 
+    internal object PcSessionTracker {
+        const val RECENT_WINDOW_MS = 45_000L
+        @Volatile private var lastAuthenticatedAtMs: Long? = null
+
+        fun noteAuthenticated(nowMs: Long = System.currentTimeMillis()) {
+            lastAuthenticatedAtMs = nowMs
+        }
+
+        fun reset() {
+            lastAuthenticatedAtMs = null
+        }
+
+        fun lastAuthenticatedAt(): Long? = lastAuthenticatedAtMs
+
+        fun isRecent(nowMs: Long = System.currentTimeMillis()): Boolean {
+            val last = lastAuthenticatedAtMs ?: return false
+            val age = nowMs - last
+            return age in 0..RECENT_WINDOW_MS
+        }
+    }
+
     /**
      * Desktop V1 keeps the localabstract socket available as an ADB-only pairing bootstrap.
      * When full control is disabled, only pair.begin/pair.complete/pair.qr.complete can pass.
@@ -52,6 +73,7 @@ object GatewayRuntime {
         GatewaySessionStore.disable(context)
         listenerError = null
         lastSafeError = null
+        PcSessionTracker.reset()
         // Keep the ADB-only listener available for zero-authority Desktop pairing bootstrap.
         startLocked(context.applicationContext)
     }
@@ -69,6 +91,7 @@ object GatewayRuntime {
     fun disconnect() {
         server?.disconnectClients()
         lastSafeError = null
+        PcSessionTracker.reset()
     }
 
     fun isEnabled(context: Context): Boolean = GatewaySessionStore.enabled(context)
@@ -88,13 +111,15 @@ object GatewayRuntime {
         val socket = server
         val enabled = GatewaySessionStore.enabled(context)
         val packageInfo = runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
-        val connected = socket?.connectedClients() ?: 0
+        val activeClients = socket?.connectedClients() ?: 0
+        val recentlyAuthenticated = PcSessionTracker.isRecent()
+        val pcSessionKnown = activeClients > 0 || recentlyAuthenticated
         val bootstrapListening = socket?.isRunning() == true
         val listening = enabled && bootstrapListening
         val state = when {
             !enabled -> "OFF"
             !listening || !DeviceState.accessibilityConnected || listenerError != null -> "ATTENTION_NEEDED"
-            connected > 0 -> "CONNECTED"
+            pcSessionKnown -> "CONNECTED"
             else -> "WAITING_FOR_PC"
         }
         return JSONObject()
@@ -119,10 +144,11 @@ object GatewayRuntime {
             .put("productionActionAuthorityBound", GatewayActionAuthorityRegistry.isProductionAuthorityBound())
             .put("desktopClipboard", GatewayClipboardAdapter.capability(context))
             .put("connectedSession", JSONObject()
-                .put("connected", connected > 0)
-                .put("clientCount", connected)
-                .put("transport", if (connected > 0) "adb-forwarded-localabstract" else JSONObject.NULL)
-                .put("lastConnectedAt", socket?.lastClientConnectedAt ?: JSONObject.NULL)
+                .put("connected", pcSessionKnown)
+                .put("clientCount", activeClients)
+                .put("transport", if (pcSessionKnown) "adb-forwarded-localabstract" else JSONObject.NULL)
+                .put("sessionMode", if (activeClients > 0) "active-request" else if (recentlyAuthenticated) "authenticated-heartbeat" else JSONObject.NULL)
+                .put("lastConnectedAt", PcSessionTracker.lastAuthenticatedAt() ?: socket?.lastClientConnectedAt ?: JSONObject.NULL)
                 .put("pcIdentityDetectable", false))
             .put("capabilities", JSONObject()
                 .put("operations", JSONArray(GatewayProtocol.operations.toList()))
@@ -170,6 +196,7 @@ internal object GatewayDispatcher {
                 GatewayRuntime.reportSafeError("PC authentication failed. Pair again or use the current session token.")
                 GatewayProtocol.error(id, "AUTH_REJECTED", "Session token is invalid or has been rotated").toString()
             } else {
+                if (!pairingBootstrap) GatewayRuntime.PcSessionTracker.noteAuthenticated()
                 val result = dispatch(context, request)
                 GatewayRuntime.clearSafeError()
                 GatewayProtocol.success(id, result).toString()

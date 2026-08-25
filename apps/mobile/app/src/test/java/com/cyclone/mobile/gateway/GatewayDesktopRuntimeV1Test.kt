@@ -8,6 +8,20 @@ import org.junit.Test
 
 class GatewayDesktopRuntimeV1Test {
     @Test
+    fun authenticatedPcSessionRemainsVisibleAcrossShortRequestConnections() {
+        GatewayRuntime.PcSessionTracker.reset()
+        assertFalse(GatewayRuntime.PcSessionTracker.isRecent(1_000L))
+
+        GatewayRuntime.PcSessionTracker.noteAuthenticated(1_000L)
+
+        assertTrue(GatewayRuntime.PcSessionTracker.isRecent(1_000L))
+        assertTrue(GatewayRuntime.PcSessionTracker.isRecent(46_000L))
+        assertFalse(GatewayRuntime.PcSessionTracker.isRecent(46_001L))
+        assertFalse(GatewayRuntime.PcSessionTracker.isRecent(999L))
+        GatewayRuntime.PcSessionTracker.reset()
+    }
+
+    @Test
     fun pairingCodeIsFourUppercaseLettersAndExpiresWithinSixtySeconds() {
         var now = 1_000L
         val engine = DesktopPairingEngine(nowMs = { now })

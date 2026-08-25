@@ -32,8 +32,10 @@ class FakeDeviceADB:
         self.fail = fail
         self.forwards = []
         self.removed = []
+        self.shell_calls = []
 
     def shell(self, *args, timeout=15):
+        self.shell_calls.append(args)
         if self.fail:
             raise ADBError("offline")
         if args[:2] == ("pm", "path"):
@@ -231,6 +233,19 @@ def test_one_device_failure_isolation():
     assert fleet.get(deterministic_device_id("GOOD")).state == DeviceFleetState.UNPAIRED
 
 
+def test_paired_health_refresh_sends_authenticated_phone_heartbeat():
+    fleet, _, _ = make_fleet([ADBDevice("HEARTBEAT", "device")])
+    fleet.refresh_once()
+    bridges = install_fake_bridges(fleet)
+    session = fleet.get(deterministic_device_id("HEARTBEAT"))
+    fleet.remember_credential(session, "H" * 43)
+
+    fleet.refresh_once()
+
+    assert session.state == DeviceFleetState.READY
+    assert [op for op, _ in bridges[session.device_id].calls].count("bridge.status") == 1
+
+
 def test_pairing_timeout_replay_attempt_limit_and_token_rotation():
     fleet, session, bridge = paired_session_for_services()
     session.credential = None
@@ -401,6 +416,22 @@ def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
         service.execute(session.device_id, {"kind": "shell"})
 
 
+def test_opening_paired_phone_uses_only_fixed_wake_event_and_marks_ready():
+    fleet, session, bridge = paired_session_for_services()
+    session.screen_awake = False
+    session.state = DeviceFleetState.SLEEPING
+
+    result = ManualControlService(fleet).execute(session.device_id, {"kind": "wake"})
+
+    assert result["ok"] is True
+    assert result["status"] == "DISPLAY_WAKE_REQUESTED"
+    assert session.screen_awake is True
+    assert session.state == DeviceFleetState.READY
+    assert ("input", "keyevent", "224") in session.adb.shell_calls
+    assert all(op != "manual.execute" for op, _ in bridge.calls)
+    assert [op for op, _ in bridge.calls].count("bridge.status") == 1
+
+
 def test_clipboard_is_pc_to_phone_and_sensitive_values_are_rejected_without_echo():
     fleet, session, _ = paired_session_for_services()
     service = ClipboardService(fleet)
@@ -432,6 +463,24 @@ def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses
     assert "SLEEPING" in sleeping.data
     controller.unsubscribe("thumbnail", q)
     time.sleep(.1)
+    controller.stop_all()
+
+
+def test_video_reports_bounded_capture_failure_instead_of_silent_infinite_wait():
+    fleet, session, _ = paired_session_for_services()
+    session.screen_awake = True
+
+    def fail_capture(*args, **kwargs):
+        raise ADBError("capture unavailable")
+
+    session.adb.exec_out = fail_capture
+    controller = VideoStreamController(session, VideoFleetLimiter())
+    q = controller.subscribe("thumbnail")
+    assert "stream.init" in q.get(timeout=2).data
+    failure = q.get(timeout=3)
+    assert failure.kind == "text"
+    assert "FRAME_CAPTURE_FAILED" in failure.data
+    controller.unsubscribe("thumbnail", q)
     controller.stop_all()
 
 

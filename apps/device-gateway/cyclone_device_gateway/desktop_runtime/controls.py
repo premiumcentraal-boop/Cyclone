@@ -47,6 +47,36 @@ class ManualControlService:
             if len(text) > 4096:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "text batch exceeds 4096 characters.")
             args["text"] = text
+        elif kind == "wake":
+            # This is a fixed Android key event, available only after Cyclone pairing. It wakes the
+            # display but cannot unlock the phone, inject arbitrary shell, or grant authority.
+            try:
+                session.adb.shell("input", "keyevent", "224", timeout=4)
+            except Exception as exc:
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
+                    "Cyclone could not wake the paired phone display.",
+                    retryable=True,
+                ) from exc
+            self.fleet.mark_screen_awake(session)
+            # Make the phone-side status immediately observe this authenticated PC session instead
+            # of waiting for the next bounded fleet heartbeat.
+            try:
+                session.bridge().request(
+                    "bridge.status",
+                    {},
+                    request_id=f"desktop-wake-health-{secrets.token_urlsafe(12)}",
+                )
+            except BridgeOperationError as exc:
+                code = RuntimeErrorCode.AUTH_REJECTED if exc.code == "AUTH_REJECTED" else RuntimeErrorCode.CAPABILITY_UNAVAILABLE
+                raise DesktopRuntimeError(code, f"Phone rejected wake health verification with {code.value}.") from exc
+            except (BridgeDisconnectedError, BridgeProtocolError) as exc:
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.DEVICE_DISCONNECTED,
+                    "Phone woke, but the authenticated Cyclone session is unavailable.",
+                    retryable=True,
+                ) from exc
+            return {"deviceId": device_id, "kind": kind, "ok": True, "status": "DISPLAY_WAKE_REQUESTED"}
         return self._call(session, "manual.execute", args, result_shape={"deviceId": device_id, "kind": kind})
 
     def _paired(self, device_id: str) -> DeviceSession:

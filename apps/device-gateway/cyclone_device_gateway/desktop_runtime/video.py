@@ -174,6 +174,7 @@ class VideoStreamController:
     def _produce_images(self, profile: str, stop: threading.Event, target_fps: int) -> None:
         interval = 1.0 / max(1, target_fps)
         sleeping_sent = False
+        consecutive_failures = 0
         while not stop.is_set():
             started = time.monotonic()
             if not self.session.screen_awake:
@@ -191,9 +192,16 @@ class VideoStreamController:
                 png = self.session.adb.exec_out("screencap", "-p", timeout=5)
                 encoded, _, _, _ = _encode_frame(png, VIDEO_PROFILES[profile].max_long_edge)
                 self._last_safe_frame = encoded
+                consecutive_failures = 0
                 self._broadcast(profile, StreamMessage("binary", self._packet(encoded)))
             except Exception:
-                pass
+                consecutive_failures += 1
+                if consecutive_failures == 3:
+                    self._broadcast(profile, StreamMessage("text", json.dumps({
+                        "type": "stream.error",
+                        "code": "FRAME_CAPTURE_FAILED",
+                        "retryable": True,
+                    }, separators=(",", ":"))))
             stop.wait(max(0.0, interval - (time.monotonic() - started)))
 
     def _packet(self, payload: bytes) -> bytes:

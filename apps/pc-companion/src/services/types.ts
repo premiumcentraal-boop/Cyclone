@@ -71,6 +71,7 @@ export type DeviceControlAction =
   | { type: "text"; text: string }
   | { type: "clipboard_sync"; enabled: boolean }
   | { type: "clipboard_paste"; text: string }
+  | { type: "wake" }
   | { type: "disconnect" }
   | { type: "reconnect" };
 

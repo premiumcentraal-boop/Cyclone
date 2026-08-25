@@ -2,11 +2,11 @@
 
 Tauri 2 + TypeScript desktop presentation shell for controlling one or many Cyclone phones.
 
-## Beta 1.0.0-beta.12
+## Beta 1.0.0-beta.13
 
-The final pairing reliability update removes wall-clock comparison between the PC and Android phone. Each device independently enforces the same bounded relative challenge lifetime, so ordinary clock drift can no longer reject a valid challenge before the code or QR appears. The modal uses one canonical state for its message, **Pair phone** button, Enter key, expiry countdown, and submit handler, and now surfaces the Gateway's safe diagnostic reason when a challenge truly cannot start.
+This connection-lifecycle update fixes the post-pairing screen that could remain on **Connecting** or **Reconnecting**. Opening a paired phone now issues one fixed-purpose wake request (never unlock), immediately confirms the authenticated phone session, and then starts the live stream. Authenticated health heartbeats keep Mobile's **USB / PC session** and **PC Gateway health** indicators truthful even though the secure ADB bridge intentionally uses short request connections. Capture failures are visible and reconnect attempts are bounded rather than spinning forever.
 
-After installing an update, close any still-open Companion window and launch **Cyclone PC Companion** again. Confirm `v1.0.0-beta.12` is visible at the bottom of the sidebar before pairing. QR pairing is available from Cyclone Mobile under **Settings → PC Gateway & QR pairing → Scan PC QR**; secure four-letter pairing remains available beside it.
+After installing an update, close any still-open Companion window and launch **Cyclone PC Companion** again. Confirm `v1.0.0-beta.13` is visible at the bottom of the sidebar before pairing. Install Mobile `3.1.0-beta.10`, keep the phone unlocked when starting live view, and use **Settings → PC Gateway & QR pairing → Scan PC QR** or the secure four-letter code. Cyclone may wake the display but deliberately cannot bypass Android's lock screen.
 
 The **AI connections** page provides one-click Codex setup. It configures the packaged Cyclone MCP server without copying a Gateway token, reports live Gateway/phone/tool readiness, and recovers a long-running Codex session after the Companion rotates its protected local connection. Restart Codex once after the first connection.
 

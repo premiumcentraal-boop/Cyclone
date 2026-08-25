@@ -7,6 +7,7 @@ import { WebCodecsH264Renderer } from "./webcodecsH264Decoder.js";
 export class LivePhoneController {
   private renderer: VideoRenderer | null = null;
   private state: StreamUiState = "CONNECTING";
+  private stopped = false;
 
   constructor(
     private readonly service: DesktopService,
@@ -17,9 +18,10 @@ export class LivePhoneController {
   ) {}
 
   start(): void {
-    if (this.device.state === "SLEEPING") {
+    this.stopped = false;
+    if (this.device.state === "SLEEPING" && this.service.mode === "mock") {
       this.setState("SLEEPING");
-      if (this.service.mode === "mock") this.startFallback();
+      this.startFallback();
       return;
     }
     if (this.device.state === "DISCONNECTED") {
@@ -28,15 +30,23 @@ export class LivePhoneController {
       return;
     }
     if (this.service.mode === "real") {
-      const renderer = new WebCodecsH264Renderer(this.input());
-      this.renderer = renderer;
-      renderer.start();
+      // Opening a paired phone is an explicit user action. Wake the display (never unlock it), then
+      // start capture so an asleep phone cannot leave the UI waiting forever without a first frame.
+      void this.service.sendControl(this.device.id, { type: "wake" })
+        .catch(() => undefined)
+        .finally(() => {
+          if (this.stopped || this.renderer || this.state === "UNAVAILABLE") return;
+          const renderer = new WebCodecsH264Renderer(this.input());
+          this.renderer = renderer;
+          renderer.start();
+        });
       return;
     }
     this.startFallback();
   }
 
   stop(): void {
+    this.stopped = true;
     this.renderer?.stop();
     this.renderer = null;
   }

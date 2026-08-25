@@ -11,6 +11,8 @@
   },
   "include": [
     "src/core/**/*.ts",
+    "src/video/decoder.ts",
+    "src/video/webcodecsH264Decoder.ts",
     "src/services/types.ts",
     "src/services/mockDesktopService.ts"
   ]

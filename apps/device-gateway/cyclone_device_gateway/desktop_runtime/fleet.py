@@ -419,6 +419,17 @@ class DeviceFleetManager:
                 return
             session.screen_awake = self._screen_awake(session)
             self._refresh_display(session)
+            # Pairing and desktop video use short, bounded ADB-forwarded connections rather than a
+            # permanently open phone socket. Keep the Android-side session indicator truthful by
+            # sending one authenticated read-only heartbeat during the existing 20-second health
+            # refresh. This also detects a rotated/revoked phone credential before a user attempts
+            # control; it does not create a second authority or execute an action.
+            if session.credential:
+                session.bridge().request(
+                    "bridge.status",
+                    {},
+                    request_id=f"desktop-heartbeat-{secrets.token_urlsafe(12)}",
+                )
             session.last_seen_ms = now_ms()
             target = DeviceFleetState.SLEEPING if not session.screen_awake and session.credential else (
                 DeviceFleetState.READY if session.credential else DeviceFleetState.UNPAIRED
@@ -426,6 +437,19 @@ class DeviceFleetManager:
             self._set_state(session, target, None)
         except Exception:
             self._set_state(session, DeviceFleetState.ATTENTION, "Cyclone USB bridge is not ready.")
+
+    def mark_screen_awake(self, session: DeviceSession) -> None:
+        """Record a successful, paired, fixed-purpose wake without waiting for fallback polling."""
+        session.screen_awake = True
+        session.last_seen_ms = now_ms()
+        if session.credential:
+            self._set_state(session, DeviceFleetState.READY, None)
+        self.events.publish(
+            FleetEventType.SCREEN_STATE_CHANGED,
+            session.device_id,
+            state="AWAKE",
+            device=session.public(),
+        )
 
     def _package_present(self, session: DeviceSession) -> bool:
         try:

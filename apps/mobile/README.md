@@ -6,6 +6,10 @@ navigation, routine creation, visual tokens or user-facing automation language.
 
 Cyclone Mobile is the first non-root Android device node for Cyclone. It targets Android 14+ (`minSdk 34`) and deliberately separates **implemented** from **verified on a real device**.
 
+## Beta 3.1.0-beta.10 PC session status
+
+Mobile now recognizes a recent authenticated PC heartbeat as an active USB session instead of requiring a short-lived request socket to be open at the exact instant the screen redraws. **USB / PC session** and **PC Gateway health** therefore remain accurate while the paired Companion is healthy. The PC may wake the display for an explicitly opened live view, but Android's lock screen remains authoritative and must be unlocked by the user.
+
 ## Implemented in v0
 
 - AccessibilityService UI-tree observation

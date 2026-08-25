@@ -1,6 +1,11 @@
 import type { VideoRenderer, VideoRendererFactoryInput } from "./decoder.js";
 
 const HEADER_BYTES = 16;
+export const MAX_STREAM_RECONNECT_ATTEMPTS = 6;
+
+export function streamCloseIsTerminal(code: number): boolean {
+  return code === 4400 || code === 4401 || code === 4404;
+}
 
 /**
  * Renderer for `cyclone.desktop.video.v1`.
@@ -40,10 +45,19 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       const socket = new WebSocket(this.input.streamUrl, this.input.streamProtocols);
       socket.binaryType = "arraybuffer";
       this.socket = socket;
-      socket.onopen = () => { this.reconnectAttempt = 0; };
+      // A TCP/WebSocket open is not proof of a healthy phone stream. Reset backoff only after the
+      // server sends valid stream state or a frame; otherwise immediate close/open loops never end.
+      socket.onopen = () => undefined;
       socket.onmessage = (event) => this.handleMessage(event.data);
       socket.onerror = () => this.fail(new Error("Phone stream unavailable"));
-      socket.onclose = () => { if (!this.stopped) this.scheduleReconnect(); };
+      socket.onclose = (event) => {
+        if (this.stopped) return;
+        if (streamCloseIsTerminal(event.code)) {
+          this.input.callbacks.onState("UNAVAILABLE");
+          return;
+        }
+        this.scheduleReconnect();
+      };
     } catch (error) {
       this.fail(error);
       this.scheduleReconnect();
@@ -57,6 +71,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
         if (message.type === "stream.init" && typeof message.codec === "string") {
           this.codec = message.codec;
         } else if (message.type === "screen.state" && message.state === "SLEEPING") {
+          this.reconnectAttempt = 0;
           this.input.callbacks.onState("SLEEPING");
         } else if (message.type === "stream.error") {
           this.input.callbacks.onState("STREAM_ERROR");
@@ -99,6 +114,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       canvas.hidden = false;
       this.input.target.fallbackImage.hidden = true;
       this.input.callbacks.onState("LIVE");
+      this.reconnectAttempt = 0;
     } finally {
       bitmap.close();
     }
@@ -106,6 +122,10 @@ export class WebCodecsH264Renderer implements VideoRenderer {
 
   private scheduleReconnect(): void {
     if (this.stopped || this.reconnectTimer != null) return;
+    if (this.reconnectAttempt >= MAX_STREAM_RECONNECT_ATTEMPTS) {
+      this.input.callbacks.onState("UNAVAILABLE");
+      return;
+    }
     this.input.callbacks.onState("RECONNECTING");
     const delay = Math.min(5000, 500 * 2 ** Math.min(this.reconnectAttempt, 3));
     this.reconnectAttempt += 1;
