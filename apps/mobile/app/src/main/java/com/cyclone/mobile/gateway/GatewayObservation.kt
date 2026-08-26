@@ -6,6 +6,10 @@ import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.applearner.PageAwarenessRuntime
 import com.cyclone.mobile.applearner.PageContext
 import com.cyclone.mobile.applearner.PageControl
+import com.cyclone.mobile.capture.PhoneScreenCapture
+import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
+import com.cyclone.mobile.observability.pagecontext.PageContextSummary
+import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -37,7 +41,7 @@ internal object GatewayObservationStore {
 }
 
 internal object GatewayObservationAdapter {
-    fun capture(context: Context): GatewayObservation {
+    fun capture(context: Context, args: JSONObject = JSONObject()): GatewayObservation {
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         PageAwarenessRuntime.initialize(context)
@@ -49,8 +53,10 @@ internal object GatewayObservationAdapter {
         val rawNodes = safeRaw.optJSONArray("nodes") ?: JSONArray()
         val elements = linkedMapOf<String, GatewayElement>()
         val semanticControls = JSONArray()
+        val controlSignatures = linkedSetOf<String>()
 
         page.controls.forEach { control ->
+            controlSignatures += signature(control)
             val matchingNode = bestNode(control, rawNodes)
             val elementId = "semantic:$observationId:${control.key}"
             val evidence = JSONObject()
@@ -82,6 +88,54 @@ internal object GatewayObservationAdapter {
             elements[elementId] = GatewayElement(elementId, "semantic", control.label, control.semanticName, control.role, evidence)
         }
 
+        // The canonical semantic store scans at most 450 raw nodes. Surface interactive nodes
+        // outside that window as supplemental semantic controls so agents can see the whole page,
+        // not only the stored PageContext slice.
+        var supplementalCount = 0
+        for (index in 0 until rawNodes.length()) {
+            val node = rawNodes.optJSONObject(index) ?: continue
+            if (!node.optBoolean("visibleToUser", true)) continue
+            val interactive = node.optBoolean("clickable") || node.optBoolean("longClickable") ||
+                node.optBoolean("editable") || node.optBoolean("scrollable") || node.optBoolean("checkable") ||
+                node.optString("role") in setOf("button", "tab", "switch", "checkbox", "edit_text", "textbox")
+            if (!interactive) continue
+            if (signature(node) in controlSignatures) continue
+            val label = node.optString("text").takeUnless { it.isBlank() || it == "<redacted>" }
+                ?: node.optString("contentDescription").takeUnless { it.isBlank() || it == "<redacted>" }
+                ?: node.optString("resourceId").substringAfterLast('/').replace('_', ' ').takeIf { it.isNotBlank() }
+                ?: continue
+            if (label.isBlank()) continue
+            supplementalCount++
+            val elementId = "semantic:$observationId:supp:$supplementalCount"
+            val evidence = JSONObject()
+                .put("elementId", elementId)
+                .put("observationId", observationId)
+                .put("source", "semantic_supplement")
+                .put("controlKey", "supp:$supplementalCount")
+                .put("label", label.take(140))
+                .put("semanticName", semanticize(label))
+                .put("role", node.optString("role"))
+                .put("selector", GatewayPrivacy.sanitizeDeep(supplementSelector(node)))
+                .put("androidActions", node.optJSONArray("actions") ?: JSONArray())
+                .put("risk", "SAFE")
+                .put("expectedEffect", JSONObject.NULL)
+                .put("confidence", 0.55)
+                .put("resourceId", node.optString("resourceId"))
+                .put("contentDescription", node.optString("contentDescription"))
+                .put("bounds", node.optJSONObject("bounds") ?: JSONObject.NULL)
+                .put("clickable", node.optBoolean("clickable"))
+                .put("longClickable", node.optBoolean("longClickable"))
+                .put("scrollable", node.optBoolean("scrollable"))
+                .put("editable", node.optBoolean("editable"))
+                .put("enabled", node.optBoolean("enabled", true))
+                .put("selected", node.optBoolean("selected"))
+                .put("checked", node.optBoolean("checked"))
+                .put("checkable", node.optBoolean("checkable"))
+                .put("rawNodeId", node.optString("id").takeIf(String::isNotBlank) ?: JSONObject.NULL)
+            semanticControls.put(evidence)
+            elements[elementId] = GatewayElement(elementId, "semantic_supplement", label.take(140), semanticize(label), node.optString("role"), evidence)
+        }
+
         for (index in 0 until rawNodes.length()) {
             val node = rawNodes.optJSONObject(index) ?: continue
             val rawId = node.optString("id").ifBlank { "index-$index" }
@@ -101,6 +155,34 @@ internal object GatewayObservationAdapter {
                 role = node.optString("role"),
                 evidence = evidence,
             )
+        }
+
+        val pageText = PageTextExtractor.extract(safeRaw)
+        val pageSummary = PageContextSummary.build(
+            snapshot = safeRaw,
+            pageKey = page.pageKey,
+            title = page.title,
+            controlCount = page.controls.size + supplementalCount,
+            textLineCount = pageText.optInt("lineCount"),
+        )
+        val includeScreenshot = args.optBoolean("includeScreenshot", false)
+        val screenshot = if (includeScreenshot) {
+            runCatching {
+                PhoneScreenCapture.capture(
+                    service = service,
+                    maxDimension = args.optInt("screenshotMaxDimension", PhoneScreenCapture.DEFAULT_EVIDENCE_MAX_DIMENSION)
+                        .takeIf { it > 0 },
+                    includeBase64 = args.optBoolean("includeScreenshotBase64", false),
+                )
+            }.getOrElse { error ->
+                JSONObject()
+                    .put("available", false)
+                    .put("errorCode", (error as? ScreenCaptureException)?.code ?: "SCREENSHOT_FAILED")
+                    .put("error", (error.message ?: "Screen capture failed").take(240))
+            }
+        } else null
+        screenshot?.optString("filePath")?.takeIf { it.isNotBlank() }?.let { path ->
+            runCatching { PageAwarenessRuntime.store.attachPreview(page.pageKey, path) }
         }
 
         val fullPage = page.toAgentJson(maxControls = page.controls.size)
@@ -131,6 +213,10 @@ internal object GatewayObservationAdapter {
             .put("pageContext", fullPage)
             .put("semanticControls", semanticControls)
             .put("controlCount", page.controls.size)
+            .put("supplementalControlCount", supplementalCount)
+            .put("pageText", pageText)
+            .put("pageSummary", pageSummary)
+            .put("screenshot", screenshot ?: JSONObject.NULL)
             .put("windows", safeRaw.optJSONArray("windows") ?: JSONArray())
             .put("rawAccessibility", safeRaw)
             .put("rawNodeCount", rawNodes.length())
@@ -218,4 +304,31 @@ internal object GatewayObservationAdapter {
         .trim()
 
     private fun semanticize(value: String): String = normalize(value).replace(' ', '_').take(100)
+
+    private fun signature(control: PageControl): String {
+        val selector = control.selector
+        return buildList {
+            selector.optString("resourceId").takeIf(String::isNotBlank)?.let { add("resource:$it") }
+            selector.optString("text").takeIf(String::isNotBlank)?.let { add("text:${normalize(it)}") }
+            selector.optString("contentDescription").takeIf(String::isNotBlank)?.let { add("desc:${normalize(it)}") }
+            selector.optString("role").takeIf(String::isNotBlank)?.let { add("role:${it.lowercase(Locale.US)}") }
+        }.joinToString("|")
+    }
+
+    private fun signature(node: JSONObject): String = buildList {
+        node.optString("resourceId").takeIf(String::isNotBlank)?.let { add("resource:$it") }
+        node.optString("text").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { add("text:${normalize(it)}") }
+        node.optString("contentDescription").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { add("desc:${normalize(it)}") }
+        node.optString("role").takeIf(String::isNotBlank)?.let { add("role:${it.lowercase(Locale.US)}") }
+    }.joinToString("|")
+
+    private fun supplementSelector(node: JSONObject): JSONObject = JSONObject().apply {
+        node.optString("resourceId").takeIf { it.isNotBlank() }?.let { put("resourceId", it) }
+        node.optString("text").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { put("text", it.take(160)) }
+        node.optString("contentDescription").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { put("contentDescription", it.take(160)) }
+        node.optString("role").takeIf { it.isNotBlank() }?.let { put("role", it) }
+        if (node.optBoolean("clickable")) put("clickable", true)
+        if (node.optBoolean("editable")) put("editable", true)
+        if (node.optBoolean("scrollable")) put("scrollable", true)
+    }
 }

@@ -221,10 +221,11 @@ internal object GatewayDispatcher {
         "clipboard.get" -> GatewayClipboardAdapter.capability(context)
         "clipboard.set" -> GatewayClipboardAdapter.set(context, request.id, request.args)
         "bridge.status" -> GatewayRuntime.status(context)
-        "observe.semantic" -> GatewayObservationAdapter.capture(context).payload
+        "observe.semantic" -> GatewayObservationAdapter.capture(context, request.args).payload
         "observe.page_debug" -> GatewayPageDebugAdapter.capture(context, request.args)
+        "capture.screenshot" -> GatewayCaptureAdapter.capture(context, request.args)
         "ui.search" -> {
-            val observation = GatewayObservationStore.current() ?: GatewayObservationAdapter.capture(context)
+            val observation = GatewayObservationStore.current() ?: GatewayObservationAdapter.capture(context, request.args)
             JSONObject()
                 .put("observationId", observation.id)
                 .put("elementIdScope", "observation-local")

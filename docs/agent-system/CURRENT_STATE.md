@@ -43,6 +43,39 @@ The diagnostic funnel distinguishes roughly:
 
 The existing diagnostic documentation records the 2500 → 450 → 80 → 36 funnel. Treat these as current implementation limits to measure/optimize, not permanent product requirements.
 
+### Gateway-side page context enrichment (page-text v1)
+
+`observe.semantic` now augments the canonical PageContext with three additive, privacy-sanitized
+views so agents can browse a phone like a page instead of guessing from raw node trees:
+
+- `pageText` (`cyclone-page-text-v1`): visible text in top-to-bottom reading order with duplicate
+  overlay text removed. Editable values and sensitive fields are excluded; editable field labels
+  survive as `contentDescription` when available.
+- `pageSummary` (`cyclone-page-summary-v1`): headings, buttons, tabs, form fields, switches,
+  scrollable region count, redacted sensitive field count and a one-line content note.
+- `supplementalControlCount` plus `semantic_supplement` controls: interactive nodes outside the
+  canonical semantic store's 450-node scan window are surfaced as observation-scoped semantic
+  controls so deep pages are not truncated for agents. Canonical `pageKey`/`structuralKey`/
+  `contentKey` and V293 compatibility identifiers are unchanged.
+
+### Android screen capture over the gateway
+
+The gateway now serves Android frames directly instead of relying on PC-side `adb screencap`:
+
+- `capture.screenshot` (authenticated op): captures through the accessibility service screenshot
+  primitive (`android:canTakeScreenshot="true"`, minSdk 34). Returns `width`, `height`, `bytes`,
+  `timestampMs`, `filePath`, `scaled`, and optional compact `pngBase64` (`includeBase64`, capped at
+  900 KB; oversized frames return `base64Omitted: "TOO_LARGE"`). `maxDimension` scales the frame
+  (default full size for the op, 480 px evidence thumbnails from observations).
+- `observe.semantic` accepts `includeScreenshot`, `screenshotMaxDimension` and
+  `includeScreenshotBase64`; when enabled, the payload includes a `screenshot` object and the
+  preview path is attached to the stored page.
+
+No `AndroidManifest.xml` change was required for this path. A future high-FPS live stream should
+add a MediaProjection foreground service (manifest lines: `<uses-permission
+android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>` and a service with
+`android:foregroundServiceType="mediaProjection"`) and consume the same `PhoneScreenCapture` seam.
+
 ## Learning
 
 App Learner / App Graph and Adaptive Brain are present. The intended behavior is to convert safe, useful navigation into structured reusable knowledge and lower confidence when evidence starts failing.
