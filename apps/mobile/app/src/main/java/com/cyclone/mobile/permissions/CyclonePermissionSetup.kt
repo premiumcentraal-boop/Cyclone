@@ -19,44 +19,59 @@ import com.cyclone.mobile.CycloneAccessibilityService
  *
  * These checks never grant access. Every grant remains an Android-owned screen or runtime dialog
  * reached only after the user taps the corresponding setup row.
+ *
+ * Permission introspection is deliberately fail-closed. Some Android/OEM builds can throw while
+ * reading system-owned settings. Setup must render in that case instead of crashing the app, so an
+ * unavailable check is treated as "not enabled" and the user can still open the Android settings
+ * screen from Cyclone.
  */
 object CyclonePermissionSetup {
     private const val ENHANCED_ACCESSIBILITY =
         "com.mobilerun.portal.service.MobilerunAccessibilityService"
     private const val AGENT_KEYBOARD = "com.mobilerun.portal.input.MobilerunKeyboardIME"
 
-    fun primaryControlEnabled(context: Context): Boolean =
+    fun primaryControlEnabled(context: Context): Boolean = safePermissionCheck {
         accessibilityServiceEnabled(context, CycloneAccessibilityService::class.java.name)
+    }
 
-    fun enhancedControlEnabled(context: Context): Boolean =
+    fun enhancedControlEnabled(context: Context): Boolean = safePermissionCheck {
         accessibilityServiceEnabled(context, ENHANCED_ACCESSIBILITY)
+    }
 
-    fun notificationAccessEnabled(context: Context): Boolean =
+    fun notificationAccessEnabled(context: Context): Boolean = safePermissionCheck {
         NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    }
 
-    fun resultNotificationsEnabled(context: Context): Boolean =
+    fun resultNotificationsEnabled(context: Context): Boolean = safePermissionCheck {
         Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.POST_NOTIFICATIONS,
         ) == PackageManager.PERMISSION_GRANTED
+    }
 
-    fun calendarEnabled(context: Context): Boolean = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.READ_CALENDAR,
-    ) == PackageManager.PERMISSION_GRANTED
+    fun calendarEnabled(context: Context): Boolean = safePermissionCheck {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_CALENDAR,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
 
-    fun overlayEnabled(context: Context): Boolean = Settings.canDrawOverlays(context)
+    fun overlayEnabled(context: Context): Boolean = safePermissionCheck {
+        Settings.canDrawOverlays(context)
+    }
 
-    fun batteryUnrestricted(context: Context): Boolean = context
-        .getSystemService(PowerManager::class.java)
-        ?.isIgnoringBatteryOptimizations(context.packageName) == true
+    fun batteryUnrestricted(context: Context): Boolean = safePermissionCheck {
+        context.getSystemService(PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(context.packageName) == true
+    }
 
-    fun exactTimingEnabled(context: Context): Boolean =
+    fun exactTimingEnabled(context: Context): Boolean = safePermissionCheck {
         Build.VERSION.SDK_INT < 31 || context.getSystemService(AlarmManager::class.java)?.canScheduleExactAlarms() == true
+    }
 
-    fun agentKeyboardEnabled(context: Context): Boolean {
+    fun agentKeyboardEnabled(context: Context): Boolean = safePermissionCheck {
         val expected = ComponentName(context.packageName, AGENT_KEYBOARD)
-        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_INPUT_METHODS)
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_INPUT_METHODS)
             .orEmpty()
             .split(':')
             .mapNotNull(ComponentName::unflattenFromString)
@@ -104,3 +119,6 @@ object CyclonePermissionSetup {
         }
     }
 }
+
+internal inline fun safePermissionCheck(check: () -> Boolean): Boolean =
+    runCatching(check).getOrDefault(false)
