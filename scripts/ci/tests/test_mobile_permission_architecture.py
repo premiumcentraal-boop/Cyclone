@@ -119,6 +119,16 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
         )
         self.assertIn("if (title == LEGACY_ENHANCED_CONTROL_ROW) return", components)
 
+    def test_enhanced_control_compatibility_uses_primary_grant(self):
+        permission_setup = (
+            ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/permissions/CyclonePermissionSetup.kt"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("MobilerunAccessibilityService", permission_setup)
+        self.assertIn(
+            "fun enhancedControlEnabled(context: Context): Boolean = primaryControlEnabled(context)",
+            permission_setup,
+        )
+
     def test_no_manifest_can_silently_expand_into_sensitive_domains(self):
         for manifest in (
             ROOT / "apps/mobile/app/src/main/AndroidManifest.xml",
