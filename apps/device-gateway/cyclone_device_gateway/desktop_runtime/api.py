@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..auth import verify_bearer
 from ..config import Settings
 from ..server import create_app as create_legacy_app
+from ..api.stream_api import create_stream_router
 from .agent import DesktopAgentService
 from .controls import ClipboardService, ManualControlService
 from .diagnostics import FleetDiagnosticSupervisor
@@ -399,6 +400,7 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     desktop = runtime or DesktopRuntime(settings)
     app.state.desktop_runtime = desktop
     app.include_router(create_desktop_router(desktop, settings.token))
+    app.include_router(create_stream_router(desktop, settings.token))
     app.add_event_handler("startup", desktop.start)
     app.add_event_handler("shutdown", desktop.stop)
     return app
