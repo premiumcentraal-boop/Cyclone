@@ -209,7 +209,7 @@ internal object GatewayV33ActionAdapter {
         .put("structuralKey", observation.page.structuralKey)
         .put("contentKey", observation.page.contentKey)
         .put("accessibilityFingerprint", observation.payload.optString("accessibilityFingerprint"))
-        .put("capturedAtMs", observation.capturedAtMs)
+        .put("capturedAtMs", observation.capturedAt)
 }
 
 internal object GatewayV33ManualDesktopAdapter {
