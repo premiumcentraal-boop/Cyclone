@@ -114,6 +114,7 @@ export function createFleetPage(
       });
       handles.push(handle);
       grid.append(handle.element);
+      attachConnectionRecovery(handle.element, service, device, () => onScan());
     }
   };
 
@@ -146,4 +147,57 @@ function fleetSubtitle(devices: DesktopDevice[]): string {
   const ready = devices.filter((device) => device.state === "READY").length;
   if (devices.length === 1) return ready === 1 ? "1 phone ready" : "1 phone detected";
   return `${devices.length} phones · ${ready} ready`;
+}
+
+function attachConnectionRecovery(
+  card: HTMLElement,
+  service: DesktopService,
+  device: DesktopDevice,
+  onScan: () => Promise<unknown>,
+): void {
+  if (device.state !== "DISCONNECTED" && !(device.state === "ATTENTION" && device.paired)) return;
+  const kicker = card.querySelector<HTMLElement>(".state-kicker");
+  const title = card.querySelector<HTMLElement>(".state-title");
+  const copy = card.querySelector<HTMLElement>(".state-copy");
+  if (kicker) kicker.textContent = device.state === "DISCONNECTED" ? "Reconnecting" : "Needs attention";
+  if (title) title.textContent = device.state === "DISCONNECTED" ? "Reconnecting" : "Needs attention";
+  if (copy) {
+    copy.textContent = device.state === "DISCONNECTED"
+      ? "The USB bridge dropped. Cyclone retries automatically with bounded backoff, or retry now."
+      : (device.lastSafeError ?? "The phone needs attention before the live view can start.");
+  }
+
+  const banner = el("div", "connection-recovery");
+  const status = el("div", "connection-recovery-status");
+  const health = device.connectionHealth;
+  if (health) {
+    const attempts = `${health.reconnectAttempts ?? 0}/${health.maxReconnectAttempts ?? 5}`;
+    if (health.nextRetryEpochMs && health.nextRetryEpochMs > Date.now()) {
+      const seconds = Math.max(0, Math.ceil((health.nextRetryEpochMs - Date.now()) / 1000));
+      status.textContent = `Attempt ${attempts} · next retry in ${seconds}s`;
+    } else {
+      status.textContent = `Attempt ${attempts} · retry now`;
+    }
+    if (health.lastError) status.setAttribute("title", health.lastError);
+  } else {
+    status.textContent = device.connectionLabel || (device.state === "DISCONNECTED" ? "Reconnecting" : "Needs attention");
+  }
+
+  const actions = el("div", "connection-recovery-actions");
+  const retry = button("Retry connection", "button secondary compact");
+  retry.addEventListener("click", () => { void onScan(); });
+  const bundle = button("Save debug bundle", "button secondary compact");
+  bundle.addEventListener("click", () => {
+    bundle.disabled = true;
+    bundle.textContent = "Collecting…";
+    void service.createConnectionDiagnosticBundle(device.id)
+      .then((result) => {
+        bundle.textContent = result.ok ? `SAVED_${result.path.split(/[\\/]/).pop() || "CONNECTION_BUNDLE"}` : "Bundle failed";
+      })
+      .catch(() => { bundle.textContent = "Bundle failed"; })
+      .finally(() => { bundle.disabled = false; });
+  });
+  actions.append(retry, bundle);
+  banner.append(status, actions);
+  card.append(banner);
 }

@@ -132,6 +132,7 @@ export class PairingModal {
       } else {
         this.diagnostics.textContent = "Live monitor unavailable · fixed crash capture will still run on failure";
       }
+      this.renderPreflightWarning(pairing.preflight);
       this.startCountdown();
       this.syncSubmissionUi();
       void this.renderQr(pairing);
@@ -321,6 +322,17 @@ export class PairingModal {
   private stopQrPolling(): void {
     if (this.qrPollTimer != null) window.clearInterval(this.qrPollTimer);
     this.qrPollTimer = null;
+  }
+
+  private renderPreflightWarning(preflight: PairBeginResult["preflight"]): void {
+    if (!preflight) return;
+    const warnings: string[] = [];
+    if (preflight.appRunning === false) warnings.push("Cyclone app isn't running on the phone · open it, then get a new code");
+    if (preflight.accessibilityEnabled === false) warnings.push("Android accessibility is off · enable it in phone settings");
+    if (preflight.accessibilityServiceConfigured === false) warnings.push("Cyclone accessibility service isn't enabled");
+    if (warnings.length === 0) return;
+    this.diagnostics.textContent = `⚠ ${warnings.join(" · ")}`;
+    this.diagnostics.classList.add("warning");
   }
 
   private finishPairing(device: DesktopDevice): void {

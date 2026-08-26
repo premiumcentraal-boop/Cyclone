@@ -48,6 +48,7 @@ class DeviceDiagnosticRecorder:
         self._started_at_ms = 0
         self._last_stage = "not-started"
         self._latest_snapshot: str | None = None
+        self._latest_bundle_path: str | None = None
         self._pid: str | None = None
         self._snapshot_counter = 0
 
@@ -112,6 +113,8 @@ class DeviceDiagnosticRecorder:
                 archive.write(candidate, arcname=candidate.name)
         temporary.replace(target)
         self.mark("connection.bundle.saved", {"code": "BUNDLE_SAVED"})
+        with self._lock:
+            self._latest_bundle_path = str(target)
         return str(target)
 
     def capture_async(self, label: str, *, heavy: bool = False) -> None:
@@ -162,6 +165,7 @@ class DeviceDiagnosticRecorder:
                 "sessionPath": str(self.path),
                 "timelinePath": str(self.timeline_path),
                 "latestSnapshotPath": self._latest_snapshot,
+                "latestBundlePath": self._latest_bundle_path,
                 "lastStage": self._last_stage,
                 "appPid": self._pid,
                 "startedAtEpochMs": self._started_at_ms or None,
@@ -376,7 +380,15 @@ class FleetDiagnosticSupervisor:
         recorder = self.ensure(device_id)
         if recorder is None:
             return None
-        return recorder.create_connection_bundle(manifest)
+        recent_events = []
+        recent = getattr(self.fleet.events, "recent", None)
+        if callable(recent):
+            try:
+                recent_events = recent(256)
+            except Exception:
+                recent_events = []
+        enriched = {**manifest, "recentFleetEvents": recent_events}
+        return recorder.create_connection_bundle(enriched)
 
     def status(self) -> dict[str, Any]:
         with self._lock:

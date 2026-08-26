@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 import queue
 import threading
@@ -25,10 +26,11 @@ class FleetEvent:
 
 
 class FleetEventBroker:
-    def __init__(self, subscriber_queue_size: int = 64):
+    def __init__(self, subscriber_queue_size: int = 64, recent_capacity: int = 512):
         self._queue_size = max(4, min(subscriber_queue_size, 256))
         self._lock = threading.Lock()
         self._subscribers: set[queue.Queue] = set()
+        self._recent = deque(maxlen=max(64, min(int(recent_capacity), 2048)))
 
     def subscribe(self) -> queue.Queue:
         q: queue.Queue = queue.Queue(maxsize=self._queue_size)
@@ -44,6 +46,7 @@ class FleetEventBroker:
         item = FleetEvent(event, device_id, payload, now_ms()).to_dict()
         with self._lock:
             subscribers = tuple(self._subscribers)
+            self._recent.append(item)
         for q in subscribers:
             try:
                 q.put_nowait(item)
@@ -56,3 +59,9 @@ class FleetEventBroker:
                     q.put_nowait(item)
                 except queue.Full:
                     pass
+
+    def recent(self, limit: int = 256) -> list[dict[str, Any]]:
+        """Bounded snapshot of the most recent fleet events for diagnostics."""
+        limit = max(1, min(int(limit), 2048))
+        with self._lock:
+            return list(self._recent)[-limit:]

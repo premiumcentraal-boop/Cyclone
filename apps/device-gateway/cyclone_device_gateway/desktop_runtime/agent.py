@@ -32,7 +32,22 @@ class DesktopAgentService:
     def status(self, device_id: str) -> dict[str, Any]:
         session = self._paired(device_id)
         result = self._request(session, "bridge.status", {})
-        return {"device_id": device_id, "status": result}
+        return {
+            "device_id": device_id,
+            "status": result,
+            "connection_health": self._connection_health(session),
+        }
+
+    @staticmethod
+    def _connection_health(session: DeviceSession) -> dict[str, Any]:
+        return {
+            "bridgeReachable": session.bridge_ok,
+            "lastHeartbeatEpochMs": session.last_heartbeat_ms,
+            "reconnectAttempts": session.reconnect_attempts,
+            "nextRetryEpochMs": session.next_reconnect_at_ms or None,
+            "lastError": session.bridge_last_error,
+            "errorClass": session.bridge_error_class,
+        }
 
     def capabilities(self, device_id: str) -> dict[str, Any]:
         session = self._paired(device_id)

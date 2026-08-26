@@ -30,6 +30,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   const adbPath = el("div", "diagnostic-path", "");
   adb.append(adbPath);
   const autoDetect = statusCard("Auto-detect", "Checking…", "Cyclone listens for USB device changes and keeps a low-rate fallback scan.");
+  const bridgeRecovery = statusCard("Bridge recovery", "Checking…", "Paired phones that lose the USB bridge reconnect with bounded backoff instead of hanging.");
   const crashDiagnostics = statusCard(
     "Live USB crash monitor",
     "Checking…",
@@ -72,7 +73,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   crashDiagnostics.append(diagnosticsPath, diagnosticsDetail, openDiagnostics);
 
   const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI or live crash monitor.");
-  cards.append(companion, phones, adb, autoDetect, crashDiagnostics, connectionDiagnostics, privacy);
+  cards.append(companion, phones, adb, autoDetect, bridgeRecovery, crashDiagnostics, connectionDiagnostics, privacy);
   page.append(header, cards);
 
   if (service.mode === "real") {
@@ -156,6 +157,24 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     const source = friendlySource(discovery.lastScanSource);
     const interval = discovery.fallbackIntervalSeconds ? ` A fallback check runs every ${Math.round(discovery.fallbackIntervalSeconds)} seconds.` : "";
     setCard(autoDetect, trackerLabel, `${source}.${interval}`.trim());
+
+    const reconnecting = discovery.reconnectingDeviceCount ?? 0;
+    const attention = discovery.attentionDeviceCount ?? 0;
+    const maxAttempts = discovery.maxReconnectAttempts ?? 5;
+    const backoff = discovery.reconnectBackoffSeconds?.length
+      ? `${discovery.reconnectBackoffSeconds.join("s · ")}s`
+      : "1s → 15s";
+    if (reconnecting > 0) {
+      const firstError = Object.values(discovery.bridgeErrors ?? {})[0];
+      const detail = firstError?.error
+        ? `Last error: ${firstError.error}.`
+        : `Reconnect attempts use bounded backoff (${backoff}).`;
+      setCard(bridgeRecovery, `${reconnecting} phone${reconnecting === 1 ? "" : "s"} reconnecting`, `Automatic retries stop after ${maxAttempts} attempts, then the phone needs attention. ${detail}`);
+    } else if (attention > 0) {
+      setCard(bridgeRecovery, `${attention} phone${attention === 1 ? "" : "s"} need attention`, "Retry the connection from the Phones page or save a debug bundle to inspect the last failure.");
+    } else {
+      setCard(bridgeRecovery, "Stable", `Every paired phone has a healthy USB bridge. Backoff window: ${backoff}.`);
+    }
 
     adbPath.textContent = discovery.adbPath || "";
     if (discovery.adbPath) adbPath.setAttribute("title", "ADB executable used by Cyclone");

@@ -26,6 +26,9 @@ from .models import (
 
 _SIZE_RE = re.compile(r"(?:Physical|Override) size:\s*(\d+)x(\d+)", re.IGNORECASE)
 
+MAX_RECONNECT_ATTEMPTS = 5
+RECONNECT_BACKOFF_SECONDS = (1, 2, 4, 8, 15)
+
 
 @dataclass
 class RememberedSession:
@@ -51,6 +54,12 @@ class DeviceSession:
     last_safe_error: str | None = None
     pending_pairing: Any = None
     video: Any = None
+    bridge_ok: bool | None = None
+    last_heartbeat_ms: int | None = None
+    reconnect_attempts: int = 0
+    next_reconnect_at_ms: int = 0
+    bridge_last_error: str | None = None
+    bridge_error_class: str | None = None
 
     def public(self) -> dict[str, Any]:
         suffix = self.serial[-4:] if len(self.serial) >= 4 else self.serial
@@ -59,6 +68,9 @@ class DeviceSession:
         height = self.display_height or 2400
         paired = self.credential is not None
         state = self.state.value
+        reconnecting_label = "Reconnecting"
+        if self.reconnect_attempts:
+            reconnecting_label = f"Reconnecting · attempt {self.reconnect_attempts} of {MAX_RECONNECT_ATTEMPTS}"
         connection_label = {
             DeviceFleetState.READY: "Ready",
             DeviceFleetState.SLEEPING: "Sleeping",
@@ -66,7 +78,7 @@ class DeviceSession:
             DeviceFleetState.PAIRING: "Pairing",
             DeviceFleetState.UNAUTHORIZED: "Authorize USB debugging",
             DeviceFleetState.ATTENTION: "Needs attention",
-            DeviceFleetState.DISCONNECTED: "Reconnecting",
+            DeviceFleetState.DISCONNECTED: reconnecting_label,
         }.get(self.state, state.replace("_", " ").title())
         return {
             "deviceId": self.device_id,
@@ -89,6 +101,15 @@ class DeviceSession:
             "lastSeenEpochMs": self.last_seen_ms,
             "lastSafeError": self.last_safe_error,
             "connectionLabel": connection_label,
+            "connectionHealth": {
+                "bridgeReachable": self.bridge_ok,
+                "lastHeartbeatEpochMs": self.last_heartbeat_ms,
+                "reconnectAttempts": self.reconnect_attempts,
+                "maxReconnectAttempts": MAX_RECONNECT_ATTEMPTS,
+                "nextRetryEpochMs": self.next_reconnect_at_ms or None,
+                "lastError": self.bridge_last_error,
+                "errorClass": self.bridge_error_class,
+            },
             "video": {
                 "mode": "SCREENSHOT",
                 "width": width,
@@ -205,7 +226,18 @@ class DeviceFleetManager:
                 self.refresh_once(source="startup" if self._last_scan_at_ms is None else "fallback")
             except Exception:
                 pass
-            self._stop.wait(self.poll_seconds)
+            wait_for = self.poll_seconds
+            with self._lock:
+                now = now_ms()
+                pending_retries = [
+                    session.next_reconnect_at_ms
+                    for session in self._sessions.values()
+                    if session.next_reconnect_at_ms > now
+                ]
+            if pending_retries:
+                delay_seconds = max(0.5, (min(pending_retries) - now) / 1000.0)
+                wait_for = max(0.5, min(delay_seconds, self.poll_seconds))
+            self._stop.wait(wait_for)
 
     def _track_loop(self) -> None:
         if not hasattr(self.inventory_adb, "start_track_devices"):
@@ -272,12 +304,35 @@ class DeviceFleetManager:
 
     def diagnostics(self) -> dict[str, Any]:
         with self._lock:
+            reconnecting = sum(
+                1 for session in self._sessions.values()
+                if session.state == DeviceFleetState.DISCONNECTED
+            )
+            attention = sum(
+                1 for session in self._sessions.values()
+                if session.state == DeviceFleetState.ATTENTION
+            )
+            bridge_errors = {
+                session.device_id: {
+                    "error": session.bridge_last_error,
+                    "errorClass": session.bridge_error_class,
+                    "attempts": session.reconnect_attempts,
+                    "nextRetryEpochMs": session.next_reconnect_at_ms or None,
+                }
+                for session in self._sessions.values()
+                if session.bridge_last_error is not None
+            }
             return {
                 "adbPath": self.adb_path,
                 "adbAvailable": self._last_scan_at_ms is not None and self._last_adb_error is None,
                 "rawAdbDeviceCount": self._last_raw_device_count,
                 "authorizedAdbDeviceCount": self._last_authorized_device_count,
                 "fleetDeviceCount": len(self._sessions),
+                "reconnectingDeviceCount": reconnecting,
+                "attentionDeviceCount": attention,
+                "maxReconnectAttempts": MAX_RECONNECT_ATTEMPTS,
+                "reconnectBackoffSeconds": list(RECONNECT_BACKOFF_SECONDS),
+                "bridgeErrors": bridge_errors,
                 "trackerActive": self._tracker_active,
                 "trackerRestarts": self._tracker_restarts,
                 "trackerError": self._last_tracker_error,
@@ -325,6 +380,7 @@ class DeviceFleetManager:
                 self._remove_serial(serial)
 
             refresh_targets: list[DeviceSession] = []
+            now = now_ms()
             for device in devices:
                 session = self._upsert(device)
                 if device.state == "unauthorized":
@@ -332,6 +388,14 @@ class DeviceFleetManager:
                 elif device.state != "device":
                     self._set_state(session, DeviceFleetState.ATTENTION, f"ADB state is {device.state}.")
                 else:
+                    # Deterministic reconnect backoff: automatic ADB-event and fallback refreshes
+                    # respect the bounded retry window, while an explicit manual scan retries now.
+                    if (
+                        source != "manual"
+                        and session.credential
+                        and session.next_reconnect_at_ms > now
+                    ):
+                        continue
                     refresh_targets.append(session)
 
             if refresh_targets:
@@ -415,34 +479,92 @@ class DeviceFleetManager:
         try:
             session.adb.ensure_bridge_forward(session.local_port)
             if not self._package_present(session):
+                self._mark_bridge_unhealthy(session, None, "Cyclone mobile app is not installed on this phone.")
                 self._set_state(session, DeviceFleetState.ATTENTION, "Install the Cyclone mobile app on this phone.")
                 return
             session.screen_awake = self._screen_awake(session)
             self._refresh_display(session)
-            # Pairing and desktop video use short, bounded ADB-forwarded connections rather than a
-            # permanently open phone socket. Keep the Android-side session indicator truthful by
-            # sending one authenticated read-only heartbeat during the existing 20-second health
-            # refresh. This also detects a rotated/revoked phone credential before a user attempts
-            # control; it does not create a second authority or execute an action.
             if session.credential:
-                session.bridge().request(
-                    "bridge.status",
-                    {},
-                    request_id=f"desktop-heartbeat-{secrets.token_urlsafe(12)}",
-                )
+                self._heartbeat(session)
             session.last_seen_ms = now_ms()
+            self._mark_bridge_healthy(session)
             target = DeviceFleetState.SLEEPING if not session.screen_awake and session.credential else (
                 DeviceFleetState.READY if session.credential else DeviceFleetState.UNPAIRED
             )
             self._set_state(session, target, None)
-        except Exception:
-            self._set_state(session, DeviceFleetState.ATTENTION, "Cyclone USB bridge is not ready.")
+        except Exception as exc:
+            self._handle_bridge_failure(session, exc)
+
+    def _heartbeat(self, session: DeviceSession) -> None:
+        """One authenticated read-only bridge.status heartbeat.
+
+        Pairing and desktop video use short, bounded ADB-forwarded connections rather than a
+        permanently open phone socket. The heartbeat keeps the Android-side session indicator
+        truthful and detects a rotated/revoked phone credential before control is attempted. It
+        does not create a second authority or execute an action.
+        """
+        session.bridge().request(
+            "bridge.status",
+            {},
+            request_id=f"desktop-heartbeat-{secrets.token_urlsafe(12)}",
+        )
+        session.last_heartbeat_ms = now_ms()
+
+    def _mark_bridge_healthy(self, session: DeviceSession) -> None:
+        with self._lock:
+            session.bridge_ok = True
+            session.reconnect_attempts = 0
+            session.next_reconnect_at_ms = 0
+            session.bridge_last_error = None
+            session.bridge_error_class = None
+
+    def _mark_bridge_unhealthy(
+        self,
+        session: DeviceSession,
+        error_class: str | None,
+        error: str | None,
+    ) -> None:
+        with self._lock:
+            session.bridge_ok = False
+            session.bridge_error_class = error_class
+            session.bridge_last_error = error
+
+    def _handle_bridge_failure(self, session: DeviceSession, exc: Exception) -> None:
+        safe_error = self._safe_error(exc)
+        self._mark_bridge_unhealthy(session, exc.__class__.__name__, safe_error)
+        with self._lock:
+            attempts = session.reconnect_attempts
+            can_retry = session.credential and attempts < MAX_RECONNECT_ATTEMPTS
+            if can_retry:
+                session.reconnect_attempts = attempts + 1
+                backoff = RECONNECT_BACKOFF_SECONDS[
+                    min(session.reconnect_attempts - 1, len(RECONNECT_BACKOFF_SECONDS) - 1)
+                ]
+                session.next_reconnect_at_ms = now_ms() + int(backoff * 1000)
+        if can_retry:
+            self._set_state(
+                session,
+                DeviceFleetState.DISCONNECTED,
+                f"Cyclone USB bridge is reconnecting: {safe_error}",
+            )
+            return
+        exhausted = (
+            f" after {MAX_RECONNECT_ATTEMPTS} attempts"
+            if session.reconnect_attempts >= MAX_RECONNECT_ATTEMPTS
+            else ""
+        )
+        self._set_state(
+            session,
+            DeviceFleetState.ATTENTION,
+            f"Cyclone USB bridge is not ready{exhausted}: {safe_error}",
+        )
 
     def mark_screen_awake(self, session: DeviceSession) -> None:
         """Record a successful, paired, fixed-purpose wake without waiting for fallback polling."""
         session.screen_awake = True
         session.last_seen_ms = now_ms()
         if session.credential:
+            self._mark_bridge_healthy(session)
             self._set_state(session, DeviceFleetState.READY, None)
         self.events.publish(
             FleetEventType.SCREEN_STATE_CHANGED,
@@ -478,6 +600,12 @@ class DeviceFleetManager:
     def remember_credential(self, session: DeviceSession, credential: str | None) -> None:
         with self._lock:
             session.credential = credential
+            if credential:
+                session.bridge_ok = None
+                session.reconnect_attempts = 0
+                session.next_reconnect_at_ms = 0
+                session.bridge_last_error = None
+                session.bridge_error_class = None
             remembered = self._remembered.setdefault(session.serial, RememberedSession(session.device_id, None, session.local_port))
             remembered.credential = credential
             remembered.local_port = session.local_port

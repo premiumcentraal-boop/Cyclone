@@ -39,6 +39,11 @@ export class MockDesktopService implements DesktopService {
       expiresAtEpochMs: Date.now() + 60_000,
       qrAvailable: true,
       qrPayload: `cyclone://pair?challenge=${encodeURIComponent(pairingId)}&nonce=mock-nonce-abcdefghijklmnop`,
+      preflight: {
+        appRunning: true,
+        accessibilityEnabled: true,
+        accessibilityServiceConfigured: true,
+      },
     };
     this.pairings.set(deviceId, result);
     return result;
@@ -59,10 +64,15 @@ export class MockDesktopService implements DesktopService {
 
   async sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult> {
     const device = this.requireDevice(deviceId);
-    if (!device.paired || device.state === "DISCONNECTED") return { ok: false, deviceId };
+    if (!device.paired) return { ok: false, deviceId };
+    if (device.state === "DISCONNECTED" && action.type !== "reconnect") return { ok: false, deviceId };
     if (action.type === "wake") { device.state = "READY"; device.connectionLabel = "Ready"; }
     if (action.type === "disconnect") { device.state = "DISCONNECTED"; device.connectionLabel = "Reconnecting"; }
-    else if (action.type === "reconnect") { device.state = "READY"; device.connectionLabel = "Ready"; }
+    else if (action.type === "reconnect") {
+      device.state = "READY";
+      device.connectionLabel = "Ready";
+      device.connectionHealth = healthyConnectionHealth();
+    }
     else if (action.type === "clipboard_sync") device.capabilities.clipboardSync = action.enabled;
     return { ok: true, deviceId, verification: `mock-${action.type}` };
   }
@@ -115,6 +125,10 @@ export class MockDesktopService implements DesktopService {
         rawAdbDeviceCount: this.devices.length,
         authorizedAdbDeviceCount: this.devices.length,
         fleetDeviceCount: this.devices.length,
+        reconnectingDeviceCount: this.devices.filter((device) => device.state === "DISCONNECTED").length,
+        attentionDeviceCount: this.devices.filter((device) => device.state === "ATTENTION").length,
+        maxReconnectAttempts: 5,
+        reconnectBackoffSeconds: [1, 2, 4, 8, 15],
         trackerActive: true,
         lastScanSource: "mock",
       },
@@ -139,9 +153,42 @@ export function createMockDevices(count: number): DesktopDevice[] {
       lastSeenEpochMs: Date.now() - index * 1000,
       video: { mode: "SCREENSHOT", width: 1080, height: 2400, rotationDegrees: 0 },
       capabilities: { keyboard: paired, clipboard: paired && index % 4 !== 3, clipboardSync: false, reconnect: true },
+      connectionHealth: state === "DISCONNECTED"
+        ? {
+            bridgeReachable: false,
+            lastHeartbeatEpochMs: Date.now() - 40_000,
+            reconnectAttempts: 2,
+            maxReconnectAttempts: 5,
+            nextRetryEpochMs: Date.now() + 4_000,
+            lastError: "Simulated USB bridge drop",
+            errorClass: "BridgeDisconnectedError",
+          }
+        : state === "ATTENTION"
+          ? {
+              bridgeReachable: false,
+              lastHeartbeatEpochMs: Date.now() - 120_000,
+              reconnectAttempts: 5,
+              maxReconnectAttempts: 5,
+              nextRetryEpochMs: null,
+              lastError: "Bridge retries exhausted",
+              errorClass: "BridgeDisconnectedError",
+            }
+          : healthyConnectionHealth(),
       lastFrameUrl: mockFrameDataUrl(`phone-${index + 1}`, "thumbnail"),
     };
   });
+}
+
+function healthyConnectionHealth() {
+  return {
+    bridgeReachable: true,
+    lastHeartbeatEpochMs: Date.now(),
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 5,
+    nextRetryEpochMs: null,
+    lastError: null,
+    errorClass: null,
+  };
 }
 
 function copyDevice(device: DesktopDevice): DesktopDevice { return { ...device, video: { ...device.video }, capabilities: { ...device.capabilities } }; }
