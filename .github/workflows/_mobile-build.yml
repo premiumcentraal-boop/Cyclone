@@ -19,6 +19,7 @@ jobs:
         id: mobile
         shell: bash
         run: |
+          python3 scripts/ci/release_versions.py --check
           python3 scripts/ci/mobile_metadata.py --github-output "$GITHUB_OUTPUT" --json mobile-metadata.json
           python3 -m unittest discover -s scripts/ci/tests -v
           PYTHONPATH=tools/cyclone-agent-coordinator python3 -m unittest discover -s tools/cyclone-agent-coordinator/tests -v

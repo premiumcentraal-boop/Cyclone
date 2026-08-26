@@ -1,0 +1,18 @@
+schema = 1
+product_version = "3.3.0-beta.1"
+channel = "beta"
+android_version_code = 34
+python_version = "3.3.0b1"
+
+[components]
+mobile = "3.3.0-beta.1"
+pc_companion = "3.3.0-beta.1"
+device_gateway = "3.3.0-beta.1"
+mcp = "3.3.0-beta.1"
+
+[release]
+publication_authorized = false
+physical_pixel8 = "NOT_RUN"
+second_android_device = "NOT_RUN"
+android_signing = "DEBUG_UNVERIFIED"
+windows_signing = "UNVERIFIED"
