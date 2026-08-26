@@ -30,6 +30,7 @@ internal object GatewayProtocol {
         "bridge.status",
         "observe.semantic",
         "observe.page_debug",
+        "capture.screenshot",
         "ui.search",
         "ui.element",
         "app_graph.get",
