@@ -9,15 +9,25 @@ from .mcp_server import McpServer
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Cyclone Phone MCP server")
-    parser.add_argument("--self-test", action="store_true", help="Check gateway status and exit instead of starting MCP stdio")
+    parser.add_argument(
+        "--self-test",
+        nargs="?",
+        const="status",
+        metavar="TARGET",
+        help="Check gateway readiness (status|devices) and exit instead of starting MCP stdio",
+    )
     args = parser.parse_args(argv)
     if args.self_test:
         try:
-            status = GatewayClient(timeout=5).status()
+            client = GatewayClient(timeout=5)
+            if args.self_test == "devices":
+                print(json.dumps({"ok": True, "devices": client.devices()}, ensure_ascii=False))
+            else:
+                status = client.status()
+                print(json.dumps({"ok": True, "gateway": status}, ensure_ascii=False))
         except GatewayError as exc:
             print(json.dumps({"ok": False, "error": str(exc)}))
             return 1
-        print(json.dumps({"ok": True, "gateway": status}, ensure_ascii=False))
         return 0
     McpServer().serve_stdio()
     return 0

@@ -31,7 +31,14 @@ function Invoke-OrShow([string]$Exe, [string[]]$Args) {
 }
 function New-StrongToken {
     $bytes = New-Object byte[] 32
-    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    # RandomNumberGenerator.Fill is .NET Core only; Windows PowerShell 5.1 still ships the
+    # .NET Framework API where GetBytes is the portable call.
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
     return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
 }
 
@@ -117,6 +124,22 @@ if ($DryRun) {
     Set-Content -Path $McpRunner -Value $RunnerContent -Encoding UTF8
     Set-Content -Path $CodexSnippet -Value $SnippetContent -Encoding UTF8
     Write-Host "Codex MCP snippet: $CodexSnippet"
+}
+
+Write-Step "Verifying the generated launcher can decrypt the token"
+if (-not $DryRun -and (Test-Path $McpRunner) -and (Test-Path $TokenFile)) {
+    $Secure = Import-Clixml $TokenFile
+    $Ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
+    try {
+        $Plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($Ptr)
+        if ([string]::IsNullOrWhiteSpace($Plain)) { throw "Decrypted PC Gateway token is empty." }
+        Write-Host "Launcher token decrypt verified (token value not printed)."
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($Ptr)
+        Remove-Variable Plain -ErrorAction SilentlyContinue
+    }
+} elseif ($DryRun) {
+    Write-Host "DRY RUN: would verify the launcher decrypts the stored token"
 }
 
 if ($Adb) {

@@ -30,6 +30,18 @@ class McpProtocolTests(unittest.TestCase):
         self.assertIn("phone_act", names)
         self.assertFalse(any("shell" in name or "root" in name or "adb" in name for name in names))
 
+    def test_tool_list_exposes_device_autodetection_and_scoping(self):
+        response = self.server.handle({"jsonrpc": "2.0", "id": 6, "method": "tools/list"})
+        tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        self.assertIn("phone_devices", tools)
+        self.assertEqual(
+            ["scan"],
+            list(tools["phone_devices"]["inputSchema"]["properties"].keys()),
+        )
+        self.assertIn("device_id", tools["phone_observe"]["inputSchema"]["properties"])
+        self.assertIn("device_id", tools["phone_act"]["inputSchema"]["properties"])
+        self.assertIn("device_id", tools["phone_debug_bundle"]["inputSchema"]["properties"])
+
     def test_unknown_tool_rejected(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "root_shell", "arguments": {}}})
         self.assertIn("error", response)

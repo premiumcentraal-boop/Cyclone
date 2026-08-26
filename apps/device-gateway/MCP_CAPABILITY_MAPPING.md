@@ -11,6 +11,8 @@ cyclone.gateway.capability.v1
 | Gateway endpoint | MCP responsibility |
 |---|---|
 | `GET /v1/device/status` | status/readiness |
+| `GET /v1/devices`, `GET /v1/fleet`, `POST /v1/fleet/scan` | auto-detect connected phones (fleet surface) |
+| `/v1/devices/{device_id}/agent/*` | per-device routing when multiple phones are connected |
 | `GET /v1/capabilities` | typed capability discovery/health |
 | `POST /v1/capabilities/observe` | compact/full structured observation with correlation + witness |
 | `GET /v1/ui/search` | deterministic semantic/raw/UiAutomator search |
@@ -23,6 +25,7 @@ cyclone.gateway.capability.v1
 
 | MCP tool | V3 concept | Notes |
 |---|---|---|
+| `phone_devices` | auto-detect | Fleet discovery; degrades to the legacy single-device status row when the gateway only exposes the legacy surface. `scan=true` forces a fresh ADB scan. |
 | `phone_status` | status | Device/Gateway/Accessibility readiness. |
 | `phone_capabilities` | status/discovery | Cached `GET /v1/capabilities`; `refresh=true` forces rediscovery. |
 | `phone_observe` | observe | Compact by default. Full only for targeted debugging. |
@@ -34,6 +37,22 @@ cyclone.gateway.capability.v1
 | `phone_screenshot` | vision fallback | Use only when structured evidence is insufficient/conflicting. |
 
 No MCP tool exposes shell, root, PowerShell, arbitrary ADB or a generic command primitive.
+
+## Per-device routing
+
+Every operation accepts an optional `device_id` returned by `phone_devices`. When provided, the
+client calls the Desktop fleet agent surface (`/v1/devices/{device_id}/agent/*`); when omitted it
+uses the legacy single-device surface selected by `CYCLONE_DEVICE_SERIAL`.
+
+The Desktop agent returns its own envelope for actions. The MCP client normalizes it to the
+canonical `cyclone.gateway.capability.v1` shape (transport -> execution -> verification) so the
+shared fail-closed classifier and fresh-observation rule apply unchanged. The normalization is
+client-side only; the gateway and Android authority are untouched.
+
+The Desktop agent semantic observe endpoint does not return image bytes (`USE_DESKTOP_VIDEO_OR_DEBUG_BUNDLE`).
+`phone_screenshot` therefore reports `screenshotAvailable=false` for a device-scoped call and points
+the agent at the legacy screenshot path or the PC Companion live video. Debug bundles remain the
+diagnostic fallback for both surfaces.
 
 ## Action authority
 
