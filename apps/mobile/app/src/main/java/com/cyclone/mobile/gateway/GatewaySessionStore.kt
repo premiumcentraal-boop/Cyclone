@@ -33,6 +33,16 @@ internal object GatewaySessionStore {
 
     fun token(context: Context): String? = if (enabled(context)) legacyToken else null
 
+    /** Enable the V3.3 gateway after visible phone trust without creating a legacy bearer. */
+    @Synchronized
+    fun enableTrusted(context: Context) {
+        prefs(context).edit()
+            .putBoolean(KEY_ENABLED, true)
+            .putLong(KEY_ROTATED_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    /** Explicit transition helper used only by the old four-letter compatibility flow. */
     @Synchronized
     fun enable(context: Context): String {
         val token = newToken()
