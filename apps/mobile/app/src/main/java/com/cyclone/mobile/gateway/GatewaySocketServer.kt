@@ -5,16 +5,33 @@ import android.net.LocalSocket
 import java.io.Closeable
 import java.io.IOException
 import java.util.Collections
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class GatewaySocketServer(
     private val onLine: (String) -> String,
 ) : Closeable {
+    companion object {
+        const val MAX_CLIENT_WORKERS = 4
+        const val MAX_QUEUED_CLIENTS = 8
+    }
+
     private val running = AtomicBoolean(false)
     private val clients = Collections.synchronizedSet(linkedSetOf<LocalSocket>())
     private val acceptExecutor = Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "cyclone-gateway-accept") }
-    private val clientExecutor = Executors.newCachedThreadPool { runnable -> Thread(runnable, "cyclone-gateway-client") }
+    private val clientExecutor = ThreadPoolExecutor(
+        2,
+        MAX_CLIENT_WORKERS,
+        30L,
+        TimeUnit.SECONDS,
+        ArrayBlockingQueue(MAX_QUEUED_CLIENTS),
+        { runnable -> Thread(runnable, "cyclone-gateway-client") },
+        ThreadPoolExecutor.AbortPolicy(),
+    ).apply { allowCoreThreadTimeOut(true) }
     @Volatile private var server: LocalServerSocket? = null
     @Volatile var lastClientConnectedAt: Long? = null
         private set
@@ -51,7 +68,12 @@ internal class GatewaySocketServer(
             }
             clients += socket
             lastClientConnectedAt = System.currentTimeMillis()
-            clientExecutor.execute { handle(socket) }
+            try {
+                clientExecutor.execute { handle(socket) }
+            } catch (_: RejectedExecutionException) {
+                clients -= socket
+                runCatching { socket.close() }
+            }
         }
     }
 
@@ -61,14 +83,12 @@ internal class GatewaySocketServer(
             val output = socket.outputStream.bufferedWriter(Charsets.UTF_8)
 
             // Do not call LocalSocket.isClosed here. On current Android builds that API can throw
-            // UnsupportedOperationException, and an uncaught exception on this worker kills the
-            // entire Cyclone process. EOF/IOException from the streams is the portable disconnect
-            // signal, while `running` remains the server-owned lifecycle flag.
+            // UnsupportedOperationException. EOF/IOException is the portable ADB disconnect signal.
             while (running.get()) {
                 val line = try {
                     GatewayLineReader.readUtf8Line(input)
                 } catch (error: GatewayProtocolException) {
-                    output.write(GatewayProtocol.error(error.requestId, error.code, error.message).toString())
+                    output.write(GatewayProtocol.error(error.requestId, error.code, error.message, error.details).toString())
                     output.newLine()
                     output.flush()
                     continue
@@ -87,8 +107,7 @@ internal class GatewaySocketServer(
         } catch (_: IOException) {
             // ADB forwards disappear abruptly on USB disconnect; that is a normal lifecycle event.
         } catch (error: Throwable) {
-            // A client transport must never be able to crash the Android app process. Android's
-            // LocalSocket implementation has device/version-specific RuntimeException behavior.
+            // Client input/transport must never be able to crash Cyclone's Android process.
             rethrowFatal(error)
         } finally {
             clients -= socket
