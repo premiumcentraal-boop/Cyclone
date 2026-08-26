@@ -2,7 +2,7 @@
 
 Updated: 2026-08-26
 Brain generation: 1
-Brain branch: `project/cyclone-brain-v1`
+Brain branch: `project/cyclone-brain`
 
 This file is intentionally short. It is the first current-state note a new session should read after `AGENTS.md`.
 
