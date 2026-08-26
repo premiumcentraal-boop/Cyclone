@@ -13,6 +13,7 @@ import type {
   PairQrConfirmResult,
   StreamDiagnosticEvent,
   StreamProfile,
+  TrustStatusResult,
 } from "./types.js";
 
 export interface HttpDesktopServiceOptions {
@@ -63,6 +64,13 @@ type ConnectorActionPayload = {
   };
 };
 
+type RuntimeSelfTest = {
+  ok: boolean;
+  runtimeInstanceId: string;
+  runtimePort: number;
+  sessionBinding: string;
+};
+
 /** The single real-backend adapter used by the Cyclone PC Companion UI. */
 export class HttpDesktopService implements DesktopService {
   readonly mode = "real" as const;
@@ -82,7 +90,10 @@ export class HttpDesktopService implements DesktopService {
     while (Date.now() < deadline) {
       try {
         const status = await this.getRuntimeStatus();
-        if (status.backendReachable) return;
+        if (status.backendReachable) {
+          await this.verifySessionBinding(Math.min(3_000, Math.max(500, deadline - Date.now())));
+          return;
+        }
       } catch (error) {
         lastError = error;
       }
@@ -102,11 +113,12 @@ export class HttpDesktopService implements DesktopService {
 
   watchFleet(onChange: () => void): () => void {
     let disposed = false;
+    let authRejected = false;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
 
     const connect = () => {
-      if (disposed) return;
+      if (disposed || authRejected) return;
       try {
         socket = new WebSocket(`${this.wsBase}/v1/fleet/events`, this.getVideoProtocols());
       } catch {
@@ -119,11 +131,17 @@ export class HttpDesktopService implements DesktopService {
       socket.addEventListener("error", () => {
         try { socket?.close(); } catch { /* noop */ }
       });
-      socket.addEventListener("close", () => scheduleReconnect());
+      socket.addEventListener("close", (event) => {
+        if (event.code === 4401) {
+          authRejected = true;
+          return;
+        }
+        scheduleReconnect();
+      });
     };
 
     const scheduleReconnect = () => {
-      if (disposed || reconnectTimer != null) return;
+      if (disposed || authRejected || reconnectTimer != null) return;
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null;
         connect();
@@ -138,6 +156,26 @@ export class HttpDesktopService implements DesktopService {
       try { socket?.close(); } catch { /* noop */ }
       socket = null;
     };
+  }
+
+  trustStatus(deviceId: string): Promise<TrustStatusResult> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/trust`);
+  }
+
+  trustBegin(deviceId: string): Promise<TrustStatusResult> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/trust/begin`, { method: "POST" });
+  }
+
+  trustComplete(deviceId: string): Promise<TrustStatusResult> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/trust/complete`, { method: "POST" });
+  }
+
+  trustRotate(deviceId: string): Promise<TrustStatusResult> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/trust/rotate`, { method: "POST" });
+  }
+
+  trustRevoke(deviceId: string): Promise<TrustStatusResult> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/trust/revoke`, { method: "POST" });
   }
 
   pairBegin(deviceId: string): Promise<PairBeginResult> {
@@ -205,8 +243,8 @@ export class HttpDesktopService implements DesktopService {
       return { ok: result.updated === true, deviceId, verification: "clipboard-redacted" };
     }
     if (action.type === "disconnect") {
-      await this.request(`/v1/devices/${encodeURIComponent(deviceId)}/pair/revoke`, { method: "POST" });
-      return { ok: true, deviceId, verification: "pairing-revoked" };
+      await this.trustRevoke(deviceId);
+      return { ok: true, deviceId, verification: "trust-revoked" };
     }
     if (action.type === "reconnect") {
       return { ok: true, deviceId, verification: "automatic-usb-reconnect" };
@@ -268,7 +306,7 @@ export class HttpDesktopService implements DesktopService {
       const codexDetails = status.details?.codex;
       const gatewayDetails = status.details?.gateway;
       const mcpDetails = status.details?.mcp;
-      const codexConnector = connector("codex", "Codex", "Give Codex instant, typed access to every paired Cyclone phone.", status.codex);
+      const codexConnector = connector("codex", "Codex", "Give Codex instant, typed access to every trusted Cyclone phone.", status.codex);
       if (codexConnector.state === "CONNECTED" && gatewayDetails?.reachable === false) {
         codexConnector.state = "NEEDS_ATTENTION";
         codexConnector.actionLabel = "Recheck";
@@ -315,6 +353,47 @@ export class HttpDesktopService implements DesktopService {
 
   getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return this.request("/v1/diagnostics/status");
+  }
+
+  private async verifySessionBinding(timeoutMs: number): Promise<void> {
+    const httpValue = await this.request<RuntimeSelfTest>("/v1/runtime/self-test");
+    const wsValue = await new Promise<RuntimeSelfTest>((resolve, reject) => {
+      let settled = false;
+      const socket = new WebSocket(`${this.wsBase}/v1/runtime/self-test/ws`, this.getVideoProtocols());
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { socket.close(); } catch { /* noop */ }
+        reject(new Error("Cyclone WebSocket session self-test timed out"));
+      }, Math.max(250, timeoutMs));
+      const finish = (value: RuntimeSelfTest | Error) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        try { socket.close(); } catch { /* noop */ }
+        if (value instanceof Error) reject(value); else resolve(value);
+      };
+      socket.addEventListener("message", (event) => {
+        try {
+          finish(JSON.parse(String(event.data)) as RuntimeSelfTest);
+        } catch {
+          finish(new Error("Cyclone WebSocket session self-test returned invalid data"));
+        }
+      });
+      socket.addEventListener("close", (event) => {
+        if (!settled && event.code === 4401) finish(new Error("Cyclone WebSocket session authentication was rejected"));
+      });
+      socket.addEventListener("error", () => finish(new Error("Cyclone WebSocket session self-test failed")));
+    });
+    if (
+      !httpValue.ok
+      || !wsValue.ok
+      || httpValue.sessionBinding !== wsValue.sessionBinding
+      || httpValue.runtimeInstanceId !== wsValue.runtimeInstanceId
+      || httpValue.runtimePort !== wsValue.runtimePort
+    ) {
+      throw new Error("Cyclone local HTTP and WebSocket clients are attached to different runtime sessions");
+    }
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

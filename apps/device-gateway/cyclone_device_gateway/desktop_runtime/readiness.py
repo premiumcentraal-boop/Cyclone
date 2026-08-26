@@ -69,7 +69,18 @@ def bridge_state(session: Any) -> BridgeState:
     return BridgeState.SOCKET_STARTING
 
 
-def ai_trust_state(session: Any, bridge: BridgeState | None = None) -> AITrustState:
+def ai_trust_state(session: Any, bridge: BridgeState | None = None, trust_status: dict[str, Any] | None = None) -> AITrustState:
+    if trust_status:
+        explicit = str(trust_status.get("state") or "")
+        mapping = {
+            "UNPAIRED": AITrustState.UNPAIRED,
+            "CONFIRMATION_REQUIRED": AITrustState.CONFIRMATION_REQUIRED,
+            "TRUSTED": AITrustState.TRUSTED,
+            "REVOKED": AITrustState.REVOKED,
+            "EXPIRED": AITrustState.EXPIRED,
+        }
+        if explicit in mapping:
+            return mapping[explicit]
     if getattr(session, "pending_pairing", None) is not None:
         return AITrustState.CONFIRMATION_REQUIRED
     if not getattr(session, "credential", None):
@@ -102,6 +113,8 @@ def connection_label(
         return "Phone connected · AI/Codex ready"
     if trust == AITrustState.EXPIRED:
         return "Phone connected · Allow AI control again"
+    if trust == AITrustState.REVOKED:
+        return "Phone connected · AI access revoked"
     if bridge == BridgeState.APP_MISSING:
         return "Phone connected · Cyclone Mobile is not installed"
     if media in {MediaState.STARTING, MediaState.WAITING_KEYFRAME, MediaState.RECONNECTING}:
@@ -148,7 +161,7 @@ def readiness_cards(
     return {"phoneConnection": phone, "liveDisplay": display, "aiCodexAccess": ai}
 
 
-def enrich_device_public(session: Any) -> dict[str, Any]:
+def enrich_device_public(session: Any, trust_status: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return the V3.3 public device shape without leaking serials, credentials or frame bytes.
 
     The legacy aggregate ``state`` is kept for existing UI compatibility, but bridge/media failures
@@ -160,7 +173,7 @@ def enrich_device_public(session: Any) -> dict[str, Any]:
     discovery = discovery_state(session)
     media = media_state(session, diagnostics)
     bridge = bridge_state(session)
-    trust = ai_trust_state(session, bridge)
+    trust = ai_trust_state(session, bridge, trust_status)
 
     if discovery == DiscoveryState.UNAUTHORIZED:
         legacy_state = "UNAUTHORIZED"
@@ -174,6 +187,7 @@ def enrich_device_public(session: Any) -> dict[str, Any]:
         legacy_state = "READY"
 
     public["state"] = legacy_state
+    public["paired"] = trust == AITrustState.TRUSTED
     public["connectionLabel"] = connection_label(discovery, media, bridge, trust)
     public["planes"] = {
         "discovery": discovery.value,

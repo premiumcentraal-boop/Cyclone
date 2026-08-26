@@ -46,6 +46,29 @@ export interface DeviceReadiness {
   aiCodexAccess: ReadinessCard;
 }
 
+export interface TrustStatusResult {
+  deviceId: string;
+  protocolVersion: string;
+  state: AITrustState;
+  confirmationRequired: boolean;
+  trusted: boolean;
+  sessionReady: boolean;
+  sessionExpiresAtEpochMs?: number | null;
+  pcId?: string;
+  pcIdentityStorage?: string;
+  sessionSecretPersisted?: boolean;
+  lastSafeError?: string | null;
+  adbReady?: boolean;
+  challengeId?: string;
+  expiresAtEpochMs?: number;
+  phoneConfirmation?: string;
+  manualFallback?: boolean;
+  restored?: boolean;
+  completed?: boolean;
+  rotated?: boolean;
+  revoked?: boolean;
+}
+
 export type StreamUiState =
   | "CONNECTING"
   | "LIVE"
@@ -261,6 +284,11 @@ export interface DesktopService {
   listDevices(): Promise<DesktopDevice[]>;
   scanDevices(): Promise<DesktopDevice[]>;
   watchFleet(onChange: () => void): () => void;
+  trustStatus?(deviceId: string): Promise<TrustStatusResult>;
+  trustBegin?(deviceId: string): Promise<TrustStatusResult>;
+  trustComplete?(deviceId: string): Promise<TrustStatusResult>;
+  trustRotate?(deviceId: string): Promise<TrustStatusResult>;
+  trustRevoke?(deviceId: string): Promise<TrustStatusResult>;
   pairBegin(deviceId: string): Promise<PairBeginResult>;
   pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult>;
   pairQrConfirm(deviceId: string, pairingId: string): Promise<PairQrConfirmResult>;

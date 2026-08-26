@@ -23,6 +23,7 @@ from .fleet import DeviceFleetManager
 from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES
 from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
+from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 
 
@@ -98,6 +99,7 @@ class DesktopRuntime:
         self.fleet = fleet or DeviceFleetManager(adb_path=settings.adb_path, poll_seconds=20.0)
         self.live_diagnostics = FleetDiagnosticSupervisor(self.fleet)
         self.pairing = PairingCoordinator(self.fleet, self.live_diagnostics)
+        self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
         self.agent = DesktopAgentService(self.fleet)
@@ -117,8 +119,11 @@ class DesktopRuntime:
         # The diagnostic supervisor is deliberately independent of pairing. As soon as ADB reports
         # an authorized phone, it records a bounded baseline and follows only the Cyclone app PID.
         self.live_diagnostics.start()
+        self.trust.start()
 
     def stop(self) -> None:
+        # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
+        self.trust.stop()
         self.live_diagnostics.stop()
         self.fleet.stop()
 
@@ -243,6 +248,7 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     def diagnostics_bundle(device_id: str) -> dict[str, Any]:
         session = runtime.fleet.get(device_id)
         video = session.video.diagnostics() if session.video is not None and hasattr(session.video, "diagnostics") else {}
+        trust = _safe_trust_status(runtime, device_id)
         bridge_probe: dict[str, Any]
         try:
             health = session.bridge().request("bridge.status", {}, request_id=f"desktop-debug-{secrets.token_urlsafe(12)}")
@@ -268,7 +274,8 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             "runtimeInstanceId": runtime.instance_id,
             "desktopProtocol": DESKTOP_PROTOCOL_VERSION,
             "sessionBinding": _session_binding(runtime, token),
-            "device": enrich_device_public(session),
+            "device": enrich_device_public(session, trust),
+            "aiTrust": trust,
             "discovery": runtime.fleet.diagnostics(),
             "video": video,
             "authenticatedBridgeProbe": bridge_probe,
@@ -279,6 +286,39 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             raise HTTPException(status_code=503, detail={"code": "DIAGNOSTICS_UNAVAILABLE", "message": "Connection diagnostics are unavailable."})
         return {"ok": True, "deviceId": device_id, "path": path, "createdAtEpochMs": created_at}
 
+    @router.get("/v1/devices/{device_id}/trust", dependencies=[Depends(auth)])
+    def trust_status(device_id: str):
+        return _call(lambda: runtime.trust.status(device_id))
+
+    @router.post("/v1/devices/{device_id}/trust/begin", dependencies=[Depends(auth)])
+    def trust_begin(device_id: str):
+        runtime.live_diagnostics.mark(device_id, "trust.challenge.requested", details={"protocol": "3.3"})
+        result = _call(lambda: runtime.trust.begin(device_id))
+        stage = "trust.session.authenticated" if result.get("sessionReady") else "trust.phone_confirmation_required"
+        runtime.live_diagnostics.mark(device_id, stage, details={"protocol": "3.3"})
+        return result
+
+    @router.post("/v1/devices/{device_id}/trust/complete", dependencies=[Depends(auth)])
+    def trust_complete(device_id: str):
+        result = _call(lambda: runtime.trust.complete(device_id))
+        stage = "trust.session.authenticated" if result.get("sessionReady") else "trust.phone_confirmation_required"
+        runtime.live_diagnostics.mark(device_id, stage, details={"protocol": "3.3"})
+        return result
+
+    @router.post("/v1/devices/{device_id}/trust/rotate", dependencies=[Depends(auth)])
+    def trust_rotate(device_id: str):
+        result = _call(lambda: runtime.trust.rotate(device_id))
+        runtime.live_diagnostics.mark(device_id, "trust.rotated", details={"protocol": "3.3"})
+        return result
+
+    @router.post("/v1/devices/{device_id}/trust/revoke", dependencies=[Depends(auth)])
+    def trust_revoke(device_id: str):
+        result = _call(lambda: runtime.trust.revoke(device_id))
+        runtime.live_diagnostics.mark(device_id, "trust.revoked", details={"protocol": "3.3"})
+        return result
+
+    # Legacy code/QR pairing stays as an explicitly secondary transition fallback. The V3.3
+    # normal USB path above never asks the user to copy a local gateway secret or four-letter code.
     @router.post("/v1/devices/{device_id}/pair/begin", dependencies=[Depends(auth)])
     def pair_begin(device_id: str):
         return _call(lambda: runtime.pairing.begin(device_id))
@@ -290,7 +330,7 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
         if isinstance(result, dict):
             result = dict(result)
             try:
-                result["device"] = enrich_device_public(runtime.fleet.get(device_id))
+                result["device"] = enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id))
             except DesktopRuntimeError:
                 pass
         return result
@@ -301,7 +341,7 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
         if isinstance(result, dict) and result.get("paired") is True:
             result = dict(result)
             try:
-                result["device"] = enrich_device_public(runtime.fleet.get(device_id))
+                result["device"] = enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id))
             except DesktopRuntimeError:
                 pass
         return result
@@ -474,6 +514,33 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     return app
 
 
+def _safe_trust_status(runtime: DesktopRuntime, device_id: str) -> dict[str, Any]:
+    try:
+        return runtime.trust.status(device_id)
+    except DesktopRuntimeError as exc:
+        return {
+            "deviceId": device_id,
+            "protocolVersion": "3.3",
+            "state": "EXPIRED",
+            "confirmationRequired": False,
+            "trusted": False,
+            "sessionReady": False,
+            "sessionSecretPersisted": False,
+            "lastSafeError": exc.safe_message,
+        }
+    except Exception:
+        return {
+            "deviceId": device_id,
+            "protocolVersion": "3.3",
+            "state": "UNPAIRED",
+            "confirmationRequired": False,
+            "trusted": False,
+            "sessionReady": False,
+            "sessionSecretPersisted": False,
+            "lastSafeError": "Cyclone AI trust status is temporarily unavailable.",
+        }
+
+
 def _public_devices(runtime: DesktopRuntime) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for item in runtime.fleet.list_public():
@@ -481,7 +548,7 @@ def _public_devices(runtime: DesktopRuntime) -> list[dict[str, Any]]:
         if not device_id:
             continue
         try:
-            result.append(enrich_device_public(runtime.fleet.get(device_id)))
+            result.append(enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id)))
         except DesktopRuntimeError:
             continue
     return result
@@ -492,7 +559,7 @@ def _enrich_event(runtime: DesktopRuntime, item: dict[str, Any]) -> dict[str, An
     device_id = str(value.get("deviceId") or "")
     if device_id and "device" in value:
         try:
-            value["device"] = enrich_device_public(runtime.fleet.get(device_id))
+            value["device"] = enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id))
         except DesktopRuntimeError:
             pass
     return value
