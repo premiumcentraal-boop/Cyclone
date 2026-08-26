@@ -16,17 +16,54 @@ internal class GatewayProtocolException(
     val code: String,
     override val message: String,
     val requestId: String = "",
+    val details: Any? = null,
 ) : IllegalArgumentException(message)
 
 internal object GatewayProtocol {
-    const val VERSION = "1.0"
+    const val VERSION = "3.3"
     const val SOCKET_NAME = "cyclone_gateway"
     const val DEFAULT_FORWARD_PORT = 8766
     const val MAX_LINE_BYTES = 1024 * 1024
 
-    val unauthenticatedOperations = setOf("pair.begin", "pair.complete", "pair.qr.complete")
+    /**
+     * These operations either negotiate capabilities or carry their own signed challenge proof.
+     * They never authorize a phone action by themselves.
+     */
+    val unauthenticatedOperations = setOf(
+        "trust.negotiate",
+        "trust.begin",
+        "trust.complete",
+        "trust.session.begin",
+        "trust.session.complete",
+        // One transition release keeps the old four-letter pairing bootstrap as an explicit
+        // non-default compatibility path. Credentials from it are read-only at dispatch.
+        "pair.begin",
+        "pair.complete",
+        "pair.qr.complete",
+    )
+
+    /** Legacy pairing credentials can inspect state but can never mutate under V3.3 rules. */
+    val legacyReadOnlyOperations = setOf(
+        "bridge.status",
+        "observe.semantic",
+        "observe.page_debug",
+        "capture.screenshot",
+        "ui.search",
+        "ui.element",
+        "app_graph.get",
+        "brain.recall",
+        "teach.status",
+        "debug.snapshot",
+    )
 
     val operations = linkedSetOf(
+        "trust.negotiate",
+        "trust.begin",
+        "trust.complete",
+        "trust.session.begin",
+        "trust.session.complete",
+        "trust.rotate",
+        "trust.revoke",
         "bridge.status",
         "observe.semantic",
         "observe.page_debug",

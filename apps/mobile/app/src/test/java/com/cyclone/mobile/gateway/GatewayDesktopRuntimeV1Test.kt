@@ -129,9 +129,25 @@ class GatewayDesktopRuntimeV1Test {
     }
 
     @Test
-    fun onlyPairingBootstrapMayOmitAuthAndNoShellOperationExists() {
-        assertEquals(setOf("pair.begin", "pair.complete", "pair.qr.complete"), GatewayProtocol.unauthenticatedOperations)
+    fun V33TrustBootstrapMayOmitAuthWhileLegacyTransitionIsReadOnly() {
+        assertEquals(
+            setOf(
+                "trust.negotiate", "trust.begin", "trust.complete", "trust.session.begin", "trust.session.complete",
+                "pair.begin", "pair.complete", "pair.qr.complete",
+            ),
+            GatewayProtocol.unauthenticatedOperations,
+        )
+        assertTrue("bridge.status" in GatewayProtocol.legacyReadOnlyOperations)
+        assertFalse("action.execute" in GatewayProtocol.legacyReadOnlyOperations)
+        assertFalse("manual.execute" in GatewayProtocol.legacyReadOnlyOperations)
+        assertFalse("clipboard.set" in GatewayProtocol.legacyReadOnlyOperations)
         val lower = GatewayProtocol.operations.map(String::lowercase)
         assertFalse(lower.any { "shell" in it || "powershell" in it || "root" in it || it == "adb" })
+    }
+
+    @Test
+    fun clientWorkerResourcesAreBounded() {
+        assertEquals(4, GatewaySocketServer.MAX_CLIENT_WORKERS)
+        assertEquals(8, GatewaySocketServer.MAX_QUEUED_CLIENTS)
     }
 }

@@ -2,6 +2,10 @@ package com.cyclone.mobile.infrastructure.v31
 
 import android.content.Context
 import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.ai.CycloneAiAccessPolicy
+import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
+import com.cyclone.mobile.ai.vision.VisionProvider
+import com.cyclone.mobile.ai.vision.VisionRouter
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.v31.V31GraphLearningBridge
 import com.cyclone.mobile.automation.AutomationRuntime
@@ -9,16 +13,13 @@ import com.cyclone.mobile.automation.run.FileRoutineRunStore
 import com.cyclone.mobile.automation.run.RoutineRunController
 import com.cyclone.mobile.brain.graphv2.InMemoryTemporalGraphStore
 import com.cyclone.mobile.brain.v31.V31MemoryBridge
-import com.cyclone.mobile.ai.vision.VisionProvider
-import com.cyclone.mobile.ai.vision.VisionRouter
-import com.cyclone.mobile.ai.CycloneAiAccessPolicy
-import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
 import com.cyclone.mobile.gateway.GatewayActionAuthority
 import com.cyclone.mobile.gateway.GatewayActionAuthorityDecision
 import com.cyclone.mobile.gateway.GatewayActionAuthorityOutcome
 import com.cyclone.mobile.gateway.GatewayActionAuthorityRegistry
 import com.cyclone.mobile.gateway.GatewayActionAuthorityRequest
 import com.cyclone.mobile.gateway.GatewayRuntime
+import com.cyclone.mobile.gateway.GatewaySessionExecutionContext
 import com.cyclone.mobile.platform.modules.ModuleHealthReport
 import com.cyclone.mobile.platform.modules.ModuleOperationResult
 import com.cyclone.mobile.policy.ActionRisk
@@ -35,7 +36,6 @@ import com.cyclone.mobile.policy.PolicyTarget
 import com.cyclone.mobile.policy.PrincipalKind
 import com.cyclone.mobile.policy.PrincipalRef
 import java.io.File
-import java.security.MessageDigest
 
 /**
  * Final V3.1 composition seam between the proven Cyclone product runtimes and Infrastructure V3.
@@ -141,8 +141,8 @@ private class ExistingRuntimeBinding(
 
 /**
  * Android remains the authority for PC-originated mutations. Enabling the USB Gateway is treated as
- * a bounded standing user rule for the current random Gateway session. Only routine/privacy-safe
- * capability classes are eligible; high-risk semantic targets still require an explicit local flow.
+ * a bounded standing user rule for the current authenticated V3.3 session. Only routine/privacy-
+ * safe capability classes are eligible; high-risk semantic targets still require a local flow.
  */
 private class V31GatewayPolicyAuthority(
     private val context: Context,
@@ -196,13 +196,18 @@ private class V31GatewayPolicyAuthority(
             "Cyclone requires a local confirmation for this sensitive action.",
         )
 
-        val token = GatewayRuntime.tokenForUser(this.context).orEmpty()
-        if (token.isBlank()) return reject(
-            GatewayActionAuthorityOutcome.CAPABILITY_UNAVAILABLE,
-            "SESSION_TOKEN_UNAVAILABLE",
-            "Create a new PC Gateway connection code and reconnect.",
-        )
-        val sessionId = shortHash(token)
+        val authenticatedSession = GatewaySessionExecutionContext.currentTrusted()
+            ?: return reject(
+                GatewayActionAuthorityOutcome.CAPABILITY_UNAVAILABLE,
+                "TRUSTED_SESSION_UNAVAILABLE",
+                "Open a fresh trusted Cyclone V3.3 PC session and retry.",
+            )
+        val sessionId = authenticatedSession.sessionId?.takeIf(String::isNotBlank)
+            ?: return reject(
+                GatewayActionAuthorityOutcome.CAPABILITY_UNAVAILABLE,
+                "TRUSTED_SESSION_UNAVAILABLE",
+                "The authenticated Cyclone session has no usable identity.",
+            )
         val now = System.currentTimeMillis()
         val grantId = ensureSessionGrant(sessionId, now)
             ?: return reject(
@@ -211,11 +216,13 @@ private class V31GatewayPolicyAuthority(
                 "Cyclone could not authorize this PC session.",
             )
 
-        // GatewayActionAdapter supplies the current authenticated session observation. Recording it
-        // here lets V3.1 freshness diagnostics agree with the canonical executor's own checks.
         services.observationAuthority.recordCurrent(observationId, now)
 
-        val risk = if (request.capability == "phone.type") ActionRisk.PRIVACY_SENSITIVE else ActionRisk.ROUTINE
+        val risk = if (request.capability in setOf("phone.type", "phone.set_clipboard")) {
+            ActionRisk.PRIVACY_SENSITIVE
+        } else {
+            ActionRisk.ROUTINE
+        }
         val target = PolicyTarget(targetType = "gateway-session", targetId = sessionId)
         val evaluation = services.policyGovernor.evaluate(
             PolicyRequest(
@@ -321,20 +328,17 @@ private class V31GatewayPolicyAuthority(
         return normalized.ifBlank { "gateway.action.${System.nanoTime()}" }
     }
 
-    private fun shortHash(value: String): String = MessageDigest.getInstance("SHA-256")
-        .digest(value.toByteArray(Charsets.UTF_8))
-        .take(12)
-        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
-
     private companion object {
         val GATEWAY_PRINCIPAL = PrincipalRef("cyclone.gateway.pc", PrincipalKind.EXTERNAL_GATEWAY)
         val READ_ONLY_CAPABILITIES = setOf("phone.observe", "phone.find", "phone.wait_for")
         val MUTATING_CAPABILITIES = setOf(
             "phone.click",
             "phone.long_press",
+            "phone.tap",
             "phone.swipe",
             "phone.scroll",
             "phone.type",
+            "phone.set_clipboard",
             "phone.back",
             "phone.home",
             "phone.open_app",
