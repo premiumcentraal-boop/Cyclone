@@ -29,6 +29,59 @@ class OpenRouterQuickAgentTest {
     }
 
     @Test
+    fun guidedProfileAllowsSafeNavigationButBlocksInput() {
+        assertTrue(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.GUIDED,
+            "phone.click",
+            JSONObject().put("selector", JSONObject().put("text", "Battery")),
+        ).allowed)
+        assertFalse(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.GUIDED,
+            "phone.type",
+            JSONObject().put("selector", JSONObject().put("text", "Search")),
+        ).allowed)
+    }
+
+    @Test
+    fun balancedProfileBlocksCommunicationComposeButAllowsOrdinaryTyping() {
+        assertTrue(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.BALANCED,
+            "phone.type",
+            JSONObject().put("selector", JSONObject().put("text", "Search")),
+        ).allowed)
+        assertFalse(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.BALANCED,
+            "phone.launch_intent",
+            JSONObject().put("uri", "sms:+15551234567"),
+        ).allowed)
+    }
+
+    @Test
+    fun fullProfileCanOpenComposeSurfaceButNeverFinalSendOrSensitiveTyping() {
+        assertTrue(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.FULL,
+            "phone.launch_intent",
+            JSONObject().put("uri", "mailto:test@example.com"),
+        ).allowed)
+        assertFalse(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.FULL,
+            "phone.click",
+            JSONObject().put("selector", JSONObject().put("text", "Send message")),
+        ).allowed)
+        assertFalse(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.FULL,
+            "phone.type",
+            JSONObject().put("selector", JSONObject().put("text", "Password")),
+        ).allowed)
+    }
+
+    @Test
+    fun profileStorageParsingDefaultsToBalanced() {
+        assertEquals(CycloneAiAccessProfile.GUIDED, CycloneAiAccessProfile.fromStorage("GUIDED"))
+        assertEquals(CycloneAiAccessProfile.BALANCED, CycloneAiAccessProfile.fromStorage("unknown"))
+    }
+
+    @Test
     fun stripsJsonCodeFenceForWorkflowCompiler() {
         assertEquals("{\"name\":\"Example\"}", OpenRouterQuickAgent.stripCodeFence("```json\n{\"name\":\"Example\"}\n```"))
     }

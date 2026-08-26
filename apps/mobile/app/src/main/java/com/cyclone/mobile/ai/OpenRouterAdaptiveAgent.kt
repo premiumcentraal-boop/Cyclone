@@ -338,9 +338,10 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 break
             }
             val params = resolved.getOrThrow()
-            if (config.safeMode && !SafeModeGuard.allowed(action.tool, params)) {
-                failedActions += "safe_mode:${action.tool}"
-                AgentTraceRuntime.event(context, traceId, "BOUNDARY", "Safe Mode stopped a consequential page action", code = action.tool, ok = false)
+            val accessDecision = CycloneAiAccessPolicy.evaluate(config.accessProfile, action.tool, params)
+            if (!accessDecision.allowed) {
+                failedActions += "${accessDecision.reasonCode}:${action.tool}"
+                AgentTraceRuntime.event(context, traceId, "BOUNDARY", accessDecision.safeMessage, code = action.tool, ok = false)
                 break
             }
 
@@ -384,8 +385,9 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             code = "brain.plan", ok = true, detail = plan.reason,
         )
         for (step in plan.steps) {
-            if (config.safeMode && !SafeModeGuard.allowed(step.tool, step.params)) {
-                return ReplayResult(false, state, "Brain shortcut reached a Safe Mode boundary.")
+            val accessDecision = CycloneAiAccessPolicy.evaluate(config.accessProfile, step.tool, step.params)
+            if (!accessDecision.allowed) {
+                return ReplayResult(false, state, accessDecision.safeMessage)
             }
             onProgress("Brain · ${step.label}")
             AgentTraceRuntime.event(context, traceId, "REPLAY", step.label, code = step.tool, detail = step.evidence)

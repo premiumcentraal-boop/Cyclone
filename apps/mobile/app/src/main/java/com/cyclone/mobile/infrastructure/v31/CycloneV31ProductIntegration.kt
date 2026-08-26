@@ -11,6 +11,8 @@ import com.cyclone.mobile.brain.graphv2.InMemoryTemporalGraphStore
 import com.cyclone.mobile.brain.v31.V31MemoryBridge
 import com.cyclone.mobile.ai.vision.VisionProvider
 import com.cyclone.mobile.ai.vision.VisionRouter
+import com.cyclone.mobile.ai.CycloneAiAccessPolicy
+import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
 import com.cyclone.mobile.gateway.GatewayActionAuthority
 import com.cyclone.mobile.gateway.GatewayActionAuthorityDecision
 import com.cyclone.mobile.gateway.GatewayActionAuthorityOutcome
@@ -170,6 +172,16 @@ private class V31GatewayPolicyAuthority(
             GatewayActionAuthorityOutcome.CAPABILITY_UNAVAILABLE,
             "CAPABILITY_NOT_ALLOWED",
             "That phone capability is not available through the PC Gateway.",
+        )
+        val profileDecision = CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfileStore.read(this.context),
+            request.capability,
+            request.parameters,
+        )
+        if (!profileDecision.allowed) return reject(
+            GatewayActionAuthorityOutcome.POLICY_DENIED,
+            profileDecision.reasonCode,
+            profileDecision.safeMessage,
         )
         val observationId = request.currentObservationId?.takeIf(String::isNotBlank)
             ?: return reject(

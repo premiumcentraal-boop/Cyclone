@@ -1,12 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
-import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,8 +58,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.TaskResultNotifierV292
@@ -76,6 +69,7 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
+import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import kotlinx.coroutines.delay
 import java.time.LocalTime
 
@@ -155,7 +149,8 @@ private fun V32HomePage(
     val phoneReady = v32AccessibilityEnabled(context)
     val notificationReady = v32NotificationListenerEnabled(context)
     val resultReady = v32ResultNotificationsEnabled(context)
-    val readiness = listOf(phoneReady, notificationReady, resultReady).count { it }
+    val batteryReady = CyclonePermissionSetup.batteryUnrestricted(context)
+    val readiness = listOf(phoneReady, notificationReady, resultReady, batteryReady).count { it }
     val automations = remember(refreshTick) { AutomationRuntime.store.listAutomations() }
     val greeting = when (LocalTime.now().hour) {
         in 5..11 -> "Good morning"
@@ -182,12 +177,12 @@ private fun V32HomePage(
             CycloneSimpleCard {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(if (readiness == 3) "Your phone is ready" else "Finish phone setup", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(if (readiness == 3) "Control, notification triggers and results are available." else "$readiness of 3 phone essentials ready", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (readiness == 4) "Your phone is ready" else "Finish phone setup", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(if (readiness == 4) "Control, triggers, results and reliable background work are available." else "$readiness of 4 phone essentials ready", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    CycloneStatusPill(if (readiness == 3) "Ready" else "$readiness/3", readiness == 3)
+                    CycloneStatusPill(if (readiness == 4) "Ready" else "$readiness/4", readiness == 4)
                 }
-                if (readiness < 3) OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth()) { Text("Finish setup") }
+                if (readiness < 4) OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth()) { Text("Finish setup") }
             }
         }
         item { CycloneSectionTitle("Your routines") { TextButton(onClick = onRoutines) { Text("See all") } } }
@@ -363,11 +358,9 @@ private fun V32RoutineDetail(context: Context, automation: AutomationDefinition,
 }
 
 internal fun v32AccessibilityEnabled(context: Context): Boolean {
-    val component = "${context.packageName}/${com.cyclone.mobile.CycloneAccessibilityService::class.java.name}"
-    val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
-    return Settings.Secure.getInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1 && enabled.split(':').any { it.equals(component, true) }
+    return CyclonePermissionSetup.primaryControlEnabled(context)
 }
 
-internal fun v32NotificationListenerEnabled(context: Context): Boolean = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+internal fun v32NotificationListenerEnabled(context: Context): Boolean = CyclonePermissionSetup.notificationAccessEnabled(context)
 
-internal fun v32ResultNotificationsEnabled(context: Context): Boolean = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+internal fun v32ResultNotificationsEnabled(context: Context): Boolean = CyclonePermissionSetup.resultNotificationsEnabled(context)

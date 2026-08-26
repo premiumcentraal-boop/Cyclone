@@ -72,6 +72,23 @@ and cannot promote themselves into authorities.
 Gradle invocation, uploads one APK/checksum/provenance bundle, and release verification reuses it.
 Version-specific workflows remain manual compatibility only. See `ADR_INFRASTRUCTURE_V3.md`.
 
+## ADR-016 — Android access and AI authority are separate permission planes
+
+**Decision:** Android system grants define which device capabilities Cyclone may use. The user's
+Guided, Balanced or Full control profile separately defines which already-granted capabilities an
+AI may use. Selecting an AI profile never opens a system settings screen, grants Android access or
+counts as current approval for authentication, payment, destructive, security-critical or final
+external-communication actions.
+
+**Why:** A broad Android grant such as Accessibility is necessary for useful phone automation but
+must not become blanket standing consent for every AI decision. Conversely, choosing Full control
+cannot manufacture an Android permission the user has not granted.
+
+**Tests/guards:** `CycloneAiAccessPolicy` is shared by on-phone AI and the PC/Codex policy adapter;
+unit tests assert profile boundaries. Manifest guards reject SMS, contacts, all-files access and
+package-install permission creep. New Android permissions must map to a real setup row and a current
+Cyclone capability before being declared.
+
 ## Adding a decision
 
 Use this template:

@@ -83,6 +83,7 @@ data class QuickAgentConfig(
     /** V2.8 counts provider calls on unknown semantic pages, not raw phone actions/events. */
     val maxDecisions: Int = 6,
     val safeMode: Boolean = true,
+    val accessProfile: CycloneAiAccessProfile = if (safeMode) CycloneAiAccessProfile.BALANCED else CycloneAiAccessProfile.FULL,
     val providerSort: String = "latency",
 )
 
@@ -220,23 +221,6 @@ Consequential actions require confirmation. If context is insufficient, create a
 }
 
 internal object SafeModeGuard {
-    private val riskyWords = listOf(
-        "pay", "purchase", "buy", "order", "transfer", "send", "submit", "delete",
-        "remove", "uninstall", "confirm payment", "place order", "book now",
-    )
-
-    fun allowed(tool: String, params: JSONObject): Boolean {
-        if (tool == "phone.share") return false
-        if (tool == "phone.launch_intent") {
-            val uri = params.optString("uri").lowercase()
-            if (uri.startsWith("tel:") || uri.startsWith("sms:") || uri.startsWith("mailto:")) return false
-        }
-        if (tool !in setOf("phone.click", "phone.tap", "phone.long_press")) return true
-        val selector = params.optJSONObject("selector") ?: params
-        val combined = listOf(
-            selector.optString("text"), selector.optString("textContains"),
-            selector.optString("contentDescription"), selector.optString("fuzzyText"),
-        ).joinToString(" ").lowercase()
-        return riskyWords.none { combined.contains(it) }
-    }
+    fun allowed(tool: String, params: JSONObject): Boolean =
+        CycloneAiAccessPolicy.evaluate(CycloneAiAccessProfile.BALANCED, tool, params).allowed
 }

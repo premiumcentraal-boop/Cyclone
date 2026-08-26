@@ -182,6 +182,7 @@ fun CyclonePermissionRow(
     title: String,
     body: String,
     ready: Boolean,
+    actionLabel: String = if (ready) "Ready" else "Enable",
     onClick: () -> Unit,
 ) {
     Row(
@@ -198,6 +199,6 @@ fun CyclonePermissionRow(
             Text(title, fontWeight = FontWeight.SemiBold)
             Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        Text(if (ready) "Ready" else "Enable", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        Text(actionLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
     }
 }

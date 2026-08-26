@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -26,18 +25,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.ScreenShare
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings as SettingsIcon
 import androidx.compose.material.icons.rounded.Smartphone
@@ -52,7 +57,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,6 +80,8 @@ import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.ai.AgentTraceRuntime
+import com.cyclone.mobile.ai.CycloneAiAccessProfile
+import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
 import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.OpenRouterSecretStore
@@ -92,6 +98,7 @@ import com.cyclone.mobile.debug.PageDebugSandboxV293
 import com.cyclone.mobile.gateway.GatewaySettingsActivity
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
+import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.ui.GatewayAiCard
 import kotlinx.coroutines.launch
 
@@ -191,10 +198,14 @@ internal fun V32AiPage(context: Context, refreshTick: Int, onSettings: () -> Uni
     var result by remember { mutableStateOf("") }
     var historyTick by remember { mutableIntStateOf(0) }
     val modelSlug = prefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }
-    val safeMode = prefs.getBoolean("safe_mode", true)
+    val accessProfile = CycloneAiAccessProfileStore.read(context)
     val hasKey = OpenRouterSecretStore.hasKey(context)
     val history = remember(refreshTick, historyTick) { BrainChatRuntime.history(context, 12) }
-    fun config() = QuickAgentConfig(model = OpenRouterModelPresets.byId(modelSlug), safeMode = safeMode)
+    fun config() = QuickAgentConfig(
+        model = OpenRouterModelPresets.byId(modelSlug),
+        safeMode = accessProfile != CycloneAiAccessProfile.FULL,
+        accessProfile = accessProfile,
+    )
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { CyclonePageIntro("One clear request", "Cyclone AI", "Known routes first, AI for uncertainty, vision only when structured phone evidence is not enough.") }
@@ -309,26 +320,101 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
     var keyDraft by rememberSaveable { mutableStateOf("") }
     var hasKey by remember(refreshTick) { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
     var selectedModel by rememberSaveable { mutableStateOf(aiPrefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }) }
-    var safeMode by rememberSaveable { mutableStateOf(aiPrefs.getBoolean("safe_mode", true)) }
+    var accessProfile by rememberSaveable { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
     var url by rememberSaveable { mutableStateOf(prefs.getString("coreWsUrl", "").orEmpty()) }
     var token by rememberSaveable { mutableStateOf(prefs.getString("coreToken", "").orEmpty()) }
     var name by rememberSaveable { mutableStateOf(prefs.getString("deviceName", defaultName).orEmpty()) }
+    val primaryControl = CyclonePermissionSetup.primaryControlEnabled(context)
+    val notificationAccess = CyclonePermissionSetup.notificationAccessEnabled(context)
+    val resultNotifications = CyclonePermissionSetup.resultNotificationsEnabled(context)
+    val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
+    val essentialReady = listOf(primaryControl, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
+    fun open(intent: Intent) = context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { CyclonePageIntro("Keep control", "Settings", "Phone access, AI, connections and safety in one quiet place.") }
         item {
+            CycloneHeroCard(
+                title = if (essentialReady == 4) "Phone setup complete" else "$essentialReady of 4 essentials ready",
+                body = "Every permission is optional, Android-owned and reversible. Cyclone asks only after you tap a setup row.",
+                icon = Icons.Rounded.Security,
+                tone = if (essentialReady == 4) CyclonePastel.MINT else CyclonePastel.LEMON,
+            ) {
+                CycloneStatusPill(if (essentialReady == 4) "Ready" else "Finish setup", essentialReady == 4)
+            }
+        }
+        item {
             CycloneSimpleCard {
-                CycloneSectionTitle("Phone access")
-                CyclonePermissionRow(Icons.Rounded.Security, "Phone control", "See semantic controls and perform approved actions.", v32AccessibilityEnabled(context)) { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                CyclonePermissionRow(Icons.Rounded.Notifications, "Notification triggers", "Start routines from app notifications.", v32NotificationListenerEnabled(context)) { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                CyclonePermissionRow(Icons.Rounded.History, "Result notifications", "Receive a concise result after a task.", v32ResultNotificationsEnabled(context)) {
-                    if (Build.VERSION.SDK_INT >= 33) (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 320) }
+                CycloneSectionTitle("Essential access")
+                CyclonePermissionRow(Icons.Rounded.Security, "Phone control", "Read semantic controls and perform policy-approved taps, typing and gestures.", primaryControl, if (primaryControl) "Manage" else "Enable") {
+                    open(CyclonePermissionSetup.accessibilitySettings())
+                }
+                CyclonePermissionRow(Icons.Rounded.Notifications, "Notification triggers", "React to selected app notifications without watching screenshots.", notificationAccess, if (notificationAccess) "Manage" else "Enable") {
+                    open(CyclonePermissionSetup.notificationAccessSettings())
+                }
+                CyclonePermissionRow(Icons.Rounded.History, "Result notifications", "Show a concise, visible result after an AI task or routine.", resultNotifications, if (resultNotifications) "Manage" else "Allow") {
+                    if (!resultNotifications && Build.VERSION.SDK_INT >= 33) {
+                        (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 320) }
+                    } else {
+                        open(CyclonePermissionSetup.appDetails(context))
+                    }
+                }
+                CyclonePermissionRow(Icons.Rounded.BatteryChargingFull, "Unrestricted battery", "Keep PC sessions and scheduled automation reliable while the phone is idle.", batteryUnrestricted, if (batteryUnrestricted) "Manage" else "Allow") {
+                    open(if (batteryUnrestricted) CyclonePermissionSetup.batteryOptimizationSettings() else CyclonePermissionSetup.batteryExemptionRequest(context))
                 }
             }
         }
         item {
             CycloneSimpleCard {
-                CycloneSectionTitle("AI")
+                CycloneSectionTitle("Advanced control")
+                val enhancedControl = CyclonePermissionSetup.enhancedControlEnabled(context)
+                val agentKeyboard = CyclonePermissionSetup.agentKeyboardEnabled(context)
+                val overlay = CyclonePermissionSetup.overlayEnabled(context)
+                val exactTiming = CyclonePermissionSetup.exactTimingEnabled(context)
+                val calendar = CyclonePermissionSetup.calendarEnabled(context)
+                CyclonePermissionRow(Icons.Rounded.Layers, "Enhanced control engine", "Optional second Accessibility backend for difficult apps and richer takeover tools.", enhancedControl, if (enhancedControl) "Manage" else "Enable") {
+                    open(CyclonePermissionSetup.accessibilitySettings())
+                }
+                CyclonePermissionRow(Icons.Rounded.Keyboard, "Cyclone Agent Keyboard", "Optional input method for more reliable text entry in stubborn fields.", agentKeyboard, if (agentKeyboard) "Manage" else "Enable") {
+                    open(CyclonePermissionSetup.keyboardSettings())
+                }
+                CyclonePermissionRow(Icons.Rounded.Layers, "Display over apps", "Show visible takeover and connection controls above the current app.", overlay, if (overlay) "Manage" else "Allow") {
+                    open(CyclonePermissionSetup.overlaySettings(context))
+                }
+                CyclonePermissionRow(Icons.Rounded.Schedule, "Precise timing", "Optional exact scheduling for routines that cannot tolerate a flexible window.", exactTiming, if (exactTiming) "Manage" else "Allow") {
+                    open(CyclonePermissionSetup.exactTimingSettings(context))
+                }
+                CyclonePermissionRow(Icons.Rounded.CalendarMonth, "Calendar context", "Optional read-only matching for calendar-aware routines.", calendar, if (calendar) "Manage" else "Allow") {
+                    if (!calendar) {
+                        (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_CALENDAR), 321) }
+                    } else {
+                        open(CyclonePermissionSetup.appDetails(context))
+                    }
+                }
+                V32FeatureRow(Icons.Rounded.ScreenShare, "Screen sharing asks every session", "Android's screen-capture consent is never converted into a permanent background grant.")
+            }
+        }
+        item {
+            CycloneSimpleCard {
+                CycloneSectionTitle("AI access profile")
+                Text("Android permissions decide what Cyclone can do. This separate profile decides what AI may use without stopping.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                CycloneAiAccessProfile.entries.forEach { profile ->
+                    V32AiAccessProfileCard(
+                        profile = profile,
+                        selected = accessProfile == profile,
+                        onClick = {
+                            accessProfile = profile
+                            CycloneAiAccessProfileStore.write(context, profile)
+                            refresh()
+                        },
+                    )
+                }
+                Text("Payments, credentials, destructive changes, security settings and final send actions still require a current local confirmation in every profile.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        item {
+            CycloneSimpleCard {
+                CycloneSectionTitle("AI model & key")
                 if (hasKey) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.secondary); Spacer(Modifier.size(8.dp)); Column(Modifier.weight(1f)) { Text("OpenRouter key secured", fontWeight = FontWeight.Bold); Text("Protected by Android Keystore", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -341,10 +427,6 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 Text("Model", fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OpenRouterModelPresets.all.forEach { model -> FilterChip(selected = selectedModel == model.id, onClick = { selectedModel = model.id; aiPrefs.edit().putString("openrouter_model", model.id).apply() }, label = { Text(model.label) }) }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("Safe Mode", fontWeight = FontWeight.Bold); Text("Stops purchase, payment, sending and destructive boundaries.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Switch(safeMode, { safeMode = it; aiPrefs.edit().putBoolean("safe_mode", it).apply() })
                 }
             }
         }
@@ -370,6 +452,47 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
             }
         }
         item { Text("${CycloneRelease.label} · com.cyclone.mobile", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
+    }
+}
+
+@Composable
+private fun V32AiAccessProfileCard(
+    profile: CycloneAiAccessProfile,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .14f) else MaterialTheme.colorScheme.surface,
+            ) {
+                Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.Security,
+                        null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(profile.displayName, fontWeight = FontWeight.Bold)
+                    if (profile == CycloneAiAccessProfile.BALANCED) CycloneStatusPill("Recommended", true)
+                }
+                Text(profile.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
