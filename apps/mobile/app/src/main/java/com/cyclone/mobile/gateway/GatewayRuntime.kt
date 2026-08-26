@@ -263,7 +263,9 @@ internal object GatewayDispatcher {
                 }
                 else -> {
                     if (auth != null) GatewayRuntime.PcSessionTracker.noteAuthenticated()
-                    val result = dispatch(context, request)
+                    val result = GatewaySessionExecutionContext.withAuth(auth) {
+                        dispatch(context, request)
+                    }
                     GatewayRuntime.clearSafeError()
                     GatewayProtocol.success(id, result).toString()
                 }
