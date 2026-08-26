@@ -36,6 +36,10 @@ def _result_failed(result: Any) -> bool:
     return classify_failure(result) is not None
 
 
+def _device_id(args: dict[str, Any]) -> str:
+    return str(args.get("device_id") or "").strip()
+
+
 class PhoneTools:
     def __init__(self, gateway: GatewayClient | None = None, recorder: SessionRecorder | None = None):
         self.gateway = gateway or GatewayClient()
@@ -60,16 +64,30 @@ class PhoneTools:
         finally:
             self.recorder.record(name, arguments, result, ok, int((time.perf_counter() - started) * 1000))
 
-    def phone_status(self, _: dict[str, Any]) -> Any:
+    def phone_status(self, args: dict[str, Any]) -> Any:
+        device_id = _device_id(args)
+        if device_id:
+            return redact(self.gateway.device_status(device_id))
         return redact(self.gateway.status())
 
     def phone_capabilities(self, args: dict[str, Any]) -> Any:
-        return redact(self.gateway.capabilities(refresh=bool(args.get("refresh", False))))
+        device_id = _device_id(args)
+        refresh = bool(args.get("refresh", False))
+        if device_id:
+            return redact(self.gateway.device_capabilities(device_id, refresh=refresh))
+        return redact(self.gateway.capabilities(refresh=refresh))
+
+    def phone_devices(self, args: dict[str, Any]) -> Any:
+        return redact(self.gateway.devices(scan=bool(args.get("scan", False))))
 
     def phone_observe(self, args: dict[str, Any]) -> Any:
+        device_id = _device_id(args)
         mode = str(args.get("mode") or "compact")
         include_screenshot = bool(args.get("include_screenshot", False))
-        raw = self.gateway.observe(include_screenshot=include_screenshot, mode=mode)
+        if device_id:
+            raw = self.gateway.device_observe(device_id, include_screenshot=include_screenshot, mode=mode)
+        else:
+            raw = self.gateway.observe(include_screenshot=include_screenshot, mode=mode)
         # Classify the complete typed response before compacting away protocol/error layers.
         if classify_failure(raw):
             return redact(raw)
@@ -81,15 +99,39 @@ class PhoneTools:
         query = str(args.get("query") or "").strip()
         if not query:
             raise ValueError("query is required")
+        device_id = _device_id(args)
+        if device_id:
+            return redact(self.gateway.device_ui_search(device_id, query))
         return redact(self.gateway.ui_search(query))
 
     def phone_inspect_element(self, args: dict[str, Any]) -> Any:
         element_id = str(args.get("element_id") or "").strip()
         if not element_id:
             raise ValueError("element_id is required")
+        device_id = _device_id(args)
+        if device_id:
+            return redact(self.gateway.device_ui_element(device_id, element_id))
         return redact(self.gateway.ui_element(element_id))
 
-    def phone_screenshot(self, _: dict[str, Any]) -> Any:
+    def phone_screenshot(self, args: dict[str, Any]) -> Any:
+        device_id = _device_id(args)
+        if device_id:
+            observed = self.gateway.device_observe(device_id, include_screenshot=True, mode="compact")
+            compact = compact_observation(observed)
+            screenshot = observed.get("screenshot") if isinstance(observed, dict) else None
+            available = isinstance(screenshot, dict) and screenshot.get("available") is not False
+            result: dict[str, Any] = {
+                "observation": compact,
+                "screenshot": screenshot,
+                "screenshotAvailable": available,
+            }
+            if not available:
+                result["note"] = (
+                    "The Desktop agent endpoint returns semantic evidence only. Use the legacy "
+                    "single-device surface (omit device_id) for image bytes, or the PC Companion "
+                    "live video; a debug bundle remains available for diagnostics."
+                )
+            return result
         observed = self.gateway.observe(include_screenshot=True, mode="compact")
         compact = compact_observation(observed)
         screenshot = compact.get("screenshot")
@@ -105,10 +147,16 @@ class PhoneTools:
                 result["imageNote"] = f"Screenshot exists but exceeds MCP image limit ({len(data)} > {max_bytes})"
         return result
 
-    def phone_current_page(self, _: dict[str, Any]) -> Any:
+    def phone_current_page(self, args: dict[str, Any]) -> Any:
+        device_id = _device_id(args)
+        if device_id:
+            return redact(self.gateway.device_current_page(device_id))
         return redact(self.gateway.current_page())
 
-    def phone_page_history(self, _: dict[str, Any]) -> Any:
+    def phone_page_history(self, args: dict[str, Any]) -> Any:
+        device_id = _device_id(args)
+        if device_id:
+            return redact(self.gateway.device_page_history(device_id))
         return redact(self.gateway.page_history())
 
     def phone_act(self, args: dict[str, Any]) -> Any:
@@ -125,7 +173,11 @@ class PhoneTools:
             # This is only an MCP-side intent/UX guard. It is never Android policy authority;
             # the V3 GatewayActionAuthority must still authorize the actual handoff.
             raise ValueError("phone.type requires user_authorized=true as an explicit MCP intent acknowledgement")
-        result = redact(self.gateway.action(tool, params, goal))
+        device_id = _device_id(args)
+        if device_id:
+            result = redact(self.gateway.device_action(device_id, tool, params, goal))
+        else:
+            result = redact(self.gateway.action(tool, params, goal))
         failure = classify_failure(result)
         if failure:
             error_class = failure.code
@@ -140,7 +192,13 @@ class PhoneTools:
         return result
 
     def phone_debug_bundle(self, args: dict[str, Any]) -> Any:
-        result = redact(self.gateway.debug_bundle(str(args.get("expected") or ""), str(args.get("goal") or "")))
+        device_id = _device_id(args)
+        expected = str(args.get("expected") or "")
+        goal = str(args.get("goal") or "")
+        if device_id:
+            result = redact(self.gateway.device_debug_bundle(device_id, expected, goal))
+        else:
+            result = redact(self.gateway.debug_bundle(expected, goal))
         stage = _find_stage(result)
         if stage and stage not in FAILURE_CLASSES:
             result = dict(result) if isinstance(result, dict) else {"result": result}
@@ -148,13 +206,24 @@ class PhoneTools:
         return result
 
     def phone_teach_start(self, args: dict[str, Any]) -> Any:
-        return redact(self.gateway.teach_start(str(args.get("goal") or "")))
+        device_id = _device_id(args)
+        goal = str(args.get("goal") or "")
+        if device_id:
+            return redact(self.gateway.device_teach_start(device_id, goal))
+        return redact(self.gateway.teach_start(goal))
 
-    def phone_teach_status(self, _: dict[str, Any]) -> Any:
+    def phone_teach_status(self, args: dict[str, Any]) -> Any:
+        device_id = _device_id(args)
+        if device_id:
+            return redact(self.gateway.device_teach_status(device_id))
         return redact(self.gateway.teach_status())
 
     def phone_teach_stop(self, args: dict[str, Any]) -> Any:
-        return redact(self.gateway.teach_stop(bool(args.get("compile_for_review", True))))
+        device_id = _device_id(args)
+        compile_for_review = bool(args.get("compile_for_review", True))
+        if device_id:
+            return redact(self.gateway.device_teach_stop(device_id, compile_for_review))
+        return redact(self.gateway.teach_stop(compile_for_review))
 
 
 def _find_stage(value: Any) -> str | None:

@@ -10,6 +10,25 @@ from cyclone_phone_mcp.tools import PhoneTools
 
 class FakeGateway:
     def status(self): return {"ok": True}
+    def devices(self, *, scan=False):
+        return {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "surface": "fleet",
+            "devices": [
+                {
+                    "deviceId": "dev_a",
+                    "id": "dev_a",
+                    "state": "READY",
+                    "name": "Pixel 8",
+                    "model": "Pixel 8",
+                    "serialSuffix": "061G",
+                    "paired": True,
+                    "screen": "AWAKE",
+                }
+            ],
+            "selectedSerialSuffix": "061G",
+            "legacy": {"available": True, "bridgeReachable": True, "selectedSerialSuffix": "061G"},
+        }
     def observe(self, **kwargs): return {"pageKey": "home", "controls": [{"id": "1", "label": "Apps"}], "screenshot": None}
     def ui_search(self, query): return {"candidates": [{"id": "1", "label": query}]}
     def ui_element(self, element_id): return {"id": element_id, "password": "should-not-leak"}
@@ -20,6 +39,42 @@ class FakeGateway:
     def teach_start(self, goal): return {"active": True, "sessionId": "t1"}
     def teach_status(self): return {"active": True}
     def teach_stop(self, compile_for_review): return {"active": False}
+    def device_status(self, device_id): return {"device_id": device_id, "status": {"gatewayEnabled": True}}
+    def device_capabilities(self, device_id, *, refresh=False):
+        return {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "device_id": device_id,
+            "capabilities": [{"capability_id": "phone.click"}, {"capability_id": "phone.observe"}],
+            "gateway_health": {"state": "READY"},
+        }
+    def device_observe(self, device_id, *, include_screenshot=False, mode="compact"):
+        return {
+            "device_id": device_id,
+            "mode": mode,
+            "observation": {"observationId": "obs-dev", "pageKey": "home", "controls": [{"id": "1", "label": "Apps"}]},
+            "witness": {"observation_id": "obs-dev", "page_key": "home"},
+            "screenshot": {"available": False, "reason": "USE_DESKTOP_VIDEO_OR_DEBUG_BUNDLE"} if include_screenshot else None,
+        }
+    def device_ui_search(self, device_id, query): return {"device_id": device_id, "results": [{"id": "1", "label": query}]}
+    def device_ui_element(self, device_id, element_id): return {"device_id": device_id, "id": element_id}
+    def device_current_page(self, device_id): return {"device_id": device_id, "page": {"pageKey": "home"}}
+    def device_page_history(self, device_id): return {"device_id": device_id, "history": []}
+    def device_action(self, device_id, tool, params, goal):
+        return {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "capability_id": tool,
+            "device_id": device_id,
+            "ok": True,
+            "transport": {"ok": True},
+            "execution": {"ok": True},
+            "verification": {"ok": True, "status": "verified"},
+            "error": None,
+        }
+    def device_debug_bundle(self, device_id, expected, goal):
+        return {"device_id": device_id, "expected": expected, "goal": goal, "snapshot": {"stage": "AGENT_CONTEXT_TRUNCATION"}}
+    def device_teach_start(self, device_id, goal): return {"device_id": device_id, "teaching": {"active": True, "sessionId": "t-dev"}}
+    def device_teach_status(self, device_id): return {"device_id": device_id, "teaching": {"active": True}}
+    def device_teach_stop(self, device_id, compile_for_review): return {"device_id": device_id, "teaching": {"active": False}}
 
 
 class FailedActionGateway(FakeGateway):
@@ -32,6 +87,20 @@ class FailedActionGateway(FakeGateway):
             "execution": {"ok": False},
             "verification": {"ok": False, "status": "required"},
             "error": {"code": "EXECUTION_FAILED", "layer": "execution"},
+        }
+
+
+class FailedDeviceActionGateway(FakeGateway):
+    def device_action(self, device_id, tool, params, goal):
+        return {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "capability_id": tool,
+            "device_id": device_id,
+            "ok": False,
+            "transport": {"ok": True},
+            "execution": {"ok": True},
+            "verification": {"ok": False, "status": "failed"},
+            "error": None,
         }
 
 
@@ -69,6 +138,63 @@ class ToolTests(unittest.TestCase):
         self.assertIn('"active":true', started)
         self.assertIn('"active":true', status)
         self.assertIn('"active":false', stopped)
+
+    def test_phone_devices_lists_detected_phones(self):
+        content = self.tools.call("phone_devices", {})[0]["text"]
+        payload = json.loads(content)
+        self.assertEqual("fleet", payload["surface"])
+        self.assertEqual("dev_a", payload["devices"][0]["deviceId"])
+        self.assertEqual("061G", payload["devices"][0]["serialSuffix"])
+
+    def test_device_scoped_status_observe_search_and_act(self):
+        status = json.loads(self.tools.call("phone_status", {"device_id": "dev_a"})[0]["text"])
+        self.assertEqual("dev_a", status["device_id"])
+        observed = json.loads(self.tools.call("phone_observe", {"device_id": "dev_a", "mode": "compact"})[0]["text"])
+        self.assertEqual("obs-dev", observed["witness"]["observation_id"])
+        self.assertEqual("home", observed["pageKey"])
+        search = json.loads(self.tools.call("phone_ui_search", {"device_id": "dev_a", "query": "Apps"})[0]["text"])
+        self.assertEqual("Apps", search["results"][0]["label"])
+        acted = json.loads(self.tools.call("phone_act", {
+            "device_id": "dev_a",
+            "tool": "phone.click",
+            "params": {"selector": {"text": "Apps"}},
+            "goal": "Open Apps",
+        })[0]["text"])
+        self.assertEqual("phone.click", acted["capability_id"])
+        self.assertFalse(self.tools.last_call_failed)
+
+    def test_device_scoped_action_failure_is_mcp_error(self):
+        recorder = SessionRecorder(self.temp.name)
+        tools = PhoneTools(FailedDeviceActionGateway(), recorder)
+        content = tools.call("phone_act", {
+            "device_id": "dev_a",
+            "tool": "phone.click",
+            "params": {"selector": {"text": "Missing"}},
+            "goal": "Open missing",
+        })
+        payload = json.loads(content[0]["text"])
+        self.assertEqual("Phone action failed", payload["error"])
+        self.assertEqual("VERIFICATION_FAILED", payload["errorClass"])
+        report = recorder.snapshot()
+        self.assertEqual(report["actions"], 1)
+        self.assertEqual(report["failedActions"], 1)
+
+    def test_device_screenshot_reports_semantic_only_evidence(self):
+        content = self.tools.call("phone_screenshot", {"device_id": "dev_a"})[0]["text"]
+        payload = json.loads(content)
+        self.assertFalse(payload["screenshotAvailable"])
+        self.assertIn("Desktop agent endpoint", payload["note"])
+
+    def test_device_debug_bundle_and_teaching_lifecycle(self):
+        debug = json.loads(self.tools.call("phone_debug_bundle", {"device_id": "dev_a", "expected": "Apps", "goal": "Open Apps"})[0]["text"])
+        self.assertEqual("dev_a", debug["device_id"])
+        self.assertIn("AGENT_CONTEXT_TRUNCATION", json.dumps(debug))
+        started = json.loads(self.tools.call("phone_teach_start", {"device_id": "dev_a", "goal": "Learn Settings"})[0]["text"])
+        status = json.loads(self.tools.call("phone_teach_status", {"device_id": "dev_a"})[0]["text"])
+        stopped = json.loads(self.tools.call("phone_teach_stop", {"device_id": "dev_a", "compile_for_review": True})[0]["text"])
+        self.assertTrue(started["teaching"]["active"])
+        self.assertTrue(status["teaching"]["active"])
+        self.assertFalse(stopped["teaching"]["active"])
 
     def test_session_report_counts_actions_and_searches(self):
         self.tools.call("phone_ui_search", {"query": "Apps"})

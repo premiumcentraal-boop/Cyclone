@@ -74,7 +74,7 @@ if (-not $HttpToken) {
 Pass "PC HTTP bearer token is configured locally"
 
 if ($HttpToken -eq $AndroidBridgeToken) {
-    Warn "The PC HTTP token and Android session token are identical. 2.9.5 supports this, but separate tokens are recommended."
+    Warn "The PC HTTP token and Android session token are identical. V3.1 supports this, but separate tokens are recommended."
 }
 
 $forward = adb -s $Serial forward --list | Where-Object { $_ -match "tcp:8766\s+localabstract:cyclone_gateway" }
@@ -111,18 +111,26 @@ if (-not $bridge.accessibilityConnected) {
 }
 Pass "Cyclone Gateway + Accessibility report ready"
 
-if ($bridge.appVersion -and $bridge.appVersion -notmatch "2\.9\.5") {
-    Warn "Installed Cyclone reports '$($bridge.appVersion)'. This preflight is designed for the 2.9.5 integrated-gateway APK."
+if ($bridge.appVersion -and $bridge.appVersion -notmatch "3\.1") {
+    Warn "Installed Cyclone reports '$($bridge.appVersion)'. This preflight is designed for the V3.1 integrated-gateway APK."
 } elseif ($bridge.appVersion) {
-    Pass "Cyclone 2.9.5 app version confirmed"
+    Pass "Cyclone V3.1 app version confirmed"
 }
 
 $mcpOutput = python -m cyclone_phone_mcp --self-test 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) {
-    Fail "Cyclone Phone MCP self-test could not talk to Device Gateway. Activate/install the 2.9.5 MCP package first. $mcpOutput"
+    Fail "Cyclone Phone MCP self-test could not talk to Device Gateway. Activate/install the V3.1 MCP package first. $mcpOutput"
 }
 Write-Host $mcpOutput.Trim()
 Pass "Cyclone Phone MCP self-test passed"
+
+$mcpDevices = python -m cyclone_phone_mcp --self-test devices 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) {
+    Warn "Device auto-detection self-test reported: $($mcpDevices.Trim())"
+} else {
+    Write-Host $mcpDevices.Trim()
+    Pass "Cyclone Phone MCP auto-detects the connected phone"
+}
 
 if (-not $SkipMcpCheck) {
     if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
@@ -136,5 +144,5 @@ if (-not $SkipMcpCheck) {
 }
 
 Write-Host ""
-Write-Host "Cyclone 2.9.5 Original UI + Full Gateway is ready for the safe Pixel 8 acceptance run." -ForegroundColor Green
+Write-Host "Cyclone V3.1 + Full Gateway is ready for the safe Pixel 8 acceptance run." -ForegroundColor Green
 Write-Host "Next: python -m cyclone_phone_mcp.acceptance --live --execute" -ForegroundColor Yellow
