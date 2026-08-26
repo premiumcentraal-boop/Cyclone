@@ -192,6 +192,17 @@ internal object GatewayV33TrustManager {
     fun revoke(context: Context, authToken: String, args: JSONObject): JSONObject =
         engine(context).revoke(authToken, args)
 
+    /** Local user authority in Cyclone Settings; no PC credential is accepted or required. */
+    fun revokeAllLocal(context: Context): Int {
+        val app = context.applicationContext
+        val repository = AndroidGatewayTrustRepository(app)
+        val active = repository.all().filter { it.revokedAtMs == null }
+        val now = System.currentTimeMillis()
+        active.forEach { repository.revoke(it.trustId, now) }
+        engine(app).disconnectSessions()
+        return active.size
+    }
+
     fun authenticateSession(context: Context, token: String): GatewayTrustedSession? =
         engine(context).authenticateSession(token)
 
