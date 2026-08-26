@@ -130,7 +130,7 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
     },
     (event) => {
       if (event.code) diagnosticCode = event.code;
-      if (currentState !== "LIVE") renderCurrent();
+      if (currentState !== "LIVE" || diagnosticCode === "FALLBACK_PREVIEW") renderCurrent();
     },
   );
   renderCurrent();
@@ -179,7 +179,15 @@ function renderStreamStatus(
   overlay.classList.toggle("visible", state !== "LIVE");
   overlay.classList.toggle("passive", state === "CONNECTING" || state === "RECONNECTING");
 
-  if (state === "LIVE") return;
+  if (state === "LIVE") {
+    status.textContent = diagnosticCode === "FALLBACK_PREVIEW"
+      ? "Low-resolution live preview - quality returns when the main stream reconnects."
+      : "";
+    status.hidden = diagnosticCode !== "FALLBACK_PREVIEW";
+    return;
+  }
+  status.textContent = "";
+  status.hidden = true;
   const title = state === "SLEEPING"
     ? "Sleeping"
     : state === "RECONNECTING"

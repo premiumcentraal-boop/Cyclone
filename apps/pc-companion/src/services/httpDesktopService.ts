@@ -230,16 +230,15 @@ export class HttpDesktopService implements DesktopService {
   }
 
   getVideoUrl(deviceId: string, profile: StreamProfile): string {
-    const stableProfile = profile === "focus" ? "thumbnail" : profile;
-    return `${this.wsBase}/v1/devices/${encodeURIComponent(deviceId)}/video?profile=${stableProfile}`;
+    return `${this.wsBase}/v1/devices/${encodeURIComponent(deviceId)}/video?profile=${profile}`;
   }
 
   getVideoProtocols(): string[] {
     return ["cyclone-v1", `cyclone-token.${this.token}`];
   }
 
-  getFallbackFrameUrl(_deviceId: string, _profile: StreamProfile): string {
-    return "";
+  getFallbackFrameUrl(deviceId: string, profile: StreamProfile): string {
+    return `${this.httpBase}/v1/devices/${encodeURIComponent(deviceId)}/stream/snapshot?profile=${profile}`;
   }
 
   async reportStreamDiagnostic(deviceId: string, event: StreamDiagnosticEvent): Promise<void> {
