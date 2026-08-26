@@ -40,12 +40,6 @@ object GatewayRuntime {
         }
     }
 
-    /**
-     * The process bootstrap owns exactly one localabstract listener. It remains available while the
-     * app process lives so ADB forwarding can reconnect after normal USB disconnects. When Gateway
-     * authority is disabled, only signed V3.3 trust bootstrap and the explicit legacy pairing
-     * transition operations may proceed.
-     */
     @Synchronized
     fun startPairingBootstrap(context: Context) {
         appContext = context.applicationContext
@@ -57,6 +51,7 @@ object GatewayRuntime {
         startPairingBootstrap(context)
     }
 
+    /** V3.3 enablement creates no reusable token; trust/session credentials are protocol-owned. */
     @Synchronized
     fun enable(context: Context): String {
         appContext = context.applicationContext
@@ -76,18 +71,20 @@ object GatewayRuntime {
         listenerError = null
         clearSafeError()
         PcSessionTracker.reset()
-        // Keep the zero-authority ADB bootstrap listener available for future visible trust.
         startLocked(context.applicationContext)
     }
 
-    /** Explicit legacy transition only; normal V3.3 sessions rotate through trust.rotate. */
+    /** Explicit one-release legacy transition helper; normal V3.3 uses trust.rotate. */
     @Synchronized
     fun rotateToken(context: Context): String {
         appContext = context.applicationContext
         val token = GatewaySessionStore.rotate(context)
         server?.disconnectClients()
         GatewayV33TrustManager.disconnectSessions(context)
-        reportSafeError("LEGACY_CREDENTIAL_ROTATED", "Legacy transition credential rotated. V3.3 PCs should open a fresh trusted session.")
+        reportSafeError(
+            "LEGACY_CREDENTIAL_ROTATED",
+            "Legacy transition credential rotated. V3.3 PCs should open a fresh trusted session.",
+        )
         return token
     }
 
@@ -101,7 +98,7 @@ object GatewayRuntime {
 
     fun isEnabled(context: Context): Boolean = GatewaySessionStore.enabled(context)
 
-    /** Kept only for transition callers; V3.3 UI must never display or copy this value. */
+    /** Kept only for compatibility callers. V3.3 UI must never expose this value. */
     fun tokenForUser(context: Context): String? = GatewaySessionStore.token(context)
 
     internal fun reportSafeError(message: String?) {
@@ -193,7 +190,7 @@ object GatewayRuntime {
                 .put("pcIdentityDetectable", trust.optInt("trustedPcCount", 0) > 0))
             .put("capabilities", JSONObject()
                 .put("operations", JSONArray(GatewayProtocol.operations.toList()))
-                .put("phoneTools", JSONArray(GatewayActionAdapter.allowedTools.toList()))
+                .put("phoneTools", JSONArray(GatewayV33ActionAdapter.allowedTools.toList()))
                 .put("manualDesktopKinds", JSONArray(DesktopManualControlContract.allowedKinds.toList()))
                 .put("fullSemanticControls", true)
                 .put("pageDebugFunnel", true)
@@ -241,19 +238,21 @@ internal object GatewayDispatcher {
             val auth = if (unauthenticatedBootstrap) null else GatewaySessionStore.resolveAuth(context, request.auth)
 
             when {
-                request.op in trustSessionBootstrap && !enabled -> {
-                    throw GatewayProtocolException(
-                        "CAPABILITY_UNAVAILABLE",
-                        "Cyclone AI Gateway is disabled on this phone. Complete visible trust or enable it in Cyclone AI.",
-                        request.id,
-                    )
-                }
-                !unauthenticatedBootstrap && !enabled -> {
-                    throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "PC Gateway is disabled", request.id)
-                }
-                !unauthenticatedBootstrap && auth == null -> {
-                    throw GatewayProtocolException("AUTH_REJECTED", "Trusted session is invalid, expired or revoked", request.id)
-                }
+                request.op in trustSessionBootstrap && !enabled -> throw GatewayProtocolException(
+                    "CAPABILITY_UNAVAILABLE",
+                    "Cyclone AI Gateway is disabled on this phone. Complete visible trust or enable it in Cyclone AI.",
+                    request.id,
+                )
+                !unauthenticatedBootstrap && !enabled -> throw GatewayProtocolException(
+                    "CAPABILITY_UNAVAILABLE",
+                    "PC Gateway is disabled",
+                    request.id,
+                )
+                !unauthenticatedBootstrap && auth == null -> throw GatewayProtocolException(
+                    "AUTH_REJECTED",
+                    "Trusted session is invalid, expired or revoked",
+                    request.id,
+                )
                 auth?.mode == GatewaySessionAuthMode.LEGACY_READ_ONLY && request.op !in GatewayProtocol.legacyReadOnlyOperations -> {
                     throw GatewayProtocolException(
                         "PROTOCOL_MISMATCH",
@@ -264,7 +263,7 @@ internal object GatewayDispatcher {
                 }
                 else -> {
                     if (auth != null) GatewayRuntime.PcSessionTracker.noteAuthenticated()
-                    val result = dispatch(context, request, auth)
+                    val result = dispatch(context, request)
                     GatewayRuntime.clearSafeError()
                     GatewayProtocol.success(id, result).toString()
                 }
@@ -275,12 +274,15 @@ internal object GatewayDispatcher {
         } catch (error: Throwable) {
             if (error is VirtualMachineError || error is ThreadDeath) throw error
             CycloneProcessDiagnostics.recordNonFatal(context, "gateway.dispatch.boundary", error)
-            GatewayRuntime.reportSafeError("INTERNAL_ERROR", "Gateway operation failed safely. Open diagnostics or reconnect the USB session.")
+            GatewayRuntime.reportSafeError(
+                "INTERNAL_ERROR",
+                "Gateway operation failed safely. Open diagnostics or reconnect the USB session.",
+            )
             GatewayProtocol.error(id, "INTERNAL_ERROR", "Gateway operation failed").toString()
         }
     }
 
-    private fun dispatch(context: Context, request: GatewayRequest, auth: GatewaySessionAuth?): Any = when (request.op) {
+    private fun dispatch(context: Context, request: GatewayRequest): Any = when (request.op) {
         "trust.negotiate" -> GatewayV33TrustManager.negotiate(context, request.args)
         "trust.begin" -> GatewayV33TrustManager.beginTrust(context, request.args)
         "trust.complete" -> GatewayV33TrustManager.completeTrust(context, request.args).also {
@@ -294,9 +296,9 @@ internal object GatewayDispatcher {
         "pair.complete" -> GatewayDesktopPairingManager.complete(context, request.args)
         "pair.qr.complete" -> GatewayDesktopPairingManager.completeQr(context, request.args)
         "pair.revoke" -> GatewayDesktopPairingManager.revoke(context)
-        "manual.execute" -> GatewayManualDesktopAdapter.execute(context, request.id, request.args)
+        "manual.execute" -> GatewayV33ManualDesktopAdapter.execute(context, request.id, request.args)
         "clipboard.get" -> GatewayClipboardAdapter.capability(context)
-        "clipboard.set" -> GatewayClipboardAdapter.set(context, request.id, request.args)
+        "clipboard.set" -> GatewayV33ClipboardAdapter.set(context, request.id, request.args)
         "bridge.status" -> GatewayRuntime.status(context)
         "observe.semantic" -> GatewayObservationAdapter.capture(context, request.args).payload
         "observe.page_debug" -> GatewayPageDebugAdapter.capture(context, request.args)
@@ -307,7 +309,14 @@ internal object GatewayDispatcher {
                 .put("observationId", observation.id)
                 .put("elementIdScope", "observation-local")
                 .put("query", request.args.optString("query"))
-                .put("candidates", GatewayObservationAdapter.search(observation, request.args.optString("query"), request.args.optInt("limit", 30)))
+                .put(
+                    "candidates",
+                    GatewayObservationAdapter.search(
+                        observation,
+                        request.args.optString("query"),
+                        request.args.optInt("limit", 30),
+                    ),
+                )
         }
         "ui.element" -> {
             val observation = GatewayObservationStore.current()
@@ -322,12 +331,16 @@ internal object GatewayDispatcher {
         }
         "app_graph.get" -> GatewayAppGraphAdapter.query(context, request.args)
         "brain.recall" -> GatewayBrainAdapter.recall(context, request.args)
-        "action.execute" -> GatewayActionAdapter.execute(context, request.id, request.args)
+        "action.execute" -> GatewayV33ActionAdapter.execute(context, request.id, request.args)
         "teach.start" -> GatewayTeachingAdapter.start(context)
         "teach.status" -> GatewayTeachingAdapter.status(context)
         "teach.stop" -> GatewayTeachingAdapter.stop(context)
         "debug.snapshot" -> debugSnapshot(context)
-        else -> throw GatewayProtocolException("PROTOCOL_MISMATCH", "Unsupported gateway operation: ${request.op}", request.id)
+        else -> throw GatewayProtocolException(
+            "PROTOCOL_MISMATCH",
+            "Unsupported gateway operation: ${request.op}",
+            request.id,
+        )
     }
 
     private fun debugSnapshot(context: Context): JSONObject {
@@ -336,21 +349,29 @@ internal object GatewayDispatcher {
         return JSONObject()
             .put("status", GatewayRuntime.status(context))
             .put("latestObservation", observation?.payload ?: JSONObject.NULL)
-            .put("latestPageDebug", latestPageDebug?.let { GatewayPageDebugAdapter.safeExport(it) } ?: JSONObject.NULL)
+            .put(
+                "latestPageDebug",
+                latestPageDebug?.let { GatewayPageDebugAdapter.safeExport(it) } ?: JSONObject.NULL,
+            )
             .put("teaching", GatewayTeachingAdapter.status(context))
             .put("recentActions", JSONArray().also { out ->
                 DeviceState.commandAudit.take(30).forEach { audit ->
-                    out.put(JSONObject()
-                        .put("commandId", audit.commandId)
-                        .put("tool", audit.tool)
-                        .put("startedAtMs", audit.startedAtMs)
-                        .put("finishedAtMs", audit.finishedAtMs)
-                        .put("ok", audit.ok)
-                        .put("beforeFingerprint", audit.beforeFingerprint ?: JSONObject.NULL)
-                        .put("afterFingerprint", audit.afterFingerprint ?: JSONObject.NULL)
-                        .put("errorCode", audit.errorCode ?: JSONObject.NULL))
+                    out.put(
+                        JSONObject()
+                            .put("commandId", audit.commandId)
+                            .put("tool", audit.tool)
+                            .put("startedAtMs", audit.startedAtMs)
+                            .put("finishedAtMs", audit.finishedAtMs)
+                            .put("ok", audit.ok)
+                            .put("beforeFingerprint", audit.beforeFingerprint ?: JSONObject.NULL)
+                            .put("afterFingerprint", audit.afterFingerprint ?: JSONObject.NULL)
+                            .put("errorCode", audit.errorCode ?: JSONObject.NULL),
+                    )
                 }
             })
-            .put("privacy", "No session token, private key, pairing code, API key, password, OTP, clipboard content or typed phone.type value is included.")
+            .put(
+                "privacy",
+                "No session token, private key, pairing code, API key, password, OTP, clipboard content or typed phone.type value is included.",
+            )
     }
 }
