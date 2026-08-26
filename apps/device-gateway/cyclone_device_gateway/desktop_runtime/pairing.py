@@ -30,7 +30,7 @@ class PairingChallenge:
 class PairingCoordinator:
     MAX_ATTEMPTS = 5
     MAX_LIFETIME_MS = 60_000
-    BEGIN_TRANSPORT_ATTEMPTS = 2
+    BEGIN_TRANSPORT_ATTEMPTS = 3
     BEGIN_RETRY_DELAY_SECONDS = 0.2
     POST_PAIR_HEALTH_PROBES = 2
     POST_PAIR_HEALTH_DELAY_SECONDS = 0.25
@@ -57,6 +57,8 @@ class PairingCoordinator:
         # Pair is pressed; heavy dumpsys snapshots are reserved for an actual failure/process death so
         # diagnostics cannot create the ADB load they are trying to observe.
         live = self._mark_live(device_id, "pair.begin.pc_request")
+        probe = self._probe_phone_readiness(session)
+        self._mark_live(device_id, "pair.begin.preflight")
         pc_nonce = secrets.token_urlsafe(32)
         response = None
         for attempt in range(self.BEGIN_TRANSPORT_ATTEMPTS):
@@ -69,13 +71,18 @@ class PairingCoordinator:
                 break
             except BridgeOperationError as exc:
                 self._mark_live(device_id, "pair.begin.phone_rejected")
-                self._map_bridge_error(exc)
+                diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.phone_rejected")
+                self._map_bridge_error(exc, self._readiness_hint(probe), diagnostics)
             except BridgeProtocolError as exc:
                 self._mark_live(device_id, "pair.begin.invalid_response")
                 diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.invalid_response")
                 raise DesktopRuntimeError(
                     RuntimeErrorCode.DEVICE_DISCONNECTED,
-                    self._diagnostic_message("Cyclone pairing returned an invalid response.", diagnostics),
+                    self._diagnostic_message(
+                        "Cyclone pairing returned an invalid response. "
+                        + self._readiness_hint(probe),
+                        diagnostics,
+                    ),
                     retryable=True,
                 ) from exc
             except BridgeDisconnectedError as exc:
@@ -84,7 +91,10 @@ class PairingCoordinator:
                     diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.transport")
                     raise DesktopRuntimeError(
                         RuntimeErrorCode.DEVICE_DISCONNECTED,
-                        self._diagnostic_message("Cyclone pairing transport is unavailable.", diagnostics),
+                        self._diagnostic_message(
+                            "Cyclone pairing transport is unavailable. " + self._readiness_hint(probe),
+                            diagnostics,
+                        ),
                         retryable=True,
                     ) from exc
                 time.sleep(self.BEGIN_RETRY_DELAY_SECONDS)
@@ -97,7 +107,10 @@ class PairingCoordinator:
             diagnostics = self._capture_pairing_diagnostics(session, "pair.begin.no_response")
             raise DesktopRuntimeError(
                 RuntimeErrorCode.DEVICE_DISCONNECTED,
-                self._diagnostic_message("Cyclone pairing transport is unavailable.", diagnostics),
+                self._diagnostic_message(
+                    "Cyclone pairing transport is unavailable. " + self._readiness_hint(probe),
+                    diagnostics,
+                ),
                 retryable=True,
             )
         challenge_id = str(response.get("challengeId") or "")
@@ -133,6 +146,7 @@ class PairingCoordinator:
             "attemptsRemaining": self.MAX_ATTEMPTS,
             "qrAvailable": True,
             "qrPayload": "cyclone://pair?" + urlencode({"challenge": challenge_id, "nonce": pc_nonce}),
+            "preflight": probe,
             "diagnosticsActive": bool(live and live.get("active")),
             "diagnosticsPath": live.get("sessionPath") if live else None,
             "diagnosticsMode": live.get("mode") if live else None,
@@ -409,8 +423,58 @@ class PairingCoordinator:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Could not prepare the isolated USB bridge.", retryable=True) from exc
         return session
 
+    def _probe_phone_readiness(self, session: DeviceSession) -> dict:
+        """Bounded, read-only preflight used to explain a failing pairing bootstrap.
+
+        The probe never exposes arbitrary ADB/shell surfaces and never collects screen pixels,
+        clipboard content, credentials or pairing codes. Unknown values (None) mean the fixed read
+        itself failed, not that the phone is healthy.
+        """
+        probe = {
+            "appRunning": None,
+            "accessibilityEnabled": None,
+            "accessibilityServiceConfigured": None,
+        }
+        try:
+            pid = session.adb.shell("pidof", "com.cyclone.mobile", timeout=3).strip()
+            probe["appRunning"] = bool(pid)
+        except Exception:
+            probe["appRunning"] = None
+        try:
+            enabled = session.adb.shell("settings", "get", "secure", "accessibility_enabled", timeout=3).strip()
+            probe["accessibilityEnabled"] = enabled == "1"
+        except Exception:
+            probe["accessibilityEnabled"] = None
+        try:
+            services = session.adb.shell("settings", "get", "secure", "enabled_accessibility_services", timeout=3).strip()
+            probe["accessibilityServiceConfigured"] = "com.cyclone.mobile" in services
+        except Exception:
+            probe["accessibilityServiceConfigured"] = None
+        return probe
+
     @staticmethod
-    def _map_bridge_error(exc: BridgeOperationError) -> None:
+    def _readiness_hint(probe: dict) -> str:
+        hints: list[str] = []
+        if probe.get("appRunning") is False:
+            hints.append("Cyclone app is not running on the phone; open it before pairing")
+        elif probe.get("appRunning") is None:
+            hints.append("Cyclone app process could not be checked")
+        if probe.get("accessibilityEnabled") is False:
+            hints.append("Android accessibility is off")
+        if probe.get("accessibilityServiceConfigured") is False:
+            hints.append("Cyclone accessibility service is not enabled")
+        if hints:
+            return "Readiness: " + "; ".join(hints) + "."
+        if any(value is None for value in probe.values()):
+            return "Readiness: checks were incomplete; the USB bridge transport could not be confirmed."
+        return "Readiness: all checks look healthy, but the phone did not complete the pairing bootstrap."
+
+    @staticmethod
+    def _map_bridge_error(
+        exc: BridgeOperationError,
+        hint: str = "",
+        diagnostics: str | None = None,
+    ) -> None:
         mapping = {
             "AUTH_REJECTED": RuntimeErrorCode.AUTH_REJECTED,
             "PAIRING_EXPIRED": RuntimeErrorCode.PAIRING_EXPIRED,
@@ -421,4 +485,9 @@ class PairingCoordinator:
             "CAPABILITY_UNAVAILABLE": RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
         }
         error_code = mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE)
-        raise DesktopRuntimeError(error_code, f"Phone rejected pairing with {error_code.value}.")
+        message = f"Phone rejected pairing with {error_code.value}."
+        if hint:
+            message = f"{message} {hint}"
+        if diagnostics:
+            message = f"{message} Diagnostic file: {diagnostics}"
+        raise DesktopRuntimeError(error_code, message)

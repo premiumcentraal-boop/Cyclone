@@ -48,6 +48,22 @@ export interface DeviceCapabilities {
   reconnect: boolean;
 }
 
+export interface DeviceConnectionHealth {
+  bridgeReachable: boolean | null;
+  lastHeartbeatEpochMs: number | null;
+  reconnectAttempts: number;
+  maxReconnectAttempts?: number;
+  nextRetryEpochMs: number | null;
+  lastError: string | null;
+  errorClass: string | null;
+}
+
+export interface PairingPreflight {
+  appRunning: boolean | null;
+  accessibilityEnabled: boolean | null;
+  accessibilityServiceConfigured: boolean | null;
+}
+
 export interface DesktopDevice {
   id: string;
   name: string;
@@ -55,9 +71,11 @@ export interface DesktopDevice {
   state: DeviceLifecycleState;
   paired: boolean;
   connectionLabel: string;
+  lastSafeError?: string | null;
   lastSeenEpochMs: number;
   video: DeviceVideoDescriptor;
   capabilities: DeviceCapabilities;
+  connectionHealth?: DeviceConnectionHealth;
   lastFrameUrl?: string;
 }
 
@@ -69,6 +87,7 @@ export interface PairBeginResult {
   diagnosticsActive?: boolean;
   diagnosticsPath?: string | null;
   diagnosticsMode?: string | null;
+  preflight?: PairingPreflight | null;
 }
 
 export type PairConfirmResult =
@@ -143,6 +162,16 @@ export interface DesktopDiscoveryStatus {
   lastScanDurationMs?: number | null;
   lastScanSource?: string;
   lastScanError?: string | null;
+  reconnectingDeviceCount?: number;
+  attentionDeviceCount?: number;
+  maxReconnectAttempts?: number;
+  reconnectBackoffSeconds?: number[];
+  bridgeErrors?: Record<string, {
+    error?: string | null;
+    errorClass?: string | null;
+    attempts?: number;
+    nextRetryEpochMs?: number | null;
+  }>;
 }
 
 export interface DeviceLiveDiagnosticsStatus {
