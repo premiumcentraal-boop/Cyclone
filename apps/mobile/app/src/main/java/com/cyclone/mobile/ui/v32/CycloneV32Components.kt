@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.automation.AutomationDefinition
 
+private const val LEGACY_ENHANCED_CONTROL_ROW = "Enhanced control engine"
+
 enum class V32Destination(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Rounded.Home),
     TEACH("Teach", Icons.Rounded.School),
@@ -185,6 +187,11 @@ fun CyclonePermissionRow(
     actionLabel: String = if (ready) "Ready" else "Enable",
     onClick: () -> Unit,
 ) {
+    // V3.2 beta.3 collapses the old second Accessibility permission into Cyclone's canonical
+    // service. Keep the large Settings source binary-compatible while no longer rendering the
+    // legacy duplicate row to users.
+    if (title == LEGACY_ENHANCED_CONTROL_ROW) return
+
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,

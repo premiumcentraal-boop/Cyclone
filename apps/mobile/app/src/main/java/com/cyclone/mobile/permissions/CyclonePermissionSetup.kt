@@ -26,17 +26,17 @@ import com.cyclone.mobile.CycloneAccessibilityService
  * screen from Cyclone.
  */
 object CyclonePermissionSetup {
-    private const val ENHANCED_ACCESSIBILITY =
-        "com.mobilerun.portal.service.MobilerunAccessibilityService"
     private const val AGENT_KEYBOARD = "com.mobilerun.portal.input.MobilerunKeyboardIME"
 
     fun primaryControlEnabled(context: Context): Boolean = safePermissionCheck {
         accessibilityServiceEnabled(context, CycloneAccessibilityService::class.java.name)
     }
 
-    fun enhancedControlEnabled(context: Context): Boolean = safePermissionCheck {
-        accessibilityServiceEnabled(context, ENHANCED_ACCESSIBILITY)
-    }
+    /**
+     * Compatibility mirror for older V3.2 UI code. Cyclone no longer exposes a second Android
+     * Accessibility service, so "enhanced" readiness follows the canonical phone-control grant.
+     */
+    fun enhancedControlEnabled(context: Context): Boolean = primaryControlEnabled(context)
 
     fun notificationAccessEnabled(context: Context): Boolean = safePermissionCheck {
         NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
