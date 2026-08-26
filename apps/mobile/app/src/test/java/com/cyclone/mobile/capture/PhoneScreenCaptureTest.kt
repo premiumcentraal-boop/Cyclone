@@ -17,7 +17,7 @@ class PhoneScreenCaptureTest {
 
     @Test
     fun scaleIsNoopWhenAlreadyWithinLimitOrMaxMissing() {
-        assertFalse(PhoneScreenCapture.scaleToMaxDimension(400, 800, 480).isScaling)
+        assertFalse(PhoneScreenCapture.scaleToMaxDimension(400, 400, 480).isScaling)
         assertFalse(PhoneScreenCapture.scaleToMaxDimension(1080, 2400, null).isScaling)
         assertFalse(PhoneScreenCapture.scaleToMaxDimension(0, 2400, 480).isScaling)
     }

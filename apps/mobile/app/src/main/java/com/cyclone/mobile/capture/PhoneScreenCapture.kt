@@ -110,7 +110,7 @@ object PhoneScreenCapture {
         height: Int,
         bytes: Int,
         timestampMs: Long,
-        crop: JSONObject,
+        crop: Any,
         scaled: Boolean,
         includeBase64: Boolean,
         pngBase64: String?,
