@@ -5,12 +5,12 @@ from io import BytesIO
 import json
 import queue
 import struct
-import subprocess
 import threading
 import time
 from typing import Any
 
 from ..adb.screenshot import is_png
+from ..media import MediaEvent, MediaState, ScrcpyMediaBackend
 from .models import DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES, VIDEO_PROTOCOL_VERSION, now_ms
 
 try:
@@ -19,8 +19,14 @@ except Exception:
     Image = None
 
 _PACKET_HEADER = struct.Struct("!QII")
+_PACKET_FLAG_CONFIG = 0x80000000
+_PACKET_FLAG_KEYFRAME = 0x40000000
+_PACKET_FLAG_MEDIA = 0x20000000
+_PACKET_SEQUENCE_MASK = 0x1FFFFFFF
 KEEPALIVE_INTERVAL_S = 2.0
 CAPTURE_OUTAGE_BACKOFF_S = 2.0
+DEGRADED_FOCUS_FPS = 2
+DEGRADED_THUMBNAIL_FPS = 1
 
 
 @dataclass(frozen=True)
@@ -55,13 +61,28 @@ class VideoFleetLimiter:
 
     def snapshot(self) -> dict[str, int]:
         with self._lock:
-            return {"sources": self._sources, "focus": self._focus, "maxSources": self.max_sources, "maxFocus": self.max_focus}
+            return {
+                "sources": self._sources,
+                "focus": self._focus,
+                "maxSources": self.max_sources,
+                "maxFocus": self.max_focus,
+            }
 
 
 class VideoStreamController:
-    """Per-device read-only stream. No video backend exposes an input/control channel."""
+    """Compatibility adapter from the gateway WebSocket surface to the V3.3 media backend.
 
-    def __init__(self, session, limiter: VideoFleetLimiter, diagnostic=None):
+    The primary path is a pinned scrcpy H.264 stream. Screenshot capture is intentionally limited
+    to a one-shot snapshot and a slow degraded preview when scrcpy cannot start.
+    """
+
+    def __init__(
+        self,
+        session,
+        limiter: VideoFleetLimiter,
+        diagnostic=None,
+        media_backend: ScrcpyMediaBackend | None = None,
+    ):
         self.session = session
         self.limiter = limiter
         self._lock = threading.RLock()
@@ -75,6 +96,9 @@ class VideoStreamController:
         self._failures_by_profile: dict[str, int] = {"thumbnail": 0, "focus": 0}
         self._last_event = "idle"
         self._last_frame_meta: tuple[bytes, str, int | None, int | None] | None = None
+        self.media_backend = media_backend or ScrcpyMediaBackend(
+            diagnostic=lambda stage, details: self._mark(stage, details)
+        )
 
     def subscribe(self, profile: str) -> queue.Queue:
         if profile not in VIDEO_PROFILES:
@@ -111,15 +135,29 @@ class VideoStreamController:
             threads = tuple(self._threads.values())
         for stop in stops:
             stop.set()
+        try:
+            self.media_backend.stop(self.session.device_id)
+        except Exception:
+            pass
         for thread in threads:
             if thread.is_alive():
-                thread.join(timeout=1.0)
+                thread.join(timeout=2.5)
 
     def subscriber_count(self) -> int:
         with self._lock:
             return sum(len(items) for items in self._subscribers.values())
 
     def diagnostics(self) -> dict[str, Any]:
+        try:
+            media = self.media_backend.status(self.session.device_id)
+            probe = self.media_backend.probe(self.session)
+        except Exception as exc:
+            media = {"backend": "scrcpy-v4.0", "sessionCount": 0, "sessions": []}
+            probe = {
+                "backend": "scrcpy-v4.0",
+                "artifactVerified": False,
+                "artifactError": exc.__class__.__name__,
+            }
         with self._lock:
             return {
                 "subscriberCount": sum(len(items) for items in self._subscribers.values()),
@@ -131,25 +169,31 @@ class VideoStreamController:
                 "lastFrameAvailable": self._last_frame_meta is not None,
                 "sequence": self._sequence,
                 "fleetLimiter": self.limiter.snapshot(),
+                "primaryBackend": "scrcpy-v4.0",
+                "mediaProbe": probe,
+                "media": media,
             }
 
     def snapshot(self) -> dict[str, Any]:
-        """Return one bounded, decoded phone frame for HTTP fallback previews.
-
-        Reuses the latest frame produced by an active stream when one exists; otherwise performs a
-        single fresh ADB capture. The frame is always safe for the Companion image decoder.
-        """
+        """Return one bounded image for evidence/degraded preview, never the primary live path."""
         with self._lock:
             meta = self._last_frame_meta
             sequence = self._sequence
         if meta is None:
             try:
-                png = self.session.adb.exec_out("screencap", "-p", timeout=6)
+                safe = self.media_backend.latest_safe_snapshot(self.session)
+                png = safe.data
                 if not is_png(png):
                     raise ValueError("screencap returned a non-PNG payload")
-                encoded, codec, width, height = _encode_frame(png, VIDEO_PROFILES["focus"].max_long_edge)
+                encoded, codec, width, height = _encode_frame(
+                    png,
+                    VIDEO_PROFILES["focus"].max_long_edge,
+                )
             except Exception as exc:
-                self._mark("server.stream.snapshot_failed", {"errorClass": exc.__class__.__name__, "retryable": True})
+                self._mark(
+                    "server.stream.snapshot_failed",
+                    {"errorClass": exc.__class__.__name__, "retryable": True},
+                )
                 raise DesktopRuntimeError(
                     RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
                     "Phone frame capture failed.",
@@ -173,87 +217,190 @@ class VideoStreamController:
         }
 
     def _producer(self, profile: str, stop: threading.Event) -> None:
-        self._mark("server.producer.start", {"profile": profile})
+        self._mark("server.producer.start", {"profile": profile, "primaryBackend": "scrcpy-v4.0"})
         allowed, focus_allowed = self.limiter.acquire(profile)
         if not allowed:
             self._mark("server.producer.capacity", {"profile": profile, "code": "STREAM_CAPACITY"})
-            self._broadcast(profile, StreamMessage("text", json.dumps({
-                "type": "stream.error",
-                "code": "STREAM_CAPACITY",
-                "retryable": True,
-            }, separators=(",", ":"))))
+            self._broadcast(
+                profile,
+                StreamMessage(
+                    "text",
+                    json.dumps(
+                        {"type": "stream.error", "code": "STREAM_CAPACITY", "retryable": True},
+                        separators=(",", ":"),
+                    ),
+                ),
+            )
             return
         try:
-            # The shipped renderer consumes discrete image frames. Android screenrecord emits an
-            # Annex-B byte stream whose chunks are not frame boundaries, so selecting it here made
-            # real phones fail while unit-test phones silently fell back to JPEG. Keep the release
-            # path on the codec both sides implement until an Annex-B parser/decoder is shipped.
-            codec = _image_codec()
-            width, height = self._target_dimensions(VIDEO_PROFILES[profile].max_long_edge)
-            self._broadcast(profile, StreamMessage("text", self._init_json(
-                profile,
-                codec,
-                "adb-screenshot",
-                fallback=profile == "focus",
-                width=width,
-                height=height,
-            )))
-            self._mark("server.stream.init", {"profile": profile, "source": "adb-screenshot"})
-            target_fps = min(15, VIDEO_PROFILES[profile].target_fps) if profile == "focus" else VIDEO_PROFILES[profile].target_fps
-            self._produce_images(profile, stop, target_fps=target_fps)
+            try:
+                self._produce_scrcpy(profile, stop)
+                if stop.is_set():
+                    return
+            except Exception as exc:
+                self._mark(
+                    "server.media.scrcpy_unavailable",
+                    {
+                        "profile": profile,
+                        "errorClass": exc.__class__.__name__,
+                        "retryable": True,
+                    },
+                )
+            if not stop.is_set():
+                self._produce_degraded(profile, stop)
         finally:
+            try:
+                self.media_backend.stop(self.session.device_id)
+            except Exception:
+                pass
             self._mark("server.producer.stop", {"profile": profile})
             self.limiter.release(profile, focus_allowed)
             with self._lock:
                 self._threads.pop(profile, None)
                 self._stops.pop(profile, None)
 
-    def _produce_h264(self, stop: threading.Event) -> None:
-        profile = "focus"
-        spec = VIDEO_PROFILES[profile]
-        width, height = self._target_dimensions(spec.max_long_edge)
-        process = self.session.adb.start_process(
-            ["exec-out", "screenrecord", "--output-format=h264", "--bit-rate", str(spec.bitrate_bps), "--size", f"{width}x{height}", "-"],
-            stdout=subprocess.PIPE,
-        )
-        self._broadcast(profile, StreamMessage("text", self._init_json(profile, "video/avc", "android-screenrecord-h264", width=width, height=height)))
-        self._mark("server.stream.init", {"profile": profile, "source": "android-screenrecord-h264"})
-        sleeping_sent = False
+    def _produce_scrcpy(self, profile: str, stop: threading.Event) -> None:
+        media = self.media_backend.start(self.session, profile)
+        events = media.subscribe()
+        init_sent = False
         try:
-            if process.stdout is None:
-                raise RuntimeError("screenrecord stdout unavailable")
             while not stop.is_set():
-                if not self.session.screen_awake:
-                    if not sleeping_sent:
-                        self._broadcast(profile, StreamMessage("text", json.dumps({"type": "screen.state", "state": "SLEEPING"}, separators=(",", ":"))))
-                        sleeping_sent = True
-                    if process.poll() is None:
-                        process.terminate()
-                    while not stop.is_set() and not self.session.screen_awake:
-                        time.sleep(0.25)
-                    if not stop.is_set():
-                        self._broadcast(profile, StreamMessage("text", json.dumps({"type": "stream.reconnect", "reason": "SCREEN_WAKE"}, separators=(",", ":"))))
-                        raise RuntimeError("screen wake requires stream restart")
-                    return
-                chunk = process.stdout.read(64 * 1024)
-                if not chunk:
-                    if process.poll() is not None:
-                        raise RuntimeError("screenrecord exited")
-                    time.sleep(0.01)
-                    continue
-                self._broadcast(profile, StreamMessage("binary", self._packet(chunk)))
-                with self._lock:
-                    self._frames_by_profile[profile] += 1
-                    first = self._frames_by_profile[profile] == 1
-                if first:
-                    self._mark("server.frame.first", {"profile": profile, "source": "android-screenrecord-h264"})
-        finally:
-            if process.poll() is None:
-                process.terminate()
                 try:
-                    process.wait(timeout=0.5)
-                except Exception:
-                    process.kill()
+                    event: MediaEvent = events.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                if event.kind == "session":
+                    width = _safe_int(event.data.get("width"))
+                    height = _safe_int(event.data.get("height"))
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "text",
+                            self._init_json(
+                                profile,
+                                "video/avc",
+                                "scrcpy-v4.0",
+                                width=width,
+                                height=height,
+                                session_id=str(event.data.get("sessionId") or media.session_id),
+                            ),
+                        ),
+                    )
+                    init_sent = True
+                    self._mark(
+                        "server.stream.init",
+                        {"profile": profile, "source": "scrcpy-v4.0", "width": width, "height": height},
+                    )
+                    continue
+                if event.kind == "packet":
+                    payload = event.data.get("payload")
+                    if not isinstance(payload, (bytes, bytearray)):
+                        continue
+                    config = event.data.get("config") is True
+                    keyframe = event.data.get("keyframe") is True
+                    pts_us = _safe_int(event.data.get("ptsUs")) or 0
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "binary",
+                            self._packet(bytes(payload), pts_us=pts_us, config=config, keyframe=keyframe),
+                        ),
+                    )
+                    if not config:
+                        with self._lock:
+                            self._frames_by_profile[profile] += 1
+                            first = self._frames_by_profile[profile] == 1
+                        if first:
+                            self._mark(
+                                "server.frame.first",
+                                {"profile": profile, "source": "scrcpy-v4.0"},
+                            )
+                    continue
+                if event.kind != "state":
+                    continue
+                state = str(event.data.get("state") or "")
+                if state == MediaState.SLEEPING.value:
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "text",
+                            json.dumps({"type": "screen.state", "state": "SLEEPING"}, separators=(",", ":")),
+                        ),
+                    )
+                elif state == MediaState.RECONNECTING.value:
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "text",
+                            json.dumps(
+                                {
+                                    "type": "stream.error",
+                                    "code": str(event.data.get("code") or "SCRCPY_RECONNECTING"),
+                                    "retryable": True,
+                                },
+                                separators=(",", ":"),
+                            ),
+                        ),
+                    )
+                elif state == MediaState.UNAVAILABLE.value:
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "text",
+                            json.dumps(
+                                {
+                                    "type": "stream.error",
+                                    "code": str(event.data.get("code") or "SCRCPY_STREAM_UNAVAILABLE"),
+                                    "retryable": True,
+                                },
+                                separators=(",", ":"),
+                            ),
+                        ),
+                    )
+                    raise RuntimeError("scrcpy media backend exhausted reconnect attempts")
+                elif state == MediaState.LIVE.value and not init_sent:
+                    status = media.status()
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "text",
+                            self._init_json(
+                                profile,
+                                "video/avc",
+                                "scrcpy-v4.0",
+                                width=status.get("width"),
+                                height=status.get("height"),
+                                session_id=media.session_id,
+                            ),
+                        ),
+                    )
+                    init_sent = True
+        finally:
+            media.unsubscribe(events)
+
+    def _produce_degraded(self, profile: str, stop: threading.Event) -> None:
+        codec = _image_codec()
+        width, height = self._target_dimensions(VIDEO_PROFILES[profile].max_long_edge)
+        self._broadcast(
+            profile,
+            StreamMessage(
+                "text",
+                self._init_json(
+                    profile,
+                    codec,
+                    "adb-screenshot-degraded",
+                    fallback=True,
+                    width=width,
+                    height=height,
+                ),
+            ),
+        )
+        self._mark(
+            "server.stream.init",
+            {"profile": profile, "source": "adb-screenshot-degraded", "degraded": True},
+        )
+        target_fps = DEGRADED_FOCUS_FPS if profile == "focus" else DEGRADED_THUMBNAIL_FPS
+        self._produce_images(profile, stop, target_fps=target_fps)
 
     def _produce_images(self, profile: str, stop: threading.Event, target_fps: int) -> None:
         interval = 1.0 / max(1, target_fps)
@@ -265,9 +412,21 @@ class VideoStreamController:
             started = time.monotonic()
             if not self.session.screen_awake:
                 if not sleeping_sent:
-                    self._broadcast(profile, StreamMessage("text", json.dumps({"type": "screen.state", "state": "SLEEPING"}, separators=(",", ":"))))
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "text",
+                            json.dumps({"type": "screen.state", "state": "SLEEPING"}, separators=(",", ":")),
+                        ),
+                    )
                     if self._last_safe_frame is not None:
-                        self._broadcast(profile, StreamMessage("binary", self._packet(self._last_safe_frame)))
+                        self._broadcast(
+                            profile,
+                            StreamMessage(
+                                "binary",
+                                self._packet(self._last_safe_frame, pts_us=now_ms() * 1000),
+                            ),
+                        )
                     sleeping_sent = True
                     last_keepalive = time.monotonic()
                 else:
@@ -275,39 +434,72 @@ class VideoStreamController:
                 stop.wait(min(0.5, interval))
                 continue
             if sleeping_sent:
-                self._broadcast(profile, StreamMessage("text", json.dumps({"type": "screen.state", "state": "AWAKE"}, separators=(",", ":"))))
+                self._broadcast(
+                    profile,
+                    StreamMessage(
+                        "text",
+                        json.dumps({"type": "screen.state", "state": "AWAKE"}, separators=(",", ":")),
+                    ),
+                )
                 sleeping_sent = False
                 last_keepalive = time.monotonic()
             try:
                 png = self.session.adb.exec_out("screencap", "-p", timeout=5)
                 if not is_png(png):
                     raise ValueError("screencap returned a non-PNG payload")
-                encoded, codec, width, height = _encode_frame(png, VIDEO_PROFILES[profile].max_long_edge)
+                encoded, codec, width, height = _encode_frame(
+                    png,
+                    VIDEO_PROFILES[profile].max_long_edge,
+                )
                 self._last_safe_frame = encoded
                 self._last_frame_meta = (encoded, codec, width, height)
                 consecutive_failures = 0
                 outage_active = False
-                self._broadcast(profile, StreamMessage("binary", self._packet(encoded)))
+                self._broadcast(
+                    profile,
+                    StreamMessage(
+                        "binary",
+                        self._packet(encoded, pts_us=now_ms() * 1000),
+                    ),
+                )
                 last_keepalive = time.monotonic()
                 with self._lock:
                     self._frames_by_profile[profile] += 1
                     first = self._frames_by_profile[profile] == 1
                 if first:
-                    self._mark("server.frame.first", {"profile": profile, "source": "adb-screenshot"})
+                    self._mark(
+                        "server.frame.first",
+                        {"profile": profile, "source": "adb-screenshot-degraded"},
+                    )
             except Exception as exc:
                 consecutive_failures += 1
                 with self._lock:
                     self._failures_by_profile[profile] += 1
                 if consecutive_failures == 1:
-                    self._mark("server.frame.capture_failed", {"profile": profile, "errorClass": exc.__class__.__name__, "retryable": True})
+                    self._mark(
+                        "server.frame.capture_failed",
+                        {"profile": profile, "errorClass": exc.__class__.__name__, "retryable": True},
+                    )
                 if consecutive_failures >= 3 and not outage_active:
                     outage_active = True
-                    self._mark("server.frame.capture_exhausted", {"profile": profile, "code": "FRAME_CAPTURE_FAILED", "retryable": True})
-                    self._broadcast(profile, StreamMessage("text", json.dumps({
-                        "type": "stream.error",
-                        "code": "FRAME_CAPTURE_FAILED",
-                        "retryable": True,
-                    }, separators=(",", ":"))))
+                    self._mark(
+                        "server.frame.capture_exhausted",
+                        {"profile": profile, "code": "FRAME_CAPTURE_FAILED", "retryable": True},
+                    )
+                    self._broadcast(
+                        profile,
+                        StreamMessage(
+                            "text",
+                            json.dumps(
+                                {
+                                    "type": "stream.error",
+                                    "code": "FRAME_CAPTURE_FAILED",
+                                    "retryable": True,
+                                },
+                                separators=(",", ":"),
+                            ),
+                        ),
+                    )
                 last_keepalive = self._maybe_keepalive(profile, last_keepalive)
             wait = interval - (time.monotonic() - started)
             if consecutive_failures >= 3:
@@ -315,21 +507,37 @@ class VideoStreamController:
             stop.wait(max(0.0, wait))
 
     def _maybe_keepalive(self, profile: str, last_keepalive: float) -> float:
-        """Keep the WebSocket observable during idle/outage without spamming frames."""
         now = time.monotonic()
         if now - last_keepalive < KEEPALIVE_INTERVAL_S:
             return last_keepalive
-        self._broadcast(profile, StreamMessage("text", json.dumps({
-            "type": "stream.keepalive",
-            "timestampMs": now_ms(),
-        }, separators=(",", ":"))))
+        self._broadcast(
+            profile,
+            StreamMessage(
+                "text",
+                json.dumps({"type": "stream.keepalive", "timestampMs": now_ms()}, separators=(",", ":")),
+            ),
+        )
         return now
 
-    def _packet(self, payload: bytes) -> bytes:
+    def _packet(
+        self,
+        payload: bytes,
+        *,
+        pts_us: int,
+        config: bool = False,
+        keyframe: bool = False,
+    ) -> bytes:
         with self._lock:
-            self._sequence = (self._sequence + 1) & 0xFFFFFFFF
+            self._sequence = (self._sequence + 1) & _PACKET_SEQUENCE_MASK
             sequence = self._sequence
-        return _PACKET_HEADER.pack(now_ms(), sequence, len(payload)) + payload
+        flags_sequence = sequence
+        if config:
+            flags_sequence |= _PACKET_FLAG_CONFIG
+        else:
+            flags_sequence |= _PACKET_FLAG_MEDIA
+        if keyframe:
+            flags_sequence |= _PACKET_FLAG_KEYFRAME
+        return _PACKET_HEADER.pack(max(0, pts_us), flags_sequence, len(payload)) + payload
 
     def _broadcast(self, profile: str, message: StreamMessage) -> None:
         with self._lock:
@@ -366,32 +574,67 @@ class VideoStreamController:
         scale = max_long_edge / longest
         return _even(max(2, int(width * scale))), _even(max(2, int(height * scale)))
 
-    def _init_json(self, profile: str, codec: str, backend: str, *, fallback: bool = False, width: int | None = None, height: int | None = None) -> str:
+    def _init_json(
+        self,
+        profile: str,
+        codec: str,
+        backend: str,
+        *,
+        fallback: bool = False,
+        width: int | None = None,
+        height: int | None = None,
+        session_id: str | None = None,
+    ) -> str:
         spec = VIDEO_PROFILES[profile]
-        return json.dumps({
-            "type": "stream.init",
-            "protocol": VIDEO_PROTOCOL_VERSION,
-            "profile": profile,
-            "codec": codec,
-            "frameFormat": "annex-b-byte-chunk" if codec == "video/avc" else "image-frame",
-            "binaryHeader": "u64be timestamp_ms + u32be sequence + u32be payload_length",
-            "timestampClock": "unix-ms",
-            "targetFps": spec.target_fps,
-            "maxLongEdge": spec.max_long_edge,
-            "backend": backend,
-            "fallback": fallback,
-            "width": width,
-            "height": height,
-            "resolutionChanges": "stream.init/reconnect metadata; clients must not assume fixed dimensions",
-            "reconnect": "subscription survives transient frame failure; USB reconnect requires a fresh WebSocket",
-        }, separators=(",", ":"))
+        is_h264 = codec == "video/avc"
+        return json.dumps(
+            {
+                "type": "stream.init",
+                "protocol": VIDEO_PROTOCOL_VERSION,
+                "profile": profile,
+                "codec": codec,
+                "frameFormat": "annex-b-access-unit" if is_h264 else "image-frame",
+                "binaryHeader": "u64be pts_us + u32be flags_sequence + u32be payload_length",
+                "flags": {
+                    "config": "0x80000000",
+                    "keyframe": "0x40000000",
+                    "media": "0x20000000",
+                    "sequenceMask": "0x1fffffff",
+                },
+                "timestampClock": "monotonic-media-us" if is_h264 else "unix-us",
+                "targetFps": (
+                    DEGRADED_FOCUS_FPS if fallback and profile == "focus"
+                    else DEGRADED_THUMBNAIL_FPS if fallback
+                    else 30 if profile == "focus" and is_h264
+                    else 8 if profile == "thumbnail" and is_h264
+                    else spec.target_fps
+                ),
+                "maxLongEdge": spec.max_long_edge,
+                "backend": backend,
+                "fallback": fallback,
+                "degraded": fallback,
+                "width": width,
+                "height": height,
+                "sessionId": session_id,
+                "resolutionChanges": "new stream.init is emitted from scrcpy session metadata",
+                "reconnect": "gateway media session owns encoder reconnect; UI owns WebSocket reconnect only",
+            },
+            separators=(",", ":"),
+        )
+
+
+def _safe_int(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
 
 
 def _even(value: int) -> int:
     return value if value % 2 == 0 else value - 1
 
 
-def _encode_frame(png: bytes, max_long_edge: int) -> tuple[bytes, str, int | None, int | None]:
+def _encode_frame(
+    png: bytes,
+    max_long_edge: int,
+) -> tuple[bytes, str, int | None, int | None]:
     if Image is None:
         return png, "image/png", None, None
     with Image.open(BytesIO(png)) as image:
