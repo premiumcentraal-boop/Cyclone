@@ -16,6 +16,26 @@ internal data class GatewaySessionAuth(
     val expiresAtMs: Long? = null,
 )
 
+/**
+ * Request-local authenticated identity. The dispatcher installs this only after validating the
+ * supplied V3.3 session credential. User-controlled action JSON can neither set nor persist it.
+ */
+internal object GatewaySessionExecutionContext {
+    private val current = ThreadLocal<GatewaySessionAuth?>()
+
+    fun currentTrusted(): GatewaySessionAuth? = current.get()?.takeIf { it.mode == GatewaySessionAuthMode.V33_TRUSTED }
+
+    fun <T> withAuth(auth: GatewaySessionAuth?, block: () -> T): T {
+        val previous = current.get()
+        current.set(auth)
+        return try {
+            block()
+        } finally {
+            if (previous == null) current.remove() else current.set(previous)
+        }
+    }
+}
+
 internal object GatewaySessionStore {
     private const val PREFS = "cyclone_pc_gateway_v293"
     private const val KEY_ENABLED = "enabled"
