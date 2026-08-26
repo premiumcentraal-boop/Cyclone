@@ -5,6 +5,10 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.Modifier
 import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.TaskResultNotifierV292
@@ -27,7 +31,13 @@ class MainActivity : ComponentActivity() {
         migrateModelDefault()
         migrateCanonicalLearning()
         TaskResultNotifierV292.ensureChannel(this)
-        setContent { CycloneMobileV32App() }
+        setContent {
+            // Android 15 enforces edge-to-edge for targetSdk 35. Keep Cyclone's interactive shell
+            // inside the status-bar safe area so the top controls never compete with Wi-Fi/battery.
+            Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                CycloneMobileV32App()
+            }
+        }
         handlePairingIntent(intent)
     }
 
