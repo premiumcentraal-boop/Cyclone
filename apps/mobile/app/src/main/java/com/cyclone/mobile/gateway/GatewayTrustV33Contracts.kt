@@ -7,9 +7,9 @@ import java.security.MessageDigest
 import java.security.PublicKey
 import java.security.SecureRandom
 import java.security.Signature
+import java.security.interfaces.ECPublicKey
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
-import kotlin.math.abs
 
 internal object GatewayTrustProtocolV33 {
     const val VERSION = "3.3"
@@ -18,7 +18,6 @@ internal object GatewayTrustProtocolV33 {
     const val CHALLENGE_LIFETIME_MS = 90_000L
     const val SESSION_CHALLENGE_LIFETIME_MS = 30_000L
     const val SESSION_LIFETIME_MS = 5 * 60_000L
-    const val MAX_CLOCK_SKEW_MS = 5 * 60_000L
 
     val capabilities = listOf(
         "trust.device-bound",
@@ -40,7 +39,7 @@ internal object GatewayTrustProtocolV33 {
                 requestId = requestId,
                 details = JSONObject()
                     .put("phoneProtocolVersion", VERSION)
-                    .put("requestedProtocolVersion", requested.ifBlank { JSONObject.NULL })
+                    .put("requestedProtocolVersion", if (requested.isBlank()) JSONObject.NULL else requested)
                     .put("recovery", "Update Cyclone PC Companion and retry trust negotiation."),
             )
         }
@@ -170,11 +169,17 @@ internal object GatewayTrustCrypto {
         if (bytes.size !in 64..512) {
             throw GatewayProtocolException("PROTOCOL_MISMATCH", "PC identity public key has an invalid size")
         }
-        return try {
+        val key = try {
             KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(bytes))
         } catch (_: Exception) {
             throw GatewayProtocolException("PROTOCOL_MISMATCH", "PC identity must be an X.509 P-256 EC public key")
         }
+        val ec = key as? ECPublicKey
+            ?: throw GatewayProtocolException("PROTOCOL_MISMATCH", "PC identity must use an EC public key")
+        if (ec.params.curve.field.fieldSize != 256) {
+            throw GatewayProtocolException("PROTOCOL_MISMATCH", "PC identity must use the P-256 curve")
+        }
+        return key
     }
 
     fun verifyPcSignature(publicKeyBase64: String, payload: String, signatureBase64: String): Boolean {
@@ -191,7 +196,8 @@ internal object GatewayTrustCrypto {
 
     fun sha256Base64Url(value: String): String = sha256Base64Url(value.toByteArray(Charsets.UTF_8))
 
-    fun sha256Base64Url(value: ByteArray): String = encodeBase64Url(MessageDigest.getInstance("SHA-256").digest(value))
+    fun sha256Base64Url(value: ByteArray): String =
+        encodeBase64Url(MessageDigest.getInstance("SHA-256").digest(value))
 
     fun encodeBase64Url(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 
@@ -230,10 +236,7 @@ internal class GatewayTrustEngine(
         GatewayTrustProtocolV33.requireVersion(args)
         val pcNonce = requireNonce(args.optString("pcNonce"), "pcNonce")
         val publicKeyBase64 = args.optString("pcPublicKey").trim()
-        val publicKey = GatewayTrustCrypto.decodePcPublicKey(publicKeyBase64)
-        if (!publicKey.algorithm.equals("EC", ignoreCase = true)) {
-            throw GatewayProtocolException("PROTOCOL_MISMATCH", "PC identity key must use P-256 ECDSA")
-        }
+        GatewayTrustCrypto.decodePcPublicKey(publicKeyBase64)
         val pcId = GatewayTrustCrypto.publicKeyId(publicKeyBase64)
         val suppliedPcId = args.optString("pcId").trim()
         if (suppliedPcId.isNotBlank() && suppliedPcId != pcId) {
@@ -287,8 +290,7 @@ internal class GatewayTrustEngine(
         val challengeId = args.optString("challengeId").trim()
         if (challengeId.isBlank()) throw GatewayProtocolException("PROTOCOL_MISMATCH", "challengeId is required")
         if (challengeId in consumedChallenges) throw GatewayProtocolException("TRUST_REPLAY", "Trust challenge was already consumed")
-        val challenge = pendingTrust
-            ?.takeIf { it.challengeId == challengeId }
+        val challenge = pendingTrust?.takeIf { it.challengeId == challengeId }
             ?: throw GatewayProtocolException("TRUST_REPLAY", "Trust challenge is not active")
         if (nowMs() > challenge.expiresAtMs) {
             pendingTrust = null
@@ -316,7 +318,9 @@ internal class GatewayTrustEngine(
         ) {
             throw GatewayProtocolException("AUTH_SIGNATURE_INVALID", "PC signature did not authenticate the trust transcript")
         }
-        val existing = records.all().firstOrNull { it.pcId == challenge.pcId && it.revokedAtMs == null && it.phoneId == phoneIdentity.phoneId }
+        val existing = records.all().firstOrNull {
+            it.pcId == challenge.pcId && it.revokedAtMs == null && it.phoneId == phoneIdentity.phoneId
+        }
         val record = if (existing != null) {
             existing.copy(
                 pcLabel = challenge.pcLabel,
@@ -514,8 +518,9 @@ internal class GatewayTrustEngine(
     fun status(): JSONObject {
         expirePendingTrustIfNeeded()
         pruneExpired()
-        val activeRecords = records.all().filter { it.revokedAtMs == null && it.phoneId == phoneIdentity.phoneId }
-        val revokedRecords = records.all().count { it.revokedAtMs != null }
+        val allRecords = records.all()
+        val activeRecords = allRecords.filter { it.revokedAtMs == null && it.phoneId == phoneIdentity.phoneId }
+        val revokedRecords = allRecords.count { it.revokedAtMs != null }
         val pending = pendingTrust
         val trustState = when {
             pending?.decision == GatewayTrustDecision.PENDING -> "CONFIRMATION_REQUIRED"
@@ -555,7 +560,11 @@ internal class GatewayTrustEngine(
     }
 
     private fun sanitizeLabel(value: String): String {
-        val label = value.replace(Regex("[\\p{Cc}\\p{Cf}]"), " ").replace(Regex("\\s+"), " ").trim().take(80)
+        val label = value
+            .replace(Regex("[\\p{Cc}\\p{Cf}]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(80)
         return label.ifBlank { "Cyclone PC" }
     }
 
