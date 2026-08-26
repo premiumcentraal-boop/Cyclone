@@ -1,5 +1,8 @@
 import type { VideoRenderer, VideoRendererFactoryInput } from "./decoder.js";
 
+export const DEGRADED_FOCUS_POLL_MS = 1500;
+export const DEGRADED_THUMBNAIL_POLL_MS = 3000;
+
 export class FallbackFrameRenderer implements VideoRenderer {
   private timer: number | null = null;
   private stopped = false;
@@ -48,6 +51,7 @@ export class FallbackFrameRenderer implements VideoRenderer {
     if (!this.loadedOnce) this.input.callbacks.onState("CONNECTING");
     const separator = this.input.fallbackUrl.includes("?") ? "&" : "?";
     this.input.target.fallbackImage.src = `${this.input.fallbackUrl}${separator}t=${Date.now()}`;
-    this.timer = window.setTimeout(() => this.refreshScreenshot(), this.input.profile === "focus" ? 750 : 1400);
+    const delay = this.input.profile === "focus" ? DEGRADED_FOCUS_POLL_MS : DEGRADED_THUMBNAIL_POLL_MS;
+    this.timer = window.setTimeout(() => this.refreshScreenshot(), delay);
   }
 }
