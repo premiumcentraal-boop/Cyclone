@@ -3,6 +3,7 @@ import type { VideoRenderer, VideoRendererFactoryInput } from "./decoder.js";
 export class FallbackFrameRenderer implements VideoRenderer {
   private timer: number | null = null;
   private stopped = false;
+  private loadedOnce = false;
 
   constructor(private readonly input: VideoRendererFactoryInput) {}
 
@@ -11,13 +12,21 @@ export class FallbackFrameRenderer implements VideoRenderer {
     const image = this.input.target.fallbackImage;
     image.hidden = false;
     this.input.target.canvas.hidden = true;
-    image.onload = () => this.input.callbacks.onState("LIVE");
+    image.onload = () => {
+      this.loadedOnce = true;
+      this.input.callbacks.onState("LIVE");
+    };
     image.onerror = () => {
       if (this.stopped) return;
       this.input.callbacks.onState("STREAM_ERROR");
       this.input.callbacks.onError(new Error("Fallback phone frame unavailable"));
     };
 
+    if (!this.input.fallbackUrl) {
+      this.input.callbacks.onState("UNAVAILABLE");
+      this.input.callbacks.onError(new Error("Fallback phone frame URL unavailable"));
+      return;
+    }
     if (this.input.device.video.mode === "MJPEG") {
       image.src = this.input.fallbackUrl;
       this.input.callbacks.onState("CONNECTING");
@@ -36,7 +45,7 @@ export class FallbackFrameRenderer implements VideoRenderer {
 
   private refreshScreenshot(): void {
     if (this.stopped) return;
-    this.input.callbacks.onState("CONNECTING");
+    if (!this.loadedOnce) this.input.callbacks.onState("CONNECTING");
     const separator = this.input.fallbackUrl.includes("?") ? "&" : "?";
     this.input.target.fallbackImage.src = `${this.input.fallbackUrl}${separator}t=${Date.now()}`;
     this.timer = window.setTimeout(() => this.refreshScreenshot(), this.input.profile === "focus" ? 750 : 1400);

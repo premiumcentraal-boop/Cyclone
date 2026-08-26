@@ -4,9 +4,16 @@ const HEADER_BYTES = 16;
 export const MAX_STREAM_RECONNECT_ATTEMPTS = 6;
 export const STREAM_HANDSHAKE_TIMEOUT_MS = 8_000;
 export const STREAM_FIRST_FRAME_TIMEOUT_MS = 12_000;
+export const STREAM_RECOVERY_TIMEOUT_MS = 20_000;
+export const STALE_FRAME_TIMEOUT_MS = 6_000;
+export const KEEPALIVE_TYPE = "stream.keepalive";
 
 export function streamCloseIsTerminal(code: number): boolean {
   return code === 4400 || code === 4401 || code === 4404;
+}
+
+export function streamErrorIsRecoverable(message: Record<string, unknown>): boolean {
+  return message.type === "stream.error" && message.retryable === true;
 }
 
 /**
@@ -25,6 +32,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
   private drawGeneration = 0;
   private healthTimer: number | null = null;
   private frameReported = false;
+  private live = false;
 
   constructor(private readonly input: VideoRendererFactoryInput) {}
 
@@ -46,6 +54,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
 
   private open(): void {
     if (this.stopped) return;
+    this.live = false;
     this.input.callbacks.onState(this.reconnectAttempt === 0 ? "CONNECTING" : "RECONNECTING");
     try {
       const socket = new WebSocket(this.input.streamUrl, this.input.streamProtocols);
@@ -91,25 +100,38 @@ export class WebCodecsH264Renderer implements VideoRenderer {
         const message = JSON.parse(data) as Record<string, unknown>;
         if (message.type === "stream.init" && typeof message.codec === "string") {
           this.codec = message.codec;
+          this.live = false;
           this.report({ stage: "client.stream.init", code: safeCode(message.backend), attempt: this.reconnectAttempt });
           this.armHealthTimeout(STREAM_FIRST_FRAME_TIMEOUT_MS, "FIRST_FRAME_TIMEOUT");
         } else if (message.type === "screen.state" && message.state === "SLEEPING") {
           this.clearHealthTimeout();
           this.reconnectAttempt = 0;
+          this.live = false;
           this.report({ stage: "client.screen.sleeping", code: "PHONE_SCREEN_OFF" });
           this.input.callbacks.onState("SLEEPING");
         } else if (message.type === "screen.state" && message.state === "AWAKE") {
+          this.live = false;
           this.report({ stage: "client.screen.awake", code: "PHONE_SCREEN_ON" });
           this.armHealthTimeout(STREAM_FIRST_FRAME_TIMEOUT_MS, "FIRST_FRAME_TIMEOUT");
         } else if (message.type === "stream.error") {
           const code = safeCode(message.code) ?? "STREAM_ERROR";
           const retryable = message.retryable === true;
           this.report({ stage: "client.stream.error", code, retryable });
-          if (retryable) this.failConnection(new Error(code), socket, code);
-          else {
+          if (retryable) {
+            // The server keeps this subscription alive while it retries capture. Tearing down the
+            // socket here would turn one outage into a reconnect storm. Stay subscribed and arm a
+            // bounded recovery deadline; the next frame (or keepalive) keeps the stream honest.
+            this.live = false;
+            this.input.callbacks.onState("RECONNECTING");
+            this.armHealthTimeout(STREAM_RECOVERY_TIMEOUT_MS, "STREAM_RECOVERY_TIMEOUT");
+          } else {
             this.clearHealthTimeout();
+            this.live = false;
             this.input.callbacks.onState("UNAVAILABLE");
           }
+        } else if (message.type === KEEPALIVE_TYPE) {
+          this.report({ stage: "client.stream.keepalive", attempt: this.reconnectAttempt });
+          if (!this.live) this.armHealthTimeout(STREAM_RECOVERY_TIMEOUT_MS, "STREAM_RECOVERY_TIMEOUT");
         }
         return;
       }
@@ -152,7 +174,10 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       canvas.hidden = false;
       this.input.target.fallbackImage.hidden = true;
       this.input.callbacks.onState("LIVE");
-      this.clearHealthTimeout();
+      this.live = true;
+      // Frames prove the stream is alive; each one re-arms a short staleness deadline so a silent
+      // death stops showing a frozen phone screen and instead reconnects.
+      this.armHealthTimeout(STALE_FRAME_TIMEOUT_MS, "FRAME_STALE");
       if (!this.frameReported) {
         this.frameReported = true;
         this.report({ stage: "client.frame.rendered", code: "FRAME_OK" });

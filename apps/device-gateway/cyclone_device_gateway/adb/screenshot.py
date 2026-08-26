@@ -9,6 +9,11 @@ import time
 from .client import ADBClient
 
 
+def is_png(data: bytes) -> bool:
+    """Return True when the payload is a complete-enough PNG (signature + IHDR)."""
+    return len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR"
+
+
 @dataclass(frozen=True)
 class ScreenshotMeta:
     screenshot_id: str

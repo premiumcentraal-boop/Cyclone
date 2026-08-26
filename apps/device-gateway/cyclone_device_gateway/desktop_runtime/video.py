@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any
 
+from ..adb.screenshot import is_png
 from .models import DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES, VIDEO_PROTOCOL_VERSION, now_ms
 
 try:
@@ -18,6 +19,8 @@ except Exception:
     Image = None
 
 _PACKET_HEADER = struct.Struct("!QII")
+KEEPALIVE_INTERVAL_S = 2.0
+CAPTURE_OUTAGE_BACKOFF_S = 2.0
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,7 @@ class VideoStreamController:
         self._frames_by_profile: dict[str, int] = {"thumbnail": 0, "focus": 0}
         self._failures_by_profile: dict[str, int] = {"thumbnail": 0, "focus": 0}
         self._last_event = "idle"
+        self._last_frame_meta: tuple[bytes, str, int | None, int | None] | None = None
 
     def subscribe(self, profile: str) -> queue.Queue:
         if profile not in VIDEO_PROFILES:
@@ -124,9 +128,49 @@ class VideoStreamController:
                 "framesByProfile": dict(self._frames_by_profile),
                 "failuresByProfile": dict(self._failures_by_profile),
                 "lastEvent": self._last_event,
+                "lastFrameAvailable": self._last_frame_meta is not None,
                 "sequence": self._sequence,
                 "fleetLimiter": self.limiter.snapshot(),
             }
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return one bounded, decoded phone frame for HTTP fallback previews.
+
+        Reuses the latest frame produced by an active stream when one exists; otherwise performs a
+        single fresh ADB capture. The frame is always safe for the Companion image decoder.
+        """
+        with self._lock:
+            meta = self._last_frame_meta
+            sequence = self._sequence
+        if meta is None:
+            try:
+                png = self.session.adb.exec_out("screencap", "-p", timeout=6)
+                if not is_png(png):
+                    raise ValueError("screencap returned a non-PNG payload")
+                encoded, codec, width, height = _encode_frame(png, VIDEO_PROFILES["focus"].max_long_edge)
+            except Exception as exc:
+                self._mark("server.stream.snapshot_failed", {"errorClass": exc.__class__.__name__, "retryable": True})
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
+                    "Phone frame capture failed.",
+                    retryable=True,
+                ) from exc
+            with self._lock:
+                self._last_safe_frame = encoded
+                self._last_frame_meta = (encoded, codec, width, height)
+                sequence = self._sequence
+            self._mark("server.stream.snapshot", {"source": "adb-screenshot", "cached": False})
+        else:
+            encoded, codec, width, height = meta
+            self._mark("server.stream.snapshot", {"source": "adb-screenshot", "cached": True})
+        return {
+            "data": encoded,
+            "codec": codec,
+            "width": width,
+            "height": height,
+            "timestamp_ms": now_ms(),
+            "sequence": sequence,
+        }
 
     def _producer(self, profile: str, stop: threading.Event) -> None:
         self._mark("server.producer.start", {"profile": profile})
@@ -145,7 +189,15 @@ class VideoStreamController:
             # real phones fail while unit-test phones silently fell back to JPEG. Keep the release
             # path on the codec both sides implement until an Annex-B parser/decoder is shipped.
             codec = _image_codec()
-            self._broadcast(profile, StreamMessage("text", self._init_json(profile, codec, "adb-screenshot", fallback=profile == "focus")))
+            width, height = self._target_dimensions(VIDEO_PROFILES[profile].max_long_edge)
+            self._broadcast(profile, StreamMessage("text", self._init_json(
+                profile,
+                codec,
+                "adb-screenshot",
+                fallback=profile == "focus",
+                width=width,
+                height=height,
+            )))
             self._mark("server.stream.init", {"profile": profile, "source": "adb-screenshot"})
             target_fps = min(15, VIDEO_PROFILES[profile].target_fps) if profile == "focus" else VIDEO_PROFILES[profile].target_fps
             self._produce_images(profile, stop, target_fps=target_fps)
@@ -207,6 +259,8 @@ class VideoStreamController:
         interval = 1.0 / max(1, target_fps)
         sleeping_sent = False
         consecutive_failures = 0
+        outage_active = False
+        last_keepalive = time.monotonic()
         while not stop.is_set():
             started = time.monotonic()
             if not self.session.screen_awake:
@@ -215,17 +269,26 @@ class VideoStreamController:
                     if self._last_safe_frame is not None:
                         self._broadcast(profile, StreamMessage("binary", self._packet(self._last_safe_frame)))
                     sleeping_sent = True
+                    last_keepalive = time.monotonic()
+                else:
+                    last_keepalive = self._maybe_keepalive(profile, last_keepalive)
                 stop.wait(min(0.5, interval))
                 continue
             if sleeping_sent:
                 self._broadcast(profile, StreamMessage("text", json.dumps({"type": "screen.state", "state": "AWAKE"}, separators=(",", ":"))))
                 sleeping_sent = False
+                last_keepalive = time.monotonic()
             try:
                 png = self.session.adb.exec_out("screencap", "-p", timeout=5)
-                encoded, _, _, _ = _encode_frame(png, VIDEO_PROFILES[profile].max_long_edge)
+                if not is_png(png):
+                    raise ValueError("screencap returned a non-PNG payload")
+                encoded, codec, width, height = _encode_frame(png, VIDEO_PROFILES[profile].max_long_edge)
                 self._last_safe_frame = encoded
+                self._last_frame_meta = (encoded, codec, width, height)
                 consecutive_failures = 0
+                outage_active = False
                 self._broadcast(profile, StreamMessage("binary", self._packet(encoded)))
+                last_keepalive = time.monotonic()
                 with self._lock:
                     self._frames_by_profile[profile] += 1
                     first = self._frames_by_profile[profile] == 1
@@ -237,14 +300,30 @@ class VideoStreamController:
                     self._failures_by_profile[profile] += 1
                 if consecutive_failures == 1:
                     self._mark("server.frame.capture_failed", {"profile": profile, "errorClass": exc.__class__.__name__, "retryable": True})
-                if consecutive_failures == 3:
+                if consecutive_failures >= 3 and not outage_active:
+                    outage_active = True
                     self._mark("server.frame.capture_exhausted", {"profile": profile, "code": "FRAME_CAPTURE_FAILED", "retryable": True})
                     self._broadcast(profile, StreamMessage("text", json.dumps({
                         "type": "stream.error",
                         "code": "FRAME_CAPTURE_FAILED",
                         "retryable": True,
                     }, separators=(",", ":"))))
-            stop.wait(max(0.0, interval - (time.monotonic() - started)))
+                last_keepalive = self._maybe_keepalive(profile, last_keepalive)
+            wait = interval - (time.monotonic() - started)
+            if consecutive_failures >= 3:
+                wait = max(wait, CAPTURE_OUTAGE_BACKOFF_S)
+            stop.wait(max(0.0, wait))
+
+    def _maybe_keepalive(self, profile: str, last_keepalive: float) -> float:
+        """Keep the WebSocket observable during idle/outage without spamming frames."""
+        now = time.monotonic()
+        if now - last_keepalive < KEEPALIVE_INTERVAL_S:
+            return last_keepalive
+        self._broadcast(profile, StreamMessage("text", json.dumps({
+            "type": "stream.keepalive",
+            "timestampMs": now_ms(),
+        }, separators=(",", ":"))))
+        return now
 
     def _packet(self, payload: bytes) -> bytes:
         with self._lock:
