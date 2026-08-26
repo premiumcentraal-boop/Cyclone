@@ -109,6 +109,16 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
         self.assertIn("statusBarsPadding()", main_activity)
         self.assertIn("Box(Modifier.fillMaxSize().statusBarsPadding())", main_activity)
 
+    def test_legacy_enhanced_control_row_is_not_rendered(self):
+        components = (
+            ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV32Components.kt"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'private const val LEGACY_ENHANCED_CONTROL_ROW = "Enhanced control engine"',
+            components,
+        )
+        self.assertIn("if (title == LEGACY_ENHANCED_CONTROL_ROW) return", components)
+
     def test_no_manifest_can_silently_expand_into_sensitive_domains(self):
         for manifest in (
             ROOT / "apps/mobile/app/src/main/AndroidManifest.xml",
