@@ -12,9 +12,10 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 30
-        // Cyclone V3.1 authenticated PC heartbeat and live-session recovery beta.
-        versionName = "3.1.0-beta.11"
+        versionCode = 31
+        // Cyclone V3.2 massive update: Android permission center, three AI
+        // control tiers, richer page context, PC live stream and stable pairing.
+        versionName = "3.2.0-beta.1"
     }
 
     buildTypes {

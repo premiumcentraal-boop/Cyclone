@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyclone-phone-mcp"
-version = "3.1.0b1"
+version = "3.2.0b1"
 description = "Codex-facing MCP bridge for the Cyclone PC Device Gateway"
 requires-python = ">=3.11"
 authors = [{name = "Cyclone"}]
