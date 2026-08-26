@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -66,6 +67,16 @@
         <receiver
             android:name=".automation.AutomationAlarmReceiver"
             android:exported="false" />
+
+        <!-- The embedded Mobilerun module remains available as compatibility code, but Cyclone
+             owns the user-facing permission endpoints. Removing these merged services prevents
+             Android from presenting a second "Cyclone Enhanced" accessibility/notification grant. -->
+        <service
+            android:name="com.mobilerun.portal.service.MobilerunAccessibilityService"
+            tools:node="remove" />
+        <service
+            android:name="com.mobilerun.portal.service.MobilerunNotificationListener"
+            tools:node="remove" />
 
         <!-- AccessibilityManager is a system process and must be able to bind this service.
              BIND_ACCESSIBILITY_SERVICE keeps the exported endpoint system-only. -->
