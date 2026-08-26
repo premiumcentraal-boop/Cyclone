@@ -8,6 +8,7 @@ import struct
 import subprocess
 import threading
 import time
+from typing import Any
 
 from .models import DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES, VIDEO_PROTOCOL_VERSION, now_ms
 
@@ -57,7 +58,7 @@ class VideoFleetLimiter:
 class VideoStreamController:
     """Per-device read-only stream. No video backend exposes an input/control channel."""
 
-    def __init__(self, session, limiter: VideoFleetLimiter):
+    def __init__(self, session, limiter: VideoFleetLimiter, diagnostic=None):
         self.session = session
         self.limiter = limiter
         self._lock = threading.RLock()
@@ -66,6 +67,10 @@ class VideoStreamController:
         self._stops: dict[str, threading.Event] = {}
         self._last_safe_frame: bytes | None = None
         self._sequence = 0
+        self._diagnostic = diagnostic
+        self._frames_by_profile: dict[str, int] = {"thumbnail": 0, "focus": 0}
+        self._failures_by_profile: dict[str, int] = {"thumbnail": 0, "focus": 0}
+        self._last_event = "idle"
 
     def subscribe(self, profile: str) -> queue.Queue:
         if profile not in VIDEO_PROFILES:
@@ -84,6 +89,7 @@ class VideoStreamController:
                 )
                 self._threads[profile] = thread
                 thread.start()
+        self._mark("server.stream.subscribed", {"profile": profile, "transport": "websocket"})
         return q
 
     def unsubscribe(self, profile: str, q: queue.Queue) -> None:
@@ -93,6 +99,7 @@ class VideoStreamController:
                 stop = self._stops.get(profile)
                 if stop:
                     stop.set()
+        self._mark("server.stream.unsubscribed", {"profile": profile, "transport": "websocket"})
 
     def stop_all(self) -> None:
         with self._lock:
@@ -108,23 +115,42 @@ class VideoStreamController:
         with self._lock:
             return sum(len(items) for items in self._subscribers.values())
 
+    def diagnostics(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "subscriberCount": sum(len(items) for items in self._subscribers.values()),
+                "subscribersByProfile": {key: len(value) for key, value in self._subscribers.items()},
+                "activeProfiles": sorted(key for key, thread in self._threads.items() if thread.is_alive()),
+                "framesByProfile": dict(self._frames_by_profile),
+                "failuresByProfile": dict(self._failures_by_profile),
+                "lastEvent": self._last_event,
+                "sequence": self._sequence,
+                "fleetLimiter": self.limiter.snapshot(),
+            }
+
     def _producer(self, profile: str, stop: threading.Event) -> None:
+        self._mark("server.producer.start", {"profile": profile})
         allowed, focus_allowed = self.limiter.acquire(profile)
         if not allowed:
-            self._broadcast(profile, StreamMessage("text", json.dumps({"type": "stream.error", "code": "STREAM_CAPACITY"}, separators=(",", ":"))))
+            self._mark("server.producer.capacity", {"profile": profile, "code": "STREAM_CAPACITY"})
+            self._broadcast(profile, StreamMessage("text", json.dumps({
+                "type": "stream.error",
+                "code": "STREAM_CAPACITY",
+                "retryable": True,
+            }, separators=(",", ":"))))
             return
         try:
-            if profile == "focus" and focus_allowed:
-                try:
-                    self._produce_h264(stop)
-                    return
-                except Exception:
-                    self._broadcast(profile, StreamMessage("text", self._init_json(profile, _image_codec(), "adb-screenshot", fallback=True)))
-                    self._produce_images(profile, stop, target_fps=min(15, VIDEO_PROFILES[profile].target_fps))
-            else:
-                self._broadcast(profile, StreamMessage("text", self._init_json(profile, _image_codec(), "adb-screenshot", fallback=profile == "focus")))
-                self._produce_images(profile, stop, target_fps=VIDEO_PROFILES[profile].target_fps)
+            # The shipped renderer consumes discrete image frames. Android screenrecord emits an
+            # Annex-B byte stream whose chunks are not frame boundaries, so selecting it here made
+            # real phones fail while unit-test phones silently fell back to JPEG. Keep the release
+            # path on the codec both sides implement until an Annex-B parser/decoder is shipped.
+            codec = _image_codec()
+            self._broadcast(profile, StreamMessage("text", self._init_json(profile, codec, "adb-screenshot", fallback=profile == "focus")))
+            self._mark("server.stream.init", {"profile": profile, "source": "adb-screenshot"})
+            target_fps = min(15, VIDEO_PROFILES[profile].target_fps) if profile == "focus" else VIDEO_PROFILES[profile].target_fps
+            self._produce_images(profile, stop, target_fps=target_fps)
         finally:
+            self._mark("server.producer.stop", {"profile": profile})
             self.limiter.release(profile, focus_allowed)
             with self._lock:
                 self._threads.pop(profile, None)
@@ -139,6 +165,7 @@ class VideoStreamController:
             stdout=subprocess.PIPE,
         )
         self._broadcast(profile, StreamMessage("text", self._init_json(profile, "video/avc", "android-screenrecord-h264", width=width, height=height)))
+        self._mark("server.stream.init", {"profile": profile, "source": "android-screenrecord-h264"})
         sleeping_sent = False
         try:
             if process.stdout is None:
@@ -163,6 +190,11 @@ class VideoStreamController:
                     time.sleep(0.01)
                     continue
                 self._broadcast(profile, StreamMessage("binary", self._packet(chunk)))
+                with self._lock:
+                    self._frames_by_profile[profile] += 1
+                    first = self._frames_by_profile[profile] == 1
+                if first:
+                    self._mark("server.frame.first", {"profile": profile, "source": "android-screenrecord-h264"})
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -194,9 +226,19 @@ class VideoStreamController:
                 self._last_safe_frame = encoded
                 consecutive_failures = 0
                 self._broadcast(profile, StreamMessage("binary", self._packet(encoded)))
-            except Exception:
+                with self._lock:
+                    self._frames_by_profile[profile] += 1
+                    first = self._frames_by_profile[profile] == 1
+                if first:
+                    self._mark("server.frame.first", {"profile": profile, "source": "adb-screenshot"})
+            except Exception as exc:
                 consecutive_failures += 1
+                with self._lock:
+                    self._failures_by_profile[profile] += 1
+                if consecutive_failures == 1:
+                    self._mark("server.frame.capture_failed", {"profile": profile, "errorClass": exc.__class__.__name__, "retryable": True})
                 if consecutive_failures == 3:
+                    self._mark("server.frame.capture_exhausted", {"profile": profile, "code": "FRAME_CAPTURE_FAILED", "retryable": True})
                     self._broadcast(profile, StreamMessage("text", json.dumps({
                         "type": "stream.error",
                         "code": "FRAME_CAPTURE_FAILED",
@@ -225,6 +267,16 @@ class VideoStreamController:
                     q.put_nowait(message)
                 except queue.Full:
                     pass
+
+    def _mark(self, stage: str, details: dict[str, Any] | None = None) -> None:
+        with self._lock:
+            self._last_event = stage
+        if self._diagnostic is None:
+            return
+        try:
+            self._diagnostic(stage, details or {})
+        except Exception:
+            pass
 
     def _target_dimensions(self, max_long_edge: int) -> tuple[int, int]:
         width = self.session.display_width or 1080

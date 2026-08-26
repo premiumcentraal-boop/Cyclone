@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import queue
 import secrets
+import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -76,6 +77,15 @@ class AgentTeachStopBody(BaseModel):
     compile_for_review: bool = True
 
 
+class StreamDiagnosticBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
+    code: str | None = Field(default=None, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
+    attempt: int | None = Field(default=None, ge=0, le=100)
+    close_code: int | None = Field(default=None, ge=0, le=9999)
+    retryable: bool | None = None
+
+
 class DesktopRuntime:
     def __init__(self, settings: Settings, *, fleet: DeviceFleetManager | None = None):
         self.settings = settings
@@ -89,7 +99,15 @@ class DesktopRuntime:
         self.clipboard = ClipboardService(self.fleet)
         self.agent = DesktopAgentService(self.fleet)
         self.video_limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
-        self.fleet.set_video_factory(lambda session: VideoStreamController(session, self.video_limiter))
+        self.fleet.set_video_factory(lambda session: VideoStreamController(
+            session,
+            self.video_limiter,
+            diagnostic=lambda stage, details, device_id=session.device_id: self.live_diagnostics.mark(
+                device_id,
+                stage,
+                details=details,
+            ),
+        ))
 
     def start(self) -> None:
         self.fleet.start()
@@ -159,6 +177,58 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             "discovery": runtime.fleet.diagnostics(),
             "liveDiagnostics": runtime.live_diagnostics.status(),
         }
+
+    @router.post("/v1/devices/{device_id}/diagnostics/stream-event", dependencies=[Depends(auth)])
+    def diagnostics_stream_event(device_id: str, body: StreamDiagnosticBody) -> dict[str, Any]:
+        runtime.fleet.get(device_id)
+        details = {
+            "code": body.code,
+            "attempt": body.attempt,
+            "closeCode": body.close_code,
+            "retryable": body.retryable,
+            "source": "pc-ui",
+        }
+        runtime.live_diagnostics.mark(device_id, body.stage, details={key: value for key, value in details.items() if value is not None})
+        return {"ok": True, "recorded": True}
+
+    @router.post("/v1/devices/{device_id}/diagnostics/bundle", dependencies=[Depends(auth)])
+    def diagnostics_bundle(device_id: str) -> dict[str, Any]:
+        session = runtime.fleet.get(device_id)
+        video = session.video.diagnostics() if session.video is not None and hasattr(session.video, "diagnostics") else {}
+        bridge_probe: dict[str, Any]
+        try:
+            health = session.bridge().request("bridge.status", {}, request_id=f"desktop-debug-{secrets.token_urlsafe(12)}")
+            bridge_probe = {
+                "ok": True,
+                "gatewayEnabled": health.get("gatewayEnabled") is True,
+                "socketListening": health.get("socketListening") is True,
+                "accessibilityConnected": health.get("accessibilityConnected") is True,
+            }
+        except Exception as exc:
+            bridge_probe = {"ok": False, "errorClass": exc.__class__.__name__}
+        try:
+            capture = session.adb.exec_out("screencap", "-p", timeout=6)
+            capture_probe = {
+                "ok": len(capture) > 8 and capture.startswith(b"\x89PNG\r\n\x1a\n"),
+                "bytesReceived": len(capture),
+            }
+        except Exception as exc:
+            capture_probe = {"ok": False, "errorClass": exc.__class__.__name__}
+        created_at = int(time.time() * 1000)
+        path = runtime.live_diagnostics.create_connection_bundle(device_id, {
+            "schemaVersion": 1,
+            "runtimeInstanceId": runtime.instance_id,
+            "desktopProtocol": DESKTOP_PROTOCOL_VERSION,
+            "device": session.public(),
+            "discovery": runtime.fleet.diagnostics(),
+            "video": video,
+            "authenticatedBridgeProbe": bridge_probe,
+            "rawCaptureProbe": capture_probe,
+            "liveDiagnostics": runtime.live_diagnostics.status(),
+        })
+        if path is None:
+            raise HTTPException(status_code=503, detail={"code": "DIAGNOSTICS_UNAVAILABLE", "message": "Connection diagnostics are unavailable."})
+        return {"ok": True, "deviceId": device_id, "path": path, "createdAtEpochMs": created_at}
 
     @router.post("/v1/devices/{device_id}/pair/begin", dependencies=[Depends(auth)])
     def pair_begin(device_id: str):
@@ -281,6 +351,8 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             return
         await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
         q = controller.subscribe(profile)
+        runtime.live_diagnostics.mark(device_id, "server.ws.accepted", details={"profile": profile, "transport": "websocket"})
+        first_binary = True
         try:
             while True:
                 try:
@@ -289,10 +361,19 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
                     continue
                 if message.kind == "binary":
                     await websocket.send_bytes(message.data)  # type: ignore[arg-type]
+                    if first_binary:
+                        first_binary = False
+                        runtime.live_diagnostics.mark(device_id, "server.ws.first_frame_sent", details={"profile": profile})
                 else:
                     await websocket.send_text(message.data)  # type: ignore[arg-type]
-        except WebSocketDisconnect:
-            pass
+        except WebSocketDisconnect as exc:
+            runtime.live_diagnostics.mark(device_id, "server.ws.disconnected", details={"profile": profile, "closeCode": exc.code})
+        except Exception as exc:
+            runtime.live_diagnostics.mark(
+                device_id,
+                "server.ws.failed",
+                details={"profile": profile, "errorClass": exc.__class__.__name__, "retryable": True},
+            )
         finally:
             controller.unsubscribe(profile, q)
 

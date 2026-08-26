@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 from typing import Any, TYPE_CHECKING
+import zipfile
 
 if TYPE_CHECKING:
     from .fleet import DeviceFleetManager, DeviceSession
@@ -28,6 +29,7 @@ class DeviceDiagnosticRecorder:
     POLL_SECONDS = 0.75
     SETTLE_SECONDS = 0.50
     MAX_LOG_BYTES = 2 * 1024 * 1024
+    MAX_TIMELINE_BYTES = 2 * 1024 * 1024
 
     def __init__(self, session: "DeviceSession", runtime_root: Path | None = None):
         self.session = session
@@ -69,15 +71,48 @@ class DeviceDiagnosticRecorder:
         if thread and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=2.0)
 
-    def mark(self, stage: str) -> None:
+    def mark(self, stage: str, details: dict[str, Any] | None = None) -> None:
         normalized = _safe_stage(stage)
         with self._lock:
             self._last_stage = normalized
-            self._append_timeline({
+            item: dict[str, Any] = {
                 "atEpochMs": int(time.time() * 1000),
                 "stage": normalized,
                 "pid": self._pid,
-            })
+            }
+            if details:
+                item["details"] = _safe_details(details)
+            self._append_timeline(item)
+
+    def create_connection_bundle(self, manifest: dict[str, Any]) -> str:
+        """Create one bounded, sendable zip with phone, fleet, server and client evidence."""
+        self.mark("connection.bundle.requested")
+        snapshot_path = self.capture_snapshot("connection.bundle.android", heavy=True)
+        now_ms = int(time.time() * 1000)
+        stamp = f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now_ms / 1000))}-{now_ms % 1000:03d}"
+        target = self.path / f"cyclone-connection-debug-{stamp}.zip"
+        temporary = target.with_suffix(".zip.tmp")
+        payload = {
+            **manifest,
+            "createdAtEpochMs": int(time.time() * 1000),
+            "privacy": "No gateway credential, pairing code, clipboard content, typed value, password, OTP, arbitrary shell, root or su output is intentionally included.",
+        }
+        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("connection-manifest.json", json.dumps(payload, indent=2, sort_keys=True))
+            candidates = [self.timeline_path, self.logcat_path]
+            candidates.extend(sorted(self.path.glob("snapshot-*.json")))
+            if snapshot_path:
+                candidates.append(Path(snapshot_path))
+            seen: set[Path] = set()
+            for candidate in candidates:
+                resolved = candidate.resolve()
+                if resolved in seen or not candidate.is_file():
+                    continue
+                seen.add(resolved)
+                archive.write(candidate, arcname=candidate.name)
+        temporary.replace(target)
+        self.mark("connection.bundle.saved", {"code": "BUNDLE_SAVED"})
+        return str(target)
 
     def capture_async(self, label: str, *, heavy: bool = False) -> None:
         if self._stop.is_set():
@@ -256,6 +291,10 @@ class DeviceDiagnosticRecorder:
     def _append_timeline(self, item: dict[str, Any]) -> None:
         try:
             self.path.mkdir(parents=True, exist_ok=True)
+            if self.timeline_path.exists() and self.timeline_path.stat().st_size > self.MAX_TIMELINE_BYTES:
+                previous = self.timeline_path.with_suffix(".jsonl.previous")
+                previous.unlink(missing_ok=True)
+                self.timeline_path.replace(previous)
             with self.timeline_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(item, sort_keys=True) + "\n")
         except Exception:
@@ -317,14 +356,27 @@ class FleetDiagnosticSupervisor:
         recorder.start()
         return recorder
 
-    def mark(self, device_id: str, stage: str, *, snapshot: bool = False) -> dict[str, Any] | None:
+    def mark(
+        self,
+        device_id: str,
+        stage: str,
+        *,
+        snapshot: bool = False,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         recorder = self.ensure(device_id)
         if recorder is None:
             return None
-        recorder.mark(stage)
+        recorder.mark(stage, details)
         if snapshot:
             recorder.capture_async(stage, heavy=True)
         return recorder.public_status()
+
+    def create_connection_bundle(self, device_id: str, manifest: dict[str, Any]) -> str | None:
+        recorder = self.ensure(device_id)
+        if recorder is None:
+            return None
+        return recorder.create_connection_bundle(manifest)
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -385,3 +437,17 @@ def _safe_component(value: str) -> str:
 
 def _safe_stage(value: str) -> str:
     return _SAFE_NAME.sub("_", value).strip("._-")[:120] or "unknown"
+
+
+def _safe_details(details: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"attempt", "closeCode", "code", "errorClass", "profile", "retryable", "source", "state", "transport"}
+    safe: dict[str, Any] = {}
+    for key in sorted(allowed.intersection(details)):
+        value = details[key]
+        if isinstance(value, bool):
+            safe[key] = value
+        elif isinstance(value, int):
+            safe[key] = max(-1, min(value, 1_000_000))
+        elif isinstance(value, str):
+            safe[key] = _SAFE_NAME.sub("_", value).strip("._-")[:120] or "unknown"
+    return safe

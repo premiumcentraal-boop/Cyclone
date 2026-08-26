@@ -143,6 +143,8 @@ button { color: inherit; }
 .state-title { font-size: 14px; font-weight: 670; }
 .state-copy { color: var(--muted); font-size: 10px; margin: 6px 0 12px; max-width: 240px; }
 .phone-state-overlay .button { margin-top: 13px; }
+.stream-recovery-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+.stream-recovery-actions .button { margin-top: 0; }
 
 .empty-state { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; padding-bottom: 80px; }
 .empty-orbit { width: 66px; height: 66px; border: 1px solid rgba(139,92,246,.24); border-radius: 50%; position: relative; margin-bottom: 20px; box-shadow: 0 0 45px rgba(139,92,246,.07); }

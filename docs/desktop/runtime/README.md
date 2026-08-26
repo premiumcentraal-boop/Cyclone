@@ -109,17 +109,17 @@ Frozen endpoint:
 
 See [VIDEO_PROTOCOL.md](VIDEO_PROTOCOL.md).
 
-Desktop V1 does **not** embed scrcpy. Focus video uses Android's fixed read-only `screenrecord --output-format=h264` producer over the per-device ADB transport. Thumbnail and focus fallback use bounded screenshots, JPEG-resized when Pillow is available, or PNG otherwise. No video path has an input/control channel.
+Desktop V1 does **not** embed scrcpy. Shipped thumbnail and focus video use bounded screenshots, JPEG-resized when Pillow is available, or PNG otherwise, because the desktop renderer consumes discrete image frames. The protocol reserves Android's read-only H.264 producer for a future release that includes a matching Annex-B parser/decoder. No video path has an input/control channel.
 
 ## Performance bounds
 
 - maximum fleet default: 16;
 - device health workers: max 8;
 - active video sources: max 12;
-- concurrent preferred H.264 focus producers: max 2;
+- concurrent focused sources: max 2;
 - zero subscribers: zero video producer for that profile;
-- thumbnail: 540px long edge target, 12 FPS, CPU weight 1;
-- focus: 1080px long edge target, 30 FPS, CPU weight 4;
+- thumbnail: 540px long edge target, 4 FPS, CPU weight 1;
+- focus: 1080px long edge target, up to 15 FPS, CPU weight 4;
 - subscriber queues are bounded and drop old frames rather than back-pressuring another phone.
 
 A stalled or disconnected phone is handled inside that session only.

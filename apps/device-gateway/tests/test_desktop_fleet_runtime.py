@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import time
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,6 +34,7 @@ class FakeDeviceADB:
         self.forwards = []
         self.removed = []
         self.shell_calls = []
+        self.process_calls = []
 
     def shell(self, *args, timeout=15):
         self.shell_calls.append(args)
@@ -57,6 +59,7 @@ class FakeDeviceADB:
         return b"png-not-used-in-sleep-test"
 
     def start_process(self, args, stdout=None):
+        self.process_calls.append(args)
         raise RuntimeError("h264 unavailable in unit test")
 
     def collect_cyclone_crash_diagnostics(self):
@@ -449,7 +452,7 @@ def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses
     assert VIDEO_PROFILES["thumbnail"].target_fps <= 4
     assert VIDEO_PROFILES["thumbnail"].cpu_weight < VIDEO_PROFILES["focus"].cpu_weight
     assert VIDEO_PROFILES["focus"].max_long_edge <= 1080
-    assert VIDEO_PROFILES["focus"].target_fps == 30
+    assert VIDEO_PROFILES["focus"].target_fps == 15
     fleet, session, _ = paired_session_for_services()
     session.screen_awake = False
     limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
@@ -466,6 +469,29 @@ def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses
     controller.stop_all()
 
 
+def test_focus_stream_uses_the_image_codec_supported_by_the_shipped_renderer():
+    fleet, session, _ = paired_session_for_services()
+    session.screen_awake = True
+    session.adb.exec_out = lambda *args, **kwargs: (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99"
+        b"=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    controller = VideoStreamController(session, VideoFleetLimiter())
+
+    q = controller.subscribe("focus")
+    init = q.get(timeout=2)
+    frame = q.get(timeout=2)
+
+    assert init.kind == "text"
+    assert '"codec":"image/' in init.data
+    assert '"backend":"adb-screenshot"' in init.data
+    assert frame.kind == "binary"
+    assert session.adb.process_calls == []
+    controller.unsubscribe("focus", q)
+    controller.stop_all()
+
+
 def test_video_reports_bounded_capture_failure_instead_of_silent_infinite_wait():
     fleet, session, _ = paired_session_for_services()
     session.screen_awake = True
@@ -474,12 +500,15 @@ def test_video_reports_bounded_capture_failure_instead_of_silent_infinite_wait()
         raise ADBError("capture unavailable")
 
     session.adb.exec_out = fail_capture
-    controller = VideoStreamController(session, VideoFleetLimiter())
+    events = []
+    controller = VideoStreamController(session, VideoFleetLimiter(), diagnostic=lambda stage, details: events.append((stage, details)))
     q = controller.subscribe("thumbnail")
     assert "stream.init" in q.get(timeout=2).data
     failure = q.get(timeout=3)
     assert failure.kind == "text"
     assert "FRAME_CAPTURE_FAILED" in failure.data
+    assert any(stage == "server.frame.capture_exhausted" for stage, _ in events)
+    assert controller.diagnostics()["failuresByProfile"]["thumbnail"] >= 3
     controller.unsubscribe("thumbnail", q)
     controller.stop_all()
 
@@ -539,6 +568,8 @@ def test_frozen_http_and_websocket_routes_are_authenticated(tmp_path):
         )
         assert complete.status_code == 200
         assert complete.json()["paired"] is True
+        with client.websocket_connect(f"/v1/devices/{device_id}/video?profile=thumbnail", headers=headers) as video:
+            assert "stream.init" in video.receive_text()
         assert client.post(
             f"/v1/devices/{device_id}/control",
             headers=headers,
@@ -546,3 +577,39 @@ def test_frozen_http_and_websocket_routes_are_authenticated(tmp_path):
         ).status_code == 422
         with client.websocket_connect("/v1/fleet/events", headers=headers) as websocket:
             assert websocket.receive_json()["event"] == "FLEET_SNAPSHOT"
+
+
+def test_connection_debug_flow_records_client_server_timeline_and_creates_sendable_zip(tmp_path):
+    fleet, session, _ = paired_session_for_services()
+    settings = Settings("pc-secret", None, "adb", tmp_path)
+    runtime = DesktopRuntime(settings, fleet=fleet)
+    runtime.live_diagnostics.runtime_root = tmp_path
+    app = create_desktop_app(settings, runtime)
+    headers = {"Authorization": "Bearer pc-secret"}
+
+    with TestClient(app) as client:
+        path = f"/v1/devices/{session.device_id}/diagnostics/stream-event"
+        assert client.post(path, json={"stage": "client.ws.close", "code": "ABNORMAL_CLOSE"}).status_code == 401
+        recorded = client.post(
+            path,
+            headers=headers,
+            json={"stage": "client.ws.close", "code": "ABNORMAL_CLOSE", "attempt": 3, "close_code": 1006, "retryable": True},
+        )
+        assert recorded.status_code == 200
+
+        bundle_response = client.post(f"/v1/devices/{session.device_id}/diagnostics/bundle", headers=headers)
+        assert bundle_response.status_code == 200
+        bundle_path = Path(bundle_response.json()["path"])
+        assert bundle_path.is_file()
+        with zipfile.ZipFile(bundle_path) as archive:
+            names = set(archive.namelist())
+            assert "connection-manifest.json" in names
+            assert "timeline.jsonl" in names
+            manifest = archive.read("connection-manifest.json").decode("utf-8")
+            timeline = archive.read("timeline.jsonl").decode("utf-8")
+        assert "authenticatedBridgeProbe" in manifest
+        assert "rawCaptureProbe" in manifest
+        assert "client.ws.close" in timeline
+        assert "ABNORMAL_CLOSE" in timeline
+        assert "pc-secret" not in manifest + timeline
+        assert session.credential not in manifest + timeline

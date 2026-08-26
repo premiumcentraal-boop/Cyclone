@@ -92,9 +92,9 @@ VIDEO_PROFILES: dict[str, VideoProfileSpec] = {
     "focus": VideoProfileSpec(
         name="focus",
         max_long_edge=1080,
-        target_fps=30,
-        bitrate_bps=6_000_000,
-        preferred_codec="video/avc",
+        target_fps=15,
+        bitrate_bps=2_000_000,
+        preferred_codec="image/jpeg",
         cpu_weight=4,
     ),
 }

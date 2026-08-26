@@ -1,4 +1,5 @@
 import type {
+  ConnectionDiagnosticBundle,
   ConnectorActionResult,
   ConnectorCard,
   ControlResult,
@@ -9,6 +10,7 @@ import type {
   PairBeginResult,
   PairConfirmResult,
   PairQrConfirmResult,
+  StreamDiagnosticEvent,
   StreamProfile,
 } from "./types.js";
 
@@ -68,6 +70,10 @@ export class MockDesktopService implements DesktopService {
   getVideoUrl(deviceId: string, profile: StreamProfile): string { return `mock://video/${encodeURIComponent(deviceId)}?profile=${profile}`; }
   getVideoProtocols(): string[] { return []; }
   getFallbackFrameUrl(deviceId: string, profile: StreamProfile): string { return mockFrameDataUrl(deviceId, profile); }
+  async reportStreamDiagnostic(_deviceId: string, _event: StreamDiagnosticEvent): Promise<void> {}
+  async createConnectionDiagnosticBundle(deviceId: string): Promise<ConnectionDiagnosticBundle> {
+    return { ok: true, deviceId, path: "mock-connection-diagnostics.zip", createdAtEpochMs: Date.now() };
+  }
 
   async listConnectors(): Promise<ConnectorCard[]> {
     return [

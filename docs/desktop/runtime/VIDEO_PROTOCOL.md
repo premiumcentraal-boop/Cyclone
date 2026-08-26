@@ -14,10 +14,10 @@ The WebSocket requires the same loopback PC Gateway bearer credential as the fle
 
 | Profile | Preferred backend | Long edge | Target FPS | Target bitrate / cost |
 |---|---|---:|---:|---|
-| `thumbnail` | bounded screenshot frames | <=540px | 12 FPS | low; CPU weight 1 |
-| `focus` | Android `screenrecord` AVC | <=1080px | 30 FPS | ~6 Mbps; CPU weight 4 |
+| `thumbnail` | bounded screenshot frames | <=540px | 4 FPS | low; CPU weight 1 |
+| `focus` | bounded screenshot frames | <=1080px | <=15 FPS | focused; CPU weight 4 |
 
-Only two simultaneous focus sources use the preferred H.264 producer by default. Additional focus subscriptions degrade to the bounded image fallback instead of creating unbounded processes. Total active video sources are capped at 12.
+Only two simultaneous focus sources reserve focused-stream capacity. Total active video sources are capped at 12. The shipped renderer and producer use discrete JPEG/PNG frames for both profiles so real devices cannot select a codec the UI does not decode.
 
 No source exists when the profile has zero subscribers.
 
@@ -30,20 +30,20 @@ The first text frame is `stream.init`, for example:
   "type": "stream.init",
   "protocol": "cyclone.desktop.video.v1",
   "profile": "focus",
-  "codec": "video/avc",
-  "frameFormat": "annex-b-byte-chunk",
+  "codec": "image/jpeg",
+  "frameFormat": "image-frame",
   "binaryHeader": "u64be timestamp_ms + u32be sequence + u32be payload_length",
   "timestampClock": "unix-ms",
-  "targetFps": 30,
+  "targetFps": 15,
   "maxLongEdge": 1080,
-  "backend": "android-screenrecord-h264",
-  "fallback": false,
-  "width": 486,
-  "height": 1080
+  "backend": "adb-screenshot",
+  "fallback": true,
+  "width": null,
+  "height": null
 }
 ```
 
-Image fallback initialization uses `codec=image/jpeg` when a JPEG encoder is available or `image/png` otherwise, `frameFormat=image-frame`, and `backend=adb-screenshot`.
+Initialization uses `codec=image/jpeg` when a JPEG encoder is available or `image/png` otherwise, `frameFormat=image-frame`, and `backend=adb-screenshot`.
 
 ## Binary records
 
@@ -56,7 +56,7 @@ Every WebSocket binary message is one Cyclone video record:
 16..    payload
 ```
 
-For `video/avc`, payloads are ordered Annex-B byte chunks from Android's read-only H.264 encoder. Chunk boundaries are transport boundaries and are **not guaranteed to be codec frame boundaries**; the desktop decoder must parse Annex-B NAL units normally.
+The protocol reserves `video/avc` for a future matched producer/decoder. If enabled in a later protocol-compatible build, payloads are ordered Annex-B byte chunks and clients must parse NAL units rather than treating transport chunks as codec frames.
 
 For `image/jpeg` or `image/png`, one binary payload is one complete image frame.
 
@@ -64,7 +64,7 @@ Timestamps are acquisition/forwarding timestamps from the PC monotonic stream lo
 
 ## Resolution changes
 
-Clients must not assume a permanent resolution. A fresh subscription always receives current initialization metadata. A source restart may send a new `stream.init`/`stream.reconnect` sequence. Image frames are self-describing; H.264 clients must honor codec parameter sets after a source restart.
+Clients must not assume a permanent resolution. A fresh subscription always receives current initialization metadata. A source restart may send a new `stream.init`/`stream.reconnect` sequence. Image frames are self-describing.
 
 ## Sleep and wake
 
@@ -89,7 +89,7 @@ The per-device pairing credential is remembered only in PC process memory, so a 
 
 ## Fallback behavior
 
-If the preferred focus H.264 process cannot start or exits, Cyclone sends new initialization metadata with `fallback=true` and falls back to bounded image acquisition. This is a graceful read-only degradation, never a switch to an input/control backend.
+Focus uses bounded image acquisition in the current release. H.264 must not become the default until the desktop ships and tests a matching Annex-B parser/decoder. Any future fallback remains read-only and never switches to an input/control backend.
 
 ## scrcpy
 

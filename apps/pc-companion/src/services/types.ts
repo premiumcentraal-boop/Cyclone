@@ -18,6 +18,21 @@ export type StreamUiState =
 export type StreamProfile = "thumbnail" | "focus";
 export type StreamBackendMode = "H264" | "MJPEG" | "SCREENSHOT";
 
+export interface StreamDiagnosticEvent {
+  stage: string;
+  code?: string;
+  attempt?: number;
+  closeCode?: number;
+  retryable?: boolean;
+}
+
+export interface ConnectionDiagnosticBundle {
+  ok: boolean;
+  deviceId: string;
+  path: string;
+  createdAtEpochMs: number;
+}
+
 export interface DeviceVideoDescriptor {
   mode: StreamBackendMode;
   width: number;
@@ -176,6 +191,8 @@ export interface DesktopService {
   getVideoUrl(deviceId: string, profile: StreamProfile): string;
   getVideoProtocols(): string[];
   getFallbackFrameUrl(deviceId: string, profile: StreamProfile): string;
+  reportStreamDiagnostic(deviceId: string, event: StreamDiagnosticEvent): Promise<void>;
+  createConnectionDiagnosticBundle(deviceId: string): Promise<ConnectionDiagnosticBundle>;
   listConnectors(): Promise<ConnectorCard[]>;
   runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<ConnectorActionResult>;
   getRuntimeStatus(): Promise<DesktopRuntimeStatus>;

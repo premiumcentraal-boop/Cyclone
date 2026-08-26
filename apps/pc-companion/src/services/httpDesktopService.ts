@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ConnectionDiagnosticBundle,
   ConnectorActionResult,
   ConnectorCard,
   ControlResult,
@@ -10,6 +11,7 @@ import type {
   PairBeginResult,
   PairConfirmResult,
   PairQrConfirmResult,
+  StreamDiagnosticEvent,
   StreamProfile,
 } from "./types.js";
 
@@ -238,6 +240,27 @@ export class HttpDesktopService implements DesktopService {
 
   getFallbackFrameUrl(_deviceId: string, _profile: StreamProfile): string {
     return "";
+  }
+
+  async reportStreamDiagnostic(deviceId: string, event: StreamDiagnosticEvent): Promise<void> {
+    try {
+      await this.request(`/v1/devices/${encodeURIComponent(deviceId)}/diagnostics/stream-event`, {
+        method: "POST",
+        body: JSON.stringify({
+          stage: event.stage,
+          code: event.code,
+          attempt: event.attempt,
+          close_code: event.closeCode,
+          retryable: event.retryable,
+        }),
+      });
+    } catch {
+      // Diagnostics must never destabilize the stream they observe.
+    }
+  }
+
+  createConnectionDiagnosticBundle(deviceId: string): Promise<ConnectionDiagnosticBundle> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/diagnostics/bundle`, { method: "POST" });
   }
 
   async listConnectors(): Promise<ConnectorCard[]> {

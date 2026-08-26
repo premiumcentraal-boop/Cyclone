@@ -1,6 +1,6 @@
-import type { DesktopDevice, StreamProfile, StreamUiState } from "../services/types.js";
+import type { DesktopDevice, StreamDiagnosticEvent, StreamProfile, StreamUiState } from "../services/types.js";
 import type { DesktopService } from "../services/types.js";
-import type { VideoRenderTarget, VideoRenderer } from "./decoder.js";
+import type { VideoRendererFactoryInput, VideoRenderTarget, VideoRenderer } from "./decoder.js";
 import { FallbackFrameRenderer } from "./fallbackFrameDecoder.js";
 import { WebCodecsH264Renderer } from "./webcodecsH264Decoder.js";
 
@@ -15,6 +15,8 @@ export class LivePhoneController {
     private readonly profile: StreamProfile,
     private readonly target: VideoRenderTarget,
     private readonly onState: (state: StreamUiState) => void,
+    private readonly onDiagnostic: (event: StreamDiagnosticEvent) => void = () => undefined,
+    private readonly realRendererFactory: (input: VideoRendererFactoryInput) => VideoRenderer = (input) => new WebCodecsH264Renderer(input),
   ) {}
 
   start(): void {
@@ -24,22 +26,27 @@ export class LivePhoneController {
       this.startFallback();
       return;
     }
-    if (this.device.state === "DISCONNECTED") {
+    if (this.device.state === "DISCONNECTED" && this.service.mode === "mock") {
       this.setState("RECONNECTING");
-      if (this.service.mode === "mock") this.startFallback();
+      this.startFallback();
       return;
     }
     if (this.service.mode === "real") {
-      // Opening a paired phone is an explicit user action. Wake the display (never unlock it), then
-      // start capture so an asleep phone cannot leave the UI waiting forever without a first frame.
+      // Stream and wake are deliberately independent. A failed/slow phone health request must not
+      // prevent the WebSocket from reporting SLEEPING, AUTH_REJECTED, or another exact stream state.
+      const renderer = this.realRendererFactory(this.input());
+      this.renderer = renderer;
+      this.report({ stage: "client.controller.start", code: `DEVICE_${this.device.state}` });
+      renderer.start();
+
+      // Opening a paired phone is an explicit user action. Wake the display but never unlock it.
       void this.service.sendControl(this.device.id, { type: "wake" })
-        .catch(() => undefined)
-        .finally(() => {
-          if (this.stopped || this.renderer || this.state === "UNAVAILABLE") return;
-          const renderer = new WebCodecsH264Renderer(this.input());
-          this.renderer = renderer;
-          renderer.start();
-        });
+        .then((result) => this.report({
+          stage: result.ok ? "client.wake.ok" : "client.wake.rejected",
+          code: result.verification || (result.ok ? "WAKE_OK" : "WAKE_REJECTED"),
+          retryable: !result.ok,
+        }))
+        .catch(() => this.report({ stage: "client.wake.failed", code: "WAKE_REQUEST_FAILED", retryable: true }));
       return;
     }
     this.startFallback();
@@ -52,6 +59,14 @@ export class LivePhoneController {
   }
 
   currentState(): StreamUiState { return this.state; }
+
+  restart(): void {
+    this.report({ stage: "client.manual.retry", code: "USER_RETRY", retryable: true });
+    this.renderer?.stop();
+    this.renderer = null;
+    this.stopped = false;
+    this.start();
+  }
 
   private startFallback(): void {
     const renderer = new FallbackFrameRenderer(this.input());
@@ -73,7 +88,8 @@ export class LivePhoneController {
           else if (state === "LIVE" && this.device.state === "DISCONNECTED") this.setState("RECONNECTING");
           else this.setState(state);
         },
-        onError: (_error: unknown) => undefined,
+        onError: (_error: unknown) => this.report({ stage: "client.render.error", code: "FRAME_RENDER_ERROR", retryable: true }),
+        onDiagnostic: (event: StreamDiagnosticEvent) => this.report(event),
       },
     };
   }
@@ -81,5 +97,10 @@ export class LivePhoneController {
   private setState(state: StreamUiState): void {
     this.state = state;
     this.onState(state);
+  }
+
+  private report(event: StreamDiagnosticEvent): void {
+    this.onDiagnostic(event);
+    void this.service.reportStreamDiagnostic(this.device.id, event);
   }
 }

@@ -1,4 +1,4 @@
-import type { DesktopDevice, StreamProfile, StreamUiState } from "../services/types.js";
+import type { DesktopDevice, StreamDiagnosticEvent, StreamProfile, StreamUiState } from "../services/types.js";
 
 export interface VideoRenderTarget {
   container: HTMLElement;
@@ -9,6 +9,7 @@ export interface VideoRenderTarget {
 export interface VideoRendererCallbacks {
   onState(state: StreamUiState): void;
   onError(error: unknown): void;
+  onDiagnostic(event: StreamDiagnosticEvent): void;
 }
 
 export interface VideoRenderer {

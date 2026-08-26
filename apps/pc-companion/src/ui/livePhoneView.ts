@@ -28,6 +28,7 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
   const image = el("img", "phone-fallback") as HTMLImageElement;
   image.alt = `${device.name} screen`;
   image.draggable = false;
+  image.hidden = true;
   const status = el("div", "phone-stream-status");
   const overlay = el("div", "phone-state-overlay");
 
@@ -93,6 +94,31 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
   }
 
   let currentState: StreamUiState = device.state === "SLEEPING" ? "SLEEPING" : "CONNECTING";
+  let diagnosticCode = device.state === "SLEEPING" ? "PHONE_SCREEN_OFF" : "STARTING";
+  let bundleInFlight = false;
+  const renderCurrent = () => renderStreamStatus(
+    status,
+    overlay,
+    currentState,
+    device,
+    diagnosticCode,
+    () => controller.restart(),
+    async () => {
+      if (bundleInFlight) return;
+      bundleInFlight = true;
+      diagnosticCode = "COLLECTING_DEBUG_BUNDLE";
+      renderCurrent();
+      try {
+        const bundle = await options.service.createConnectionDiagnosticBundle(device.id);
+        diagnosticCode = bundle.ok ? `SAVED_${bundle.path.split(/[\\/]/).pop() || "CONNECTION_BUNDLE"}` : "BUNDLE_FAILED";
+      } catch {
+        diagnosticCode = "BUNDLE_FAILED";
+      } finally {
+        bundleInFlight = false;
+        renderCurrent();
+      }
+    },
+  );
   const controller = new LivePhoneController(
     options.service,
     device,
@@ -100,10 +126,14 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
     { container: frame, canvas, fallbackImage: image },
     (next) => {
       currentState = next;
-      renderStreamStatus(status, overlay, next, device);
+      renderCurrent();
+    },
+    (event) => {
+      if (event.code) diagnosticCode = event.code;
+      if (currentState !== "LIVE") renderCurrent();
     },
   );
-  renderStreamStatus(status, overlay, currentState, device);
+  renderCurrent();
   controller.start();
 
   if (options.onOpen) {
@@ -135,7 +165,15 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
   };
 }
 
-function renderStreamStatus(status: HTMLElement, overlay: HTMLElement, state: StreamUiState, device: DesktopDevice): void {
+function renderStreamStatus(
+  status: HTMLElement,
+  overlay: HTMLElement,
+  state: StreamUiState,
+  device: DesktopDevice,
+  diagnosticCode: string,
+  onRetry: () => void,
+  onBundle: () => void,
+): void {
   status.textContent = "";
   overlay.replaceChildren();
   overlay.classList.toggle("visible", state !== "LIVE");
@@ -152,7 +190,20 @@ function renderStreamStatus(status: HTMLElement, overlay: HTMLElement, state: St
           ? "Live view unavailable"
           : "Stream interrupted";
   overlay.append(el("div", "state-title", title));
-  if (state === "SLEEPING") overlay.append(el("div", "state-copy", `Showing the last frame from ${device.name}`));
+  if (state === "SLEEPING") {
+    overlay.append(el("div", "state-copy", `Unlock ${device.name} to show protected screen content. Cyclone can wake the display but never bypass Android's lock screen.`));
+  } else {
+    overlay.append(el("div", "state-copy", `Connection code: ${diagnosticCode}`));
+  }
+  if (state === "RECONNECTING" || state === "STREAM_ERROR" || state === "UNAVAILABLE") {
+    const actions = el("div", "stream-recovery-actions");
+    const retry = button("Retry live view", "button primary compact");
+    retry.addEventListener("click", (event) => { event.stopPropagation(); onRetry(); });
+    const bundle = button("Save debug bundle", "button secondary compact");
+    bundle.addEventListener("click", (event) => { event.stopPropagation(); onBundle(); });
+    actions.append(retry, bundle);
+    overlay.append(actions);
+  }
 }
 
 function friendlyConnection(device: DesktopDevice): string {

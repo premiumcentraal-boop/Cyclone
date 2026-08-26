@@ -2,11 +2,11 @@
 
 Tauri 2 + TypeScript desktop presentation shell for controlling one or many Cyclone phones.
 
-## Beta 1.0.0-beta.13
+## Beta 1.0.0-beta.14
 
-This connection-lifecycle update fixes the post-pairing screen that could remain on **Connecting** or **Reconnecting**. Opening a paired phone now issues one fixed-purpose wake request (never unlock), immediately confirms the authenticated phone session, and then starts the live stream. Authenticated health heartbeats keep Mobile's **USB / PC session** and **PC Gateway health** indicators truthful even though the secure ADB bridge intentionally uses short request connections. Capture failures are visible and reconnect attempts are bounded rather than spinning forever.
+This stream-recovery update removes the last opaque **Reconnecting** path. The physical-phone focus stream now uses the JPEG/PNG frames implemented by the shipped renderer instead of selecting an incompatible Android H.264 byte stream. Video starts independently from the fixed-purpose wake/health request, so a slow or failed wake cannot prevent the WebSocket from reporting its real state. Every connection has explicit handshake and first-frame deadlines, a visible failure code, **Retry live view**, and **Save debug bundle** actions. The sendable zip correlates the PC client, local WebSocket server, frame producer, authenticated phone bridge, raw content-free capture probe, and bounded Android process timeline without intentionally recording screen pixels, gateway credentials, pairing codes, clipboard or typed content.
 
-After installing an update, close any still-open Companion window and launch **Cyclone PC Companion** again. Confirm `v1.0.0-beta.13` is visible at the bottom of the sidebar before pairing. Install Mobile `3.1.0-beta.10`, keep the phone unlocked when starting live view, and use **Settings → PC Gateway & QR pairing → Scan PC QR** or the secure four-letter code. Cyclone may wake the display but deliberately cannot bypass Android's lock screen.
+After installing an update, close any still-open Companion window and launch **Cyclone PC Companion** again. Confirm `v1.0.0-beta.14` is visible at the bottom of the sidebar before pairing. Install Mobile `3.1.0-beta.11`, keep the phone unlocked when starting live view, and use **Settings → PC Gateway & QR pairing → Scan PC QR** or the secure four-letter code. Cyclone may wake the display but deliberately cannot bypass Android's lock screen.
 
 The **AI connections** page provides one-click Codex setup. It configures the packaged Cyclone MCP server without copying a Gateway token, reports live Gateway/phone/tool readiness, and recovers a long-running Codex session after the Companion rotates its protected local connection. Restart Codex once after the first connection.
 

@@ -35,6 +35,30 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     "Checking…",
     "Starts automatically when an authorized Android phone is detected, before you press Pair.",
   );
+  const connectionDiagnostics = statusCard(
+    "Connection debug flow",
+    "Ready to capture",
+    "Creates one sendable zip with the PC WebSocket timeline, bounded Android process evidence, authenticated bridge health, and a content-free screen-capture probe.",
+  );
+  const runConnectionDiagnostics = button("Create connection debug bundle", "button secondary wide");
+  const connectionDiagnosticsPath = el("div", "diagnostic-path", "No bundle created in this session.");
+  runConnectionDiagnostics.disabled = !devices.some((device) => device.paired);
+  runConnectionDiagnostics.addEventListener("click", async () => {
+    const device = devices.find((candidate) => candidate.paired);
+    if (!device) return;
+    runConnectionDiagnostics.disabled = true;
+    setCard(connectionDiagnostics, "Collecting…", "Cyclone is running fixed read-only checks. Screen pixels, credentials, pairing codes, clipboard and typed content are not saved.");
+    try {
+      const bundle = await service.createConnectionDiagnosticBundle(device.id);
+      connectionDiagnosticsPath.textContent = bundle.path;
+      setCard(connectionDiagnostics, "Bundle saved", "Send this zip with a bug report. It contains the exact last client/server stream stages and bounded phone health evidence.");
+    } catch {
+      setCard(connectionDiagnostics, "Capture failed", "The local Gateway could not complete the debug flow. Reopen Cyclone and retry.");
+    } finally {
+      runConnectionDiagnostics.disabled = false;
+    }
+  });
+  connectionDiagnostics.append(connectionDiagnosticsPath, runConnectionDiagnostics);
   const diagnosticsPath = el("div", "diagnostic-path", "Resolving diagnostics folder…");
   const diagnosticsDetail = el("p", "setting-copy", "Fixed read-only ADB diagnostics only · no root/su required · no pairing code or credential is intentionally recorded.");
   const openDiagnostics = button("Open diagnostics folder", "button secondary wide");
@@ -48,7 +72,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   crashDiagnostics.append(diagnosticsPath, diagnosticsDetail, openDiagnostics);
 
   const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI or live crash monitor.");
-  cards.append(companion, phones, adb, autoDetect, crashDiagnostics, privacy);
+  cards.append(companion, phones, adb, autoDetect, crashDiagnostics, connectionDiagnostics, privacy);
   page.append(header, cards);
 
   if (service.mode === "real") {
