@@ -8,6 +8,8 @@ This stream-recovery update removes the last opaque **Reconnecting** path. The p
 
 After installing an update, close any still-open Companion window and launch **Cyclone PC Companion** again. Confirm `v1.0.0-beta.14` is visible at the bottom of the sidebar before pairing. Install Mobile `3.1.0-beta.11`, keep the phone unlocked when starting live view, and use **Settings → PC Gateway & QR pairing → Scan PC QR** or the secure four-letter code. Cyclone may wake the display but deliberately cannot bypass Android's lock screen.
 
+The beta.14 source stream was exercised against a physical Pixel 8 before release: the focus handshake selected `image/jpeg` over `adb-screenshot` and delivered a valid JPEG first frame. Packaged Windows and Android artifacts are still accepted only after their matching GitHub Actions gates pass for the same source SHA.
+
 The **AI connections** page provides one-click Codex setup. It configures the packaged Cyclone MCP server without copying a Gateway token, reports live Gateway/phone/tool readiness, and recovers a long-running Codex session after the Companion rotates its protected local connection. Restart Codex once after the first connection.
 
 ## Development
