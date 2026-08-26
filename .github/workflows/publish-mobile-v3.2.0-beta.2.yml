@@ -1,0 +1,118 @@
+name: Publish Cyclone Mobile 3.2.0-beta.2
+
+on:
+  push:
+    branches: [release/cyclone-mobile-v3.2]
+    paths:
+      - '.github/workflows/publish-mobile-v3.2.0-beta.2.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_RUN_ID: '32981773559'
+      SOURCE_SHA: '500455fb21341718dda63cb73c6957ccd8ccff13'
+      ARTIFACT_NAME: 'Cyclone-Mobile-3.2.0-beta.2'
+      APK_NAME: 'Cyclone-Mobile-3.2.0-beta.2.apk'
+      TAG: 'v3.2.0-beta.2'
+    steps:
+      - name: Wait for and validate authoritative Mobile CI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID")"
+            status="$(jq -r '.status' <<< "$run_json")"
+            conclusion="$(jq -r '.conclusion // empty' <<< "$run_json")"
+            if [[ "$status" == "completed" ]]; then
+              test "$conclusion" = "success"
+              test "$(jq -r '.name' <<< "$run_json")" = "Cyclone Mobile CI"
+              test "$(jq -r '.path' <<< "$run_json")" = ".github/workflows/mobile-ci.yml"
+              test "$(jq -r '.event' <<< "$run_json")" = "push"
+              test "$(jq -r '.head_branch' <<< "$run_json")" = "release/cyclone-mobile-v3.2"
+              test "$(jq -r '.head_sha' <<< "$run_json")" = "$SOURCE_SHA"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for Mobile CI run $BUILD_RUN_ID" >&2
+          exit 1
+
+      - name: Download authoritative APK artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME" --dir candidate
+
+      - name: Verify APK provenance and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "candidate/$APK_NAME"
+          test -s "candidate/$APK_NAME.sha256"
+          test "$(tr -d '\r\n' < candidate/source-sha.txt)" = "$SOURCE_SHA"
+          test "$(tr -d '\r\n' < candidate/run-id.txt)" = "$BUILD_RUN_ID"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('candidate/mobile-metadata.json').read_text())
+          assert m['version_name'] == '3.2.0-beta.2'
+          assert m['version_code'] == 32
+          assert m['application_id'] == 'com.cyclone.mobile'
+          assert m['artifact_name'] == 'Cyclone-Mobile-3.2.0-beta.2'
+          assert m['apk_name'] == 'Cyclone-Mobile-3.2.0-beta.2.apk'
+          PY
+          (cd candidate && sha256sum --check "$APK_NAME.sha256")
+
+      - name: Publish GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing duplicate publication." >&2
+            exit 1
+          fi
+          cat > release-notes.md <<EOF
+          # Cyclone Mobile 3.2.0-beta.2
+
+          Hotfix for the V3.2 phone setup crash.
+
+          ## Fixed
+          - Fixes the crash/termination when tapping **Finish setup** from Home.
+          - Android/OEM permission-state reads now fail closed to “not enabled” instead of terminating Cyclone if a system API throws.
+          - Adds regression coverage for permission-state `SecurityException` and runtime failures.
+
+          ## Build
+          - Package: `com.cyclone.mobile`
+          - Version: `3.2.0-beta.2`
+          - versionCode: `32`
+          - Source SHA: `$SOURCE_SHA`
+          - Cyclone Mobile CI run: `$BUILD_RUN_ID`
+
+          ## Verification
+          - Published APK is the exact artifact produced by the successful Mobile CI run above; it is not rebuilt during release publication.
+          - APK checksum and source/run provenance are verified before publication.
+          - Physical-device verification remains separate from CI and should be performed by installing this APK and exercising Finish setup on hardware.
+          EOF
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "Cyclone Mobile 3.2.0-beta.2" \
+            --prerelease \
+            --notes-file release-notes.md \
+            "candidate/$APK_NAME" \
+            "candidate/$APK_NAME.sha256" \
+            candidate/mobile-metadata.json \
+            candidate/source-sha.txt \
+            candidate/run-id.txt
