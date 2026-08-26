@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import queue
 import secrets
@@ -21,6 +22,7 @@ from .diagnostics import FleetDiagnosticSupervisor
 from .fleet import DeviceFleetManager
 from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES
 from .pairing import PairingCoordinator
+from .readiness import enrich_device_public
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 
 
@@ -130,32 +132,76 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.get("/v1/fleet", dependencies=[Depends(auth)])
     @router.get("/v1/devices", dependencies=[Depends(auth)], include_in_schema=False)
     def fleet() -> dict[str, Any]:
-        return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": runtime.fleet.list_public()}
+        return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": _public_devices(runtime)}
 
     @router.post("/v1/fleet/scan", dependencies=[Depends(auth)])
     def fleet_scan() -> dict[str, Any]:
-        devices = _call(lambda: runtime.fleet.refresh_once(source="manual"))
+        _call(lambda: runtime.fleet.refresh_once(source="manual"))
         return {
             "protocol": DESKTOP_PROTOCOL_VERSION,
-            "devices": devices,
+            "devices": _public_devices(runtime),
             "discovery": runtime.fleet.diagnostics(),
             "liveDiagnostics": runtime.live_diagnostics.status(),
         }
 
+    @router.get("/v1/runtime/self-test", dependencies=[Depends(auth)])
+    def runtime_self_test() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "protocol": DESKTOP_PROTOCOL_VERSION,
+            "runtimeInstanceId": runtime.instance_id,
+            "runtimePort": runtime.settings.port,
+            "sessionBinding": _session_binding(runtime, token),
+            "httpAuth": "CURRENT_TAURI_SESSION",
+            "websocketAuth": "CURRENT_TAURI_SESSION",
+        }
+
+    @router.websocket("/v1/runtime/self-test/ws")
+    async def runtime_self_test_ws(websocket: WebSocket):
+        if not _websocket_authorized(websocket, token):
+            await websocket.close(code=4401)
+            return
+        await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
+        await websocket.send_json({
+            "ok": True,
+            "protocol": DESKTOP_PROTOCOL_VERSION,
+            "runtimeInstanceId": runtime.instance_id,
+            "runtimePort": runtime.settings.port,
+            "sessionBinding": _session_binding(runtime, token),
+        })
+        await websocket.close(code=1000)
+
     @router.get("/v1/diagnostics/status", dependencies=[Depends(auth)])
     def diagnostics_status() -> dict[str, Any]:
-        devices = runtime.fleet.list_public()
+        devices = _public_devices(runtime)
         discovery = runtime.fleet.diagnostics()
         live_diagnostics = runtime.live_diagnostics.status()
         paired = sum(1 for device in devices if device.get("paired") is True)
-        attention = sum(1 for device in devices if device.get("state") in {"ATTENTION", "UNAUTHORIZED"})
+        action_required = sum(
+            1
+            for device in devices
+            if any(
+                card.get("state") in {"ACTION_REQUIRED", "OFFLINE"}
+                for card in (device.get("readiness") or {}).values()
+            )
+        )
+        recovering = sum(
+            1
+            for device in devices
+            if any(
+                card.get("state") == "RECOVERING"
+                for card in (device.get("readiness") or {}).values()
+            )
+        )
         adb_available = discovery.get("adbAvailable") is True
         if not adb_available and discovery.get("lastScanError"):
             message = "ADB is not available to Cyclone"
         elif discovery.get("rawAdbDeviceCount", 0) > 0 and not devices:
             message = "ADB sees a phone, but Cyclone has not added it to the fleet"
-        elif attention:
-            message = f"{attention} phone(s) need attention"
+        elif action_required:
+            message = f"{action_required} phone(s) need one action"
+        elif recovering:
+            message = f"{recovering} phone(s) are recovering a connection plane"
         elif devices:
             message = "Ready"
         else:
@@ -164,9 +210,10 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             "backendReachable": True,
             "runtimeInstanceId": runtime.instance_id,
             "runtimePort": runtime.settings.port,
+            "sessionBinding": _session_binding(runtime, token),
             "deviceCount": len(devices),
             "pairedDeviceCount": paired,
-            "recoveryActive": attention > 0 or not adb_available,
+            "recoveryActive": action_required > 0 or recovering > 0 or not adb_available,
             "message": message,
             "discovery": discovery,
             "liveDiagnostics": live_diagnostics,
@@ -217,10 +264,11 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             capture_probe = {"ok": False, "errorClass": exc.__class__.__name__}
         created_at = int(time.time() * 1000)
         path = runtime.live_diagnostics.create_connection_bundle(device_id, {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "runtimeInstanceId": runtime.instance_id,
             "desktopProtocol": DESKTOP_PROTOCOL_VERSION,
-            "device": session.public(),
+            "sessionBinding": _session_binding(runtime, token),
+            "device": enrich_device_public(session),
             "discovery": runtime.fleet.diagnostics(),
             "video": video,
             "authenticatedBridgeProbe": bridge_probe,
@@ -238,11 +286,25 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.post("/v1/devices/{device_id}/pair/complete", dependencies=[Depends(auth)])
     @router.post("/v1/devices/{device_id}/pair/confirm", dependencies=[Depends(auth)], include_in_schema=False)
     def pair_complete(device_id: str, body: PairCompleteBody):
-        return _call(lambda: runtime.pairing.complete(device_id, body.pairing_id, body.code))
+        result = _call(lambda: runtime.pairing.complete(device_id, body.pairing_id, body.code))
+        if isinstance(result, dict):
+            result = dict(result)
+            try:
+                result["device"] = enrich_device_public(runtime.fleet.get(device_id))
+            except DesktopRuntimeError:
+                pass
+        return result
 
     @router.post("/v1/devices/{device_id}/pair/qr/complete", dependencies=[Depends(auth)])
     def pair_qr_complete(device_id: str, body: PairQrCompleteBody):
-        return _call(lambda: runtime.pairing.complete_qr(device_id, body.pairing_id))
+        result = _call(lambda: runtime.pairing.complete_qr(device_id, body.pairing_id))
+        if isinstance(result, dict) and result.get("paired") is True:
+            result = dict(result)
+            try:
+                result["device"] = enrich_device_public(runtime.fleet.get(device_id))
+            except DesktopRuntimeError:
+                pass
+        return result
 
     @router.post("/v1/devices/{device_id}/pair/revoke", dependencies=[Depends(auth)])
     def pair_revoke(device_id: str):
@@ -319,14 +381,14 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             await websocket.send_json({
                 "event": "FLEET_SNAPSHOT",
                 "protocol": DESKTOP_PROTOCOL_VERSION,
-                "devices": runtime.fleet.list_public(),
+                "devices": _public_devices(runtime),
             })
             while True:
                 try:
                     item = await asyncio.to_thread(q.get, True, 1.0)
                 except queue.Empty:
                     continue
-                await websocket.send_json(item)
+                await websocket.send_json(_enrich_event(runtime, item))
         except WebSocketDisconnect:
             pass
         finally:
@@ -342,13 +404,19 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             return
         try:
             session = runtime.fleet.get(device_id)
-            if not session.credential:
-                raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_REQUIRED, "Pair this phone before video streaming.")
+            adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
+            if adb_state != "device":
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.DEVICE_UNAUTHORIZED if adb_state == "unauthorized" else RuntimeErrorCode.DEVICE_DISCONNECTED,
+                    "ADB authorization is required for live display.",
+                    retryable=True,
+                )
             controller = session.video
             if controller is None:
                 raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Video runtime is unavailable.")
-        except DesktopRuntimeError:
-            await websocket.close(code=4404)
+        except DesktopRuntimeError as exc:
+            close_code = 4403 if exc.code == RuntimeErrorCode.DEVICE_UNAUTHORIZED.value else 4404
+            await websocket.close(code=close_code)
             return
         await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
         q = controller.subscribe(profile)
@@ -406,6 +474,35 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     return app
 
 
+def _public_devices(runtime: DesktopRuntime) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in runtime.fleet.list_public():
+        device_id = str(item.get("deviceId") or item.get("id") or "")
+        if not device_id:
+            continue
+        try:
+            result.append(enrich_device_public(runtime.fleet.get(device_id)))
+        except DesktopRuntimeError:
+            continue
+    return result
+
+
+def _enrich_event(runtime: DesktopRuntime, item: dict[str, Any]) -> dict[str, Any]:
+    value = dict(item)
+    device_id = str(value.get("deviceId") or "")
+    if device_id and "device" in value:
+        try:
+            value["device"] = enrich_device_public(runtime.fleet.get(device_id))
+        except DesktopRuntimeError:
+            pass
+    return value
+
+
+def _session_binding(runtime: DesktopRuntime, token: str) -> str:
+    material = f"{runtime.instance_id}\0{runtime.settings.port}\0{token}".encode("utf-8")
+    return hashlib.sha256(material).hexdigest()[:24]
+
+
 def _websocket_authorized(websocket: WebSocket, token: str) -> bool:
     value = websocket.headers.get("authorization", "")
     if value.startswith("Bearer "):
@@ -446,6 +543,12 @@ def _call(fn):
             RuntimeErrorCode.PAIRING_CODE_REJECTED.value: 403,
             RuntimeErrorCode.PAIRING_ATTEMPTS_EXCEEDED.value: 429,
             RuntimeErrorCode.PAIRING_SESSION_MISMATCH.value: 409,
+            RuntimeErrorCode.TRUST_CONFIRMATION_REQUIRED.value: 409,
+            RuntimeErrorCode.TRUST_REVOKED.value: 403,
+            RuntimeErrorCode.TRUST_EXPIRED.value: 401,
+            RuntimeErrorCode.TRUST_AUTH_FAILED.value: 403,
+            RuntimeErrorCode.PROTOCOL_MISMATCH.value: 426,
+            RuntimeErrorCode.PHONE_LOCKED.value: 423,
             RuntimeErrorCode.AUTH_REJECTED.value: 403,
             RuntimeErrorCode.INVALID_REQUEST.value: 400,
             RuntimeErrorCode.STREAM_CAPACITY.value: 503,

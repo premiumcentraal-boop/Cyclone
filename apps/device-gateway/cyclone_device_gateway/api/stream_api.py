@@ -1,22 +1,18 @@
 """Loopback stream API for the desktop gateway.
 
-Additive V1 surface that gives the PC Companion a real fallback path when the WebSocket live view
-cannot deliver frames. This module is intentionally self-contained so it can be mounted without
-touching ``server.py``. Integration step (one line, by the integration owner):
-
-    # apps/device-gateway/cyclone_device_gateway/server.py or desktop_runtime/api.py
-    from cyclone_device_gateway.api.stream_api import create_stream_router
-    app.include_router(create_stream_router(app.state.desktop_runtime, settings.token))
+V3.3 keeps the media plane independent from Cyclone AI trust. An ADB-authorized phone may expose a
+live/snapshot display while the Android bridge is unpaired, reconnecting, or unavailable. These
+routes therefore require the ephemeral PC Gateway bearer plus ADB authorization, never the Android
+AI credential.
 
 Endpoints (both require ``Authorization: Bearer <token>``):
 
 - ``GET /v1/devices/{device_id}/stream/snapshot?profile=thumbnail|focus``
-    Returns the latest decoded phone frame (``image/jpeg``, or ``image/png`` when Pillow is
-    unavailable) with ``Cache-Control: no-store``. Performs one bounded fresh capture when no
-    frame exists yet. This powers the Companion's low-resolution degraded live view.
+    Returns the latest safe phone frame with ``Cache-Control: no-store``. A media backend may use a
+    cached decoded frame or one bounded fallback capture; high-rate screenshot polling is not the
+    product live path.
 - ``GET /v1/devices/{device_id}/stream/status``
-    Bounded per-device stream diagnostics: frame/failure counters, subscriber count, and the
-    fleet limiter snapshot.
+    Bounded per-device stream diagnostics without frame bytes.
 """
 
 from __future__ import annotations
@@ -39,13 +35,16 @@ def create_stream_router(runtime: Any, token: str) -> APIRouter:
     def auth(authorization: str | None = Header(default=None)) -> None:
         verify_bearer(authorization, token)
 
-    def paired_controller(device_id: str):
+    def adb_controller(device_id: str):
         try:
             session = runtime.fleet.get(device_id)
         except DesktopRuntimeError:
             raise HTTPException(status_code=404, detail={"code": "DEVICE_NOT_FOUND", "message": "Phone is not connected."})
-        if not getattr(session, "credential", None):
-            raise HTTPException(status_code=401, detail={"code": "PAIRING_REQUIRED", "message": "Pair this phone before streaming."})
+        adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
+        if adb_state != "device":
+            code = "DEVICE_UNAUTHORIZED" if adb_state == "unauthorized" else "DEVICE_DISCONNECTED"
+            message = "Approve USB debugging on the phone." if adb_state == "unauthorized" else "Phone is not ADB-ready."
+            raise HTTPException(status_code=409, detail={"code": code, "message": message})
         controller = getattr(session, "video", None)
         if controller is None or not hasattr(controller, "snapshot"):
             raise HTTPException(status_code=503, detail={"code": "CAPABILITY_UNAVAILABLE", "message": "Video runtime is unavailable."})
@@ -55,7 +54,7 @@ def create_stream_router(runtime: Any, token: str) -> APIRouter:
     def stream_snapshot(device_id: str, profile: str = Query(default="focus")):
         if profile not in VIDEO_PROFILES:
             raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": "Unknown video profile."})
-        controller = paired_controller(device_id)
+        controller = adb_controller(device_id)
         try:
             frame = controller.snapshot()
         except DesktopRuntimeError as exc:
@@ -74,7 +73,7 @@ def create_stream_router(runtime: Any, token: str) -> APIRouter:
 
     @router.get("/v1/devices/{device_id}/stream/status", dependencies=[Depends(auth)])
     def stream_status(device_id: str):
-        controller = paired_controller(device_id)
+        controller = adb_controller(device_id)
         diagnostics = controller.diagnostics() if hasattr(controller, "diagnostics") else {}
         return {
             "ok": True,

@@ -7,6 +7,45 @@ export type DeviceLifecycleState =
   | "UNAUTHORIZED"
   | "ATTENTION";
 
+export type DiscoveryState = "ABSENT" | "UNAUTHORIZED" | "OFFLINE" | "ADB_READY";
+export type MediaPlaneState =
+  | "STOPPED"
+  | "STARTING"
+  | "WAITING_KEYFRAME"
+  | "LIVE"
+  | "SLEEPING"
+  | "RECONNECTING"
+  | "UNAVAILABLE";
+export type BridgePlaneState =
+  | "APP_MISSING"
+  | "APP_STOPPED"
+  | "SOCKET_STARTING"
+  | "CONNECTED"
+  | "AUTH_FAILED"
+  | "DEGRADED";
+export type AITrustState = "UNPAIRED" | "CONFIRMATION_REQUIRED" | "TRUSTED" | "REVOKED" | "EXPIRED";
+
+export interface DevicePlanes {
+  discovery: DiscoveryState;
+  media: MediaPlaneState;
+  bridge: BridgePlaneState;
+  aiTrust: AITrustState;
+}
+
+export type ReadinessCardState = "READY" | "ACTION_REQUIRED" | "OFFLINE" | "IDLE" | "RECOVERING" | "SLEEPING" | "LIMITED";
+
+export interface ReadinessCard {
+  state: ReadinessCardState;
+  ready: boolean;
+  message: string;
+}
+
+export interface DeviceReadiness {
+  phoneConnection: ReadinessCard;
+  liveDisplay: ReadinessCard;
+  aiCodexAccess: ReadinessCard;
+}
+
 export type StreamUiState =
   | "CONNECTING"
   | "LIVE"
@@ -76,6 +115,14 @@ export interface DesktopDevice {
   video: DeviceVideoDescriptor;
   capabilities: DeviceCapabilities;
   connectionHealth?: DeviceConnectionHealth;
+  planes?: DevicePlanes;
+  readiness?: DeviceReadiness;
+  videoDiagnostics?: {
+    subscriberCount: number;
+    activeProfiles: string[];
+    lastEvent: string;
+    lastFrameAvailable: boolean;
+  };
   lastFrameUrl?: string;
 }
 
@@ -200,6 +247,7 @@ export interface DesktopRuntimeStatus {
   backendReachable: boolean;
   runtimeInstanceId?: string;
   runtimePort?: number;
+  sessionBinding?: string;
   deviceCount: number;
   pairedDeviceCount: number;
   recoveryActive: boolean;
