@@ -4,7 +4,7 @@
 
 - Base SHA: `e0149ab0638c77fa3d99d9d383f1d912fcbca25e`
 - Branch: `research/v35-vmos-archaeology`
-- Head SHA: filled after commit (see final report)
+- Head SHA (research content commit): `851cf3d2a4a47130f3d5a80b680c8bb7b4c6bf51` (the final handoff metadata commit is reported by the coordinator after push)
 - Owned paths: `docs/research/vmos/**` (no production runtime changes)
 
 ## Files changed
