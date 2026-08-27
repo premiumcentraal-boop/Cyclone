@@ -2,7 +2,7 @@
 
 - Branch: `feature/v35-fleet-virtualization`
 - Base: `e0149ab0638c77fa3d99d9d383f1d912fcbca25e`
-- Head: `9967a5c` (full SHA reported after push)
+- Head: `abc56ac86a7db41ab7fc7ce680a63b1b707845b1`
 
 ## Changed implementation
 
