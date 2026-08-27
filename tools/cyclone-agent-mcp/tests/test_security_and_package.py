@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 
 from cyclone_agent_mcp.audit import SafeAuditLog
-from cyclone_agent_mcp.safe import redact
+from cyclone_agent_mcp.safe import redact, validate_typed_params
 from cyclone_agent_mcp.tool_catalog import TOOL_NAMES
 
 ROOT = Path(__file__).parents[1]
@@ -19,6 +19,20 @@ def test_official_mcp_sdk_is_exactly_pinned():
 def test_no_shell_or_adb_tools_exist():
     lowered = [name.lower() for name in TOOL_NAMES]
     assert not any("shell" in name or "adb" in name or "exec" in name or "command" in name for name in lowered)
+
+
+def test_typed_params_reject_nested_host_command_escape_hatches():
+    for payload in (
+        {"command": "whoami"},
+        {"selector": {"shell": "id"}},
+        {"provider": {"docker": "run"}},
+        {"script": "anything"},
+    ):
+        try:
+            validate_typed_params(payload)
+            raise AssertionError("command-shaped payload should be rejected")
+        except ValueError:
+            pass
 
 
 def test_redaction_removes_secrets_recursively():

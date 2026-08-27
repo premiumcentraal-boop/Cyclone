@@ -121,7 +121,18 @@ async def _verify_async(command: ServerCommand) -> dict[str, dict[str, Any]]:
     from mcp import Client, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    params = StdioServerParameters(command=command.command, args=command.args)
+    # The MCP SDK intentionally starts child processes with a curated environment and does not
+    # inherit PYTHONPATH.  Preserve the source checkout when verification is run before the
+    # package has been installed (the normal contributor/CI path), while retaining any caller
+    # supplied import roots for packaged or embedded use.
+    source_root = str(Path(__file__).resolve().parents[1])
+    inherited_pythonpath = os.getenv("PYTHONPATH", "")
+    pythonpath = os.pathsep.join(part for part in (source_root, inherited_pythonpath) if part)
+    params = StdioServerParameters(
+        command=command.command,
+        args=command.args,
+        env={"PYTHONPATH": pythonpath},
+    )
     async with Client(stdio_client(params)) as client:
         result = await client.list_tools()
         return {tool.name: dict(tool.input_schema) for tool in result.tools}
@@ -135,9 +146,11 @@ def verify_tools_list(executable: str | None = None) -> dict[str, Any]:
     schema_errors: list[str] = []
     for name, schema in sorted(definitions.items()):
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
-        if name == "phone_list":
+        if name in {"phone_list", "phone_group_act"}:
             if "device_id" in properties:
-                schema_errors.append("phone_list_must_not_accept_device_id")
+                schema_errors.append(f"{name}_must_not_accept_device_id")
+            if name == "phone_group_act" and "device_ids" not in properties:
+                schema_errors.append("phone_group_act_missing_device_ids")
         elif name in expected and "device_id" not in properties:
             schema_errors.append(f"{name}_missing_device_id")
     return {

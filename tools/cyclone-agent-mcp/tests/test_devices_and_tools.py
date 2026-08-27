@@ -99,7 +99,7 @@ def test_every_phone_scoped_server_function_has_device_id_and_no_escape_hatch():
         if contract.phone_scoped:
             assert "device_id" in args, contract.name
         else:
-            assert contract.name == "phone_list" and "device_id" not in args
+            assert contract.name in {"phone_list", "phone_group_act"} and "device_id" not in args
     lowered = " ".join(TOOL_NAMES).lower()
     assert all(fragment not in lowered for fragment in FORBIDDEN_TOOL_FRAGMENTS)
 
@@ -111,3 +111,40 @@ def test_server_action_schema_has_only_typed_phone_actions():
     assert "powershell" in source.lower()
     assert "subprocess." not in source
     assert '"phone.click"' in source and '"phone.type"' in source
+
+
+def test_group_action_requires_explicit_unique_targets_and_observes_each_first():
+    gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY"), DeviceSummary("phone-b", "READY")])
+    tools = PhoneTools(gateway=gateway)
+    result = tools.call("phone_group_act", {
+        "device_ids": ["phone-a", "phone-b"],
+        "tool": "phone.home",
+        "params": {},
+        "goal": "Return selected test devices home",
+    })
+    assert result["ok"] is True
+    assert result["selected_device_ids"] == ["phone-a", "phone-b"]
+    assert gateway.calls == [
+        ("observe", "phone-a", False, "compact"),
+        ("observe", "phone-b", False, "compact"),
+    ]
+    duplicate = tools.call("phone_group_act", {
+        "device_ids": ["phone-a", "phone-a"], "tool": "phone.home", "params": {}, "goal": "x",
+    })
+    assert duplicate["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_command_shaped_params_and_batch_typing_are_rejected():
+    gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY")])
+    tools = PhoneTools(gateway=gateway)
+    injected = tools.call("phone_act", {
+        "device_id": "phone-a",
+        "tool": "phone.click",
+        "params": {"selector": {"text": "Apps"}, "command": "whoami"},
+        "goal": "Open Apps",
+    })
+    assert injected["error"]["code"] == "INVALID_REQUEST"
+    typed = tools.call("phone_group_act", {
+        "device_ids": ["phone-a"], "tool": "phone.type", "params": {"value": "x"}, "goal": "type",
+    })
+    assert typed["error"]["code"] == "INVALID_REQUEST"

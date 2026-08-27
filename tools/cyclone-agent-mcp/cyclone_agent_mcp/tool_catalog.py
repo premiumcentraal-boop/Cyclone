@@ -21,6 +21,7 @@ TOOL_CONTRACTS = (
     ToolContract("phone_current_page", True, True),
     ToolContract("phone_page_history", True, True),
     ToolContract("phone_act", False, True),
+    ToolContract("phone_group_act", False, False),
     ToolContract("phone_debug_bundle", True, True),
     ToolContract("phone_teach_start", False, True),
     ToolContract("phone_teach_status", True, True),
@@ -48,6 +49,19 @@ ALLOWED_ACTIONS = frozenset(
         "phone.swipe",
         "phone.scroll",
         "phone.type",
+        "phone.back",
+        "phone.home",
+        "phone.open_app",
+        "phone.wait_for",
+    }
+)
+
+ALLOWED_GROUP_ACTIONS = frozenset(
+    {
+        "phone.click",
+        "phone.long_press",
+        "phone.swipe",
+        "phone.scroll",
         "phone.back",
         "phone.home",
         "phone.open_app",

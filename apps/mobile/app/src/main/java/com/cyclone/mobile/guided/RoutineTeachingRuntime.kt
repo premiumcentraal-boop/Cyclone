@@ -36,6 +36,12 @@ data class RoutineTeachingStep(
     val optimizedDurationMs: Long? = null,
     val beforeFingerprint: String? = null,
     val afterFingerprint: String? = null,
+    val expectedResult: String? = null,
+    val verifier: String? = null,
+    val actionSucceeded: Boolean? = null,
+    val verificationSucceeded: Boolean? = null,
+    val fallbackPathUsed: String? = null,
+    val confidence: Double? = null,
     val screenshotPath: String? = null,
     val beforeScreenshotPath: String? = null,
     val afterScreenshotPath: String? = null,
@@ -62,6 +68,12 @@ data class RoutineTeachingStep(
         .put("optimizedDurationMs", optimizedDurationMs ?: JSONObject.NULL)
         .put("beforeFingerprint", beforeFingerprint ?: JSONObject.NULL)
         .put("afterFingerprint", afterFingerprint ?: JSONObject.NULL)
+        .put("expectedResult", expectedResult ?: JSONObject.NULL)
+        .put("verifier", verifier ?: JSONObject.NULL)
+        .put("actionSucceeded", actionSucceeded ?: JSONObject.NULL)
+        .put("verificationSucceeded", verificationSucceeded ?: JSONObject.NULL)
+        .put("fallbackPathUsed", fallbackPathUsed ?: JSONObject.NULL)
+        .put("confidence", confidence ?: JSONObject.NULL)
         .put("screenshotPath", screenshotPath ?: JSONObject.NULL)
         .put("beforeScreenshotPath", beforeScreenshotPath ?: JSONObject.NULL)
         .put("afterScreenshotPath", afterScreenshotPath ?: JSONObject.NULL)
@@ -91,6 +103,12 @@ data class RoutineTeachingStep(
             optimizedDurationMs = j.optLong("optimizedDurationMs", -1L).takeIf { it >= 0 },
             beforeFingerprint = j.optString("beforeFingerprint").takeIf { it.isNotBlank() },
             afterFingerprint = j.optString("afterFingerprint").takeIf { it.isNotBlank() },
+            expectedResult = j.optString("expectedResult").takeIf { it.isNotBlank() },
+            verifier = j.optString("verifier").takeIf { it.isNotBlank() },
+            actionSucceeded = j.optBoolean("actionSucceeded").takeIf { j.has("actionSucceeded") && !j.isNull("actionSucceeded") },
+            verificationSucceeded = j.optBoolean("verificationSucceeded").takeIf { j.has("verificationSucceeded") && !j.isNull("verificationSucceeded") },
+            fallbackPathUsed = j.optString("fallbackPathUsed").takeIf { it.isNotBlank() },
+            confidence = j.optDouble("confidence", Double.NaN).takeIf { it.isFinite() }?.coerceIn(0.0, 1.0),
             screenshotPath = j.optString("screenshotPath").takeIf { it.isNotBlank() },
             beforeScreenshotPath = j.optString("beforeScreenshotPath").takeIf { it.isNotBlank() },
             afterScreenshotPath = j.optString("afterScreenshotPath").takeIf { it.isNotBlank() },
@@ -234,6 +252,11 @@ object RoutineTeachingRuntime {
             semanticSignal = optimized.signal,
             replayStrategy = optimized.strategy,
             optimizedDurationMs = optimized.optimizedDurationMs,
+            expectedResult = "A fresh semantic after-state consistent with the demonstrated action",
+            verifier = "semantic_after_state",
+            actionSucceeded = true,
+            fallbackPathUsed = optimized.strategy.takeUnless { it == "OBSERVE" },
+            confidence = 0.62,
         )
         append(step, captureCurrent = true)
     }
@@ -260,6 +283,10 @@ object RoutineTeachingRuntime {
             pageKey = pageKey,
             replayStrategy = "PAGE_CONTEXT",
             afterFingerprint = snapshot.fingerprint,
+            expectedResult = "Semantic page remains observable",
+            verifier = "page_fingerprint",
+            verificationSucceeded = true,
+            confidence = 0.9,
             uiSnapshotPath = uiFile.absolutePath,
         )
         append(step, captureCurrent = true)
@@ -297,6 +324,12 @@ object RoutineTeachingRuntime {
             optimizedDurationMs = optimized.optimizedDurationMs,
             beforeFingerprint = evidence.beforeFingerprint,
             afterFingerprint = evidence.afterFingerprint,
+            expectedResult = "Observed semantic state after the guided ${evidence.kind.name.lowercase()} action",
+            verifier = if (evidence.afterFingerprint != null) "page_fingerprint" else "action_result",
+            actionSucceeded = true,
+            verificationSucceeded = evidence.afterFingerprint != null,
+            fallbackPathUsed = optimized.strategy.takeUnless { it == "OBSERVE" },
+            confidence = if (evidence.afterFingerprint != null) 0.88 else 0.58,
             beforeScreenshotPath = evidence.beforeScreenshot,
             afterScreenshotPath = evidence.afterScreenshot,
             beforeUiPath = evidence.beforeUi,
@@ -308,7 +341,7 @@ object RoutineTeachingRuntime {
     @Synchronized
     fun updateNote(sessionId: String, stepId: String, note: String): RoutineTeachingSession? {
         val session = load(sessionId) ?: return null
-        val clean = note.trim().take(2_000)
+        val clean = redactTeachingText(note).trim().take(2_000)
         val updated = session.copy(steps = session.steps.map { if (it.id == stepId) it.copy(note = clean) else it })
         save(updated)
         writeReport(updated)
@@ -337,7 +370,7 @@ object RoutineTeachingRuntime {
             pathsLearned = pathsLearned,
             copiedAutomationId = copiedAutomationId,
             optimizedAutomationId = optimizedAutomationId,
-            aiAnalysis = aiAnalysis,
+            aiAnalysis = redactTeachingText(aiAnalysis).take(6_000),
         )
         save(done)
         writeReport(done)
@@ -349,7 +382,7 @@ object RoutineTeachingRuntime {
     @Synchronized
     fun saveAiAnalysis(sessionId: String, analysis: String): RoutineTeachingSession? {
         val session = load(sessionId) ?: return null
-        val updated = session.copy(aiAnalysis = analysis.trim().take(12_000))
+        val updated = session.copy(aiAnalysis = redactTeachingText(analysis).trim().take(12_000))
         save(updated)
         writeReport(updated)
         return updated
@@ -441,6 +474,13 @@ object RoutineTeachingRuntime {
                         screenshotPath = copied ?: step.screenshotPath,
                         uiSnapshotPath = uiPath ?: step.uiSnapshotPath,
                         afterFingerprint = snapshot?.fingerprint ?: step.afterFingerprint,
+                        verificationSucceeded = snapshot?.fingerprint?.let { it != step.beforeFingerprint }
+                            ?: step.verificationSucceeded,
+                        confidence = when {
+                            snapshot == null -> step.confidence
+                            snapshot.fingerprint != step.beforeFingerprint -> maxOf(step.confidence ?: 0.0, 0.78)
+                            else -> maxOf(step.confidence ?: 0.0, 0.55)
+                        },
                     )
                 })
                 save(updated)
@@ -456,6 +496,13 @@ object RoutineTeachingRuntime {
         temp.copyTo(File(dir, "session.json"), overwrite = true)
         temp.delete()
     }
+
+    private fun redactTeachingText(value: String): String = value
+        .replace(
+            Regex("(?i)(password|passcode|passwd|otp|verification.?code|api.?key|token|secret|cvv|pin)\\s*[:=]\\s*[^,;\\s}]+"),
+        ) { "${it.groupValues[1]}=[REDACTED]" }
+        .replace(Regex("(?i)bearer\\s+[a-z0-9._~+/-]{8,}"), "Bearer [REDACTED]")
+        .replace(Regex("(?<!\\d)(?:\\d[ -]?){13,19}(?!\\d)"), "[PAYMENT_REDACTED]")
 
     private fun writeReport(session: RoutineTeachingSession) {
         val dir = sessionDir(session.id).also(File::mkdirs)

@@ -5,8 +5,8 @@ from typing import Any, Callable
 
 from .audit import SafeAuditLog
 from .gateway import GatewayClient, GatewayError
-from .safe import redact
-from .tool_catalog import ALLOWED_ACTIONS, TOOL_NAMES
+from .safe import redact, validate_typed_params
+from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
 
 
 class PhoneTools:
@@ -91,12 +91,48 @@ class PhoneTools:
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
+        validate_typed_params(params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true; Android policy remains authoritative")
         return self.gateway.action(tool, params, goal, self._device(args))
+
+    def phone_group_act(self, args: dict[str, Any]) -> Any:
+        raw_ids = args.get("device_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise ValueError("device_ids must be a non-empty array of explicit Cyclone device ids")
+        device_ids = [str(value).strip() for value in raw_ids]
+        if any(not value or len(value) > 160 for value in device_ids):
+            raise ValueError("device_ids contains an invalid device id")
+        if len(device_ids) > 32 or len(set(device_ids)) != len(device_ids):
+            raise ValueError("device_ids must contain 1..32 unique explicit targets")
+        tool = str(args.get("tool") or "")
+        if tool not in ALLOWED_GROUP_ACTIONS:
+            raise ValueError(f"Unsupported group phone action: {tool}")
+        params = args.get("params") or {}
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        validate_typed_params(params)
+        goal = str(args.get("goal") or "").strip()
+        if not goal:
+            raise ValueError("goal is required")
+        results: list[dict[str, Any]] = []
+        for device_id in device_ids:
+            try:
+                before = self.gateway.observe(device_id, include_screenshot=False, mode="compact")
+                outcome = self.gateway.action(tool, params, goal, device_id)
+                results.append({"device_id": device_id, "ok": _error_code(outcome) is None, "before": before, "outcome": outcome})
+            except GatewayError as exc:
+                results.append({"device_id": device_id, "ok": False, "error": exc.body or {"code": "GATEWAY_ERROR"}})
+        return {
+            "operation": "typed_group_action",
+            "tool": tool,
+            "selected_device_ids": device_ids,
+            "ok": all(item["ok"] for item in results),
+            "results": results,
+        }
 
     def phone_debug_bundle(self, args: dict[str, Any]) -> Any:
         return self.gateway.debug_bundle(

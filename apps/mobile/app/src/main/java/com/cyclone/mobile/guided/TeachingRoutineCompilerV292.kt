@@ -26,6 +26,8 @@ object TeachingRoutineCompilerV292 {
 
     fun compileAndSave(context: Context, session: RoutineTeachingSession): AutomationDefinition? {
         if (session.copiedAutomationId != null || session.optimizedAutomationId != null) return null
+        val quality = TeachingWorkflowQuality.evaluate(session)
+        if (quality.gate == WorkflowCompileGate.REJECTED) return null
         AutomationRuntime.initialize(context)
         val gestures = TeachingGestureEvidenceV292.list(context, session.id)
         val merged = buildList<Evidence> {
@@ -62,10 +64,13 @@ object TeachingRoutineCompilerV292 {
 
         val marker = "[Follow Me session ${session.id}]"
         val existing = AutomationRuntime.store.listAutomations().firstOrNull { marker in it.description }
+        val qualitySummary = "Quality ${quality.scorePercent}/100 · ${quality.gate.name}. " +
+            if (quality.repairs.isEmpty()) "Semantic selectors and after-state evidence are present."
+            else "Repair before enabling: ${quality.repairs.take(3).joinToString("; ")}."
         val automation = AutomationDefinition(
             id = existing?.id ?: java.util.UUID.randomUUID().toString(),
             name = existing?.name ?: "Learned · ${session.name.removePrefix("Teach ").ifBlank { "Phone routine" }}",
-            description = "$marker Consolidated locally from ${steps.size} demonstrated action${if (steps.size == 1) "" else "s"}. Review before enabling. Cyclone will request AI recovery only if a learned step no longer matches the live UI.",
+            description = "$marker Consolidated locally from ${steps.size} demonstrated action${if (steps.size == 1) "" else "s"}. $qualitySummary Review before enabling. Cyclone will request AI recovery only if a learned step no longer matches the live UI.",
             enabled = false,
             version = (existing?.version ?: 0) + 1,
             trigger = TriggerDefinition(TriggerType.MANUAL),
@@ -138,7 +143,8 @@ object TeachingRoutineCompilerV292 {
     }
 
     private fun selectorFromJson(raw: String): Selector {
-        val json = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
+        val repaired = TeachingWorkflowQuality.repairSelector(raw) ?: raw
+        val json = runCatching { JSONObject(repaired) }.getOrElse { JSONObject() }
         return Selector(
             resourceId = json.optString("resourceId").takeIf(String::isNotBlank),
             text = json.optString("text").takeIf(String::isNotBlank),

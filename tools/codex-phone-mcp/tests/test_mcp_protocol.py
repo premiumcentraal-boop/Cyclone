@@ -41,6 +41,8 @@ class McpProtocolTests(unittest.TestCase):
         self.assertIn("device_id", tools["phone_observe"]["inputSchema"]["properties"])
         self.assertIn("device_id", tools["phone_act"]["inputSchema"]["properties"])
         self.assertIn("device_id", tools["phone_debug_bundle"]["inputSchema"]["properties"])
+        self.assertIn("device_ids", tools["phone_group_act"]["inputSchema"]["properties"])
+        self.assertNotIn("phone.type", tools["phone_group_act"]["inputSchema"]["properties"]["tool"]["enum"])
 
     def test_unknown_tool_rejected(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "root_shell", "arguments": {}}})
