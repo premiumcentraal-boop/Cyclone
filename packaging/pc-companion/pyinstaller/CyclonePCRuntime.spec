@@ -2,11 +2,17 @@ from pathlib import Path
 
 repo = Path(SPECPATH).resolve().parents[2]
 entrypoints = repo / "scripts" / "pc-companion" / "entrypoints"
+scrcpy = repo / "apps" / "device-gateway" / "third_party" / "scrcpy"
 a = Analysis(
     [str(entrypoints / "pc_runtime.py")],
     pathex=[str(repo / "apps" / "device-gateway"), str(entrypoints)],
     binaries=[],
-    datas=[],
+    datas=[
+        (str(scrcpy / "scrcpy-server-v4.0"), "third_party/scrcpy"),
+        (str(scrcpy / "scrcpy-v4.0.json"), "third_party/scrcpy"),
+        (str(scrcpy / "LICENSE"), "third_party/scrcpy"),
+        (str(scrcpy / "NOTICE.md"), "third_party/scrcpy"),
+    ],
     hiddenimports=["secure_gateway_token"],
     hookspath=[],
     hooksconfig={},

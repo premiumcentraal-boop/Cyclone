@@ -20,7 +20,6 @@ from .protocol import (
     SessionEvent,
 )
 
-_REMOTE_SERVER = "/data/local/tmp/cyclone-scrcpy-server-v4.0.jar"
 _CONNECT_TIMEOUT_S = 3.0
 _RECONNECT_BACKOFF_S = (0.25, 0.5, 1.0, 2.0)
 _MAX_EVENT_QUEUE = 12
@@ -89,13 +88,11 @@ class ScrcpyMediaSession:
         device: Any,
         profile: MediaProfile,
         artifact: ScrcpyArtifact,
-        ensure_artifact_on_device: Callable[[Any, ScrcpyArtifact], None],
         diagnostic: Callable[[str, dict[str, Any]], None] | None = None,
     ):
         self.device = device
         self.profile = profile
         self.artifact = artifact
-        self.ensure_artifact_on_device = ensure_artifact_on_device
         self.diagnostic = diagnostic
         self.session_id = secrets.token_hex(12)
         self._lock = threading.RLock()
@@ -268,10 +265,10 @@ class ScrcpyMediaSession:
 
     def _run_once(self) -> None:
         self.artifact.verify()
-        self.ensure_artifact_on_device(self.device, self.artifact)
         scid = secrets.randbelow(0x7FFFFFFF)
         port = _reserve_port()
         socket_name = f"scrcpy_{scid:08x}"
+        remote_server = f"/data/local/tmp/cyclone-scrcpy-server-{scid:08x}.jar"
         adb = self.device.adb
         process: subprocess.Popen | None = None
         stream_socket: socket.socket | None = None
@@ -279,10 +276,13 @@ class ScrcpyMediaSession:
             self._active_port = port
             self._active_scid = scid
         try:
+            # scrcpy deletes its server JAR during cleanup. A unique path prevents one
+            # session from removing the JAR another concurrent/restarting session needs.
+            adb.run(["push", str(self.artifact.path), remote_server], timeout=20)
             adb.run(["forward", f"tcp:{port}", f"localabstract:{socket_name}"], timeout=5)
             args = [
                 "shell",
-                f"CLASSPATH={_REMOTE_SERVER}",
+                f"CLASSPATH={remote_server}",
                 "app_process",
                 "/",
                 "com.genymobile.scrcpy.Server",
@@ -298,7 +298,10 @@ class ScrcpyMediaSession:
                 f"max_fps={self.profile.target_fps}",
                 "tunnel_forward=true",
                 "send_device_meta=false",
-                "send_dummy_byte=false",
+                # The forward-tunnel dummy byte proves that ADB reached the Android
+                # localabstract listener. A local TCP connect may succeed before that listener
+                # exists, which otherwise looks like an immediate empty video stream.
+                "send_dummy_byte=true",
                 "send_stream_meta=true",
                 "send_frame_meta=true",
                 "cleanup=true",
@@ -326,6 +329,10 @@ class ScrcpyMediaSession:
                 adb.remove_forward(port)
             except Exception:
                 pass
+            try:
+                adb.run(["shell", "rm", "-f", remote_server], timeout=3)
+            except Exception:
+                pass
             with self._lock:
                 self._active_port = None
                 self._active_scid = None
@@ -337,8 +344,17 @@ class ScrcpyMediaSession:
             if process.poll() is not None:
                 raise RuntimeError(f"scrcpy server exited before socket connection ({process.returncode})")
             try:
-                return socket.create_connection(("127.0.0.1", port), timeout=0.3)
-            except OSError as exc:
+                candidate = socket.create_connection(("127.0.0.1", port), timeout=0.3)
+                try:
+                    candidate.settimeout(0.3)
+                    dummy = candidate.recv(1)
+                    if dummy != b"\x00":
+                        raise RuntimeError("scrcpy forward tunnel did not return its ready byte")
+                    return candidate
+                except Exception:
+                    candidate.close()
+                    raise
+            except (OSError, RuntimeError) as exc:
                 last_error = exc
                 time.sleep(0.05)
         raise RuntimeError(f"scrcpy video socket did not open: {_safe_text(last_error or RuntimeError('timeout'))}")
@@ -358,7 +374,32 @@ class ScrcpyMediaSession:
             except socket.timeout:
                 continue
             if not chunk:
-                raise RuntimeError("scrcpy video socket closed")
+                returncode = process.poll()
+                if returncode is None:
+                    try:
+                        returncode = process.wait(timeout=0.2)
+                    except subprocess.TimeoutExpired:
+                        process.terminate()
+                        try:
+                            returncode = process.wait(timeout=1.0)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            returncode = process.wait(timeout=1.0)
+                stderr = ""
+                stdout = ""
+                if returncode is not None and process.stderr is not None:
+                    try:
+                        stderr = process.stderr.read(4096).decode("utf-8", "replace").strip()
+                    except Exception:
+                        stderr = ""
+                if returncode is not None and process.stdout is not None:
+                    try:
+                        stdout = process.stdout.read(4096).decode("utf-8", "replace").strip()
+                    except Exception:
+                        stdout = ""
+                server_output = stderr or stdout
+                detail = f"; server={server_output[:320]}" if server_output else ""
+                raise RuntimeError(f"scrcpy video socket closed (exit={returncode}){detail}")
             for event in parser.feed(chunk):
                 if isinstance(event, CodecEvent):
                     if event.codec_id != SCRCPY_CODEC_H264:
@@ -424,7 +465,6 @@ class ScrcpyMediaBackend:
         self.diagnostic = diagnostic
         self._lock = threading.RLock()
         self._sessions: dict[tuple[str, str], ScrcpyMediaSession] = {}
-        self._pushed: set[str] = set()
 
     def probe(self, device: Any) -> dict[str, Any]:
         adb_state = getattr(getattr(device, "adb_device", None), "state", "device")
@@ -457,7 +497,6 @@ class ScrcpyMediaBackend:
                 device,
                 spec,
                 artifact,
-                self._ensure_artifact_on_device,
                 self.diagnostic,
             )
             self._sessions[key] = session
@@ -503,13 +542,3 @@ class ScrcpyMediaBackend:
             width = int.from_bytes(data[16:20], "big")
             height = int.from_bytes(data[20:24], "big")
         return SafeSnapshot(data, "image/png", width, height, _now_ms())
-
-    def _ensure_artifact_on_device(self, device: Any, artifact: ScrcpyArtifact) -> None:
-        serial = str(getattr(device, "serial", getattr(device.adb, "serial", "unknown")))
-        with self._lock:
-            if serial in self._pushed:
-                return
-        artifact.verify()
-        device.adb.run(["push", str(artifact.path), _REMOTE_SERVER], timeout=20)
-        with self._lock:
-            self._pushed.add(serial)

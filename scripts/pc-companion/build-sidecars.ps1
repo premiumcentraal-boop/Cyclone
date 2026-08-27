@@ -5,12 +5,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $Lock = Get-Content (Join-Path $Repo 'packaging\pc-companion\sidecar-build.lock.json') -Raw | ConvertFrom-Json
-python -m pip install --disable-pip-version-check "pyinstaller==$($Lock.pyinstaller)"
-python -m pip install --disable-pip-version-check (Join-Path $Repo 'apps\device-gateway') (Join-Path $Repo 'tools\cyclone-agent-mcp')
+$BuildVenv = Join-Path $Repo 'build\pc-sidecar-venv'
+$BuildPython = Join-Path $BuildVenv 'Scripts\python.exe'
+if (-not (Test-Path $BuildPython)) {
+    python -m venv $BuildVenv
+}
+
+& $BuildPython (Join-Path $Repo 'scripts\pc-companion\prepare-scrcpy-server.py') --repo $Repo
+& $BuildPython -m pip install --disable-pip-version-check "pyinstaller==$($Lock.pyinstaller)"
+& $BuildPython -m pip install --disable-pip-version-check (Join-Path $Repo 'apps\device-gateway') (Join-Path $Repo 'tools\cyclone-agent-mcp')
 $Dist = Join-Path $Repo 'dist\pc-companion'
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
-python -m PyInstaller --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\agent') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CycloneAgentMCP.spec')
-python -m PyInstaller --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\runtime') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CyclonePCRuntime.spec')
+& $BuildPython -m PyInstaller --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\agent') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CycloneAgentMCP.spec')
+& $BuildPython -m PyInstaller --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\runtime') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CyclonePCRuntime.spec')
 
 $TauriBinaries = Join-Path $Repo 'apps\pc-companion\src-tauri\binaries'
 New-Item -ItemType Directory -Force -Path $TauriBinaries | Out-Null

@@ -1,4 +1,4 @@
-name: Cyclone Desktop V1 CI
+name: Cyclone 3.3 Combined Release CI
 
 # Dedicated release/beta branches publish a GitHub prerelease after both build gates pass.
 # Mobile accessibility/bridge guards are part of the paired desktop+phone beta gate.
@@ -57,7 +57,7 @@ jobs:
             -f target_url="$RUN_URL"
 
   windows-companion:
-    name: Windows PC Companion
+    name: Cyclone 3.3 Windows PC Companion
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +121,7 @@ jobs:
           retention-days: 30
 
   mobile-companion:
-    name: Matching Cyclone Mobile V3.1
+    name: Matching Cyclone 3.3 Mobile
     uses: ./.github/workflows/_mobile-build.yml
 
   publish-beta:
@@ -158,8 +158,13 @@ jobs:
           print(match.group(1))
           PY
           )"
-          RELEASE_TAG="v${MOBILE_VERSION}-pc-${PC_VERSION}"
-          RELEASE_TITLE="Cyclone Mobile ${MOBILE_VERSION} + PC Companion ${PC_VERSION}"
+          if [[ "$PC_VERSION" == "$MOBILE_VERSION" ]]; then
+            RELEASE_TAG="v${MOBILE_VERSION}"
+            RELEASE_TITLE="Cyclone ${MOBILE_VERSION}"
+          else
+            RELEASE_TAG="v${MOBILE_VERSION}-pc-${PC_VERSION}"
+            RELEASE_TITLE="Cyclone Mobile ${MOBILE_VERSION} + PC Companion ${PC_VERSION}"
+          fi
           echo "pc_version=$PC_VERSION" >> "$GITHUB_OUTPUT"
           echo "mobile_version=$MOBILE_VERSION" >> "$GITHUB_OUTPUT"
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
@@ -194,30 +199,28 @@ jobs:
           MOBILE_VERSION: ${{ steps.versions.outputs.mobile_version }}
         run: |
           cat > release-notes.md <<EOF
-          # Cyclone Mobile ${MOBILE_VERSION} + PC Companion ${PC_VERSION}
+          # Cyclone ${MOBILE_VERSION}
 
-          This is an automated Cyclone beta prerelease produced only after the matching Windows and Android build gates passed for the same source revision.
+          This combined beta contains Cyclone Mobile and Cyclone PC Companion built and verified from the same source revision.
 
           ## Downloads
           - **Windows:** Cyclone PC Companion ${PC_VERSION} installer.
           - **Android:** Cyclone Mobile ${MOBILE_VERSION} APK.
-          - Checksums, source SHA/provenance, and third-party notices are attached where applicable.
+          - Checksums, exact source SHA, build provenance, and third-party notices are attached.
 
-          ## V3.1 Beta pairing and mobile overhaul
-          - Live-session recovery: opening a paired phone safely wakes the display (never unlocks it), verifies the authenticated phone session, and starts capture without waiting for the fallback scanner.
-          - Mobile recognizes the Companion's bounded authenticated heartbeat, so **USB / PC session** and **PC Gateway health** stay truthful between short bridge requests.
-          - Real-device focus streaming now uses the JPEG/PNG codec implemented by the shipped renderer. The previous Android H.264 producer/UI codec mismatch that only appeared on physical phones is removed.
-          - The live WebSocket now starts independently from wake verification, enforces handshake and first-frame deadlines, and surfaces a stable connection code instead of remaining indefinitely on **Reconnecting**.
-          - **Retry live view** performs a clean user-requested recovery. **Save debug bundle** creates one sendable zip correlating client, server, frame producer, authenticated bridge, content-free capture probe, and bounded Android process evidence.
-          - Android's lock screen remains authoritative and must be unlocked by the user before protected content can be shown.
-          - PC and Android do not compare independent wall clocks. Both enforce a bounded relative challenge lifetime, preventing a valid phone challenge from being rejected before code entry.
-          - The **Pair phone** label, button, Enter key, expiry countdown, and submit handler share one canonical state. A valid four-letter code visibly becomes **Ready to pair** and cannot be silently ignored.
-          - The Companion identifies its installed version in the sidebar, preventing an older false-ready dialog from being mistaken for this build.
-          - One-scan **QR pairing** is generated from the same live challenge. In Mobile, open **Settings → PC Gateway & QR pairing → Scan PC QR**; manual pairing remains available.
-          - Cyclone Mobile ships the calm, pastel V3.1 experience: a simpler Home, routine library, guided trigger/action builder, AI coach, Brain, and Settings surfaces.
+          ## Cyclone 3.3 gateway overhaul
+          - The primary USB live view is now a pinned, checksum-verified scrcpy 4.0 H.264 stream instead of repeated screenshots.
+          - A real WebCodecs H.264 decoder renders the stream in PC Companion; screenshot capture is retained only as a bounded degraded fallback.
+          - The forward-tunnel readiness handshake is verified before decoding, fixing the physical Pixel 8 empty-socket/reconnect loop.
+          - Each media session uses an isolated scrcpy server path and ADB tunnel, preventing cleanup races across reconnects and multiple phones.
+          - Media, Android semantic context, actions, and trust report independent readiness states so one failed plane no longer disguises the others.
+          - Normal setup uses visible, device-bound **Allow this PC** trust backed by Android Keystore and Windows DPAPI. Four-letter pairing remains fallback-only.
+          - Codex receives sanitized semantic page context and typed actions through Cyclone's policy governor and canonical PhoneToolExecutor.
+          - Entered text, passwords, PINs, OTPs, credentials, and tokens remain excluded or redacted while safe field labels remain observable.
+          - Diagnostics now identify the last successful stage and first failed stage across discovery, media, bridge, trust, rendering, and action verification.
 
           ## Beta status
-          This is a test release. The PC Gateway remains loopback/USB-oriented and agent actions stay behind Cyclone's typed control and Android policy boundaries. No arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed to agents.
+          This is a beta, not a stable universal-OEM claim. The scrcpy media plane was exercised on a Pixel 8 running Android 16/API 36. The APK is debug-signed, so upgrading from a differently signed beta may require uninstalling the old Cyclone app first; uninstalling removes its local app data. Secure/DRM surfaces and Android's lock screen may remain blank by Android design. The gateway remains loopback/USB-oriented, and no arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed to agents.
           EOF
 
       - name: Create or replace GitHub prerelease

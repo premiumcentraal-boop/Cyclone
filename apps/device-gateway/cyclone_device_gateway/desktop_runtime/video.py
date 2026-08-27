@@ -262,7 +262,23 @@ class VideoStreamController:
     def _produce_scrcpy(self, profile: str, stop: threading.Event) -> None:
         media = self.media_backend.start(self.session, profile)
         events = media.subscribe()
-        init_sent = False
+        status = media.status()
+        self._broadcast(
+            profile,
+            StreamMessage(
+                "text",
+                self._init_json(
+                    profile,
+                    "video/avc",
+                    "scrcpy-v4.0",
+                    width=status.get("width") or getattr(self.session, "display_width", None),
+                    height=status.get("height") or getattr(self.session, "display_height", None),
+                    session_id=media.session_id,
+                ),
+            ),
+        )
+        init_sent = True
+        self._mark("server.stream.init", {"profile": profile, "source": "scrcpy-v4.0", "provisional": True})
         try:
             while not stop.is_set():
                 try:

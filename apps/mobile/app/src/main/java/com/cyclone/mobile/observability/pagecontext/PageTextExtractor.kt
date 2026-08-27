@@ -42,11 +42,16 @@ object PageTextExtractor {
             val rawText = node.optString("text").trim()
             val description = node.optString("contentDescription").trim()
             val editable = node.optBoolean("editable", false)
+            val safeDescription = description.takeIf { it.isNotBlank() && it != REDACTED }.orEmpty()
             val sensitive = ActionSafetyPolicy.looksSensitiveField(node)
             val text = when {
-                rawText == REDACTED || sensitive && editable -> ""
-                editable -> description.takeIf { it != REDACTED }.orEmpty()
-                else -> rawText.ifBlank { description.takeIf { it != REDACTED }.orEmpty() }
+                // Editable node text is user-entered state and is always discarded at the
+                // gateway boundary. Sensitive fields remain absent; ordinary editable fields
+                // keep only the Accessibility-provided label.
+                sensitive && editable -> ""
+                editable -> safeDescription
+                rawText == REDACTED || sensitive -> safeDescription
+                else -> rawText.ifBlank { safeDescription }
             }
             if (text.isBlank()) continue
             candidates += Line(text.take(240), node.optString("role"), top, left)

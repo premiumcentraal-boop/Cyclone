@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import time
 import unittest
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,12 +15,17 @@ from cyclone_device_gateway.desktop_runtime.models import (
     VIDEO_PROTOCOL_VERSION,
 )
 from cyclone_device_gateway.desktop_runtime.video import VideoFleetLimiter, VideoStreamController
+from cyclone_device_gateway.media.backend import ScrcpyMediaBackend
 
 _PNG_1X1 = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99"
     b"=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
 )
+
+
+def unavailable_media_backend() -> ScrcpyMediaBackend:
+    return ScrcpyMediaBackend(artifact_path=Path(__file__).with_name("missing-scrcpy-server"))
 
 
 class FakeStreamADB:
@@ -48,13 +54,18 @@ class FakeStreamSession:
         self.display_height = 2400
         self.credential = "Z" * 43
         self.adb = adb
+        self.adb_device = type("AdbDevice", (), {"state": "device"})()
         self.video = None
 
 
 class VideoStreamPipelineTests(unittest.TestCase):
     def test_capture_outage_emits_one_error_then_keepalives_and_keeps_subscription(self):
         adb = FakeStreamADB(fail_capture=True)
-        controller = VideoStreamController(FakeStreamSession(adb), VideoFleetLimiter())
+        controller = VideoStreamController(
+            FakeStreamSession(adb),
+            VideoFleetLimiter(),
+            media_backend=unavailable_media_backend(),
+        )
         q = controller.subscribe("focus")
         self.assertIn("stream.init", q.get(timeout=2).data)
         first = q.get(timeout=2)
@@ -103,7 +114,7 @@ class VideoStreamPipelineTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "CAPABILITY_UNAVAILABLE")
         self.assertTrue(ctx.exception.retryable)
 
-    def test_stream_endpoints_require_auth_profile_and_pairing(self):
+    def test_stream_endpoints_require_pc_auth_and_adb_but_not_ai_pairing(self):
         session = FakeStreamSession(FakeStreamADB())
         controller = VideoStreamController(session, VideoFleetLimiter())
         session.video = controller
@@ -128,7 +139,9 @@ class VideoStreamPipelineTests(unittest.TestCase):
         self.assertEqual(client.get("/v1/devices/unknown/stream/snapshot", headers=headers).status_code, 404)
         self.assertEqual(client.get(f"{base}/snapshot?profile=bogus", headers=headers).status_code, 400)
         session.credential = None
-        self.assertEqual(client.get(f"{base}/snapshot", headers=headers).status_code, 401)
+        unpaired_response = client.get(f"{base}/snapshot", headers=headers)
+        self.assertEqual(unpaired_response.status_code, 200)
+        self.assertTrue(unpaired_response.headers["content-type"].startswith("image/"))
         session.credential = "Z" * 43
 
         response = client.get(f"{base}/snapshot?profile=focus", headers=headers)

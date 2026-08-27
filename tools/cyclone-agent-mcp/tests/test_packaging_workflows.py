@@ -20,13 +20,15 @@ def test_sidecar_lock_is_exact_and_specs_exist():
     assert {x["name"] for x in lock["sidecars"]} == {"CyclonePCRuntime.exe", "CycloneAgentMCP.exe"}
     assert all((REPO / x["spec"]).is_file() for x in lock["sidecars"])
 
-def test_empty_third_party_lock_generates_deterministic_notice(tmp_path):
+def test_pinned_scrcpy_notice_is_deterministic_and_complete(tmp_path):
     script = load_script("generate-third-party-notices.py")
     data = script.load_lock(REPO / "packaging/pc-companion/third-party-binaries.lock.json")
     a = script.render(data)
     b = script.render(data)
     assert a == b
-    assert "No external binary payloads" in a
+    assert "scrcpy-server 4.0" in a
+    assert "84924bd564a1eb6089c872c7521f968058977f91f5ff02514a8c74aff3210f3a" in a
+    assert "Apache-2.0" in a
     assert "latest" not in a.lower()
 
 def test_invalid_unpinned_third_party_binary_is_rejected(tmp_path):

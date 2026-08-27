@@ -5,6 +5,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cyclone_device_gateway.media.artifact import (
     SCRCPY_COMMIT,
@@ -15,7 +16,7 @@ from cyclone_device_gateway.media.artifact import (
     ScrcpyArtifactError,
     metadata,
 )
-from cyclone_device_gateway.media.backend import MediaProfile, ScrcpyMediaBackend
+from cyclone_device_gateway.media.backend import MediaProfile, ScrcpyMediaBackend, ScrcpyMediaSession
 from cyclone_device_gateway.media.protocol import (
     CodecEvent,
     MediaPacket,
@@ -140,6 +141,118 @@ class ScrcpyBackendTests(unittest.TestCase):
         result = ScrcpyMediaBackend().latest_safe_snapshot(FakeDevice())
         self.assertEqual(result.codec, "image/png")
         self.assertEqual((result.width, result.height), (2, 3))
+
+    def test_each_session_uses_and_removes_its_own_remote_server_jar(self):
+        class FakeArtifact:
+            path = Path("scrcpy-server-v4.0")
+            version = "4.0"
+
+            def verify(self):
+                pass
+
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self):
+                self.returncode = -15
+
+            def wait(self, timeout=0):
+                return self.returncode
+
+            def kill(self):
+                self.returncode = -9
+
+        class FakeStream:
+            def settimeout(self, timeout):
+                self.timeout = timeout
+
+            def shutdown(self, how):
+                pass
+
+            def close(self):
+                pass
+
+        class FakeAdb:
+            def __init__(self):
+                self.runs = []
+                self.started = []
+
+            def run(self, args, timeout=0):
+                self.runs.append((tuple(args), timeout))
+
+            def start_process(self, args, stdout=None):
+                self.started.append(tuple(args))
+                return FakeProcess()
+
+            def remove_forward(self, port):
+                pass
+
+        class FakeDevice:
+            device_id = "dev_unique_server"
+            adb = FakeAdb()
+
+        session = ScrcpyMediaSession(FakeDevice(), MediaProfile.named("focus"), FakeArtifact())
+        session._connect = lambda port, process: FakeStream()
+        session._consume = lambda stream, parser, process: None
+
+        with patch("cyclone_device_gateway.media.backend.secrets.randbelow", side_effect=[1, 2]):
+            session._run_once()
+            session._run_once()
+
+        pushes = [args for args, _ in FakeDevice.adb.runs if args[0] == "push"]
+        removals = [args for args, _ in FakeDevice.adb.runs if args[:3] == ("shell", "rm", "-f")]
+        self.assertEqual(
+            [args[2] for args in pushes],
+            [
+                "/data/local/tmp/cyclone-scrcpy-server-00000001.jar",
+                "/data/local/tmp/cyclone-scrcpy-server-00000002.jar",
+            ],
+        )
+        self.assertEqual([args[3] for args in removals], [args[2] for args in pushes])
+        self.assertIn(f"CLASSPATH={pushes[0][2]}", FakeDevice.adb.started[0])
+        self.assertIn(f"CLASSPATH={pushes[1][2]}", FakeDevice.adb.started[1])
+        self.assertIn("send_dummy_byte=true", FakeDevice.adb.started[0])
+
+    def test_forward_tunnel_retries_until_android_ready_byte_arrives(self):
+        class FakeArtifact:
+            path = Path("scrcpy-server-v4.0")
+            version = "4.0"
+
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return None
+
+        class FakeSocket:
+            def __init__(self, ready):
+                self.ready = ready
+                self.closed = False
+
+            def settimeout(self, timeout):
+                self.timeout = timeout
+
+            def recv(self, size):
+                return b"\x00" if self.ready else b""
+
+            def close(self):
+                self.closed = True
+
+        first = FakeSocket(False)
+        ready = FakeSocket(True)
+        session = ScrcpyMediaSession(object(), MediaProfile.named("focus"), FakeArtifact())
+        with patch(
+            "cyclone_device_gateway.media.backend.socket.create_connection",
+            side_effect=[first, ready],
+        ):
+            connected = session._connect(12345, FakeProcess())
+
+        self.assertIs(connected, ready)
+        self.assertTrue(first.closed)
+        self.assertFalse(ready.closed)
 
     def test_controller_reframes_scrcpy_config_and_keyframe_without_image_conversion(self):
         import queue

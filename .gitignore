@@ -17,6 +17,8 @@ coverage/
 .pytest_cache/
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
 
 # Local vault contents (the templates are versioned; personal working knowledge is not)
 vault/CycloneVault/
@@ -30,12 +32,14 @@ dist/
 # Tauri / Rust build artifacts
 target/
 apps/desktop/src-tauri/target/
+apps/pc-companion/src-tauri/binaries/
 
 # IDE / OS
 .vscode/
 .idea/
 .gradle/
 apps/mobile/**/build/
+apps/device-gateway/third_party/scrcpy/scrcpy-server-v4.0
 .DS_Store
 Thumbs.db
 

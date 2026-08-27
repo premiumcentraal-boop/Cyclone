@@ -406,7 +406,11 @@ export class WebCodecsH264Renderer implements VideoRenderer {
   private async drawImagePacket(buffer: ArrayBuffer): Promise<void> {
     const packet = parseCyclonePacket(buffer);
     const generation = ++this.imageDrawGeneration;
-    const bitmap = await createImageBitmap(new Blob([packet.payload], { type: this.codec }));
+    // BlobPart requires an ArrayBuffer-backed view. Copy the bounded fallback payload so
+    // TypeScript cannot widen its backing store to SharedArrayBuffer.
+    const imageBytes = new Uint8Array(packet.payload.byteLength);
+    imageBytes.set(packet.payload);
+    const bitmap = await createImageBitmap(new Blob([imageBytes.buffer], { type: this.codec }));
     try {
       if (this.stopped || generation !== this.imageDrawGeneration) return;
       const canvas = this.input.target.canvas;

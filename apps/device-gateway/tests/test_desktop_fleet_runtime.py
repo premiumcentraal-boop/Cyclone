@@ -17,6 +17,11 @@ from cyclone_device_gateway.desktop_runtime.models import DesktopRuntimeError, D
 from cyclone_device_gateway.desktop_runtime.pairing import PairingCoordinator
 from cyclone_device_gateway.desktop_runtime.video import VideoFleetLimiter, VideoStreamController
 from cyclone_device_gateway.cyclone_bridge.protocol import ALLOWED_OPS
+from cyclone_device_gateway.media.backend import ScrcpyMediaBackend
+
+
+def unavailable_media_backend() -> ScrcpyMediaBackend:
+    return ScrcpyMediaBackend(artifact_path=Path(__file__).with_name("missing-scrcpy-server"))
 
 
 class Inventory:
@@ -456,7 +461,7 @@ def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses
     fleet, session, _ = paired_session_for_services()
     session.screen_awake = False
     limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
-    controller = VideoStreamController(session, limiter)
+    controller = VideoStreamController(session, limiter, media_backend=unavailable_media_backend())
     assert controller.subscriber_count() == 0
     assert limiter.snapshot()["sources"] == 0
     q = controller.subscribe("thumbnail")
@@ -469,7 +474,7 @@ def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses
     controller.stop_all()
 
 
-def test_focus_stream_uses_the_image_codec_supported_by_the_shipped_renderer():
+def test_focus_stream_uses_bounded_image_fallback_when_scrcpy_is_unavailable():
     fleet, session, _ = paired_session_for_services()
     session.screen_awake = True
     session.adb.exec_out = lambda *args, **kwargs: (
@@ -477,7 +482,7 @@ def test_focus_stream_uses_the_image_codec_supported_by_the_shipped_renderer():
         b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDAT\x08\xd7c\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99"
         b"=\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
     )
-    controller = VideoStreamController(session, VideoFleetLimiter())
+    controller = VideoStreamController(session, VideoFleetLimiter(), media_backend=unavailable_media_backend())
 
     q = controller.subscribe("focus")
     init = q.get(timeout=2)
@@ -485,7 +490,7 @@ def test_focus_stream_uses_the_image_codec_supported_by_the_shipped_renderer():
 
     assert init.kind == "text"
     assert '"codec":"image/' in init.data
-    assert '"backend":"adb-screenshot"' in init.data
+    assert '"backend":"adb-screenshot-degraded"' in init.data
     assert frame.kind == "binary"
     assert session.adb.process_calls == []
     controller.unsubscribe("focus", q)
@@ -501,7 +506,12 @@ def test_video_reports_bounded_capture_failure_instead_of_silent_infinite_wait()
 
     session.adb.exec_out = fail_capture
     events = []
-    controller = VideoStreamController(session, VideoFleetLimiter(), diagnostic=lambda stage, details: events.append((stage, details)))
+    controller = VideoStreamController(
+        session,
+        VideoFleetLimiter(),
+        diagnostic=lambda stage, details: events.append((stage, details)),
+        media_backend=unavailable_media_backend(),
+    )
     q = controller.subscribe("thumbnail")
     assert "stream.init" in q.get(timeout=2).data
     failure = q.get(timeout=3)
@@ -539,6 +549,13 @@ def test_frozen_http_and_websocket_routes_are_authenticated(tmp_path):
     install_fake_bridges(fleet)
     settings = Settings("pc-secret", None, "adb", tmp_path)
     runtime = DesktopRuntime(settings, fleet=fleet)
+    for public in fleet.list_public():
+        session = fleet.get(public["deviceId"])
+        session.video = VideoStreamController(
+            session,
+            runtime.video_limiter,
+            media_backend=unavailable_media_backend(),
+        )
     app = create_desktop_app(settings, runtime)
     with TestClient(app) as client:
         assert client.get("/v1/fleet").status_code == 401
