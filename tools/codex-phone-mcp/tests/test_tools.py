@@ -116,6 +116,31 @@ class ToolTests(unittest.TestCase):
         content = self.tools.call("phone_act", {"tool": "adb.shell", "params": {}, "goal": "x"})
         self.assertIn("Unsupported phone action", content[0]["text"])
 
+    def test_command_shaped_nested_params_are_rejected(self):
+        content = self.tools.call("phone_act", {
+            "device_id": "dev_a",
+            "tool": "phone.click",
+            "params": {"selector": {"text": "Apps"}, "command": "whoami"},
+            "goal": "Open Apps",
+        })
+        self.assertIn("not a permitted typed phone parameter", content[0]["text"])
+
+    def test_group_action_is_explicit_observe_act_verify_and_disallows_typing(self):
+        payload = json.loads(self.tools.call("phone_group_act", {
+            "device_ids": ["dev_a"],
+            "tool": "phone.home",
+            "params": {},
+            "goal": "Return selected test phones home",
+        })[0]["text"])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(["dev_a"], payload["selected_device_ids"])
+        self.assertEqual("verified", payload["results"][0]["outcome"]["verification"]["status"])
+        rejected = self.tools.call("phone_group_act", {
+            "device_ids": ["dev_a"], "tool": "phone.type", "params": {"value": "secret"}, "goal": "type",
+        })[0]["text"]
+        self.assertIn("Unsupported group phone action", rejected)
+        self.assertNotIn("secret", rejected)
+
     def test_type_requires_authorization_and_redacts_report(self):
         content = self.tools.call("phone_act", {"tool": "phone.type", "params": {"text": "secret"}, "goal": "fill"})
         self.assertIn("user_authorized", content[0]["text"])

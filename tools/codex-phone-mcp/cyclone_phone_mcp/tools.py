@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -23,6 +24,10 @@ ALLOWED_ACTIONS = {
     "phone.open_app",
     "phone.wait_for",
 }
+ALLOWED_GROUP_ACTIONS = ALLOWED_ACTIONS - {"phone.type"}
+FORBIDDEN_OPERATION_KEY = re.compile(
+    r"(?i)^(?:cmd|command|shell|adb|powershell|subprocess|executable|script|root|su|docker|host_command)$"
+)
 
 FAILURE_CLASSES = {
     "ACCESSIBILITY_PERCEPTION",
@@ -38,6 +43,20 @@ def _result_failed(result: Any) -> bool:
 
 def _device_id(args: dict[str, Any]) -> str:
     return str(args.get("device_id") or "").strip()
+
+
+def _validate_typed_params(value: Any, path: str = "params") -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            if FORBIDDEN_OPERATION_KEY.fullmatch(key_text):
+                raise ValueError(f"{path}.{key_text} is not a permitted typed phone parameter")
+            _validate_typed_params(item, f"{path}.{key_text}")
+    elif isinstance(value, list):
+        if len(value) > 100:
+            raise ValueError(f"{path} exceeds the bounded list size")
+        for index, item in enumerate(value):
+            _validate_typed_params(item, f"{path}[{index}]")
 
 
 class PhoneTools:
@@ -166,6 +185,7 @@ class PhoneTools:
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
+        _validate_typed_params(params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
@@ -190,6 +210,48 @@ class PhoneTools:
                 "action": result,
             }
         return result
+
+    def phone_group_act(self, args: dict[str, Any]) -> Any:
+        raw_ids = args.get("device_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise ValueError("device_ids must be a non-empty array of explicit Cyclone device ids")
+        device_ids = [str(value).strip() for value in raw_ids]
+        if any(not value or len(value) > 160 for value in device_ids):
+            raise ValueError("device_ids contains an invalid device id")
+        if len(device_ids) > 32 or len(set(device_ids)) != len(device_ids):
+            raise ValueError("device_ids must contain 1..32 unique explicit targets")
+        tool = str(args.get("tool") or "")
+        if tool not in ALLOWED_GROUP_ACTIONS:
+            raise ValueError(f"Unsupported group phone action: {tool}")
+        params = args.get("params") or {}
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        _validate_typed_params(params)
+        goal = str(args.get("goal") or "").strip()
+        if not goal:
+            raise ValueError("goal is required")
+        results: list[dict[str, Any]] = []
+        for device_id in device_ids:
+            try:
+                before = self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
+                outcome = redact(self.gateway.device_action(device_id, tool, params, goal))
+                failure = classify_failure(outcome)
+                results.append({
+                    "device_id": device_id,
+                    "ok": failure is None,
+                    "before": compact_observation(before),
+                    "outcome": outcome,
+                    "failure": None if failure is None else {"code": failure.code, "layer": failure.layer},
+                })
+            except GatewayError as exc:
+                results.append({"device_id": device_id, "ok": False, "error": redact(exc.body)})
+        return {
+            "operation": "typed_group_action",
+            "tool": tool,
+            "selected_device_ids": device_ids,
+            "ok": all(item["ok"] for item in results),
+            "results": results,
+        }
 
     def phone_debug_bundle(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)

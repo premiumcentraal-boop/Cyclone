@@ -71,6 +71,12 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             ?: return@withContext QuickAgentResult(false, "Cyclone could not read the current Android page. Enable Accessibility and try again.", 0, config.model.id)
 
         val traceId = AgentTraceRuntime.start(context, goal, config.model.id)
+        val reliability = AgentReliabilitySession(
+            AgentReliabilityConfig(maxTurns = (config.maxDecisions * 3).coerceIn(6, 60)),
+            sessionId = traceId,
+        )
+        reliability.start()
+        reliability.observe(state.page.pageKey)
         maybeStartOverlay(traceId)
         val skillSignatures = mutableListOf<String>()
         val successfulActions = mutableListOf<String>()
@@ -89,7 +95,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
 
         // First: V2.7 system/micro-skill deterministic shortcut.
         AdaptiveBrainRuntime.deterministicPlan(context, goal, state.environment)?.let { plan ->
-            val replay = executeBrainPlan(traceId, goal, plan, state, config, skillSignatures, successfulActions, failedActions, onProgress)
+            val replay = executeBrainPlan(traceId, goal, plan, state, config, reliability, skillSignatures, successfulActions, failedActions, onProgress)
             state = replay.state
             if (replay.completed) {
                 return@withContext completeTrace(
@@ -110,9 +116,17 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         var noProgressCount = 0
 
         while (providerRequests < config.maxDecisions) {
+            if (reliability.observe(state.page.pageKey) != ReliabilityDirective.CONTINUE) {
+                AgentTraceRuntime.event(context, traceId, "PAUSED", "Cyclone paused because execution stopped converging", code = reliability.snapshot().stopCode, ok = false)
+                break
+            }
             // Before spending tokens, use a high-confidence first hop from the page-aware App Graph.
             val graphAction = knownAppGraphAction(state.page, goal, graphAttempts)
             if (graphAction != null) {
+                if (reliability.requestAction("phone.click", graphAction.selectorJson) != ReliabilityDirective.CONTINUE) {
+                    AgentTraceRuntime.event(context, traceId, "PAUSED", "Cyclone paused before repeating a learned route without progress", code = reliability.snapshot().stopCode, ok = false)
+                    break
+                }
                 graphAttempts += "${state.page.pageKey}|${graphAction.id}"
                 onProgress("Using learned app map: ${graphAction.label}")
                 AgentTraceRuntime.event(
@@ -125,6 +139,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 val params = JSONObject().put("selector", JSONObject(graphAction.selectorJson)).put("retries", 1).put("waitForChangeMs", 1500)
                 val result = PhoneToolExecutor.execute(context, PhoneToolRequest("v28-graph-${UUID.randomUUID()}", "phone.click", params))
                 val after = observeState(goal) ?: before
+                reliability.result(result.ok, result.ok, if (result.ok) null else ReliabilityFailureClass.ACTION)
                 recordOutcome(
                     traceId = traceId,
                     goal = goal,
@@ -244,7 +259,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                         continue
                     }
                     val execution = executeDecisionActions(
-                        traceId, goal, visual, state, config, skillSignatures,
+                        traceId, goal, visual, state, config, reliability, skillSignatures,
                         successfulActions, failedActions, onProgress,
                     )
                     state = execution.first
@@ -264,7 +279,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                         continue
                     }
                     val execution = executeDecisionActions(
-                        traceId, goal, decision, state, config, skillSignatures,
+                        traceId, goal, decision, state, config, reliability, skillSignatures,
                         successfulActions, failedActions, onProgress,
                     )
                     val oldKey = state.page.pageKey
@@ -319,6 +334,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         decision: PageAgentDecision,
         initial: ObservedState,
         config: QuickAgentConfig,
+        reliability: AgentReliabilitySession,
         signatures: MutableList<String>,
         successfulActions: MutableList<String>,
         failedActions: MutableList<String>,
@@ -338,6 +354,11 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 break
             }
             val params = resolved.getOrThrow()
+            val stableTarget = action.controlId ?: params.optJSONObject("selector")?.toString() ?: action.tool
+            if (reliability.requestAction(action.tool, stableTarget) != ReliabilityDirective.CONTINUE) {
+                AgentTraceRuntime.event(context, traceId, "PAUSED", "Cyclone paused before repeating an action without state progress", code = reliability.snapshot().stopCode, ok = false)
+                break
+            }
             val accessDecision = CycloneAiAccessPolicy.evaluate(config.accessProfile, action.tool, params)
             if (!accessDecision.allowed) {
                 failedActions += "${accessDecision.reasonCode}:${action.tool}"
@@ -351,6 +372,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             val before = state
             val result = PhoneToolExecutor.execute(context, PhoneToolRequest("v28-page-${UUID.randomUUID()}", action.tool, params))
             val after = observeState(goal) ?: before
+            reliability.result(result.ok, result.ok, if (result.ok) null else ReliabilityFailureClass.ACTION)
             val control = action.controlId?.let { id -> before.page.controls.firstOrNull { it.key == id } }
             recordOutcome(
                 traceId, goal, action.tool, params, before, after, result.ok,
@@ -373,6 +395,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         plan: BrainActionPlan,
         initial: ObservedState,
         config: QuickAgentConfig,
+        reliability: AgentReliabilitySession,
         signatures: MutableList<String>,
         successfulActions: MutableList<String>,
         failedActions: MutableList<String>,
@@ -385,6 +408,9 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             code = "brain.plan", ok = true, detail = plan.reason,
         )
         for (step in plan.steps) {
+            if (reliability.requestAction(step.tool, step.params.optJSONObject("selector")?.toString() ?: step.label) != ReliabilityDirective.CONTINUE) {
+                return ReplayResult(false, state, "Cyclone paused a repeated learned action because the page was not progressing.")
+            }
             val accessDecision = CycloneAiAccessPolicy.evaluate(config.accessProfile, step.tool, step.params)
             if (!accessDecision.allowed) {
                 return ReplayResult(false, state, accessDecision.safeMessage)
@@ -395,6 +421,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             val result = PhoneToolExecutor.execute(context, PhoneToolRequest("brain-v28-${UUID.randomUUID()}", step.tool, step.params))
             val after = observeState(goal) ?: before
             val verified = result.ok && verifyPlanStep(step.tool, step.params, after.environment)
+            reliability.result(result.ok, verified, if (!result.ok) ReliabilityFailureClass.ACTION else ReliabilityFailureClass.VERIFICATION)
             recordOutcome(
                 traceId, goal, step.tool, step.params, before, after, verified,
                 "BRAIN_REPLAY", matchingControl(before.page, step.params.optJSONObject("selector")?.toString()),

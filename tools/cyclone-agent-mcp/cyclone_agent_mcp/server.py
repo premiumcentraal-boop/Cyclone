@@ -81,6 +81,16 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         """Forward one typed action to Cyclone. There is no generic command/shell/ADB escape hatch."""
         return tools.call("phone_act", {"device_id": device_id, "tool": tool, "params": params, "goal": goal, "user_authorized": user_authorized})
 
+    @mcp.tool(annotations=WRITE)
+    def phone_group_act(
+        device_ids: list[str],
+        tool: Literal["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"],
+        params: dict[str, Any],
+        goal: str,
+    ) -> dict[str, Any]:
+        """Run one typed, non-secret phone action on 1..32 explicitly selected devices and return per-device evidence."""
+        return tools.call("phone_group_act", {"device_ids": device_ids, "tool": tool, "params": params, "goal": goal})
+
     @mcp.tool(annotations=READ)
     def phone_debug_bundle(device_id: str | None = None, goal: str = "", expected: str = "") -> dict[str, Any]:
         """Capture bounded diagnostic evidence when perception, execution and verification disagree."""
