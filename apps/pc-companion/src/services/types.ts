@@ -147,6 +147,43 @@ export interface DesktopDevice {
     lastFrameAvailable: boolean;
   };
   lastFrameUrl?: string;
+  source?: "USB" | "LAN" | "VIRTUAL";
+  provider?: string | null;
+  providerInstanceId?: string | null;
+}
+
+export interface FleetGroup {
+  groupId: string;
+  name: string;
+  deviceIds: string[];
+}
+
+export interface FleetWorkspace {
+  schemaVersion: number;
+  groups: FleetGroup[];
+  selectedDeviceIds: string[];
+}
+
+export type FleetBatchOperation = "home" | "back" | "open_app" | "screenshot" | "recover";
+
+export interface FleetBatchResult {
+  deviceId: string;
+  ok: boolean;
+  transportOk?: boolean;
+  executionOk?: boolean;
+  verificationOk?: boolean;
+  cancelled?: boolean;
+  error?: { code?: string; message?: string };
+  result?: Record<string, unknown>;
+}
+
+export interface FleetBatchTask {
+  batchId: string;
+  operation: FleetBatchOperation;
+  status: "RUNNING" | "CANCELLING" | "COMPLETED" | "CANCELLED";
+  deviceIds: string[];
+  results: FleetBatchResult[];
+  summary: { requested: number; completed: number; succeeded: number; failed: number };
 }
 
 export interface PairBeginResult {
@@ -301,4 +338,11 @@ export interface DesktopService {
   listConnectors(): Promise<ConnectorCard[]>;
   runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<ConnectorActionResult>;
   getRuntimeStatus(): Promise<DesktopRuntimeStatus>;
+  getFleetWorkspace?(): Promise<FleetWorkspace>;
+  saveFleetGroup?(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup>;
+  deleteFleetGroup?(groupId: string): Promise<void>;
+  setFleetSelection?(deviceIds: string[]): Promise<string[]>;
+  submitFleetBatch?(deviceIds: string[], operation: FleetBatchOperation, params?: Record<string, unknown>): Promise<FleetBatchTask>;
+  getFleetBatch?(batchId: string): Promise<FleetBatchTask>;
+  cancelFleetBatch?(batchId: string): Promise<FleetBatchTask>;
 }

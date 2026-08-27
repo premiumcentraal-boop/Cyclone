@@ -277,3 +277,26 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
 }
+.fleet-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+
+.fleet-search,
+.fleet-source-filter {
+  min-height: 38px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  background: var(--surface, rgba(255, 255, 255, 0.06));
+  color: inherit;
+  padding: 0 12px;
+}
+
+.fleet-search { min-width: min(280px, 100%); }
+.fleet-selected-count,
+.fleet-batch-status { color: var(--muted, #9aa4b2); font-size: 13px; }
+.fleet-device-selector { display: flex; align-items: center; gap: 7px; padding: 8px 10px 0; font-size: 12px; color: var(--muted, #9aa4b2); }
+.fleet-device-selector input { accent-color: #6a7cff; }
