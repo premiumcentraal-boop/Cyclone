@@ -12,22 +12,24 @@ The product goal is not “an AI that keeps rediscovering how an app works.” T
 
 Cyclone is a broader repo with Desktop/Core/Hermes components, but **Cyclone Mobile autonomy is the primary product direction for current mobile work**.
 
-## Five-minute onboarding
+## Two-minute, scope-first onboarding
 
-Read these in order:
+Every agent starts with only:
 
-1. `docs/agent-system/README.md`
-2. `docs/agent-system/CURRENT_STATE.md`
-3. `docs/agent-system/ARCHITECTURE_AND_CONTRACTS.md`
-4. `docs/agent-system/MULTI_AGENT_PROTOCOL.md`
-5. `docs/agent-system/FAST_RELEASE_PLAYBOOK.md`
-6. `docs/agent-system/AUTONOMY_ROADMAP.md`
+1. this file;
+2. `docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md`;
+3. the generated context below.
 
 Then run:
 
 ```bash
 python scripts/agent/cyclone-context.py --markdown
 ```
+
+Classify the task and owner lane before loading more context. Read the hub/current-state and one
+owner-lane document next. Read architecture, multi-agent, roadmap and historical handoffs only when
+the task actually crosses those boundaries. Do not preload the entire knowledge package for a
+focused fix.
 
 For Android changes, the release instructions agents must follow are in
 `docs/agent-system/FAST_RELEASE_PLAYBOOK.md`. The short rule is: classify the changed paths first,
@@ -187,15 +189,25 @@ Do not give two agents ownership of the same large file. If two tracks need the 
 
 For small changes:
 
-1. Run `cyclone-context.py`.
-2. Inspect only the owning module and its tests.
-3. Make the smallest focused change; do not reconstruct large legacy files.
-4. Update/add a regression test or static guard for the bug.
-5. Run the smallest relevant test gate.
-6. Run full release CI only when the change can affect a distributable artifact.
-7. Never claim an APK is updated until release evidence points to the exact source SHA.
+1. Run `cyclone-context.py` and classify the diff using
+   `docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md`.
+2. Declare the owner lane, planned paths, focused first test and artifact impact.
+3. Inspect only the owning module, nearest test and directly consumed contract.
+4. Make the smallest focused change; do not reconstruct large legacy files.
+5. Update/add a regression test or static guard for the bug.
+6. Run the focused gate until green, then run the full relevant gate once on the final candidate.
+7. Do not rerun an unchanged green lane or rebuild the same source SHA.
+8. Run release CI only when the change can affect a distributable artifact.
+9. Let a successful release workflow publish its own artifacts; avoid workstation
+   download/checksum/re-upload loops.
+10. Never claim an APK or installer is updated until release evidence points to the exact source
+    SHA.
 
 For large changes, use a feature branch and the multi-agent task contract.
+
+Default to one agent for one ownership lane. Parallel agents require two or more independent lanes,
+frozen contracts and non-overlapping paths; otherwise their setup and handoffs usually add time and
+tokens instead of saving them.
 
 ## Version/release rules
 

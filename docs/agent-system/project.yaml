@@ -8,6 +8,7 @@ mission: >-
 canonical_docs:
   agent_rules: AGENTS.md
   hub: docs/agent-system/README.md
+  fast_work: docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md
   current_state: docs/agent-system/CURRENT_STATE.md
   architecture: docs/agent-system/ARCHITECTURE_AND_CONTRACTS.md
   multi_agent: docs/agent-system/MULTI_AGENT_PROTOCOL.md
@@ -133,9 +134,37 @@ release:
   authoritative_mobile_ci: .github/workflows/mobile-ci.yml
   reusable_mobile_build: .github/workflows/_mobile-build.yml
   release_artifact_reuse: .github/workflows/mobile-release.yml
-  publication_enabled: false
+  production_publication_enabled: false
+  combined_beta_publication_enabled_on_release_push: true
+  combined_beta_publication_enabled_on_manual_dispatch: false
+
+workflow_optimization:
+  baseline_date: 2026-08-27
+  evidence_runs:
+    combined_beta_1: 33080472172
+    combined_beta_2: 33089372883
+  measured:
+    beta_2_windows_seconds: 573
+    beta_2_android_seconds: 265
+    beta_2_installer_seconds: 352
+    beta_2_manual_post_ci_publish_seconds: 588
+  targets:
+    routine_code_to_beta_minutes: 10
+    routine_hotfix_total_minutes: 20
+    warm_combined_ci_minutes: 7
+    post_ci_publish_minutes: 2
+  phases:
+    - scope_first_agent_guidance
+    - explicit_safe_manual_publish
+    - npm_pip_cargo_caching
+    - parallel_verification_and_packaging
+    - changed_path_gate_selector
+    - measure_before_dedicated_runner
+  rule: never_rebuild_or_transfer_an_artifact_for_an_unchanged_source_sha
 
 agent_bootstrap:
   command: python scripts/agent/cyclone-context.py --markdown
+  first_read: docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md
+  context_policy: root_rules_then_fast_playbook_then_one_owner_lane
   task_template: .github/ISSUE_TEMPLATE/agent-task.md
   pr_template: .github/PULL_REQUEST_TEMPLATE.md

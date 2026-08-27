@@ -27,6 +27,22 @@ def git(*args: str) -> str:
         return ""
 
 
+def git_porcelain() -> str:
+    """Keep the leading status column; generic git() intentionally strips whitespace."""
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(ROOT), "status", "--porcelain"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).rstrip("\r\n")
+    except Exception:
+        return ""
+
+
+def porcelain_paths(status: str) -> list[str]:
+    return [line[3:] for line in status.splitlines() if len(line) > 3]
+
+
 def match(pattern: str, text: str) -> str:
     m = re.search(pattern, text, re.MULTILINE)
     return m.group(1).strip() if m else ""
@@ -34,6 +50,19 @@ def match(pattern: str, text: str) -> str:
 
 def pyproject_version(path: str) -> str:
     return match(r'^version\s*=\s*["\']([^"\']+)["\']', read(path))
+
+
+def normalize_product_version(value: str) -> str:
+    """Compare SemVer prereleases with their PEP 440 Python equivalents."""
+    normalized = value.strip().lower()
+    if "-v" in normalized:
+        normalized = normalized.rsplit("-v", 1)[-1]
+    pep440 = re.fullmatch(r"(\d+\.\d+\.\d+)(a|b|rc)(\d+)", normalized)
+    if pep440:
+        base, marker, number = pep440.groups()
+        channel = {"a": "alpha", "b": "beta", "rc": "rc"}[marker]
+        return f"{base}-{channel}.{number}"
+    return normalized
 
 
 def build_context() -> dict:
@@ -44,9 +73,7 @@ def build_context() -> dict:
     pc_version = pyproject_version("apps/device-gateway/pyproject.toml")
     mcp_version = pyproject_version("tools/codex-phone-mcp/pyproject.toml")
 
-    normalized_android = android_version
-    if "-v" in normalized_android:
-        normalized_android = normalized_android.rsplit("-v", 1)[-1]
+    normalized_android = normalize_product_version(android_version)
 
     versions = {
         "android_version_name": android_version,
@@ -55,7 +82,11 @@ def build_context() -> dict:
         "pc_gateway": pc_version,
         "codex_mcp": mcp_version,
     }
-    comparable = [v for v in (normalized_android, pc_version, mcp_version) if v]
+    comparable = [
+        normalize_product_version(v)
+        for v in (normalized_android, pc_version, mcp_version)
+        if v
+    ]
     consistent = len(set(comparable)) <= 1
 
     important = [
@@ -70,8 +101,8 @@ def build_context() -> dict:
         "tools/codex-phone-mcp",
     ]
 
-    dirty = git("status", "--porcelain")
-    changed_paths = [line[3:] for line in dirty.splitlines() if len(line) > 3]
+    dirty = git_porcelain()
+    changed_paths = porcelain_paths(dirty)
     v3_services = {
         "capability_registry": "apps/mobile/app/src/main/java/com/cyclone/mobile/platform/capability",
         "policy_governor": "apps/mobile/app/src/main/java/com/cyclone/mobile/policy",
@@ -122,6 +153,9 @@ def build_context() -> dict:
         },
         "canonical_docs": [
             "AGENTS.md",
+            "docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md",
+        ],
+        "reference_docs": [
             "docs/agent-system/README.md",
             "docs/agent-system/CURRENT_STATE.md",
             "docs/agent-system/PROJECT_VISION.md",
@@ -152,9 +186,14 @@ def as_markdown(ctx: dict) -> str:
         f"- Cross-component product version match: `{ctx['mobile']['cross_component_version_consistent']}`",
         "- Mission loop: `observe → understand → act → verify → learn → reuse → self-heal`",
         "",
-        "## Read first",
+        "## Start here",
     ]
     lines += [f"- `{p}`" for p in ctx["canonical_docs"]]
+    lines += [
+        "",
+        "## Load only when the task requires it",
+    ]
+    lines += [f"- `{p}`" for p in ctx["reference_docs"]]
     v3 = ctx["infrastructure_v3"]
     lines += [
         "",

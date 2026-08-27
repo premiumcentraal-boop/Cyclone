@@ -9,6 +9,7 @@ Its purpose is to make the repository **self-explanatory**: a fresh agent should
 | Document | Use |
 |---|---|
 | [`../../AGENTS.md`](../../AGENTS.md) | Mandatory operating rules and fast onboarding |
+| [`FAST_WORK_AND_TOKEN_PLAYBOOK.md`](FAST_WORK_AND_TOKEN_PLAYBOOK.md) | Scope-first context, minimal gates, measured timing baseline and CI optimization plan |
 | [`CYCLONE_AGENT_KNOWLEDGE_PACKAGE.md`](CYCLONE_AGENT_KNOWLEDGE_PACKAGE.md) | Single long-form text document covering the whole system |
 | [`CURRENT_STATE.md`](CURRENT_STATE.md) | What exists now and what is not yet proven |
 | [`PROJECT_VISION.md`](PROJECT_VISION.md) | Product north star and UX direction |
@@ -21,6 +22,10 @@ Its purpose is to make the repository **self-explanatory**: a fresh agent should
 | [`DECISIONS.md`](DECISIONS.md) | Architectural decisions agents should not casually reverse |
 | [`project.yaml`](project.yaml) | Compact machine-readable project map |
 | [`infrastructure-v3/README.md`](infrastructure-v3/README.md) | V3 services, owners, health and integration seams |
+
+Do not read every document in this table before a focused change. Start with root `AGENTS.md`,
+`FAST_WORK_AND_TOKEN_PLAYBOOK.md`, the generated context, and the owning lane. Expand only when a
+contract or architecture boundary requires it.
 
 For APK work, `FAST_RELEASE_PLAYBOOK.md` and `../../apps/mobile/AGENTS.md` are mandatory. They state
 when to change `versionCode`/`versionName`, which changes need an APK, and how to reuse one CI

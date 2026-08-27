@@ -1,5 +1,10 @@
 # Cyclone 3.3 Gateway Overhaul — Shared Agent Contract
 
+> **Historical implementation contract:** this file preserves the frozen three-agent V3.3 build
+> contract and its original base SHA. Do not use it as the default starting point for a new patch.
+> Start with root `AGENTS.md`, `docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md`, and the current
+> integration/release head. Use this document only when maintaining the V3.3 trust/media contracts.
+
 This document is the operating contract for the three-agent Cyclone 3.3 gateway overhaul. Every
 agent must receive this file together with its role-specific prompt. It is intentionally
 self-contained because the agents will start in separate chats without access to the conversation

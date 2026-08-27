@@ -33,6 +33,11 @@
 
 ## Verification
 
+- Change class:
+- Focused first gate:
+- Full gate required for this blast radius:
+- Unchanged/skipped lanes and reason:
+- Existing exact-SHA CI/artifact reused:
 - Unit/contract commands:
 - Result:
 - CI run/status:
@@ -52,7 +57,15 @@
 - Source SHA in artifact:
 - APK SHA-256:
 - Signing mode (expected beta/debug unless separately proven):
-- Publication status (expected disabled/not run):
+- Publication status (production disabled unless proven; combined beta may publish from approved release workflow):
+
+## Time/token efficiency
+
+- [ ] Read scope was limited to root rules, fast-work playbook, generated context and owner lane
+- [ ] Additional agents were used only for independent, non-overlapping lanes
+- [ ] Full suites ran once on the final candidate rather than after every edit
+- [ ] No unchanged SHA was rebuilt or manually downloaded/re-uploaded
+- Baseline/candidate run timing (required for workflow optimization changes):
 
 ## Learning/autonomy impact
 

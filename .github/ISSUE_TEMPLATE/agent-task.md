@@ -6,6 +6,18 @@ labels: agent-task
 
 # Mission
 
+## Fast-path classification
+
+- Change class (docs / PC UI / gateway / packaging / MCP / Android / shared contract / release):
+- Distributable impact (none / APK / installer / both):
+- Focused first test:
+- Full gate required once on final SHA:
+- Existing CI run/artifact that can be reused:
+- Additional agents needed and why independent work exists (default: none):
+
+Read root `AGENTS.md` and `docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md`, then load only the
+owner-lane context.
+
 ## Exact base
 
 `<commit SHA>`
@@ -51,6 +63,8 @@ labels: agent-task
 - [ ] Contract tests
 - [ ] Relevant CI
 - [ ] Physical Android check if required
+- [ ] Unchanged green lanes were not rerun without a written reason
+- [ ] The same source SHA was not rebuilt or manually transferred unnecessarily
 
 ## APK impact
 
@@ -62,7 +76,8 @@ labels: agent-task
 
 ## Non-negotiable invariants
 
-Read root `AGENTS.md` and `docs/agent-system/DECISIONS.md` before coding.
+Read `docs/agent-system/DECISIONS.md` when the task changes an invariant or cross-layer architecture;
+do not preload it for an unrelated focused patch.
 
 ## Required handoff
 

@@ -2,6 +2,9 @@
 
 The release system should optimize for two things at the same time: **fast feedback** and **artifact truth**.
 
+For the scope-first agent workflow, measured 3.3 timing baseline, token rules and phased CI speed
+plan, read `FAST_WORK_AND_TOKEN_PLAYBOOK.md` first.
+
 ## Current authoritative path
 
 `Cyclone Mobile CI` (`.github/workflows/mobile-ci.yml`) is the only normal push/PR APK workflow.
@@ -14,9 +17,16 @@ exact source SHA.
 artifact name; it downloads and verifies the existing artifact. It never recompiles. Publication is
 currently disabled and these builds remain beta/debug-signed unless separately proven otherwise.
 
-Current release blockers are deliberate: Android `versionCode` is still `17`, the CI artifact is a
-debug-signed beta, protected release signing is not configured, and physical-device acceptance has
-not been run for Infrastructure V3. Do not enable publication until each is intentionally resolved.
+For paired Cyclone 3.3 Windows + Android betas, `.github/workflows/pc-companion-ci.yml` builds both
+artifacts from one SHA. Release-branch push runs can publish the combined prerelease after both jobs
+pass. Manual dispatch currently verifies/builds but skips publication; Phase 1 of the speed plan
+adds an explicit, fail-closed manual publish input so agents no longer download and re-upload the
+same artifacts.
+
+Current beta facts: Android `versionCode` is `35` on `3.3.0-beta.2`, distributed APKs are still
+debug-signed unless separately proven otherwise, and protected production signing remains future
+work. Physical verification is feature/release specific; read the exact release evidence rather
+than applying one global status to every later build.
 
 ## 1. Classify the change first
 
@@ -60,6 +70,9 @@ decorated SemVer such as `3.0.0-beta.1` are supported by `scripts/ci/mobile_meta
 ### Cross-layer/release candidate
 
 Run Android and PC/MCP lanes in parallel, then package once both are green.
+
+For one-lane patches, run the nearest regression gate first and the full relevant gate once on the
+final SHA. Do not run every repository suite locally and then repeat it unchanged in CI.
 
 ## 2. Versioning
 
@@ -108,6 +121,11 @@ source SHA ─ guards                            ├─ package/release ─ veri
 ```
 
 Use caching and concurrency cancellation so obsolete branch pushes do not continue consuming build resources.
+
+The next combined-workflow implementation should cache npm, pip downloads and Cargo inputs/target,
+split verification from packaging so they run concurrently, and provide explicit safe publication
+for approved manual release dispatches. Acceptance targets and measured baselines are in
+`FAST_WORK_AND_TOKEN_PLAYBOOK.md`.
 
 PR/push builds share concurrency by PR/ref and cancel stale work. Release verification has its own
 non-cancelling concurrency key so artifact review cannot be replaced mid-run.
@@ -178,3 +196,9 @@ Known limitations:
 
 If CI is not green, do not call the APK ready. If no physical device was tested, write
 `Physical-device acceptance: NOT RUN`; never infer it from emulator, mock or unit results.
+
+## 11. Time and token handoff
+
+Also report the change class, focused gate, full gate actually required, CI run reused, and any
+intentionally skipped lane. Never trigger another build merely to obtain evidence already attached
+to the exact same SHA.

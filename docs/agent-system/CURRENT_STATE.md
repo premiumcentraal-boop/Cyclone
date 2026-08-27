@@ -1,6 +1,9 @@
 # Current Cyclone State
 
-This document describes the current source architecture around the Cyclone Mobile 2.9.5 line. Verify exact release/build status from current code and `releases/<version>/BUILD_VERIFIED.json`.
+This document describes the current source architecture on the Cyclone 3.3 beta line. The latest
+published paired release at this update is `3.3.0-beta.2` (Android `versionCode 35`). Verify exact
+release/build status from current code, GitHub release provenance, and any
+`releases/<version>/BUILD_VERIFIED.json` evidence rather than assuming this sentence remains latest.
 
 ## Mobile product identity
 
@@ -71,10 +74,10 @@ The gateway now serves Android frames directly instead of relying on PC-side `ad
   `includeScreenshotBase64`; when enabled, the payload includes a `screenshot` object and the
   preview path is attached to the stored page.
 
-No `AndroidManifest.xml` change was required for this path. A future high-FPS live stream should
-add a MediaProjection foreground service (manifest lines: `<uses-permission
-android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>` and a service with
-`android:foregroundServiceType="mediaProjection"`) and consume the same `PhoneScreenCapture` seam.
+No `AndroidManifest.xml` change was required for this accessibility-screenshot path. It remains a
+useful still-image evidence/fallback seam, but it is no longer the proposed primary live stream:
+Cyclone 3.3's PC media plane uses the pinned scrcpy H.264 server over the USB/ADB transport. Do not
+add a second MediaProjection architecture without a new requirement and ADR.
 
 ## Learning
 
@@ -105,6 +108,13 @@ Sensitive text is redacted again at the gateway boundary.
 
 The Android bridge session token and PC HTTP bearer token are separate concepts.
 
+Cyclone 3.3 uses a pinned scrcpy 4.0 H.264 media plane for primary USB live view, rendered through
+WebCodecs in PC Companion. Screenshot capture remains a bounded degraded fallback. Discovery,
+media, Android bridge and AI trust have independent readiness so a failed live view does not erase
+otherwise healthy semantic/action capabilities. The frozen PC sidecar includes its WebSocket
+runtime; packaged-runtime HTTP and WebSocket readiness are release gates after the Beta 1 startup
+regression.
+
 ## Codex MCP
 
 `tools/codex-phone-mcp/**` provides a constrained local STDIO MCP client for Codex. The documented tool surface includes status, observation, UI search, element inspection, screenshot, current page/history, typed action, debug bundle and teaching lifecycle tools.
@@ -124,6 +134,10 @@ but no new product UI or second navigation shell was added merely to expose them
 
 ## Release state / limitations
 
+- The paired Cyclone 3.3 workflow can publish combined Windows + Android prereleases from approved
+  `release/beta/**` push runs after both build jobs pass. Manual dispatch currently builds/verifies
+  but skips publication; the optimization plan is in
+  `docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md`.
 - Builds are currently beta/debug-signed unless a later release explicitly changes signing.
 - Stable protected signing is still needed for painless long-term Android upgrades.
 - A physical rooted Pixel 8 acceptance path has been the target hardware gate for the full gateway. Do not convert mocked CI evidence into a physical verification claim.
