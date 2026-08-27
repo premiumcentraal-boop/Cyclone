@@ -16,7 +16,10 @@ from ..auth import verify_bearer
 from ..config import Settings
 from ..server import create_app as create_legacy_app
 from ..api.stream_api import create_stream_router
+from ..backends.desktop_android import DesktopAndroidBackend
+from ..virtual import AndroidEmulatorProvider, VirtualDeviceConfig, VirtualDeviceRegistry, VirtualDeviceService
 from .agent import DesktopAgentService
+from .batch import FleetBatchService
 from .controls import ClipboardService, ManualControlService
 from .diagnostics import FleetDiagnosticSupervisor
 from .fleet import DeviceFleetManager
@@ -25,6 +28,7 @@ from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
+from .workspace import FleetWorkspaceStore
 
 
 class PairCompleteBody(BaseModel):
@@ -90,6 +94,51 @@ class StreamDiagnosticBody(BaseModel):
     retryable: bool | None = None
 
 
+class FleetGroupBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+    device_ids: list[str] = Field(default_factory=list, max_length=32)
+
+
+class FleetSelectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_ids: list[str] = Field(default_factory=list, max_length=32)
+
+
+class FleetBatchBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_ids: list[str] = Field(min_length=1, max_length=32)
+    operation: Literal["home", "back", "open_app", "screenshot", "recover"]
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class VirtualCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(min_length=1, max_length=80)
+    image: str = Field(min_length=1, max_length=240)
+    width: int = Field(default=1080, ge=320, le=3840)
+    height: int = Field(default=1920, ge=480, le=3840)
+    dpi: int = Field(default=420, ge=120, le=640)
+    fps: int = Field(default=30, ge=1, le=60)
+    locale: str = Field(default="en-US", min_length=2, max_length=32)
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    network_mode: Literal["loopback"] = "loopback"
+    storage_mb: int = Field(default=8192, ge=2048, le=131072)
+
+
+class VirtualConfigureBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    image: str = Field(min_length=1, max_length=240)
+    width: int = Field(default=1080, ge=320, le=3840)
+    height: int = Field(default=1920, ge=480, le=3840)
+    dpi: int = Field(default=420, ge=120, le=640)
+    fps: int = Field(default=30, ge=1, le=60)
+    locale: str = Field(default="en-US", min_length=2, max_length=32)
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    network_mode: Literal["loopback"] = "loopback"
+    storage_mb: int = Field(default=8192, ge=2048, le=131072)
+
+
 class DesktopRuntime:
     def __init__(self, settings: Settings, *, fleet: DeviceFleetManager | None = None):
         self.settings = settings
@@ -97,12 +146,22 @@ class DesktopRuntime:
         # USB topology changes are normally event-driven through adb track-devices. A 20 second
         # fallback is intentionally retained for recovery if that stream dies on a particular PC.
         self.fleet = fleet or DeviceFleetManager(adb_path=settings.adb_path, poll_seconds=20.0)
+        self.virtual_registry = VirtualDeviceRegistry(settings.runtime_dir / "virtual" / "instances.json")
+        self.virtual = VirtualDeviceService(
+            self.virtual_registry,
+            [AndroidEmulatorProvider(settings.runtime_dir)],
+        )
+        self.fleet.set_source_resolver(self.virtual_registry.metadata_for_serial)
+        self.workspace = FleetWorkspaceStore(settings.runtime_dir / "fleet-workspace.json")
         self.live_diagnostics = FleetDiagnosticSupervisor(self.fleet)
         self.pairing = PairingCoordinator(self.fleet, self.live_diagnostics)
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
         self.agent = DesktopAgentService(self.fleet)
+        self.batches = FleetBatchService(lambda device_id: DesktopAndroidBackend(
+            self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
+        ))
         self.video_limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
         self.fleet.set_video_factory(lambda session: VideoStreamController(
             session,
@@ -113,6 +172,26 @@ class DesktopRuntime:
                 details=details,
             ),
         ))
+
+    def _snapshot_for_batch(self, device_id: str, profile: str) -> dict[str, Any]:
+        session = self.fleet.get(device_id)
+        if session.video is None:
+            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture is unavailable.")
+        capture = session.video.snapshot()
+        data = capture.get("data")
+        if not isinstance(data, bytes):
+            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture returned no image.")
+        codec = str(capture.get("codec") or "image/jpeg")
+        suffix = ".png" if codec == "image/png" else ".jpg"
+        root = self.settings.runtime_dir / "fleet-screenshots"
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / f"{device_id}-{int(time.time() * 1000)}{suffix}"
+        path.write_bytes(data)
+        return {
+            "deviceId": device_id, "filePath": str(path.resolve()), "codec": codec,
+            "width": capture.get("width"), "height": capture.get("height"),
+            "timestampMs": capture.get("timestamp_ms"),
+        }
 
     def start(self) -> None:
         self.fleet.start()
@@ -136,8 +215,14 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
 
     @router.get("/v1/fleet", dependencies=[Depends(auth)])
     @router.get("/v1/devices", dependencies=[Depends(auth)], include_in_schema=False)
-    def fleet() -> dict[str, Any]:
-        return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": _public_devices(runtime)}
+    def fleet(
+        q: str = Query(default="", max_length=160),
+        source: str | None = Query(default=None, pattern=r"^(USB|LAN|VIRTUAL)$"),
+        group_id: str | None = Query(default=None, max_length=48),
+    ) -> dict[str, Any]:
+        group = runtime.workspace.group(group_id) if group_id else None
+        devices = runtime.workspace.search(_public_devices(runtime), q, source=source, group=group)
+        return {"protocol": DESKTOP_PROTOCOL_VERSION, "devices": devices, "workspace": runtime.workspace.public()}
 
     @router.post("/v1/fleet/scan", dependencies=[Depends(auth)])
     def fleet_scan() -> dict[str, Any]:
@@ -148,6 +233,85 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             "discovery": runtime.fleet.diagnostics(),
             "liveDiagnostics": runtime.live_diagnostics.status(),
         }
+
+    @router.get("/v1/fleet/workspace", dependencies=[Depends(auth)])
+    def fleet_workspace() -> dict[str, Any]:
+        return runtime.workspace.public()
+
+    @router.post("/v1/fleet/groups/{group_id}", dependencies=[Depends(auth)])
+    def fleet_group_put(group_id: str, body: FleetGroupBody) -> dict[str, Any]:
+        return _service_call(lambda: runtime.workspace.put_group(group_id, body.name, body.device_ids))
+
+    @router.post("/v1/fleet/groups/{group_id}/delete", dependencies=[Depends(auth)])
+    def fleet_group_delete(group_id: str) -> dict[str, Any]:
+        runtime.workspace.delete_group(group_id)
+        return {"groupId": group_id, "deleted": True}
+
+    @router.post("/v1/fleet/selection", dependencies=[Depends(auth)])
+    def fleet_selection(body: FleetSelectionBody) -> dict[str, Any]:
+        return _service_call(lambda: {"selectedDeviceIds": runtime.workspace.set_selection(body.device_ids)})
+
+    @router.post("/v1/fleet/batches", dependencies=[Depends(auth)])
+    def fleet_batch(body: FleetBatchBody) -> dict[str, Any]:
+        return _service_call(lambda: runtime.batches.submit(body.device_ids, body.operation, body.params))
+
+    @router.get("/v1/fleet/batches/{batch_id}", dependencies=[Depends(auth)])
+    def fleet_batch_status(batch_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.batches.get(batch_id))
+
+    @router.post("/v1/fleet/batches/{batch_id}/cancel", dependencies=[Depends(auth)])
+    def fleet_batch_cancel(batch_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.batches.cancel(batch_id))
+
+    @router.get("/v1/virtual/providers", dependencies=[Depends(auth)])
+    def virtual_providers() -> dict[str, Any]:
+        return {"providers": runtime.virtual.health()}
+
+    @router.get("/v1/virtual/providers/{provider_id}", dependencies=[Depends(auth)])
+    def virtual_provider_status(provider_id: str) -> dict[str, Any]:
+        return _service_call(lambda: next(item for item in runtime.virtual.health() if item["provider"] == provider_id))
+
+    @router.get("/v1/virtual/providers/{provider_id}/images", dependencies=[Depends(auth)])
+    def virtual_images(provider_id: str) -> dict[str, Any]:
+        return _service_call(lambda: {"provider": provider_id, "images": runtime.virtual.list_images(provider_id)})
+
+    @router.get("/v1/virtual/instances", dependencies=[Depends(auth)])
+    def virtual_instances() -> dict[str, Any]:
+        return {"instances": runtime.virtual.list_instances()}
+
+    @router.get("/v1/virtual/instances/{instance_id}", dependencies=[Depends(auth)])
+    def virtual_instance_status(instance_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.virtual.get(instance_id))
+
+    @router.get("/v1/virtual/instances/{instance_id}/endpoint", dependencies=[Depends(auth)])
+    def virtual_instance_endpoint(instance_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.virtual.endpoint(instance_id))
+
+    @router.post("/v1/virtual/instances", dependencies=[Depends(auth)])
+    def virtual_create(body: VirtualCreateBody) -> dict[str, Any]:
+        config = VirtualDeviceConfig(
+            image=body.image, width=body.width, height=body.height, dpi=body.dpi, fps=body.fps,
+            locale=body.locale, timezone=body.timezone, network_mode=body.network_mode, storage_mb=body.storage_mb,
+        )
+        return _service_call(lambda: runtime.virtual.create(body.provider, config))
+
+    @router.post("/v1/virtual/instances/{instance_id}/configure", dependencies=[Depends(auth)])
+    def virtual_configure(instance_id: str, body: VirtualConfigureBody) -> dict[str, Any]:
+        config = VirtualDeviceConfig(
+            image=body.image, width=body.width, height=body.height, dpi=body.dpi, fps=body.fps,
+            locale=body.locale, timezone=body.timezone, network_mode=body.network_mode, storage_mb=body.storage_mb,
+        )
+        return _service_call(lambda: runtime.virtual.configure(instance_id, config))
+
+    @router.post("/v1/virtual/instances/{instance_id}/{operation}", dependencies=[Depends(auth)])
+    def virtual_lifecycle(instance_id: str, operation: Literal["start", "stop", "reset", "delete"]) -> dict[str, Any]:
+        result = _service_call(lambda: runtime.virtual.lifecycle(instance_id, operation))
+        if operation in {"start", "stop", "reset", "delete"}:
+            try:
+                runtime.fleet.refresh_once(source=f"virtual-{operation}")
+            except DesktopRuntimeError:
+                pass
+        return result
 
     @router.get("/v1/runtime/self-test", dependencies=[Depends(auth)])
     def runtime_self_test() -> dict[str, Any]:
@@ -621,3 +785,14 @@ def _call(fn):
             RuntimeErrorCode.STREAM_CAPACITY.value: 503,
         }.get(exc.code, 503)
         raise HTTPException(status_code=status, detail=exc.to_dict()) from exc
+
+
+def _service_call(fn):
+    try:
+        return fn()
+    except (KeyError, StopIteration) as exc:
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Requested fleet resource was not found."}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(exc)[:240]}) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail={"code": "PROVIDER_UNAVAILABLE", "message": str(exc)[:240]}) from exc

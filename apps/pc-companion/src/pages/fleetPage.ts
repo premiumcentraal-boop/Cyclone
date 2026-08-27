@@ -1,5 +1,5 @@
 import { computeVirtualRange, fleetColumnCount } from "../core/grid.js";
-import type { DesktopDevice, DesktopService } from "../services/types.js";
+import type { DesktopDevice, DesktopService, FleetBatchOperation } from "../services/types.js";
 import { createLivePhoneView, type LivePhoneViewHandle } from "../ui/livePhoneView.js";
 import { button, el } from "../ui/dom.js";
 
@@ -75,6 +75,32 @@ export function createFleetPage(
     return { element: page, destroy: () => undefined };
   }
 
+  const selected = new Set<string>();
+  let query = "";
+  let source = "ALL";
+  const tools = el("div", "fleet-tools");
+  const search = el("input", "fleet-search") as HTMLInputElement;
+  search.type = "search";
+  search.placeholder = "Search phones";
+  search.setAttribute("aria-label", "Search phones by name, model, source, or state");
+  const sourceFilter = el("select", "fleet-source-filter") as HTMLSelectElement;
+  for (const [value, label] of [["ALL", "All phones"], ["USB", "USB"], ["LAN", "LAN"], ["VIRTUAL", "Virtual"]]) {
+    const option = el("option") as HTMLOptionElement;
+    option.value = value;
+    option.textContent = label;
+    sourceFilter.append(option);
+  }
+  const selectedCount = el("span", "fleet-selected-count", "0 selected");
+  const selectAll = button("Select visible", "button secondary compact");
+  const clear = button("Clear", "button secondary compact");
+  const home = button("Home", "button secondary compact");
+  const back = button("Back", "button secondary compact");
+  const screenshot = button("Screenshots", "button secondary compact");
+  const saveGroup = button("Save group", "button secondary compact");
+  const batchStatus = el("span", "fleet-batch-status");
+  tools.append(search, sourceFilter, selectedCount, selectAll, clear, home, back, screenshot, saveGroup, batchStatus);
+  page.append(tools);
+
   const viewport = el("div", "fleet-viewport");
   const grid = el("div", "fleet-grid");
   viewport.append(grid);
@@ -83,20 +109,38 @@ export function createFleetPage(
   let handles: LivePhoneViewHandle[] = [];
   let resizeObserver: ResizeObserver | null = null;
 
+  const filteredDevices = () => devices.filter((device) => {
+    if (source !== "ALL" && (device.source ?? "USB") !== source) return false;
+    if (!query) return true;
+    return [device.name, device.model, device.source, device.provider, device.state]
+      .some((value) => String(value ?? "").toLocaleLowerCase().includes(query));
+  });
+
+  const persistSelection = () => {
+    selectedCount.textContent = `${selected.size} selected`;
+    const enabled = selected.size > 0 && service.submitFleetBatch != null;
+    home.disabled = !enabled;
+    back.disabled = !enabled;
+    screenshot.disabled = !enabled;
+    saveGroup.disabled = selected.size === 0 || service.saveFleetGroup == null;
+    void service.setFleetSelection?.([...selected]);
+  };
+
   const render = () => {
     handles.forEach((handle) => handle.destroy());
     handles = [];
     const width = viewport.clientWidth || window.innerWidth;
-    const columns = fleetColumnCount(devices.length, width);
+    const matching = filteredDevices();
+    const columns = fleetColumnCount(matching.length, width);
     grid.style.setProperty("--fleet-columns", String(columns));
     grid.replaceChildren();
 
-    let visible = devices;
+    let visible = matching;
     let topSpacer = 0;
     let bottomSpacer = 0;
-    if (devices.length > 12) {
-      const range = computeVirtualRange(devices.length, columns, viewport.scrollTop, viewport.clientHeight || window.innerHeight, 540, 2);
-      visible = devices.slice(range.startIndex, range.endIndexExclusive);
+    if (matching.length > 12) {
+      const range = computeVirtualRange(matching.length, columns, viewport.scrollTop, viewport.clientHeight || window.innerHeight, 540, 2);
+      visible = matching.slice(range.startIndex, range.endIndexExclusive);
       topSpacer = range.topSpacerPx;
       bottomSpacer = range.bottomSpacerPx;
     }
@@ -113,10 +157,60 @@ export function createFleetPage(
         onPair,
       });
       handles.push(handle);
+      const chooser = el("label", "fleet-device-selector");
+      const checkbox = el("input") as HTMLInputElement;
+      checkbox.type = "checkbox";
+      checkbox.checked = selected.has(device.id);
+      checkbox.setAttribute("aria-label", `Select ${device.name}`);
+      checkbox.addEventListener("click", (event) => event.stopPropagation());
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selected.add(device.id); else selected.delete(device.id);
+        persistSelection();
+      });
+      chooser.append(checkbox, el("span", "fleet-device-source", device.source === "VIRTUAL" ? `Virtual · ${device.provider ?? "provider"}` : (device.source ?? "USB")));
+      handle.element.prepend(chooser);
       grid.append(handle.element);
       attachConnectionRecovery(handle.element, service, device, () => onScan());
     }
   };
+
+  const runBatch = async (operation: FleetBatchOperation) => {
+    if (!service.submitFleetBatch || !service.getFleetBatch || selected.size === 0) return;
+    batchStatus.textContent = `Starting ${operation.replace("_", " ")}…`;
+    try {
+      let task = await service.submitFleetBatch([...selected], operation);
+      while (task.status === "RUNNING" || task.status === "CANCELLING") {
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+        task = await service.getFleetBatch(task.batchId);
+      }
+      batchStatus.textContent = `${task.summary.succeeded}/${task.summary.requested} succeeded`;
+      batchStatus.title = task.results.map((item) => `${item.deviceId}: ${item.ok ? "OK" : item.error?.code ?? "FAILED"}`).join("\n");
+    } catch {
+      batchStatus.textContent = "Batch failed safely";
+    }
+  };
+
+  search.addEventListener("input", () => { query = search.value.trim().toLocaleLowerCase(); render(); });
+  sourceFilter.addEventListener("change", () => { source = sourceFilter.value; render(); });
+  selectAll.addEventListener("click", () => { filteredDevices().forEach((device) => selected.add(device.id)); persistSelection(); render(); });
+  clear.addEventListener("click", () => { selected.clear(); persistSelection(); render(); });
+  home.addEventListener("click", () => { void runBatch("home"); });
+  back.addEventListener("click", () => { void runBatch("back"); });
+  screenshot.addEventListener("click", () => { void runBatch("screenshot"); });
+  saveGroup.addEventListener("click", () => {
+    if (!service.saveFleetGroup || selected.size === 0) return;
+    const name = window.prompt("Name this phone group");
+    if (!name?.trim()) return;
+    const groupId = name.trim().toLocaleLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
+    if (!groupId) return;
+    void service.saveFleetGroup(groupId, name.trim(), [...selected]).then(() => { batchStatus.textContent = `Saved ${name.trim()}`; });
+  });
+
+  void service.getFleetWorkspace?.().then((workspace) => {
+    workspace.selectedDeviceIds.filter((id) => devices.some((device) => device.id === id)).forEach((id) => selected.add(id));
+    persistSelection();
+    render();
+  });
 
   let scrollRaf = 0;
   viewport.addEventListener("scroll", () => {
@@ -132,6 +226,7 @@ export function createFleetPage(
     resizeObserver.observe(viewport);
   }
   render();
+  persistSelection();
 
   return {
     element: page,

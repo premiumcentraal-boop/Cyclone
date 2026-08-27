@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import hashlib
 import re
 import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -60,6 +61,9 @@ class DeviceSession:
     next_reconnect_at_ms: int = 0
     bridge_last_error: str | None = None
     bridge_error_class: str | None = None
+    source: str = "USB"
+    provider: str | None = None
+    provider_instance_id: str | None = None
 
     def public(self) -> dict[str, Any]:
         suffix = self.serial[-4:] if len(self.serial) >= 4 else self.serial
@@ -100,6 +104,13 @@ class DeviceSession:
             "lastSeenMs": self.last_seen_ms,
             "lastSeenEpochMs": self.last_seen_ms,
             "lastSafeError": self.last_safe_error,
+            "source": self.source,
+            "provider": self.provider,
+            "providerInstanceId": self.provider_instance_id,
+            "transport": {
+                "kind": self.source,
+                "endpoint": "loopback" if self.source == "VIRTUAL" else ("lan" if self.source == "LAN" else "usb"),
+            },
             "connectionLabel": connection_label,
             "connectionHealth": {
                 "bridgeReachable": self.bridge_ok,
@@ -183,6 +194,13 @@ class DeviceFleetManager:
         self._last_adb_error: str | None = None
         self._last_raw_device_count = 0
         self._last_authorized_device_count = 0
+        self._source_resolver: Callable[[str], dict[str, str] | None] | None = None
+
+    def set_source_resolver(self, resolver: Callable[[str], dict[str, str] | None]) -> None:
+        self._source_resolver = resolver
+        with self._lock:
+            for session in self._sessions.values():
+                self._apply_source_metadata(session)
 
     def set_video_factory(self, factory: Callable[[DeviceSession], Any]) -> None:
         self._video_factory = factory
@@ -434,6 +452,7 @@ class DeviceFleetManager:
                 state=DeviceFleetState.UNAUTHORIZED if device.state == "unauthorized" else DeviceFleetState.UNPAIRED,
                 credential=remembered.credential if remembered else None,
             )
+            self._apply_source_metadata(session)
             if self._video_factory:
                 session.video = self._video_factory(session)
             self._sessions[device_id] = session
@@ -447,11 +466,43 @@ class DeviceFleetManager:
         base, span = 18000, 1000
         used = {s.local_port for s in self._sessions.values()}
         used.update(r.local_port for r in self._remembered.values() if r.local_port is not None)
+        forwarded_ports: set[int] = set()
+        try:
+            for _, local, _ in self.inventory_adb.forward_mappings():
+                if local.startswith("tcp:"):
+                    forwarded_ports.add(int(local.split(":", 1)[1]))
+        except Exception:
+            pass
         for offset in range(span):
             port = base + ((seed + offset) % span)
-            if port not in used:
+            if port not in used and port not in forwarded_ports and self._loopback_port_available(port):
                 return port
         raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "No free Cyclone device bridge port is available.")
+
+    def _apply_source_metadata(self, session: DeviceSession) -> None:
+        metadata = self._source_resolver(session.serial) if self._source_resolver is not None else None
+        if metadata:
+            session.source = str(metadata.get("source") or "VIRTUAL")
+            session.provider = metadata.get("provider")
+            session.provider_instance_id = metadata.get("instanceId")
+        elif session.serial.startswith("emulator-"):
+            session.source = "VIRTUAL"
+            session.provider = "external-emulator"
+        elif ":" in session.serial:
+            session.source = "LAN"
+        else:
+            session.source = "USB"
+
+    @staticmethod
+    def _loopback_port_available(port: int) -> bool:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+        finally:
+            sock.close()
 
     def _remove_serial(self, serial: str) -> None:
         with self._lock:

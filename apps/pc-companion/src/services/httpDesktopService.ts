@@ -14,6 +14,10 @@ import type {
   StreamDiagnosticEvent,
   StreamProfile,
   TrustStatusResult,
+  FleetBatchOperation,
+  FleetBatchTask,
+  FleetGroup,
+  FleetWorkspace,
 } from "./types.js";
 
 export interface HttpDesktopServiceOptions {
@@ -109,6 +113,40 @@ export class HttpDesktopService implements DesktopService {
 
   scanDevices(): Promise<DesktopDevice[]> {
     return this.request<{ devices: DesktopDevice[] }>("/v1/fleet/scan", { method: "POST" }).then((value) => value.devices);
+  }
+
+  getFleetWorkspace(): Promise<FleetWorkspace> {
+    return this.request("/v1/fleet/workspace");
+  }
+
+  saveFleetGroup(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup> {
+    return this.request(`/v1/fleet/groups/${encodeURIComponent(groupId)}`, {
+      method: "POST", body: JSON.stringify({ name, device_ids: deviceIds }),
+    });
+  }
+
+  async deleteFleetGroup(groupId: string): Promise<void> {
+    await this.request(`/v1/fleet/groups/${encodeURIComponent(groupId)}/delete`, { method: "POST" });
+  }
+
+  setFleetSelection(deviceIds: string[]): Promise<string[]> {
+    return this.request<{ selectedDeviceIds: string[] }>("/v1/fleet/selection", {
+      method: "POST", body: JSON.stringify({ device_ids: deviceIds }),
+    }).then((value) => value.selectedDeviceIds);
+  }
+
+  submitFleetBatch(deviceIds: string[], operation: FleetBatchOperation, params: Record<string, unknown> = {}): Promise<FleetBatchTask> {
+    return this.request("/v1/fleet/batches", {
+      method: "POST", body: JSON.stringify({ device_ids: deviceIds, operation, params }),
+    });
+  }
+
+  getFleetBatch(batchId: string): Promise<FleetBatchTask> {
+    return this.request(`/v1/fleet/batches/${encodeURIComponent(batchId)}`);
+  }
+
+  cancelFleetBatch(batchId: string): Promise<FleetBatchTask> {
+    return this.request(`/v1/fleet/batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST" });
   }
 
   watchFleet(onChange: () => void): () => void {
