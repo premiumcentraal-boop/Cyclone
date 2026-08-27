@@ -1,6 +1,6 @@
 [package]
 name = "cyclone-pc-companion"
-version = "3.3.0-beta.1"
+version = "3.3.0-beta.2"
 description = "Cyclone PC Companion"
 authors = ["Cyclone"]
 edition = "2021"

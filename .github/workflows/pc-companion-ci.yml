@@ -209,6 +209,8 @@ jobs:
           - Checksums, exact source SHA, build provenance, and third-party notices are attached.
 
           ## Cyclone 3.3 gateway overhaul
+          - The frozen PC Gateway now includes its pinned WebSocket runtime, fixing the **Cyclone couldn't start the local Gateway** screen caused by WebSocket routes falling through as HTTP 404.
+          - Sidecar builds always perform a clean dependency analysis so runtime dependency fixes cannot be hidden by a stale PyInstaller cache.
           - The primary USB live view is now a pinned, checksum-verified scrcpy 4.0 H.264 stream instead of repeated screenshots.
           - A real WebCodecs H.264 decoder renders the stream in PC Companion; screenshot capture is retained only as a bounded degraded fallback.
           - The forward-tunnel readiness handshake is verified before decoding, fixing the physical Pixel 8 empty-socket/reconnect loop.
