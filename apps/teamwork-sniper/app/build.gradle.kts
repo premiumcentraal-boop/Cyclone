@@ -11,8 +11,8 @@ android {
         applicationId = "com.cyclone.teamworksniper"
         minSdk = 34
         targetSdk = 35
-        versionCode = 1
-        versionName = "3.5.2-beta"
+        versionCode = 2
+        versionName = "3.5.3"
     }
     buildTypes {
         release {
@@ -33,12 +33,12 @@ val verifySemanticOnly by tasks.registering {
     doLast {
         val prohibited = listOf("screencap", "takescreenshot", "mediaprojection", "textrecognizer", "bitmapfactory", "pixelcopy", "gesturedescription", "dispatchgesture", "getboundsinscreen")
         val failures = mutableListOf<String>()
-        fileTree("src/main") { include("**/*.kt", "**/*.java") }.forEach { file ->
-            val lower = file.readText().lowercase()
-            prohibited.forEach { token -> if (lower.contains(token)) failures += "${file.path}: $token" }
-            if (Regex("\\bocr\\b", RegexOption.IGNORE_CASE).containsMatchIn(file.readText())) failures += "${file.path}: OCR"
+        fileTree("src/main") { include("**/*.kt", "**/*.java") }.forEach { sourceFile ->
+            val lower = sourceFile.readText().lowercase()
+            prohibited.forEach { token -> if (lower.contains(token)) failures += sourceFile.path + ": " + token }
+            if (Regex("\bocr\b", RegexOption.IGNORE_CASE).containsMatchIn(sourceFile.readText())) failures += sourceFile.path + ": OCR"
         }
-        check(failures.isEmpty()) { "Semantic-only guard failed:\n${failures.joinToString("\n")}" }
+        check(failures.isEmpty()) { "Semantic-only guard failed:\n" + failures.joinToString("\n") }
     }
 }
 tasks.named("preBuild").configure { dependsOn(verifySemanticOnly) }
@@ -53,6 +53,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
