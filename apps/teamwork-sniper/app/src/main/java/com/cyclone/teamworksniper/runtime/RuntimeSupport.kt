@@ -150,7 +150,7 @@ object AccessibilitySemanticTree {
     fun ownSemanticText(node: AccessibilityNodeInfo): String =
         listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
             .joinToString(" ")
-            .replace(Regex("\s+"), " ")
+            .replace(Regex("""\s+"""), " ")
             .trim()
 
     fun findClickableByOwnText(

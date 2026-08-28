@@ -123,7 +123,7 @@ class OpenRouterAdvisor(context: Context) {
                         .orEmpty()
                     val adviceJson = extractJson(content)
                     val candidate = adviceJson.optString("candidateId").trim()
-                    val reason = adviceJson.optString("reason").replace(Regex("\s+"), " ").trim().take(180)
+                    val reason = adviceJson.optString("reason").replace(Regex("""\s+"""), " ").trim().take(180)
                     val validId = candidate.takeUnless { it.equals("NONE", ignoreCase = true) }
                         ?.takeIf { id -> local.any { AiDecisionPolicy.candidateId(it) == id } }
                     val ordered = AiDecisionPolicy.applyPriority(local, validId)

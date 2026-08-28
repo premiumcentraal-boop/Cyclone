@@ -66,7 +66,7 @@ class UiMapStore(context: Context) {
 
     fun save(resourceId: String?, semanticLabel: String?) {
         val id = resourceId?.trim()?.takeIf { it.isNotBlank() }?.take(200)
-        val label = semanticLabel?.replace(Regex("\s+"), " ")?.trim()?.takeIf { it.isNotBlank() }?.take(160)
+        val label = semanticLabel?.replace(Regex("""\s+"""), " ")?.trim()?.takeIf { it.isNotBlank() }?.take(160)
         if (id == null && label == null) return
         val json = JSONObject()
             .put("resourceId", id ?: JSONObject.NULL)
@@ -174,5 +174,5 @@ private fun String?.safe(): String? {
     if (isNullOrBlank()) return null
     val lower = lowercase()
     if (listOf("password", "verification code", "one-time code", "otp").any(lower::contains)) return null
-    return replace(Regex("\s+"), " ").trim().take(240)
+    return replace(Regex("""\s+"""), " ").trim().take(240)
 }

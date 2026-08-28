@@ -199,7 +199,7 @@ class TeamworkAccessibilityService : AccessibilityService() {
     private fun looksLikeShiftSurface(snapshot: SemanticNode): Boolean {
         val text = snapshot.subtreeSemanticText()
         val code = Regex("(?i)(?<![A-Z0-9])(M1|M2|S1|S2|S3)(?![A-Z0-9])").containsMatchIn(text)
-        val time = Regex("\b\d{1,2}[:.]\d{2}\b").containsMatchIn(text)
+        val time = Regex("""\b\d{1,2}[:.]\d{2}\b""").containsMatchIn(text)
         return code && time
     }
 
@@ -226,7 +226,7 @@ class TeamworkAccessibilityService : AccessibilityService() {
     }
 
     private fun normalize(value: String): String =
-        value.replace(Regex("\s+"), " ").trim().lowercase()
+        value.replace(Regex("""\s+"""), " ").trim().lowercase()
 
     private suspend fun scan(parser: TeamworkParser, reset: Boolean): List<OpenShift> {
         if (reset) rewind()
