@@ -62,7 +62,21 @@ APK binaries stay in Actions / Release assets, not Git history. Publication rema
 | Armed safeguard | NOT RUN | Agent 1-owned runtime not integrated |
 | Real claim | NOT EXECUTED | No integrated sniper/device/live safe-match evidence |
 | Pixel 8 install | NOT RUN | Requires built APKs and adb/device access |
-| APK SHA-256 | NOT AVAILABLE | No authoritative build artifact for this Agent 3 lane |
+| Cyclone CI build | PASS | Mobile CI run `33174384023`, source `045f4868607031af1b35b9686188fd55047642c0` |
+| Cyclone APK SHA-256 | PASS | `e0973d02ae29ed9d0b08bc836f34ab5b926825319611b09d22170a8c3756c92a` |
+| Teamwork Sniper APK SHA-256 | NOT AVAILABLE | Agent 1 source not integrated; no sniper APK built |
+
+## Agent 3 CI evidence
+
+- Baseline 3.5.1 Mobile CI: run `33167968999` completed successfully on preserved SHA `9957eea21016476e8b004121d553e80ad0f7c136`.
+- Agent 3 Mobile CI: run `33174384023` completed successfully on source SHA `045f4868607031af1b35b9686188fd55047642c0`.
+- Artifact: `Cyclone-Android-3.5.2-beta` (Actions artifact id `9687045076`).
+- APK: `Cyclone-3.5.2-beta.apk`.
+- APK SHA-256: `e0973d02ae29ed9d0b08bc836f34ab5b926825319611b09d22170a8c3756c92a`.
+- Artifact provenance records source SHA `045f4868607031af1b35b9686188fd55047642c0` and run id `33174384023`.
+- Teamwork Sniper build step: **SKIPPED**, correctly, because Agent 1 has not been integrated.
+
+The successful Agent 3 run covers release/version guards, the scripts/CI unit suite, preserved PC Gateway + MCP tests, Windows bridge dry-run, wrapper validation, Cyclone Android unit tests, `:app:assembleDebug`, provenance packaging and artifact upload. It is not physical-device evidence and it does not verify the absent standalone sniper.
 
 ## Exact final-integration sequence
 
@@ -120,7 +134,7 @@ Never fabricate a match or call a dry run a claim.
 
 - Agent 1 exact head SHA has not been supplied, so the standalone app/runtime is not integrated.
 - Agent 2 exact head SHA has not been supplied, so live probe fixtures/contracts are not integrated.
-- This connector-only Agent 3 lane has no Gradle/Android/adb execution or physical Pixel 8 evidence.
-- No authoritative CI APKs or SHA-256 values exist for the combined release yet.
+- Agent 3 has CI Gradle/build evidence for Cyclone, but no adb or physical Pixel 8 evidence.
+- No authoritative **combined dual-APK** artifact or Teamwork Sniper SHA-256 exists yet.
 
 **Release readiness: NOT READY.** The exact Agent 1/2 heads, final CI artifact, Pixel 8 acceptance and live Teamwork evidence remain required.
