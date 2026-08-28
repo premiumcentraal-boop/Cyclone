@@ -17,12 +17,18 @@ data class OpenShift(
     val date: LocalDate,
     val dayOfWeek: DayOfWeek = date.dayOfWeek,
     val code: ShiftCode,
+    val codes: List<ShiftCode> = listOf(code),
     val startTime: LocalTime? = null,
     val endTime: LocalTime? = null,
     val semanticIdentity: String,
+    val teamworkShiftId: String? = null,
 ) {
+    val codeLabel: String
+        get() = codes.joinToString("-") { it.name }
+
     val stableKey: String
-        get() = date.toString() + "|" + code.name + "|" + (startTime ?: "?") + "|" + (endTime ?: "?")
+        get() = teamworkShiftId ?: date.toString() + "|" + codeLabel + "|" +
+            (startTime ?: "?") + "|" + (endTime ?: "?")
 }
 
 enum class RuleType { EXACT, SEQUENCE, COMBINATION }

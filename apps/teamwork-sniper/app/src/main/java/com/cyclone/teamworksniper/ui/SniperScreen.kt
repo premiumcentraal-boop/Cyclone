@@ -16,7 +16,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -30,10 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cyclone.teamworksniper.UiState
-import com.cyclone.teamworksniper.data.AiSettings
 import com.cyclone.teamworksniper.data.ShiftCode
 import com.cyclone.teamworksniper.data.ShiftRule
 import com.cyclone.teamworksniper.data.SniperSettings
@@ -48,17 +45,11 @@ private enum class DraftMode { ANY, SEQUENCE }
 fun SniperScreen(
     state: UiState,
     onSettings: (SniperSettings) -> Unit,
-    onAiSettings: (AiSettings) -> Unit,
-    onSaveAiKey: (String) -> Unit,
-    onClearAiKey: () -> Unit,
     onRules: (List<ShiftRule>) -> Unit,
     onNotification: () -> Unit,
     onAccessibility: () -> Unit,
     onEvaluate: () -> Unit,
 ) {
-    var keyDraft by rememberSaveable { mutableStateOf("") }
-    var modelDraft by remember(state.aiSettings.model) { mutableStateOf(state.aiSettings.model) }
-
     MaterialTheme {
         Surface(Modifier.fillMaxSize()) {
             LazyColumn(
@@ -82,7 +73,7 @@ fun SniperScreen(
                             },
                         )
                         Text(
-                            "Local semantic automation · PC optional · AI optional",
+                            "Runs locally · no screenshots, AI or PC required",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -110,107 +101,12 @@ fun SniperScreen(
                     Card {
                         Column(Modifier.padding(16.dp)) {
                             Toggle(
-                                title = "Sniper enabled",
-                                subtitle = "Allows Teamwork triggers, semantic UI mapping and rule evaluation",
-                                checked = state.settings.enabled,
-                            ) {
-                                onSettings(state.settings.copy(enabled = it))
+                                title = if (state.settings.enabled && state.settings.armed) "Sniper ON" else "Sniper OFF",
+                                subtitle = "When on, matching Teamwork notifications can claim only your saved shifts",
+                                checked = state.settings.enabled && state.settings.armed,
+                            ) { on ->
+                                onSettings(SniperSettings(enabled = on, armed = on))
                             }
-                            Toggle(
-                                title = "Armed",
-                                subtitle = "Only this explicit state permits claim actions",
-                                checked = state.settings.armed,
-                            ) {
-                                onSettings(state.settings.copy(armed = it))
-                            }
-                            if (!state.settings.armed) {
-                                Text(
-                                    "Disarmed mode still reads and logs what WOULD happen.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    Card {
-                        Column(
-                            Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text("Optional AI assist", fontWeight = FontWeight.Bold)
-                            Text(
-                                "The sniper works without AI and without a PC. OpenRouter can only prioritize between candidates that already passed your rules and fresh Open-to-take checks.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            Toggle(
-                                title = "Use OpenRouter when useful",
-                                subtitle = "Skipped for simple single-match decisions and bypassed automatically on errors",
-                                checked = state.aiSettings.enabled,
-                            ) {
-                                onAiSettings(state.aiSettings.copy(enabled = it))
-                            }
-
-                            OutlinedTextField(
-                                value = modelDraft,
-                                onValueChange = { modelDraft = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("OpenRouter model") },
-                                singleLine = true,
-                            )
-                            OutlinedButton(
-                                onClick = {
-                                    onAiSettings(
-                                        state.aiSettings.copy(
-                                            model = modelDraft.trim().ifBlank { "openrouter/auto" },
-                                        ),
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text("Save model")
-                            }
-
-                            if (state.aiKeyPresent) {
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("OpenRouter key secured", fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            "Encrypted with Android Keystore",
-                                            style = MaterialTheme.typography.bodySmall,
-                                        )
-                                    }
-                                    TextButton(onClick = onClearAiKey) { Text("Remove") }
-                                }
-                            } else {
-                                OutlinedTextField(
-                                    value = keyDraft,
-                                    onValueChange = { keyDraft = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    label = { Text("OpenRouter API key") },
-                                    singleLine = true,
-                                    visualTransformation = PasswordVisualTransformation(),
-                                )
-                                Button(
-                                    onClick = {
-                                        onSaveAiKey(keyDraft)
-                                        keyDraft = ""
-                                    },
-                                    enabled = keyDraft.isNotBlank(),
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Secure key")
-                                }
-                            }
-
-                            Text(
-                                "AI never creates a shift, bypasses Armed, resolves an ambiguous claim node, or expands beyond your selected rules.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
                         }
                     }
                 }
@@ -380,12 +276,12 @@ private fun RuleComposer(
                 FilterChip(
                     selected = mode == DraftMode.ANY,
                     onClick = { mode = DraftMode.ANY },
-                    label = { Text("Claim any selected") },
+                        label = { Text("Any selected") },
                 )
                 FilterChip(
                     selected = mode == DraftMode.SEQUENCE,
                     onClick = { mode = DraftMode.SEQUENCE },
-                    label = { Text("Require full sequence") },
+                        label = { Text("Exact combo") },
                 )
             }
 
@@ -393,7 +289,7 @@ private fun RuleComposer(
                 if (mode == DraftMode.ANY) {
                     "Selected codes are independent."
                 } else {
-                    "All consecutive codes must be open on the same date."
+                    "Matches one combined shift such as S1-S2-S3, or the full consecutive set."
                 },
                 style = MaterialTheme.typography.bodySmall,
             )

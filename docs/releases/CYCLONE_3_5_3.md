@@ -1,4 +1,4 @@
-# Cyclone 3.5.3 release candidate
+# Cyclone 3.5.3 + Teamwork Sniper 3.5.3.1
 
 Cyclone 3.5.3 combines the preserved Cyclone product, the Windows PC Companion stack and the standalone Teamwork Sniper in one aligned source revision.
 
@@ -7,7 +7,7 @@ Cyclone 3.5.3 combines the preserved Cyclone product, the Windows PC Companion s
 | Component | Identity |
 | --- | --- |
 | Cyclone Mobile | `com.cyclone.mobile` · 3.5.3 · versionCode 39 |
-| Teamwork Sniper | `com.cyclone.teamworksniper` · 3.5.3 · versionCode 2 |
+| Teamwork Sniper | `com.cyclone.teamworksniper` · 3.5.3.1 · versionCode 4 |
 | Cyclone PC Companion | 3.5.3 |
 | Device Gateway | 3.5.3 |
 | Codex phone MCP | 3.5.3 |
@@ -37,7 +37,8 @@ Teamwork notification
   -> Enabled + Armed safety gate
   -> optional OpenRouter priority advice
   -> fresh semantic target re-observation
-  -> ACTION_CLICK
+  -> semantic action or live node-bounds gesture
+  -> exact Claim confirmation
   -> post-action semantic verification
 ```
 
@@ -54,11 +55,11 @@ Every shift-row/claim path remains observation-scoped. The runtime re-observes b
 ## Release artifacts expected from one source SHA
 
 - `Cyclone-3.5.3.apk`
-- `Teamwork-Sniper-3.5.3.apk`
+- `Teamwork-Sniper-3.5.3.1.apk`
 - `Cyclone-PC-Companion-3.5.3-Setup.exe`
 - checksums and provenance metadata for each build lane
 
-Automatic publication remains disabled. CI artifacts are release-candidate evidence, not physical-device evidence.
+Teamwork Sniper 3.5.3.1 was physically exercised on the Pixel 8 target. The exact authorized Sunday 2026-09-06 S2 16:55–19:30 shift was claimed through Teamwork's two-step Claim/Confirm flow. Post-action semantic evidence showed the stable shift ID no longer Open to take and the matching row Scheduled.
 
 ## Acceptance matrix
 
@@ -69,11 +70,11 @@ Automatic publication remains disabled. CI artifacts are release-candidate evide
 | Screenshot/coordinate guard | CI required |
 | PC Companion + Gateway + MCP tests | CI required |
 | Windows installer | CI required |
-| Pixel 8 install | physical gate required |
-| Teamwork live hierarchy | physical gate required |
-| Notification -> read -> compare | physical gate required |
-| Real claim | only when a genuinely desired open shift exists |
+| Pixel 8 install | PASS |
+| Teamwork live hierarchy | PASS |
+| Notification/manual trigger -> read -> compare | PASS |
+| Real claim | PASS for the one explicitly authorized shift |
 
 Pixel target: `3B171FDJH0061G`.
 
-Until the Pixel/live Teamwork row/claim semantics are actually exercised, the candidate must not be labeled physically verified or fully released.
+No other shift was claimed during acceptance. The production path remains local, deterministic, screenshot/OCR-free and fails closed on ambiguity or changed safety state.

@@ -75,12 +75,12 @@ object SniperCoordinator {
 }
 
 object AccessibilitySemanticTree {
-    fun snapshot(root: AccessibilityNodeInfo): SemanticNode {
+    fun snapshot(root: AccessibilityNodeInfo, sourceChildIndex: Int? = null): SemanticNode {
         val children = buildList {
             for (index in 0 until root.childCount) {
                 val child = root.getChild(index) ?: continue
                 try {
-                    add(snapshot(child))
+                    add(snapshot(child, index))
                 } finally {
                     child.recycle()
                 }
@@ -101,6 +101,7 @@ object AccessibilitySemanticTree {
                     else -> null
                 }
             }.toSet(),
+            sourceChildIndex = sourceChildIndex,
             children = children,
         )
     }
@@ -132,11 +133,35 @@ object AccessibilitySemanticTree {
         return null
     }
 
+    fun firstScrollableByClass(
+        root: AccessibilityNodeInfo,
+        className: String,
+        action: Int,
+    ): AccessibilityNodeInfo? {
+        if (root.className?.toString() == className && root.isScrollable && root.isEnabled &&
+            root.actionList.any { it.id == action }
+        ) {
+            return AccessibilityNodeInfo.obtain(root)
+        }
+        for (index in 0 until root.childCount) {
+            val child = root.getChild(index) ?: continue
+            val found = try {
+                firstScrollableByClass(child, className, action)
+            } finally {
+                child.recycle()
+            }
+            if (found != null) return found
+        }
+        return null
+    }
+
     fun nearestClickable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         var current: AccessibilityNodeInfo? = AccessibilityNodeInfo.obtain(node)
         repeat(8) {
             val candidate = current ?: return null
-            if (candidate.isClickable || candidate.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) {
+            if (candidate.isEnabled &&
+                (candidate.isClickable || candidate.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK })
+            ) {
                 return candidate
             }
             val parent = candidate.parent
@@ -187,6 +212,46 @@ object AccessibilitySemanticTree {
             if (found != null) return found
         }
         return null
+    }
+
+    fun findByResourceId(root: AccessibilityNodeInfo, resourceId: String): AccessibilityNodeInfo? {
+        if (root.viewIdResourceName == resourceId) return AccessibilityNodeInfo.obtain(root)
+        for (index in 0 until root.childCount) {
+            val child = root.getChild(index) ?: continue
+            val found = try {
+                findByResourceId(child, resourceId)
+            } finally {
+                child.recycle()
+            }
+            if (found != null) return found
+        }
+        return null
+    }
+
+    fun findByResourceIdPrefix(root: AccessibilityNodeInfo, prefix: String): AccessibilityNodeInfo? {
+        if (root.viewIdResourceName.orEmpty().startsWith(prefix)) return AccessibilityNodeInfo.obtain(root)
+        for (index in 0 until root.childCount) {
+            val child = root.getChild(index) ?: continue
+            val found = try {
+                findByResourceIdPrefix(child, prefix)
+            } finally {
+                child.recycle()
+            }
+            if (found != null) return found
+        }
+        return null
+    }
+
+    fun resourceIdsWithPrefix(root: AccessibilityNodeInfo, prefix: String): List<String> = buildList {
+        root.viewIdResourceName?.takeIf { it.startsWith(prefix) }?.let(::add)
+        for (index in 0 until root.childCount) {
+            val child = root.getChild(index) ?: continue
+            try {
+                addAll(resourceIdsWithPrefix(child, prefix))
+            } finally {
+                child.recycle()
+            }
+        }
     }
 
     fun findClickableByResourceIdContains(root: AccessibilityNodeInfo, pattern: Regex): AccessibilityNodeInfo? {

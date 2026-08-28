@@ -13,4 +13,15 @@ class TeamworkParserTest{private val p=TeamworkParser(LocalDate.of(2026,8,28));p
 @Test fun missingDateFailsClosed(){assertTrue(p.parse(SemanticNode(children=listOf(row("S3","18:00 - 20:00")))).shifts.isEmpty())}
 @Test fun duplicateObservationsNormalizeOnce(){val duplicate=SemanticNode(text="S1 Open to take 14:00 - 16:00",clickable=true,children=listOf(SemanticNode(text="Open to take")));val r=p.parse(SemanticNode(children=listOf(SemanticNode(text="2026-08-28"),duplicate)));assertEquals(2,r.openMarkersSeen);assertEquals(1,r.shifts.size)}
 @Test fun dutchMonth(){val s=p.parse(SemanticNode(children=listOf(SemanticNode(text="maandag 31 augustus"),row("M2","10.00 – 12.00")))).shifts.single().shift;assertEquals(LocalDate.of(2026,8,31),s.date)}
+@Test fun detailDateSkipsTimeBeforeWeekday(){assertEquals(LocalDate.of(2026,9,6),p.parseDate("16:55 - 19:30 Sunday, 6 September"))}
+@Test fun scheduledNeighborIsNeverReclassifiedAsOpen(){
+    val day=SemanticNode(children=listOf(
+        SemanticNode(text="Sunday, 6 September"),
+        row("S2","16:55 - 19:30",false).copy(children=listOf(SemanticNode(text="S2"),SemanticNode(text="16:55 - 19:30"),SemanticNode(text="Scheduled"))),
+        row("S3","19:40 - 22:15"),
+    ))
+    val shifts=p.parse(day).shifts.map { it.shift }
+    assertEquals(1,shifts.size)
+    assertEquals(ShiftCode.S3,shifts.single().code)
+}
 }

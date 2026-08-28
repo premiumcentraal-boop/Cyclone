@@ -23,7 +23,6 @@ import com.cyclone.teamworksniper.data.TriggerSource
 import com.cyclone.teamworksniper.runtime.PermissionChecker
 import com.cyclone.teamworksniper.runtime.PermissionState
 import com.cyclone.teamworksniper.runtime.SniperCoordinator
-import com.cyclone.teamworksniper.runtime.TeamworkLauncher
 import com.cyclone.teamworksniper.ui.SniperScreen
 
 class MainActivity : ComponentActivity() {
@@ -60,18 +59,6 @@ class MainActivity : ComponentActivity() {
                     settings.save(it)
                     refresh()
                 },
-                onAiSettings = {
-                    aiSettings.save(it)
-                    refresh()
-                },
-                onSaveAiKey = {
-                    aiSecret.save(it)
-                    refresh()
-                },
-                onClearAiKey = {
-                    aiSecret.clear()
-                    refresh()
-                },
                 onRules = {
                     rules.save(it)
                     refresh()
@@ -105,15 +92,15 @@ class MainActivity : ComponentActivity() {
 
     private fun evaluateNow() {
         val elapsed = SystemClock.elapsedRealtime()
-        val launch = TeamworkLauncher.open(this)
         SniperCoordinator.submit(
             TriggerEvent(
                 source = TriggerSource.MANUAL,
                 wallClockEpochMs = System.currentTimeMillis(),
                 elapsedRealtimeMs = elapsed,
-                launchOutcome = launch,
+                launchOutcome = "existing-teamwork-task",
             ),
         )
+        moveTaskToBack(true)
     }
 }
 

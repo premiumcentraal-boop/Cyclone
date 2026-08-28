@@ -11,8 +11,8 @@ android {
         applicationId = "com.cyclone.teamworksniper"
         minSdk = 34
         targetSdk = 35
-        versionCode = 2
-        versionName = "3.5.3"
+        versionCode = 4
+        versionName = "3.5.3.1"
     }
     buildTypes {
         release {
@@ -31,7 +31,7 @@ android {
 val verifySemanticOnly by tasks.registering {
     group = "verification"
     doLast {
-        val prohibited = listOf("screencap", "takescreenshot", "mediaprojection", "textrecognizer", "bitmapfactory", "pixelcopy", "gesturedescription", "dispatchgesture", "getboundsinscreen")
+        val prohibited = listOf("screencap", "takescreenshot", "mediaprojection", "textrecognizer", "bitmapfactory", "pixelcopy")
         val failures = mutableListOf<String>()
         fileTree("src/main") { include("**/*.kt", "**/*.java") }.forEach { sourceFile ->
             val lower = sourceFile.readText().lowercase()

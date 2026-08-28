@@ -1,10 +1,10 @@
-# Teamwork Sniper 3.5.3
+# Teamwork Sniper 3.5.3.1
 
 Standalone phone-side companion for `tech.picnic.workapp`.
 
 - package: `com.cyclone.teamworksniper`
-- versionName: `3.5.3`
-- versionCode: `2`
+- versionName: `3.5.3.1`
+- versionCode: `3`
 - PC connection: not required
 - AI model: optional
 - primary input: Teamwork notifications + Android accessibility hierarchy
@@ -72,7 +72,7 @@ From the repository root:
 ```bash
 python scripts/ci/teamwork_sniper_metadata.py --require-app
 python scripts/ci/teamwork_sniper_guard.py --require-app
-./apps/teamwork-sniper/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleDebug --stacktrace
+./apps/mobile/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleDebug --stacktrace
 ```
 
 Physical Teamwork acceptance is a separate gate. Synthetic parser tests and CI compilation must not be represented as proof of a live claim.
