@@ -32,9 +32,11 @@ object AiDecisionPolicy {
                 .thenBy { it.ruleId },
         )
 
-    fun applyPriority(matches: List<RuleMatch>, candidateId: String?): List<RuleMatch> {
+    fun applyPriority(matches: List<RuleMatch>, preferredCandidateId: String?): List<RuleMatch> {
         val ordered = deterministic(matches)
-        val selected = candidateId?.let { id -> ordered.firstOrNull { candidateId(it) == id } } ?: return ordered
+        val selected = preferredCandidateId?.let { id ->
+            ordered.firstOrNull { candidateId(it) == id }
+        } ?: return ordered
         return listOf(selected) + ordered.filterNot { it === selected }
     }
 }
