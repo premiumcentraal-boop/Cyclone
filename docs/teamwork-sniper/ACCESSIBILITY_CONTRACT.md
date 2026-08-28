@@ -1,86 +1,100 @@
 # Teamwork Sniper Accessibility Contract
 
-## Scope and evidence status
+## Evidence status
 
-Target package: `tech.picnic.workapp`  
+Package: `tech.picnic.workapp`  
 Launcher: `tech.picnic.workapp/.MainActivity`  
-Target device requested: Pixel serial `3B171FDJH0061G`, 1080x2400 @ 420 dpi.
+Target Pixel: `3B171FDJH0061G`  
+Current live status: **UNVERIFIED — physical ADB is not exposed in the authoring runtime.**
 
-This branch was authored from a ChatGPT environment that **does not expose the user's Windows ADB shell or physical device**. Therefore this document deliberately contains **no claimed live Teamwork observations**. Anything under "Provisional parser contract" is a fail-closed implementation contract to validate against a real `uiautomator dump` before production use.
+The parser/tooling is intentionally structured so selectors and observations carry one of three evidence levels:
 
-No executable probe code calls screencap, screenshot APIs, OCR, vision, image parsing, or pixel detection.
+- `LIVE_CONFIRMED` — personally observed from a physical Teamwork hierarchy.
+- `PROVISIONAL` — parser rule designed for live validation, not asserted as Teamwork behavior.
+- `SYNTHETIC_ONLY` — contract/test corpus only; never evidence of Teamwork UI.
 
-## Required live capture commands
+No Teamwork resource ID is frozen into the contract until repeated live captures establish it.
 
-```powershell
-adb -s 3B171FDJH0061G devices
-adb -s 3B171FDJH0061G shell am start -n tech.picnic.workapp/.MainActivity
-adb -s 3B171FDJH0061G shell uiautomator dump /sdcard/teamwork.xml
-adb -s 3B171FDJH0061G pull /sdcard/teamwork.xml tools/teamwork-sniper-probe/fixtures/calendar_live.xml
-adb -s 3B171FDJH0061G shell getprop ro.build.version.release
-adb -s 3B171FDJH0061G shell dumpsys package tech.picnic.workapp
-adb -s 3B171FDJH0061G shell dumpsys notification
-```
+## Machine-readable OpenShift contract
 
-A fixture must not be named as real unless produced from such a live semantic dump.
+Schema: `docs/teamwork-sniper/accessibility-contract.schema.json`
 
-## Provisional parser contract
+Fields:
 
-An open-shift candidate is admitted only when one smallest ancestor subtree contains:
+- `date`: ISO date or null when ambiguous.
+- `day`: normalized weekday or null.
+- `code`: normalized `M<n>`/`S<n>` or null when ambiguous.
+- `start`, `end`: normalized HH:MM or null when ambiguous.
+- `state`: currently `OPEN_TO_TAKE` for open candidates.
+- `semanticRowIdentity`: deterministic diagnostic identity for one semantic row shape.
+- `claimCandidatePath`: semantic ancestor path or null.
+- `confidence`: `UNAMBIGUOUS` / `AMBIGUOUS`.
+- `ambiguity`: explicit fail-closed reason codes.
+- `evidenceLevel`: `LIVE_CONFIRMED`, `PROVISIONAL`, or `SYNTHETIC_ONLY`.
 
-1. exactly one semantic `Open to take` marker in `text` or `content-desc`;
-2. exactly one recognized shift code (currently `M<n>` or `S<n>`);
-3. exactly one start/end pair, either one range token such as `08:00–10:35` or exactly two distinct HH:MM tokens;
-4. exactly one unambiguous date in a supported grammar;
-5. an enabled clickable ancestor reachable from the open marker.
+## Provisional open-row grammar
 
-If any binding is ambiguous, the candidate is returned with `ambiguous=true`; production claim logic must reject it.
+A candidate begins at a semantic node whose `text` or `content-desc` contains `Open to take`. The parser climbs ancestors and selects the **smallest** subtree that contains a recognized shift code and an unambiguous start/end pair. Within that scope it resolves:
 
-### Binding rule
+- `text=` and `content-desc=` values;
+- empty/nested wrapper nodes;
+- clickable parent or grandparent ancestry;
+- nested Compose-style semantics;
+- duplicate semantic exposure;
+- ranges `08:00–10:35`, `08:00 - 10:35`, or two distinct time tokens `08:00 10:35`;
+- ISO, numeric Dutch/European, and Dutch/English month-name dates;
+- sticky preceding day/date headings when the row itself omits the date and a unique year anchor is available.
 
-Bind date + code + time + state only inside the smallest ancestor of the `Open to take` node that simultaneously contains a valid code and a valid time pair. Do not bind tokens across sibling shift-row ancestors or across day boundaries.
+Any multiple interpretation remains `AMBIGUOUS`; the parser does not pick a most-likely answer.
 
-### Claim-node rule
+## Binding rule
 
-The probe identifies, but never invokes, the nearest enabled ancestor of the `Open to take` marker with `clickable="true"`. This is only a candidate claim node until verified live. If none exists, fail closed.
+Date + day + code + time + state must resolve within the smallest qualifying row scope, except that a missing date/day may inherit from the nearest preceding semantic day/date heading only when that heading resolves uniquely. Cross-row and cross-day token binding is forbidden.
 
-### Success rule
+## Claim candidate rule
 
-No success grammar is asserted yet. Production logic must not infer success solely from a click. Live acceptance must establish a semantic postcondition such as a confirmation message, row-state transition, disappearance of `Open to take`, or appearance in a user's assigned-shift state.
+The diagnostic candidate is the nearest enabled ancestor of the open marker with `clickable="true"`. This is **PROVISIONAL**, not a live Teamwork fact. The probe reports the path but performs no claim.
 
-## Scroll discovery algorithm
+## Success and confirmation
 
-1. Dump and parse current hierarchy.
-2. Add normalized tuples `(date, code, start, end, state)` to a set.
-3. Identify the semantic node with `scrollable="true"` that contains shift rows.
-4. Invoke semantic/uiautomator scroll on that container (not coordinate-based parser logic).
-5. Dump again.
-6. Stop when scroll reports failure, or both the normalized shift set and normalized semantic-tree fingerprint cease changing.
-7. Deduplicate repeated rows across pages by normalized tuple.
+No live success or confirmation grammar exists yet. Synthetic confirmation/success/failure fixtures model contract states only. Production integration must require a live-confirmed post-action semantic state and must not treat click completion as success.
 
-The exact live scrollable class/resource-id and action remain unverified.
+## Full-week aggregation
 
-## Week/date algorithm
+`probe.py` accepts one or multiple XML dumps. Multi-dump mode:
 
-Prefer explicit date text/content descriptions associated with each row/day heading. If Teamwork exposes only day names under a semantically labelled week header, resolve dates only when the week anchor itself is unambiguous. Never guess a calendar year/week from device date alone when multiple interpretations are possible.
+1. parses each page;
+2. normalizes shifts;
+3. deduplicates by `(date, code, start, end, state)`;
+4. records pages where each shift appeared;
+5. reports `newPerPage`;
+6. computes semantic fingerprints;
+7. reports `stable=true` when the newest page adds no shifts and repeats the immediately previous page fingerprint.
 
-Week navigation must use semantic text/content-desc/resource-id discovered live. No coordinates belong in the parser contract.
+This allows a live scanner to stop only after the semantic traversal itself has also reached a no-progress condition.
 
-## Stable identifiers
+## Date grammar
 
-None are asserted as stable until captured repeatedly across live states/app relaunches. Resource IDs in `synthetic_*` fixtures are intentionally fake and must never ship into production selectors.
+Supported provisional forms include:
+
+- `2026-08-29`
+- `29/08/2026`
+- `29-08-2026`
+- `29 Aug 2026`
+- `29 August 2026`
+- `29 augustus 2026`
+- `August 29, 2026`
+
+Yearless sticky headings such as `Saturday 29 Aug` are accepted only when the current hierarchy contains exactly one unambiguous `20xx` year anchor.
 
 ## Notifications
 
-No live notification sample was available in this execution environment. The required contract is to record package, channel/category, title/body, contentIntent presence and destination after safe invocation. Do not assume contentIntent reaches the calendar.
+`notification_parser.py` isolates `dumpsys notification` records containing `tech.picnic.workapp` and reports package, channel, title, text, post time and whether a content intent appears present. It does **not** claim where that intent routes.
 
-## Fail-closed recommendations
+## Static safety rule
 
-- Reject multiple codes in one row scope.
-- Reject more/fewer than two unambiguous times unless one valid range exists.
-- Reject missing/ambiguous date.
-- Reject missing clickable semantic ancestor.
-- Reject cross-row token binding.
-- Reject duplicate semantic candidates that disagree on date/time/code.
-- Treat unknown confirmation/post-click state as failure, not success.
-- Treat notification routing as untrusted until live-tested.
+`safety_guard.py` scans executable Teamwork probe paths and fails on forbidden screen-capture/OCR/image mechanisms or obvious hardcoded tap coordinates. Documentation is allowed to describe prohibited mechanisms.
+
+## Current live questions
+
+Only physical-device evidence can establish the actual Teamwork row boundary, actual claim node, actual scroll selector/action, actual confirmation/success states, stable IDs/content descriptions, notification routing destination, and Android/app timing.
