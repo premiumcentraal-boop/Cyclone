@@ -1,36 +1,78 @@
-# Teamwork Sniper 3.5.2-beta
+# Teamwork Sniper 3.5.3
 
-Standalone companion APK for `tech.picnic.workapp`.
+Standalone phone-side companion for `tech.picnic.workapp`.
 
 - package: `com.cyclone.teamworksniper`
-- versionName: `3.5.2-beta`
-- versionCode: `1`
-- input: Teamwork notifications + Android accessibility hierarchy only
-- actions: semantic `AccessibilityNodeInfo.ACTION_CLICK` only
+- versionName: `3.5.3`
+- versionCode: `2`
+- PC connection: not required
+- AI model: optional
+- primary input: Teamwork notifications + Android accessibility hierarchy
+- primary actions: semantic `AccessibilityNodeInfo.ACTION_CLICK` and semantic scroll actions only
 
-## Runtime contract
+## Deterministic-first runtime
 
-The notification listener filters strictly to Teamwork, timestamps the trigger, prefers the notification `PendingIntent`, and falls back to Teamwork's package launch intent. The accessibility service performs a bounded fast settle, runs an immediate semantic comparison, scrolls using accessibility scroll actions, fingerprints semantic state to stop loops, and evaluates persisted rules.
+Teamwork Sniper is designed to work with no PC and no model API.
 
-`OpenShift` never retains a live node. Parser output keeps an observation-scoped semantic path separately. Every action gets a fresh tree, confirms the target is still `Open to take`, confirms the rule is unchanged and enabled, confirms global enabled + armed state, resolves one target, climbs to a clickable semantic ancestor and sends `ACTION_CLICK`. Any ambiguity fails closed. Sequence rules preflight all members on the same date before the first action and stop on partial change.
+A Teamwork notification timestamps the trigger and opens Teamwork using the notification PendingIntent when available, otherwise the package launch intent. The accessibility service then:
 
-No Teamwork resource ID is hard-coded. Text/content-description/class/resource-id/action metadata may all be observed, but only supported code/date/open-state semantics are assumed by the generic parser.
+1. observes the current semantic hierarchy;
+2. recognizes the shift surface or navigates through a locally learned semantic UI-map hint;
+3. scans `Open to take` rows;
+4. scrolls using accessibility actions and deduplicates semantic state;
+5. normalizes shifts to date/code/time;
+6. compares only against persisted user rules;
+7. requires both Enabled and Armed before any action;
+8. re-observes and resolves one fresh semantic target;
+9. sends `ACTION_CLICK`;
+10. verifies the target is no longer open before continuing.
+
+The local UI map stores only a successful semantic resource ID/label hint. It never stores screen coordinates and never turns an old observation path into permanent truth.
+
+## Optional OpenRouter advisor
+
+OpenRouter is an optional prioritization layer, not an action authority.
+
+- disabled by default;
+- configurable model, default `openrouter/auto`;
+- API key encrypted with Android Keystore;
+- skipped when one safe candidate is already enough;
+- receives only candidates that already passed deterministic rules and semantic open-state checks;
+- may reorder those existing candidates or return no preference;
+- invented/unknown candidate IDs are rejected;
+- timeout/API/model failures fall back immediately to deterministic ordering;
+- AI cannot arm the sniper, create a shift, expand the user's rules, resolve an ambiguous UI node, or click anything directly.
 
 ## Rule JSON schema
 
 ```json
-{"schemaVersion":1,"rules":[{"id":"uuid","name":"S1 → S2 → S3","type":"EXACT | SEQUENCE | COMBINATION","enabled":true,"codes":["S1","S2","S3"],"weekOffsets":[0,1],"dates":["2026-08-31"],"days":["MONDAY"]}]}
+{
+  "schemaVersion": 1,
+  "rules": [
+    {
+      "id": "uuid",
+      "name": "S1 → S2 → S3",
+      "type": "EXACT | SEQUENCE | COMBINATION",
+      "enabled": true,
+      "codes": ["S1", "S2", "S3"],
+      "weekOffsets": [0, 1],
+      "dates": ["2026-08-31"],
+      "days": ["MONDAY"]
+    }
+  ]
+}
 ```
 
-`EXACT` requires one code. `COMBINATION` means any selected code is independently desired. `SEQUENCE` requires every consecutive selected code on the same date and in observed start-time/code order. Empty `dates`/`days` means unrestricted. Week offsets are relative to the current Monday-based week.
+`EXACT` requires one code. `COMBINATION` means any selected code is independently desired. `SEQUENCE` requires every consecutive selected code on the same date.
 
-## Gates
+## Build gates
 
-From this directory with Android SDK + Gradle available:
+From the repository root:
 
 ```bash
-gradle testDebugUnitTest verifySemanticOnly assembleDebug
-python scripts/verify_semantic_only.py
+python scripts/ci/teamwork_sniper_metadata.py --require-app
+python scripts/ci/teamwork_sniper_guard.py --require-app
+./apps/teamwork-sniper/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleDebug --stacktrace
 ```
 
-The Gradle static guard is attached to `preBuild` and `check`.
+Physical Teamwork acceptance is a separate gate. Synthetic parser tests and CI compilation must not be represented as proof of a live claim.

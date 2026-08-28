@@ -471,7 +471,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                     }
                 } else {
                     Text(
-                        "Install Teamwork-Sniper-3.5.2-beta.apk separately to use shift matching.",
+                        "Install Teamwork-Sniper-3.5.3.apk separately to use shift matching.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
