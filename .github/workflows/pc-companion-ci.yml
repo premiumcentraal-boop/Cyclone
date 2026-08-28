@@ -13,6 +13,7 @@ on:
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
       - 'scripts/ci/tests/**'
+      - 'release/version.toml'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   push:
@@ -30,6 +31,7 @@ on:
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
       - 'scripts/ci/tests/**'
+      - 'release/version.toml'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   workflow_dispatch:
