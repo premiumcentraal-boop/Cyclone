@@ -1,21 +1,21 @@
 schema = 1
-product_version = "3.5.0"
+product_version = "3.5.1"
 channel = "stable"
-android_version_code = 36
-python_version = "3.5.0"
+android_version_code = 37
+python_version = "3.5.1"
 
 [components]
-mobile = "3.5.0"
-pc_companion = "3.5.0"
-device_gateway = "3.5.0"
-mcp = "3.5.0"
+mobile = "3.5.1"
+pc_companion = "3.5.1"
+device_gateway = "3.5.1"
+mcp = "3.5.1"
 
 [release]
 publication_authorized = true
-physical_pixel8 = "DISCOVERY_ONLY_ACCEPTANCE_PENDING"
-physical_pixel8_ui_acceptance = "PASSED_2026_08_28"
-second_android_device = "PASSED_2026_08_28_EMULATOR"
-virtual_provider = "PASSED_2026_08_28_AVD_LIFECYCLE"
+physical_pixel8 = "PASS_PIXEL_8_ANDROID_16_3B171FDJH0061G"
+physical_pixel8_ui_acceptance = "PASS_LIVE_MEDIA_TAP_SWIPE_BACK_HOME"
+second_android_device = "NOT_REQUIRED_PC_CONTROL_PATCH"
+virtual_provider = "UNCHANGED_FROM_3.5.0"
 android_signing = "DEBUG_UNVERIFIED"
 windows_signing = "UNVERIFIED"
-windows_installer = "BLOCKED_MSVC_BUILD_TOOLS_UAC"
+windows_installer = "PENDING_3.5.1_CI_BUILD"

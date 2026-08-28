@@ -9,7 +9,7 @@ from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationErro
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode
 
-MANUAL_KINDS = frozenset({"tap", "back", "home", "scroll_up", "scroll_down", "text", "wake"})
+MANUAL_KINDS = frozenset({"tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"})
 _SENSITIVE_HINT = re.compile(r"(?i)(password|passcode|otp|one.?time|verification.?code|api.?key|bearer|token|secret|cvv|pin)\s*[:=]?")
 _JWT = re.compile(r"^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$")
 _LONG_SECRET = re.compile(r"^[A-Za-z0-9_+\-/=]{32,}$")
@@ -40,6 +40,17 @@ class ManualControlService:
             if not (math.isfinite(float(x)) and math.isfinite(float(y)) and 0.0 <= float(x) <= 1.0 and 0.0 <= float(y) <= 1.0):
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "tap coordinates must be in the 0.0..1.0 range.")
             args.update({"x": float(x), "y": float(y)})
+        elif kind == "swipe":
+            points = [payload.get(name) for name in ("x1", "y1", "x2", "y2")]
+            if not all(isinstance(value, (int, float)) for value in points):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "swipe requires normalized x1, y1, x2, and y2.")
+            normalized = [float(value) for value in points]
+            if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in normalized):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "swipe coordinates must be in the 0.0..1.0 range.")
+            duration_ms = payload.get("duration_ms", 350)
+            if not isinstance(duration_ms, int) or not 100 <= duration_ms <= 3000:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "swipe duration must be between 100 and 3000 milliseconds.")
+            args.update(dict(zip(("x1", "y1", "x2", "y2"), normalized)), durationMs=duration_ms)
         elif kind == "text":
             text = payload.get("text")
             if not isinstance(text, str) or not text:

@@ -207,6 +207,7 @@ export type PairQrConfirmResult =
 
 export type DeviceControlAction =
   | { type: "tap"; x: number; y: number }
+  | { type: "swipe"; x1: number; y1: number; x2: number; y2: number; durationMs: number }
   | { type: "key"; key: "BACK" | "HOME" | "ENTER" | "BACKSPACE" | "TAB" }
   | { type: "scroll"; direction: "UP" | "DOWN" }
   | { type: "text"; text: string }

@@ -1,8 +1,8 @@
 # Current Cyclone State
 
-This document describes the Cyclone 3.5 integration candidate. Its product version is `3.5.0`
-(Android `versionCode 36`). Publication remains gated by the evidence in
-`docs/cyclone-3.5/HARD_LAUNCH_REPORT.md`; source integration is not itself a published release.
+This document describes the Cyclone 3.5.1 control-workspace candidate. Its product version is `3.5.1`
+(Android `versionCode 37`). Publication remains gated by the evidence in
+`docs/cyclone-3.5.1/RELEASE_REPORT.md`; source integration is not itself a published release.
 Always verify the exact GitHub source SHA, CI run and attached checksums before treating an artifact
 as distributed.
 

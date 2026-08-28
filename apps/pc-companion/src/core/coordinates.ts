@@ -10,6 +10,10 @@ export interface NormalizedPoint {
   y: number;
 }
 
+export type NormalizedPointerGesture =
+  | { type: "tap"; x: number; y: number }
+  | { type: "swipe"; x1: number; y1: number; x2: number; y2: number; durationMs: number };
+
 export function mapPointerToNormalized(
   clientX: number,
   clientY: number,
@@ -35,6 +39,30 @@ export function mapPointerToNormalized(
   const displayX = clamp01(localX / contentWidth);
   const displayY = clamp01(localY / contentHeight);
   return unrotate(displayX, displayY, rotationDegrees);
+}
+
+export function mapPointerGesture(
+  start: { clientX: number; clientY: number; startedAtMs: number },
+  end: { clientX: number; clientY: number; endedAtMs: number },
+  viewport: RectLike,
+  sourceWidth: number,
+  sourceHeight: number,
+  rotationDegrees: 0 | 90 | 180 | 270,
+  dragThresholdPx = 8,
+): NormalizedPointerGesture | null {
+  const from = mapPointerToNormalized(start.clientX, start.clientY, viewport, sourceWidth, sourceHeight, rotationDegrees);
+  const to = mapPointerToNormalized(end.clientX, end.clientY, viewport, sourceWidth, sourceHeight, rotationDegrees);
+  if (!from || !to) return null;
+  const distance = Math.hypot(end.clientX - start.clientX, end.clientY - start.clientY);
+  if (distance < dragThresholdPx) return { type: "tap", x: to.x, y: to.y };
+  return {
+    type: "swipe",
+    x1: from.x,
+    y1: from.y,
+    x2: to.x,
+    y2: to.y,
+    durationMs: Math.max(120, Math.min(1200, Math.round(end.endedAtMs - start.startedAtMs))),
+  };
 }
 
 function unrotate(x: number, y: number, rotation: 0 | 90 | 180 | 270): NormalizedPoint {

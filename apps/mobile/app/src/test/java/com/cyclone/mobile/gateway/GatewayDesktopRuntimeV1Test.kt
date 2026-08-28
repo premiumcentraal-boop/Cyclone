@@ -115,7 +115,7 @@ class GatewayDesktopRuntimeV1Test {
         assertTrue(DesktopManualControlContract.normalizedPixel(0.5, 1080) in 539..540)
         assertTrue(runCatching { DesktopManualControlContract.normalizedPixel(1.1, 1080) }.isFailure)
         assertEquals(
-            setOf("tap", "back", "home", "scroll_up", "scroll_down", "text", "wake"),
+            setOf("tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"),
             DesktopManualControlContract.allowedKinds,
         )
     }

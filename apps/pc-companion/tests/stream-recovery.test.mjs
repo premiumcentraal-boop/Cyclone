@@ -8,6 +8,13 @@ import {
   streamErrorIsRecoverable,
 } from "../.test-dist/video/webcodecsH264Decoder.js";
 import { FALLBACK_WS_RETRY_MS, LivePhoneController } from "../.test-dist/video/livePhoneController.js";
+import { cacheBustedFrameUrl } from "../.test-dist/video/fallbackFrameDecoder.js";
+
+test("fallback previews preserve data and blob URLs while HTTP snapshots bypass stale caches", () => {
+  assert.equal(cacheBustedFrameUrl("data:image/svg+xml,phone", 42), "data:image/svg+xml,phone");
+  assert.equal(cacheBustedFrameUrl("blob:http://127.0.0.1/frame", 42), "blob:http://127.0.0.1/frame");
+  assert.equal(cacheBustedFrameUrl("http://127.0.0.1/frame?profile=focus", 42), "http://127.0.0.1/frame?profile=focus&t=42");
+});
 
 test("recoverable stream errors keep the socket contract while terminal closes stay terminal", () => {
   assert.equal(streamErrorIsRecoverable({ type: "stream.error", retryable: true }), true);

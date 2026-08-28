@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyclone-agent-mcp"
-version = "3.5.0"
+version = "3.5.1"
 description = "Generic MCP interface for Cyclone PC Device Gateway"
 requires-python = ">=3.11"
 authors = [{name = "Cyclone"}]

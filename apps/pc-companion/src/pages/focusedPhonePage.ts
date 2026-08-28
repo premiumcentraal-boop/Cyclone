@@ -1,6 +1,6 @@
 import { keyboardCommandForEvent } from "../core/keyboard.js";
 import { KeyboardCapture } from "../core/keyboardCapture.js";
-import type { DesktopDevice, DesktopService } from "../services/types.js";
+import type { DesktopDevice, DesktopService, DeviceControlAction } from "../services/types.js";
 import { button, el, icon } from "../ui/dom.js";
 import { createLivePhoneView } from "../ui/livePhoneView.js";
 
@@ -20,30 +20,95 @@ export function createFocusedPhonePage(
   const back = button("Back to all phones", "back-to-fleet");
   back.prepend(icon("←"));
   back.addEventListener("click", onBack);
+  const focusHeading = el("div", "focus-heading");
+  focusHeading.append(el("div", "focus-kicker", "LIVE CONTROL"), el("h1", "focus-title", "Phone workspace"));
   const identity = el("div", "focus-device-identity");
   identity.append(el("div", "focus-device-name", device.name), el("div", "phone-connection", device.connectionLabel));
-  topbar.append(back, identity);
+  topbar.append(back, focusHeading, identity);
 
   const workspace = el("div", "focus-workspace");
+  const contextPanel = el("aside", "focus-context-panel");
+  contextPanel.append(
+    el("div", "panel-eyebrow", "ACTIVE PHONE"),
+    el("div", "context-device-name", device.name),
+    el("div", "context-device-model", device.model || "Android phone"),
+  );
+  const health = el("div", "context-health");
+  health.append(el("span", `context-health-dot state-${device.state.toLowerCase()}`), el("span", "context-health-copy", device.connectionLabel));
+  const humanInput = el("div", "context-card");
+  humanInput.append(
+    el("div", "context-card-title", "Human control"),
+    el("p", "context-card-copy", "Click anywhere on the screen to tap. Hold and drag naturally to swipe."),
+  );
+  const aiInput = el("div", "context-card accent");
+  aiInput.append(
+    el("div", "context-card-title", "AI-ready"),
+    el("p", "context-card-copy", "The same phone stays explicitly targeted for governed AI and MCP actions."),
+  );
+  contextPanel.append(health, humanInput, aiInput);
+
+  const controlStatus = el("div", "control-status", "Ready");
   const liveColumn = el("div", "focus-live-column");
-  const live = createLivePhoneView({ service, device, profile: "focus", interactive: true, showLabel: false });
+  const live = createLivePhoneView({
+    service,
+    device,
+    profile: "focus",
+    interactive: true,
+    showLabel: false,
+    onControl: (kind, ok) => {
+      const label = kind === "tap" ? "Mouse tap" : "Mouse swipe";
+      controlStatus.textContent = ok ? `${label} sent` : `${label} unavailable`;
+      controlStatus.classList.toggle("error", !ok);
+    },
+  });
   live.element.classList.add("focused-live-phone");
-  liveColumn.append(live.element);
+  liveColumn.append(el("div", "direct-control-hint", "Mouse control · click to tap · drag to swipe"), live.element);
 
   const controls = el("aside", "focus-controls");
+  controls.append(el("div", "panel-eyebrow", "CONTROLLER"));
+  const runControl = async (action: DeviceControlAction, label: string) => {
+    controlStatus.textContent = `${label}…`;
+    controlStatus.classList.remove("error");
+    try {
+      const result = await service.sendControl(device.id, action);
+      controlStatus.textContent = result.ok ? `${label} sent` : `${label} unavailable`;
+      controlStatus.classList.toggle("error", !result.ok);
+    } catch {
+      controlStatus.textContent = `${label} failed safely`;
+      controlStatus.classList.add("error");
+    }
+  };
   const primary = el("div", "control-rail");
-  const controlDefs: Array<[string, string, () => void]> = [
-    ["←", "Back", () => void service.sendControl(device.id, { type: "key", key: "BACK" }).catch(() => undefined)],
-    ["⌂", "Home", () => void service.sendControl(device.id, { type: "key", key: "HOME" }).catch(() => undefined)],
-    ["↑", "Scroll up", () => void service.sendControl(device.id, { type: "scroll", direction: "UP" }).catch(() => undefined)],
-    ["↓", "Scroll down", () => void service.sendControl(device.id, { type: "scroll", direction: "DOWN" }).catch(() => undefined)],
+  const controlDefs: Array<[string, string, DeviceControlAction]> = [
+    ["←", "Back", { type: "key", key: "BACK" }],
+    ["⌂", "Home", { type: "key", key: "HOME" }],
   ];
+  const quickControls = el("div", "quick-controls");
   for (const [symbol, label, action] of controlDefs) {
     const node = button("", "control-button");
     node.append(icon(symbol), el("span", "control-label", label));
-    node.addEventListener("click", action);
-    primary.append(node);
+    node.addEventListener("click", () => void runControl(action, label));
+    quickControls.append(node);
   }
+  primary.append(quickControls);
+
+  const directionPad = el("div", "direction-pad");
+  const directionalControls: Array<["up" | "left" | "right" | "down", string, DeviceControlAction]> = [
+    ["up", "Scroll up", { type: "swipe", x1: .5, y1: .72, x2: .5, y2: .28, durationMs: 280 }],
+    ["left", "Scroll left", { type: "swipe", x1: .72, y1: .5, x2: .28, y2: .5, durationMs: 280 }],
+    ["right", "Scroll right", { type: "swipe", x1: .28, y1: .5, x2: .72, y2: .5, durationMs: 280 }],
+    ["down", "Scroll down", { type: "swipe", x1: .5, y1: .28, x2: .5, y2: .72, durationMs: 280 }],
+  ];
+  for (const [direction, label, action] of directionalControls) {
+    const symbol = direction === "up" ? "↑" : direction === "down" ? "↓" : direction === "left" ? "←" : "→";
+    const node = button(symbol, `direction-button direction-${direction}`);
+    node.setAttribute("aria-label", label);
+    node.title = label;
+    node.addEventListener("click", () => void runControl(action, label));
+    directionPad.append(node);
+  }
+  directionPad.append(el("div", "direction-center", "SWIPE"));
+  primary.append(directionPad, controlStatus);
 
   const keyboardCapture = new KeyboardCapture();
   let keyboardActive = false;
@@ -109,7 +174,7 @@ export function createFocusedPhonePage(
   more.append(summary, menu);
 
   controls.append(primary, more, clipboardPanel);
-  workspace.append(liveColumn, controls);
+  workspace.append(contextPanel, liveColumn, controls);
   page.append(topbar, keyboardIndicator, workspace);
 
   const keydown = (event: KeyboardEvent) => {

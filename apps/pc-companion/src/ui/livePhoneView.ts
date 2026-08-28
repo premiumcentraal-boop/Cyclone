@@ -1,4 +1,4 @@
-import { mapPointerToNormalized } from "../core/coordinates.js";
+import { mapPointerGesture } from "../core/coordinates.js";
 import type { DesktopDevice, DesktopService, StreamProfile, StreamUiState } from "../services/types.js";
 import { LivePhoneController } from "../video/livePhoneController.js";
 import { button, el } from "./dom.js";
@@ -12,6 +12,7 @@ export interface LivePhoneViewOptions {
   autoStart?: boolean;
   onOpen?: (device: DesktopDevice) => void;
   onPair?: (device: DesktopDevice) => void;
+  onControl?: (kind: "tap" | "swipe", ok: boolean) => void;
 }
 
 export interface LivePhoneViewHandle {
@@ -22,6 +23,9 @@ export interface LivePhoneViewHandle {
 export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneViewHandle {
   const { device } = options;
   const card = el("article", `phone-card phone-state-${device.state.toLowerCase()}`);
+  const displayedWidth = device.video.rotationDegrees === 90 || device.video.rotationDegrees === 270 ? device.video.height : device.video.width;
+  const displayedHeight = device.video.rotationDegrees === 90 || device.video.rotationDegrees === 270 ? device.video.width : device.video.height;
+  card.style.setProperty("--phone-aspect", `${displayedWidth} / ${displayedHeight}`);
   const stage = el("div", "phone-stage");
   const frame = el("div", "phone-frame");
   const canvas = el("canvas", "phone-canvas");
@@ -72,6 +76,7 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
   // Fleet cards are intentionally connection-only. Pairing must never implicitly start a continuous
   // adb screencap/video workload. The live stream starts only after the user opens a paired phone.
   if (options.autoStart === false) {
+    card.classList.add("passive-device-card");
     canvas.hidden = true;
     image.hidden = true;
     overlay.classList.add("visible", "passive");
@@ -143,20 +148,48 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
 
   if (options.interactive) {
     frame.classList.add("interactive");
-    frame.addEventListener("click", (event) => {
+    frame.setAttribute("aria-label", `Control ${device.name}. Click to tap, hold and drag to swipe.`);
+    let pointerStart: { clientX: number; clientY: number; startedAtMs: number; pointerId: number } | null = null;
+    frame.addEventListener("pointerdown", (event) => {
       if (currentState !== "LIVE") return;
+      if (event.button !== 0) return;
+      pointerStart = { clientX: event.clientX, clientY: event.clientY, startedAtMs: performance.now(), pointerId: event.pointerId };
+      frame.setPointerCapture(event.pointerId);
+      frame.classList.add("pointer-active");
+      event.preventDefault();
+    });
+    frame.addEventListener("pointermove", (event) => {
+      if (!pointerStart || pointerStart.pointerId !== event.pointerId) return;
+      if (Math.hypot(event.clientX - pointerStart.clientX, event.clientY - pointerStart.clientY) >= 8) frame.classList.add("pointer-dragging");
+      event.preventDefault();
+    });
+    frame.addEventListener("pointerup", (event) => {
+      if (!pointerStart || pointerStart.pointerId !== event.pointerId) return;
       const rect = frame.getBoundingClientRect();
-      const point = mapPointerToNormalized(
-        event.clientX,
-        event.clientY,
+      const gesture = mapPointerGesture(
+        pointerStart,
+        { clientX: event.clientX, clientY: event.clientY, endedAtMs: performance.now() },
         rect,
         device.video.width,
         device.video.height,
         device.video.rotationDegrees,
       );
-      if (!point) return;
-      void options.service.sendControl(device.id, { type: "tap", x: point.x, y: point.y }).catch(() => undefined);
+      pointerStart = null;
+      frame.classList.remove("pointer-active", "pointer-dragging");
+      if (frame.hasPointerCapture(event.pointerId)) frame.releasePointerCapture(event.pointerId);
+      if (!gesture) return;
+      void options.service.sendControl(device.id, gesture)
+        .then((result) => options.onControl?.(gesture.type, result.ok))
+        .catch(() => options.onControl?.(gesture.type, false));
+      event.preventDefault();
     });
+    const cancelPointer = (event: PointerEvent) => {
+      if (pointerStart?.pointerId !== event.pointerId) return;
+      pointerStart = null;
+      frame.classList.remove("pointer-active", "pointer-dragging");
+    };
+    frame.addEventListener("pointercancel", cancelPointer);
+    frame.addEventListener("lostpointercapture", cancelPointer);
   }
 
   return {

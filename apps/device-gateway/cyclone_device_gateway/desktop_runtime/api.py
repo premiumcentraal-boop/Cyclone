@@ -44,9 +44,14 @@ class PairQrCompleteBody(BaseModel):
 
 class ManualControlBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["tap", "back", "home", "scroll_up", "scroll_down", "text", "wake"]
+    kind: Literal["tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"]
     x: float | None = None
     y: float | None = None
+    x1: float | None = None
+    y1: float | None = None
+    x2: float | None = None
+    y2: float | None = None
+    duration_ms: int | None = None
     text: str | None = None
 
 

@@ -193,7 +193,7 @@ jobs:
           mkdir -p release-assets/desktop release-assets/mobile
           gh run download "$GITHUB_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
-            --name "cyclone-pc-companion-v1-$GITHUB_SHA" \
+            --name "cyclone-pc-companion-$GITHUB_SHA" \
             --dir release-assets/desktop
           gh run download "$GITHUB_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
@@ -222,7 +222,14 @@ jobs:
           - **Android:** Cyclone Mobile ${MOBILE_VERSION} APK.
           - Checksums, exact source SHA, build provenance, and third-party notices are attached.
 
-          ## Cyclone 3.5
+          ## Cyclone 3.5.1
+          - The PC Companion now uses a compact top navigation bar with notifications and profile-owned Connections and Settings.
+          - The focused phone is centered at its real display aspect ratio and separated from device context and controls.
+          - Mouse click maps to phone tap; hold-drag-release maps to an authenticated normalized swipe.
+          - A four-direction controller adds bounded up, down, left and right swipes alongside Back and Home.
+          - Fleet refreshes preserve the mounted live stream, reducing avoidable disconnects and visual jumps.
+
+          ## Cyclone 3.5 platform
           - A unified Device Wall now models physical and virtual Android targets behind one capability-aware backend contract.
           - Persistent groups, search, explicit multi-select and typed batch actions return independent per-device outcomes.
           - The virtual-device provider is lifecycle-bounded, loopback-first and fails closed when a compatible AVD host is unavailable; unsupported clone/snapshot operations are not advertised.

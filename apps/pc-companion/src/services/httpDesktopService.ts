@@ -291,6 +291,14 @@ export class HttpDesktopService implements DesktopService {
     let body: Record<string, unknown>;
     if (action.type === "wake") body = { kind: "wake" };
     else if (action.type === "tap") body = { kind: "tap", x: action.x, y: action.y };
+    else if (action.type === "swipe") body = {
+      kind: "swipe",
+      x1: action.x1,
+      y1: action.y1,
+      x2: action.x2,
+      y2: action.y2,
+      duration_ms: action.durationMs,
+    };
     else if (action.type === "scroll") body = { kind: action.direction === "UP" ? "scroll_up" : "scroll_down" };
     else if (action.type === "text") body = { kind: "text", text: action.text };
     else if (action.type === "key" && action.key === "BACK") body = { kind: "back" };

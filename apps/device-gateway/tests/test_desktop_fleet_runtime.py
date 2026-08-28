@@ -420,6 +420,8 @@ def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
     fleet, session, bridge = paired_session_for_services()
     service = ManualControlService(fleet)
     assert service.execute(session.device_id, {"kind": "tap", "x": .25, "y": .75})["kind"] == "tap"
+    assert service.execute(session.device_id, {"kind": "swipe", "x1": .5, "y1": .8, "x2": .5, "y2": .2, "duration_ms": 280})["kind"] == "swipe"
+    assert bridge.calls[-1][1] == {"kind": "swipe", "source": "HUMAN_DESKTOP", "x1": .5, "y1": .8, "x2": .5, "y2": .2, "durationMs": 280}
     result = service.execute(session.device_id, {"kind": "text", "text": "ordinary words"})
     assert "ordinary words" not in str(result)
     assert bridge.calls[-1][0] == "manual.execute"
@@ -529,7 +531,7 @@ def test_video_reports_bounded_capture_failure_instead_of_silent_infinite_wait()
 
 def test_no_generic_shell_or_arbitrary_adb_surface():
     forbidden = ("shell", "powershell", "root", "su", "command", "script", "adb")
-    assert MANUAL_KINDS == {"tap", "back", "home", "scroll_up", "scroll_down", "text", "wake"}
+    assert MANUAL_KINDS == {"tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"}
     assert all(not any(word in op.lower() for word in forbidden) for op in ALLOWED_OPS)
 
 

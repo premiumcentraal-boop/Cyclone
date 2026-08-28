@@ -164,6 +164,26 @@ internal object GatewayManualDesktopAdapter {
                 }
                 PhoneToolRequest(requestId, "phone.tap", JSONObject().put("x", x).put("y", y).put("waitForChangeMs", 0))
             }
+            "swipe" -> {
+                val width = snapshot?.screenWidth ?: 0
+                val height = snapshot?.screenHeight ?: 0
+                fun pixel(name: String, size: Int): Int = try {
+                    DesktopManualControlContract.normalizedPixel(args.optDouble(name, Double.NaN), size)
+                } catch (_: IllegalArgumentException) {
+                    throw GatewayProtocolException("PROTOCOL_MISMATCH", "$name is invalid", requestId)
+                }
+                PhoneToolRequest(
+                    requestId,
+                    "phone.swipe",
+                    JSONObject()
+                        .put("x1", pixel("x1", width))
+                        .put("y1", pixel("y1", height))
+                        .put("x2", pixel("x2", width))
+                        .put("y2", pixel("y2", height))
+                        .put("durationMs", args.optLong("durationMs", 350L).coerceIn(100L, 3000L))
+                        .put("waitForChangeMs", 0),
+                )
+            }
             "back" -> PhoneToolRequest(requestId, "phone.back", JSONObject().put("waitForChangeMs", 0))
             "home" -> PhoneToolRequest(requestId, "phone.home", JSONObject().put("waitForChangeMs", 0))
             "scroll_up" -> PhoneToolRequest(requestId, "phone.scroll", JSONObject().put("direction", "backward").put("waitForChangeMs", 0))

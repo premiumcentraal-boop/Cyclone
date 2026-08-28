@@ -152,7 +152,7 @@ internal class DesktopPairingEngine(
 }
 
 internal object DesktopManualControlContract {
-    val allowedKinds = setOf("tap", "back", "home", "scroll_up", "scroll_down", "text", "wake")
+    val allowedKinds = setOf("tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake")
 
     fun normalizedPixel(value: Double, pixels: Int): Int {
         require(value.isFinite() && value in 0.0..1.0) { "normalized coordinate must be 0.0..1.0" }

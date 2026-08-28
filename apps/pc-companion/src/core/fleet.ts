@@ -37,3 +37,9 @@ export function reduceCompanionState(state: CompanionState, action: CompanionAct
       return { ...state, route: action.route, focusedDeviceId: null };
   }
 }
+
+export function canPreserveFocusedPage(state: CompanionState, devices: DesktopDevice[]): boolean {
+  return state.route === "focused"
+    && state.focusedDeviceId != null
+    && devices.some((device) => device.id === state.focusedDeviceId);
+}

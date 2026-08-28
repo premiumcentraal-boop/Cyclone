@@ -239,6 +239,22 @@ internal object GatewayV33ManualDesktopAdapter {
                 params.put("normalizedY", args.optDouble("y", Double.NaN))
                 params.put("waitForChangeMs", 0)
             }
+            "swipe" -> {
+                val snapshot = CycloneAccessibilityService.instance?.observe(markFresh = false)
+                    ?: throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Accessibility is unavailable for swipe control", requestId)
+                fun pixel(name: String, size: Int): Int = try {
+                    DesktopManualControlContract.normalizedPixel(args.optDouble(name, Double.NaN), size)
+                } catch (_: IllegalArgumentException) {
+                    throw GatewayProtocolException("PROTOCOL_MISMATCH", "$name must be between 0 and 1", requestId)
+                }
+                toolArgs.put("tool", "phone.swipe")
+                params.put("x1", pixel("x1", snapshot.screenWidth))
+                params.put("y1", pixel("y1", snapshot.screenHeight))
+                params.put("x2", pixel("x2", snapshot.screenWidth))
+                params.put("y2", pixel("y2", snapshot.screenHeight))
+                params.put("durationMs", args.optLong("durationMs", 350L).coerceIn(100L, 3000L))
+                params.put("waitForChangeMs", 0)
+            }
             "back" -> toolArgs.put("tool", "phone.back")
             "home" -> toolArgs.put("tool", "phone.home")
             "scroll_up" -> {
