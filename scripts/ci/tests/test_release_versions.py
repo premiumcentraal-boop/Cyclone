@@ -12,31 +12,31 @@ SPEC.loader.exec_module(release_versions)
 class ReleaseVersionsTest(unittest.TestCase):
     def coherent_values(self):
         return {
-            "product": "3.5.2-beta",
-            "expectedMobile": "3.5.2-beta",
-            "expectedPc": "3.5.1",
-            "expectedGatewayPython": "3.5.1",
-            "expectedMcpPython": "3.5.1",
-            "androidVersionName": "3.5.2-beta",
-            "androidVersionCode": 38,
-            "gatewayPython": "3.5.1",
-            "mcpPython": "3.5.1",
-            "agentMcpPython": "3.5.1",
-            "pcPackage": "3.5.1",
-            "pcPackageLock": "3.5.1",
-            "pcCargo": "3.5.1",
-            "pcTauri": "3.5.1",
-            "expectedAndroidVersionCode": 38,
+            "product": "3.5.3",
+            "expectedMobile": "3.5.3",
+            "expectedPc": "3.5.3",
+            "expectedGatewayPython": "3.5.3",
+            "expectedMcpPython": "3.5.3",
+            "androidVersionName": "3.5.3",
+            "androidVersionCode": 39,
+            "gatewayPython": "3.5.3",
+            "mcpPython": "3.5.3",
+            "agentMcpPython": "3.5.3",
+            "pcPackage": "3.5.3",
+            "pcPackageLock": "3.5.3",
+            "pcCargo": "3.5.3",
+            "pcTauri": "3.5.3",
+            "expectedAndroidVersionCode": 39,
         }
 
-    def test_mobile_beta_can_advance_without_relabeling_pc_components(self):
+    def test_3_5_3_components_are_aligned(self):
         self.assertEqual([], release_versions.check(self.coherent_values()))
 
     def test_mobile_version_drift_is_rejected(self):
         values = self.coherent_values()
-        values["androidVersionName"] = "3.5.1"
+        values["androidVersionName"] = "3.5.2-beta"
         self.assertIn(
-            "androidVersionName='3.5.1' expected '3.5.2-beta'",
+            "androidVersionName='3.5.2-beta' expected '3.5.3'",
             release_versions.check(values),
         )
 
@@ -45,7 +45,7 @@ class ReleaseVersionsTest(unittest.TestCase):
         values["androidVersionCode"] = 37
         values["expectedAndroidVersionCode"] = 37
         self.assertIn(
-            "Cyclone 3.5.2 distributed Android builds require versionCode > 37",
+            "Distributed Cyclone Android builds must remain above the preserved 3.5.1 versionCode 37",
             release_versions.check(values),
         )
 

@@ -81,7 +81,7 @@ def check(values: dict[str, str | int]) -> list[str]:
     if int(values["androidVersionCode"]) != expected_code:
         errors.append(f"androidVersionCode={values['androidVersionCode']} expected {expected_code}")
     if expected_code <= 37:
-        errors.append("Cyclone 3.5.2 distributed Android builds require versionCode > 37")
+        errors.append("Distributed Cyclone Android builds must remain above the preserved 3.5.1 versionCode 37")
     return errors
 
 

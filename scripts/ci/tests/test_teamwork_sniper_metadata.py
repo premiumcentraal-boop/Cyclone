@@ -23,21 +23,21 @@ class TeamworkSniperMetadataTest(unittest.TestCase):
     def test_expected_identity_and_filename(self):
         root = self.app(
             'applicationId = "com.cyclone.teamworksniper"\n'
-            'versionCode = 1\n'
-            'versionName = "3.5.2-beta"\n'
+            'versionCode = 2\n'
+            'versionName = "3.5.3"\n'
         )
-        with patch.object(metadata, "expected_identity", return_value=("3.5.2-beta", 1)):
+        with patch.object(metadata, "expected_identity", return_value=("3.5.3", 2)):
             result = metadata.read_metadata(root)
         self.assertTrue(result["present"])
-        self.assertEqual("Teamwork-Sniper-3.5.2-beta.apk", result["apk_name"])
+        self.assertEqual("Teamwork-Sniper-3.5.3.apk", result["apk_name"])
 
     def test_wrong_package_is_rejected(self):
         root = self.app(
             'applicationId = "com.cyclone.mobile"\n'
-            'versionCode = 1\n'
-            'versionName = "3.5.2-beta"\n'
+            'versionCode = 2\n'
+            'versionName = "3.5.3"\n'
         )
-        with patch.object(metadata, "expected_identity", return_value=("3.5.2-beta", 1)):
+        with patch.object(metadata, "expected_identity", return_value=("3.5.3", 2)):
             with self.assertRaisesRegex(ValueError, "unexpected applicationId"):
                 metadata.read_metadata(root)
 
