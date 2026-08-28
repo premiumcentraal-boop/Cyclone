@@ -1,0 +1,15 @@
+{
+  "contract": "Teamwork Sniper logical parser vectors",
+  "evidenceLevel": "SYNTHETIC_ONLY",
+  "warning": "These vectors are contract cases only and are not live Teamwork evidence.",
+  "vectors": [
+    {"name":"single_m1","input":{"date":"2026-08-29","day":"SAT","code":"M1","start":"08:00","end":"10:35","open":true,"clickable":true},"expected":{"state":"OPEN_TO_TAKE","ambiguous":false}},
+    {"name":"m1_m2_same_day","input":[{"date":"2026-08-30","code":"M1","start":"08:00","end":"10:35"},{"date":"2026-08-30","code":"M2","start":"10:45","end":"13:20"}],"expected":{"count":2,"ambiguous":false}},
+    {"name":"s1_s2_s3_sequence","input":[{"date":"2026-08-31","code":"S1","start":"06:00","end":"08:00"},{"date":"2026-08-31","code":"S2","start":"08:15","end":"10:15"},{"date":"2026-08-31","code":"S3","start":"10:30","end":"12:30"}],"expected":{"codes":["S1","S2","S3"],"ambiguous":false}},
+    {"name":"multiple_days","input":[{"date":"2026-08-29","code":"M1"},{"date":"2026-08-30","code":"M2"}],"expected":{"dates":["2026-08-29","2026-08-30"]}},
+    {"name":"day_boundary","input":[{"date":"2026-08-29","code":"M1","start":"23:00","end":"23:59"},{"date":"2026-08-30","code":"M2","start":"00:01","end":"01:00"}],"expected":{"crossBind":false}},
+    {"name":"duplicate_page","input":{"pages":[["2026-08-30","M1","08:00","10:35"],["2026-08-30","M1","08:00","10:35"]]},"expected":{"deduplicatedCount":1}},
+    {"name":"ambiguous_row","input":{"date":"2026-08-29","codes":["M1","M2"],"times":["08:00","10:35"]},"expected":{"ambiguous":true,"claimAllowed":false}},
+    {"name":"non_clickable_row","input":{"date":"2026-08-29","code":"M1","times":["08:00","10:35"],"clickable":false},"expected":{"ambiguous":true,"claimAllowed":false}}
+  ]
+}
