@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SYNTHETIC. Not captured from Teamwork. Models only the fail-closed parser grammar. -->
+<hierarchy>
+  <node class="android.widget.FrameLayout">
+    <node class="androidx.recyclerview.widget.RecyclerView" scrollable="true">
+      <node class="android.view.ViewGroup" resource-id="synthetic/shift_row" clickable="true" enabled="true">
+        <node text="2026-08-29"/>
+        <node text="M1"/>
+        <node content-desc="08:00–10:35"/>
+        <node text="Open to take"/>
+      </node>
+      <node class="android.view.ViewGroup" resource-id="synthetic/shift_row" clickable="true" enabled="true">
+        <node text="2026-08-30"/>
+        <node text="M2"/>
+        <node content-desc="10:45–13:20"/>
+        <node text="Open to take"/>
+      </node>
+    </node>
+  </node>
+</hierarchy>
