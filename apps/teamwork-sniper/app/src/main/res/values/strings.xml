@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Teamwork Sniper</string>
+    <string name="accessibility_service_description">Reads Teamwork shift availability semantically and acts only on explicitly armed matching open shifts.</string>
+</resources>
