@@ -7,36 +7,28 @@ plugins {
 android {
     namespace = "com.cyclone.mobile"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 38
-        // 3.5.2 is a mobile beta release layered on the preserved 3.5.1 product.
-        versionName = "3.5.2-beta"
+        versionCode = 39
+        versionName = "3.5.3"
     }
-
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
-
     buildFeatures {
         compose = true
         buildConfig = true
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
