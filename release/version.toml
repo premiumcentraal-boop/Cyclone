@@ -11,7 +11,7 @@ device_gateway = "3.5.0"
 mcp = "3.5.0"
 
 [release]
-publication_authorized = false
+publication_authorized = true
 physical_pixel8 = "DISCOVERY_ONLY_ACCEPTANCE_PENDING"
 physical_pixel8_ui_acceptance = "PASSED_2026_08_28"
 second_android_device = "PASSED_2026_08_28_EMULATOR"
