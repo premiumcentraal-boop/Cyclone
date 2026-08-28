@@ -42,7 +42,7 @@ jobs:
           test "$(jq -r '.head_repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
           head_branch="$(jq -r '.head_branch' <<< "$run_json")"
           case "$head_branch" in
-            main|release/cyclone-mobile-v*|feature/cyclone-3.5.2-beta) ;;
+            main|release/cyclone-mobile-v*|feature/cyclone-3.5.2-beta|release/cyclone-3.5.3-beta) ;;
             *) echo "Untrusted mobile release source branch: $head_branch" >&2; exit 1 ;;
           esac
           head_sha="$(jq -r '.head_sha' <<< "$run_json")"

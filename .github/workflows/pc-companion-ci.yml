@@ -7,6 +7,7 @@ on:
     paths:
       - 'apps/device-gateway/**'
       - 'apps/mobile/**'
+      - 'apps/teamwork-sniper/**'
       - 'apps/pc-companion/**'
       - 'tools/cyclone-agent-mcp/**'
       - 'tools/codex-phone-mcp/**'
@@ -22,9 +23,11 @@ on:
       - 'release/cyclone-mobile-v3.1-beta'
       - 'release/beta/**'
       - 'release/stable/**'
+      - 'release/cyclone-3.5.3-beta'
     paths:
       - 'apps/device-gateway/**'
       - 'apps/mobile/**'
+      - 'apps/teamwork-sniper/**'
       - 'apps/pc-companion/**'
       - 'tools/cyclone-agent-mcp/**'
       - 'tools/codex-phone-mcp/**'
@@ -199,7 +202,7 @@ jobs:
             --dir release-assets/desktop
           gh run download "$GITHUB_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
-            --name "Cyclone-Mobile-$MOBILE_VERSION" \
+            --name "Cyclone-Android-$MOBILE_VERSION" \
             --dir release-assets/mobile
           if [[ -f release-assets/desktop/source-sha.txt ]]; then
             mv release-assets/desktop/source-sha.txt release-assets/desktop/Cyclone-PC-source-sha.txt
