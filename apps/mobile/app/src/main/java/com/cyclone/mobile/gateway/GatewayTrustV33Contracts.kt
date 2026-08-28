@@ -475,7 +475,7 @@ internal class GatewayTrustEngine(
     fun rotateSessionCredential(authToken: String, args: JSONObject): JSONObject {
         GatewayTrustProtocolV33.requireVersion(args)
         val session = authenticateSession(authToken)
-            ?: throw GatewayProtocolException("AUTH_REJECTED", "A trusted V3.3 session is required")
+            ?: throw GatewayProtocolException("AUTH_REJECTED", "A trusted Cyclone PC session is required")
         val record = requireActiveRecord(session.trustId)
         val rotated = record.copy(generation = record.generation + 1)
         records.put(rotated)
@@ -492,7 +492,7 @@ internal class GatewayTrustEngine(
     fun revoke(authToken: String, args: JSONObject): JSONObject {
         GatewayTrustProtocolV33.requireVersion(args)
         val session = authenticateSession(authToken)
-            ?: throw GatewayProtocolException("AUTH_REJECTED", "A trusted V3.3 session is required")
+            ?: throw GatewayProtocolException("AUTH_REJECTED", "A trusted Cyclone PC session is required")
         val requestedTrustId = args.optString("trustId").ifBlank { session.trustId }
         if (requestedTrustId != session.trustId) {
             throw GatewayProtocolException("POLICY_DENIED", "A PC may revoke only its own trust record through this session")

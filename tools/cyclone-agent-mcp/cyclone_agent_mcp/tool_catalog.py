@@ -26,6 +26,13 @@ TOOL_CONTRACTS = (
     ToolContract("phone_teach_start", False, True),
     ToolContract("phone_teach_status", True, True),
     ToolContract("phone_teach_stop", False, True),
+    ToolContract("phone_virtual_list", True, False),
+    ToolContract("phone_virtual_create", False, False),
+    ToolContract("phone_virtual_start", False, False),
+    ToolContract("phone_virtual_stop", False, False),
+    ToolContract("phone_routine_run", False, True),
+    ToolContract("phone_routine_status", True, True),
+    ToolContract("phone_routine_cancel", False, True),
 )
 
 TOOL_NAMES = tuple(contract.name for contract in TOOL_CONTRACTS)

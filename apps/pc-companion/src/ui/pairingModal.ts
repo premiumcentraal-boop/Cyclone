@@ -152,7 +152,7 @@ export class PairingModal {
     const copy = el(
       "p",
       "pair-copy",
-      "Manual fallback is for recovery or transition devices. Enter the temporary 4-letter code shown by Cyclone Mobile. V3.3 AI actions still require one-time Allow this PC trust.",
+      "Manual fallback is for recovery or transition devices. Enter the temporary 4-letter code shown by Cyclone Mobile. AI actions still require one-time Allow this PC trust.",
     );
     this.input = el("input", "pair-code-input") as HTMLInputElement;
     this.input.maxLength = 8;
@@ -204,7 +204,7 @@ export class PairingModal {
         this.message.className = "pair-message error";
         return;
       }
-      this.message.textContent = "Fallback connection ready. Complete Allow this PC to enable V3.3 AI actions.";
+      this.message.textContent = "Fallback connection ready. Complete Allow this PC to enable trusted AI actions.";
       this.message.className = "pair-message success";
       window.setTimeout(() => {
         if (this.closed) return;
@@ -238,6 +238,6 @@ function friendlyTrustError(error: unknown): string {
   if (!message) return "Cyclone could not start one-time trust. Unlock the phone and try again.";
   if (/expired/i.test(message)) return "The phone confirmation expired. Start again and tap Allow this PC.";
   if (/locked/i.test(message)) return "Unlock the phone, then try Allow this PC again.";
-  if (/protocol|version/i.test(message)) return "Cyclone Mobile and PC Companion need the same V3.3 trust version.";
+  if (/protocol|version/i.test(message)) return "Cyclone Mobile and PC Companion need compatible trust versions.";
   return message.slice(0, 220);
 }

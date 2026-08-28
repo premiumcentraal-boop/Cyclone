@@ -12,10 +12,10 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 35
+        versionCode = 36
         // Cyclone 3.3 gateway overhaul release identity. Shared Android runtime/manifest
         // integration remains owned by the integration lane.
-        versionName = "3.3.0-beta.2"
+        versionName = "3.5.0"
     }
 
     buildTypes {

@@ -77,7 +77,7 @@ internal object GatewayCompatibilityActionAuthority : GatewayActionAuthority {
         return GatewayActionAuthorityDecision(
             GatewayActionAuthorityOutcome.CAPABILITY_UNAVAILABLE,
             "V31_ACTION_AUTHORITY_NOT_BOUND",
-            "Cyclone V3.1 action authority is not bound yet; mutating PC actions remain disabled.",
+            "Cyclone action authority is not bound yet; mutating PC actions remain disabled.",
         )
     }
 }

@@ -34,7 +34,7 @@ internal object GatewayV33ActionAdapter {
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
         val tool = args.optString("tool").trim()
         if (tool !in allowedTools) {
-            throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Tool is not enabled for the V3.3 PC gateway", requestId)
+            throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Tool is not enabled for the current PC gateway", requestId)
         }
         return executeTyped(context, requestId, tool, args, publicCapability = true)
     }
@@ -195,7 +195,7 @@ internal object GatewayV33ActionAdapter {
         if (requested.isBlank() || requested != current.id) {
             throw GatewayProtocolException(
                 "STALE_OBSERVATION",
-                "Mutating V3.3 actions require the exact current observationId; observe again after page changes.",
+                "Mutating actions require the exact current observationId; observe again after page changes.",
                 requestId,
             )
         }

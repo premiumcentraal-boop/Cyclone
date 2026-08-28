@@ -344,7 +344,7 @@ private fun GatewayControlCenter(
                         ) {
                             Text("Legacy fallback pairing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                "Only use this with the transition PC Companion or non-USB fallback. Normal V3.3 USB setup uses Allow this PC above.",
+                                "Only use this with a transition PC Companion or non-USB fallback. Normal USB setup uses Allow this PC above.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Button(
@@ -364,7 +364,7 @@ private fun GatewayControlCenter(
                             )
                             val seconds = (((pairingExpiresAt ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L) / 1000L)
                             Text(
-                                "Expires in about ${seconds}s. V3.3 treats credentials from this transition path as read-only.",
+                                "Expires in about ${seconds}s. Credentials from this transition path are read-only.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }

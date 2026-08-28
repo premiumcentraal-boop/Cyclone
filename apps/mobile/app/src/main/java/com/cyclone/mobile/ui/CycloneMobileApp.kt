@@ -1,5 +1,7 @@
 package com.cyclone.mobile.ui
 
+import com.cyclone.mobile.CycloneRelease
+
 import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
@@ -171,7 +173,7 @@ fun CycloneMobileApp() {
                         Column {
                             Text("Cyclone", fontWeight = FontWeight.SemiBold)
                             Text(
-                                if (DeviceState.bridgeConnected) "Connected to Core" else "Mobile V2.2",
+                                if (DeviceState.bridgeConnected) "Connected to Core" else CycloneRelease.label,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -785,8 +787,8 @@ private fun SettingsScreen(context: Context, refreshTick: Int, refresh: () -> Un
         item {
             Card(shape = RoundedCornerShape(24.dp)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SectionHeader("About this build", "Cyclone Mobile 0.4.0-v2.2")
-                    Text("Native Cyclone phone toolbox + Automation Studio + Hermes bridge + embedded Mobilerun Portal runtime + V2.2 guided setup.")
+                    SectionHeader("About this build", CycloneRelease.label)
+                    Text("Native Cyclone phone toolbox + Automation Studio + Hermes bridge + embedded Mobilerun Portal runtime + guided setup.")
                     HorizontalDivider()
                     Text(
                         "Mobilerun Portal is included from upstream commit d3dae858ecc5ec3bfd3701ff27d58465c9f661b4 and remains licensed under GNU AGPL-3.0-or-later. Cyclone preserves upstream source and attribution through the pinned git submodule.",

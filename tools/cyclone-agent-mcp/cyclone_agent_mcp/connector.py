@@ -146,7 +146,10 @@ def verify_tools_list(executable: str | None = None) -> dict[str, Any]:
     schema_errors: list[str] = []
     for name, schema in sorted(definitions.items()):
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
-        if name in {"phone_list", "phone_group_act"}:
+        if name in {
+            "phone_list", "phone_group_act", "phone_virtual_list", "phone_virtual_create",
+            "phone_virtual_start", "phone_virtual_stop",
+        }:
             if "device_id" in properties:
                 schema_errors.append(f"{name}_must_not_accept_device_id")
             if name == "phone_group_act" and "device_ids" not in properties:

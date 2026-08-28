@@ -123,7 +123,7 @@ object CycloneV31Runtime {
     private fun create(context: Context): CycloneV31Services {
         val clock = V31Clock(System::currentTimeMillis)
         val root = File(context.filesDir, "cyclone-v31")
-        require(root.exists() || root.mkdirs()) { "Could not create Cyclone V3.1 runtime directory" }
+        require(root.exists() || root.mkdirs()) { "Could not create Cyclone runtime directory" }
 
         val bindings = V31RuntimeBindings()
         val updateBindings = V31RuntimeUpdateBindings()

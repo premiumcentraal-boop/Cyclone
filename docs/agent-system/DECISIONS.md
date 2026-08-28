@@ -89,6 +89,51 @@ unit tests assert profile boundaries. Manifest guards reject SMS, contacts, all-
 package-install permission creep. New Android permissions must map to a real setup row and a current
 Cyclone capability before being declared.
 
+## ADR-017 — Physical and virtual devices share one backend contract
+
+**Decision:** Higher layers use `DeviceBackend`; provider and transport differences stay behind
+adapters. Android mutations still terminate at `PhoneToolExecutor` and use the public `phone.*`
+vocabulary.
+
+**Why:** Fleet, Teach, Brain and MCP should not branch into incompatible physical/virtual engines.
+
+**Tests/guards:** Backend conformance, explicit capabilities, unified inventory metadata and
+arbitrary-command rejection.
+
+## ADR-018 — Virtualization is a fail-closed lifecycle layer
+
+**Decision:** `VirtualDeviceProvider` may create/configure/start/stop/reset/delete instances and
+register a healthy endpoint. It cannot invent semantic phone operations, expose public ADB, or
+advertise clone/snapshot support before the selected provider proves it.
+
+**Why:** Host capabilities vary sharply, and lifecycle availability is independent of phone
+semantics.
+
+**Tests/guards:** Loopback port allocation, fixed process arguments, provider health checks and
+persistent instance state.
+
+## ADR-019 — Android owns semantic action verification
+
+**Decision:** Desktop and MCP may relay Android's verification result but cannot infer success from
+transport completion, executor completion, a new frame or a changed observation ID. `OBSERVED` is
+evidence, not `PASSED`.
+
+**Why:** False verification contaminates routines and learned App Graph routes.
+
+**Tests/guards:** Regression tests cover Android `FAILED`, `OBSERVED` and `PASSED` envelopes and
+require Android canonical authority for a positive claim.
+
+## ADR-020 — Agent reliability is bounded and resumable
+
+**Decision:** Agent sessions plan before execution, cap retries/time/turns, detect repeated actions,
+require after-action verification, emit structured events and pause rather than loop indefinitely.
+Successful evidence may compile into the existing Cyclone routine/Brain path.
+
+**Why:** Reliability controls must improve the canonical automation system rather than introduce a
+second autonomous executor.
+
+**Tests/guards:** Retry, timeout, convergence, repetition, quality-gate, MCP target and privacy tests.
+
 ## Adding a decision
 
 Use this template:

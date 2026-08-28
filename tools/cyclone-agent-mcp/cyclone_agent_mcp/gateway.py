@@ -314,3 +314,60 @@ class GatewayClient:
         if selected.legacy_unscoped:
             return self._request("POST", "/v1/teach/stop", {"compileForReview": compile_for_review, "source": "PC_AGENT_MCP"})
         return self._request("POST", self._agent_path(selected, "/teach/stop"), {"compile_for_review": compile_for_review})
+
+    def virtual_instances(self) -> Any:
+        return self._bounded_route("GET", "/v1/virtual/instances")
+
+    def virtual_create(self, provider: str, image: str) -> Any:
+        return self._bounded_route("POST", "/v1/virtual/instances", {
+            "provider": provider,
+            "image": image,
+            "network_mode": "loopback",
+        })
+
+    def virtual_lifecycle(self, instance_id: str, operation: str) -> Any:
+        return self._bounded_route(
+            "POST", f"/v1/virtual/instances/{urllib.parse.quote(instance_id, safe='')}/{operation}"
+        )
+
+    def routine_run(self, device_id: str, routine_id: str) -> Any:
+        return self._bounded_route(
+            "POST",
+            f"/v1/devices/{urllib.parse.quote(device_id, safe='')}/agent/routines/"
+            f"{urllib.parse.quote(routine_id, safe='')}/runs",
+            {},
+        )
+
+    def routine_status(self, device_id: str, run_id: str) -> Any:
+        return self._bounded_route(
+            "GET",
+            f"/v1/devices/{urllib.parse.quote(device_id, safe='')}/agent/routine-runs/"
+            f"{urllib.parse.quote(run_id, safe='')}",
+        )
+
+    def routine_cancel(self, device_id: str, run_id: str) -> Any:
+        return self._bounded_route(
+            "POST",
+            f"/v1/devices/{urllib.parse.quote(device_id, safe='')}/agent/routine-runs/"
+            f"{urllib.parse.quote(run_id, safe='')}/cancel",
+            {},
+        )
+
+    def _bounded_route(self, method: str, path: str, payload: Any | None = None) -> Any:
+        """Call one frozen Gateway route and never improvise when it is unavailable."""
+        try:
+            return self._request(method, path, payload)
+        except GatewayError as exc:
+            if exc.status not in {404, 405}:
+                raise
+            raise GatewayError(
+                "Cyclone Device Gateway does not expose this governed capability",
+                status=exc.status,
+                body={
+                    "error": {
+                        "code": "CAPABILITY_UNAVAILABLE",
+                        "layer": "CAPABILITY",
+                        "retryable": False,
+                    }
+                },
+            ) from exc

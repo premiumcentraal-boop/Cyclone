@@ -31,7 +31,9 @@ def collect() -> dict[str, str | int]:
     gradle = read_text("apps/mobile/app/build.gradle.kts")
     gateway = read_text("apps/device-gateway/pyproject.toml")
     mcp = read_text("tools/codex-phone-mcp/pyproject.toml")
+    agent_mcp = read_text("tools/cyclone-agent-mcp/pyproject.toml")
     package_json = read_text("apps/pc-companion/package.json")
+    package_lock = read_text("apps/pc-companion/package-lock.json")
     cargo = read_text("apps/pc-companion/src-tauri/Cargo.toml")
     tauri = read_text("apps/pc-companion/src-tauri/tauri.conf.json")
 
@@ -42,7 +44,9 @@ def collect() -> dict[str, str | int]:
         "androidVersionCode": int(extract(r'^\s*versionCode\s*=\s*(\d+)', gradle, "Android versionCode")),
         "gatewayPython": extract(r'^version\s*=\s*"([^"]+)"', gateway, "gateway package version"),
         "mcpPython": extract(r'^version\s*=\s*"([^"]+)"', mcp, "MCP package version"),
+        "agentMcpPython": extract(r'^version\s*=\s*"([^"]+)"', agent_mcp, "agent MCP package version"),
         "pcPackage": extract(r'^\s*"version"\s*:\s*"([^"]+)"', package_json, "PC package version"),
+        "pcPackageLock": extract(r'^\s*"version"\s*:\s*"([^"]+)"', package_lock, "PC lockfile version"),
         "pcCargo": extract(r'^version\s*=\s*"([^"]+)"', cargo, "PC Cargo version"),
         "pcTauri": extract(r'^\s*"version"\s*:\s*"([^"]+)"', tauri, "Tauri version"),
         "expectedAndroidVersionCode": version_code,
@@ -54,8 +58,8 @@ def check(values: dict[str, str | int]) -> list[str]:
     python_version = str(values["python"])
     expected_code = int(values["expectedAndroidVersionCode"])
     errors: list[str] = []
-    product_fields = ("androidVersionName", "pcPackage", "pcCargo", "pcTauri")
-    python_fields = ("gatewayPython", "mcpPython")
+    product_fields = ("androidVersionName", "pcPackage", "pcPackageLock", "pcCargo", "pcTauri")
+    python_fields = ("gatewayPython", "mcpPython", "agentMcpPython")
     for field in product_fields:
         if values[field] != product:
             errors.append(f"{field}={values[field]!r} expected {product!r}")
@@ -66,8 +70,8 @@ def check(values: dict[str, str | int]) -> list[str]:
         errors.append(
             f"androidVersionCode={values['androidVersionCode']} expected {expected_code}"
         )
-    if expected_code <= 33:
-        errors.append("Cyclone 3.3 distributed Android builds require versionCode > 33")
+    if expected_code <= 35:
+        errors.append("Cyclone 3.5 distributed Android builds require versionCode > 35")
     return errors
 
 

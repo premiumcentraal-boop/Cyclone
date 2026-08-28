@@ -145,7 +145,7 @@ def test_detailed_codex_status_reports_safe_gateway_readiness(monkeypatch, tmp_p
         "device_count": 1,
         "devices": [{"device_id": "phone-safe", "state": "READY"}],
     }
-    assert result["details"]["mcp"]["tool_count"] == 15
+    assert result["details"]["mcp"]["tool_count"] == 22
     assert "token" not in json.dumps(result).lower()
 
 

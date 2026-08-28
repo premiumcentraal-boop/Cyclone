@@ -83,7 +83,7 @@ object GatewayRuntime {
         GatewayV33TrustManager.disconnectSessions(context)
         reportSafeError(
             "LEGACY_CREDENTIAL_ROTATED",
-            "Legacy transition credential rotated. V3.3 PCs should open a fresh trusted session.",
+            "Legacy transition credential rotated. Current PC Companions should open a fresh trusted session.",
         )
         return token
     }
@@ -256,7 +256,7 @@ internal object GatewayDispatcher {
                 auth?.mode == GatewaySessionAuthMode.LEGACY_READ_ONLY && request.op !in GatewayProtocol.legacyReadOnlyOperations -> {
                     throw GatewayProtocolException(
                         "PROTOCOL_MISMATCH",
-                        "V3.2 transition credentials are read-only under V3.3. Update PC Companion and complete Allow this PC trust.",
+                        "Legacy transition credentials are read-only. Update PC Companion and complete Allow this PC trust.",
                         request.id,
                         JSONObject().put("requiredProtocolVersion", GatewayTrustProtocolV33.VERSION),
                     )

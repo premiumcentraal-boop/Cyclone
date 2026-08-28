@@ -36,6 +36,13 @@ FAILURE_CLASSES = {
     "AGENT_REASONING_OR_MEMORY",
 }
 
+PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,79}$")
+IMAGE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.;+:-]{0,239}$")
+INSTANCE_ID = re.compile(r"^vdev_[a-f0-9]{16}$")
+ROUTINE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
+RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+
 
 def _result_failed(result: Any) -> bool:
     return classify_failure(result) is not None
@@ -43,6 +50,18 @@ def _result_failed(result: Any) -> bool:
 
 def _device_id(args: dict[str, Any]) -> str:
     return str(args.get("device_id") or "").strip()
+
+
+def _required_id(args: dict[str, Any], key: str, pattern: re.Pattern[str]) -> str:
+    value = str(args.get(key) or "").strip()
+    if not pattern.fullmatch(value):
+        raise ValueError(f"{key} is invalid")
+    return value
+
+
+def _only_keys(args: dict[str, Any], allowed: set[str]) -> None:
+    if set(args) - allowed:
+        raise ValueError("Unexpected parameters are not permitted")
 
 
 def _validate_typed_params(value: Any, path: str = "params") -> None:
@@ -286,6 +305,44 @@ class PhoneTools:
         if device_id:
             return redact(self.gateway.device_teach_stop(device_id, compile_for_review))
         return redact(self.gateway.teach_stop(compile_for_review))
+
+    def phone_virtual_list(self, _: dict[str, Any]) -> Any:
+        _only_keys(_, set())
+        return redact(self.gateway.virtual_instances())
+
+    def phone_virtual_create(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"provider", "image"})
+        provider = _required_id(args, "provider", PROVIDER_ID)
+        image = _required_id(args, "image", IMAGE_ID)
+        return redact(self.gateway.virtual_create(provider, image))
+
+    def phone_virtual_start(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"instance_id"})
+        instance_id = _required_id(args, "instance_id", INSTANCE_ID)
+        return redact(self.gateway.virtual_lifecycle(instance_id, "start"))
+
+    def phone_virtual_stop(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"instance_id"})
+        instance_id = _required_id(args, "instance_id", INSTANCE_ID)
+        return redact(self.gateway.virtual_lifecycle(instance_id, "stop"))
+
+    def phone_routine_run(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "routine_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        routine_id = _required_id(args, "routine_id", ROUTINE_ID)
+        return redact(self.gateway.routine_run(device_id, routine_id))
+
+    def phone_routine_status(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "run_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        run_id = _required_id(args, "run_id", RUN_ID)
+        return redact(self.gateway.routine_status(device_id, run_id))
+
+    def phone_routine_cancel(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "run_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        run_id = _required_id(args, "run_id", RUN_ID)
+        return redact(self.gateway.routine_cancel(device_id, run_id))
 
 
 def _find_stage(value: Any) -> str | None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Callable
 
@@ -7,6 +8,26 @@ from .audit import SafeAuditLog
 from .gateway import GatewayClient, GatewayError
 from .safe import redact, validate_typed_params
 from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
+
+
+PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,79}$")
+IMAGE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.;+:-]{0,239}$")
+INSTANCE_ID = re.compile(r"^vdev_[a-f0-9]{16}$")
+ROUTINE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
+RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+
+
+def _required_id(args: dict[str, Any], key: str, pattern: re.Pattern[str]) -> str:
+    value = str(args.get(key) or "").strip()
+    if not pattern.fullmatch(value):
+        raise ValueError(f"{key} is invalid")
+    return value
+
+
+def _only_keys(args: dict[str, Any], allowed: set[str]) -> None:
+    if set(args) - allowed:
+        raise ValueError("Unexpected parameters are not permitted")
 
 
 class PhoneTools:
@@ -147,6 +168,44 @@ class PhoneTools:
 
     def phone_teach_stop(self, args: dict[str, Any]) -> Any:
         return self.gateway.teach_stop(self._device(args), compile_for_review=bool(args.get("compile_for_review", True)))
+
+    def phone_virtual_list(self, _: dict[str, Any]) -> Any:
+        _only_keys(_, set())
+        return self.gateway.virtual_instances()
+
+    def phone_virtual_create(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"provider", "image"})
+        provider = _required_id(args, "provider", PROVIDER_ID)
+        image = _required_id(args, "image", IMAGE_ID)
+        return self.gateway.virtual_create(provider, image)
+
+    def phone_virtual_start(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"instance_id"})
+        instance_id = _required_id(args, "instance_id", INSTANCE_ID)
+        return self.gateway.virtual_lifecycle(instance_id, "start")
+
+    def phone_virtual_stop(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"instance_id"})
+        instance_id = _required_id(args, "instance_id", INSTANCE_ID)
+        return self.gateway.virtual_lifecycle(instance_id, "stop")
+
+    def phone_routine_run(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "routine_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        routine_id = _required_id(args, "routine_id", ROUTINE_ID)
+        return self.gateway.routine_run(device_id, routine_id)
+
+    def phone_routine_status(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "run_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        run_id = _required_id(args, "run_id", RUN_ID)
+        return self.gateway.routine_status(device_id, run_id)
+
+    def phone_routine_cancel(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"device_id", "run_id"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        run_id = _required_id(args, "run_id", RUN_ID)
+        return self.gateway.routine_cancel(device_id, run_id)
 
 
 def _error_code(value: Any) -> str | None:

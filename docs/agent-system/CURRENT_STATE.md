@@ -1,9 +1,10 @@
 # Current Cyclone State
 
-This document describes the current source architecture on the Cyclone 3.3 beta line. The latest
-published paired release at this update is `3.3.0-beta.2` (Android `versionCode 35`). Verify exact
-release/build status from current code, GitHub release provenance, and any
-`releases/<version>/BUILD_VERIFIED.json` evidence rather than assuming this sentence remains latest.
+This document describes the Cyclone 3.5 integration candidate. Its product version is `3.5.0`
+(Android `versionCode 36`). Publication remains gated by the evidence in
+`docs/cyclone-3.5/HARD_LAUNCH_REPORT.md`; source integration is not itself a published release.
+Always verify the exact GitHub source SHA, CI run and attached checksums before treating an artifact
+as distributed.
 
 ## Mobile product identity
 
@@ -108,6 +109,17 @@ Sensitive text is redacted again at the gateway boundary.
 
 The Android bridge session token and PC HTTP bearer token are separate concepts.
 
+Cyclone 3.5 adds a provider-neutral `DeviceBackend`, one unified physical/virtual inventory,
+persistent groups and explicit selection, and typed batch actions with isolated per-device results.
+Disconnected devices remain visible with durable identity and pairing metadata. Android remains
+the canonical action and verification authority: PC transport success or a fresh frame can never
+be promoted into semantic verification.
+
+The virtual-device layer is lifecycle-only and implements an official Android Emulator/AVD
+provider. It binds management to loopback, persists instance identity, uses fixed argument vectors
+and reports missing host prerequisites as unavailable. Clone and snapshot/restore are not
+advertised. ReDroid remains experimental until proven on a host with binder support.
+
 Cyclone 3.3 uses a pinned scrcpy 4.0 H.264 media plane for primary USB live view, rendered through
 WebCodecs in PC Companion. Screenshot capture remains a bounded degraded fallback. Discovery,
 media, Android bridge and AI trust have independent readiness so a failed live view does not erase
@@ -120,6 +132,15 @@ regression.
 `tools/codex-phone-mcp/**` provides a constrained local STDIO MCP client for Codex. The documented tool surface includes status, observation, UI search, element inspection, screenshot, current page/history, typed action, debug bundle and teaching lifecycle tools.
 
 The model does not get generic shell/root tools.
+
+Cyclone 3.5 MCP surfaces add explicit-target device/group operations and bounded virtual and routine
+lifecycle tools. Empty, wildcard and duplicate target sets are rejected, and command-shaped host
+parameters fail closed.
+
+Teach and Brain score selector stability, verifier strength and evidence completeness before a
+captured workflow becomes durable knowledge. Agent execution adds bounded retries, per-tool
+timeouts, repeated-action/convergence protection, structured events and mandatory post-mutation
+verification without creating a second routine engine.
 
 Infrastructure V3 is now present as compiled Cyclone-native services: capability registry, policy
 governor, memory service and tiered provider, Module Supervisor and offline catalog, Context Ledger,
@@ -134,13 +155,13 @@ but no new product UI or second navigation shell was added merely to expose them
 
 ## Release state / limitations
 
-- The paired Cyclone 3.3 workflow can publish combined Windows + Android prereleases from approved
-  `release/beta/**` push runs after both build jobs pass. Manual dispatch currently builds/verifies
-  but skips publication; the optimization plan is in
-  `docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md`.
+- The combined workflow builds Windows + Android from one SHA. `release/beta/**` publishes a
+  prerelease and `release/stable/**` may publish a stable release only when
+  `release/version.toml` explicitly authorizes publication.
 - Builds are currently beta/debug-signed unless a later release explicitly changes signing.
 - Stable protected signing is still needed for painless long-term Android upgrades.
-- A physical rooted Pixel 8 acceptance path has been the target hardware gate for the full gateway. Do not convert mocked CI evidence into a physical verification claim.
+- A physical Pixel 8 is the hardware acceptance target. Virtual and mixed-fleet claims require a
+  genuinely booted provider, not lifecycle mocks. See the hard-launch report for exact outcomes.
 - The broader repository still includes Cyclone Desktop/Core/Hermes/n8n/Host Bridge. Those remain useful as an external control plane and agent environment, but mobile autonomy should not depend on them for basic local phone learning/execution.
 
 ## Known organizational debt

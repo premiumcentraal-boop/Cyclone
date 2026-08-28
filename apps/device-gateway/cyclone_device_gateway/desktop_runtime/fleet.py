@@ -507,12 +507,16 @@ class DeviceFleetManager:
     def _remove_serial(self, serial: str) -> None:
         with self._lock:
             device_id = self._serial_to_device.pop(serial, None)
-            session = self._sessions.pop(device_id, None) if device_id else None
+            session = self._sessions.get(device_id) if device_id else None
         if session is None:
             return
         self._remembered[serial] = RememberedSession(session.device_id, session.credential, session.local_port)
         self._cleanup_session(session)
-        self.events.publish(FleetEventType.DEVICE_REMOVED, session.device_id, state=DeviceFleetState.DISCONNECTED.value)
+        session.bridge_ok = False
+        session.next_reconnect_at_ms = 0
+        session.bridge_error_class = "ADB_DISCONNECTED"
+        session.bridge_last_error = "Android device is offline. Cyclone will reconnect when it returns."
+        self._set_state(session, DeviceFleetState.DISCONNECTED, session.bridge_last_error)
 
     def _cleanup_session(self, session: DeviceSession) -> None:
         if session.video is not None:

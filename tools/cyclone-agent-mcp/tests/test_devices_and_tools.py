@@ -99,7 +99,17 @@ def test_every_phone_scoped_server_function_has_device_id_and_no_escape_hatch():
         if contract.phone_scoped:
             assert "device_id" in args, contract.name
         else:
-            assert contract.name in {"phone_list", "phone_group_act"} and "device_id" not in args
+            assert (
+                contract.name
+                in {
+                    "phone_list",
+                    "phone_group_act",
+                    "phone_virtual_list",
+                    "phone_virtual_create",
+                    "phone_virtual_start",
+                    "phone_virtual_stop",
+                }
+            ) and "device_id" not in args
     lowered = " ".join(TOOL_NAMES).lower()
     assert all(fragment not in lowered for fragment in FORBIDDEN_TOOL_FRAGMENTS)
 

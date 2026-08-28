@@ -153,14 +153,47 @@ class DesktopAgentService:
             "package": after.get("package"),
         })
         execution_payload = execution.get("execution") if isinstance(execution, dict) else None
-        execution_ok = bool(execution_payload.get("ok")) if isinstance(execution_payload, dict) else bool(execution)
+        android_execution = execution.get("androidExecution") if isinstance(execution, dict) else None
+        execution_ok = (
+            bool(android_execution.get("ok"))
+            if isinstance(android_execution, dict)
+            else bool(execution_payload.get("ok"))
+            if isinstance(execution_payload, dict)
+            else False
+        )
+        android_verification = execution.get("verification") if isinstance(execution, dict) else None
+        verification_status = (
+            str(android_verification.get("status") or "UNKNOWN").upper()
+            if isinstance(android_verification, dict)
+            else "MISSING"
+        )
+        semantic_success_claimed = (
+            android_verification.get("semanticSuccessClaimed") is not False
+            if isinstance(android_verification, dict)
+            else False
+        )
+        verification_passed = (
+            execution_ok
+            and bool(after_id)
+            and isinstance(android_verification, dict)
+            and android_verification.get("ok") is True
+            and verification_status in {"PASSED", "NOT_REQUIRED"}
+            and semantic_success_claimed
+        )
         return {
             "device_id": device_id,
             "capability_id": tool,
             "transport": {"ok": True},
             "execution": execution,
             "verification": {
-                "passed": execution_ok and bool(after_id),
+                # Android is the sole verification authority. A successful transport, executor
+                # result, or fresh observation is evidence, but none of those alone proves that
+                # the requested semantic after-state was reached.
+                "passed": verification_passed,
+                "status": verification_status,
+                "code": android_verification.get("code") if isinstance(android_verification, dict) else None,
+                "semantic_success_claimed": semantic_success_claimed,
+                "authority": "ANDROID_CANONICAL",
                 "before_observation_id": expected or (before or {}).get("observationId"),
                 "after_observation_id": after_id,
                 "after_page_key": after.get("pageKey"),

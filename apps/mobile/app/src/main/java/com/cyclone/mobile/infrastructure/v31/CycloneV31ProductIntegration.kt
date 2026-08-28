@@ -200,7 +200,7 @@ private class V31GatewayPolicyAuthority(
             ?: return reject(
                 GatewayActionAuthorityOutcome.CAPABILITY_UNAVAILABLE,
                 "TRUSTED_SESSION_UNAVAILABLE",
-                "Open a fresh trusted Cyclone V3.3 PC session and retry.",
+                "Open a fresh trusted Cyclone PC session and retry.",
             )
         val sessionId = authenticatedSession.sessionId?.takeIf(String::isNotBlank)
             ?: return reject(
@@ -314,7 +314,7 @@ private class V31GatewayPolicyAuthority(
     private fun allow(reason: String) = GatewayActionAuthorityDecision(
         GatewayActionAuthorityOutcome.AUTHORIZED_HANDOFF,
         reason,
-        "Authorized by Cyclone V3.1.",
+        "Authorized by Cyclone.",
     )
 
     private fun reject(

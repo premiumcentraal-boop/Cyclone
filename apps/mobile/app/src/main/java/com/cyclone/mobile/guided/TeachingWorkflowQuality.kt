@@ -81,7 +81,7 @@ object TeachingWorkflowQuality {
             // Coordinates survive only when there is no semantic alternative and are scored as weak.
             listOf("x", "y").forEach { key -> if (source.has(key)) repaired.put(key, source.opt(key)) }
         }
-        return repaired.takeIf { it.length() > 2 }?.toString()
+        return repaired.takeIf { it.length() > 0 }?.toString()
     }
 
     private fun evaluateStep(step: RoutineTeachingStep): TeachingStepQuality {

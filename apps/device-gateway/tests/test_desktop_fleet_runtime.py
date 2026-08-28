@@ -222,6 +222,10 @@ def test_reconnect_reuses_device_id_and_credential_and_cleans_only_removed_devic
     fleet.refresh_once()
     assert adbs["A"].removed == [a_port]
     assert b_port not in adbs["A"].removed
+    offline = {item["deviceId"]: item for item in fleet.list_public()}[a.device_id]
+    assert offline["state"] == "DISCONNECTED"
+    assert offline["paired"] is True
+    assert offline["connectionHealth"]["errorClass"] == "ADB_DISCONNECTED"
     inventory.current = [ADBDevice("A", "device"), ADBDevice("B", "device")]
     fleet.refresh_once()
     install_fake_bridges(fleet)

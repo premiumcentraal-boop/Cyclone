@@ -274,7 +274,7 @@ private fun SetupWizard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Cyclone Mobile", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("V2.2 guided setup", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        Text("Guided setup", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "Close setup") }
                 }

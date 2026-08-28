@@ -1,7 +1,7 @@
-name: Cyclone 3.3 Combined Release CI
+name: Cyclone Combined Release CI
 
-# Dedicated release/beta branches publish a GitHub prerelease after both build gates pass.
-# Mobile accessibility/bridge guards are part of the paired desktop+phone beta gate.
+# Dedicated release branches publish one paired GitHub release after both build gates pass.
+# Mobile accessibility/bridge guards are part of the paired desktop+phone release gate.
 on:
   pull_request:
     paths:
@@ -20,6 +20,7 @@ on:
       - 'release/cyclone-desktop-v1'
       - 'release/cyclone-mobile-v3.1-beta'
       - 'release/beta/**'
+      - 'release/stable/**'
     paths:
       - 'apps/device-gateway/**'
       - 'apps/mobile/**'
@@ -37,9 +38,9 @@ permissions:
   contents: read
 
 jobs:
-  mark-beta-pending:
-    name: Mark paired beta pending
-    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/')) }}
+  mark-release-pending:
+    name: Mark paired release pending
+    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/') || startsWith(github.ref, 'refs/heads/release/stable/')) }}
     runs-on: ubuntu-latest
     permissions:
       statuses: write
@@ -52,12 +53,12 @@ jobs:
           RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             -f state='pending' \
-            -f context='cyclone/paired-beta-release' \
-            -f description='Windows + Android beta gates are running' \
+            -f context='cyclone/paired-release' \
+            -f description='Windows + Android release gates are running' \
             -f target_url="$RUN_URL"
 
   windows-companion:
-    name: Cyclone 3.3 Windows PC Companion
+    name: Cyclone Windows PC Companion
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,7 +111,7 @@ jobs:
           python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
       - uses: actions/upload-artifact@v4
         with:
-          name: cyclone-pc-companion-v1-${{ github.sha }}
+          name: cyclone-pc-companion-${{ github.sha }}
           path: |
             dist/pc-companion/Cyclone-PC-Companion-*-Setup.exe
             dist/pc-companion/SHA256SUMS.txt
@@ -121,12 +122,12 @@ jobs:
           retention-days: 30
 
   mobile-companion:
-    name: Matching Cyclone 3.3 Mobile
+    name: Matching Cyclone Mobile
     uses: ./.github/workflows/_mobile-build.yml
 
-  publish-beta:
-    name: Publish combined beta release
-    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/')) }}
+  publish-release:
+    name: Publish combined release
+    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/') || startsWith(github.ref, 'refs/heads/release/stable/')) }}
     needs:
       - windows-companion
       - mobile-companion
@@ -136,17 +137,25 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout exact beta source
+      - name: Checkout exact release source
         uses: actions/checkout@v4
         with:
           persist-credentials: false
           submodules: false
 
-      - name: Resolve beta versions
+      - name: Resolve release versions
         id: versions
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          release = tomllib.loads(Path('release/version.toml').read_text(encoding='utf-8'))['release']
+          if release.get('publication_authorized') is not True:
+              raise SystemExit('release/version.toml has publication_authorized=false; refusing publication')
+          PY
           PC_VERSION="$(node -p "require('./apps/pc-companion/package.json').version")"
           MOBILE_VERSION="$(python3 - <<'PY'
           import re
@@ -169,6 +178,11 @@ jobs:
           echo "mobile_version=$MOBILE_VERSION" >> "$GITHUB_OUTPUT"
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "release_title=$RELEASE_TITLE" >> "$GITHUB_OUTPUT"
+          if [[ "$MOBILE_VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Download desktop and mobile build artifacts
         shell: bash
@@ -192,7 +206,7 @@ jobs:
             mv release-assets/mobile/source-sha.txt release-assets/mobile/Cyclone-Mobile-source-sha.txt
           fi
 
-      - name: Write beta release notes
+      - name: Write release notes
         shell: bash
         env:
           PC_VERSION: ${{ steps.versions.outputs.pc_version }}
@@ -201,35 +215,32 @@ jobs:
           cat > release-notes.md <<EOF
           # Cyclone ${MOBILE_VERSION}
 
-          This combined beta contains Cyclone Mobile and Cyclone PC Companion built and verified from the same source revision.
+          Cyclone Mobile and Cyclone PC Companion are built and verified from the same source revision.
 
           ## Downloads
           - **Windows:** Cyclone PC Companion ${PC_VERSION} installer.
           - **Android:** Cyclone Mobile ${MOBILE_VERSION} APK.
           - Checksums, exact source SHA, build provenance, and third-party notices are attached.
 
-          ## Cyclone 3.3 gateway overhaul
-          - The frozen PC Gateway now includes its pinned WebSocket runtime, fixing the **Cyclone couldn't start the local Gateway** screen caused by WebSocket routes falling through as HTTP 404.
-          - Sidecar builds always perform a clean dependency analysis so runtime dependency fixes cannot be hidden by a stale PyInstaller cache.
-          - The primary USB live view is now a pinned, checksum-verified scrcpy 4.0 H.264 stream instead of repeated screenshots.
-          - A real WebCodecs H.264 decoder renders the stream in PC Companion; screenshot capture is retained only as a bounded degraded fallback.
-          - The forward-tunnel readiness handshake is verified before decoding, fixing the physical Pixel 8 empty-socket/reconnect loop.
-          - Each media session uses an isolated scrcpy server path and ADB tunnel, preventing cleanup races across reconnects and multiple phones.
-          - Media, Android semantic context, actions, and trust report independent readiness states so one failed plane no longer disguises the others.
-          - Normal setup uses visible, device-bound **Allow this PC** trust backed by Android Keystore and Windows DPAPI. Four-letter pairing remains fallback-only.
-          - Codex receives sanitized semantic page context and typed actions through Cyclone's policy governor and canonical PhoneToolExecutor.
-          - Entered text, passwords, PINs, OTPs, credentials, and tokens remain excluded or redacted while safe field labels remain observable.
-          - Diagnostics now identify the last successful stage and first failed stage across discovery, media, bridge, trust, rendering, and action verification.
+          ## Cyclone 3.5
+          - A unified Device Wall now models physical and virtual Android targets behind one capability-aware backend contract.
+          - Persistent groups, search, explicit multi-select and typed batch actions return independent per-device outcomes.
+          - The virtual-device provider is lifecycle-bounded, loopback-first and fails closed when a compatible AVD host is unavailable; unsupported clone/snapshot operations are not advertised.
+          - Teach evaluates selector stability, verifier strength and evidence completeness before accepting a routine as durable knowledge.
+          - Agent execution adds bounded retries, timeouts, repeated-action/convergence protection and required after-action verification.
+          - MCP fleet operations require explicit targets and never expose arbitrary shell, ADB, Docker, PowerShell or host execution.
+          - VMOS research informed clean-room architecture only; GPL and noncommercial VMOS sources/binaries are not included.
 
-          ## Beta status
-          This is a beta, not a stable universal-OEM claim. The scrcpy media plane was exercised on a Pixel 8 running Android 16/API 36. The APK is debug-signed, so upgrading from a differently signed beta may require uninstalling the old Cyclone app first; uninstalling removes its local app data. Secure/DRM surfaces and Android's lock screen may remain blank by Android design. The gateway remains loopback/USB-oriented, and no arbitrary shell, arbitrary ADB, or unrestricted root execution is exposed to agents.
+          ## Platform notes
+          The Android APK is currently debug-signed and the Windows installer is unsigned. A differently signed prior APK may need removal before installation, which deletes that app's local data. Secure/DRM surfaces and Android's lock screen can remain blank by Android design. Virtual Android requires a compatible local provider and system image; when prerequisites are absent Cyclone reports the provider unavailable rather than claiming a virtual phone booted.
           EOF
 
-      - name: Create or replace GitHub prerelease
+      - name: Create or replace GitHub release
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
           RELEASE_TITLE: ${{ steps.versions.outputs.release_title }}
+          IS_PRERELEASE: ${{ steps.versions.outputs.prerelease }}
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -237,23 +248,27 @@ jobs:
           fi
           mapfile -t assets < <(find release-assets -type f -print | sort)
           if [[ ${#assets[@]} -eq 0 ]]; then
-            echo 'No beta assets were produced.' >&2
+            echo 'No release assets were produced.' >&2
             exit 1
+          fi
+          release_args=()
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            release_args+=(--prerelease)
           fi
           gh release create "$RELEASE_TAG" "${assets[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TITLE" \
             --notes-file release-notes.md \
-            --prerelease
+            "${release_args[@]}"
 
-  report-beta-status:
-    name: Report paired beta result
-    if: ${{ always() && github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/')) }}
+  report-release-status:
+    name: Report paired release result
+    if: ${{ always() && github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/') || startsWith(github.ref, 'refs/heads/release/stable/')) }}
     needs:
       - windows-companion
       - mobile-companion
-      - publish-beta
+      - publish-release
     runs-on: ubuntu-latest
     permissions:
       statuses: write
@@ -265,7 +280,7 @@ jobs:
         env:
           WINDOWS_RESULT: ${{ needs.windows-companion.result }}
           MOBILE_RESULT: ${{ needs.mobile-companion.result }}
-          PUBLISH_RESULT: ${{ needs.publish-beta.result }}
+          PUBLISH_RESULT: ${{ needs.publish-release.result }}
         run: |
           STATE='failure'
           DESCRIPTION="Windows=$WINDOWS_RESULT Android=$MOBILE_RESULT Publish=$PUBLISH_RESULT"
@@ -275,9 +290,9 @@ jobs:
           RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$WINDOWS_RESULT" -f context='cyclone/windows-companion' -f description="Windows PC Companion: $WINDOWS_RESULT" -f target_url="$RUN_URL"
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$MOBILE_RESULT" -f context='cyclone/mobile-companion' -f description="Matching Cyclone Mobile: $MOBILE_RESULT" -f target_url="$RUN_URL"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$PUBLISH_RESULT" -f context='cyclone/publish-beta' -f description="Combined prerelease: $PUBLISH_RESULT" -f target_url="$RUN_URL"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$PUBLISH_RESULT" -f context='cyclone/publish-release' -f description="Combined release: $PUBLISH_RESULT" -f target_url="$RUN_URL"
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             -f state="$STATE" \
-            -f context='cyclone/paired-beta-release' \
+            -f context='cyclone/paired-release' \
             -f description="${DESCRIPTION:0:140}" \
             -f target_url="$RUN_URL"

@@ -238,7 +238,12 @@ class EmptyFleet:
     def stop(self): return None
 
 
-def test_fleet_and_virtual_http_contracts_are_authenticated_and_fail_closed(tmp_path):
+def test_fleet_and_virtual_http_contracts_are_authenticated_and_fail_closed(tmp_path, monkeypatch):
+    empty_sdk = tmp_path / "empty-sdk"
+    empty_sdk.mkdir()
+    monkeypatch.setenv("ANDROID_SDK_ROOT", str(empty_sdk))
+    monkeypatch.setenv("ANDROID_HOME", str(empty_sdk))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
     settings = Settings("pc-secret", None, "adb", tmp_path)
     runtime = DesktopRuntime(settings, fleet=EmptyFleet())
     client = TestClient(create_desktop_app(settings, runtime))

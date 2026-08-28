@@ -16,6 +16,7 @@ INSTRUCTIONS = (
     "Search/inspect element IDs may be passed back to phone_act as params.elementId or params.selector.elementId; the PC gateway resolves them into stable Android selectors before acting. "
     "When multiple phones are connected, pass the device_id returned by phone_devices to every tool so operations target the right phone. "
     "After every mutating action re-observe and verify. Never repeat the same failed action blindly. App Graph/Brain are hints, not unquestionable truth. "
+    "Virtual lifecycle and routine tools accept only explicit Cyclone identifiers and fail closed when the authenticated Gateway route is unavailable. "
     "user_authorized is only an MCP intent acknowledgement and never bypasses Android policy. Do not expose secrets or use arbitrary shell/root/ADB commands."
 )
 
@@ -64,6 +65,13 @@ TOOLS = [
     _tool("phone_teach_start", "Start Cyclone's canonical Follow Me/Teach session; this does not create a second teaching store.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}}}), read_only=False),
     _tool("phone_teach_status", "Read the active Cyclone teaching session state.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_teach_stop", "Stop Cyclone teaching and optionally compile evidence into a disabled-for-review routine.", _with_device({"type": "object", "properties": {"compile_for_review": {"type": "boolean", "default": True}}}), read_only=False),
+    _tool("phone_virtual_list", "List Cyclone-managed virtual phone instances through the authenticated local Gateway.", {"type": "object", "properties": {}, "additionalProperties": False}, read_only=True),
+    _tool("phone_virtual_create", "Create one virtual phone from an installed provider image. Provider policy and availability remain authoritative.", {"type": "object", "properties": {"provider": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,79}$"}, "image": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.;+:-]{0,239}$"}}, "required": ["provider", "image"], "additionalProperties": False}, read_only=False),
+    _tool("phone_virtual_start", "Start one explicitly identified Cyclone virtual phone.", {"type": "object", "properties": {"instance_id": {"type": "string", "pattern": "^vdev_[a-f0-9]{16}$"}}, "required": ["instance_id"], "additionalProperties": False}, read_only=False),
+    _tool("phone_virtual_stop", "Stop one explicitly identified Cyclone virtual phone.", {"type": "object", "properties": {"instance_id": {"type": "string", "pattern": "^vdev_[a-f0-9]{16}$"}}, "required": ["instance_id"], "additionalProperties": False}, read_only=False),
+    _tool("phone_routine_run", "Run one known Cyclone routine on one explicitly selected device. No arbitrary routine payload is accepted.", {"type": "object", "properties": {"device_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$"}, "routine_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"}}, "required": ["device_id", "routine_id"], "additionalProperties": False}, read_only=False),
+    _tool("phone_routine_status", "Read one explicitly targeted Cyclone routine run.", {"type": "object", "properties": {"device_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$"}, "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"}}, "required": ["device_id", "run_id"], "additionalProperties": False}, read_only=True),
+    _tool("phone_routine_cancel", "Cancel one explicitly targeted Cyclone routine run.", {"type": "object", "properties": {"device_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$"}, "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"}}, "required": ["device_id", "run_id"], "additionalProperties": False}, read_only=False),
 ]
 
 

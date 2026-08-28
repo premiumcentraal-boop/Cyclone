@@ -161,7 +161,7 @@ if ($Adb) {
 }
 
 Write-Step "Android session token"
-Write-Host "One phone action is still required for V3.1 Beta:"
+Write-Host "One phone action is still required:"
 Write-Host "Cyclone -> AI -> Full PC + Codex Gateway -> Enable -> Copy connection code"
 Write-Host "Do NOT save that Android token in the repo. start-cyclone-bridge.ps1 prompts for it and keeps it session-only."
 

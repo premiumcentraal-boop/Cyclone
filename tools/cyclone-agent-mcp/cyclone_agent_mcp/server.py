@@ -14,6 +14,7 @@ INSTRUCTIONS = (
     "Use Cyclone directly whenever the user asks to inspect or control a connected phone. Start with phone_list, then use the selected phone's typed tools. "
     "If exactly one phone is READY it may be selected automatically; if more than one is READY, pass device_id explicitly and never guess. "
     "Observe before mutations, re-observe afterward, verify meaningful changes, and use screenshots only when structured evidence is insufficient. "
+    "Virtual lifecycle and routine tools accept only explicit Cyclone identifiers and fail closed when the authenticated Gateway route is unavailable. "
     "This server has no shell, PowerShell, arbitrary ADB, root, su, subprocess or script-evaluation tool."
 )
 
@@ -110,6 +111,41 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
     def phone_teach_stop(device_id: str | None = None, compile_for_review: bool = True) -> dict[str, Any]:
         """Stop Cyclone teaching and optionally compile a disabled-for-review routine."""
         return tools.call("phone_teach_stop", {"device_id": device_id, "compile_for_review": compile_for_review})
+
+    @mcp.tool(annotations=READ)
+    def phone_virtual_list() -> dict[str, Any]:
+        """List Cyclone-managed virtual phone instances."""
+        return tools.call("phone_virtual_list", {})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_virtual_create(provider: str, image: str) -> dict[str, Any]:
+        """Create one virtual phone from an installed provider image."""
+        return tools.call("phone_virtual_create", {"provider": provider, "image": image})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_virtual_start(instance_id: str) -> dict[str, Any]:
+        """Start one explicitly identified Cyclone virtual phone."""
+        return tools.call("phone_virtual_start", {"instance_id": instance_id})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_virtual_stop(instance_id: str) -> dict[str, Any]:
+        """Stop one explicitly identified Cyclone virtual phone."""
+        return tools.call("phone_virtual_stop", {"instance_id": instance_id})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_routine_run(device_id: str, routine_id: str) -> dict[str, Any]:
+        """Run one known routine on one explicitly selected Cyclone device."""
+        return tools.call("phone_routine_run", {"device_id": device_id, "routine_id": routine_id})
+
+    @mcp.tool(annotations=READ)
+    def phone_routine_status(device_id: str, run_id: str) -> dict[str, Any]:
+        """Read one explicitly targeted Cyclone routine run."""
+        return tools.call("phone_routine_status", {"device_id": device_id, "run_id": run_id})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_routine_cancel(device_id: str, run_id: str) -> dict[str, Any]:
+        """Cancel one explicitly targeted Cyclone routine run."""
+        return tools.call("phone_routine_cancel", {"device_id": device_id, "run_id": run_id})
 
     return mcp
 
