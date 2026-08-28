@@ -10,6 +10,8 @@ import com.cyclone.teamworksniper.ai.OpenRouterAdvisor
 import com.cyclone.teamworksniper.data.ActivityEntry
 import com.cyclone.teamworksniper.data.ActivityLogStore
 import com.cyclone.teamworksniper.data.OpenShift
+import com.cyclone.teamworksniper.data.RuleMatch
+import com.cyclone.teamworksniper.data.RuleType
 import com.cyclone.teamworksniper.data.RuleStore
 import com.cyclone.teamworksniper.data.SettingsStore
 import com.cyclone.teamworksniper.data.ShiftRule
@@ -17,8 +19,6 @@ import com.cyclone.teamworksniper.data.TriggerEvent
 import com.cyclone.teamworksniper.data.UiMapStore
 import com.cyclone.teamworksniper.rules.ExecutionMode
 import com.cyclone.teamworksniper.rules.RuleEngine
-import com.cyclone.teamworksniper.rules.RuleMatch
-import com.cyclone.teamworksniper.rules.RuleType
 import com.cyclone.teamworksniper.rules.SafetyGate
 import com.cyclone.teamworksniper.teamwork.SemanticNode
 import com.cyclone.teamworksniper.teamwork.TeamworkParser
