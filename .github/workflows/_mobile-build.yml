@@ -62,7 +62,7 @@ jobs:
       - name: Test and assemble Teamwork Sniper when present
         if: steps.mobile.outputs.sniper_present == 'true'
         shell: bash
-        run: ./apps/teamwork-sniper/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleDebug --stacktrace
+        run: ./apps/mobile/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleDebug --stacktrace
       - name: Package APK provenance
         shell: bash
         env:
