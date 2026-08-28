@@ -25,7 +25,11 @@ def extract(pattern: str, text: str, label: str) -> str:
 def collect() -> dict[str, str | int]:
     metadata = tomllib.loads(METADATA.read_text(encoding="utf-8"))
     product = str(metadata["product_version"])
-    python_version = str(metadata["python_version"])
+    components = metadata.get("components", {})
+    mobile_version = str(components.get("mobile", product))
+    pc_version = str(components.get("pc_companion", product))
+    gateway_version = str(components.get("device_gateway", metadata.get("python_version", product)))
+    mcp_version = str(components.get("mcp", metadata.get("python_version", product)))
     version_code = int(metadata["android_version_code"])
 
     gradle = read_text("apps/mobile/app/build.gradle.kts")
@@ -39,7 +43,10 @@ def collect() -> dict[str, str | int]:
 
     return {
         "product": product,
-        "python": python_version,
+        "expectedMobile": mobile_version,
+        "expectedPc": pc_version,
+        "expectedGatewayPython": gateway_version,
+        "expectedMcpPython": mcp_version,
         "androidVersionName": extract(r'^\s*versionName\s*=\s*"([^"]+)"', gradle, "Android versionName"),
         "androidVersionCode": int(extract(r'^\s*versionCode\s*=\s*(\d+)', gradle, "Android versionCode")),
         "gatewayPython": extract(r'^version\s*=\s*"([^"]+)"', gateway, "gateway package version"),
@@ -54,24 +61,27 @@ def collect() -> dict[str, str | int]:
 
 
 def check(values: dict[str, str | int]) -> list[str]:
-    product = str(values["product"])
-    python_version = str(values["python"])
+    mobile_version = str(values["expectedMobile"])
+    pc_version = str(values["expectedPc"])
+    gateway_version = str(values["expectedGatewayPython"])
+    mcp_version = str(values["expectedMcpPython"])
     expected_code = int(values["expectedAndroidVersionCode"])
     errors: list[str] = []
-    product_fields = ("androidVersionName", "pcPackage", "pcPackageLock", "pcCargo", "pcTauri")
-    python_fields = ("gatewayPython", "mcpPython", "agentMcpPython")
-    for field in product_fields:
-        if values[field] != product:
-            errors.append(f"{field}={values[field]!r} expected {product!r}")
-    for field in python_fields:
-        if values[field] != python_version:
-            errors.append(f"{field}={values[field]!r} expected {python_version!r}")
+
+    if values["androidVersionName"] != mobile_version:
+        errors.append(f"androidVersionName={values['androidVersionName']!r} expected {mobile_version!r}")
+    for field in ("pcPackage", "pcPackageLock", "pcCargo", "pcTauri"):
+        if values[field] != pc_version:
+            errors.append(f"{field}={values[field]!r} expected {pc_version!r}")
+    if values["gatewayPython"] != gateway_version:
+        errors.append(f"gatewayPython={values['gatewayPython']!r} expected {gateway_version!r}")
+    for field in ("mcpPython", "agentMcpPython"):
+        if values[field] != mcp_version:
+            errors.append(f"{field}={values[field]!r} expected {mcp_version!r}")
     if int(values["androidVersionCode"]) != expected_code:
-        errors.append(
-            f"androidVersionCode={values['androidVersionCode']} expected {expected_code}"
-        )
-    if expected_code <= 35:
-        errors.append("Cyclone 3.5 distributed Android builds require versionCode > 35")
+        errors.append(f"androidVersionCode={values['androidVersionCode']} expected {expected_code}")
+    if expected_code <= 37:
+        errors.append("Cyclone 3.5.2 distributed Android builds require versionCode > 37")
     return errors
 
 

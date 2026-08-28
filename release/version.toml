@@ -1,21 +1,23 @@
 schema = 1
-product_version = "3.5.1"
-channel = "stable"
-android_version_code = 37
+product_version = "3.5.2-beta"
+channel = "beta"
+android_version_code = 38
 python_version = "3.5.1"
 
 [components]
-mobile = "3.5.1"
+mobile = "3.5.2-beta"
+teamwork_sniper = "3.5.2-beta"
+teamwork_sniper_android_version_code = 1
 pc_companion = "3.5.1"
 device_gateway = "3.5.1"
 mcp = "3.5.1"
 
 [release]
-publication_authorized = true
-physical_pixel8 = "PASS_PIXEL_8_ANDROID_16_3B171FDJH0061G"
-physical_pixel8_ui_acceptance = "PASS_LIVE_MEDIA_TAP_SWIPE_BACK_HOME"
-second_android_device = "NOT_REQUIRED_PC_CONTROL_PATCH"
-virtual_provider = "UNCHANGED_FROM_3.5.0"
+publication_authorized = false
+physical_pixel8 = "NOT_RUN_3.5.2_BETA"
+physical_pixel8_ui_acceptance = "NOT_RUN_3.5.2_BETA"
+second_android_device = "NOT_REQUIRED_FOR_AGENT_3_LANE"
+virtual_provider = "UNCHANGED_FROM_3.5.1"
 android_signing = "DEBUG_UNVERIFIED"
-windows_signing = "UNVERIFIED"
-windows_installer = "PENDING_3.5.1_CI_BUILD"
+windows_signing = "UNCHANGED_3.5.1"
+windows_installer = "UNCHANGED_3.5.1"

@@ -102,6 +102,8 @@ import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.ui.GatewayAiCard
 import kotlinx.coroutines.launch
 
+private const val TEAMWORK_SNIPER_PACKAGE = "com.cyclone.teamworksniper"
+
 @Composable
 internal fun V32TeachPage(context: Context, refreshTick: Int) {
     val follow = FollowMeLearnerRuntime.progress()
@@ -329,6 +331,9 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
     val resultNotifications = CyclonePermissionSetup.resultNotificationsEnabled(context)
     val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
     val essentialReady = listOf(primaryControl, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
+    val teamworkSniperInstalled = remember(refreshTick) {
+        context.packageManager.getLaunchIntentForPackage(TEAMWORK_SNIPER_PACKAGE) != null
+    }
     fun open(intent: Intent) = context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -427,6 +432,49 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 Text("Model", fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OpenRouterModelPresets.all.forEach { model -> FilterChip(selected = selectedModel == model.id, onClick = { selectedModel = model.id; aiPrefs.edit().putString("openrouter_model", model.id).apply() }, label = { Text(model.label) }) }
+                }
+            }
+        }
+        item {
+            CycloneSimpleCard {
+                CycloneSectionTitle("Companion apps")
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Teamwork Sniper", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Automatic Picnic Teamwork shift matching. Rules, permissions and armed state stay in the separate companion app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    CycloneStatusPill(if (teamworkSniperInstalled) "Installed" else "Separate APK", teamworkSniperInstalled)
+                }
+                if (teamworkSniperInstalled) {
+                    Button(
+                        onClick = {
+                            val launch = context.packageManager.getLaunchIntentForPackage(TEAMWORK_SNIPER_PACKAGE)
+                            if (launch == null) {
+                                Toast.makeText(context, "Teamwork Sniper is not installed.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Rounded.Bolt, null)
+                        Spacer(Modifier.size(6.dp))
+                        Text("Open Teamwork Sniper")
+                    }
+                } else {
+                    Text(
+                        "Install Teamwork-Sniper-3.5.2-beta.apk separately to use shift matching.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

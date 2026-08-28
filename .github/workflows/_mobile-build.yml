@@ -21,6 +21,11 @@ jobs:
         run: |
           python3 scripts/ci/release_versions.py --check
           python3 scripts/ci/mobile_metadata.py --github-output "$GITHUB_OUTPUT" --json mobile-metadata.json
+          python3 scripts/ci/mobile_product_guard.py
+          python3 scripts/ci/teamwork_sniper_metadata.py --github-output "$GITHUB_OUTPUT" --json teamwork-sniper-metadata.json
+          if [[ -d apps/teamwork-sniper ]]; then
+            python3 scripts/ci/teamwork_sniper_guard.py --require-app
+          fi
           python3 -m unittest discover -s scripts/ci/tests -v
           PYTHONPATH=tools/cyclone-agent-coordinator python3 -m unittest discover -s tools/cyclone-agent-coordinator/tests -v
       - name: Verify Cyclone PC Gateway and MCP
@@ -54,15 +59,25 @@ jobs:
       - name: Test and assemble once
         shell: bash
         run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:assembleDebug --stacktrace
+      - name: Test and assemble Teamwork Sniper when present
+        if: steps.mobile.outputs.sniper_present == 'true'
+        shell: bash
+        run: ./apps/teamwork-sniper/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleDebug --stacktrace
       - name: Package APK provenance
         shell: bash
         env:
           APK_NAME: ${{ steps.mobile.outputs.apk_name }}
+          SNIPER_PRESENT: ${{ steps.mobile.outputs.sniper_present }}
+          SNIPER_APK_NAME: ${{ steps.mobile.outputs.sniper_apk_name }}
         run: |
           set -euo pipefail
           mkdir -p dist/mobile
           cp apps/mobile/app/build/outputs/apk/debug/app-debug.apk "dist/mobile/$APK_NAME"
-          (cd dist/mobile && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
+          if [[ "$SNIPER_PRESENT" == "true" ]]; then
+            cp apps/teamwork-sniper/app/build/outputs/apk/debug/app-debug.apk "dist/mobile/$SNIPER_APK_NAME"
+            cp teamwork-sniper-metadata.json dist/mobile/teamwork-sniper-metadata.json
+          fi
+          (cd dist/mobile && for apk in *.apk; do sha256sum "$apk" > "$apk.sha256"; done)
           printf '%s\n' "$GITHUB_SHA" > dist/mobile/source-sha.txt
           printf '%s\n' "$GITHUB_RUN_ID" > dist/mobile/run-id.txt
           cp mobile-metadata.json dist/mobile/mobile-metadata.json
@@ -80,3 +95,7 @@ jobs:
           echo "- Version: ${{ steps.mobile.outputs.version_name }} (${{ steps.mobile.outputs.version_code }})" >> "$GITHUB_STEP_SUMMARY"
           echo "- Source: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Artifact: \`${{ steps.mobile.outputs.artifact_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cyclone APK: \`${{ steps.mobile.outputs.apk_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.mobile.outputs.sniper_present }}" == "true" ]]; then
+            echo "- Teamwork Sniper APK: \`${{ steps.mobile.outputs.sniper_apk_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
