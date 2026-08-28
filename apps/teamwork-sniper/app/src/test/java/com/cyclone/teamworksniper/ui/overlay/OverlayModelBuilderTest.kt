@@ -6,6 +6,7 @@ import com.cyclone.teamworksniper.data.ShiftCode
 import com.cyclone.teamworksniper.data.ShiftRule
 import com.cyclone.teamworksniper.data.TriggerSource
 import com.cyclone.teamworksniper.rules.RuleJson
+import com.cyclone.teamworksniper.rules.TargetSelectionRules
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -21,10 +22,10 @@ class OverlayModelBuilderTest {
     @Test fun hollowSelectedAndUnselectedRoundTripThroughExistingRules() {
         val empty = build(emptyList()).single().choices.first { it.code == ShiftCode.S2 }
         assertFalse(empty.selected)
-        val selectedRules = OverlaySelectionRules.toggle(emptyList(), date, ShiftCode.S2)
+        val selectedRules = TargetSelectionRules.toggle(emptyList(), date, ShiftCode.S2)
         val persisted = RuleJson.decode(RuleJson.encode(selectedRules))
         assertTrue(build(persisted).single().choices.first { it.code == ShiftCode.S2 }.selected)
-        assertTrue(OverlaySelectionRules.toggle(persisted, date, ShiftCode.S2).isEmpty())
+        assertTrue(TargetSelectionRules.toggle(persisted, date, ShiftCode.S2).isEmpty())
     }
 
     @Test fun assignedShiftIsNotOffered() {

@@ -6,19 +6,19 @@ python_version = "3.5.3"
 
 [components]
 mobile = "3.5.3"
-teamwork_sniper = "3.5.3.2"
-teamwork_sniper_android_version_code = 5
+teamwork_sniper = "3.5.3.3"
+teamwork_sniper_android_version_code = 6
 pc_companion = "3.5.3"
 device_gateway = "3.5.3"
 mcp = "3.5.3"
 
 [release]
 publication_authorized = true
-physical_pixel8 = "PASS_TEAMWORK_SNIPER_3.5.3.2"
-physical_pixel8_ui_acceptance = "PASS_EXACT_SHIFT_CLAIM_AND_CALENDAR_OVERLAY"
+physical_pixel8 = "PASS_TEAMWORK_SNIPER_3.5.3.3"
+physical_pixel8_ui_acceptance = "PASS_NATIVE_TARGET_CALENDAR_OVERLAY_DISABLED"
 second_android_device = "NOT_REQUIRED"
 virtual_provider = "UNCHANGED_FROM_3.5.1"
-android_signing = "DEBUG_SIGNED_PHYSICAL_3.5.3.2"
+android_signing = "DEBUG_SIGNED_PHYSICAL_3.5.3.3"
 windows_signing = "CI_PENDING_3.5.3"
 windows_installer = "CI_PENDING_3.5.3"
-candidate_generation = "teamwork-sniper-3.5.3.2"
+candidate_generation = "teamwork-sniper-3.5.3.3"

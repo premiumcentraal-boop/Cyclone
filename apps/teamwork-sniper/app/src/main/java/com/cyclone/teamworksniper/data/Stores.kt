@@ -10,6 +10,7 @@ private const val PREFS = "teamwork_sniper"
 private const val RULES = "rules_json"
 private const val ENABLED = "sniper_enabled"
 private const val ARMED = "sniper_armed"
+private const val LEGACY_OVERLAY = "legacy_overlay_enabled"
 private const val AI_ENABLED = "ai_enabled"
 private const val AI_MODEL = "ai_model"
 private const val ACTIVITY = "activity_json"
@@ -29,9 +30,17 @@ class RuleStore(context: Context) {
 
 class SettingsStore(context: Context) {
     private val p = sniperPreferences(context)
-    fun load() = SniperSettings(p.getBoolean(ENABLED, true), p.getBoolean(ARMED, false))
+    fun load() = SniperSettings(
+        enabled = p.getBoolean(ENABLED, true),
+        armed = p.getBoolean(ARMED, false),
+        legacyOverlayEnabled = p.getBoolean(LEGACY_OVERLAY, false),
+    )
     fun save(value: SniperSettings) {
-        p.edit().putBoolean(ENABLED, value.enabled).putBoolean(ARMED, value.armed).apply()
+        p.edit()
+            .putBoolean(ENABLED, value.enabled)
+            .putBoolean(ARMED, value.armed)
+            .putBoolean(LEGACY_OVERLAY, value.legacyOverlayEnabled)
+            .apply()
     }
 }
 

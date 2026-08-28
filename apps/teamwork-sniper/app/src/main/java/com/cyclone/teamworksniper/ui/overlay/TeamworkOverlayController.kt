@@ -9,6 +9,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.cyclone.teamworksniper.data.ActivityLogStore
 import com.cyclone.teamworksniper.data.RuleStore
+import com.cyclone.teamworksniper.rules.TargetSelectionRules
 import com.cyclone.teamworksniper.runtime.TeamworkLauncher
 import com.cyclone.teamworksniper.teamwork.TeamworkScheduleOverlayMapper
 
@@ -68,7 +69,7 @@ class TeamworkOverlayController(
         } else {
             val days = modelBuilder.build(schedule, rules.load(), activity.load())
             windowManager.render(days) { choice ->
-                rules.save(OverlaySelectionRules.toggle(rules.load(), choice.date, choice.code))
+                rules.save(TargetSelectionRules.toggle(rules.load(), choice.date, choice.code))
                 scheduleRefresh(0)
             }
         }

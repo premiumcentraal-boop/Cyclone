@@ -53,16 +53,17 @@ class TeamworkAccessibilityService : AccessibilityService() {
     private val uiMap by lazy { UiMapStore(this) }
     private val ai by lazy { OpenRouterAdvisor(this) }
     private val overlay by lazy { TeamworkOverlayController(this) { rootInActiveWindow } }
+    private var overlayActive = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         SniperCoordinator.attach(this)
-        overlay.start()
+        updateOverlayState()
     }
 
     override fun onDestroy() {
         SniperCoordinator.detach(this)
-        overlay.dispose()
+        if (overlayActive) overlay.dispose()
         job.cancel()
         super.onDestroy()
     }
@@ -70,9 +71,24 @@ class TeamworkAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        overlay.onAccessibilityEvent(event)
+        updateOverlayState()
+        if (overlayActive) overlay.onAccessibilityEvent(event)
         if (event?.packageName?.toString() != TeamworkLauncher.PACKAGE) return
         SniperCoordinator.current()?.let(::requestEvaluation)
+    }
+
+    private fun updateOverlayState() {
+        val enabled = settings.load().legacyOverlayEnabled
+        when {
+            enabled && !overlayActive -> {
+                overlay.start()
+                overlayActive = true
+            }
+            !enabled && overlayActive -> {
+                overlay.dispose()
+                overlayActive = false
+            }
+        }
     }
 
     @Synchronized

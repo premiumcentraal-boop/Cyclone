@@ -1,12 +1,12 @@
-# Teamwork calendar overlay verification
+# Legacy Teamwork overlay record
 
-Version: `3.5.3.2` (`versionCode 5`)
+Historical version: `3.5.3.2` (`versionCode 5`)
 
 Target: Pixel 8 `3B171FDJH0061G`, 1080x2400 at 420 dpi.
 
-## Result
+## Status
 
-**WORKING** on the live Teamwork calendar without screenshots, OCR, image analysis, or AI.
+The overlay was physically validated without screenshots, OCR, image analysis, or AI, then made a disabled-by-default legacy setting in 3.5.3.3. The native target calendar is now the supported primary UI.
 
 - The overlay appears only on the recognized `tech.picnic.workapp` calendar surface.
 - Four live `No shift` day regions in Week 35 produced four independently aligned accessibility-overlay windows.

@@ -1,45 +1,64 @@
 package com.cyclone.teamworksniper.ui
 
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cyclone.teamworksniper.UiState
 import com.cyclone.teamworksniper.data.ShiftCode
 import com.cyclone.teamworksniper.data.ShiftRule
 import com.cyclone.teamworksniper.data.SniperSettings
-import com.cyclone.teamworksniper.data.RuleType
+import com.cyclone.teamworksniper.rules.TargetSelectionRules
+import com.cyclone.teamworksniper.teamwork.ShiftTemplateProvider
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.util.UUID
+import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 
-private enum class DraftMode { ANY, SEQUENCE }
+private val TeamworkGreen = Color(0xFF0B7A55)
+private val TeamworkGreenSoft = Color(0xFFE6F4EE)
+private val SniperOrange = Color(0xFFE85D04)
+private val AppSurface = Color(0xFFF5F7F5)
+private val CardSurface = Color.White
+private val Ink = Color(0xFF16211C)
+private val Muted = Color(0xFF64706A)
+private val DayFormat = DateTimeFormatter.ofPattern("EEE, d MMM")
+private val RangeFormat = DateTimeFormatter.ofPattern("d MMM")
+private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
 
 @Composable
 fun SniperScreen(
@@ -48,328 +67,247 @@ fun SniperScreen(
     onRules: (List<ShiftRule>) -> Unit,
     onNotification: () -> Unit,
     onAccessibility: () -> Unit,
-    onEvaluate: () -> Unit,
 ) {
-    MaterialTheme {
-        Surface(Modifier.fillMaxSize()) {
-            LazyColumn(
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                item {
-                    Column {
-                        Text(
-                            "Teamwork Sniper",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            when {
-                                !state.permissions.notificationAccess -> "MISSING NOTIFICATION ACCESS"
-                                !state.permissions.accessibilityAccess -> "MISSING ACCESSIBILITY ACCESS"
-                                !state.settings.enabled -> "DISABLED"
-                                state.settings.armed -> "ARMED"
-                                else -> "READY · DISARMED"
-                            },
-                        )
-                        Text(
-                            "Runs locally · no screenshots, AI or PC required",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-
-                item {
-                    Card {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("Permissions", fontWeight = FontWeight.Bold)
-                            PermissionRow(
-                                "Notification access",
-                                state.permissions.notificationAccess,
-                                onNotification,
-                            )
-                            PermissionRow(
-                                "Accessibility access",
-                                state.permissions.accessibilityAccess,
-                                onAccessibility,
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    Card {
-                        Column(Modifier.padding(16.dp)) {
-                            Toggle(
-                                title = if (state.settings.enabled && state.settings.armed) "Sniper ON" else "Sniper OFF",
-                                subtitle = "When on, matching Teamwork notifications can claim only your saved shifts",
-                                checked = state.settings.enabled && state.settings.armed,
-                            ) { on ->
-                                onSettings(SniperSettings(enabled = on, armed = on))
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    RuleComposer(state.rules, onRules)
-                }
-
-                if (state.rules.isNotEmpty()) {
-                    item { Text("Desired rules", fontWeight = FontWeight.Bold) }
-                    items(state.rules, key = { it.id }) { rule ->
-                        Card {
-                            Row(
-                                Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(rule.name, fontWeight = FontWeight.SemiBold)
-                                    Text(rule.type.name, style = MaterialTheme.typography.bodySmall)
-                                }
-                                Switch(
-                                    checked = rule.enabled,
-                                    onCheckedChange = { enabled ->
-                                        onRules(
-                                            state.rules.map {
-                                                if (it.id == rule.id) it.copy(enabled = enabled) else it
-                                            },
-                                        )
-                                    },
-                                )
-                                TextButton(
-                                    onClick = {
-                                        onRules(state.rules.filterNot { it.id == rule.id })
-                                    },
-                                ) {
-                                    Text("Delete")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    Button(
-                        onClick = onEvaluate,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = state.permissions.accessibilityAccess,
-                    ) {
-                        Text("Evaluate Teamwork now")
-                    }
-                }
-
-                item {
-                    Text(
-                        "Semantic UI map",
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        "Teamwork Sniper learns successful semantic navigation labels/resource IDs locally, then re-observes the live hierarchy before every shift decision.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-
-                item { Text("Recent activity", fontWeight = FontWeight.Bold) }
-                items(state.activity.take(12), key = { it.id }) { entry ->
-                    Card {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(
-                                entry.triggerSource.name + " · " + entry.decision,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                "Decision: " + entry.decisionEngine +
-                                    " · Armed " + entry.armedState +
-                                    " · attempted " + entry.claimAttempted,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            entry.aiAdvice?.let {
-                                Text("AI: " + it, style = MaterialTheme.typography.bodySmall)
-                            }
-                            entry.firstComparisonLatencyMs?.let {
-                                Text("First comparison " + it + "ms", style = MaterialTheme.typography.bodySmall)
-                            }
-                            if (entry.openShifts.isNotEmpty()) {
-                                Text(
-                                    "Open: " + entry.openShifts.joinToString(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            entry.claimResult?.let {
-                                Text("Claim: " + it, style = MaterialTheme.typography.bodySmall)
-                            }
-                            entry.verificationResult?.let {
-                                Text("Verify: " + it, style = MaterialTheme.typography.bodySmall)
-                            }
-                            entry.failureReason?.let {
-                                Text("Reason: " + it, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PermissionRow(label: String, ok: Boolean, open: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(label)
-            Text(if (ok) "Enabled" else "Required", style = MaterialTheme.typography.bodySmall)
-        }
-        OutlinedButton(onClick = open) { Text(if (ok) "Open" else "Enable") }
-    }
-}
-
-@Composable
-private fun Toggle(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onChange: (Boolean) -> Unit,
-) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
-        }
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-@Composable
-private fun RuleComposer(
-    existing: List<ShiftRule>,
-    onRules: (List<ShiftRule>) -> Unit,
-) {
-    var codes by remember { mutableStateOf(emptySet<ShiftCode>()) }
-    var mode by remember { mutableStateOf(DraftMode.ANY) }
-    var weeks by remember { mutableStateOf(setOf(0, 1)) }
-    var days by remember { mutableStateOf(emptySet<DayOfWeek>()) }
-    var dates by remember { mutableStateOf(emptySet<LocalDate>()) }
-
-    val ordered = codes.sortedBy { it.order }
-    val validSequence = ordered.size >= 2 &&
-        ordered.zipWithNext().all { (first, second) -> second.order == first.order + 1 }
-
-    Card {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("New desired rule", fontWeight = FontWeight.Bold)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ShiftCode.entries.forEach { code ->
-                    FilterChip(
-                        selected = code in codes,
-                        onClick = { codes = codes.toggle(code) },
-                        label = { Text(code.name) },
-                    )
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(
-                    selected = mode == DraftMode.ANY,
-                    onClick = { mode = DraftMode.ANY },
-                        label = { Text("Any selected") },
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    MaterialTheme(colorScheme = teamworkSniperPalette()) {
+        Surface(Modifier.fillMaxSize(), color = AppSurface) {
+            Column {
+                AppHeader(
+                    selectedCount = targetCount(state.rules),
+                    settingsVisible = showSettings,
+                    onSettings = { showSettings = !showSettings },
                 )
-                FilterChip(
-                    selected = mode == DraftMode.SEQUENCE,
-                    onClick = { mode = DraftMode.SEQUENCE },
-                        label = { Text("Exact combo") },
-                )
-            }
-
-            Text(
-                if (mode == DraftMode.ANY) {
-                    "Selected codes are independent."
+                if (showSettings) {
+                    SettingsPanel(state, onSettings, onNotification, onAccessibility)
                 } else {
-                    "Matches one combined shift such as S1-S2-S3, or the full consecutive set."
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                listOf(0 to "This week", 1 to "+1 week", 2 to "+2 weeks").forEach { (week, label) ->
-                    FilterChip(
-                        selected = week in weeks,
-                        onClick = { weeks = weeks.toggle(week) },
-                        label = { Text(label) },
-                    )
+                    TargetCalendar(state.rules, onRules)
                 }
-            }
-
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                DayOfWeek.entries.forEach { day ->
-                    FilterChip(
-                        selected = day in days,
-                        onClick = { days = days.toggle(day) },
-                        label = { Text(day.name.take(2)) },
-                    )
-                }
-            }
-
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                (0..13).map { LocalDate.now().plusDays(it.toLong()) }.forEach { date ->
-                    FilterChip(
-                        selected = date in dates,
-                        onClick = { dates = dates.toggle(date) },
-                        label = { Text(date.dayOfMonth.toString() + "/" + date.monthValue) },
-                    )
-                }
-            }
-
-            val canAdd = codes.isNotEmpty() &&
-                weeks.isNotEmpty() &&
-                (mode == DraftMode.ANY || validSequence)
-
-            Button(
-                onClick = {
-                    val type = if (mode == DraftMode.SEQUENCE) {
-                        RuleType.SEQUENCE
-                    } else if (ordered.size == 1) {
-                        RuleType.EXACT
-                    } else {
-                        RuleType.COMBINATION
-                    }
-                    val separator = if (type == RuleType.SEQUENCE) " → " else " / "
-                    onRules(
-                        existing + ShiftRule(
-                            id = UUID.randomUUID().toString(),
-                            name = ordered.joinToString(separator) { it.name },
-                            type = type,
-                            codes = ordered,
-                            enabled = true,
-                            weekOffsets = weeks,
-                            dates = dates,
-                            days = days,
-                        ),
-                    )
-                    codes = emptySet()
-                    dates = emptySet()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = canAdd,
-            ) {
-                Text("Add rule")
             }
         }
     }
 }
 
-private fun <T> Set<T>.toggle(value: T) =
-    if (value in this) this - value else this + value
+@Composable
+private fun AppHeader(selectedCount: Int, settingsVisible: Boolean, onSettings: () -> Unit) {
+    Surface(color = CardSurface, shadowElevation = 1.dp) {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Teamwork", color = Ink, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("SNIPER", color = SniperOrange, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.width(8.dp))
+                    Text("$selectedCount targets", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            TextButton(onClick = onSettings) { Text(if (settingsVisible) "Calendar" else "Settings") }
+        }
+    }
+}
+
+@Composable
+private fun TargetCalendar(rules: List<ShiftRule>, onRules: (List<ShiftRule>) -> Unit) {
+    var weekOffset by rememberSaveable { mutableIntStateOf(0) }
+    val weekStart = remember(weekOffset) {
+        LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(weekOffset.toLong())
+    }
+    val templates = remember { ShiftTemplateProvider() }
+
+    LazyColumn(
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Text("Calendar", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
+            Text("Choose the shifts Sniper may claim", style = MaterialTheme.typography.bodyMedium, color = Muted)
+        }
+        item { WeekChooser(weekStart, { weekOffset-- }, { weekOffset++ }) }
+        items(7) { index ->
+            val date = weekStart.plusDays(index.toLong())
+            DayTargets(
+                date = date,
+                rules = rules,
+                templates = templates,
+                onToggle = { code -> onRules(TargetSelectionRules.toggle(rules, date, code)) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeekChooser(weekStart: LocalDate, onPrevious: () -> Unit, onNext: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = CardSurface), shape = MaterialTheme.shapes.medium) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(onClick = onPrevious) { Text("‹") }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Week ${weekStart.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)}", fontWeight = FontWeight.Bold)
+                Text(
+                    "${weekStart.format(RangeFormat)} – ${weekStart.plusDays(6).format(RangeFormat)}",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            TextButton(onClick = onNext) { Text("›") }
+        }
+    }
+}
+
+@Composable
+private fun DayTargets(
+    date: LocalDate,
+    rules: List<ShiftRule>,
+    templates: ShiftTemplateProvider,
+    onToggle: (ShiftCode) -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = CardSurface), shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(date.format(DayFormat), color = Ink, fontWeight = FontWeight.Bold)
+                    Text("Target shifts", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Text("◎", color = SniperOrange, style = MaterialTheme.typography.titleLarge)
+            }
+            templates.forDate(date).forEach { shift ->
+                val selected = rules.any { TargetSelectionRules.isExactTarget(it, date, shift.code) }
+                ShiftTargetRow(
+                    code = shift.code,
+                    time = shift.start?.let { start -> shift.end?.let { end -> "${start.format(TimeFormat)} – ${end.format(TimeFormat)}" } },
+                    selected = selected,
+                    onClick = { onToggle(shift.code) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShiftTargetRow(code: ShiftCode, time: String?, selected: Boolean, onClick: () -> Unit) {
+    val background = if (selected) TeamworkGreen else TeamworkGreenSoft
+    val foreground = if (selected) Color.White else Ink
+    val secondary = if (selected) Color.White.copy(alpha = 0.86f) else Muted
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(background)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("◎", color = if (selected) Color.White else SniperOrange, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                time ?: "Time not mapped yet",
+                color = foreground,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(if (selected) "Selected for Sniper" else "Tap to select", color = secondary, style = MaterialTheme.typography.bodySmall)
+        }
+        Surface(
+            color = if (selected) Color.White.copy(alpha = 0.2f) else Color.White,
+            shape = MaterialTheme.shapes.small,
+            border = if (selected) null else BorderStroke(1.dp, TeamworkGreen.copy(alpha = 0.35f)),
+        ) {
+            Text(
+                code.name,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                color = foreground,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsPanel(
+    state: UiState,
+    onSettings: (SniperSettings) -> Unit,
+    onNotification: () -> Unit,
+    onAccessibility: () -> Unit,
+) {
+    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Ink) }
+        item {
+            SettingsCard {
+                SettingsToggle(
+                    title = "Sniper enabled",
+                    subtitle = "Allows saved target shifts to be checked after Teamwork notifications.",
+                    checked = state.settings.enabled && state.settings.armed,
+                    onCheckedChange = { enabled -> onSettings(state.settings.copy(enabled = enabled, armed = enabled)) },
+                )
+            }
+        }
+        item {
+            SettingsCard {
+                SettingsToggle(
+                    title = "Legacy Teamwork overlay",
+                    subtitle = "Off by default. Shows controls over the official Teamwork app.",
+                    checked = state.settings.legacyOverlayEnabled,
+                    onCheckedChange = { enabled -> onSettings(state.settings.copy(legacyOverlayEnabled = enabled)) },
+                )
+            }
+        }
+        item {
+            SettingsCard {
+                PermissionRow("Notification access", state.permissions.notificationAccess, onNotification)
+                Spacer(Modifier.height(8.dp))
+                PermissionRow("Accessibility access", state.permissions.accessibilityAccess, onAccessibility)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCard(content: @Composable () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = CardSurface), shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.padding(16.dp)) { content() }
+    }
+}
+
+@Composable
+private fun SettingsToggle(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.width(10.dp))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun PermissionRow(label: String, enabled: Boolean, onOpen: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, color = Ink, fontWeight = FontWeight.SemiBold)
+            Text(if (enabled) "Enabled" else "Required", color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        OutlinedButton(onClick = onOpen) { Text(if (enabled) "Manage" else "Enable") }
+    }
+}
+
+private fun targetCount(rules: List<ShiftRule>): Int = rules.count {
+    it.enabled && it.dates.size == 1 && it.codes.size == 1 && TargetSelectionRules.isExactTarget(it, it.dates.single(), it.codes.single())
+}
+
+private fun teamworkSniperPalette() = lightColorScheme(
+    primary = TeamworkGreen,
+    onPrimary = Color.White,
+    secondary = SniperOrange,
+    background = AppSurface,
+    onBackground = Ink,
+    surface = CardSurface,
+    onSurface = Ink,
+)

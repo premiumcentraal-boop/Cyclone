@@ -44,7 +44,12 @@ data class ShiftRule(
     val days: Set<DayOfWeek> = emptySet(),
 )
 
-data class SniperSettings(val enabled: Boolean = true, val armed: Boolean = false)
+data class SniperSettings(
+    val enabled: Boolean = true,
+    val armed: Boolean = false,
+    /** Legacy accessibility overlay. Deliberately opt-in; the native planner is the primary UI. */
+    val legacyOverlayEnabled: Boolean = false,
+)
 data class AiSettings(val enabled: Boolean = false, val model: String = "openrouter/auto")
 data class UiMapHint(val resourceId: String? = null, val semanticLabel: String? = null, val updatedAtEpochMs: Long = 0)
 

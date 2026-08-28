@@ -4,6 +4,7 @@ import com.cyclone.teamworksniper.data.ActivityEntry
 import com.cyclone.teamworksniper.data.RuleType
 import com.cyclone.teamworksniper.data.ShiftCode
 import com.cyclone.teamworksniper.data.ShiftRule
+import com.cyclone.teamworksniper.rules.TargetSelectionRules
 import com.cyclone.teamworksniper.teamwork.ShiftTemplateProvider
 import java.time.LocalDate
 
@@ -65,24 +66,4 @@ class OverlayModelBuilder(
         private val VERIFIED_RESULTS = setOf("TARGET_NO_LONGER_OPEN", "VERIFIED_NOT_OPEN_AFTER_ACTION")
         private val ACTIVITY_SHIFT = Regex("^(\\d{4}-\\d{2}-\\d{2})\\s+(M1|M2|S1|S2|S3)(?:\\b|[- ])")
     }
-}
-
-object OverlaySelectionRules {
-    private const val PREFIX = "overlay-target:"
-
-    fun toggle(rules: List<ShiftRule>, date: LocalDate, code: ShiftCode): List<ShiftRule> {
-        val matching = rules.filter { isExactTarget(it, date, code) }
-        if (matching.isNotEmpty()) return rules.filterNot { isExactTarget(it, date, code) }
-        return rules + ShiftRule(
-            id = "$PREFIX$date:${code.name}",
-            name = "${code.name} · $date",
-            type = RuleType.EXACT,
-            codes = listOf(code),
-            enabled = true,
-            dates = setOf(date),
-        )
-    }
-
-    fun isExactTarget(rule: ShiftRule, date: LocalDate, code: ShiftCode): Boolean =
-        rule.type == RuleType.EXACT && rule.codes == listOf(code) && rule.dates == setOf(date)
 }
