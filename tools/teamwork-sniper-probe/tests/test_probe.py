@@ -1,10 +1,12 @@
 from pathlib import Path
 import importlib.util
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("probe", ROOT / "probe.py")
 probe = importlib.util.module_from_spec(spec)
 assert spec.loader
+sys.modules[spec.name] = probe
 spec.loader.exec_module(probe)
 
 def wrap(inner: str) -> str:
