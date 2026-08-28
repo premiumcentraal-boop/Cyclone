@@ -7,6 +7,7 @@ on:
     paths:
       - 'apps/device-gateway/**'
       - 'apps/mobile/**'
+      - 'apps/teamwork-sniper/**'
       - 'apps/pc-companion/**'
       - 'tools/cyclone-agent-mcp/**'
       - 'tools/codex-phone-mcp/**'
@@ -22,9 +23,11 @@ on:
       - 'release/cyclone-mobile-v3.1-beta'
       - 'release/beta/**'
       - 'release/stable/**'
+      - 'release/cyclone-3.5.3-beta'
     paths:
       - 'apps/device-gateway/**'
       - 'apps/mobile/**'
+      - 'apps/teamwork-sniper/**'
       - 'apps/pc-companion/**'
       - 'tools/cyclone-agent-mcp/**'
       - 'tools/codex-phone-mcp/**'
@@ -199,7 +202,7 @@ jobs:
             --dir release-assets/desktop
           gh run download "$GITHUB_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
-            --name "Cyclone-Mobile-$MOBILE_VERSION" \
+            --name "Cyclone-Android-$MOBILE_VERSION" \
             --dir release-assets/mobile
           if [[ -f release-assets/desktop/source-sha.txt ]]; then
             mv release-assets/desktop/source-sha.txt release-assets/desktop/Cyclone-PC-source-sha.txt
@@ -215,33 +218,36 @@ jobs:
           MOBILE_VERSION: ${{ steps.versions.outputs.mobile_version }}
         run: |
           cat > release-notes.md <<EOF
-          # Cyclone ${MOBILE_VERSION}
+          # Cyclone 3.5.3
 
-          Cyclone Mobile and Cyclone PC Companion are built and verified from the same source revision.
+          Cyclone 3.5.3 ships three coordinated applications built from the same source revision.
 
           ## Downloads
-          - **Windows:** Cyclone PC Companion ${PC_VERSION} installer.
-          - **Android:** Cyclone Mobile ${MOBILE_VERSION} APK.
-          - Checksums, exact source SHA, build provenance, and third-party notices are attached.
+          - **Cyclone Mobile 3.5.3** — Android APK for the main Cyclone phone experience.
+          - **Teamwork Sniper 3.5.3** — separate Android APK for automatic Picnic Teamwork open-shift matching and claiming.
+          - **Cyclone PC Companion 3.5.3** — Windows installer with Device Gateway and Cyclone Agent MCP integration.
+          - Checksums, source SHA, build provenance and third-party notices are attached alongside the installers.
 
-          ## Cyclone 3.5.1
-          - The PC Companion now uses a compact top navigation bar with notifications and profile-owned Connections and Settings.
-          - The focused phone is centered at its real display aspect ratio and separated from device context and controls.
-          - Mouse click maps to phone tap; hold-drag-release maps to an authenticated normalized swipe.
-          - A four-direction controller adds bounded up, down, left and right swipes alongside Back and Home.
-          - Fleet refreshes preserve the mounted live stream, reducing avoidable disconnects and visual jumps.
+          ## Teamwork Sniper
+          - Works directly on Android; no PC connection is required.
+          - Watches Teamwork notifications and reads the live Android accessibility hierarchy.
+          - Uses semantic UI mapping and accessibility actions rather than screenshots, OCR or hard-coded coordinates.
+          - Supports M1, M2, S1, S2 and S3 exact, combination and same-day sequence rules.
+          - Requires explicit **Enabled + Armed** state before any claim attempt.
+          - Re-observes the live Teamwork tree before every action and verifies the target is no longer open after a claim.
+          - Includes optional OpenRouter support with an Android-Keystore-protected API key.
+          - AI is advisory only: it may prioritize already-valid matches, while deterministic user rules remain the action authority and automatic fallback.
 
-          ## Cyclone 3.5 platform
-          - A unified Device Wall now models physical and virtual Android targets behind one capability-aware backend contract.
-          - Persistent groups, search, explicit multi-select and typed batch actions return independent per-device outcomes.
-          - The virtual-device provider is lifecycle-bounded, loopback-first and fails closed when a compatible AVD host is unavailable; unsupported clone/snapshot operations are not advertised.
-          - Teach evaluates selector stability, verifier strength and evidence completeness before accepting a routine as durable knowledge.
-          - Agent execution adds bounded retries, timeouts, repeated-action/convergence protection and required after-action verification.
-          - MCP fleet operations require explicit targets and never expose arbitrary shell, ADB, Docker, PowerShell or host execution.
-          - VMOS research informed clean-room architecture only; GPL and noncommercial VMOS sources/binaries are not included.
+          ## Cyclone Mobile + PC
+          - Preserves the Cyclone Home, Teach, AI, Routines, Brain, Settings and PC Gateway product surfaces.
+          - Aligns Mobile, PC Companion, Device Gateway, Codex phone MCP and generic Cyclone Agent MCP at 3.5.3.
+          - Keeps phone execution capability-aware, policy-gated and verification-first.
+          - Windows fleet/device controls and Android pairing remain integrated through the Cyclone Device Gateway.
 
-          ## Platform notes
-          The Android APK is currently debug-signed and the Windows installer is unsigned. A differently signed prior APK may need removal before installation, which deletes that app's local data. Secure/DRM surfaces and Android's lock screen can remain blank by Android design. Virtual Android requires a compatible local provider and system image; when prerequisites are absent Cyclone reports the provider unavailable rather than claiming a virtual phone booted.
+          ## Installation notes
+          Teamwork Sniper needs Android Notification Access and Accessibility Access before it can react to Teamwork. Leave it disarmed while configuring rules, then arm it only when you want matching open shifts to be claimed.
+
+          The Android APKs are currently CI debug-signed and the Windows installer is unsigned. A differently signed prior Android build may need to be removed before installation, which removes that app's local data.
           EOF
 
       - name: Create or replace GitHub release

@@ -42,7 +42,7 @@ jobs:
           test "$(jq -r '.head_repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
           head_branch="$(jq -r '.head_branch' <<< "$run_json")"
           case "$head_branch" in
-            main|release/cyclone-mobile-v*) ;;
+            main|release/cyclone-mobile-v*|feature/cyclone-3.5.2-beta|release/cyclone-3.5.3-beta) ;;
             *) echo "Untrusted mobile release source branch: $head_branch" >&2; exit 1 ;;
           esac
           head_sha="$(jq -r '.head_sha' <<< "$run_json")"
@@ -63,7 +63,6 @@ jobs:
           EXPECTED_ARTIFACT_NAME: ${{ inputs.artifact_name }}
         run: |
           set -euo pipefail
-          test "$(find candidate -maxdepth 1 -name '*.apk' -type f | wc -l)" -eq 1
           test -s candidate/source-sha.txt
           test -s candidate/run-id.txt
           test -s candidate/mobile-metadata.json
@@ -76,11 +75,21 @@ jobs:
 
           root = Path("candidate")
           metadata = json.loads((root / "mobile-metadata.json").read_text(encoding="utf-8"))
-          apks = list(root.glob("*.apk"))
-          assert len(apks) == 1
+          apks = sorted(root.glob("*.apk"))
           assert metadata["artifact_name"] == os.environ["EXPECTED_ARTIFACT_NAME"]
-          assert metadata["apk_name"] == apks[0].name
           assert metadata["application_id"] == "com.cyclone.mobile"
+          mobile_apk = root / metadata["apk_name"]
+          assert mobile_apk.is_file(), f"missing Cyclone APK: {mobile_apk.name}"
+          sniper_metadata_path = root / "teamwork-sniper-metadata.json"
+          if sniper_metadata_path.is_file():
+              sniper = json.loads(sniper_metadata_path.read_text(encoding="utf-8"))
+              assert sniper["present"] is True
+              assert sniper["application_id"] == "com.cyclone.teamworksniper"
+              sniper_apk = root / sniper["apk_name"]
+              assert sniper_apk.is_file(), f"missing Teamwork Sniper APK: {sniper_apk.name}"
+              assert len(apks) == 2
+          else:
+              assert len(apks) == 1
           PY
           (cd candidate && sha256sum --check ./*.apk.sha256)
           echo "Publication is intentionally disabled; this job only verifies the reused CI artifact." >> "$GITHUB_STEP_SUMMARY"

@@ -1,21 +1,24 @@
 schema = 1
-product_version = "3.5.1"
+product_version = "3.5.3"
 channel = "stable"
-android_version_code = 37
-python_version = "3.5.1"
+android_version_code = 39
+python_version = "3.5.3"
 
 [components]
-mobile = "3.5.1"
-pc_companion = "3.5.1"
-device_gateway = "3.5.1"
-mcp = "3.5.1"
+mobile = "3.5.3"
+teamwork_sniper = "3.5.3.1"
+teamwork_sniper_android_version_code = 4
+pc_companion = "3.5.3"
+device_gateway = "3.5.3"
+mcp = "3.5.3"
 
 [release]
 publication_authorized = true
-physical_pixel8 = "PASS_PIXEL_8_ANDROID_16_3B171FDJH0061G"
-physical_pixel8_ui_acceptance = "PASS_LIVE_MEDIA_TAP_SWIPE_BACK_HOME"
-second_android_device = "NOT_REQUIRED_PC_CONTROL_PATCH"
-virtual_provider = "UNCHANGED_FROM_3.5.0"
-android_signing = "DEBUG_UNVERIFIED"
-windows_signing = "UNVERIFIED"
-windows_installer = "PENDING_3.5.1_CI_BUILD"
+physical_pixel8 = "PASS_TEAMWORK_SNIPER_3.5.3.1"
+physical_pixel8_ui_acceptance = "PASS_EXACT_SHIFT_CLAIM_2026-09-06_S2"
+second_android_device = "NOT_REQUIRED"
+virtual_provider = "UNCHANGED_FROM_3.5.1"
+android_signing = "DEBUG_SIGNED_PHYSICAL_3.5.3.1"
+windows_signing = "CI_PENDING_3.5.3"
+windows_installer = "CI_PENDING_3.5.3"
+candidate_generation = "teamwork-sniper-3.5.3.1"

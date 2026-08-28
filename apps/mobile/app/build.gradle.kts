@@ -7,37 +7,28 @@ plugins {
 android {
     namespace = "com.cyclone.mobile"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 37
-        // Cyclone 3.3 gateway overhaul release identity. Shared Android runtime/manifest
-        // integration remains owned by the integration lane.
-        versionName = "3.5.1"
+        versionCode = 39
+        versionName = "3.5.3"
     }
-
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
-
     buildFeatures {
         compose = true
         buildConfig = true
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {

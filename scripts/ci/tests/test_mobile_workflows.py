@@ -17,12 +17,14 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
                 assemblers.append(path.name)
         self.assertEqual(["_mobile-build.yml"], assemblers)
 
-    def test_guards_precede_toolchain_submodule_and_single_gradle_invocation(self):
+    def test_guards_precede_toolchain_and_both_apps_use_trusted_wrapper(self):
         workflow = self.text("_mobile-build.yml")
         guard = workflow.index("mobile_metadata.py")
         for later in ("actions/setup-java", "android-actions/setup-android", "gradle/actions/setup-gradle", "git submodule update"):
             self.assertLess(guard, workflow.index(later))
-        self.assertEqual(1, workflow.count("./apps/mobile/gradlew"))
+        self.assertEqual(2, workflow.count("./apps/mobile/gradlew"))
+        self.assertIn("./apps/mobile/gradlew -p apps/mobile", workflow)
+        self.assertIn("./apps/mobile/gradlew -p apps/teamwork-sniper", workflow)
         self.assertIn(":app:testDebugUnitTest :app:assembleDebug", workflow)
         self.assertIn("persist-credentials: false", workflow)
         self.assertLess(workflow.index("wrapper-validation"), workflow.index("./apps/mobile/gradlew"))

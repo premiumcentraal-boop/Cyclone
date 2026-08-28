@@ -19,4 +19,5 @@ class RuleEngineTest{private val anchor=LocalDate.of(2026,8,24);private val engi
 @Test fun disabledGlobalNeverClaims(){val e=engine.evaluate(listOf(rule(RuleType.EXACT,ShiftCode.S1)),listOf(shift(anchor,ShiftCode.S1,"14:00")));assertEquals(ExecutionMode.NO_ACTION,SafetyGate.decide(SniperSettings(false,true),e))}
 @Test fun unknownCodeNeverMatches(){assertNull(ShiftCode.fromRaw("X9"))}
 @Test fun nonConsecutiveSequenceRejected(){val e=engine.evaluate(listOf(rule(RuleType.SEQUENCE,ShiftCode.S1,ShiftCode.S3)),listOf(shift(anchor,ShiftCode.S1,"13:00"),shift(anchor,ShiftCode.S3,"17:00")));assertTrue(e.matches.isEmpty())}
+@Test fun nativeCombinedShiftMatchesExactSequence(){val combo=shift(anchor,ShiftCode.S1,"14:10").copy(codes=listOf(ShiftCode.S1,ShiftCode.S2,ShiftCode.S3));val e=engine.evaluate(listOf(rule(RuleType.SEQUENCE,ShiftCode.S1,ShiftCode.S2,ShiftCode.S3)),listOf(combo));assertEquals(listOf(combo),e.matches.single().shifts)}
 }

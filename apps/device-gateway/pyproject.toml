@@ -4,14 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cyclone-device-gateway"
-version = "3.5.1"
+version = "3.5.3"
 description = "Deterministic PC-side Android device gateway for Cyclone"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<0.116",
   "uvicorn>=0.30,<1",
-  # Uvicorn falls back to ordinary HTTP (404) for every WebSocket route when no
-  # WebSocket implementation is installed. Keep this exact runtime in the frozen sidecar.
   "websockets==15.0.1",
   "pydantic>=2.8,<3",
   "cryptography>=44,<47",

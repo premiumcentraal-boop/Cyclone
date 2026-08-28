@@ -14,6 +14,7 @@ data class ParseResult(val shifts: List<ParsedOpenShift>, val openMarkersSeen: I
 class TeamworkParser(private val referenceDate: LocalDate = LocalDate.now()) {
     private val codeRegex = Regex("(?i)(?<![A-Z0-9])(M1|M2|S1|S2|S3)(?![A-Z0-9])")
     private val openRegex = Regex("(?i)\\bopen\\s+to\\s+take\\b")
+    private val scheduledRegex = Regex("(?i)\\bscheduled\\b")
     private val rangeRegex = Regex("(?i)(\\d{1,2})[:.](\\d{2})\\s*(?:-|–|—|to)\\s*(\\d{1,2})[:.](\\d{2})")
     private val isoDate = Regex("(?<!\\d)(\\d{4})-(\\d{2})-(\\d{2})(?!\\d)")
     private val numericDate = Regex("(?<!\\d)(\\d{1,2})[-/](\\d{1,2})[-/](\\d{4})(?!\\d)")
@@ -23,6 +24,12 @@ class TeamworkParser(private val referenceDate: LocalDate = LocalDate.now()) {
 
     fun parse(root: SemanticNode): ParseResult {
         var lastDate: LocalDate? = null; var markers = 0; var ignored = 0; val parsed = linkedMapOf<String, ParsedOpenShift>()
+        root.flatten().forEach { ref ->
+            TeamworkNativeShiftId.decode(ref.node.resourceId)?.let { shift ->
+                markers++
+                parsed.putIfAbsent(shift.stableKey, ParsedOpenShift(shift, ref.path))
+            }
+        }
         root.flatten().forEach { ref ->
             parseDate(ref.node.ownSemanticText())?.let { lastDate = it }
             if (!openRegex.containsMatchIn(ref.node.ownSemanticText())) return@forEach
@@ -41,7 +48,7 @@ class TeamworkParser(private val referenceDate: LocalDate = LocalDate.now()) {
     }
 
     private fun selectRow(marker: SemanticRef): SemanticRef? = (listOf(marker) + marker.ancestors.asReversed()).mapIndexedNotNull { distance, ref ->
-        val text = ref.node.subtreeSemanticText(); if (!openRegex.containsMatchIn(text) || text.length > 900) return@mapIndexedNotNull null
+        val text = ref.node.subtreeSemanticText(); if (!openRegex.containsMatchIn(text) || scheduledRegex.containsMatchIn(text) || text.length > 900) return@mapIndexedNotNull null
         val codes = codeRegex.findAll(text).map { it.groupValues[1].uppercase() }.distinct().toList(); if (codes.size != 1) return@mapIndexedNotNull null
         var score = 100-distance.coerceAtMost(80); if (ref.node.clickable || ref.node.actions.any { it.contains("CLICK",true) }) score += 60; if (parseDate(text)!=null) score += 10; ref to score
     }.maxByOrNull { it.second }?.first
@@ -49,8 +56,8 @@ class TeamworkParser(private val referenceDate: LocalDate = LocalDate.now()) {
     fun parseDate(text: String): LocalDate? {
         isoDate.find(text)?.let { m -> return runCatching { LocalDate.of(m.groupValues[1].toInt(),m.groupValues[2].toInt(),m.groupValues[3].toInt()) }.getOrNull() }
         numericDate.find(text)?.let { m -> return runCatching { LocalDate.of(m.groupValues[3].toInt(),m.groupValues[2].toInt(),m.groupValues[1].toInt()) }.getOrNull() }
-        dayMonth.find(text)?.let { m -> val month = monthFor(m.groupValues[2]) ?: return@let; return runCatching { LocalDate.of(resolveYear(month,m.groupValues[3].toIntOrNull()),month,m.groupValues[1].toInt()) }.getOrNull() }
-        monthDay.find(text)?.let { m -> val month = monthFor(m.groupValues[1]) ?: return@let; return runCatching { LocalDate.of(resolveYear(month,m.groupValues[3].toIntOrNull()),month,m.groupValues[2].toInt()) }.getOrNull() }
+        dayMonth.findAll(text).forEach { m -> val month = monthFor(m.groupValues[2]) ?: return@forEach; return runCatching { LocalDate.of(resolveYear(month,m.groupValues[3].toIntOrNull()),month,m.groupValues[1].toInt()) }.getOrNull() }
+        monthDay.findAll(text).forEach { m -> val month = monthFor(m.groupValues[1]) ?: return@forEach; return runCatching { LocalDate.of(resolveYear(month,m.groupValues[3].toIntOrNull()),month,m.groupValues[2].toInt()) }.getOrNull() }
         return null
     }
     private fun safeTime(h:String,m:String): LocalTime? = runCatching { LocalTime.of(h.toInt(),m.toInt()) }.getOrNull()
