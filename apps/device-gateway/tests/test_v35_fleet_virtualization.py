@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import socket
 import time
@@ -131,8 +132,11 @@ class FakeRunner:
 
 
 def fake_sdk(root: Path) -> Path:
+    emulator_name = "emulator.exe" if os.name == "nt" else "emulator"
+    adb_name = "adb.exe" if os.name == "nt" else "adb"
+    avdmanager_name = "avdmanager.bat" if os.name == "nt" else "avdmanager"
     for relative in (
-        "emulator/emulator.exe", "platform-tools/adb.exe", "cmdline-tools/latest/bin/avdmanager.bat",
+        f"emulator/{emulator_name}", f"platform-tools/{adb_name}", f"cmdline-tools/latest/bin/{avdmanager_name}",
         "system-images/android-35/google_apis/x86_64/package.xml",
     ):
         path = root / relative
@@ -156,7 +160,8 @@ def test_android_emulator_provider_uses_only_fixed_argument_vectors_and_loopback
     assert item.adb_endpoint == "emulator-5554"
     config = (Path(item.data_path) / "config.ini").read_text(encoding="utf-8")
     assert "hw.lcd.width=720" in config and "hw.lcd.density=320" in config
-    launch = next(call for call in runner.calls if call[0] == "emulator.exe")
+    emulator_name = "emulator.exe" if os.name == "nt" else "emulator"
+    launch = next(call for call in runner.calls if call[0] == emulator_name)
     assert "-port" in launch[1] and "5554" in launch[1] and "-no-window" in launch[1]
     assert all(isinstance(call[1], tuple) for call in runner.calls)
     provider.stop(item)
