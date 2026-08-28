@@ -1,14 +1,18 @@
-# Teamwork Sniper 3.5.3.1
+# Teamwork Sniper 3.5.3.2
 
 Standalone phone-side companion for `tech.picnic.workapp`.
 
 - package: `com.cyclone.teamworksniper`
-- versionName: `3.5.3.1`
-- versionCode: `3`
+- versionName: `3.5.3.2`
+- versionCode: `5`
 - PC connection: not required
 - AI model: optional
 - primary input: Teamwork notifications + Android accessibility hierarchy
 - primary actions: semantic `AccessibilityNodeInfo.ACTION_CLICK` and semantic scroll actions only
+
+## Teamwork calendar overlay
+
+On recognized Teamwork calendar pages, days marked `No shift` receive a transparent stack of full-width sniper rows. There is no card, header, note, calendar icon, or plus button. Each row uses a sniper sight icon and the same date/code model as the deterministic claim rules. Orange hollow rows are available choices, orange filled rows are selected, and green rows are verified claims. Assigned Teamwork rows are never covered or offered as sniper choices.
 
 ## Deterministic-first runtime
 

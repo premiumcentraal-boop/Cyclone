@@ -11,8 +11,8 @@ android {
         applicationId = "com.cyclone.teamworksniper"
         minSdk = 34
         targetSdk = 35
-        versionCode = 4
-        versionName = "3.5.3.1"
+        versionCode = 5
+        versionName = "3.5.3.2"
     }
     buildTypes {
         release {

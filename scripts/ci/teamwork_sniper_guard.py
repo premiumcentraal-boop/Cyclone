@@ -24,6 +24,14 @@ HARDCODED_COORDINATES = (
     re.compile(r"\bswipe\s*\(\s*\d+(?:\.\d+)?[fF]?\s*,\s*\d+(?:\.\d+)?[fF]?"),
     re.compile(r"\b(?:moveTo|lineTo)\s*\(\s*\d+(?:\.\d+)?[fF]?\s*,\s*\d+(?:\.\d+)?[fF]?"),
 )
+GEOMETRY_API = re.compile(r"\bgetBoundsInScreen\b|\bTYPE_ACCESSIBILITY_OVERLAY\b")
+OVERLAY_CLAIM_API = re.compile(r"\bdispatchGesture\b|\bACTION_CLICK\b|\bperformAction\s*\(")
+OVERLAY_PATH = Path("app/src/main/java/com/cyclone/teamworksniper/ui/overlay")
+# This verified 3.5.3.1 dispatcher predates the visual overlay and resolves an exact semantic node
+# before using its live bounds. New geometry belongs only in the dedicated presentation package.
+FROZEN_SEMANTIC_DISPATCHER = Path(
+    "app/src/main/java/com/cyclone/teamworksniper/runtime/TeamworkAccessibilityService.kt"
+)
 PRODUCTION_SUFFIXES = {".kt", ".java", ".xml", ".kts", ".gradle"}
 
 
@@ -38,6 +46,7 @@ def audit(app_root: Path) -> list[str]:
     errors: list[str] = []
     for path in production_files(app_root):
         text = path.read_text(encoding="utf-8", errors="replace")
+        relative = path.relative_to(app_root)
         for label, pattern in FORBIDDEN.items():
             if pattern.search(text):
                 errors.append(f"{path}: forbidden {label} dependency/reference")
@@ -47,6 +56,16 @@ def audit(app_root: Path) -> list[str]:
                     f"{path}: hardcoded coordinate action is forbidden for Teamwork read/claim execution"
                 )
                 break
+        if GEOMETRY_API.search(text) and not (
+            relative.is_relative_to(OVERLAY_PATH) or relative == FROZEN_SEMANTIC_DISPATCHER
+        ):
+            errors.append(
+                f"{path}: accessibility geometry is restricted to overlay presentation"
+            )
+        if relative.is_relative_to(OVERLAY_PATH) and OVERLAY_CLAIM_API.search(text):
+            errors.append(
+                f"{path}: overlay presentation must never perform Teamwork claim actions"
+            )
     return errors
 
 

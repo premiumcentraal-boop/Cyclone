@@ -26,6 +26,7 @@ import com.cyclone.teamworksniper.rules.SafetyGate
 import com.cyclone.teamworksniper.teamwork.SemanticNode
 import com.cyclone.teamworksniper.teamwork.TeamworkParser
 import com.cyclone.teamworksniper.teamwork.flatten
+import com.cyclone.teamworksniper.ui.overlay.TeamworkOverlayController
 import java.time.LocalDate
 import java.time.temporal.IsoFields
 import java.util.UUID
@@ -51,14 +52,17 @@ class TeamworkAccessibilityService : AccessibilityService() {
     private val log by lazy { ActivityLogStore(this) }
     private val uiMap by lazy { UiMapStore(this) }
     private val ai by lazy { OpenRouterAdvisor(this) }
+    private val overlay by lazy { TeamworkOverlayController(this) { rootInActiveWindow } }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         SniperCoordinator.attach(this)
+        overlay.start()
     }
 
     override fun onDestroy() {
         SniperCoordinator.detach(this)
+        overlay.dispose()
         job.cancel()
         super.onDestroy()
     }
@@ -66,6 +70,7 @@ class TeamworkAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        overlay.onAccessibilityEvent(event)
         if (event?.packageName?.toString() != TeamworkLauncher.PACKAGE) return
         SniperCoordinator.current()?.let(::requestEvaluation)
     }
