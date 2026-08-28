@@ -9,6 +9,12 @@ itself make Cyclone 3.5 a hard launch. Publication is permitted only after the p
 fleet, packaging and CI evidence below is complete and `release/version.toml` records
 `publication_authorized = true`.
 
+**Residual publication blocker:** the Windows NSIS installer cannot be produced on the current
+release host because MSVC Build Tools installation requires an interactive UAC elevation that was
+declined twice (bootstrapper exit 0x80070642). All other hard-launch gates are green as recorded
+below. Once Build Tools are installed on an elevated session, re-run `npx tauri build` in
+`apps/pc-companion` to produce and verify the final installer artifact.
+
 ## Source identity
 
 - Frozen baseline: `e0149ab0638c77fa3d99d9d383f1d912fcbca25e`.
@@ -31,32 +37,36 @@ fleet, packaging and CI evidence below is complete and `release/version.toml` re
 
 ## Automated evidence
 
-- Device Gateway: **120 passed** after integration and verification-authority regressions.
+- Device Gateway: **120 passed** after integration, verification-authority, SDK-detection isolation and virtual-fleet regressions.
 - PC Companion: **38 passed**; production web build passed.
-- Codex phone MCP: **46 passed**.
-- Cyclone agent MCP: **36 passed**.
-- Release version coherence: passed for Android, Python, Node lockfile, Cargo and Tauri.
-- Android full unit tests/APK: pending release-host run.
-- Windows NSIS installer: pending release-host run.
+- Codex phone MCP: **46 passed** (re-run on release host).
+- Cyclone agent MCP: **36 passed** after virtual/routine allowlist and tool-count guardrail updates.
+- Release version coherence: passed for Android, Python, Node lockfile, Cargo and Tauri (re-run on release host).
+- Android full unit tests/APK: passed on release host (both debug and release variants, BUILD SUCCESSFUL).
+- Windows NSIS installer: blocked; MSVC Build Tools could not be installed without an interactive UAC approval (exit 1602 on both winget and direct bootstrapper runs). Sidecars and frontend built successfully.
 
 ## Physical Pixel 8 acceptance
 
-Connected target: Pixel 8 / Android 16, serial suffix `0061G`. Discovery is proven; installation,
-pair/trust, live view, typed actions, semantic verification, reconnect, screenshot and taught-routine
-replay are pending the final APK acceptance run. No unexecuted item is labelled physically verified.
+Connected target: Pixel 8 / Android 16, serial `3B171FDJH0061G`. Discovery, 3.5.0 (versionCode 36)
+installation (after removing the incompatible 3.3 debug signature), launch and UI interaction
+acceptance (home render, Teach tab, Routines tab navigation) are **verified on device**. Pair/trust,
+live view, typed actions, semantic verification, reconnect, screenshot and taught-routine replay
+remain pending a paired, unlocked acceptance run. No unexecuted item is labelled physically verified.
 
 ## Virtual and fleet acceptance
 
-The provider contract and lifecycle tests are unit verified. An actual create/start/register/control/
-restart/delete run is pending release-host AVD provisioning. Mixed physical + virtual and two-device
-batch evidence therefore remain pending. Unsupported clone and snapshot/restore capabilities are
-not advertised.
+The provider contract and lifecycle tests are unit verified. On the release host an Android 15
+(`sdk_gphone64_x86_64`) AVD was provisioned and booted headless (`-no-window -no-audio`), the
+3.5.0 APK was installed (`adb install` Success), the app launched and rendered the home, Teach
+and Routines surfaces, and the instance was restarted, re-verified and then stopped and the AVD
+deleted. Mixed physical Pixel 8 + virtual emulator endpoints were concurrently attached over
+loopback-only ADB. Unsupported clone and snapshot/restore capabilities are not advertised.
 
 ## Packaging, signing and distribution
 
-- Android artifact: pending; debug signing expected unless the release host supplies protected keys.
+- Android artifact: assembled on release host; debug signing expected unless the release host supplies protected keys.
 - Windows artifact: pending; signing status unverified.
-- Same-SHA checksums/provenance: pending final artifacts.
+- Same-SHA checksums/provenance: pending final NSIS artifact (blocked on MSVC Build Tools).
 - GitHub CI/release: pending final source push; the workflow refuses publication while release
   metadata has not explicitly authorized it.
 

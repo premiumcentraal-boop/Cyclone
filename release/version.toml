@@ -13,7 +13,9 @@ mcp = "3.5.0"
 [release]
 publication_authorized = false
 physical_pixel8 = "DISCOVERY_ONLY_ACCEPTANCE_PENDING"
-second_android_device = "NOT_RUN"
-virtual_provider = "UNAVAILABLE_UNVERIFIED"
+physical_pixel8_ui_acceptance = "PASSED_2026_08_28"
+second_android_device = "PASSED_2026_08_28_EMULATOR"
+virtual_provider = "PASSED_2026_08_28_AVD_LIFECYCLE"
 android_signing = "DEBUG_UNVERIFIED"
 windows_signing = "UNVERIFIED"
+windows_installer = "BLOCKED_MSVC_BUILD_TOOLS_UAC"
