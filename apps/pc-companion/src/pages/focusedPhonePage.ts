@@ -3,10 +3,12 @@ import { KeyboardCapture } from "../core/keyboardCapture.js";
 import type { DesktopDevice, DesktopService, DeviceControlAction } from "../services/types.js";
 import { button, el, icon } from "../ui/dom.js";
 import { createLivePhoneView } from "../ui/livePhoneView.js";
+import { createDeviceHealthPanel } from "../ui/deviceHealthPanel.js";
 
 export interface FocusedPhonePageHandle {
   element: HTMLElement;
   destroy(): void;
+  updateDevice(device: DesktopDevice): void;
 }
 
 export function createFocusedPhonePage(
@@ -23,18 +25,26 @@ export function createFocusedPhonePage(
   const focusHeading = el("div", "focus-heading");
   focusHeading.append(el("div", "focus-kicker", "LIVE CONTROL"), el("h1", "focus-title", "Phone workspace"));
   const identity = el("div", "focus-device-identity");
-  identity.append(el("div", "focus-device-name", device.name), el("div", "phone-connection", device.connectionLabel));
+  const identityName = el("div", "focus-device-name", device.name);
+  const identityConnection = el("div", "phone-connection", device.connectionLabel);
+  identity.append(identityName, identityConnection);
   topbar.append(back, focusHeading, identity);
 
   const workspace = el("div", "focus-workspace");
   const contextPanel = el("aside", "focus-context-panel");
+  const contextName = el("div", "context-device-name", device.name);
+  const contextModel = el("div", "context-device-model", device.model || "Android phone");
   contextPanel.append(
     el("div", "panel-eyebrow", "ACTIVE PHONE"),
-    el("div", "context-device-name", device.name),
-    el("div", "context-device-model", device.model || "Android phone"),
+    contextName,
+    contextModel,
   );
   const health = el("div", "context-health");
-  health.append(el("span", `context-health-dot state-${device.state.toLowerCase()}`), el("span", "context-health-copy", device.connectionLabel));
+  const healthDot = el("span", `context-health-dot state-${device.state.toLowerCase()}`);
+  const healthCopy = el("span", "context-health-copy", device.connectionLabel);
+  health.append(healthDot, healthCopy);
+  const healthSlot = el("div", "focus-health-slot");
+  healthSlot.append(createDeviceHealthPanel(device));
   const humanInput = el("div", "context-card");
   humanInput.append(
     el("div", "context-card-title", "Human control"),
@@ -45,7 +55,7 @@ export function createFocusedPhonePage(
     el("div", "context-card-title", "AI-ready"),
     el("p", "context-card-copy", "The same phone stays explicitly targeted for governed AI and MCP actions."),
   );
-  contextPanel.append(health, humanInput, aiInput);
+  contextPanel.append(health, healthSlot, humanInput, aiInput);
 
   const controlStatus = el("div", "control-status", "Ready");
   const liveColumn = el("div", "focus-live-column");
@@ -55,6 +65,7 @@ export function createFocusedPhonePage(
     profile: "focus",
     interactive: true,
     showLabel: false,
+    showHealth: false,
     onControl: (kind, ok) => {
       const label = kind === "tap" ? "Mouse tap" : "Mouse swipe";
       controlStatus.textContent = ok ? `${label} sent` : `${label} unavailable`;
@@ -212,6 +223,15 @@ export function createFocusedPhonePage(
       setKeyboardActive(false);
       window.removeEventListener("keydown", keydown, true);
       live.destroy();
+    },
+    updateDevice: (next) => {
+      identityName.textContent = next.name;
+      identityConnection.textContent = next.connectionLabel;
+      contextName.textContent = next.name;
+      contextModel.textContent = next.model || "Android phone";
+      healthDot.className = `context-health-dot state-${next.state.toLowerCase()}`;
+      healthCopy.textContent = next.connectionLabel;
+      healthSlot.replaceChildren(createDeviceHealthPanel(next));
     },
   };
 }

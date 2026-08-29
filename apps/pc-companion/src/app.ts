@@ -5,6 +5,7 @@ import {
   type AppRoute,
   type CompanionState,
 } from "./core/fleet.js";
+import { TopologyRefreshGate } from "./core/topologyRefresh.js";
 import type { DesktopDevice, DesktopService } from "./services/types.js";
 import { createConnectionsPage } from "./pages/connectionsPage.js";
 import { createFleetPage } from "./pages/fleetPage.js";
@@ -16,6 +17,7 @@ import { button, el } from "./ui/dom.js";
 interface PageHandle {
   element: HTMLElement;
   destroy(): void;
+  updateDevice?(device: DesktopDevice): void;
 }
 
 export class CyclonePcCompanionApp {
@@ -26,6 +28,8 @@ export class CyclonePcCompanionApp {
   private fleetUnsubscribe: (() => void) | null = null;
   private pairingModal: PairingModal | null = null;
   private deviceSignature = "";
+  private gatewayError: string | null = null;
+  private readonly topologyRefresh = new TopologyRefreshGate();
   private readonly content = el("main", "app-content");
   private readonly navButtons = new Map<AppRoute, HTMLButtonElement>();
   private topbarStatus: HTMLElement | null = null;
@@ -126,18 +130,34 @@ export class CyclonePcCompanionApp {
   }
 
   private async refreshDevices(forceRender: boolean): Promise<void> {
+    if (!this.topologyRefresh.begin(forceRender)) return;
     try {
       const devices = await this.service.listDevices();
+      this.gatewayError = null;
       this.applyDevices(devices, forceRender);
-    } catch {
-      if (forceRender && this.state.devices.length === 0) this.renderPage();
+    } catch (error) {
+      this.gatewayError = friendlyGatewayError(error);
+      this.updateTopbarStatus();
+      // Keep last known inventory and a mounted healthy focused stream. A discovery failure is
+      // evidence about the Gateway, not evidence that every phone vanished.
+      if (forceRender && this.state.route !== "focused") this.renderPage();
+    } finally {
+      const nextForceRender = this.topologyRefresh.finish();
+      if (nextForceRender != null) void this.refreshDevices(nextForceRender);
     }
   }
 
   private async scanForPhones(): Promise<number> {
-    const devices = await this.service.scanDevices();
-    this.applyDevices(devices, true);
-    return devices.length;
+    try {
+      const devices = await this.service.scanDevices();
+      this.gatewayError = null;
+      this.applyDevices(devices, true);
+      return devices.length;
+    } catch (error) {
+      this.gatewayError = friendlyGatewayError(error);
+      this.updateTopbarStatus();
+      throw error;
+    }
   }
 
   private applyDevices(devices: DesktopDevice[], forceRender: boolean): void {
@@ -151,6 +171,10 @@ export class CyclonePcCompanionApp {
     // controller owns its own recovery and remains mounted until the device disappears or the
     // user navigates away.
     if ((forceRender || changed) && !preserveFocusedPage) this.renderPage();
+    if (changed && preserveFocusedPage && this.state.focusedDeviceId) {
+      const focused = devices.find((device) => device.id === this.state.focusedDeviceId);
+      if (focused) this.currentPage?.updateDevice?.(focused);
+    }
   }
 
   private navigate(route: Exclude<AppRoute, "focused">): void {
@@ -209,6 +233,8 @@ export class CyclonePcCompanionApp {
         (device) => this.focusDevice(device),
         (device) => this.openPairing(device),
         () => this.scanForPhones(),
+        () => this.navigate("settings"),
+        { offline: this.gatewayError != null, message: this.gatewayError ?? undefined },
       );
     }
     this.content.replaceChildren(this.currentPage.element);
@@ -229,12 +255,22 @@ export class CyclonePcCompanionApp {
     const ready = this.state.devices.filter((device) => device.state === "READY").length;
     const attention = this.state.devices.filter((device) => ["DISCONNECTED", "ATTENTION", "UNAUTHORIZED"].includes(device.state));
     const copy = this.topbarStatus.querySelector<HTMLElement>(".topbar-status-copy");
-    if (copy) copy.textContent = this.state.devices.length === 0
+    if (copy) copy.textContent = this.gatewayError
+      ? "Gateway needs attention"
+      : this.state.devices.length === 0
       ? "No phones"
       : `${ready}/${this.state.devices.length} ready`;
-    this.notificationBadge.textContent = attention.length ? String(attention.length) : "";
-    this.notificationBadge.hidden = attention.length === 0;
+    const alertCount = attention.length + (this.gatewayError ? 1 : 0);
+    this.notificationBadge.textContent = alertCount ? String(alertCount) : "";
+    this.notificationBadge.hidden = alertCount === 0;
     this.notificationPanel.replaceChildren(el("div", "popover-heading", "Notifications"));
+    if (this.gatewayError) {
+      const gateway = el("button", "notification-item") as HTMLButtonElement;
+      gateway.type = "button";
+      gateway.append(el("span", "notification-device", "Local Gateway"), el("span", "notification-copy", this.gatewayError));
+      gateway.addEventListener("click", () => this.navigate("settings"));
+      this.notificationPanel.append(gateway);
+    }
     if (attention.length === 0) {
       this.notificationPanel.append(
         el("div", "notification-item positive", "All connected phones look healthy."),
@@ -265,5 +301,16 @@ function deviceSignature(device: DesktopDevice): string {
     device.video.rotationDegrees,
     device.capabilities.clipboard,
     device.capabilities.keyboard,
+    JSON.stringify(device.connectionHealth ?? {}),
+    JSON.stringify(device.planes ?? {}),
+    JSON.stringify(device.readiness ?? {}),
+    JSON.stringify(device.operatorHealth ?? {}),
   ].join(":");
+}
+
+function friendlyGatewayError(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (/401|403|token|session/i.test(message)) return "Local session verification failed. Reopen PC Companion to start a fresh protected session.";
+  if (/fetch|network|offline|gateway|connect/i.test(message)) return "The local Gateway sidecar is not responding. Retry discovery, then reopen PC Companion if needed.";
+  return message ? message.slice(0, 180) : "Cyclone could not refresh local phone inventory.";
 }

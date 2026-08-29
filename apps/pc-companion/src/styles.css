@@ -124,6 +124,10 @@ button { color: inherit; }
 
 .fleet-page { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
 .fleet-header { padding-bottom: 13px; }
+.fleet-gateway-warning { margin: 0 32px 14px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; border: 1px solid rgba(231,161,72,.28); border-radius: 14px; background: rgba(231,161,72,.055); }
+.fleet-gateway-warning-title { color: #f0c27d; font-size: 11px; font-weight: 720; }
+.fleet-gateway-warning-copy { max-width: 680px; margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.fleet-gateway-warning-actions, .empty-state-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
 .fleet-viewport { overflow: auto; padding: 5px 26px 28px; scrollbar-width: thin; scrollbar-color: #2d3039 transparent; }
 .fleet-grid {
   --fleet-columns: 2;
@@ -161,6 +165,19 @@ button { color: inherit; }
 .phone-state-sleeping .phone-canvas, .phone-state-sleeping .phone-fallback { filter: brightness(.48) saturate(.72); }
 .phone-state-disconnected .phone-canvas, .phone-state-disconnected .phone-fallback { filter: brightness(.38) grayscale(.15); }
 .phone-card-footer { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 13px 10px 15px; border-top: 1px solid var(--border); }
+.device-health-panel { border-top: 1px solid var(--border); padding: 12px 14px; background: rgba(255,255,255,.018); }
+.device-health-panel.compact { padding: 10px 13px; }
+.device-health-heading { margin-bottom: 8px; color: var(--muted); font-size: 8px; font-weight: 760; letter-spacing: .1em; text-transform: uppercase; }
+.device-health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
+.device-health-item { min-width: 0; display: grid; grid-template-columns: 6px minmax(0, 1fr); column-gap: 6px; align-items: center; }
+.device-health-dot { width: 6px; height: 6px; border-radius: 50%; background: #555a68; }
+.device-health-item.state-ready .device-health-dot { background: var(--green); box-shadow: 0 0 8px rgba(98,212,154,.25); }
+.device-health-item.state-recovering .device-health-dot { background: var(--amber); box-shadow: 0 0 8px rgba(230,184,92,.2); }
+.device-health-item.state-action_required .device-health-dot { background: var(--danger); box-shadow: 0 0 8px rgba(255,117,143,.2); }
+.device-health-item.state-offline .device-health-dot { background: #7b8191; }
+.device-health-label, .device-health-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-health-label { color: #d2cfdb; font-size: 9px; }
+.device-health-state { grid-column: 2; color: var(--muted); font-size: 8px; margin-top: 1px; }
 .phone-label { font-size: 12px; font-weight: 650; color: #e7e5ee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .phone-connection { margin-top: 2px; font-size: 9px; color: var(--muted); }
 .phone-stream-status { position: absolute; inset: auto 9px 9px auto; font-size: 9px; color: var(--muted); }
@@ -185,6 +202,7 @@ button { color: inherit; }
 .empty-orbit::before { content: ""; position: absolute; width: 9px; height: 9px; border-radius: 50%; background: var(--purple); top: 7px; left: 11px; box-shadow: 0 0 12px rgba(139,92,246,.5); }
 .empty-title { margin: 0; font-size: 18px; }
 .empty-copy { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.empty-state-actions { margin-top: 16px; }
 
 .focus-page { display: grid; grid-template-rows: auto auto minmax(0, 1fr); background: linear-gradient(180deg, rgba(17,18,25,.55), rgba(8,9,13,.92)); }
 .focus-topbar { min-height: 66px; display: flex; align-items: center; justify-content: space-between; padding: 13px 24px; border-bottom: 1px solid var(--border); background: rgba(8,9,13,.78); backdrop-filter: blur(18px); z-index: 10; }
@@ -202,6 +220,9 @@ button { color: inherit; }
 .context-health-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px rgba(98,212,154,.36); }
 .context-health-dot.state-disconnected, .context-health-dot.state-attention { background: var(--amber); }
 .context-health-copy { color: var(--muted-strong); font-size: 9px; }
+.focus-context-panel .device-health-panel { margin: 0 -6px 18px; padding: 0 6px 16px; border-top: 0; border-bottom: 1px solid var(--border); background: transparent; }
+.focus-context-panel .device-health-grid { grid-template-columns: 1fr; gap: 8px; }
+.focus-context-panel .device-health-label { font-size: 10px; }
 .context-card { border-top: 1px solid var(--border); padding: 17px 0 4px; }
 .context-card.accent { margin-top: 12px; padding: 15px; border: 1px solid rgba(139,92,246,.2); border-radius: 13px; background: rgba(139,92,246,.07); }
 .context-card-title { font-size: 11px; font-weight: 690; }
@@ -337,6 +358,7 @@ button { color: inherit; }
   .focus-heading { display: none; }
   .control-label { font-size: 7px; }
   .more-menu-panel, .tool-popover { right: 148px; }
+  .fleet-gateway-warning { margin-left: 20px; margin-right: 20px; align-items: stretch; flex-direction: column; }
   .codex-connections-grid { grid-template-columns: 1fr; padding-left: 20px; padding-right: 20px; }
   .codex-readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .codex-connect-top, .codex-connect-actions, .codex-handoff { align-items: stretch; flex-direction: column; }
