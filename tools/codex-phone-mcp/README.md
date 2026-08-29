@@ -8,6 +8,8 @@ CycloneAgentMCP.exe connect codex
 
 The historical `cyclone_phone_mcp` Python package remains in the repository for V3.1 compatibility and acceptance fixtures, but it is not a second desktop controller and is not the Desktop V1 packaging entry point.
 
+Compact `phone_observe` output is a **page card**: `package` / `activity` / `pageKey` / `title`, surviving `pageText` (`cyclone-page-text-v1`) and `pageSummary` (`cyclone-page-summary-v1`), goal-ranked `controls` (not an exactly-12 list), `counts` including `compact`, optional `nextCursor`, and up to five `routeHints`. It never dumps a raw 2500-node tree.
+
 The generic server talks only to the authenticated loopback Cyclone PC Device Gateway. It exposes no generic ADB, shell, PowerShell, root, subprocess, or arbitrary command capability. Gateway tokens are inherited at runtime and are never written to Codex project TOML.
 
 `phone_devices` auto-detects connected phones through the gateway fleet surface, and every tool
