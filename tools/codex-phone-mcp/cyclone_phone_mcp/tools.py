@@ -8,10 +8,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from .compact import compact_observation, redact
+from .compact import compact_element, compact_observation, compact_search, page_changed, page_delta, redact
 from .gateway import GatewayClient, GatewayError
 from .reports import SessionRecorder
-from .protocol import classify_failure
+from .protocol import Failure, classify_failure
 
 ALLOWED_ACTIONS = {
     "phone.click",
@@ -42,6 +42,14 @@ INSTANCE_ID = re.compile(r"^vdev_[a-f0-9]{16}$")
 ROUTINE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+ANDROID_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
+
+MUTATING_ACTIONS = ALLOWED_ACTIONS - {"phone.wait_for"}
+ELEMENT_ID_KEYS = {"elementId", "element_id"}
+COORDINATE_KEYS = {
+    "x", "y", "x1", "y1", "x2", "y2", "startx", "starty", "endx", "endy",
+    "coordinates", "coordinate", "bounds", "point", "points",
+}
 
 
 def _result_failed(result: Any) -> bool:
@@ -78,11 +86,110 @@ def _validate_typed_params(value: Any, path: str = "params") -> None:
             _validate_typed_params(item, f"{path}[{index}]")
 
 
+def _element_id_from_params(params: dict[str, Any]) -> str | None:
+    direct = next((params.get(key) for key in ELEMENT_ID_KEYS if params.get(key)), None)
+    selector = params.get("selector")
+    nested = None
+    if isinstance(selector, dict):
+        nested = next((selector.get(key) for key in ELEMENT_ID_KEYS if selector.get(key)), None)
+        unsupported = set(selector) - ELEMENT_ID_KEYS
+        if unsupported:
+            raise ValueError(
+                "MCP selector input must contain only a current observation-scoped elementId; "
+                "use phone_locate or phone_ui_search first."
+            )
+    if direct and nested and str(direct) != str(nested):
+        raise ValueError("elementId values disagree")
+    element_id = str(direct or nested or "").strip()
+    return element_id or None
+
+
+def _reject_coordinate_params(value: Any, path: str = "params") -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            key_text = str(key)
+            normalized = key_text.replace("_", "").lower()
+            if normalized in COORDINATE_KEYS:
+                raise ValueError(
+                    f"{path}.{key_text} is not permitted: MCP does not execute free-form coordinates. "
+                    "Use a current observation-scoped elementId or a safe typed route."
+                )
+            _reject_coordinate_params(nested, f"{path}.{key_text}")
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            _reject_coordinate_params(nested, f"{path}[{index}]")
+
+
+def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None:
+    """Keep the PC-agent surface semantic and observation-scoped.
+
+    Gateway support for broader selectors remains unchanged for internal Cyclone routes. MCP is a
+    deliberately narrower model-facing surface: it never accepts raw text, fuzzy or coordinate
+    selectors that can drift after context truncation.
+    """
+    _validate_typed_params(params)
+    _reject_coordinate_params(params)
+    element_id = _element_id_from_params(params)
+
+    if tool in {"phone.click", "phone.long_press", "phone.type"} and not element_id:
+        raise ValueError(
+            f"{tool} requires a current observation-scoped elementId. Run phone_locate or "
+            "phone_observe, then use one returned candidate ID."
+        )
+    if tool == "phone.swipe":
+        raise ValueError(
+            "phone.swipe has no safe typed MCP route in the frozen gateway protocol. "
+            "Use phone.scroll with direction=forward/backward instead."
+        )
+    if tool == "phone.scroll":
+        allowed = {"direction", "selector", *ELEMENT_ID_KEYS}
+        if set(params) - allowed:
+            raise ValueError("phone.scroll accepts only direction and an optional current elementId")
+        direction = str(params.get("direction") or "forward").lower()
+        if direction not in {"forward", "backward"}:
+            raise ValueError("phone.scroll direction must be forward or backward")
+    elif tool == "phone.type":
+        allowed = {"value", "text", "selector", *ELEMENT_ID_KEYS}
+        if set(params) - allowed or not isinstance(params.get("value", params.get("text")), str):
+            raise ValueError("phone.type accepts one text/value and a current elementId")
+        if "value" in params and "text" in params and params["value"] != params["text"]:
+            raise ValueError("phone.type text and value disagree")
+    elif tool == "phone.long_press":
+        allowed = {"durationMs", "selector", *ELEMENT_ID_KEYS}
+        if set(params) - allowed:
+            raise ValueError("phone.long_press accepts only durationMs and a current elementId")
+    elif tool == "phone.click":
+        allowed = {"selector", *ELEMENT_ID_KEYS}
+        if set(params) - allowed:
+            raise ValueError("phone.click accepts only a current observation-scoped elementId")
+    elif tool in {"phone.back", "phone.home"}:
+        if params:
+            raise ValueError(f"{tool} accepts no parameters")
+    elif tool == "phone.open_app":
+        if set(params) != {"package"} or not ANDROID_PACKAGE.fullmatch(str(params.get("package") or "")):
+            raise ValueError("phone.open_app requires one valid Android package name")
+    elif tool == "phone.wait_for":
+        allowed = {"condition", "timeoutMs", "pollMs", "selector", *ELEMENT_ID_KEYS}
+        if set(params) - allowed:
+            raise ValueError("phone.wait_for accepts only a bounded condition, timeout, poll interval, and elementId")
+        condition = params.get("condition")
+        if condition is not None and not isinstance(condition, dict):
+            raise ValueError("phone.wait_for condition must be an object")
+    return element_id
+
+
+def _error_class(value: Any, fallback: str) -> str:
+    failure = classify_failure(value)
+    return failure.code if failure else fallback
+
+
 class PhoneTools:
     def __init__(self, gateway: GatewayClient | None = None, recorder: SessionRecorder | None = None):
         self.gateway = gateway or GatewayClient()
         self.recorder = recorder or SessionRecorder()
         self.last_call_failed = False
+        self._page_cards: dict[str, tuple[Any, dict[str, Any]]] = {}
+        self._current_element_ids: dict[str, set[str]] = {}
 
     def call(self, name: str, arguments: dict[str, Any]) -> list[dict[str, Any]]:
         started = time.perf_counter()
@@ -122,6 +229,7 @@ class PhoneTools:
         device_id = _device_id(args)
         mode = str(args.get("mode") or "compact")
         include_screenshot = bool(args.get("include_screenshot", False))
+        goal = str(args.get("goal") or "").strip()
         if device_id:
             raw = self.gateway.device_observe(device_id, include_screenshot=include_screenshot, mode=mode)
         else:
@@ -131,16 +239,64 @@ class PhoneTools:
             return redact(raw)
         if mode == "full":
             return redact(raw)
-        return compact_observation(raw)
+        return self._remember_page_card(device_id, raw, goal=goal)
+
+    def phone_locate(self, args: dict[str, Any]) -> Any:
+        """Fuse bounded readiness, Page Card context, and semantic search for one goal."""
+        device_id = _device_id(args)
+        goal = str(args.get("goal") or "").strip()
+        if not goal:
+            raise ValueError("goal is required")
+        query = str(args.get("query") or goal).strip()
+        if len(query) > 240:
+            raise ValueError("query exceeds the bounded length")
+        if device_id:
+            status = self.gateway.device_status(device_id)
+            raw = self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
+        else:
+            status = self.gateway.status()
+            raw = self.gateway.observe(include_screenshot=False, mode="compact")
+        if classify_failure(raw):
+            return redact(raw)
+        page_card = self._remember_page_card(device_id, raw, goal=goal)
+        try:
+            search_raw = (
+                self.gateway.device_ui_search(device_id, query)
+                if device_id else self.gateway.ui_search(query)
+            )
+            semantic_search = compact_search(search_raw, query=query, goal=goal)
+            self._remember_search_ids(device_id, semantic_search)
+        except GatewayError as exc:
+            semantic_search = {
+                "kind": "semantic_search",
+                "query": query,
+                "available": False,
+                "errorClass": _error_class(exc.body, "SEARCH_UNAVAILABLE"),
+            }
+        return {
+            "kind": "phone_locate",
+            "goal": goal,
+            "status": _compact_status(status),
+            "pageCard": page_card,
+            "semanticSearch": semantic_search,
+            "next": (
+                "Use a goal-ranked/current elementId immediately, then call phone_act. "
+                "After any mutation, use phone_locate again; IDs are not reusable."
+            ),
+        }
 
     def phone_ui_search(self, args: dict[str, Any]) -> Any:
         query = str(args.get("query") or "").strip()
         if not query:
             raise ValueError("query is required")
+        goal = str(args.get("goal") or "").strip()
         device_id = _device_id(args)
         if device_id:
-            return redact(self.gateway.device_ui_search(device_id, query))
-        return redact(self.gateway.ui_search(query))
+            search = compact_search(self.gateway.device_ui_search(device_id, query), query=query, goal=goal)
+        else:
+            search = compact_search(self.gateway.ui_search(query), query=query, goal=goal)
+        self._remember_search_ids(device_id, search)
+        return search
 
     def phone_inspect_element(self, args: dict[str, Any]) -> Any:
         element_id = str(args.get("element_id") or "").strip()
@@ -148,8 +304,8 @@ class PhoneTools:
             raise ValueError("element_id is required")
         device_id = _device_id(args)
         if device_id:
-            return redact(self.gateway.device_ui_element(device_id, element_id))
-        return redact(self.gateway.ui_element(element_id))
+            return compact_element(self.gateway.device_ui_element(device_id, element_id), element_id=element_id)
+        return compact_element(self.gateway.ui_element(element_id), element_id=element_id)
 
     def phone_screenshot(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
@@ -204,7 +360,7 @@ class PhoneTools:
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
-        _validate_typed_params(params)
+        _validate_mcp_action_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
@@ -213,22 +369,9 @@ class PhoneTools:
             # the V3 GatewayActionAuthority must still authorize the actual handoff.
             raise ValueError("phone.type requires user_authorized=true as an explicit MCP intent acknowledgement")
         device_id = _device_id(args)
-        if device_id:
-            result = redact(self.gateway.device_action(device_id, tool, params, goal))
-        else:
-            result = redact(self.gateway.action(tool, params, goal))
-        failure = classify_failure(result)
-        if failure:
-            error_class = failure.code
-            verification = result.get("verification") if isinstance(result, dict) else None
-            return {
-                "error": "Phone action failed",
-                "errorClass": error_class,
-                "failureLayer": failure.layer,
-                "verification": verification,
-                "action": result,
-            }
-        return result
+        if tool not in MUTATING_ACTIONS:
+            return self._run_non_mutating_action(device_id, tool, params, goal)
+        return self._run_verified_mutation(device_id, tool, params, goal)
 
     def phone_group_act(self, args: dict[str, Any]) -> Any:
         raw_ids = args.get("device_ids")
@@ -245,7 +388,7 @@ class PhoneTools:
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
-        _validate_typed_params(params)
+        _validate_mcp_action_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
@@ -270,6 +413,154 @@ class PhoneTools:
             "selected_device_ids": device_ids,
             "ok": all(item["ok"] for item in results),
             "results": results,
+        }
+
+    def _scope_key(self, device_id: str) -> str:
+        return device_id or "__gateway_selected__"
+
+    def _remember_page_card(self, device_id: str, raw: Any, *, goal: str = "") -> dict[str, Any]:
+        card = compact_observation(raw, goal=goal)
+        scope = self._scope_key(device_id)
+        self._page_cards[scope] = (raw, card)
+        self._current_element_ids[scope] = _card_element_ids(card)
+        return card
+
+    def _remember_search_ids(self, device_id: str, search: dict[str, Any]) -> None:
+        scope = self._scope_key(device_id)
+        if scope not in self._page_cards:
+            return
+        current = self._current_element_ids.setdefault(scope, set())
+        current.update(_search_element_ids(search))
+
+    def _run_non_mutating_action(self, device_id: str, tool: str, params: dict[str, Any], goal: str) -> Any:
+        try:
+            action = (
+                self.gateway.device_action(device_id, tool, params, goal)
+                if device_id else self.gateway.action(tool, params, goal)
+            )
+        except GatewayError as exc:
+            return _failed_action_envelope(
+                tool=tool,
+                goal=goal,
+                before=None,
+                after=None,
+                action=None,
+                error_class=_error_class(exc.body, "GATEWAY_ERROR"),
+                failure_layer="gateway",
+                delta="The non-mutating action did not return a usable result.",
+            )
+        failure = classify_failure(action)
+        return {
+            "kind": "phone_action_result",
+            "tool": tool,
+            "goal": goal,
+            "mutating": False,
+            "actionStatus": _action_status(action, failure, after_observed=False),
+            "beforePageCard": None,
+            "afterPageCard": None,
+            "pageChanged": None,
+            "delta": "No mutation was requested.",
+            "errorClass": failure.code if failure else None,
+            "ok": failure is None,
+            "error": None if failure is None else {"code": failure.code, "layer": failure.layer},
+        }
+
+    def _run_verified_mutation(self, device_id: str, tool: str, params: dict[str, Any], goal: str) -> dict[str, Any]:
+        scope = self._scope_key(device_id)
+        cached = self._page_cards.get(scope)
+        if cached is None:
+            return _failed_action_envelope(
+                tool=tool,
+                goal=goal,
+                before=None,
+                after=None,
+                action=None,
+                error_class="STALE_OBSERVATION",
+                failure_layer="protocol",
+                delta="No current Page Card is available. Run phone_locate or phone_observe before acting.",
+            )
+        element_id = _element_id_from_params(params)
+        if element_id and element_id not in self._current_element_ids.get(scope, set()):
+            return _failed_action_envelope(
+                tool=tool,
+                goal=goal,
+                before=cached[1],
+                after=None,
+                action=None,
+                error_class="STALE_OBSERVATION",
+                failure_layer="protocol",
+                delta="The elementId is not from the current Page Card/search scope. Locate again before acting.",
+            )
+        before_raw, _ = cached
+        before = compact_observation(before_raw, goal=goal)
+        # The gateway clears its observation authority after an action. Clear our model-facing
+        # cache at the same boundary so an ID can never be accidentally reused.
+        self._page_cards.pop(scope, None)
+        self._current_element_ids.pop(scope, None)
+        action: Any = None
+        failure = None
+        action_error: GatewayError | None = None
+        try:
+            action = (
+                self.gateway.device_action(device_id, tool, params, goal)
+                if device_id else self.gateway.action(tool, params, goal)
+            )
+            failure = classify_failure(action)
+        except GatewayError as exc:
+            action_error = exc
+            action = redact(exc.body) if exc.body is not None else {"error": str(exc)}
+            failure = classify_failure(action)
+
+        after: dict[str, Any] | None = None
+        after_failure = None
+        # A 200 transport receipt never proves that Android changed state. When the gateway is
+        # still reachable, observe again even after execution/verification failure for evidence.
+        action_error_class = failure.code if failure else ("GATEWAY_ERROR" if action_error else None)
+        can_observe_after = action_error_class not in {"DEVICE_DISCONNECTED", "AUTH_REJECTED"}
+        if can_observe_after:
+            try:
+                after_raw = (
+                    self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
+                    if device_id else self.gateway.observe(include_screenshot=False, mode="compact")
+                )
+                after_failure = classify_failure(after_raw)
+                if after_failure is None:
+                    after = self._remember_page_card(device_id, after_raw, goal=goal)
+            except GatewayError as exc:
+                after_failure = classify_failure(exc.body)
+                if after_failure is None:
+                    after_failure = Failure("AFTER_OBSERVATION_FAILED", "transport")
+
+        changed = page_changed(before, after)
+        delta = page_delta(before, after, changed)
+        typed_verification = _gateway_verification_passed(action)
+        verified = failure is None and action_error is None and typed_verification and after is not None
+        if failure is not None:
+            error_class, failure_layer = failure.code, failure.layer
+        elif action_error is not None:
+            error_class, failure_layer = "GATEWAY_ERROR", "gateway"
+        elif after_failure is not None:
+            error_class, failure_layer = after_failure.code, after_failure.layer
+        elif not typed_verification:
+            error_class, failure_layer = "VERIFICATION_REQUIRED", "verification"
+        elif after is None:
+            error_class, failure_layer = "AFTER_OBSERVATION_FAILED", "verification"
+        else:
+            error_class, failure_layer = None, None
+        return {
+            "kind": "phone_action_result",
+            "tool": tool,
+            "goal": goal,
+            "mutating": True,
+            "actionStatus": _action_status(action, failure, after_observed=after is not None),
+            "beforePageCard": before,
+            "afterPageCard": after,
+            "pageChanged": changed,
+            "delta": delta,
+            "errorClass": error_class,
+            "failureLayer": failure_layer,
+            "ok": verified,
+            "error": None if verified else {"code": error_class, "layer": failure_layer},
         }
 
     def phone_debug_bundle(self, args: dict[str, Any]) -> Any:
@@ -343,6 +634,99 @@ class PhoneTools:
         device_id = _required_id(args, "device_id", TARGET_ID)
         run_id = _required_id(args, "run_id", RUN_ID)
         return redact(self.gateway.routine_cancel(device_id, run_id))
+
+
+def _compact_status(status: Any) -> dict[str, Any]:
+    """Keep locate useful without returning an unbounded gateway diagnostic object."""
+    if not isinstance(status, dict):
+        return {"available": False, "summary": "Gateway status was not an object."}
+    nested_status = status.get("status") if isinstance(status.get("status"), dict) else {}
+    health = status.get("gateway_health") if isinstance(status.get("gateway_health"), dict) else {}
+    result: dict[str, Any] = {"available": True}
+    for key in (
+        "device_id", "deviceId", "serial", "serialSuffix", "model", "state", "ready",
+        "cyclone_bridge_reachable", "bridgeReachable", "gatewayEnabled", "accessibilityEnabled",
+    ):
+        value = status.get(key, nested_status.get(key))
+        if isinstance(value, (str, int, float, bool)):
+            result[key] = value
+    if health:
+        result["gatewayHealth"] = {
+            key: value for key, value in health.items()
+            if key in {"state", "ready", "available"} and isinstance(value, (str, int, float, bool))
+        }
+    return redact(result)
+
+
+def _card_element_ids(card: dict[str, Any]) -> set[str]:
+    candidates = card.get("candidates") if isinstance(card.get("candidates"), dict) else {}
+    rows = list(candidates.get("current") or []) + list(candidates.get("goalRanked") or [])
+    return {
+        str(item["elementId"]) for item in rows
+        if isinstance(item, dict) and isinstance(item.get("elementId"), str) and item["elementId"]
+    }
+
+
+def _search_element_ids(search: dict[str, Any]) -> set[str]:
+    return {
+        str(item["elementId"]) for item in search.get("results", [])
+        if isinstance(item, dict) and isinstance(item.get("elementId"), str) and item["elementId"]
+    }
+
+
+def _gateway_verification_passed(action: Any) -> bool:
+    if not isinstance(action, dict):
+        return False
+    verification = action.get("verification")
+    return (
+        isinstance(verification, dict)
+        and verification.get("ok") is True
+        and verification.get("status") not in {None, "not_required", "required", "failed"}
+    )
+
+
+def _action_status(action: Any, failure: Any, *, after_observed: bool) -> dict[str, Any]:
+    action = action if isinstance(action, dict) else {}
+    transport = action.get("transport") if isinstance(action.get("transport"), dict) else {}
+    execution = action.get("execution") if isinstance(action.get("execution"), dict) else {}
+    verification = action.get("verification") if isinstance(action.get("verification"), dict) else {}
+    return {
+        "transport": "ok" if transport.get("ok") is True else ("failed" if transport else "unknown"),
+        "execution": "ok" if execution.get("ok") is True else ("failed" if execution else "unknown"),
+        "gatewayVerification": "passed" if _gateway_verification_passed(action) else (
+            "failed" if verification else "unavailable"
+        ),
+        "afterObserved": after_observed,
+        "verified": failure is None and _gateway_verification_passed(action) and after_observed,
+    }
+
+
+def _failed_action_envelope(
+    *,
+    tool: str,
+    goal: str,
+    before: dict[str, Any] | None,
+    after: dict[str, Any] | None,
+    action: Any,
+    error_class: str,
+    failure_layer: str,
+    delta: str,
+) -> dict[str, Any]:
+    return {
+        "kind": "phone_action_result",
+        "tool": tool,
+        "goal": goal,
+        "mutating": True,
+        "actionStatus": _action_status(action, None, after_observed=False),
+        "beforePageCard": before,
+        "afterPageCard": after,
+        "pageChanged": page_changed(before, after),
+        "delta": delta,
+        "errorClass": error_class,
+        "failureLayer": failure_layer,
+        "ok": False,
+        "error": {"code": error_class, "layer": failure_layer},
+    }
 
 
 def _find_stage(value: Any) -> str | None:

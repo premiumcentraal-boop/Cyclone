@@ -24,6 +24,36 @@ class CompactTests(unittest.TestCase):
         self.assertEqual("corr-1", result["correlationId"])
         self.assertEqual("obs-1", result["witness"]["observation_id"])
 
+    def test_page_card_preserves_meaningful_context_and_goal_ranks_candidates(self):
+        result = compact_observation({
+            "correlation_id": "corr-2",
+            "witness": {"observation_id": "obs-2"},
+            "observation": {
+                "page": {
+                    "package": "com.android.settings",
+                    "activity": "Settings",
+                    "title": "Apps",
+                    "pageKey": "settings/apps",
+                    "location": "Settings > Apps",
+                    "pageText": "Apps. Recently opened apps and notifications.",
+                    "pageSummary": "App settings list",
+                    "controls": [
+                        {"id": "nav", "label": "Network", "clickable": True},
+                        {"id": "apps", "label": "Apps", "resourceId": "android:id/apps", "clickable": True},
+                    ],
+                },
+                "counts": {"raw": 2200, "semantic": 80, "agent": 30},
+            },
+        }, goal="Open Apps")
+        self.assertEqual("page_card", result["kind"])
+        self.assertEqual("obs-2", result["observationScope"]["id"])
+        self.assertEqual("Settings > Apps", result["location"]["location"])
+        self.assertEqual("Apps", result["location"]["title"])
+        self.assertIn("Recently opened", result["pageText"])
+        self.assertEqual("App settings list", result["pageSummary"])
+        self.assertEqual("apps", result["candidates"]["goalRanked"][0]["elementId"])
+        self.assertTrue(result["truncated"]["rawTreeExcluded"])
+
 
 if __name__ == "__main__":
     unittest.main()
