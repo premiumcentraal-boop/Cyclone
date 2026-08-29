@@ -7,7 +7,7 @@ on:
     paths:
       - "apps/teamwork-sniper/**"
       - "scripts/ci/teamwork_sniper_*"
-      - ".github/workflows/teamwork-sniper-v1.yml"
+      - ".github/workflows/teamwork-sniper-v1.yml"\n      - "release/version.toml"
 
 permissions:
   contents: write
