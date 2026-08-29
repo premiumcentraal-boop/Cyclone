@@ -2,23 +2,17 @@
 
 Release branch: `release/teamwork-sniper-v1`
 
-Product version: **V1 Beta 1**  
+Product version: **V1 Beta 2** (versionCode 8)  
 Canonical Android package: `com.cyclone.teamworksniper`  
 Clean-install package: `com.cyclone.teamworksniper.v1`
 
 ## Installability verification
 
-Verification candidate commit:
+Verification candidate: this Beta 2 publish.
 
-`49935be38544f96679e4e5ccae859145e9f4c11d`
+Result: **PENDING GitHub Actions**
 
-GitHub Actions run:
-
-`33242847992`
-
-Result: **SUCCESS**
-
-Verified gates:
+Verified gates on Beta 1 (kept as the previous installable):
 
 - Teamwork Sniper metadata: PASS
 - semantic/safety guard: PASS

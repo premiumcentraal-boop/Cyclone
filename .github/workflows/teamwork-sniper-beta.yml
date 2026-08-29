@@ -1,6 +1,7 @@
 name: Teamwork Sniper V1 Beta
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - release/teamwork-sniper-v1
@@ -112,7 +113,7 @@ jobs:
       - name: Upload verified beta artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Teamwork-Sniper-V1-Beta1
+          name: Teamwork-Sniper-V1-Beta2
           path: |
             dist/Teamwork-Sniper-V1.apk
             dist/Teamwork-Sniper-V1.apk.sha256
@@ -125,15 +126,15 @@ jobs:
           retention-days: 30
 
       - name: Publish beta release
-        if: ${{ contains(github.event.head_commit.message, 'publish beta') }}
+        if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'publish beta') }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           cat > release-notes.md <<'EOF'
-          # Teamwork Sniper V1 Beta 1
+          # Teamwork Sniper V1 Beta 2
 
-          Installability-focused beta of the redesigned Teamwork Sniper app.
+          Fresh orange-identity build of the redesigned Teamwork Sniper app (versionCode 8).
 
           Use **Teamwork-Sniper-V1-Clean.apk** first if previous Teamwork Sniper builds showed **App not installed**. It uses the fresh Android package id `com.cyclone.teamworksniper.v1`.
 
@@ -142,14 +143,14 @@ jobs:
           Live Teamwork shift claiming still requires physical-device verification against the real Teamwork app.
           EOF
 
-          if gh release view teamwork-sniper-v1-beta.1 >/dev/null 2>&1; then
-            gh release delete teamwork-sniper-v1-beta.1 --cleanup-tag --yes
+          if gh release view teamwork-sniper-v1-beta.2 >/dev/null 2>&1; then
+            gh release delete teamwork-sniper-v1-beta.2 --cleanup-tag --yes
           fi
 
-          gh release create teamwork-sniper-v1-beta.1 \
+          gh release create teamwork-sniper-v1-beta.2 \
             --target "${GITHUB_SHA}" \
             --prerelease \
-            --title "Teamwork Sniper V1 Beta 1" \
+            --title "Teamwork Sniper V1 Beta 2" \
             --notes-file release-notes.md \
             dist/Teamwork-Sniper-V1.apk \
             dist/Teamwork-Sniper-V1.apk.sha256 \
