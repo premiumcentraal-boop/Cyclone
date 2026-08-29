@@ -1,84 +1,91 @@
-# Teamwork Sniper 3.5.3.3
+# Teamwork Sniper V1
 
-Standalone phone-side companion for `tech.picnic.workapp`.
+Teamwork Sniper V1 is the first product-style release of the standalone companion for `tech.picnic.workapp`.
 
 - package: `com.cyclone.teamworksniper`
-- versionName: `3.5.3.3`
-- versionCode: `6`
+- versionName: `V1`
+- versionCode: `7`
 - PC connection: not required
 - AI model: optional
 - primary input: Teamwork notifications + Android accessibility hierarchy
-- primary actions: semantic `AccessibilityNodeInfo.ACTION_CLICK` and semantic scroll actions only
+- primary actions: bounded semantic Teamwork actions
+- visual direction: bright-orange, schedule-first, lightweight native Android UI
 
-## Native target calendar
+## V1 product experience
 
-The app's primary screen is a native, Teamwork-inspired weekly calendar. It shows M1 through S3 as full-width schedule rows and saves taps as exact date/code targets for the deterministic claim engine. This first native-calendar release deliberately does not pretend to sync Scheduled or Open to take shifts; those are separate future work.
+V1 replaces the previous technical-looking planner with the approved Teamwork Sniper visual system:
 
-The previous on-screen Teamwork overlay is retained only as a **Legacy Teamwork overlay** setting, disabled by default. The standard user flow never draws controls over Teamwork.
+1. Welcome
+2. Quick Setup
+3. Choose shifts
+4. All Set
+5. Main weekly schedule
+6. Activity timeline
+7. Settings
+8. Shift Templates
+9. Overlay Preview
+10. Diagnostics
+
+The primary schedule uses the product state language from the approved design:
+
+- hollow orange = available to select
+- filled orange = selected for sniping
+- green claimed state = a real claim was post-action verified
+- green `Open now` badge = a recent real semantic Teamwork observation reported the shift open
+
+A selected shift is not the same as an armed claim and is not the same as a verified successful claim.
+
+## Schedule behavior
+
+Tapping a shift creates or removes the exact date/code target already consumed by the deterministic claim engine.
+
+The UI does not fabricate Teamwork data:
+
+- live-confirmed template times may be displayed as expected Teamwork times;
+- provisional/unknown times remain `Time to be confirmed`;
+- `Claimed` is shown only when activity evidence contains `TARGET_NO_LONGER_OPEN`;
+- recent open badges come from recent semantic Teamwork observations.
+
+## Overlay
+
+The old accessibility overlay remains available as an experimental option under:
+
+`Settings → Overlay mode`
+
+The native Teamwork Sniper schedule is the default and reliable product surface. The Overlay Preview page shows the intended UI language without pretending preview data is live Teamwork state.
 
 ## Deterministic-first runtime
 
-Teamwork Sniper is designed to work with no PC and no model API.
+Teamwork Sniper still works without a PC and without AI.
 
-A Teamwork notification timestamps the trigger and opens Teamwork using the notification PendingIntent when available, otherwise the package launch intent. The accessibility service then:
+The runtime continues to:
 
-1. observes the current semantic hierarchy;
-2. recognizes the shift surface or navigates through a locally learned semantic UI-map hint;
-3. scans `Open to take` rows;
-4. scrolls using accessibility actions and deduplicates semantic state;
-5. normalizes shifts to date/code/time;
-6. compares only against persisted user rules;
-7. requires both Enabled and Armed before any action;
-8. re-observes and resolves one fresh semantic target;
-9. sends `ACTION_CLICK`;
-10. verifies the target is no longer open before continuing.
+1. observe the current semantic Teamwork hierarchy;
+2. normalize Teamwork shift candidates;
+3. compare only against persisted user targets;
+4. require Sniper enabled + Armed mode before claim actions;
+5. re-observe and resolve the fresh semantic target;
+6. act;
+7. verify the Teamwork postcondition.
 
-The local UI map stores only a successful semantic resource ID/label hint. It never stores screen coordinates and never turns an old observation path into permanent truth.
+The UI overhaul does not create a second claim engine.
 
-## Optional OpenRouter advisor
+## Optional OpenRouter
 
-OpenRouter is an optional prioritization layer, not an action authority.
+OpenRouter remains optional and is not an action authority. It cannot arm Sniper, create targets, expand user rules, resolve ambiguous Teamwork UI, or click Teamwork directly.
 
-- disabled by default;
-- configurable model, default `openrouter/auto`;
-- API key encrypted with Android Keystore;
-- skipped when one safe candidate is already enough;
-- receives only candidates that already passed deterministic rules and semantic open-state checks;
-- may reorder those existing candidates or return no preference;
-- invented/unknown candidate IDs are rejected;
-- timeout/API/model failures fall back immediately to deterministic ordering;
-- AI cannot arm the sniper, create a shift, expand the user's rules, resolve an ambiguous UI node, or click anything directly.
-
-## Rule JSON schema
-
-```json
-{
-  "schemaVersion": 1,
-  "rules": [
-    {
-      "id": "uuid",
-      "name": "S1 → S2 → S3",
-      "type": "EXACT | SEQUENCE | COMBINATION",
-      "enabled": true,
-      "codes": ["S1", "S2", "S3"],
-      "weekOffsets": [0, 1],
-      "dates": ["2026-08-31"],
-      "days": ["MONDAY"]
-    }
-  ]
-}
-```
-
-`EXACT` requires one code. `COMBINATION` means any selected code is independently desired. `SEQUENCE` requires every consecutive selected code on the same date.
-
-## Build gates
+## Build and validation
 
 From the repository root:
 
 ```bash
 python scripts/ci/teamwork_sniper_metadata.py --require-app
 python scripts/ci/teamwork_sniper_guard.py --require-app
-./apps/mobile/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleDebug --stacktrace
+./apps/mobile/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest :app:assembleRelease --stacktrace
 ```
 
-Physical Teamwork acceptance is a separate gate. Synthetic parser tests and CI compilation must not be represented as proof of a live claim.
+The V1 GitHub workflow builds and publishes the installable APK from branch:
+
+`release/teamwork-sniper-v1`
+
+Physical-device Teamwork behavior remains a separate acceptance gate. CI compilation is not proof of successful live Teamwork claiming.

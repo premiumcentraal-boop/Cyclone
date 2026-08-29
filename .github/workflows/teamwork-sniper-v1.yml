@@ -1,0 +1,115 @@
+name: Teamwork Sniper V1
+
+on:
+  push:
+    branches:
+      - release/teamwork-sniper-v1
+    paths:
+      - "apps/teamwork-sniper/**"
+      - "scripts/ci/teamwork_sniper_*"
+      - ".github/workflows/teamwork-sniper-v1.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: teamwork-sniper-v1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and verify V1
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x apps/mobile/gradlew
+
+      - name: Verify Teamwork Sniper metadata
+        run: python scripts/ci/teamwork_sniper_metadata.py --require-app
+
+      - name: Verify Teamwork Sniper safety guard
+        run: python scripts/ci/teamwork_sniper_guard.py --require-app
+
+      - name: Run unit tests
+        run: ./apps/mobile/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest --stacktrace
+
+      - name: Build installable V1 APK
+        run: ./apps/mobile/gradlew -p apps/teamwork-sniper :app:assembleRelease --stacktrace
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp apps/teamwork-sniper/app/build/outputs/apk/release/app-release.apk dist/Teamwork-Sniper-V1.apk
+          sha256sum dist/Teamwork-Sniper-V1.apk > dist/Teamwork-Sniper-V1.apk.sha256
+          printf '%s\n' "${GITHUB_SHA}" > dist/source-sha.txt
+
+      - name: Upload V1 build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Teamwork-Sniper-V1
+          path: |
+            dist/Teamwork-Sniper-V1.apk
+            dist/Teamwork-Sniper-V1.apk.sha256
+            dist/source-sha.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub V1 release
+        if: github.event.head_commit.message == 'release(teamwork-sniper): publish V1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          # Teamwork Sniper V1
+
+          The first true Teamwork Sniper product release.
+
+          ## Visual overhaul
+          - new orange Teamwork Sniper identity
+          - polished Welcome and Quick Setup onboarding
+          - native weekly schedule as the primary screen
+          - hollow orange = available to select
+          - filled orange = selected for sniping
+          - evidence-backed Claimed and Open now states
+          - Activity timeline
+          - simplified Settings
+          - Shift Templates, Overlay Preview and Diagnostics subpages
+          - Teamwork launch shortcut
+          - new app icon
+
+          ## Runtime
+          The existing deterministic-first Teamwork Sniper runtime remains authoritative. The visual redesign does not add a second rule or claim engine.
+
+          ## Verification boundary
+          This APK passed repository metadata/safety gates, JVM unit tests, and Android release assembly in GitHub Actions. It is intentionally signed with the repository's test/debug certificate so it is directly installable for physical-device verification.
+
+          A successful CI build is not proof of a successful live Teamwork claim. Real claim behavior still requires physical testing against Teamwork.
+          EOF
+
+          if gh release view teamwork-sniper-v1 >/dev/null 2>&1; then
+            gh release delete teamwork-sniper-v1 --cleanup-tag --yes
+          fi
+
+          gh release create teamwork-sniper-v1             --target "${GITHUB_SHA}"             --title "Teamwork Sniper V1"             --notes-file release-notes.md             dist/Teamwork-Sniper-V1.apk             dist/Teamwork-Sniper-V1.apk.sha256             dist/source-sha.txt

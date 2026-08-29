@@ -8,6 +8,8 @@
 
     <application
         android:allowBackup="true"
+        android:icon="@drawable/ic_teamwork_sniper"
+        android:roundIcon="@drawable/ic_teamwork_sniper"
         android:label="Teamwork Sniper"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 

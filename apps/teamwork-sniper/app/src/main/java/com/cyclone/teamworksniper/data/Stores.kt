@@ -15,6 +15,7 @@ private const val AI_ENABLED = "ai_enabled"
 private const val AI_MODEL = "ai_model"
 private const val ACTIVITY = "activity_json"
 private const val UI_MAP = "ui_map_hint_json"
+private const val ONBOARDING_COMPLETE = "ui_onboarding_complete_v1"
 private const val MAX = 100
 
 fun sniperPreferences(context: Context): SharedPreferences =
@@ -35,6 +36,7 @@ class SettingsStore(context: Context) {
         armed = p.getBoolean(ARMED, false),
         legacyOverlayEnabled = p.getBoolean(LEGACY_OVERLAY, false),
     )
+
     fun save(value: SniperSettings) {
         p.edit()
             .putBoolean(ENABLED, value.enabled)
@@ -44,12 +46,23 @@ class SettingsStore(context: Context) {
     }
 }
 
+class UiPreferencesStore(context: Context) {
+    private val p = sniperPreferences(context)
+
+    fun isOnboardingComplete(): Boolean = p.getBoolean(ONBOARDING_COMPLETE, false)
+
+    fun setOnboardingComplete(value: Boolean) {
+        p.edit().putBoolean(ONBOARDING_COMPLETE, value).apply()
+    }
+}
+
 class AiSettingsStore(context: Context) {
     private val p = sniperPreferences(context)
     fun load() = AiSettings(
         enabled = p.getBoolean(AI_ENABLED, false),
         model = p.getString(AI_MODEL, "openrouter/auto").orEmpty().ifBlank { "openrouter/auto" },
     )
+
     fun save(value: AiSettings) {
         p.edit()
             .putBoolean(AI_ENABLED, value.enabled)
@@ -75,7 +88,11 @@ class UiMapStore(context: Context) {
 
     fun save(resourceId: String?, semanticLabel: String?) {
         val id = resourceId?.trim()?.takeIf { it.isNotBlank() }?.take(200)
-        val label = semanticLabel?.replace(Regex("""\s+"""), " ")?.trim()?.takeIf { it.isNotBlank() }?.take(160)
+        val label = semanticLabel
+            ?.replace(Regex("""\s+"""), " ")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.take(160)
         if (id == null && label == null) return
         val json = JSONObject()
             .put("resourceId", id ?: JSONObject.NULL)

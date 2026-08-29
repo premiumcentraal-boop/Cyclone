@@ -17,6 +17,7 @@ import com.cyclone.teamworksniper.data.RuleStore
 import com.cyclone.teamworksniper.data.SettingsStore
 import com.cyclone.teamworksniper.data.ShiftRule
 import com.cyclone.teamworksniper.data.SniperSettings
+import com.cyclone.teamworksniper.data.UiPreferencesStore
 import com.cyclone.teamworksniper.runtime.PermissionChecker
 import com.cyclone.teamworksniper.runtime.PermissionState
 import com.cyclone.teamworksniper.ui.SniperScreen
@@ -27,6 +28,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var aiSettings: AiSettingsStore
     private lateinit var aiSecret: OpenRouterSecretStore
     private lateinit var activity: ActivityLogStore
+    private lateinit var uiPreferences: UiPreferencesStore
 
     private var state by mutableStateOf(
         UiState(
@@ -36,6 +38,7 @@ class MainActivity : ComponentActivity() {
             permissions = PermissionState(false, false),
             rules = emptyList(),
             activity = emptyList(),
+            onboardingComplete = false,
         ),
     )
 
@@ -46,6 +49,7 @@ class MainActivity : ComponentActivity() {
         aiSettings = AiSettingsStore(this)
         aiSecret = OpenRouterSecretStore(this)
         activity = ActivityLogStore(this)
+        uiPreferences = UiPreferencesStore(this)
         refresh()
 
         setContent {
@@ -65,6 +69,11 @@ class MainActivity : ComponentActivity() {
                 onAccessibility = {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 },
+                onOnboardingComplete = {
+                    uiPreferences.setOnboardingComplete(true)
+                    refresh()
+                },
+                onOpenTeamwork = ::openTeamwork,
             )
         }
     }
@@ -72,6 +81,14 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::rules.isInitialized) refresh()
+    }
+
+    private fun openTeamwork() {
+        val launch = packageManager.getLaunchIntentForPackage(TEAMWORK_PACKAGE)
+        if (launch != null) {
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(launch)
+        }
     }
 
     private fun refresh() {
@@ -82,9 +99,13 @@ class MainActivity : ComponentActivity() {
             permissions = PermissionChecker.read(this),
             rules = rules.load(),
             activity = activity.load(),
+            onboardingComplete = uiPreferences.isOnboardingComplete(),
         )
     }
 
+    companion object {
+        private const val TEAMWORK_PACKAGE = "tech.picnic.workapp"
+    }
 }
 
 data class UiState(
@@ -94,4 +115,5 @@ data class UiState(
     val permissions: PermissionState,
     val rules: List<ShiftRule>,
     val activity: List<ActivityEntry>,
+    val onboardingComplete: Boolean,
 )

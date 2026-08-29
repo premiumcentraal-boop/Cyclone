@@ -11,12 +11,13 @@ android {
         applicationId = "com.cyclone.teamworksniper"
         minSdk = 34
         targetSdk = 35
-        versionCode = 6
-        versionName = "3.5.3.3"
+        versionCode = 7
+        versionName = "V1"
     }
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -31,14 +32,27 @@ android {
 val verifySemanticOnly by tasks.registering {
     group = "verification"
     doLast {
-        val prohibited = listOf("screencap", "takescreenshot", "mediaprojection", "textrecognizer", "bitmapfactory", "pixelcopy")
+        val prohibited = listOf(
+            "screencap",
+            "takescreenshot",
+            "mediaprojection",
+            "textrecognizer",
+            "bitmapfactory",
+            "pixelcopy",
+        )
         val failures = mutableListOf<String>()
         fileTree("src/main") { include("**/*.kt", "**/*.java") }.forEach { sourceFile ->
             val lower = sourceFile.readText().lowercase()
-            prohibited.forEach { token -> if (lower.contains(token)) failures += sourceFile.path + ": " + token }
-            if (Regex("\bocr\b", RegexOption.IGNORE_CASE).containsMatchIn(sourceFile.readText())) failures += sourceFile.path + ": OCR"
+            prohibited.forEach { token ->
+                if (lower.contains(token)) failures += sourceFile.path + ": " + token
+            }
+            if (Regex("\\bocr\\b", RegexOption.IGNORE_CASE).containsMatchIn(sourceFile.readText())) {
+                failures += sourceFile.path + ": OCR"
+            }
         }
-        check(failures.isEmpty()) { "Semantic-only guard failed:\n" + failures.joinToString("\n") }
+        check(failures.isEmpty()) {
+            "Semantic-only guard failed:\n" + failures.joinToString("\n")
+        }
     }
 }
 tasks.named("preBuild").configure { dependsOn(verifySemanticOnly) }
@@ -52,6 +66,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
