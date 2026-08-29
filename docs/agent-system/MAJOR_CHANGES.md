@@ -1,5 +1,18 @@
 # Major changes
 
+## Cyclone V4 (direction, not yet a shipped APK)
+
+V4 is the next infrastructure layer on 3.5.x / Infrastructure V3. It is not a rewrite.
+
+- Product face: Gemini-style overlay (Analysis → Confirm → Working → Live view → Gate).
+- Agent face: page card + after-state act + four-tool MCP + `tools/codex-phone-mcp/SKILL.md`.
+- Memory face: verified paths compile into the existing AutomationStore as draft skills.
+- Fleet face: teacher device writes skills; workers run `verified` only.
+- Lab face: Pixel golden-page fixtures first; AVD optional; emulator must not promote Brain.
+
+Steering docs: `V4_BUILD_BIBLE.md`, `V4_DIRECTIONS.md`, `V4_ROADMAP.md`.
+Do not bump `versionName` to 4.0.0 until roadmap slices 1–4 are green on a physical Pixel.
+
 ## Cyclone 3.5
 
 - Unified physical and virtual Android targets behind `DeviceBackend`.
