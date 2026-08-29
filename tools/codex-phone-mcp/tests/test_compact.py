@@ -54,6 +54,17 @@ class CompactTests(unittest.TestCase):
         self.assertEqual("apps", result["candidates"]["goalRanked"][0]["elementId"])
         self.assertTrue(result["truncated"]["rawTreeExcluded"])
 
+    def test_page_card_preserves_device_artifact_and_verified_route_hints(self):
+        result = compact_observation({
+            "screenshot": {"available": True, "artifact": {"kind": "LOCAL_FILE", "reference": "C:/safe.jpg"}},
+            "observation": {
+                "pageKey": "settings", "controls": [],
+                "nextHopHints": [{"confidence": 0.9, "freshness": "CURRENT", "action": {"tool": "phone.click"}}],
+            },
+        })
+        self.assertEqual("LOCAL_FILE", result["screenshot"]["artifact"]["kind"])
+        self.assertEqual("phone.click", result["knownRouteHints"][0]["action"]["tool"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -199,11 +199,19 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
     candidates = [candidate for item in controls if (candidate := _candidate(item))]
     current = candidates[:max(1, min(control_limit, PAGE_CARD_CANDIDATE_LIMIT))]
     location = _location(page, data)
-    routes = data.get("knownRoutes") or data.get("known_routes") or data.get("routeHints") or []
+    # Android V3.5 exposes page-scoped, verified route evidence as ``nextHopHints``. Retain
+    # it alongside older gateway aliases so the PC agent sees the same bounded guidance on both
+    # legacy and device-scoped paths.
+    routes = data.get("nextHopHints") or data.get("knownRoutes") or data.get("known_routes") or data.get("routeHints") or []
     if not isinstance(routes, list):
         routes = [routes] if routes else []
     brain = _bounded_text(data.get("brainRecall") or data.get("brain_recall") or data.get("brainSummary"), 360)
-    screenshot = data.get("screenshot") or data.get("screenshotRef") or data.get("screenshot_ref")
+    # Device-scoped observations keep the bounded artifact on the outer operation envelope.
+    # Prefer page-local metadata, then preserve that envelope artifact instead of dropping it.
+    screenshot = (
+        data.get("screenshot") or data.get("screenshotRef") or data.get("screenshot_ref")
+        or envelope.get("screenshot") or envelope.get("screenshotRef") or envelope.get("screenshot_ref")
+    )
     witness = envelope.get("witness") if isinstance(envelope.get("witness"), dict) else {}
     page_text = _bounded_text(_first(page, "pageText", "page_text", default=_first(data, "pageText", "page_text")), PAGE_CARD_TEXT_LIMIT)
     page_summary = _bounded_text(_first(page, "pageSummary", "page_summary", default=_first(data, "pageSummary", "page_summary")), PAGE_CARD_SUMMARY_LIMIT)
