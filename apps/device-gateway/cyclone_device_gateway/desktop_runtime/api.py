@@ -163,7 +163,7 @@ class DesktopRuntime:
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
-        self.agent = DesktopAgentService(self.fleet)
+        self.agent = DesktopAgentService(self.fleet, snapshot=self._snapshot_for_batch)
         self.batches = FleetBatchService(lambda device_id: DesktopAndroidBackend(
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
         ))
@@ -396,8 +396,23 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.get("/v1/diagnostics/discovery", dependencies=[Depends(auth)])
     def diagnostics_discovery() -> dict[str, Any]:
         return {
+            # ADB inventory is intentionally independent from the local HTTP/media/AI planes.
+            # An authorized phone must remain visible here even when another plane is unavailable.
+            "devices": _public_devices(runtime),
             "discovery": runtime.fleet.diagnostics(),
             "liveDiagnostics": runtime.live_diagnostics.status(),
+        }
+
+    @router.get("/v1/devices/{device_id}/health", dependencies=[Depends(auth)])
+    def device_health(device_id: str) -> dict[str, Any]:
+        session = runtime.fleet.get(device_id)
+        device = enrich_device_public(session, _safe_trust_status(runtime, device_id))
+        return {
+            "deviceId": device_id,
+            "device_id": device_id,
+            "health": device.get("health"),
+            "planes": device.get("planes"),
+            "readiness": device.get("readiness"),
         }
 
     @router.post("/v1/devices/{device_id}/diagnostics/stream-event", dependencies=[Depends(auth)])
@@ -542,6 +557,10 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.post("/v1/devices/{device_id}/agent/observe", dependencies=[Depends(auth)])
     def agent_observe(device_id: str, body: AgentObserveBody):
         return _call(lambda: runtime.agent.observe(device_id, mode=body.mode, include_screenshot=body.include_screenshot))
+
+    @router.get("/v1/devices/{device_id}/agent/screenshot", dependencies=[Depends(auth)])
+    def agent_screenshot(device_id: str, profile: Literal["thumbnail", "focus"] = Query(default="thumbnail")):
+        return _call(lambda: runtime.agent.screenshot(device_id, profile=profile))
 
     @router.get("/v1/devices/{device_id}/agent/ui/search", dependencies=[Depends(auth)])
     def agent_ui_search(device_id: str, q: str = Query(min_length=1, max_length=300)):

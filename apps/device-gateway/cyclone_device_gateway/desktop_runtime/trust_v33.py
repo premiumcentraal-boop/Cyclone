@@ -571,6 +571,7 @@ class PCTrustCoordinator:
                     {},
                     request_id=f"session-health-{secrets.token_urlsafe(12)}",
                 )
+                self.fleet.record_bridge_status(session, health)
                 session.bridge_ok = bool(health.get("gatewayEnabled") is True)
                 session.last_heartbeat_ms = _now_ms()
                 session.bridge_last_error = None

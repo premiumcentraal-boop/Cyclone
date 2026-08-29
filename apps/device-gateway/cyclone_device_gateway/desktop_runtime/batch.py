@@ -111,7 +111,15 @@ class FleetBatchService:
             return {"deviceId": device_id, "ok": True, "transportOk": True, "executionOk": True, "verificationOk": True, "result": value}
         if operation == "screenshot":
             value = backend.screenshot(profile="thumbnail")
-            return {"deviceId": device_id, "ok": True, "transportOk": True, "executionOk": True, "verificationOk": True, "result": value}
+            available = not isinstance(value.get("screenshot"), dict) or value["screenshot"].get("available") is True
+            return {
+                "deviceId": device_id,
+                "ok": available,
+                "transportOk": available,
+                "executionOk": available,
+                "verificationOk": available,
+                "result": value,
+            }
         capability_id = {"home": "phone.home", "back": "phone.back", "open_app": "phone.open_app"}[operation]
         action_params = {"package": params["package"]} if operation == "open_app" else {}
         value = backend.act(capability_id, action_params, goal=f"Fleet batch: {operation}")

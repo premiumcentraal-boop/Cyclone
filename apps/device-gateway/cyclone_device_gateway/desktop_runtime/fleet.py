@@ -61,6 +61,9 @@ class DeviceSession:
     next_reconnect_at_ms: int = 0
     bridge_last_error: str | None = None
     bridge_error_class: str | None = None
+    bridge_gateway_enabled: bool | None = None
+    bridge_socket_listening: bool | None = None
+    accessibility_connected: bool | None = None
     source: str = "USB"
     provider: str | None = None
     provider_instance_id: str | None = None
@@ -114,6 +117,9 @@ class DeviceSession:
             "connectionLabel": connection_label,
             "connectionHealth": {
                 "bridgeReachable": self.bridge_ok,
+                "gatewayEnabled": self.bridge_gateway_enabled,
+                "socketListening": self.bridge_socket_listening,
+                "accessibilityConnected": self.accessibility_connected,
                 "lastHeartbeatEpochMs": self.last_heartbeat_ms,
                 "reconnectAttempts": self.reconnect_attempts,
                 "maxReconnectAttempts": MAX_RECONNECT_ATTEMPTS,
@@ -183,6 +189,7 @@ class DeviceFleetManager:
         self._fallback_thread: threading.Thread | None = None
         self._track_thread: threading.Thread | None = None
         self._tracker_process: subprocess.Popen | None = None
+        self._tracker_restart_delay_seconds = 2.0
         self._stop = threading.Event()
         self._video_factory: Callable[[DeviceSession], Any] | None = None
         self._tracker_active = False
@@ -295,7 +302,7 @@ class DeviceFleetManager:
                         process.terminate()
                     except Exception:
                         pass
-            if self._stop.wait(2.0):
+            if self._stop.wait(self._tracker_restart_delay_seconds):
                 break
             with self._lock:
                 self._tracker_restarts += 1
@@ -532,7 +539,7 @@ class DeviceFleetManager:
 
     def _refresh_authorized(self, session: DeviceSession) -> None:
         try:
-            session.adb.ensure_bridge_forward(session.local_port)
+            self._ensure_bridge_forward(session)
             if not self._package_present(session):
                 self._mark_bridge_unhealthy(session, None, "Cyclone mobile app is not installed on this phone.")
                 self._set_state(session, DeviceFleetState.ATTENTION, "Install the Cyclone mobile app on this phone.")
@@ -558,12 +565,26 @@ class DeviceFleetManager:
         truthful and detects a rotated/revoked phone credential before control is attempted. It
         does not create a second authority or execute an action.
         """
-        session.bridge().request(
+        status = session.bridge().request(
             "bridge.status",
             {},
             request_id=f"desktop-heartbeat-{secrets.token_urlsafe(12)}",
         )
+        self.record_bridge_status(session, status)
+        if status.get("gatewayEnabled") is not True or status.get("socketListening") is not True:
+            raise BridgeHealthError(
+                "BRIDGE_GATEWAY_DISABLED",
+                "Cyclone Mobile gateway is not ready on this phone.",
+            )
         session.last_heartbeat_ms = now_ms()
+
+    def record_bridge_status(self, session: DeviceSession, status: dict[str, Any] | None) -> None:
+        """Persist only bounded bridge health facts; never persist tokens or bridge payloads."""
+        value = status if isinstance(status, dict) else {}
+        with self._lock:
+            session.bridge_gateway_enabled = _optional_bool(value.get("gatewayEnabled"))
+            session.bridge_socket_listening = _optional_bool(value.get("socketListening"))
+            session.accessibility_connected = _optional_bool(value.get("accessibilityConnected"))
 
     def _mark_bridge_healthy(self, session: DeviceSession) -> None:
         with self._lock:
@@ -586,7 +607,15 @@ class DeviceFleetManager:
 
     def _handle_bridge_failure(self, session: DeviceSession, exc: Exception) -> None:
         safe_error = self._safe_error(exc)
-        self._mark_bridge_unhealthy(session, exc.__class__.__name__, safe_error)
+        reason_code = str(getattr(exc, "reason_code", "") or getattr(exc, "code", "") or exc.__class__.__name__).upper()
+        if reason_code in {"AUTH_REJECTED", "TRUST_EXPIRED", "TRUST_REVOKED", "AUTH_SIGNATURE_INVALID"}:
+            # The phone rejected the per-device bridge credential.  Do not keep retrying a stale
+            # sidecar token or accidentally point it at another phone.  PCTrustCoordinator may
+            # still restore a signed session from its separate trust record.
+            self.invalidate_credential(session, "TOKEN_SESSION_MISMATCH", safe_error)
+            self._set_state(session, DeviceFleetState.UNPAIRED, "Allow this PC on the phone again.")
+            return
+        self._mark_bridge_unhealthy(session, reason_code, safe_error)
         with self._lock:
             attempts = session.reconnect_attempts
             can_retry = session.credential and attempts < MAX_RECONNECT_ATTEMPTS
@@ -613,6 +642,35 @@ class DeviceFleetManager:
             DeviceFleetState.ATTENTION,
             f"Cyclone USB bridge is not ready{exhausted}: {safe_error}",
         )
+
+    def _ensure_bridge_forward(self, session: DeviceSession) -> None:
+        """Repair only provably stale per-device forwards, never steal a live device port."""
+        try:
+            session.adb.ensure_bridge_forward(session.local_port)
+            return
+        except ADBError:
+            if not self._reclaim_stale_forward(session):
+                raise
+        session.adb.ensure_bridge_forward(session.local_port)
+
+    def _reclaim_stale_forward(self, session: DeviceSession) -> bool:
+        try:
+            mappings = self.inventory_adb.forward_mappings()
+            connected = {item.serial for item in self.inventory_adb.devices()}
+        except Exception:
+            return False
+        local = f"tcp:{session.local_port}"
+        owners = [serial for serial, mapped_local, _ in mappings if mapped_local == local and serial != session.serial]
+        if not owners or any(serial in connected for serial in owners):
+            return False
+        remover = getattr(self.inventory_adb, "remove_stale_forward", None)
+        if not callable(remover):
+            return False
+        try:
+            remover(session.local_port)
+            return True
+        except Exception:
+            return False
 
     def mark_screen_awake(self, session: DeviceSession) -> None:
         """Record a successful, paired, fixed-purpose wake without waiting for fallback polling."""
@@ -665,6 +723,22 @@ class DeviceFleetManager:
             remembered.credential = credential
             remembered.local_port = session.local_port
 
+    def invalidate_credential(self, session: DeviceSession, reason_code: str, message: str) -> None:
+        """Fail closed on rejected per-device credentials without touching trust material."""
+        with self._lock:
+            session.credential = None
+            session.bridge_ok = False
+            session.bridge_error_class = reason_code
+            session.bridge_last_error = message[:240]
+            session.reconnect_attempts = 0
+            session.next_reconnect_at_ms = 0
+            remembered = self._remembered.setdefault(
+                session.serial,
+                RememberedSession(session.device_id, None, session.local_port),
+            )
+            remembered.credential = None
+            remembered.local_port = session.local_port
+
     def set_pairing(self, session: DeviceSession, pending: Any) -> None:
         with self._lock:
             session.pending_pairing = pending
@@ -687,3 +761,13 @@ class DeviceFleetManager:
     def _safe_error(error: Exception) -> str:
         value = str(error).strip().replace("\r", " ").replace("\n", " ")
         return value[:240] or error.__class__.__name__
+
+
+class BridgeHealthError(RuntimeError):
+    def __init__(self, reason_code: str, message: str):
+        super().__init__(message)
+        self.reason_code = reason_code
+
+
+def _optional_bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None

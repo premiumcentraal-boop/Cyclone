@@ -70,9 +70,8 @@ class DesktopAndroidBackend:
         })
 
     def screenshot(self, *, profile: str = "thumbnail") -> dict[str, Any]:
-        if self._snapshot is None:
-            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture is unavailable.")
-        return self._snapshot(self.device_id, profile)
+        # Share the same device-scoped bounded artifact contract as the public agent endpoint.
+        return self.agent.screenshot(self.device_id, profile=profile)
 
     def stream(self, *, profile: str = "thumbnail") -> Any:
         if profile not in {"thumbnail", "focus"}:

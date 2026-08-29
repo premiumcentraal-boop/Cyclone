@@ -8,8 +8,10 @@ from typing import Any
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
+from .readiness import enrich_device_public
 
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
+DEVICE_OPERATION_CONTRACT_VERSION = "cyclone.desktop.device-operation.v1"
 ALLOWED_PHONE_TOOLS = frozenset({
     "phone.observe", "phone.find", "phone.click", "phone.long_press", "phone.swipe",
     "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for",
@@ -23,17 +25,25 @@ class DesktopAgentService:
     arbitrary Android bridge operation, ADB command, shell command, or executable payload.
     """
 
-    def __init__(self, fleet: DeviceFleetManager, history_limit: int = 40):
+    def __init__(
+        self,
+        fleet: DeviceFleetManager,
+        history_limit: int = 40,
+        *,
+        snapshot=None,
+    ):
         self.fleet = fleet
         self.history_limit = max(5, min(int(history_limit), 100))
+        self._snapshot = snapshot
         self._history: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=self.history_limit))
         self._lock = threading.RLock()
 
     def status(self, device_id: str) -> dict[str, Any]:
         session = self._paired(device_id)
         result = self._request(session, "bridge.status", {})
+        self.fleet.record_bridge_status(session, result)
         return {
-            "device_id": device_id,
+            **self._operation_context(session, device_id, "status"),
             "status": result,
             "connection_health": self._connection_health(session),
         }
@@ -52,12 +62,13 @@ class DesktopAgentService:
     def capabilities(self, device_id: str) -> dict[str, Any]:
         session = self._paired(device_id)
         status = self._request(session, "bridge.status", {})
+        self.fleet.record_bridge_status(session, status)
         raw = status.get("capabilities") if isinstance(status, dict) else None
         phone_tools = raw.get("phoneTools", []) if isinstance(raw, dict) else []
         allowed = sorted({str(item) for item in phone_tools if str(item) in ALLOWED_PHONE_TOOLS})
         return {
+            **self._operation_context(session, device_id, "capabilities"),
             "protocol_version": CAPABILITY_PROTOCOL_VERSION,
-            "device_id": device_id,
             "capabilities": [
                 {"capability_id": capability_id, "source": "ANDROID_CANONICAL"}
                 for capability_id in allowed
@@ -77,8 +88,8 @@ class DesktopAgentService:
             "package": observation.get("package"),
         }
         self._append(device_id, record)
-        return {
-            "device_id": device_id,
+        response = {
+            **self._operation_context(session, device_id, "observe"),
             "mode": mode if mode in {"compact", "full"} else "compact",
             "observation": observation,
             "witness": {
@@ -86,31 +97,42 @@ class DesktopAgentService:
                 "page_key": observation.get("pageKey"),
                 "captured_at": observation.get("timestamp"),
             },
-            # Screenshot transport belongs to Desktop video. MCP does not receive unbounded image
-            # bytes from this semantic endpoint.
-            "screenshot": {"available": False, "reason": "USE_DESKTOP_VIDEO_OR_DEBUG_BUNDLE"} if include_screenshot else None,
+            "afterState": self._after_state(observation),
+            # Screenshot transport belongs to Desktop video. This response never contains image
+            # bytes, only the same bounded local artifact contract as `agent/screenshot`.
+            "screenshot": None,
         }
+        if include_screenshot:
+            response["screenshot"] = self.screenshot(device_id, profile="thumbnail")["screenshot"]
+        return response
 
     def ui_search(self, device_id: str, query: str) -> dict[str, Any]:
         session = self._paired(device_id)
-        return self._request(session, "ui.search", {"query": query[:300], "limit": 50})
+        result = self._request(session, "ui.search", {"query": query[:300], "limit": 50})
+        return {**result, **self._operation_context(session, device_id, "search"), "query": query[:300]}
 
     def ui_element(self, device_id: str, element_id: str) -> dict[str, Any]:
         session = self._paired(device_id)
-        return self._request(session, "ui.element", {"elementId": element_id[:500]})
+        result = self._request(session, "ui.element", {"elementId": element_id[:500]})
+        return {
+            **result,
+            **self._operation_context(session, device_id, "inspect"),
+            "elementId": str(result.get("elementId") or element_id[:500]),
+        }
 
     def current_page(self, device_id: str) -> dict[str, Any]:
         with self._lock:
             latest = next((item for item in reversed(self._history[device_id]) if item.get("kind") == "observation"), None)
         if latest is None:
             return self.observe(device_id)
-        return {"device_id": device_id, "page": latest}
+        session = self._paired(device_id)
+        return {**self._operation_context(session, device_id, "current_page"), "page": latest}
 
     def page_history(self, device_id: str) -> dict[str, Any]:
-        self._paired(device_id)
+        session = self._paired(device_id)
         with self._lock:
             items = list(self._history[device_id])
-        return {"device_id": device_id, "history": items}
+        return {**self._operation_context(session, device_id, "page_history"), "history": items}
 
     def action(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         session = self._paired(device_id)
@@ -181,7 +203,7 @@ class DesktopAgentService:
             and semantic_success_claimed
         )
         return {
-            "device_id": device_id,
+            **self._operation_context(session, device_id, "act"),
             "capability_id": tool,
             "transport": {"ok": True},
             "execution": execution,
@@ -199,26 +221,108 @@ class DesktopAgentService:
                 "after_page_key": after.get("pageKey"),
             },
             "after": after,
+            "afterState": self._after_state(after),
+        }
+
+    def screenshot(self, device_id: str, *, profile: str = "thumbnail") -> dict[str, Any]:
+        """Return a bounded per-device artifact reference, never frame bytes or a hidden default phone."""
+        session = self.fleet.get(device_id)
+        if profile not in {"thumbnail", "focus"}:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unknown screenshot profile.")
+        if str(getattr(getattr(session, "adb_device", None), "state", "") or "") != "device":
+            return self._screenshot_unavailable(session, device_id, "SCREENSHOT_USB_UNAVAILABLE", "USB authorization is required for screenshots.")
+        if self._snapshot is None:
+            return self._screenshot_unavailable(session, device_id, "SCREENSHOT_CAPABILITY_UNAVAILABLE", "Screenshot capture is unavailable.")
+        try:
+            capture = self._snapshot(device_id, profile)
+        except DesktopRuntimeError as exc:
+            return self._screenshot_unavailable(session, device_id, "SCREENSHOT_CAPTURE_FAILED", exc.safe_message)
+        except Exception:
+            return self._screenshot_unavailable(session, device_id, "SCREENSHOT_CAPTURE_FAILED", "Screenshot capture failed safely.")
+        path = str(capture.get("filePath") or "")
+        if not path:
+            return self._screenshot_unavailable(session, device_id, "SCREENSHOT_ARTIFACT_MISSING", "Screenshot capture returned no artifact.")
+        artifact = {
+            "kind": "LOCAL_FILE",
+            "reference": path,
+            "mediaType": str(capture.get("codec") or "image/jpeg"),
+            "width": capture.get("width"),
+            "height": capture.get("height"),
+            "timestampMs": capture.get("timestampMs"),
+        }
+        return {
+            **self._operation_context(session, device_id, "screenshot"),
+            # Retained for existing batch consumers; new callers should read the bounded artifact.
+            "filePath": path,
+            "codec": artifact["mediaType"],
+            "width": artifact["width"],
+            "height": artifact["height"],
+            "timestampMs": artifact["timestampMs"],
+            "artifact": artifact,
+            "screenshot": {"available": True, "reasonCode": "SCREENSHOT_AVAILABLE", "artifact": artifact},
         }
 
     def debug_bundle(self, device_id: str, *, expected: str = "", goal: str = "") -> dict[str, Any]:
         session = self._paired(device_id)
         result = self._request(session, "debug.snapshot", {})
-        return {"device_id": device_id, "expected": expected[:500], "goal": goal[:500], "snapshot": result}
+        return {**self._operation_context(session, device_id, "debug"), "expected": expected[:500], "goal": goal[:500], "snapshot": result}
 
     def teach_start(self, device_id: str, *, goal: str = "") -> dict[str, Any]:
         session = self._paired(device_id)
         result = self._request(session, "teach.start", {"goal": goal[:1000]})
-        return {"device_id": device_id, "teaching": result}
+        return {**self._operation_context(session, device_id, "teach_start"), "teaching": result}
 
     def teach_status(self, device_id: str) -> dict[str, Any]:
         session = self._paired(device_id)
-        return {"device_id": device_id, "teaching": self._request(session, "teach.status", {})}
+        return {**self._operation_context(session, device_id, "teach_status"), "teaching": self._request(session, "teach.status", {})}
 
     def teach_stop(self, device_id: str, *, compile_for_review: bool = True) -> dict[str, Any]:
         session = self._paired(device_id)
         result = self._request(session, "teach.stop", {"compileForReview": bool(compile_for_review)})
-        return {"device_id": device_id, "teaching": result}
+        return {**self._operation_context(session, device_id, "teach_stop"), "teaching": result}
+
+    def _screenshot_unavailable(self, session: DeviceSession, device_id: str, reason_code: str, message: str) -> dict[str, Any]:
+        return {
+            **self._operation_context(session, device_id, "screenshot", available=False, reason_code=reason_code),
+            "artifact": None,
+            "screenshot": {"available": False, "reasonCode": reason_code, "message": message[:240], "artifact": None},
+        }
+
+    def _operation_context(
+        self,
+        session: DeviceSession,
+        device_id: str,
+        operation: str,
+        *,
+        available: bool = True,
+        reason_code: str = "CAPABILITY_AVAILABLE",
+    ) -> dict[str, Any]:
+        public = self._safe_public(session)
+        return {
+            "device_id": device_id,
+            "deviceId": device_id,
+            "operation": operation,
+            "deviceContract": {"version": DEVICE_OPERATION_CONTRACT_VERSION, "targetDeviceId": device_id},
+            "capability": {"available": available, "reasonCode": reason_code},
+            "deviceHealth": (public.get("health") if public else None),
+        }
+
+    @staticmethod
+    def _safe_public(session: DeviceSession) -> dict[str, Any]:
+        try:
+            return enrich_device_public(session)
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _after_state(observation: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "observationId": observation.get("observationId"),
+            "pageKey": observation.get("pageKey"),
+            "package": observation.get("package"),
+            "activity": observation.get("activity"),
+            "accessibilityFingerprint": observation.get("accessibilityFingerprint"),
+        }
 
     def _paired(self, device_id: str) -> DeviceSession:
         session = self.fleet.get(device_id)

@@ -4,6 +4,10 @@ from typing import Any
 
 from .models import AITrustState, BridgeState, DiscoveryState, MediaState
 
+HEALTH_READY = "READY"
+HEALTH_DEGRADED = "DEGRADED"
+HEALTH_UNAVAILABLE = "UNAVAILABLE"
+
 
 def _video_diagnostics(session: Any) -> dict[str, Any]:
     controller = getattr(session, "video", None)
@@ -161,6 +165,94 @@ def readiness_cards(
     return {"phoneConnection": phone, "liveDisplay": display, "aiCodexAccess": ai}
 
 
+def _health_card(state: str, reason_code: str, message: str, action: str | None = None) -> dict[str, str | bool | None]:
+    """Stable, per-plane status for Page Cards and deterministic recovery clients."""
+    return {
+        "state": state,
+        "ready": state == HEALTH_READY,
+        "reasonCode": reason_code,
+        "message": message,
+        "recommendedAction": action,
+    }
+
+
+def health_planes(
+    session: Any,
+    discovery: DiscoveryState,
+    media: MediaState,
+    bridge: BridgeState,
+    trust: AITrustState,
+) -> dict[str, dict[str, str | bool | None]]:
+    """Independent health evidence. These codes are public API, so keep them stable."""
+    if discovery == DiscoveryState.ADB_READY:
+        usb = _health_card(HEALTH_READY, "USB_AUTHORIZED", "USB debugging is authorized.")
+    elif discovery == DiscoveryState.UNAUTHORIZED:
+        usb = _health_card(HEALTH_UNAVAILABLE, "USB_UNAUTHORIZED", "USB debugging authorization is required.", "APPROVE_USB_DEBUGGING")
+    elif discovery == DiscoveryState.OFFLINE:
+        usb = _health_card(HEALTH_UNAVAILABLE, "USB_OFFLINE", "The phone is offline to ADB.", "RECONNECT_USB")
+    else:
+        usb = _health_card(HEALTH_UNAVAILABLE, "USB_ABSENT", "The phone is not present in ADB.", "RECONNECT_USB")
+
+    gateway_enabled = getattr(session, "bridge_gateway_enabled", None)
+    socket_listening = getattr(session, "bridge_socket_listening", None)
+    if bridge == BridgeState.APP_MISSING:
+        gateway = _health_card(HEALTH_UNAVAILABLE, "GATEWAY_APP_MISSING", "Cyclone Mobile is not installed.", "INSTALL_CYCLONE_MOBILE")
+    elif bridge == BridgeState.AUTH_FAILED:
+        gateway = _health_card(HEALTH_DEGRADED, "GATEWAY_AUTH_REJECTED", "The phone rejected the current bridge session.", "RESTORE_PHONE_TRUST")
+    elif bridge == BridgeState.CONNECTED and gateway_enabled is not False and socket_listening is not False:
+        gateway = _health_card(HEALTH_READY, "GATEWAY_CONNECTED", "Cyclone Mobile gateway is reachable.")
+    elif bridge == BridgeState.SOCKET_STARTING:
+        gateway = _health_card(HEALTH_DEGRADED, "GATEWAY_STARTING", "Cyclone Mobile gateway is starting.", "WAIT_FOR_GATEWAY")
+    else:
+        gateway = _health_card(HEALTH_DEGRADED, "GATEWAY_UNAVAILABLE", "Cyclone Mobile gateway is reconnecting.", "RETRY_GATEWAY")
+
+    accessibility = getattr(session, "accessibility_connected", None)
+    if accessibility is True:
+        accessibility_card = _health_card(HEALTH_READY, "ACCESSIBILITY_CONNECTED", "Cyclone Accessibility is connected.")
+    elif accessibility is False:
+        accessibility_card = _health_card(HEALTH_UNAVAILABLE, "ACCESSIBILITY_DISABLED", "Enable Cyclone Accessibility on the phone.", "ENABLE_ACCESSIBILITY")
+    elif trust in {AITrustState.UNPAIRED, AITrustState.CONFIRMATION_REQUIRED}:
+        accessibility_card = _health_card(HEALTH_DEGRADED, "ACCESSIBILITY_UNVERIFIED", "Accessibility will be checked after phone trust is enabled.", "ALLOW_THIS_PC")
+    else:
+        accessibility_card = _health_card(HEALTH_DEGRADED, "ACCESSIBILITY_UNKNOWN", "Accessibility status has not been confirmed yet.", "RETRY_GATEWAY")
+
+    if trust == AITrustState.TRUSTED and bridge == BridgeState.CONNECTED:
+        token = _health_card(HEALTH_READY, "TOKEN_SESSION_MATCHED", "The trusted phone session matches this device.")
+    elif trust in {AITrustState.UNPAIRED, AITrustState.CONFIRMATION_REQUIRED}:
+        token = _health_card(HEALTH_UNAVAILABLE, "TOKEN_SESSION_UNPAIRED", "Allow this PC on the phone before AI control.", "ALLOW_THIS_PC")
+    elif trust in {AITrustState.EXPIRED, AITrustState.REVOKED} or bridge == BridgeState.AUTH_FAILED:
+        token = _health_card(HEALTH_UNAVAILABLE, "TOKEN_SESSION_MISMATCH", "The previous phone session is no longer valid.", "RESTORE_PHONE_TRUST")
+    else:
+        token = _health_card(HEALTH_DEGRADED, "TOKEN_SESSION_PENDING", "The trusted phone session is being restored.", "WAIT_FOR_TRUST")
+
+    if gateway["ready"] and accessibility_card["ready"] and token["ready"]:
+        semantic = _health_card(HEALTH_READY, "SEMANTIC_READY", "Semantic observation and canonical actions are ready.")
+    elif accessibility is False:
+        semantic = _health_card(HEALTH_UNAVAILABLE, "SEMANTIC_ACCESSIBILITY_UNAVAILABLE", "Semantic controls require Cyclone Accessibility.", "ENABLE_ACCESSIBILITY")
+    elif token["reasonCode"] in {"TOKEN_SESSION_UNPAIRED", "TOKEN_SESSION_MISMATCH"}:
+        semantic = _health_card(HEALTH_UNAVAILABLE, "SEMANTIC_TRUST_REQUIRED", "Semantic controls require a trusted phone session.", "RESTORE_PHONE_TRUST")
+    else:
+        semantic = _health_card(HEALTH_DEGRADED, "SEMANTIC_GATEWAY_DEGRADED", "Semantic controls are waiting for the phone gateway.", "RETRY_GATEWAY")
+
+    if media == MediaState.LIVE:
+        media_card = _health_card(HEALTH_READY, "MEDIA_LIVE", "Live display is receiving frames.")
+    elif media in {MediaState.STARTING, MediaState.WAITING_KEYFRAME, MediaState.RECONNECTING}:
+        media_card = _health_card(HEALTH_DEGRADED, "MEDIA_RECONNECTING", "Live display is reconnecting.", "WAIT_FOR_MEDIA")
+    elif media == MediaState.SLEEPING:
+        media_card = _health_card(HEALTH_DEGRADED, "MEDIA_SLEEPING", "Wake the phone to resume live display.", "WAKE_PHONE")
+    else:
+        media_card = _health_card(HEALTH_UNAVAILABLE, "MEDIA_UNAVAILABLE", "Live display is unavailable.", "OPEN_LIVE_DISPLAY")
+
+    return {
+        "usbAuthorization": usb,
+        "gateway": gateway,
+        "accessibility": accessibility_card,
+        "tokenSession": token,
+        "semantic": semantic,
+        "media": media_card,
+    }
+
+
 def enrich_device_public(session: Any, trust_status: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return the V3.3 public device shape without leaking serials, credentials or frame bytes.
 
@@ -196,6 +288,10 @@ def enrich_device_public(session: Any, trust_status: dict[str, Any] | None = Non
         "aiTrust": trust.value,
     }
     public["readiness"] = readiness_cards(discovery, media, bridge, trust)
+    public["health"] = {
+        "version": "cyclone.device-health.v1",
+        "planes": health_planes(session, discovery, media, bridge, trust),
+    }
     public["videoDiagnostics"] = {
         "subscriberCount": int(diagnostics.get("subscriberCount") or 0),
         "activeProfiles": list(diagnostics.get("activeProfiles") or []),

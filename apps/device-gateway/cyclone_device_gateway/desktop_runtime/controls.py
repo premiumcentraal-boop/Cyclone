@@ -73,11 +73,12 @@ class ManualControlService:
             # Make the phone-side status immediately observe this authenticated PC session instead
             # of waiting for the next bounded fleet heartbeat.
             try:
-                session.bridge().request(
+                health = session.bridge().request(
                     "bridge.status",
                     {},
                     request_id=f"desktop-wake-health-{secrets.token_urlsafe(12)}",
                 )
+                self.fleet.record_bridge_status(session, health)
             except BridgeOperationError as exc:
                 code = RuntimeErrorCode.AUTH_REJECTED if exc.code == "AUTH_REJECTED" else RuntimeErrorCode.CAPABILITY_UNAVAILABLE
                 raise DesktopRuntimeError(code, f"Phone rejected wake health verification with {code.value}.") from exc
