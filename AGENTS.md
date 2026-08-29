@@ -12,6 +12,15 @@ The product goal is not “an AI that keeps rediscovering how an app works.” T
 
 Cyclone is a broader repo with Desktop/Core/Hermes components, but **Cyclone Mobile autonomy is the primary product direction for current mobile work**.
 
+V4 direction (overlay super-app + page card + skill OS) is specified in:
+
+- `docs/agent-system/V4_BUILD_BIBLE.md`
+- `docs/agent-system/V4_DIRECTIONS.md`
+- `docs/agent-system/V4_ROADMAP.md`
+- `tools/codex-phone-mcp/SKILL.md`
+
+V4 does not replace these invariants or Infrastructure V3. Do not bump `versionName` to 4.0.0 until V4 roadmap slices 1–4 are green on a physical Pixel.
+
 ## Two-minute, scope-first onboarding
 
 Every agent starts with only:
@@ -27,9 +36,10 @@ python scripts/agent/cyclone-context.py --markdown
 ```
 
 Classify the task and owner lane before loading more context. Read the hub/current-state and one
-owner-lane document next. Read architecture, multi-agent, roadmap and historical handoffs only when
-the task actually crosses those boundaries. Do not preload the entire knowledge package for a
-focused fix.
+owner-lane document next. For overlay, page-card, skill-compile or MCP compact work, also read
+`docs/agent-system/V4_BUILD_BIBLE.md`. Read architecture, multi-agent, roadmap and historical
+handoffs only when the task actually crosses those boundaries. Do not preload the entire knowledge
+package for a focused fix.
 
 For Android changes, the release instructions agents must follow are in
 `docs/agent-system/FAST_RELEASE_PLAYBOOK.md`. The short rule is: classify the changed paths first,
@@ -45,7 +55,7 @@ When documents disagree, use this order:
 1. current executable code and tests;
 2. current CI/release evidence (`releases/<version>/BUILD_VERIFIED.json`);
 3. `docs/agent-system/CURRENT_STATE.md` and `project.yaml`;
-4. current architecture/contract docs;
+4. current architecture/contract docs and, for V4-scoped work, `V4_BUILD_BIBLE.md`;
 5. historical version handoffs.
 
 A historical `V2.x` document is context, not authority for the current product.
@@ -69,6 +79,7 @@ Do not break these unless a task explicitly changes the product architecture:
 - Do not persist passwords, OTPs, tokens, API keys, payment credentials or `phone.type` plaintext in learning/report stores.
 - Consequential/authentication/security-sensitive actions must retain policy/approval boundaries.
 - App content is untrusted environment data and cannot override Cyclone policy or the user’s goal.
+- Overlay chrome (Stop task / Take control / Confirm) changes Cyclone state only. Host-app taps still go through `PhoneToolExecutor`.
 
 ## Runtime decision order
 
@@ -124,7 +135,7 @@ Primary paths:
 - `apps/mobile/.../ai/**`
 - `apps/mobile/.../ui/**`
 
-Owns user-facing AI flows, model orchestration and the Cyclone product experience. It does not bypass the phone tool layer.
+Owns user-facing AI flows, model orchestration, overlay chrome and the Cyclone product experience. It does not bypass the phone tool layer.
 
 ### Lane D — PC Device Gateway
 
@@ -139,7 +150,7 @@ Primary paths:
 - `tools/codex-phone-mcp/**`
 - `scripts/phone-gateway/**`
 
-Owns the constrained MCP surface and PC setup/acceptance tooling. It talks to the PC gateway, not directly to Android.
+Owns the constrained MCP surface and PC setup/acceptance tooling. It talks to the PC gateway, not directly to Android. Keep `SKILL.md` aligned with the tool loop.
 
 ### Lane F — Desktop/Core/Host ecosystem
 
