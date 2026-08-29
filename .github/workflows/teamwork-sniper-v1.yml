@@ -7,7 +7,8 @@ on:
     paths:
       - "apps/teamwork-sniper/**"
       - "scripts/ci/teamwork_sniper_*"
-      - ".github/workflows/teamwork-sniper-v1.yml"\n      - "release/version.toml"
+      - ".github/workflows/teamwork-sniper-v1.yml"
+      - "release/version.toml"
 
 permissions:
   contents: write
@@ -29,7 +30,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -103,7 +104,7 @@ jobs:
           The existing deterministic-first Teamwork Sniper runtime remains authoritative. The visual redesign does not add a second rule or claim engine.
 
           ## Verification boundary
-          This APK passed repository metadata/safety gates, JVM unit tests, and Android release assembly in GitHub Actions. It is intentionally signed with the repository's test/debug certificate so it is directly installable for physical-device verification.
+          This APK passed repository metadata/safety gates, JVM unit tests, and Android release assembly in GitHub Actions. It is signed with the repository test certificate so it can be installed for physical-device verification.
 
           A successful CI build is not proof of a successful live Teamwork claim. Real claim behavior still requires physical testing against Teamwork.
           EOF
