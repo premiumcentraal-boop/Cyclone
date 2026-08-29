@@ -5,6 +5,9 @@ import android.os.PowerManager
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
+import com.cyclone.mobile.applearner.AppLearnerRuntime
+import com.cyclone.mobile.applearner.PcRouteOutcomeEvidence
+import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import org.json.JSONObject
 
 /**
@@ -140,6 +143,18 @@ internal object GatewayV33ActionAdapter {
                 .put("semanticSuccessClaimed", false)
         }
 
+        val routeLearning = recordVerifiedRouteOutcome(
+            context = context,
+            goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') },
+            tool = tool,
+            params = normalizedParams,
+            before = beforeObservation,
+            after = afterObservation,
+            transportOk = true,
+            androidExecutionOk = androidExecutionOk,
+            verification = verification,
+        )
+
         return baseResult
             .put("transport", JSONObject().put("ok", true).put("protocol", GatewayProtocol.VERSION))
             .put("androidExecution", JSONObject()
@@ -148,6 +163,7 @@ internal object GatewayV33ActionAdapter {
                 .put("errorCode", errorCode.takeIf(String::isNotBlank) ?: JSONObject.NULL))
             .put("afterState", afterObservation?.let(::compactAfterState) ?: JSONObject.NULL)
             .put("verification", verification)
+            .put("routeLearning", routeLearning)
             .put("requiresReobserveBeforeNextMutation", tool in mutatingTools)
             .put("publicCapability", publicCapability)
     }
@@ -210,6 +226,66 @@ internal object GatewayV33ActionAdapter {
         .put("contentKey", observation.page.contentKey)
         .put("accessibilityFingerprint", observation.payload.optString("accessibilityFingerprint"))
         .put("capturedAtMs", observation.capturedAt)
+
+    private fun recordVerifiedRouteOutcome(
+        context: Context,
+        goal: String,
+        tool: String,
+        params: JSONObject,
+        before: GatewayObservation?,
+        after: GatewayObservation?,
+        transportOk: Boolean,
+        androidExecutionOk: Boolean,
+        verification: JSONObject,
+    ): JSONObject {
+        val outcome = PcRouteOutcomeEvidence(
+            transportOk = transportOk,
+            androidExecutionOk = androidExecutionOk,
+            verificationStatus = verification.optString("status"),
+            before = before?.page,
+            after = after?.page,
+        )
+        if (!outcome.isVerifiedPageOutcome) {
+            return JSONObject()
+                .put("recorded", false)
+                .put("reason", "Transport/executor success is not a verified semantic route outcome")
+        }
+        val appGraph = runCatching {
+            AppLearnerRuntime.recordVerifiedPcRoute(context, tool, params, outcome)
+        }.getOrElse { error ->
+            return JSONObject().put("recorded", false).put("reason", "App Graph persistence failed safely: ${error.javaClass.simpleName}")
+        }
+        if (!appGraph.recorded) {
+            return JSONObject().put("recorded", false).put("reason", appGraph.reason)
+        }
+        val brainSignature = runCatching {
+            AdaptiveBrainRuntime.recordToolOutcome(
+                context = context,
+                goal = goal,
+                tool = tool,
+                params = params,
+                before = brainState(before),
+                after = brainState(after),
+                ok = true,
+                source = "PC_CODEX_VERIFIED_ROUTE",
+            ).also { signature ->
+                AdaptiveBrainRuntime.recordRunPath(context, goal, listOf(signature), success = true)
+            }
+        }.getOrNull()
+        return JSONObject()
+            .put("recorded", true)
+            .put("reason", appGraph.reason)
+            .put("appGraph", JSONObject()
+                .put("fromPageKey", appGraph.fromPageKey ?: JSONObject.NULL)
+                .put("toPageKey", appGraph.toPageKey ?: JSONObject.NULL)
+                .put("transitionState", appGraph.transitionState?.name ?: JSONObject.NULL))
+            .put("brainSignature", brainSignature ?: JSONObject.NULL)
+            .put("verifiedOutcome", true)
+    }
+
+    private fun brainState(observation: GatewayObservation?): JSONObject = JSONObject()
+        .put("currentPackage", observation?.page?.packageName.orEmpty())
+        .put("fingerprint", observation?.payload?.optString("accessibilityFingerprint").orEmpty())
 }
 
 internal object GatewayV33ManualDesktopAdapter {

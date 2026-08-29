@@ -3,7 +3,6 @@ package com.cyclone.mobile.gateway
 import android.content.Context
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
-import com.cyclone.mobile.PhoneToolErrorCode
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.applearner.AppGraphSnapshot
@@ -156,11 +155,6 @@ internal object GatewayActionAdapter {
         "phone.open_app",
         "phone.wait_for",
     )
-    private val evidenceTools = setOf(
-        "phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type",
-        "phone.back", "phone.home", "phone.open_app",
-    )
-
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
         val tool = args.optString("tool")
         if (tool !in allowedTools) throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Tool is not enabled for the PC gateway", requestId)
@@ -185,23 +179,10 @@ internal object GatewayActionAdapter {
         authorityDecision.requireAuthorized(requestId)
 
         val executableParams = JSONObject(params.toString()).apply { remove("_gatewayRisk") }
-        val before = brainState()
         val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, executableParams))
-        val after = brainState()
-        if (tool in evidenceTools && shouldRecord(result.error?.code)) {
-            runCatching {
-                AdaptiveBrainRuntime.recordToolOutcome(
-                    context = context,
-                    goal = goal,
-                    tool = tool,
-                    params = executableParams,
-                    before = before,
-                    after = after,
-                    ok = result.ok,
-                    source = "PC_CODEX",
-                )
-            }
-        }
+        // V3.3 owns post-action observation. Learning here would confuse executor/transport
+        // success with a verified page result, so GatewayV33ActionAdapter records only a passed
+        // semantic after-state.
         return JSONObject()
             .put("source", "PC_CODEX")
             .put("tool", tool)
@@ -213,20 +194,6 @@ internal object GatewayActionAdapter {
             .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
     }
 
-    private fun brainState(): JSONObject {
-        val service = CycloneAccessibilityService.instance
-        val snapshot = runCatching { service?.observe(markFresh = false) }.getOrNull()
-        return JSONObject()
-            .put("currentPackage", snapshot?.packageName ?: DeviceState.currentPackage ?: "")
-            .put("fingerprint", snapshot?.fingerprint ?: "")
-    }
-
-    private fun shouldRecord(error: PhoneToolErrorCode?): Boolean = error == null || error in setOf(
-        PhoneToolErrorCode.ACTION_FAILED,
-        PhoneToolErrorCode.TIMEOUT,
-        PhoneToolErrorCode.ELEMENT_NOT_FOUND,
-        PhoneToolErrorCode.STALE_ELEMENT,
-    )
 }
 
 internal object GatewayTeachingMapper {

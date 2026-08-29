@@ -3,9 +3,11 @@ package com.cyclone.mobile.gateway
 import android.content.Context
 import android.content.res.Configuration
 import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.PageAwarenessRuntime
 import com.cyclone.mobile.applearner.PageContext
 import com.cyclone.mobile.applearner.PageControl
+import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.capture.PhoneScreenCapture
 import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
 import com.cyclone.mobile.observability.pagecontext.PageContextSummary
@@ -165,6 +167,28 @@ internal object GatewayObservationAdapter {
             controlCount = page.controls.size + supplementalCount,
             textLineCount = pageText.optInt("lineCount"),
         )
+        // Page context is the canonical PC-agent source of truth. Graph/Brain knowledge can
+        // contribute only advisory, repeatedly-verified next hops; it cannot authorize an action.
+        AppLearnerRuntime.initialize(context)
+        val nextHopHints = GatewayRouteEvidence.nextHops(
+            page = page,
+            accessibilityFingerprint = snapshot.fingerprint,
+            graph = AppLearnerRuntime.graph(page.packageName),
+            brainSkills = AdaptiveBrainRuntime.reusableMicroSkills(context),
+        )
+        val windows = safeRaw.optJSONArray("windows") ?: JSONArray()
+        val boundedPageEvidence = GatewayRouteEvidence.pageEvidence(
+            page = page,
+            packageName = snapshot.packageName,
+            activity = snapshot.className,
+            pageText = pageText,
+            pageSummary = pageSummary,
+            semanticControls = page.controls.size,
+            supplementalControls = supplementalCount,
+            rawNodes = rawNodes.length(),
+            windows = windows.length(),
+            nextHopHints = nextHopHints,
+        )
         val includeScreenshot = args.optBoolean("includeScreenshot", false)
         val screenshot = if (includeScreenshot) {
             runCatching {
@@ -216,8 +240,10 @@ internal object GatewayObservationAdapter {
             .put("supplementalControlCount", supplementalCount)
             .put("pageText", pageText)
             .put("pageSummary", pageSummary)
+            .put("pageEvidence", boundedPageEvidence)
+            .put("nextHopHints", nextHopHints)
             .put("screenshot", screenshot ?: JSONObject.NULL)
-            .put("windows", safeRaw.optJSONArray("windows") ?: JSONArray())
+            .put("windows", windows)
             .put("rawAccessibility", safeRaw)
             .put("rawNodeCount", rawNodes.length())
 

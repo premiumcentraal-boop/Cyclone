@@ -118,6 +118,15 @@ object AdaptiveBrainRuntime {
         return store.deterministicPlan(goal, environment)
     }
 
+    /**
+     * Read-only candidate source for a current semantic observation. Filtering for safe,
+     * coordinate-free click descriptors happens in the Gateway/App Graph adapter.
+     */
+    fun reusableMicroSkills(context: Context, limit: Int = 160): List<BrainMicroSkill> {
+        initialize(context)
+        return store.listMicroSkills(limit)
+    }
+
     fun addUserNote(context: Context, text: String, source: String = "USER"): BrainUserNote {
         initialize(context)
         return store.addNote(text, source)
