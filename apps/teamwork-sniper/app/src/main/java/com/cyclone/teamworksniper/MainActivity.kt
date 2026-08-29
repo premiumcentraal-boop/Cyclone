@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,11 +24,15 @@ import com.cyclone.teamworksniper.data.RuleStore
 import com.cyclone.teamworksniper.data.SettingsStore
 import com.cyclone.teamworksniper.data.ShiftRule
 import com.cyclone.teamworksniper.data.SniperSettings
+import com.cyclone.teamworksniper.data.TriggerEvent
+import com.cyclone.teamworksniper.data.TriggerSource
 import com.cyclone.teamworksniper.data.UiPreferencesStore
 import com.cyclone.teamworksniper.rules.TargetSelectionRules
 import com.cyclone.teamworksniper.runtime.PermissionChecker
 import com.cyclone.teamworksniper.runtime.PermissionState
+import com.cyclone.teamworksniper.runtime.SniperCoordinator
 import com.cyclone.teamworksniper.runtime.TeamworkDailySync
+import com.cyclone.teamworksniper.runtime.TeamworkLauncher
 import com.cyclone.teamworksniper.teamwork.ShiftTemplateProvider
 import com.cyclone.teamworksniper.ui.SniperScreen
 import java.time.LocalDate
@@ -102,6 +107,18 @@ class MainActivity : ComponentActivity() {
                 onSyncNow = {
                     TeamworkDailySync.syncNow(this)
                     refresh()
+                },
+                onSnipeNow = {
+                    TeamworkLauncher.open(this)
+                    SniperCoordinator.submit(
+                        TriggerEvent(
+                            source = TriggerSource.MANUAL,
+                            wallClockEpochMs = System.currentTimeMillis(),
+                            elapsedRealtimeMs = SystemClock.elapsedRealtime(),
+                            notificationTitle = "Instant check",
+                            notificationText = "Scan sniping targets now",
+                        ),
+                    )
                 },
             )
         }

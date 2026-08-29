@@ -2,7 +2,7 @@
 
 Release branch: `release/teamwork-sniper-v1`
 
-Product version: **V1 Beta 3** (versionCode 9)  
+Product version: **V1 Beta 4** (versionCode 10)  
 Canonical Android package: `com.cyclone.teamworksniper`  
 Clean-install package: `com.cyclone.teamworksniper.v1`
 

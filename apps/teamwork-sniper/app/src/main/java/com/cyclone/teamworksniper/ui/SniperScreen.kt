@@ -1,6 +1,14 @@
 package com.cyclone.teamworksniper.ui
 
 import androidx.compose.animation.animateColorAsState
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -9,6 +17,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +68,8 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 private val SniperOrange = Color(0xFFFF6500)
 private val SniperOrangeSoft = Color(0xFFFFF3EB)
@@ -84,6 +97,10 @@ private enum class AppTab { SCHEDULE, ACTIVITY, SETTINGS }
 private enum class ShiftVisualState { AVAILABLE, SELECTED, CLAIMED }
 private enum class SettingsPage { ROOT, TEMPLATES, OVERLAY, DIAGNOSTICS }
 
+private const val MIN_WEEK_OFFSET = -1
+private const val MAX_WEEK_OFFSET = 6
+private val WEEK_PAGE_COUNT = MAX_WEEK_OFFSET - MIN_WEEK_OFFSET + 1
+
 @Composable
 fun SniperScreen(
     state: UiState,
@@ -94,11 +111,12 @@ fun SniperScreen(
     onOnboardingComplete: () -> Unit,
     onOpenTeamwork: () -> Unit,
     onSyncNow: () -> Unit = {},
+    onSnipeNow: () -> Unit = {},
 ) {
     MaterialTheme(colorScheme = sniperPalette()) {
         Surface(Modifier.fillMaxSize(), color = AppBackground) {
             if (state.onboardingComplete) {
-                MainSniperApp(state, onSettings, onRules, onNotification, onAccessibility, onOpenTeamwork, onSyncNow)
+                MainSniperApp(state, onSettings, onRules, onNotification, onAccessibility, onOpenTeamwork, onSyncNow, onSnipeNow)
             } else {
                 OnboardingFlow(state, onRules, onNotification, onAccessibility, onOnboardingComplete, onOpenTeamwork)
             }
@@ -288,6 +306,7 @@ private fun MainSniperApp(
     onAccessibility: () -> Unit,
     onOpenTeamwork: () -> Unit,
     onSyncNow: () -> Unit,
+    onSnipeNow: () -> Unit,
 ) {
     var tabIndex by rememberSaveable { mutableIntStateOf(AppTab.SCHEDULE.ordinal) }
     var settingsPage by rememberSaveable { mutableIntStateOf(SettingsPage.ROOT.ordinal) }
@@ -307,6 +326,7 @@ private fun MainSniperApp(
                 onArmed = { onSettings(state.settings.copy(armed = it)) },
                 showOpenTeamwork = tab == AppTab.SCHEDULE,
                 onOpenTeamwork = onOpenTeamwork,
+                onSnipeNow = onSnipeNow,
             )
         },
         bottomBar = {
@@ -372,10 +392,11 @@ private fun MainTopBar(
     onArmed: (Boolean) -> Unit,
     showOpenTeamwork: Boolean,
     onOpenTeamwork: () -> Unit,
+    onSnipeNow: () -> Unit,
 ) {
     Surface(color = CardSurface, shadowElevation = 1.dp) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TargetMark(34.dp)
+            ShootableMark(onFire = onSnipeNow)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(if (title.isBlank()) "Teamwork Sniper" else title, color = Ink, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
@@ -392,8 +413,80 @@ private fun MainTopBar(
 
 @Composable
 private fun ScheduleScreen(state: UiState, onRules: (List<ShiftRule>) -> Unit) {
+    val scope = rememberCoroutineScope()
     var weekOffset by rememberSaveable { mutableIntStateOf(0) }
-    ScheduleList(state, weekOffset, { weekOffset = it }, onRules, showStatus = true)
+    val pagerState = rememberPagerState(
+        initialPage = (weekOffset - MIN_WEEK_OFFSET).coerceIn(0, WEEK_PAGE_COUNT - 1),
+        pageCount = { WEEK_PAGE_COUNT },
+    )
+
+    LaunchedEffect(pagerState.settledPage) {
+        val next = pagerState.settledPage + MIN_WEEK_OFFSET
+        if (next != weekOffset) weekOffset = next
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        val weekStart = remember(weekOffset) {
+            LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(weekOffset.toLong())
+        }
+        Surface(color = AppBackground) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ReadinessStrip(state)
+                WeekChooser(
+                    weekStart = weekStart,
+                    onPrevious = {
+                        scope.launch { pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0)) }
+                    },
+                    onNext = {
+                        scope.launch { pagerState.animateScrollToPage((pagerState.currentPage + 1).coerceAtMost(WEEK_PAGE_COUNT - 1)) }
+                    },
+                )
+            }
+        }
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) { page ->
+            val offset = page + MIN_WEEK_OFFSET
+            WeekPage(state, offset, onRules)
+        }
+    }
+}
+
+@Composable
+private fun WeekPage(state: UiState, weekOffset: Int, onRules: (List<ShiftRule>) -> Unit) {
+    val weekStart = remember(weekOffset) {
+        LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).plusWeeks(weekOffset.toLong())
+    }
+    val templates = remember { ShiftTemplateProvider() }
+    val claimed = remember(state.activity) { claimedKeys(state.activity) }
+    val openNow = remember(state.activity) { recentOpenKeys(state.activity) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(7) { index ->
+            val date = weekStart.plusDays(index.toLong())
+            DaySection(
+                date = date,
+                rules = state.rules,
+                templates = templates,
+                claimedKeys = claimed,
+                openKeys = openNow,
+                onToggle = { code -> onRules(TargetSelectionRules.toggle(state.rules, date, code)) },
+            )
+        }
+        item {
+            Text(
+                "Expected times are shown only when backed by the current Teamwork shift templates. Unconfirmed times stay hidden.",
+                color = Muted,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -1112,8 +1205,48 @@ private fun DividerLine() {
 }
 
 @Composable
-private fun TargetMark(size: androidx.compose.ui.unit.Dp, color: Color = SniperOrange) {
-    Canvas(Modifier.size(size)) {
+private fun ShootableMark(onFire: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val rotation = remember { Animatable(0f) }
+    val scale = remember { Animatable(1f) }
+    var busy by remember { mutableStateOf(false) }
+    val whip = CubicBezierEasing(0.75f, 0.02f, 0.18f, 1f)
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .graphicsLayer {
+                rotationZ = rotation.value
+                scaleX = scale.value
+                scaleY = scale.value
+            }
+            .clickable(enabled = !busy) {
+                busy = true
+                onFire()
+                scope.launch {
+                    rotation.snapTo(0f)
+                    scale.snapTo(1f)
+                    coroutineScope {
+                        launch { rotation.animateTo(720f, tween(780, easing = whip)) }
+                        launch {
+                            scale.animateTo(0.38f, tween(250, easing = FastOutLinearInEasing))
+                            scale.animateTo(1.26f, tween(200, easing = LinearOutSlowInEasing))
+                            scale.animateTo(1f, tween(330, easing = FastOutSlowInEasing))
+                        }
+                    }
+                    rotation.snapTo(0f)
+                    scale.snapTo(1f)
+                    busy = false
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        TargetMark(34.dp)
+    }
+}
+
+@Composable
+private fun TargetMark(size: androidx.compose.ui.unit.Dp, color: Color = SniperOrange, modifier: Modifier = Modifier) {
+    Canvas(modifier.size(size)) {
         val stroke = size.toPx() * 0.075f
         val radius = this.size.minDimension * 0.31f
         drawCircle(color = color, radius = radius, style = Stroke(width = stroke))
