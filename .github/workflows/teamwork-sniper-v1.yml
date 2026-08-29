@@ -64,6 +64,34 @@ jobs:
           sha256sum dist/Teamwork-Sniper-V1.apk > dist/Teamwork-Sniper-V1.apk.sha256
           printf '%s\n' "${GITHUB_SHA}" > dist/source-sha.txt
 
+      - name: Verify APK signature, manifest and alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PWD/dist/Teamwork-Sniper-V1.apk"
+          BUILD_TOOLS="$(ls -1d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)"
+          echo "Using build tools: $BUILD_TOOLS"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | tee dist/apk-badging.txt
+          "$BUILD_TOOLS/zipalign" -c -v 4 "$APK"
+          grep -q "package: name='com.cyclone.teamworksniper'" dist/apk-badging.txt
+          grep -q "sdkVersion:'34'" dist/apk-badging.txt
+          grep -q "targetSdkVersion:'35'" dist/apk-badging.txt
+
+      - name: Install APK on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_8
+          disable-animations: true
+          script: |
+            set -e
+            adb install -r "$GITHUB_WORKSPACE/dist/Teamwork-Sniper-V1.apk"
+            adb shell pm path com.cyclone.teamworksniper
+            adb shell dumpsys package com.cyclone.teamworksniper | grep -E "versionCode|versionName" | head
+            adb shell am start -W -n com.cyclone.teamworksniper/.MainActivity
+
       - name: Upload V1 build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -72,6 +100,7 @@ jobs:
             dist/Teamwork-Sniper-V1.apk
             dist/Teamwork-Sniper-V1.apk.sha256
             dist/source-sha.txt
+            dist/apk-badging.txt
           if-no-files-found: error
           retention-days: 30
 
