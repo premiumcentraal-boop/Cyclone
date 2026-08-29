@@ -464,7 +464,7 @@ private fun WeekPage(state: UiState, weekOffset: Int, onRules: (List<ShiftRule>)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(7) { index ->
