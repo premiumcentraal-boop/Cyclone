@@ -4,8 +4,12 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-class AutomationStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+/**
+ * Existing Automation Studio persistence. V4 skill compile writes disabled drafts here —
+ * no second JSON brain and no parallel routines file.
+ */
+class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
+    constructor(context: Context) : this(SharedAutomationPrefs(context))
 
     @Synchronized fun listAutomations(): List<AutomationDefinition> = decodeArray(KEY_AUTOMATIONS, AutomationCodec::automationFromJson)
     @Synchronized fun getAutomation(id: String): AutomationDefinition? = listAutomations().firstOrNull { it.id == id }
@@ -23,7 +27,7 @@ class AutomationStore(context: Context) {
         }.filterNot { it.optString("id") == run.id }.toMutableList()
         existing.add(runToJson(run))
         val trimmed = existing.takeLast(MAX_RUNS)
-        prefs.edit().putString(KEY_RUNS, JSONArray(trimmed).toString()).apply()
+        prefs.putString(KEY_RUNS, JSONArray(trimmed).toString())
     }
 
     @Synchronized fun listRuns(limit: Int = 50): List<AutomationRun> {
@@ -39,7 +43,7 @@ class AutomationStore(context: Context) {
     @Synchronized fun saveCheckpoint(checkpoint: Checkpoint) {
         val all = rawObject(KEY_CHECKPOINTS)
         all.put(checkpoint.runId, checkpointToJson(checkpoint))
-        prefs.edit().putString(KEY_CHECKPOINTS, all.toString()).apply()
+        prefs.putString(KEY_CHECKPOINTS, all.toString())
     }
 
     @Synchronized fun getCheckpoint(runId: String): Checkpoint? = rawObject(KEY_CHECKPOINTS).optJSONObject(runId)?.let(::checkpointFromJson)
@@ -47,7 +51,7 @@ class AutomationStore(context: Context) {
     @Synchronized fun deleteCheckpoint(runId: String) {
         val all = rawObject(KEY_CHECKPOINTS)
         all.remove(runId)
-        prefs.edit().putString(KEY_CHECKPOINTS, all.toString()).apply()
+        prefs.putString(KEY_CHECKPOINTS, all.toString())
     }
 
     @Synchronized fun exportAutomation(id: String): String? = getAutomation(id)?.let { AutomationCodec.automationToJson(it).toString(2) }
@@ -66,14 +70,14 @@ class AutomationStore(context: Context) {
         val values = mutableListOf<JSONObject>()
         for (i in 0 until array.length()) array.optJSONObject(i)?.takeIf { it.optString("id") != id }?.let(values::add)
         values.add(value)
-        prefs.edit().putString(key, JSONArray(values).toString()).apply()
+        prefs.putString(key, JSONArray(values).toString())
     }
 
     private fun deleteById(key: String, id: String) {
         val array = rawArray(key)
         val values = mutableListOf<JSONObject>()
         for (i in 0 until array.length()) array.optJSONObject(i)?.takeIf { it.optString("id") != id }?.let(values::add)
-        prefs.edit().putString(key, JSONArray(values).toString()).apply()
+        prefs.putString(key, JSONArray(values).toString())
     }
 
     private fun rawArray(key: String) = runCatching { JSONArray(prefs.getString(key, "[]") ?: "[]") }.getOrElse { JSONArray() }
@@ -136,5 +140,29 @@ class AutomationStore(context: Context) {
         private const val KEY_RUNS = "runs"
         private const val KEY_CHECKPOINTS = "checkpoints"
         private const val MAX_RUNS = 100
+
+        /** JVM/unit tests and compile path. Same class as production; no second store. */
+        fun inMemory(): AutomationStore = AutomationStore(MemoryAutomationPrefs())
+    }
+}
+
+internal interface AutomationPrefs {
+    fun getString(key: String, def: String?): String?
+    fun putString(key: String, value: String)
+}
+
+private class SharedAutomationPrefs(context: Context) : AutomationPrefs {
+    private val prefs = context.applicationContext.getSharedPreferences("cyclone_automation_studio", Context.MODE_PRIVATE)
+    override fun getString(key: String, def: String?): String? = prefs.getString(key, def)
+    override fun putString(key: String, value: String) {
+        prefs.edit().putString(key, value).apply()
+    }
+}
+
+private class MemoryAutomationPrefs : AutomationPrefs {
+    private val data = linkedMapOf<String, String>()
+    override fun getString(key: String, def: String?): String? = data[key] ?: def
+    override fun putString(key: String, value: String) {
+        data[key] = value
     }
 }
