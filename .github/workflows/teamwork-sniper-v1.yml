@@ -20,8 +20,8 @@ concurrency:
 jobs:
   build:
     name: Build and verify V1
-    runs-on: macos-14
-    timeout-minutes: 25
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Checkout exact commit
@@ -39,6 +39,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          ls -l /dev/kvm || true
 
       - name: Prepare Gradle wrapper
         run: chmod +x apps/mobile/gradlew
@@ -61,7 +69,11 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           cp apps/teamwork-sniper/app/build/outputs/apk/release/app-release.apk dist/Teamwork-Sniper-V1.apk
-          shasum -a 256 dist/Teamwork-Sniper-V1.apk > dist/Teamwork-Sniper-V1.apk.sha256
+          python - <<'PY'
+          import hashlib, pathlib
+          p = pathlib.Path("dist/Teamwork-Sniper-V1.apk")
+          pathlib.Path("dist/Teamwork-Sniper-V1.apk.sha256").write_text(hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name + "\n")
+          PY
           printf '%s\n' "${GITHUB_SHA}" > dist/source-sha.txt
 
       - name: Build clean-install compatibility APK
@@ -72,7 +84,11 @@ jobs:
         run: |
           set -euo pipefail
           cp apps/teamwork-sniper/app/build/outputs/apk/release/app-release.apk dist/Teamwork-Sniper-V1-Clean.apk
-          shasum -a 256 dist/Teamwork-Sniper-V1-Clean.apk > dist/Teamwork-Sniper-V1-Clean.apk.sha256
+          python - <<'PY'
+          import hashlib, pathlib
+          p = pathlib.Path("dist/Teamwork-Sniper-V1-Clean.apk")
+          pathlib.Path("dist/Teamwork-Sniper-V1-Clean.apk.sha256").write_text(hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name + "\n")
+          PY
 
       - name: Verify APK signatures, manifests and alignment
         shell: bash
@@ -101,7 +117,8 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          arch: arm64-v8a
+          arch: x86_64
+          emulator-boot-timeout: 900
           disable-animations: true
           script: |
             set -e
@@ -130,17 +147,17 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish GitHub V1 release
-        if: ${{ contains(github.event.head_commit.message, 'publish V1') }}
+      - name: Publish GitHub V1 beta
+        if: ${{ contains(github.event.head_commit.message, 'publish beta') }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           cat > release-notes.md <<'EOF'
-          # Teamwork Sniper V1
+          # Teamwork Sniper V1 Beta 1
 
-          The first true Teamwork Sniper product release.
+          Installability-focused beta of the redesigned Teamwork Sniper app.
 
           ## Visual overhaul
           - new orange Teamwork Sniper identity
@@ -159,13 +176,15 @@ jobs:
           The existing deterministic-first Teamwork Sniper runtime remains authoritative. The visual redesign does not add a second rule or claim engine.
 
           ## Verification boundary
-          This APK passed repository metadata/safety gates, JVM unit tests, and Android release assembly in GitHub Actions. It is signed with the repository test certificate so it can be installed for physical-device verification.
+          Both attached APKs passed repository metadata/safety gates, JVM unit tests, signature/manifest/alignment checks, and an actual Android emulator install + launch gate in GitHub Actions.
+
+          If an earlier Teamwork Sniper package/signature state caused Android to show "App not installed", use **Teamwork-Sniper-V1-Clean.apk** first. It uses the clean package id `com.cyclone.teamworksniper.v1`.
 
           A successful CI build is not proof of a successful live Teamwork claim. Real claim behavior still requires physical testing against Teamwork.
           EOF
 
-          if gh release view teamwork-sniper-v1 >/dev/null 2>&1; then
-            gh release delete teamwork-sniper-v1 --cleanup-tag --yes
+          if gh release view teamwork-sniper-v1-beta.1 >/dev/null 2>&1; then
+            gh release delete teamwork-sniper-v1-beta.1 --cleanup-tag --yes
           fi
 
-          gh release create teamwork-sniper-v1 --target "${GITHUB_SHA}" --title "Teamwork Sniper V1" --notes-file release-notes.md dist/Teamwork-Sniper-V1.apk dist/Teamwork-Sniper-V1.apk.sha256 dist/Teamwork-Sniper-V1-Clean.apk dist/Teamwork-Sniper-V1-Clean.apk.sha256 dist/source-sha.txt
+          gh release create teamwork-sniper-v1-beta.1 --target "${GITHUB_SHA}" --prerelease --title "Teamwork Sniper V1 Beta 1" --notes-file release-notes.md dist/Teamwork-Sniper-V1.apk dist/Teamwork-Sniper-V1.apk.sha256 dist/Teamwork-Sniper-V1-Clean.apk dist/Teamwork-Sniper-V1-Clean.apk.sha256 dist/source-sha.txt
