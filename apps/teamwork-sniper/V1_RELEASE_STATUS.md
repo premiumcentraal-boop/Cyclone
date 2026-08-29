@@ -2,18 +2,19 @@
 
 Release branch: `release/teamwork-sniper-v1`
 
-Product version: **V1**  
-Android package: `com.cyclone.teamworksniper`
+Product version: **V1 Beta 1**  
+Canonical Android package: `com.cyclone.teamworksniper`  
+Clean-install package: `com.cyclone.teamworksniper.v1`
 
-## Pre-publication CI evidence
+## Installability verification
 
-Candidate commit:
+Verification candidate commit:
 
-`edf8bda053ffdec68327d1ca342791f3ae49ec55`
+`49935be38544f96679e4e5ccae859145e9f4c11d`
 
 GitHub Actions run:
 
-`33223081840`
+`33242847992`
 
 Result: **SUCCESS**
 
@@ -22,48 +23,28 @@ Verified gates:
 - Teamwork Sniper metadata: PASS
 - semantic/safety guard: PASS
 - JVM unit tests: PASS
-- installable Android release assembly: PASS
+- canonical Android release assembly: PASS
+- clean-install Android release assembly: PASS
+- APK signature verification: PASS
+- manifest/package verification: PASS
+- zip alignment verification: PASS
+- canonical APK emulator install: PASS
+- canonical MainActivity launch: PASS
+- clean-install APK emulator install: PASS
+- clean-install MainActivity launch: PASS
 - release artifact packaging: PASS
 
-Candidate artifact:
+## Beta packaging
 
-`Teamwork-Sniper-V1.apk`
+The beta publishes two APKs:
 
-Candidate SHA-256:
+- `Teamwork-Sniper-V1.apk` — canonical package `com.cyclone.teamworksniper`
+- `Teamwork-Sniper-V1-Clean.apk` — fresh package `com.cyclone.teamworksniper.v1`
 
-`731f5b37730eddb377db49893b2032f553e1acb0933232fb9c93378cd9d9277f`
-
-Artifact source SHA:
-
-`edf8bda053ffdec68327d1ca342791f3ae49ec55`
-
-## V1 visual implementation
-
-V1 implements the approved orange Teamwork Sniper product direction:
-
-- Welcome screen
-- Quick Setup permissions flow
-- Choose Shifts onboarding
-- All Set confirmation
-- polished weekly Schedule
-- hollow orange Snipe state
-- filled orange Sniping state
-- evidence-backed Claimed state
-- recent evidence-backed Open now badge
-- Activity timeline
-- simplified Settings
-- Shift Templates page
-- Overlay Preview page
-- Diagnostics page
-- Teamwork launch shortcut
-- V1 target app icon
-
-The visual layer reuses the existing RuleStore and deterministic claim runtime. It does not create a second claim engine.
+Use the **Clean** APK first when an earlier Teamwork Sniper build produced Android's generic **App not installed** message. The clean package avoids collisions with stale package/signature state from previous builds.
 
 ## Verification boundary
 
-The CI evidence above proves source/build/package gates only.
+The APK packaging and Android install/launch path are CI-verified.
 
-**Physical V1 visual acceptance is pending user testing.**
-
-A successful live Teamwork claim must still be verified on a physical device against the real Teamwork post-action state. CI success is not live-claim proof.
+**Physical-device visual acceptance and real Teamwork claiming remain pending.** A successful emulator install does not prove live Teamwork claim behavior.
