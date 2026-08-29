@@ -75,7 +75,7 @@ jobs:
           retention-days: 30
 
       - name: Publish GitHub V1 release
-        if: github.event.head_commit.message == 'release(teamwork-sniper): publish V1'
+        if: ${{ contains(github.event.head_commit.message, 'publish V1') }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -112,4 +112,4 @@ jobs:
             gh release delete teamwork-sniper-v1 --cleanup-tag --yes
           fi
 
-          gh release create teamwork-sniper-v1             --target "${GITHUB_SHA}"             --title "Teamwork Sniper V1"             --notes-file release-notes.md             dist/Teamwork-Sniper-V1.apk             dist/Teamwork-Sniper-V1.apk.sha256             dist/source-sha.txt
+          gh release create teamwork-sniper-v1 --target "${GITHUB_SHA}" --title "Teamwork Sniper V1" --notes-file release-notes.md dist/Teamwork-Sniper-V1.apk dist/Teamwork-Sniper-V1.apk.sha256 dist/source-sha.txt
