@@ -7,10 +7,10 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.cyclone.teamworksniper.ai.OpenRouterSecretStore
 import com.cyclone.teamworksniper.data.ActivityEntry
@@ -39,6 +39,18 @@ class MainActivity : ComponentActivity() {
     private lateinit var aiSecret: OpenRouterSecretStore
     private lateinit var activity: ActivityLogStore
     private lateinit var uiPreferences: UiPreferencesStore
+    private val calendarPermission = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        val granted = CALENDAR_PERMISSIONS.all { result[it] == true }
+        if (granted) {
+            settings.save(settings.load().copy(calendarSync = true))
+            writeCalendar()
+        } else {
+            settings.save(settings.load().copy(calendarSync = false))
+        }
+        refresh()
+    }
 
     private var state by mutableStateOf(
         UiState(
@@ -100,24 +112,10 @@ class MainActivity : ComponentActivity() {
         if (::rules.isInitialized) refresh()
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQ_CALENDAR) return
-        val granted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-        if (granted) {
-            settings.save(settings.load().copy(calendarSync = true))
-            writeCalendar()
-        } else {
-            settings.save(settings.load().copy(calendarSync = false))
-        }
-        refresh()
-    }
-
     private fun applyConnectionSideEffects(previous: SniperSettings, next: SniperSettings) {
         if (next.calendarSync && !previous.calendarSync) {
             if (hasCalendarPermission()) writeCalendar()
-            else ActivityCompat.requestPermissions(this, CALENDAR_PERMISSIONS, REQ_CALENDAR)
+            else calendarPermission.launch(CALENDAR_PERMISSIONS)
         } else if (!next.calendarSync && previous.calendarSync) {
             PhoneCalendarGateway(this).disconnect()
         } else if (next.calendarSync) {
@@ -177,7 +175,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TEAMWORK_PACKAGE = "tech.picnic.workapp"
-        private const val REQ_CALENDAR = 91
         private val CALENDAR_PERMISSIONS = arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
 
         private fun claimedShiftKeys(entries: List<ActivityEntry>): Set<String> =
