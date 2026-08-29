@@ -1,0 +1,158 @@
+name: Teamwork Sniper V1 Beta
+
+on:
+  push:
+    branches:
+      - release/teamwork-sniper-v1
+    paths:
+      - "apps/teamwork-sniper/**"
+      - ".github/workflows/teamwork-sniper-beta.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: teamwork-sniper-v1-beta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          ls -l /dev/kvm || true
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x apps/mobile/gradlew
+
+      - name: Verify metadata and safety
+        run: |
+          python scripts/ci/teamwork_sniper_metadata.py --require-app
+          python scripts/ci/teamwork_sniper_guard.py --require-app
+
+      - name: Run unit tests
+        run: ./apps/mobile/gradlew -p apps/teamwork-sniper :app:testDebugUnitTest --stacktrace
+
+      - name: Build canonical APK
+        run: ./apps/mobile/gradlew -p apps/teamwork-sniper :app:assembleRelease --stacktrace
+
+      - name: Save canonical APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp apps/teamwork-sniper/app/build/outputs/apk/release/app-release.apk dist/Teamwork-Sniper-V1.apk
+          python -c "import hashlib,pathlib; p=pathlib.Path('dist/Teamwork-Sniper-V1.apk'); pathlib.Path('dist/Teamwork-Sniper-V1.apk.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\\n')"
+          printf '%s\n' "${GITHUB_SHA}" > dist/source-sha.txt
+
+      - name: Build clean-install APK
+        run: ./apps/mobile/gradlew -p apps/teamwork-sniper -PteamworkSniperCleanInstall=true :app:assembleRelease --stacktrace
+
+      - name: Save clean-install APK
+        shell: bash
+        run: |
+          cp apps/teamwork-sniper/app/build/outputs/apk/release/app-release.apk dist/Teamwork-Sniper-V1-Clean.apk
+          python -c "import hashlib,pathlib; p=pathlib.Path('dist/Teamwork-Sniper-V1-Clean.apk'); pathlib.Path('dist/Teamwork-Sniper-V1-Clean.apk.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\\n')"
+
+      - name: Verify APK packages, signatures and alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$(ls -1d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs dist/Teamwork-Sniper-V1.apk
+          "$BUILD_TOOLS/aapt" dump badging dist/Teamwork-Sniper-V1.apk | tee dist/apk-badging.txt
+          "$BUILD_TOOLS/zipalign" -c -v 4 dist/Teamwork-Sniper-V1.apk
+          grep -q "package: name='com.cyclone.teamworksniper'" dist/apk-badging.txt
+
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs dist/Teamwork-Sniper-V1-Clean.apk
+          "$BUILD_TOOLS/aapt" dump badging dist/Teamwork-Sniper-V1-Clean.apk | tee dist/apk-clean-badging.txt
+          "$BUILD_TOOLS/zipalign" -c -v 4 dist/Teamwork-Sniper-V1-Clean.apk
+          grep -q "package: name='com.cyclone.teamworksniper.v1'" dist/apk-clean-badging.txt
+
+      - name: Install and launch both APKs on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: default
+          emulator-boot-timeout: 900
+          disable-animations: true
+          script: |
+            set -e
+            adb install -r "$GITHUB_WORKSPACE/dist/Teamwork-Sniper-V1.apk"
+            adb shell pm path com.cyclone.teamworksniper
+            adb shell am start -W -n com.cyclone.teamworksniper/com.cyclone.teamworksniper.MainActivity
+
+            adb install -r "$GITHUB_WORKSPACE/dist/Teamwork-Sniper-V1-Clean.apk"
+            adb shell pm path com.cyclone.teamworksniper.v1
+            adb shell am start -W -n com.cyclone.teamworksniper.v1/com.cyclone.teamworksniper.MainActivity
+
+      - name: Upload verified beta artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Teamwork-Sniper-V1-Beta1
+          path: |
+            dist/Teamwork-Sniper-V1.apk
+            dist/Teamwork-Sniper-V1.apk.sha256
+            dist/Teamwork-Sniper-V1-Clean.apk
+            dist/Teamwork-Sniper-V1-Clean.apk.sha256
+            dist/source-sha.txt
+            dist/apk-badging.txt
+            dist/apk-clean-badging.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish beta release
+        if: ${{ contains(github.event.head_commit.message, 'publish beta') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          # Teamwork Sniper V1 Beta 1
+
+          Installability-focused beta of the redesigned Teamwork Sniper app.
+
+          Use **Teamwork-Sniper-V1-Clean.apk** first if previous Teamwork Sniper builds showed **App not installed**. It uses the fresh Android package id `com.cyclone.teamworksniper.v1`.
+
+          Both APKs passed metadata/safety checks, JVM unit tests, Android signature/manifest/alignment checks, and actual emulator install + launch verification before this prerelease was published.
+
+          Live Teamwork shift claiming still requires physical-device verification against the real Teamwork app.
+          EOF
+
+          if gh release view teamwork-sniper-v1-beta.1 >/dev/null 2>&1; then
+            gh release delete teamwork-sniper-v1-beta.1 --cleanup-tag --yes
+          fi
+
+          gh release create teamwork-sniper-v1-beta.1 \
+            --target "${GITHUB_SHA}" \
+            --prerelease \
+            --title "Teamwork Sniper V1 Beta 1" \
+            --notes-file release-notes.md \
+            dist/Teamwork-Sniper-V1.apk \
+            dist/Teamwork-Sniper-V1.apk.sha256 \
+            dist/Teamwork-Sniper-V1-Clean.apk \
+            dist/Teamwork-Sniper-V1-Clean.apk.sha256 \
+            dist/source-sha.txt
