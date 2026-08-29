@@ -9,6 +9,12 @@ android {
     compileSdk = 35
     defaultConfig {
         applicationId = "com.cyclone.teamworksniper"
+        // Clean-install compatibility build: same code/runtime, distinct Android package.
+        // This bypasses stale package/signature state in another Android user/profile
+        // without weakening the canonical package identity.
+        if (providers.gradleProperty("teamworkSniperCleanInstall").orNull == "true") {
+            applicationId = applicationId + ".v1"
+        }
         minSdk = 34
         targetSdk = 35
         versionCode = 7
