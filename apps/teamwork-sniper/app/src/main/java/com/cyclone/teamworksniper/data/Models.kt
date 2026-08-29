@@ -49,6 +49,10 @@ data class SniperSettings(
     val armed: Boolean = false,
     /** Legacy accessibility overlay. Deliberately opt-in; the native planner is the primary UI. */
     val legacyOverlayEnabled: Boolean = false,
+    val calendarSync: Boolean = false,
+    val teamworkDailySync: Boolean = false,
+    val standbyClaims: Boolean = false,
+    val lastTeamworkSyncMs: Long = 0L,
 )
 data class AiSettings(val enabled: Boolean = false, val model: String = "openrouter/auto")
 data class UiMapHint(val resourceId: String? = null, val semanticLabel: String? = null, val updatedAtEpochMs: Long = 0)

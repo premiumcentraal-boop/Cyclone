@@ -113,7 +113,7 @@ jobs:
       - name: Upload verified beta artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Teamwork-Sniper-V1-Beta2
+          name: Teamwork-Sniper-V1-Beta3
           path: |
             dist/Teamwork-Sniper-V1.apk
             dist/Teamwork-Sniper-V1.apk.sha256
@@ -132,25 +132,32 @@ jobs:
         shell: bash
         run: |
           cat > release-notes.md <<'EOF'
-          # Teamwork Sniper V1 Beta 2
+          # Teamwork Sniper V1 Beta 3
 
-          Fresh orange-identity build of the redesigned Teamwork Sniper app (versionCode 8).
+          Native schedule with a swipeable week bar, vertical M1–S3 days, and three shift states: Open, Sniping, Claimed.
 
-          Use **Teamwork-Sniper-V1-Clean.apk** first if previous Teamwork Sniper builds showed **App not installed**. It uses the fresh Android package id `com.cyclone.teamworksniper.v1`.
+          Setup is now three connections:
+          - Phone calendar — writes working / sniping / open shifts onto the device calendar
+          - Teamwork — one pull every 24 hours for the coming 3 weeks
+          - Standby claims — keep claiming after the screen locks (phone app only; requires Armed)
 
-          Both APKs passed metadata/safety checks, JVM unit tests, Android signature/manifest/alignment checks, and actual emulator install + launch verification before this prerelease was published.
+          Header Arm control is Off / Armed. versionCode 9.
+
+          Use **Teamwork-Sniper-V1-Clean.apk** first if a previous Teamwork Sniper build showed **App not installed**. It uses the fresh Android package id `com.cyclone.teamworksniper.v1`.
+
+          Both APKs passed metadata/safety checks, JVM unit tests, Android signature/manifest/alignment checks, and emulator install + launch verification before this prerelease was published.
 
           Live Teamwork shift claiming still requires physical-device verification against the real Teamwork app.
           EOF
 
-          if gh release view teamwork-sniper-v1-beta.2 >/dev/null 2>&1; then
-            gh release delete teamwork-sniper-v1-beta.2 --cleanup-tag --yes
+          if gh release view teamwork-sniper-v1-beta.3 >/dev/null 2>&1; then
+            gh release delete teamwork-sniper-v1-beta.3 --cleanup-tag --yes
           fi
 
-          gh release create teamwork-sniper-v1-beta.2 \
+          gh release create teamwork-sniper-v1-beta.3 \
             --target "${GITHUB_SHA}" \
             --prerelease \
-            --title "Teamwork Sniper V1 Beta 2" \
+            --title "Teamwork Sniper V1 Beta 3" \
             --notes-file release-notes.md \
             dist/Teamwork-Sniper-V1.apk \
             dist/Teamwork-Sniper-V1.apk.sha256 \

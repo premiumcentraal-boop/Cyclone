@@ -11,6 +11,10 @@ private const val RULES = "rules_json"
 private const val ENABLED = "sniper_enabled"
 private const val ARMED = "sniper_armed"
 private const val LEGACY_OVERLAY = "legacy_overlay_enabled"
+private const val CALENDAR_SYNC = "calendar_sync"
+private const val TEAMWORK_DAILY = "teamwork_daily_sync"
+private const val STANDBY_CLAIMS = "standby_claims"
+private const val LAST_TEAMWORK_SYNC = "last_teamwork_sync_ms"
 private const val AI_ENABLED = "ai_enabled"
 private const val AI_MODEL = "ai_model"
 private const val ACTIVITY = "activity_json"
@@ -35,6 +39,10 @@ class SettingsStore(context: Context) {
         enabled = p.getBoolean(ENABLED, true),
         armed = p.getBoolean(ARMED, false),
         legacyOverlayEnabled = p.getBoolean(LEGACY_OVERLAY, false),
+        calendarSync = p.getBoolean(CALENDAR_SYNC, false),
+        teamworkDailySync = p.getBoolean(TEAMWORK_DAILY, false),
+        standbyClaims = p.getBoolean(STANDBY_CLAIMS, false),
+        lastTeamworkSyncMs = p.getLong(LAST_TEAMWORK_SYNC, 0L),
     )
 
     fun save(value: SniperSettings) {
@@ -42,6 +50,10 @@ class SettingsStore(context: Context) {
             .putBoolean(ENABLED, value.enabled)
             .putBoolean(ARMED, value.armed)
             .putBoolean(LEGACY_OVERLAY, value.legacyOverlayEnabled)
+            .putBoolean(CALENDAR_SYNC, value.calendarSync)
+            .putBoolean(TEAMWORK_DAILY, value.teamworkDailySync)
+            .putBoolean(STANDBY_CLAIMS, value.standbyClaims)
+            .putLong(LAST_TEAMWORK_SYNC, value.lastTeamworkSyncMs)
             .apply()
     }
 }

@@ -7,7 +7,7 @@ python_version = "3.5.3"
 [components]
 mobile = "3.5.3"
 teamwork_sniper = "V1"
-teamwork_sniper_android_version_code = 8
+teamwork_sniper_android_version_code = 9
 pc_companion = "3.5.3"
 device_gateway = "3.5.3"
 mcp = "3.5.3"

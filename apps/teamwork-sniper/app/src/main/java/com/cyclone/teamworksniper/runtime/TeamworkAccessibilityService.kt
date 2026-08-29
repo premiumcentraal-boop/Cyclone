@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -470,6 +471,9 @@ class TeamworkAccessibilityService : AccessibilityService() {
             if (!settings.load().let { it.enabled && it.armed }) {
                 return Triple(results.joinToString(";"), "STOPPED", "Sniper not both enabled and armed")
             }
+            if (!screenAllowsClaim()) {
+                return Triple(results.joinToString(";"), "STOPPED", "Standby claims off · screen locked")
+            }
 
             val preflight = RuleEngine(LocalDate.now())
                 .evaluate(listOf(rule), scan(parser, reset = true))
@@ -524,6 +528,9 @@ class TeamworkAccessibilityService : AccessibilityService() {
             !settings.load().let { it.enabled && it.armed }
         ) {
             return Quad("NOT_EXECUTED", false, "STOPPED", "Safety state changed")
+        }
+        if (!screenAllowsClaim()) {
+            return Quad("NOT_EXECUTED", false, "STOPPED", "Standby claims off · screen locked")
         }
 
         if (!navigateToDate(target.date)) {
@@ -974,5 +981,11 @@ class TeamworkAccessibilityService : AccessibilityService() {
             delay(50)
         }
         return null
+    }
+
+    private fun screenAllowsClaim(): Boolean {
+        if (settings.load().standbyClaims) return true
+        val power = getSystemService(POWER_SERVICE) as PowerManager
+        return power.isInteractive
     }
 }

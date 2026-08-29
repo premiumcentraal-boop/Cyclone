@@ -3,6 +3,8 @@ package com.cyclone.teamworksniper.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,12 +21,12 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,11 +93,12 @@ fun SniperScreen(
     onAccessibility: () -> Unit,
     onOnboardingComplete: () -> Unit,
     onOpenTeamwork: () -> Unit,
+    onSyncNow: () -> Unit = {},
 ) {
     MaterialTheme(colorScheme = sniperPalette()) {
         Surface(Modifier.fillMaxSize(), color = AppBackground) {
             if (state.onboardingComplete) {
-                MainSniperApp(state, onSettings, onRules, onNotification, onAccessibility, onOpenTeamwork)
+                MainSniperApp(state, onSettings, onRules, onNotification, onAccessibility, onOpenTeamwork, onSyncNow)
             } else {
                 OnboardingFlow(state, onRules, onNotification, onAccessibility, onOnboardingComplete, onOpenTeamwork)
             }
@@ -283,6 +287,7 @@ private fun MainSniperApp(
     onNotification: () -> Unit,
     onAccessibility: () -> Unit,
     onOpenTeamwork: () -> Unit,
+    onSyncNow: () -> Unit,
 ) {
     var tabIndex by rememberSaveable { mutableIntStateOf(AppTab.SCHEDULE.ordinal) }
     var settingsPage by rememberSaveable { mutableIntStateOf(SettingsPage.ROOT.ordinal) }
@@ -295,9 +300,11 @@ private fun MainSniperApp(
                 title = when (tab) {
                     AppTab.SCHEDULE -> "This Week"
                     AppTab.ACTIVITY -> "Activity"
-                    AppTab.SETTINGS -> if (settingsPage == SettingsPage.ROOT.ordinal) "Settings" else ""
+                    AppTab.SETTINGS -> if (settingsPage == SettingsPage.ROOT.ordinal) "Setup" else ""
                 },
                 targetCount = targetCount(state.rules),
+                armed = state.settings.armed,
+                onArmed = { onSettings(state.settings.copy(armed = it)) },
                 showOpenTeamwork = tab == AppTab.SCHEDULE,
                 onOpenTeamwork = onOpenTeamwork,
             )
@@ -317,7 +324,15 @@ private fun MainSniperApp(
                             if (item != AppTab.SETTINGS) settingsPage = SettingsPage.ROOT.ordinal
                         },
                         icon = { Icon(icon, item.name.lowercase()) },
-                        label = { Text(item.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                        label = {
+                            Text(
+                                when (item) {
+                                    AppTab.SCHEDULE -> "Schedule"
+                                    AppTab.ACTIVITY -> "Activity"
+                                    AppTab.SETTINGS -> "Setup"
+                                },
+                            )
+                        },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = SniperOrange,
                             selectedTextColor = SniperOrange,
@@ -335,7 +350,7 @@ private fun MainSniperApp(
                 AppTab.SCHEDULE -> ScheduleScreen(state, onRules)
                 AppTab.ACTIVITY -> ActivityScreen(state.activity)
                 AppTab.SETTINGS -> when (SettingsPage.entries[settingsPage]) {
-                    SettingsPage.ROOT -> SettingsScreen(state, onSettings, onNotification, onAccessibility) { settingsPage = it.ordinal }
+                    SettingsPage.ROOT -> SettingsScreen(state, onSettings, onNotification, onAccessibility, onSyncNow) { settingsPage = it.ordinal }
                     SettingsPage.TEMPLATES -> TemplateSettingsPage { settingsPage = SettingsPage.ROOT.ordinal }
                     SettingsPage.OVERLAY -> OverlayPreviewPage(
                         enabled = state.settings.legacyOverlayEnabled,
@@ -350,7 +365,14 @@ private fun MainSniperApp(
 }
 
 @Composable
-private fun MainTopBar(title: String, targetCount: Int, showOpenTeamwork: Boolean, onOpenTeamwork: () -> Unit) {
+private fun MainTopBar(
+    title: String,
+    targetCount: Int,
+    armed: Boolean,
+    onArmed: (Boolean) -> Unit,
+    showOpenTeamwork: Boolean,
+    onOpenTeamwork: () -> Unit,
+) {
     Surface(color = CardSurface, shadowElevation = 1.dp) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             TargetMark(34.dp)
@@ -360,6 +382,7 @@ private fun MainTopBar(title: String, targetCount: Int, showOpenTeamwork: Boolea
                 val suffix = if (targetCount == 1) "" else "s"
                 Text(targetCount.toString() + " shift target" + suffix, color = Muted, style = MaterialTheme.typography.bodySmall)
             }
+            DualSwitch(value = armed, onChange = onArmed, onLabel = "Armed")
             if (showOpenTeamwork) {
                 IconButton(onClick = onOpenTeamwork) { Icon(Icons.Outlined.OpenInNew, "Open Teamwork", tint = SniperOrange) }
             }
@@ -447,7 +470,23 @@ private fun ReadinessStrip(state: UiState) {
 
 @Composable
 private fun WeekChooser(weekStart: LocalDate, onPrevious: () -> Unit, onNext: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = CardSurface), shape = RoundedLarge) {
+    var drag by remember { mutableFloatStateOf(0f) }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = CardSurface),
+        shape = RoundedLarge,
+        modifier = Modifier.pointerInput(weekStart) {
+            detectHorizontalDragGestures(
+                onDragEnd = {
+                    when {
+                        drag <= -64f -> onNext()
+                        drag >= 64f -> onPrevious()
+                    }
+                    drag = 0f
+                },
+                onHorizontalDrag = { _, amount -> drag += amount },
+            )
+        },
+    ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -455,8 +494,22 @@ private fun WeekChooser(weekStart: LocalDate, onPrevious: () -> Unit, onNext: ()
         ) {
             TextButton(onClick = onPrevious) { Text("‹", color = SniperOrange, style = MaterialTheme.typography.headlineSmall) }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Week " + weekStart.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR), fontWeight = FontWeight.Bold, color = Ink)
-                Text(weekStart.format(RangeFormat) + " – " + weekStart.plusDays(6).format(RangeFormat), color = Muted, style = MaterialTheme.typography.bodySmall)
+                val label = when (java.time.temporal.ChronoUnit.WEEKS.between(
+                    LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
+                    weekStart,
+                ).toInt()) {
+                    -1 -> "Last week"
+                    0 -> "This week"
+                    1 -> "Next week"
+                    else -> "Week " + weekStart.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+                }
+                Text(label, fontWeight = FontWeight.Bold, color = Ink)
+                Text(
+                    "Week " + weekStart.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR) +
+                        " · " + weekStart.format(RangeFormat) + " – " + weekStart.plusDays(6).format(RangeFormat),
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             TextButton(onClick = onNext) { Text("›", color = SniperOrange, style = MaterialTheme.typography.headlineSmall) }
         }
@@ -533,10 +586,6 @@ private fun ShiftTargetRow(template: ShiftTemplate, state: ShiftVisualState, ope
                     overflow = TextOverflow.Ellipsis,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (openNow) {
-                        StatePill("Open now", SuccessSoft, Success)
-                        Spacer(Modifier.width(6.dp))
-                    }
                     Text(
                         if (template.provenance == TemplateProvenance.PROVISIONAL) "Time not confirmed" else "Expected Teamwork time",
                         color = secondary,
@@ -546,9 +595,9 @@ private fun ShiftTargetRow(template: ShiftTemplate, state: ShiftVisualState, ope
             }
             Text(
                 when (state) {
-                    ShiftVisualState.AVAILABLE -> "Snipe"
-                    ShiftVisualState.SELECTED -> "Sniping ✓"
-                    ShiftVisualState.CLAIMED -> "Claimed ✓"
+                    ShiftVisualState.AVAILABLE -> "Open"
+                    ShiftVisualState.SELECTED -> "Sniping"
+                    ShiftVisualState.CLAIMED -> "Claimed"
                 },
                 color = foreground,
                 fontWeight = FontWeight.Bold,
@@ -621,6 +670,7 @@ private fun SettingsScreen(
     onSettings: (SniperSettings) -> Unit,
     onNotification: () -> Unit,
     onAccessibility: () -> Unit,
+    onSyncNow: () -> Unit,
     onPage: (SettingsPage) -> Unit,
 ) {
     LazyColumn(
@@ -628,24 +678,66 @@ private fun SettingsScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { SettingsStatusCard(state) }
+        item {
+            ConnectionCard(
+                icon = Icons.Outlined.CalendarMonth,
+                title = "Phone calendar",
+                subtitle = "Mirror every shift onto your calendar. Claimed shows as working hours.",
+                enabled = state.settings.calendarSync,
+                onEnabled = { onSettings(state.settings.copy(calendarSync = it)) },
+            )
+        }
+        item {
+            ConnectionCard(
+                icon = Icons.Outlined.Refresh,
+                title = "Teamwork",
+                subtitle = "Pull the coming 3 weeks from Teamwork once every 24 hours.",
+                enabled = state.settings.teamworkDailySync,
+                onEnabled = { onSettings(state.settings.copy(teamworkDailySync = it)) },
+            ) {
+                if (state.settings.teamworkDailySync) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            lastSyncLabel(state.settings.lastTeamworkSyncMs),
+                            color = Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onSyncNow) { Text("Sync now", color = SniperOrange) }
+                    }
+                }
+            }
+        }
+        item {
+            ConnectionCard(
+                icon = Icons.Outlined.DarkMode,
+                title = "Standby claims",
+                subtitle = "Keep claiming after the screen locks. Needs Armed plus a live accessibility service. A browser tab cannot do this; this phone app can.",
+                enabled = state.settings.standbyClaims,
+                onEnabled = { onSettings(state.settings.copy(standbyClaims = it)) },
+            ) {
+                if (state.settings.standbyClaims) {
+                    Text(
+                        if (state.settings.armed) {
+                            "Armed. Claims continue while Sniper stays resident, even if the screen is off."
+                        } else {
+                            "Turn Arm on in the header. Standby does nothing while the sniper is Off."
+                        },
+                        color = Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+            }
+        }
         item {
             SettingsGroup {
-                SettingsToggleRow(
-                    icon = { TargetMark(28.dp) },
-                    title = "Sniper enabled",
-                    subtitle = "Allow Teamwork notifications to trigger evaluation.",
-                    checked = state.settings.enabled,
-                    onCheckedChange = { onSettings(state.settings.copy(enabled = it)) },
-                )
+                PermissionSettingsRow(Icons.Outlined.Notifications, "Notification access", state.permissions.notificationAccess, onNotification)
                 DividerLine()
-                SettingsToggleRow(
-                    icon = { Icon(Icons.Outlined.Lock, null, tint = SniperOrange) },
-                    title = "Armed mode",
-                    subtitle = "Allow verified matching openings to be claimed.",
-                    checked = state.settings.armed,
-                    onCheckedChange = { onSettings(state.settings.copy(armed = it)) },
-                )
+                PermissionSettingsRow(Icons.Outlined.Accessibility, "Accessibility access", state.permissions.accessibilityAccess, onAccessibility)
             }
         }
         item {
@@ -658,32 +750,8 @@ private fun SettingsScreen(
             }
         }
         item {
-            SettingsGroup {
-                PermissionSettingsRow(Icons.Outlined.Notifications, "Notification access", state.permissions.notificationAccess, onNotification)
-                DividerLine()
-                PermissionSettingsRow(Icons.Outlined.Accessibility, "Accessibility access", state.permissions.accessibilityAccess, onAccessibility)
-            }
-        }
-        item {
-            SettingsGroup {
-                Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.SmartToy, null, tint = Muted)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("AI advisor", color = Ink, fontWeight = FontWeight.SemiBold)
-                        val aiLabel = when {
-                            !state.aiSettings.enabled -> "Optional · Off"
-                            state.aiKeyPresent -> "Optional · Configured"
-                            else -> "Optional · API key required"
-                        }
-                        Text(aiLabel, color = Muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
-        item {
             Text(
-                "Teamwork Sniper " + BuildConfig.VERSION_NAME + "\nSafe. Private. Reliable.",
+                "Teamwork Sniper " + BuildConfig.VERSION_NAME + "\nSafe. Private. On-device.",
                 color = Muted,
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
@@ -691,6 +759,72 @@ private fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun ConnectionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    onEnabled: (Boolean) -> Unit,
+    extra: @Composable ColumnScope.() -> Unit = {},
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = CardSurface), shape = RoundedLarge) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(icon, null, tint = SniperOrange, modifier = Modifier.size(22.dp).padding(top = 2.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, color = Ink, fontWeight = FontWeight.Bold)
+                    Text(subtitle, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.width(8.dp))
+                DualSwitch(value = enabled, onChange = onEnabled)
+            }
+            extra()
+        }
+    }
+}
+
+@Composable
+private fun DualSwitch(
+    value: Boolean,
+    onChange: (Boolean) -> Unit,
+    offLabel: String = "Off",
+    onLabel: String = "On",
+) {
+    Row(
+        modifier = Modifier
+            .height(44.dp)
+            .width(148.dp)
+            .clip(RoundedSmall)
+            .background(Assigned),
+    ) {
+        Box(
+            Modifier.weight(1f).fillMaxHeight().clip(RoundedSmall).background(if (!value) CardSurface else Color.Transparent).clickable { onChange(false) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(offLabel, color = if (!value) Ink else Muted, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+        }
+        Box(
+            Modifier.weight(1f).fillMaxHeight().clip(RoundedSmall).background(if (value) SniperOrange else Color.Transparent).clickable { onChange(true) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(onLabel, color = if (value) Color.White else Muted, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+private fun lastSyncLabel(lastMs: Long): String {
+    if (lastMs <= 0L) return "Never synced"
+    val minutes = ((System.currentTimeMillis() - lastMs) / 60_000L).toInt()
+    return when {
+        minutes < 1 -> "Last pull just now"
+        minutes < 60 -> "Last pull ${minutes}m ago"
+        minutes < 36 * 60 -> "Last pull ${minutes / 60}h ago"
+        else -> "Last pull ${minutes / (60 * 24)}d ago"
+    } + " · next in 24h"
 }
 
 @Composable
