@@ -134,6 +134,18 @@ second autonomous executor.
 
 **Tests/guards:** Retry, timeout, convergence, repetition, quality-gate, MCP target and privacy tests.
 
+## ADR-021 — PC agents receive page cards and verified action transitions
+
+**Status:** accepted
+
+**Context:** A compact list of arbitrary controls makes an external PC agent repeatedly rediscover where it is. Transport success after an action does not establish that the phone changed as intended.
+
+**Decision:** The Gateway/MCP boundary exposes a bounded Page Card as the default current-page representation. It contains sanitized location identity, page text/summary, control counts, current goal-ranked candidates, and a small set of confidence/freshness-qualified route hints. A mutating PC action returns its before/after Page Cards, page-change classification, concise semantic delta, and Android-owned verification result in one envelope. Observation-scoped element IDs remain mandatory for selection-based actions.
+
+**Consequences:** External agents can use a small `locate → act → verify` loop without raw-tree dumping or selector invention. The Gateway normalizes physical/virtual/device-scoped surfaces; Android remains the sole mutation and verification authority. Page Cards and route hints are advisory, sanitized, bounded, and must not contain secrets.
+
+**Tests/guards:** Producer/consumer fixtures must assert page-text retention, bounded candidate selection, after-state on actions, stale-ID rejection, device-scoped contract parity, and no transport-only verification.
+
 ## Adding a decision
 
 Use this template:
