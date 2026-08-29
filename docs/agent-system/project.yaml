@@ -3,7 +3,8 @@ project: Cyclone
 primary_direction: autonomous_android_phone_agent
 mission: >-
   Let a user ask for phone goals or teach routines, then observe, understand,
-  act, verify, learn, reuse and self-heal across Android apps.
+  act, verify, learn, reuse and self-heal across Android apps. V4 adds a
+  Gemini-style overlay and a portable skill OS on top of Infrastructure V3.
 
 canonical_docs:
   agent_rules: AGENTS.md
@@ -14,6 +15,11 @@ canonical_docs:
   multi_agent: docs/agent-system/MULTI_AGENT_PROTOCOL.md
   releases: docs/agent-system/FAST_RELEASE_PLAYBOOK.md
   roadmap: docs/agent-system/AUTONOMY_ROADMAP.md
+  v4_bible: docs/agent-system/V4_BUILD_BIBLE.md
+  v4_directions: docs/agent-system/V4_DIRECTIONS.md
+  v4_roadmap: docs/agent-system/V4_ROADMAP.md
+  overlay_handoff: docs/design/mobile-v32/SUPER_APP_OVERLAY_HANDOFF.md
+  mcp_skill: tools/codex-phone-mcp/SKILL.md
   decisions: docs/agent-system/DECISIONS.md
   infrastructure_v3: docs/agent-system/infrastructure-v3/README.md
   infrastructure_v3_adr: docs/agent-system/ADR_INFRASTRUCTURE_V3.md
@@ -112,6 +118,21 @@ infrastructure_v3:
     - blast_radius
     - ci_and_physical_verification_status
 
+infrastructure_v4:
+  status: direction_docs_only_until_slices_1_to_4_green_on_pixel
+  bible: docs/agent-system/V4_BUILD_BIBLE.md
+  first_slices:
+    - page_card_survives_mcp_compact
+    - phone_act_after_state_envelope
+    - skill_compile_into_existing_store
+    - overlay_chrome_analysis_working_live_gate
+  first_vertical: chat_intent_to_shop_cart_gate_to_draft_skill
+  mcp_default_tools:
+    - phone_status
+    - phone_locate
+    - phone_act
+    - phone_skill_run_or_save
+
 invariants:
   - one_android_launcher
   - one_phone_mutation_engine
@@ -125,6 +146,7 @@ invariants:
   - one_policy_authority
   - one_memory_write_seam
   - recovery_only_runtime_promotion_and_rollback
+  - overlay_chrome_is_not_a_second_executor
 
 release:
   verified_marker_pattern: releases/<version>/BUILD_VERIFIED.json
@@ -166,5 +188,6 @@ agent_bootstrap:
   command: python scripts/agent/cyclone-context.py --markdown
   first_read: docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md
   context_policy: root_rules_then_fast_playbook_then_one_owner_lane
+  v4_when: overlay_or_page_card_or_skill_or_mcp_compact
   task_template: .github/ISSUE_TEMPLATE/agent-task.md
   pr_template: .github/PULL_REQUEST_TEMPLATE.md
