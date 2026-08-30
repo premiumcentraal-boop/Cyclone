@@ -24,6 +24,7 @@ on:
       - 'release/beta/**'
       - 'release/stable/**'
       - 'release/cyclone-3.5.3-beta'
+      - 'release/cyclone-3.6-beta'
     paths:
       - 'apps/device-gateway/**'
       - 'apps/mobile/**'
@@ -33,7 +34,7 @@ on:
       - 'tools/codex-phone-mcp/**'
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
-      - 'scripts/ci/tests/**'
+      - 'scripts/ci/**'
       - 'release/version.toml'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
@@ -217,38 +218,25 @@ jobs:
           PC_VERSION: ${{ steps.versions.outputs.pc_version }}
           MOBILE_VERSION: ${{ steps.versions.outputs.mobile_version }}
         run: |
-          cat > release-notes.md <<EOF
-          # Cyclone 3.5.3
+          set -euo pipefail
+          NOTES_CANDIDATE="docs/release-notes/v${MOBILE_VERSION}.md"
+          if [[ -f "$NOTES_CANDIDATE" ]]; then
+            cp "$NOTES_CANDIDATE" release-notes.md
+          else
+            cat > release-notes.md <<EOF
+          # Cyclone ${MOBILE_VERSION}
 
-          Cyclone 3.5.3 ships three coordinated applications built from the same source revision.
+          Coordinated Mobile + PC Companion pre-release built from the same source revision.
 
           ## Downloads
-          - **Cyclone Mobile 3.5.3** — Android APK for the main Cyclone phone experience.
-          - **Teamwork Sniper 3.5.3** — separate Android APK for automatic Picnic Teamwork open-shift matching and claiming.
-          - **Cyclone PC Companion 3.5.3** — Windows installer with Device Gateway and Cyclone Agent MCP integration.
-          - Checksums, source SHA, build provenance and third-party notices are attached alongside the installers.
-
-          ## Teamwork Sniper
-          - Works directly on Android; no PC connection is required.
-          - Watches Teamwork notifications and reads the live Android accessibility hierarchy.
-          - Uses semantic UI mapping and accessibility actions rather than screenshots, OCR or hard-coded coordinates.
-          - Supports M1, M2, S1, S2 and S3 exact, combination and same-day sequence rules.
-          - Requires explicit **Enabled + Armed** state before any claim attempt.
-          - Re-observes the live Teamwork tree before every action and verifies the target is no longer open after a claim.
-          - Includes optional OpenRouter support with an Android-Keystore-protected API key.
-          - AI is advisory only: it may prioritize already-valid matches, while deterministic user rules remain the action authority and automatic fallback.
-
-          ## Cyclone Mobile + PC
-          - Preserves the Cyclone Home, Teach, AI, Routines, Brain, Settings and PC Gateway product surfaces.
-          - Aligns Mobile, PC Companion, Device Gateway, Codex phone MCP and generic Cyclone Agent MCP at 3.5.3.
-          - Keeps phone execution capability-aware, policy-gated and verification-first.
-          - Windows fleet/device controls and Android pairing remain integrated through the Cyclone Device Gateway.
+          - **Cyclone Mobile ${MOBILE_VERSION}** — Android APK
+          - **Cyclone PC Companion ${PC_VERSION}** — Windows installer with Device Gateway and Agent MCP
+          - Checksums, source SHA, build provenance and third-party notices are attached
 
           ## Installation notes
-          Teamwork Sniper needs Android Notification Access and Accessibility Access before it can react to Teamwork. Leave it disarmed while configuring rules, then arm it only when you want matching open shifts to be claimed.
-
-          The Android APKs are currently CI debug-signed and the Windows installer is unsigned. A differently signed prior Android build may need to be removed before installation, which removes that app's local data.
+          The Android APK is currently CI debug-signed and the Windows installer is unsigned. A differently signed prior Android build may need to be removed before installation, which removes that app's local data.
           EOF
+          fi
 
       - name: Create or replace GitHub release
         shell: bash
