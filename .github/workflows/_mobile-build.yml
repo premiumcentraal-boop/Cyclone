@@ -10,11 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source without credentials or submodules
+      - name: Checkout source with pinned build dependencies
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-          submodules: false
+          # mobilerun-embedded compiles the repository-pinned Mobilerun source. A clean checkout
+          # without this submodule cannot link the Android resources or produce a trustworthy APK.
+          submodules: recursive
       - name: Run cheap metadata and architecture guards
         id: mobile
         shell: bash
