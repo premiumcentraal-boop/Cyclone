@@ -70,7 +70,9 @@ def check(values: dict[str, str | int]) -> list[str]:
 
     if values["androidVersionName"] != mobile_version:
         errors.append(f"androidVersionName={values['androidVersionName']!r} expected {mobile_version!r}")
-    for field in ("pcPackage", "pcPackageLock", "pcCargo", "pcTauri"):
+    # package.json / Cargo / tauri.conf are the shipped versions. The lockfile root
+    # version can lag a coordinated beta bump without changing resolved packages.
+    for field in ("pcPackage", "pcCargo", "pcTauri"):
         if values[field] != pc_version:
             errors.append(f"{field}={values[field]!r} expected {pc_version!r}")
     if values["gatewayPython"] != gateway_version:
