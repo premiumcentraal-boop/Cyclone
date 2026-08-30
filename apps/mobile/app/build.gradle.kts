@@ -1,7 +1,18 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+fun materializePinnedDebugKeystore(): File {
+    val store = rootProject.file("debug.keystore")
+    val encoded = rootProject.file("debug.keystore.b64")
+    if (!store.exists() && encoded.exists()) {
+        store.writeBytes(Base64.getDecoder().decode(encoded.readText().trim()))
+    }
+    return store
 }
 
 android {
@@ -11,10 +22,21 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 40
-        versionName = "3.6.0-beta"
+        versionCode = 41
+        versionName = "3.6.0-beta.1"
+    }
+    signingConfigs {
+        create("ciDebug") {
+            storeFile = materializePinnedDebugKeystore()
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("ciDebug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
