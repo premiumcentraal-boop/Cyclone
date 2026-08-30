@@ -13,6 +13,7 @@ class ObserveRequest(BaseModel):
     uiautomator: bool = True
     mode: Literal["compact", "full"] = "compact"
     goal: str | None = None
+    device_id: str | None = None
 
     @property
     def wants_screenshot(self) -> bool:
@@ -39,6 +40,9 @@ class ActionRequest(BaseModel):
     goal: str = ""
     source: Literal["PC_CODEX"] = "PC_CODEX"
     request_id: str | None = None
+    device_id: str | None = None
+    generation: str | None = None
+    visionFallback: bool = False
 
 
 class DebugBundleRequest(BaseModel):

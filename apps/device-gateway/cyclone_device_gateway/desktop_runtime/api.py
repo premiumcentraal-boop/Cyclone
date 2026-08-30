@@ -16,6 +16,7 @@ from ..auth import verify_bearer
 from ..config import Settings
 from ..server import create_app as create_legacy_app
 from ..api.stream_api import create_stream_router
+from ..adb.screenshot import ScreenshotStore
 from ..backends.desktop_android import DesktopAndroidBackend
 from ..virtual import AndroidEmulatorProvider, VirtualDeviceConfig, VirtualDeviceRegistry, VirtualDeviceService
 from .agent import DesktopAgentService
@@ -72,6 +73,8 @@ class AgentActionBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     goal: str = ""
     expected_observation_id: str | None = None
+    generation: str | None = None
+    visionFallback: bool = False
 
 
 class AgentDebugBody(BaseModel):
@@ -163,7 +166,10 @@ class DesktopRuntime:
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
-        self.agent = DesktopAgentService(self.fleet)
+        self.agent = DesktopAgentService(
+            self.fleet,
+            screenshots=ScreenshotStore(settings.runtime_dir / "agent-screenshots"),
+        )
         self.batches = FleetBatchService(lambda device_id: DesktopAndroidBackend(
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
         ))

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from copy import deepcopy
+from dataclasses import asdict
 import secrets
 import threading
 from typing import Any
 
+from ..actions.envelope import (
+    build_act_envelope,
+    generation_from_element_id,
+    has_coordinate_tap,
+    pop_envelope_flags,
+)
+from ..adb.screenshot import ScreenshotStore
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
@@ -23,9 +32,16 @@ class DesktopAgentService:
     arbitrary Android bridge operation, ADB command, shell command, or executable payload.
     """
 
-    def __init__(self, fleet: DeviceFleetManager, history_limit: int = 40):
+    def __init__(
+        self,
+        fleet: DeviceFleetManager,
+        history_limit: int = 40,
+        *,
+        screenshots: ScreenshotStore | None = None,
+    ):
         self.fleet = fleet
         self.history_limit = max(5, min(int(history_limit), 100))
+        self.screenshots = screenshots
         self._history: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=self.history_limit))
         self._lock = threading.RLock()
 
@@ -75,10 +91,13 @@ class DesktopAgentService:
             "observationId": observation_id,
             "pageKey": observation.get("pageKey"),
             "package": observation.get("package"),
+            "activity": observation.get("activity"),
         }
         self._append(device_id, record)
+        screenshot = self._capture_screenshot(session) if include_screenshot else None
         return {
             "device_id": device_id,
+            "serial": session.serial if hasattr(session, "serial") else None,
             "mode": mode if mode in {"compact", "full"} else "compact",
             "observation": observation,
             "witness": {
@@ -86,10 +105,25 @@ class DesktopAgentService:
                 "page_key": observation.get("pageKey"),
                 "captured_at": observation.get("timestamp"),
             },
-            # Screenshot transport belongs to Desktop video. MCP does not receive unbounded image
-            # bytes from this semantic endpoint.
-            "screenshot": {"available": False, "reason": "USE_DESKTOP_VIDEO_OR_DEBUG_BUNDLE"} if include_screenshot else None,
+            "screenshot": screenshot,
         }
+
+    def _capture_screenshot(self, session: DeviceSession) -> dict[str, Any]:
+        identity = {
+            "device_id": session.device_id,
+            "serial": getattr(session, "serial", None),
+        }
+        if self.screenshots is None:
+            return {
+                "available": False,
+                "reason": "USE_DESKTOP_VIDEO_OR_DEBUG_BUNDLE",
+                **identity,
+            }
+        try:
+            meta = self.screenshots.capture(session.adb)
+            return {"available": True, "source": "ADB", **identity, **asdict(meta)}
+        except Exception as exc:
+            return {"available": False, "source": "ADB", "error": str(exc), **identity}
 
     def ui_search(self, device_id: str, query: str) -> dict[str, Any]:
         session = self._paired(device_id)
@@ -117,15 +151,46 @@ class DesktopAgentService:
         tool = str(payload.get("capability_id") or payload.get("tool") or "")
         if tool not in ALLOWED_PHONE_TOOLS:
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Requested phone capability is unavailable.")
-        params = payload.get("params") or {}
-        if not isinstance(params, dict):
+        raw_params = payload.get("params") or {}
+        if not isinstance(raw_params, dict):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object.")
+        params = deepcopy(raw_params)
+        vision_fallback, flag_generation = pop_envelope_flags(params)
+        vision_fallback = bool(vision_fallback or payload.get("visionFallback") or payload.get("vision_fallback"))
         goal = str(payload.get("goal") or tool.replace("phone.", "").replace("_", " "))[:1000]
-        expected = str(payload.get("expected_observation_id") or payload.get("currentObservationId") or "")
+        expected = str(
+            payload.get("expected_observation_id")
+            or payload.get("currentObservationId")
+            or payload.get("generation")
+            or flag_generation
+            or ""
+        )
         if tool not in {"phone.observe", "phone.find", "phone.wait_for"} and not expected:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A fresh observation is required before mutation.")
 
         before = self._latest_observation(device_id)
+        latest_id = str((before or {}).get("observationId") or "")
+        element_id = params.get("elementId") or params.get("element_id")
+        selector = params.get("selector") if isinstance(params.get("selector"), dict) else {}
+        element_id = element_id or selector.get("elementId") or selector.get("element_id")
+        embedded_generation = generation_from_element_id(element_id)
+        generation = flag_generation or embedded_generation or expected or latest_id or None
+
+        if tool in {"phone.click", "phone.long_press"} and has_coordinate_tap(params) and not vision_fallback:
+            return self._fail_closed_action(
+                device_id,
+                tool,
+                before,
+                generation,
+                "COORDINATE_TAP_DENIED",
+            )
+        if generation and latest_id and generation != latest_id:
+            return self._fail_closed_action(device_id, tool, before, generation, "STALE_ELEMENT")
+        if expected and latest_id and expected != latest_id:
+            return self._fail_closed_action(device_id, tool, before, expected, "STALE_ELEMENT")
+        if embedded_generation and expected and embedded_generation != expected:
+            return self._fail_closed_action(device_id, tool, before, embedded_generation, "STALE_ELEMENT")
+
         args: dict[str, Any] = {
             "tool": tool,
             "params": params,
@@ -151,6 +216,7 @@ class DesktopAgentService:
             "observationId": after_id,
             "pageKey": after.get("pageKey"),
             "package": after.get("package"),
+            "activity": after.get("activity"),
         })
         execution_payload = execution.get("execution") if isinstance(execution, dict) else None
         android_execution = execution.get("androidExecution") if isinstance(execution, dict) else None
@@ -180,7 +246,14 @@ class DesktopAgentService:
             and verification_status in {"PASSED", "NOT_REQUIRED"}
             and semantic_success_claimed
         )
-        return {
+        envelope = build_act_envelope(
+            ok=verification_passed,
+            before=before,
+            after=after,
+            generation=generation,
+            error_class=None if verification_passed else (android_verification or {}).get("code") if isinstance(android_verification, dict) else "VERIFICATION_FAILED",
+        )
+        result = {
             "device_id": device_id,
             "capability_id": tool,
             "transport": {"ok": True},
@@ -190,6 +263,7 @@ class DesktopAgentService:
                 # result, or fresh observation is evidence, but none of those alone proves that
                 # the requested semantic after-state was reached.
                 "passed": verification_passed,
+                "ok": verification_passed,
                 "status": verification_status,
                 "code": android_verification.get("code") if isinstance(android_verification, dict) else None,
                 "semantic_success_claimed": semantic_success_claimed,
@@ -199,6 +273,42 @@ class DesktopAgentService:
                 "after_page_key": after.get("pageKey"),
             },
             "after": after,
+        }
+        result.update(envelope)
+        return result
+
+    def _fail_closed_action(
+        self,
+        device_id: str,
+        tool: str,
+        before: dict[str, Any] | None,
+        generation: str | None,
+        error_class: str,
+    ) -> dict[str, Any]:
+        envelope = build_act_envelope(
+            ok=False,
+            before=before,
+            after=before,
+            generation=generation,
+            error_class=error_class,
+        )
+        return {
+            "device_id": device_id,
+            "capability_id": tool,
+            "transport": {"ok": True},
+            "execution": {"ok": False, "status": "not_attempted", "error": {"code": error_class}},
+            "verification": {
+                "passed": False,
+                "ok": False,
+                "status": "not_attempted",
+                "authority": "ANDROID_CANONICAL",
+                "before_observation_id": (before or {}).get("observationId"),
+                "after_observation_id": (before or {}).get("observationId"),
+                "after_page_key": (before or {}).get("pageKey"),
+            },
+            "after": before,
+            "mutated": False,
+            **envelope,
         }
 
     def debug_bundle(self, device_id: str, *, expected: str = "", goal: str = "") -> dict[str, Any]:

@@ -35,6 +35,7 @@ from .cyclone_bridge.client import CycloneBridgeClient
 from .retrieval.service import RetrievalService
 from .root.provider import RootProvider
 from .state.store import StateStore
+from .state.identity import DeviceIdentityError, resolve_device_identity
 from .uiautomator.client import UiAutomatorProvider
 
 
@@ -101,7 +102,12 @@ class Gateway:
         screenshot: bool = False,
         uiautomator: bool = True,
         diagnostics: bool = False,
+        device_id: str | None = None,
     ) -> dict:
+        identity = resolve_device_identity(
+            device_id=device_id,
+            serial=getattr(self.adb, "serial", None) or self.settings.device_serial,
+        )
         semantic = self.bridge.request("observe.semantic", {})
 
         page_debug: dict[str, Any] | None = None
@@ -130,9 +136,19 @@ class Gateway:
         shot = None
         if screenshot:
             try:
-                shot = {"source": "ADB", **asdict(self.screens.capture(self.adb))}
+                shot = {
+                    "source": "ADB",
+                    **asdict(self.screens.capture(self.adb)),
+                    "device_id": identity["device_id"],
+                    "serial": identity["serial"],
+                }
             except Exception as exc:
-                shot = {"source": "ADB", "error": str(exc)}
+                shot = {
+                    "source": "ADB",
+                    "error": str(exc),
+                    "device_id": identity["device_id"],
+                    "serial": identity["serial"],
+                }
 
         raw: dict[str, Any] = {"semantic": semantic}
         if page_debug is not None:
@@ -147,7 +163,8 @@ class Gateway:
             raw=raw,
         )
         observation = self.store.get_observation(observation_id) or {}
-        observation["device_serial"] = getattr(self.adb, "serial", None)
+        observation["device_id"] = identity["device_id"]
+        observation["device_serial"] = identity["serial"]
         return observation
 
     def _observe_for_action(self) -> dict:
@@ -338,15 +355,21 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
 
     @app.post("/v1/observe", dependencies=[Depends(auth)])
     def observe(request: ObserveRequest):
-        gateway.observe(
-            screenshot=request.wants_screenshot,
-            uiautomator=request.uiautomator,
-            diagnostics=request.mode == "full",
-        )
+        try:
+            captured = gateway.observe(
+                screenshot=request.wants_screenshot,
+                uiautomator=request.uiautomator,
+                diagnostics=request.mode == "full",
+                device_id=request.device_id,
+            )
+        except DeviceIdentityError as exc:
+            raise HTTPException(404, str(exc)) from exc
         result = gateway.retrieval.get_page_context(request.mode, request.goal)
         if result is None:
             raise HTTPException(404, "No observation captured")
         result.update(gateway.knowledge_context(request.goal))
+        result["device_id"] = captured.get("device_id")
+        result["device_serial"] = captured.get("device_serial")
         return result
 
     @app.get("/v1/ui/search", dependencies=[Depends(auth)])
@@ -383,8 +406,18 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
 
     @app.post("/v1/action", dependencies=[Depends(auth)])
     def action(request: ActionRequest):
+        payload = request.model_dump()
         try:
-            result = gateway.actions.execute(**request.model_dump())
+            result = gateway.actions.execute(
+                tool=payload["tool"],
+                params=payload.get("params") or {},
+                goal=payload.get("goal") or "",
+                source=payload.get("source") or "PC_CODEX",
+                request_id=payload.get("request_id"),
+                generation=payload.get("generation"),
+                vision_fallback=bool(payload.get("visionFallback")),
+                device_id=payload.get("device_id"),
+            )
         except ActionValidationError as exc:
             raise HTTPException(400, str(exc))
         except Exception:
@@ -393,10 +426,17 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
                 content={
                     "request_id": request.request_id,
                     "success": False,
+                    "ok": False,
                     "transport_ok": False,
                     "execution_ok": False,
                     "verification_ok": False,
                     "error_class": GatewayErrorCode.DEVICE_DISCONNECTED,
+                    "errorClass": GatewayErrorCode.DEVICE_DISCONNECTED,
+                    "pageChanged": False,
+                    "before": {"pageKey": None, "package": None, "activity": None},
+                    "after": {"pageKey": None, "package": None, "activity": None},
+                    "delta": {"appeared": [], "disappeared": [], "focused": []},
+                    "generation": None,
                 },
             )
         status = _legacy_action_http_status(request.tool, result)
@@ -456,6 +496,10 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
 
 
 def _legacy_action_http_status(tool: str, result: dict[str, Any]) -> int:
+    error_class = str(result.get("errorClass") or result.get("error_class") or "").upper()
+    if error_class in {"STALE_ELEMENT", "COORDINATE_TAP_DENIED"}:
+        # Application fail-closed: HTTP 200 is not success. Clients must read `ok`.
+        return 200
     if result.get("transport_ok") is not True:
         return ERROR_HTTP_STATUS[GatewayErrorCode.DEVICE_DISCONNECTED]
     if result.get("execution_ok") is not True:

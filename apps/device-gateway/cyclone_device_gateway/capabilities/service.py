@@ -22,6 +22,7 @@ from .registry import CapabilityRegistry
 ERROR_HTTP_STATUS = {
     GatewayErrorCode.CAPABILITY_UNAVAILABLE: 503,
     GatewayErrorCode.STALE_OBSERVATION: 409,
+    GatewayErrorCode.STALE_ELEMENT: 409,
     GatewayErrorCode.POLICY_DENIED: 403,
     GatewayErrorCode.EXECUTION_FAILED: 502,
     GatewayErrorCode.VERIFICATION_FAILED: 409,
@@ -243,7 +244,7 @@ class CapabilityService:
                 retryable=True,
             )
         if not execution_ok:
-            error_class = str(raw.get("error_class") or "").upper()
+            error_class = str(raw.get("errorClass") or raw.get("error_class") or "").upper()
             if error_class == GatewayErrorCode.AUTH_REJECTED:
                 return _error(
                     GatewayErrorCode.AUTH_REJECTED,
@@ -269,6 +270,19 @@ class CapabilityService:
                     FailureLayer.PROTOCOL,
                     "Android rejected stale observation evidence.",
                     retryable=True,
+                )
+            if error_class == GatewayErrorCode.STALE_ELEMENT or error_class == "STALE_ELEMENT":
+                return _error(
+                    GatewayErrorCode.STALE_ELEMENT,
+                    FailureLayer.PROTOCOL,
+                    "ElementId generation does not match the current observation.",
+                    retryable=True,
+                )
+            if error_class == "COORDINATE_TAP_DENIED":
+                return _error(
+                    GatewayErrorCode.PROTOCOL_MISMATCH,
+                    FailureLayer.PROTOCOL,
+                    "Coordinate taps require visionFallback=true.",
                 )
             if error_class == GatewayErrorCode.PROTOCOL_MISMATCH:
                 return _error(

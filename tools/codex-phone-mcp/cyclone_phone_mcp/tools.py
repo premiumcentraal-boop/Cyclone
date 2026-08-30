@@ -212,23 +212,28 @@ class PhoneTools:
             # This is only an MCP-side intent/UX guard. It is never Android policy authority;
             # the V3 GatewayActionAuthority must still authorize the actual handoff.
             raise ValueError("phone.type requires user_authorized=true as an explicit MCP intent acknowledgement")
+        if tool in {"phone.click", "phone.long_press"} and _has_coordinate_tap(params) and not _vision_fallback(params, args):
+            raise ValueError("Coordinate taps require visionFallback=true")
         device_id = _device_id(args)
         if device_id:
             result = redact(self.gateway.device_action(device_id, tool, params, goal))
         else:
             result = redact(self.gateway.action(tool, params, goal))
+        envelope = _attach_act_envelope(result)
         failure = classify_failure(result)
         if failure:
-            error_class = failure.code
             verification = result.get("verification") if isinstance(result, dict) else None
-            return {
+            payload = {
                 "error": "Phone action failed",
-                "errorClass": error_class,
                 "failureLayer": failure.layer,
                 "verification": verification,
                 "action": result,
             }
-        return result
+            payload.update({key: envelope[key] for key in _ACT_ENVELOPE_KEYS})
+            payload["errorClass"] = envelope.get("errorClass") or failure.code
+            payload["ok"] = False
+            return payload
+        return envelope
 
     def phone_group_act(self, args: dict[str, Any]) -> Any:
         raw_ids = args.get("device_ids")
@@ -366,6 +371,118 @@ def _extract_screenshot_path(value: Any) -> str | None:
             if isinstance(path, str) and os.path.isabs(path):
                 return path
     return None
+
+
+_ACT_ENVELOPE_KEYS = ("ok", "pageChanged", "before", "after", "delta", "errorClass", "generation")
+_PASSWORD_HINTS = ("password", "passwd", "passcode", "otp", "pin")
+
+
+def _has_coordinate_tap(params: dict[str, Any]) -> bool:
+    selector = params.get("selector") if isinstance(params.get("selector"), dict) else {}
+    return any(key in params for key in ("x", "y")) or any(key in selector for key in ("x", "y"))
+
+
+def _vision_fallback(params: dict[str, Any], args: dict[str, Any]) -> bool:
+    return bool(
+        params.get("visionFallback")
+        or params.get("vision_fallback")
+        or args.get("visionFallback")
+        or args.get("vision_fallback")
+    )
+
+
+def _page_ref(value: Any, *, include_card: bool = False) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"pageKey": None, "package": None, "activity": None}
+    nested = value.get("observation") if isinstance(value.get("observation"), dict) else value
+    ref = {
+        "pageKey": nested.get("pageKey") or nested.get("page_key") or value.get("pageKey") or value.get("page_key"),
+        "package": nested.get("package") or value.get("package"),
+        "activity": nested.get("activity") or value.get("activity"),
+    }
+    if include_card:
+        card = value.get("pageCard") or nested.get("pageCard")
+        if not isinstance(card, dict):
+            card = {
+                "package": ref["package"],
+                "activity": ref["activity"],
+                "pageKey": ref["pageKey"],
+                "title": nested.get("pageTitle") or nested.get("title") or value.get("title"),
+                "pageText": nested.get("pageText") or "",
+                "pageSummary": nested.get("pageSummary") or "",
+                "controls": nested.get("controls") or nested.get("semanticControls") or [],
+            }
+        ref["pageCard"] = _sanitize_page_card(card)
+    return ref
+
+
+def _sanitize_page_card(card: Any) -> dict[str, Any]:
+    if not isinstance(card, dict):
+        return {}
+    out = dict(card)
+    controls = out.get("controls")
+    sanitized_controls: list[dict[str, Any]] = []
+    if isinstance(controls, list):
+        for item in controls:
+            if not isinstance(item, dict):
+                continue
+            control = dict(item)
+            haystack = " ".join(str(control.get(key) or "") for key in ("role", "class", "inputType", "hint", "label", "resourceId")).lower()
+            secret = control.get("password") is True or any(hint in haystack for hint in _PASSWORD_HINTS)
+            if secret:
+                for key in ("text", "label", "value", "hint", "contentDescription"):
+                    if key in control and control[key] not in (None, "", "<redacted>"):
+                        control[key] = "<redacted>"
+            sanitized_controls.append(control)
+    out["controls"] = sanitized_controls
+    out["pageText"] = out.get("pageText") or ""
+    return redact(out)
+
+
+def _delta(value: Any) -> dict[str, list[Any]]:
+    if not isinstance(value, dict):
+        return {"appeared": [], "disappeared": [], "focused": []}
+    def _list(key: str) -> list[Any]:
+        raw = value.get(key)
+        return list(raw) if isinstance(raw, list) else []
+    return {"appeared": _list("appeared"), "disappeared": _list("disappeared"), "focused": _list("focused")}
+
+
+def _attach_act_envelope(result: Any) -> dict[str, Any]:
+    payload = dict(result) if isinstance(result, dict) else {"ok": False, "errorClass": "PROTOCOL_MISMATCH"}
+    before_src = payload.get("before")
+    after_src = payload.get("after")
+    if not isinstance(before_src, dict):
+        before_src = payload.get("before_witness") or {}
+    if not isinstance(after_src, dict):
+        after_src = payload.get("after_witness") or payload.get("after") or {}
+    error_class = payload.get("errorClass") or payload.get("error_class")
+    if not error_class and isinstance(payload.get("error"), dict):
+        error_class = payload["error"].get("code")
+    ok = payload.get("ok")
+    if not isinstance(ok, bool):
+        ok = payload.get("success") is True
+    before = _page_ref(before_src)
+    after = _page_ref(after_src, include_card=True)
+    page_changed = payload.get("pageChanged")
+    if not isinstance(page_changed, bool):
+        page_changed = bool(before.get("pageKey") and after.get("pageKey") and before.get("pageKey") != after.get("pageKey"))
+    generation = payload.get("generation")
+    if generation in (None, ""):
+        if isinstance(payload.get("before_witness"), dict):
+            generation = payload["before_witness"].get("observation_id")
+        elif isinstance(payload.get("witness"), dict):
+            generation = payload["witness"].get("observation_id")
+    payload.update({
+        "ok": bool(ok),
+        "pageChanged": bool(page_changed),
+        "before": before,
+        "after": after,
+        "delta": _delta(payload.get("delta")),
+        "errorClass": None if error_class in (None, "") else str(error_class),
+        "generation": generation,
+    })
+    return payload
 
 
 def _to_mcp_content(result: Any) -> list[dict[str, Any]]:

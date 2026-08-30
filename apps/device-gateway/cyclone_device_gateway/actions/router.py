@@ -6,6 +6,7 @@ import uuid
 import re
 from typing import Any, Callable
 
+from .envelope import FailClosedError, build_act_envelope, generation_from_element_id, has_coordinate_tap, observation_generation, pop_envelope_flags
 from ..auth import AuditLog, redact_params
 from ..cyclone_bridge.client import BridgeOperationError, BridgeProtocolError
 from ..retrieval.service import RetrievalService
@@ -144,7 +145,7 @@ def _witness(observation: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _selector_from_element(element: dict[str, Any]) -> dict[str, Any]:
+def _selector_from_element(element: dict[str, Any], *, vision_fallback: bool = False) -> dict[str, Any]:
     selector: dict[str, Any] = {}
 
     embedded = element.get("selector")
@@ -177,7 +178,7 @@ def _selector_from_element(element: dict[str, Any]) -> dict[str, Any]:
 
     if not selector:
         bounds = element.get("bounds")
-        if isinstance(bounds, dict):
+        if vision_fallback and isinstance(bounds, dict):
             left = bounds.get("left")
             top = bounds.get("top")
             right = bounds.get("right")
@@ -262,7 +263,59 @@ class ActionRouter:
         self.stabilize = stabilize
         self.resolve_element = resolve_element or RetrievalService(store).get_element
 
-    def _resolve_element_ids(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _current_observation(self) -> dict[str, Any] | None:
+        current = self.store.current_observation()
+        return current if isinstance(current, dict) else None
+
+    def _fail_closed(
+        self,
+        *,
+        request_id: str,
+        error_class: str,
+        generation: str | None,
+        observation: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        snapshot = observation if isinstance(observation, dict) else {}
+        envelope = build_act_envelope(
+            ok=False,
+            before=snapshot,
+            after=snapshot,
+            generation=generation,
+            error_class=error_class,
+        )
+        witness = _witness(snapshot) if snapshot else {
+            "observation_id": str(generation or ""),
+            "gateway_record_id": "",
+            "page_key": None,
+            "package": None,
+            "accessibility_fingerprint": None,
+        }
+        return {
+            "request_id": request_id,
+            "success": False,
+            "transport_ok": True,
+            "execution_ok": False,
+            "verification_ok": False,
+            "result": {"error": {"code": error_class}, "mutated": False},
+            "transition_id": None,
+            "before_page": envelope["before"]["pageKey"],
+            "after_page": envelope["after"]["pageKey"],
+            "latency_ms": 0,
+            "verification": "not_attempted",
+            "verification_error_class": None,
+            "error_class": error_class,
+            "before_witness": witness,
+            "after_witness": witness,
+            **envelope,
+        }
+
+    def _resolve_element_ids(
+        self,
+        params: dict[str, Any],
+        *,
+        vision_fallback: bool = False,
+        expected_generation: str | None = None,
+    ) -> dict[str, Any]:
         resolved = deepcopy(params)
         selector = resolved.get("selector")
         if selector is not None and not isinstance(selector, dict):
@@ -279,13 +332,30 @@ class ActionRouter:
         if not element_id:
             return resolved
 
+        current = self._current_observation()
+        current_generation = observation_generation(current)
+        embedded_generation = generation_from_element_id(element_id)
+        generation = expected_generation or embedded_generation or current_generation
+        if embedded_generation and current_generation and embedded_generation != current_generation:
+            raise FailClosedError("STALE_ELEMENT", generation=embedded_generation)
+        if expected_generation and current_generation and expected_generation != current_generation:
+            raise FailClosedError("STALE_ELEMENT", generation=expected_generation)
+        if (
+            expected_generation
+            and embedded_generation
+            and expected_generation != embedded_generation
+        ):
+            raise FailClosedError("STALE_ELEMENT", generation=expected_generation)
+
         element = self.resolve_element(str(element_id))
         if element is None:
-            raise ActionValidationError(
-                "Unknown or stale elementId; observe/search the current page again"
+            raise FailClosedError(
+                "STALE_ELEMENT",
+                generation=generation,
+                message="Unknown or stale elementId; observe/search the current page again",
             )
 
-        stable_selector = _selector_from_element(element)
+        stable_selector = _selector_from_element(element, vision_fallback=vision_fallback)
         if isinstance(selector, dict):
             stable_selector.update(_normalize_aliases(selector))
         resolved["selector"] = stable_selector
@@ -303,16 +373,65 @@ class ActionRouter:
         goal: str = "",
         source: str = "PC_CODEX",
         request_id: str | None = None,
+        generation: str | None = None,
+        vision_fallback: bool = False,
+        device_id: str | None = None,
     ) -> dict:
         validate_action(tool, params)
         if source != "PC_CODEX":
             raise ActionValidationError("Action source must be PC_CODEX")
 
-        resolved_params = self._resolve_element_ids(params)
-        resolved_params = _normalize_action_params(tool, resolved_params)
-        validate_action(tool, resolved_params)
-
         request_id = request_id or str(uuid.uuid4())
+        working = deepcopy(params)
+        flag_vision, flag_generation = pop_envelope_flags(working)
+        vision_fallback = bool(vision_fallback or flag_vision)
+        requested_generation = str(generation).strip() if generation not in (None, "") else flag_generation
+        current = self._current_observation()
+        current_generation = observation_generation(current)
+        element_id = working.get("elementId") or working.get("element_id")
+        selector = working.get("selector") if isinstance(working.get("selector"), dict) else {}
+        element_id = element_id or selector.get("elementId") or selector.get("element_id")
+        embedded_generation = generation_from_element_id(element_id)
+        envelope_generation = requested_generation or embedded_generation or current_generation
+
+        if tool in {"phone.click", "phone.long_press"} and has_coordinate_tap(working) and not vision_fallback:
+            return self._fail_closed(
+                request_id=request_id,
+                error_class="COORDINATE_TAP_DENIED",
+                generation=envelope_generation,
+                observation=current,
+            )
+        if requested_generation and current_generation and requested_generation != current_generation:
+            return self._fail_closed(
+                request_id=request_id,
+                error_class="STALE_ELEMENT",
+                generation=requested_generation,
+                observation=current,
+            )
+
+        try:
+            resolved_params = self._resolve_element_ids(
+                working,
+                vision_fallback=vision_fallback,
+                expected_generation=requested_generation,
+            )
+            resolved_params = _normalize_action_params(tool, resolved_params)
+            validate_action(tool, resolved_params)
+            if tool in {"phone.click", "phone.long_press"} and has_coordinate_tap(resolved_params) and not vision_fallback:
+                return self._fail_closed(
+                    request_id=request_id,
+                    error_class="COORDINATE_TAP_DENIED",
+                    generation=envelope_generation,
+                    observation=current,
+                )
+        except FailClosedError as exc:
+            return self._fail_closed(
+                request_id=request_id,
+                error_class=exc.error_class,
+                generation=exc.generation or envelope_generation,
+                observation=current,
+            )
+
         before = self.observe()
         started = time.perf_counter()
         error_class: str | None = None
@@ -418,6 +537,13 @@ class ActionRouter:
             verification_ok = True
 
         overall_success = transport_ok and success and verification_ok
+        envelope = build_act_envelope(
+            ok=overall_success,
+            before=before,
+            after=after,
+            generation=envelope_generation or observation_generation(before),
+            error_class=error_class,
+        )
 
         stored_result = result if tool != "phone.type" else {
             "success": overall_success,
@@ -445,7 +571,7 @@ class ActionRouter:
         )
         self.audit.write(
             {
-                "device": after.get("device_serial"),
+                "device": after.get("device_serial") or device_id,
                 "request_id": request_id,
                 "operation": "action.execute",
                 "tool": tool,
@@ -460,7 +586,7 @@ class ActionRouter:
                 "source_client": source,
             }
         )
-        return {
+        payload = {
             "request_id": request_id,
             "success": overall_success,
             "transport_ok": transport_ok,
@@ -477,3 +603,7 @@ class ActionRouter:
             "before_witness": _witness(before),
             "after_witness": _witness(after),
         }
+        payload.update(envelope)
+        if device_id:
+            payload["device_id"] = device_id
+        return payload
