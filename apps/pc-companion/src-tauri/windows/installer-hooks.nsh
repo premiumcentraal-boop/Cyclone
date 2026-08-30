@@ -1,7 +1,8 @@
 ; Kill running Companion + sidecar processes before overwrite/uninstall.
 ; The 3.6.0-beta installer failed with:
 ;   Error opening file for writing: ...\CycloneAgentMCP.exe
-because the previous Companion left that sidecar running.
+; because the previous Companion left that sidecar running.
+; Every comment line must start with ';' — NSIS treats a bare word as a command.
 
 !macro NSIS_HOOK_PREINSTALL
   ClearErrors

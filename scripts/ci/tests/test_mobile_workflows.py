@@ -13,7 +13,8 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
     def test_only_reusable_lane_assembles_android(self):
         assemblers = []
         for path in WORKFLOWS.glob("*.yml"):
-            if ":app:assembleDebug" in path.read_text(encoding="utf-8"):
+            text = path.read_text(encoding="utf-8")
+            if ":app:assembleDebug" in text or ":app:assembleRelease" in text:
                 assemblers.append(path.name)
         self.assertEqual(["_mobile-build.yml"], assemblers)
 
@@ -25,7 +26,9 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertEqual(2, workflow.count("./apps/mobile/gradlew"))
         self.assertIn("./apps/mobile/gradlew -p apps/mobile", workflow)
         self.assertIn("./apps/mobile/gradlew -p apps/teamwork-sniper", workflow)
-        self.assertIn(":app:testDebugUnitTest :app:assembleDebug", workflow)
+        self.assertIn(":app:testDebugUnitTest :app:assembleRelease", workflow)
+        self.assertIn("outputs/apk/release/app-release.apk", workflow)
+        self.assertIn("testOnly", workflow)
         self.assertIn("persist-credentials: false", workflow)
         self.assertLess(workflow.index("wrapper-validation"), workflow.index("./apps/mobile/gradlew"))
 

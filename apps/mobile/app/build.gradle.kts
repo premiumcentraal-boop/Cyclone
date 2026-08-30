@@ -22,8 +22,8 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 41
-        versionName = "3.6.0-beta.1"
+        versionCode = 42
+        versionName = "3.6.0-beta.2"
     }
     signingConfigs {
         create("ciDebug") {
@@ -38,7 +38,10 @@ android {
             signingConfig = signingConfigs.getByName("ciDebug")
         }
         release {
+            // Sideloadable Pixel APK: release has no android:testOnly. Keep minify off so
+            // the 3.6 overlay/runtime symbols stay intact.
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("ciDebug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

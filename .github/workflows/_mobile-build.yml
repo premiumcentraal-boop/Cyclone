@@ -60,7 +60,9 @@ jobs:
         run: git submodule update --init --recursive --depth 1
       - name: Test and assemble once
         shell: bash
-        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:assembleDebug --stacktrace
+        # assembleRelease (not assembleDebug). Debug APKs set android:testOnly=true and the
+        # Pixel system installer reports only "App not installed" even on a clean phone.
+        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:assembleRelease --stacktrace
       - name: Test and assemble Teamwork Sniper when present
         if: steps.mobile.outputs.sniper_present == 'true'
         shell: bash
@@ -74,10 +76,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/mobile
-          cp apps/mobile/app/build/outputs/apk/debug/app-debug.apk "dist/mobile/$APK_NAME"
+          cp apps/mobile/app/build/outputs/apk/release/app-release.apk "dist/mobile/$APK_NAME"
           if [[ "$SNIPER_PRESENT" == "true" ]]; then
             cp apps/teamwork-sniper/app/build/outputs/apk/debug/app-debug.apk "dist/mobile/$SNIPER_APK_NAME"
             cp teamwork-sniper-metadata.json dist/mobile/teamwork-sniper-metadata.json
+          fi
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          AAPT="$SDK_ROOT/build-tools/35.0.0/aapt"
+          BADGING=$("$AAPT" dump badging "dist/mobile/$APK_NAME")
+          echo "$BADGING"
+          if echo "$BADGING" | grep -Eq 'testOnly[= ]true'; then
+            echo "ERROR: Cyclone APK is testOnly; Pixel PackageInstaller will reject it"
+            exit 1
           fi
           (cd dist/mobile && for apk in *.apk; do sha256sum "$apk" > "$apk.sha256"; done)
           printf '%s\n' "$GITHUB_SHA" > dist/mobile/source-sha.txt
