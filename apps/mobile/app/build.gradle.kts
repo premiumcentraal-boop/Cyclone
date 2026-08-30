@@ -6,9 +6,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-fun materializePinnedDebugKeystore(): File {
-    val store = rootProject.file("debug.keystore")
-    val encoded = rootProject.file("debug.keystore.b64")
+fun materializeKeystore(storeName: String, encodedName: String): File {
+    val store = rootProject.file(storeName)
+    val encoded = rootProject.file(encodedName)
     if (!store.exists() && encoded.exists()) {
         store.writeBytes(Base64.getDecoder().decode(encoded.readText().trim()))
     }
@@ -22,15 +22,26 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 42
-        versionName = "3.6.0-beta.2"
+        versionCode = 43
+        versionName = "3.6.0"
+        ndk {
+            // Pixel 8 is arm64. Dropping other ABIs shrinks the sideload APK and
+            // avoids packaging 4KB-aligned 32-bit WebRTC libs Android 15 rejects.
+            abiFilters += listOf("arm64-v8a")
+        }
     }
     signingConfigs {
         create("ciDebug") {
-            storeFile = materializePinnedDebugKeystore()
+            storeFile = materializeKeystore("debug.keystore", "debug.keystore.b64")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        create("ciRelease") {
+            storeFile = materializeKeystore("release.keystore", "release.keystore.b64")
+            storePassword = "Cyclone36Release!"
+            keyAlias = "cyclone"
+            keyPassword = "Cyclone36Release!"
         }
     }
     buildTypes {
@@ -38,10 +49,8 @@ android {
             signingConfig = signingConfigs.getByName("ciDebug")
         }
         release {
-            // Sideloadable Pixel APK: release has no android:testOnly. Keep minify off so
-            // the 3.6 overlay/runtime symbols stay intact.
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("ciDebug")
+            signingConfig = signingConfigs.getByName("ciRelease")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
