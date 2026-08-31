@@ -1,24 +1,24 @@
 schema = 1
-product_version = "3.6.0"
-channel = "stable"
-android_version_code = 43
-python_version = "3.6.0"
+product_version = "3.7.0-beta"
+channel = "beta"
+android_version_code = 44
+python_version = "3.7.0-beta"
 
 [components]
-mobile = "3.6.0"
+mobile = "3.7.0-beta"
 teamwork_sniper = "3.5.3.3"
 teamwork_sniper_android_version_code = 6
-pc_companion = "3.6.0"
-device_gateway = "3.6.0"
-mcp = "3.6.0"
+pc_companion = "3.7.0-beta"
+device_gateway = "3.7.0-beta"
+mcp = "3.7.0-beta"
 
 [release]
 publication_authorized = true
-physical_pixel8 = "UNVERIFIED_3.6"
+physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 second_android_device = "NOT_REQUIRED"
 virtual_provider = "UNCHANGED_FROM_3.5.1"
 android_signing = "PINNED_RELEASE_KEYSTORE"
 windows_signing = "CI_UNSIGNED"
-windows_installer = "CI_PENDING_3.6.0"
-candidate_generation = "cyclone-3.6.0-full-sideload"
+windows_installer = "CI_UNSIGNED"
+candidate_generation = "cyclone-3.7.0-beta"
