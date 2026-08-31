@@ -19,6 +19,12 @@ SECRET_SLOT_KEYS = {
     "pin", "pincode", "cvv", "ssn",
 }
 OBSERVATION_SCOPED_KEYS = {"elementId", "element_id"}
+ANDROID_SKILL_OPS_MISSING = "ANDROID_SKILL_OPS_MISSING"
+_MISSING_ANDROID_SKILL_OPS = frozenset({
+    "UNKNOWN_OPERATION",
+    "CAPABILITY_UNAVAILABLE",
+    ANDROID_SKILL_OPS_MISSING,
+})
 
 
 def _is_secret_key(key: str) -> bool:
@@ -43,6 +49,84 @@ def strip_secret_slots(value: Any, parent_key: str = "") -> Any:
     if isinstance(value, list):
         return [strip_secret_slots(item, parent_key) for item in value]
     return value
+
+
+def _iter_error_codes(value: Any) -> list[str]:
+    codes: list[str] = []
+    if value is None:
+        return codes
+    if isinstance(value, BaseException):
+        codes.extend(_iter_error_codes(getattr(value, "body", None)))
+        message = str(value)
+        for token in _MISSING_ANDROID_SKILL_OPS:
+            if token in message:
+                codes.append(token)
+        return codes
+    if not isinstance(value, dict):
+        return codes
+    for key in ("errorClass", "code", "error_class"):
+        raw = value.get(key)
+        if isinstance(raw, str) and raw:
+            codes.append(raw)
+    error = value.get("error")
+    if isinstance(error, dict):
+        codes.extend(_iter_error_codes(error))
+    elif isinstance(error, str) and error:
+        codes.append(error)
+    detail = value.get("detail")
+    if isinstance(detail, dict):
+        codes.extend(_iter_error_codes(detail))
+    return codes
+
+
+def android_skill_ops_missing(value: Any) -> bool:
+    """True when Android skill.compile / skill.run / skill.match is not available."""
+    return any(code in _MISSING_ANDROID_SKILL_OPS for code in _iter_error_codes(value))
+
+
+def missing_android_skill_ops(kind: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "kind": kind,
+        "ok": False,
+        "written": False,
+        "skipModel": False,
+        "matchedSkill": None,
+        "storeClass": STORE_CLASS,
+        "compiler": COMPILER,
+        "errorClass": ANDROID_SKILL_OPS_MISSING,
+        "error": {
+            "code": ANDROID_SKILL_OPS_MISSING,
+            "layer": "capability",
+            "message": (
+                "Android skill.compile / skill.run / skill.match ops are missing. "
+                "Fail closed until the phone exposes those operations; this is not the V3.8 live path."
+            ),
+        },
+    }
+    if extra:
+        body.update(extra)
+    return body
+
+
+def attach_missing_android_skill_ops(result: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed on locate without dropping the Page Card."""
+    result["ok"] = False
+    result["skipModel"] = False
+    result["matchedSkill"] = None
+    result["errorClass"] = ANDROID_SKILL_OPS_MISSING
+    result["error"] = {
+        "code": ANDROID_SKILL_OPS_MISSING,
+        "layer": "capability",
+        "message": (
+            "Android skill.compile / skill.run / skill.match ops are missing. "
+            "Fail closed until the phone exposes those operations; this is not the V3.8 live path."
+        ),
+    }
+    return result
+
+
+def draft_run_denied(skill_id: str, status: str = "draft") -> dict[str, Any]:
+    return _draft_denied(skill_id, status)
 
 
 def _step_verified(step: Any) -> bool:
@@ -163,6 +247,20 @@ def build_save_payload(args: dict[str, Any]) -> dict[str, Any]:
 
 def save_success(gateway_result: Any, payload: dict[str, Any]) -> dict[str, Any]:
     body = gateway_result if isinstance(gateway_result, dict) else {"raw": gateway_result}
+    if android_skill_ops_missing(body) or android_skill_ops_missing(gateway_result):
+        return missing_android_skill_ops("phone_skill_save")
+    if body.get("ok") is False:
+        return {
+            "kind": "phone_skill_save",
+            "ok": False,
+            "written": False,
+            "status": None,
+            "enabled": False,
+            "storeClass": str(body.get("storeClass") or STORE_CLASS),
+            "compiler": COMPILER,
+            "errorClass": str(body.get("errorClass") or (body.get("error") or {}).get("code") or "SKILL_SAVE_FAILED"),
+            "error": body.get("error") or {"code": body.get("errorClass") or "SKILL_SAVE_FAILED", "layer": "execution"},
+        }
     skill = body.get("skill") if isinstance(body.get("skill"), dict) else body
     return redact({
         "kind": "phone_skill_save",
@@ -212,6 +310,8 @@ def matched_verified_skill(match_raw: Any, goal: str, page_key: str) -> dict[str
 
 def normalize_run(result: Any, *, skill_id: str, dry_run: bool) -> dict[str, Any]:
     body = result if isinstance(result, dict) else {"raw": result}
+    if android_skill_ops_missing(body) or android_skill_ops_missing(result):
+        return missing_android_skill_ops("phone_skill_run", {"skillId": skill_id, "dryRun": dry_run, "steps": []})
     status = str(body.get("status") or (body.get("skill") or {}).get("status") or "").lower()
     if body.get("errorClass") == "DRAFT_RUN_DENIED" or body.get("denied") is True:
         return _draft_denied(skill_id, status or "draft")
