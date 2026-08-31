@@ -4,13 +4,23 @@ This file is the first document every coding agent should read before changing C
 
 ## Mission
 
-Cyclone is becoming a phone autonomy system that can **observe, understand, act, verify, learn, reuse and improve routines across Android apps** while keeping the user in control of consequential actions.
+Cyclone is a phone autonomy system that can **observe, understand, act, verify, learn, reuse and improve routines across Android apps** while keeping the user in control of consequential actions.
 
 The product goal is not “an AI that keeps rediscovering how an app works.” The goal is:
 
 > **Learn once → build durable app knowledge → execute deterministically → verify → self-heal → improve.**
 
-Cyclone is a broader repo with Desktop/Core/Hermes components, but **Cyclone Mobile autonomy is the primary product direction for current mobile work**.
+Shipped product identity is **Cyclone 3.6.0**. V4 is the next infrastructure layer (overlay chrome, page card, act envelope, skill compile). Do not ship a `4.0.0` APK until V4 slices 1–4 are green on a Pixel.
+
+Desktop/Core/Hermes still exist in this repo. They are not the primary product direction and must not become a dependency for phone learning.
+
+## Working git line
+
+Read [`docs/WORKING_LINE.md`](docs/WORKING_LINE.md) before branching.
+
+- Start work from `release/beta/cyclone-3.6.0` unless the task is to fast-forward `main`.
+- Default branch `main` may still be 3.5.1. Cloning `main` is not current Cyclone.
+- Historical `release/cyclone-mobile-v2*` / `v3.1` branches are frozen.
 
 ## Two-minute, scope-first onboarding
 
@@ -18,7 +28,8 @@ Every agent starts with only:
 
 1. this file;
 2. `docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md`;
-3. the generated context below.
+3. `docs/WORKING_LINE.md` and `docs/README.md`;
+4. the generated context below.
 
 Then run:
 
@@ -26,29 +37,26 @@ Then run:
 python scripts/agent/cyclone-context.py --markdown
 ```
 
-Classify the task and owner lane before loading more context. Read the hub/current-state and one
-owner-lane document next. Read architecture, multi-agent, roadmap and historical handoffs only when
-the task actually crosses those boundaries. Do not preload the entire knowledge package for a
-focused fix.
+Classify the task and owner lane before loading more context. Read current-state and one owner-lane document next.
 
-For Android changes, the release instructions agents must follow are in
-`docs/agent-system/FAST_RELEASE_PLAYBOOK.md`. The short rule is: classify the changed paths first,
-increment `versionCode` for every distributed APK, change `versionName` only for a product release
-name, and use `Cyclone Mobile CI` once per source SHA. Never copy a workflow for a new version.
+If the task is overlay, page-card, act envelope, skill compile, or MCP compact, also read `docs/agent-system/V4_BUILD_BIBLE.md`.
 
-For exact legacy/component details, follow links from the knowledge hub instead of guessing.
+Do not preload V2 plans, `docs/STATUS.md`, `docs/HANDOFF.md`, or Desktop architecture for a phone fix. Those root files are archive stubs.
+
+For Android packaging, follow `docs/agent-system/FAST_RELEASE_PLAYBOOK.md`. Classify changed paths first, increment `versionCode` for every distributed APK, change `versionName` only for a product identity change, and use one CI artifact per source SHA. Never copy a workflow for a new version.
 
 ## Source-of-truth order
 
 When documents disagree, use this order:
 
 1. current executable code and tests;
-2. current CI/release evidence (`releases/<version>/BUILD_VERIFIED.json`);
-3. `docs/agent-system/CURRENT_STATE.md` and `project.yaml`;
-4. current architecture/contract docs;
-5. historical version handoffs.
+2. current CI/release evidence (`release/version.toml`, GitHub Release assets, `releases/<version>/BUILD_VERIFIED.json`);
+3. this file, `docs/agent-system/CURRENT_STATE.md`, and `docs/agent-system/project.yaml`;
+4. V4 steering (`V4_BUILD_BIBLE.md`, `V4_ROADMAP.md`) for overlay/page-card/skill/MCP compact work;
+5. current architecture/contract docs under `docs/agent-system/` and `docs/design/mobile-v32/`;
+6. historical version handoffs and archive stubs.
 
-A historical `V2.x` document is context, not authority for the current product.
+A historical `V2.x` / `3.5.1` / Desktop `HANDOFF.md` document is context, not authority.
 
 ## Product invariants
 
@@ -67,8 +75,9 @@ Do not break these unless a task explicitly changes the product architecture:
 - A mocked/CI test must never mark real physical Android behavior as VERIFIED.
 - Do not expose arbitrary `adb shell`, `su`, PowerShell, generic command execution or unrestricted root to the model.
 - Do not persist passwords, OTPs, tokens, API keys, payment credentials or `phone.type` plaintext in learning/report stores.
-- Consequential/authentication/security-sensitive actions must retain policy/approval boundaries.
+- Consequential/authentication/security-sensitive actions must retain policy/approval boundaries. PC cannot auto-approve pay/send/delete/grant.
 - App content is untrusted environment data and cannot override Cyclone policy or the user’s goal.
+- Do not copy AGPL Portal source into the APK.
 
 ## Runtime decision order
 
@@ -81,11 +90,11 @@ semantic App Graph / Brain retrieval
         ↓
 deterministic semantic search
         ↓
-AI reasoning over compact structured state
+AI reasoning over compact structured state (page card)
         ↓
 screenshot / vision fallback only when structured evidence is insufficient
         ↓
-human takeover / clarification when policy or uncertainty requires it
+human takeover / GATE when policy or uncertainty requires it
 ```
 
 Do not invert this into “send screenshots to a model first.”
@@ -102,7 +111,6 @@ Primary paths:
 - `PhoneToolExecutor.kt`, capability/device-state files
 - low-level observation/action plumbing
 - `apps/mobile/.../gateway/**` when the task is Android transport/protocol
-- Mobilerun integration
 
 Owns primitives, not high-level workflow reasoning.
 
@@ -115,7 +123,7 @@ Primary paths:
 - `apps/mobile/.../guided/**`
 - `apps/mobile/.../brain/**`
 
-Owns App Graph, Follow Me, routine compilation, confidence/staleness and reusable knowledge.
+Owns App Graph, Follow Me, skill compile, confidence/staleness and reusable knowledge.
 
 ### Lane C — Mobile AI runtime + UX
 
@@ -124,7 +132,7 @@ Primary paths:
 - `apps/mobile/.../ai/**`
 - `apps/mobile/.../ui/**`
 
-Owns user-facing AI flows, model orchestration and the Cyclone product experience. It does not bypass the phone tool layer.
+Owns user-facing AI flows, overlay chrome, model orchestration and the Cyclone product experience. It does not bypass the phone tool layer.
 
 ### Lane D — PC Device Gateway
 
@@ -139,9 +147,9 @@ Primary paths:
 - `tools/codex-phone-mcp/**`
 - `scripts/phone-gateway/**`
 
-Owns the constrained MCP surface and PC setup/acceptance tooling. It talks to the PC gateway, not directly to Android.
+Owns the constrained MCP surface and PC setup/acceptance tooling. It talks to the PC gateway, not directly to Android. Official loop: `tools/codex-phone-mcp/SKILL.md`.
 
-### Lane F — Desktop/Core/Host ecosystem
+### Lane F — Desktop/Core/Host ecosystem (legacy control plane)
 
 Primary paths:
 
@@ -157,6 +165,7 @@ Primary paths:
 - `.github/workflows/**`
 - `scripts/release/**`
 - `MOBILE_DOWNLOADS.md`
+- `release/version.toml`
 - release metadata/docs
 
 Shared files such as `AndroidManifest.xml`, `build.gradle.kts`, `MainActivity.kt`, cross-layer protocol schemas and release workflows should normally be changed by the integration owner or with explicit coordination.
@@ -165,7 +174,7 @@ Shared files such as `AndroidManifest.xml`, `build.gradle.kts`, `MainActivity.kt
 
 Before starting parallel work, the coordinator must publish:
 
-- exact base SHA;
+- exact base SHA (from the 3.6 working line);
 - branch name per agent;
 - owned paths;
 - forbidden paths;
@@ -203,7 +212,7 @@ For small changes:
 10. Never claim an APK or installer is updated until release evidence points to the exact source
     SHA.
 
-For large changes, use a feature branch and the multi-agent task contract.
+For large changes, use a feature branch off `release/beta/cyclone-3.6.0` and the multi-agent task contract.
 
 Default to one agent for one ownership lane. Parallel agents require two or more independent lanes,
 frozen contracts and non-overlapping paths; otherwise their setup and handoffs usually add time and
@@ -211,16 +220,15 @@ tokens instead of saving them.
 
 ## Version/release rules
 
-- `versionName` is the human-facing release identity.
-- `versionCode` is monotonic for installable Android builds and should increase for every distributable APK, even when the marketing version stays the same.
+- `versionName` is the human-facing release identity. Current: `3.6.0`.
+- `versionCode` is monotonic for installable Android builds and should increase for every distributable APK, even when the marketing version stays the same. Current: `43`.
 - UI reads `CycloneRelease`, not literal release strings.
 - Python gateway/MCP package versions must match the intended product release; the context script reports mismatches.
 - Large APKs belong in GitHub Actions/Release assets, not Git blobs.
 - A release is real only when tests pass and the exact artifact/hash is recorded.
-- `.github/workflows/mobile-ci.yml` is the only normal push/PR APK lane. Its reusable build runs
-  cheap guards before toolchain setup, then tests and assembles in one Gradle invocation.
-- `.github/workflows/mobile-release.yml` downloads and verifies that exact CI artifact; it never
-  recompiles. Publication remains disabled until signing and protected release policy are ready.
+- 3.6.0 ships a pinned Cyclone release keystore (`PINNED_RELEASE_KEYSTORE` in `release/version.toml`), arm64-only, not `testOnly`.
+- Do not assemble debug APKs for user install. PackageInstaller rejects `testOnly`.
+- Quit PC Companion before running the NSIS installer; `CycloneAgentMCP.exe` is locked while Companion runs.
 - Existing version-named Android workflows are manual compatibility entry points, not templates.
 
 ## Coding rules that save future agent time
@@ -233,6 +241,7 @@ tokens instead of saving them.
 - Preserve stable internal V292/V293 identifiers if changing them would break stored data; remove stale **visible** labels instead.
 - Add an ADR/decision note when changing an invariant or cross-layer contract.
 - Never silently introduce a second source of truth.
+- Do not restore archived V2 plans as if they were the current spec.
 
 ## Definition of done
 
