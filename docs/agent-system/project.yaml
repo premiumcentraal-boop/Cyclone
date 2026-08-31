@@ -5,18 +5,43 @@ mission: >-
   Let a user ask for phone goals or teach routines, then observe, understand,
   act, verify, learn, reuse and self-heal across Android apps.
 
+working_line:
+  product_version: "3.6.0"
+  android_version_code: 43
+  branch: release/beta/cyclone-3.6.0
+  release_tag: v3.6.0
+  default_branch_warning: main_may_still_be_3.5.1
+  next_layer: V4_overlay_page_card_skill_os
+  advertise_4_0_0: false_until_pixel_slices_1_4_green
+
 canonical_docs:
   agent_rules: AGENTS.md
   hub: docs/agent-system/README.md
+  working_line: docs/WORKING_LINE.md
+  docs_map: docs/README.md
   fast_work: docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md
   current_state: docs/agent-system/CURRENT_STATE.md
   architecture: docs/agent-system/ARCHITECTURE_AND_CONTRACTS.md
   multi_agent: docs/agent-system/MULTI_AGENT_PROTOCOL.md
   releases: docs/agent-system/FAST_RELEASE_PLAYBOOK.md
   roadmap: docs/agent-system/AUTONOMY_ROADMAP.md
+  v4_bible: docs/agent-system/V4_BUILD_BIBLE.md
+  v4_directions: docs/agent-system/V4_DIRECTIONS.md
+  v4_roadmap: docs/agent-system/V4_ROADMAP.md
+  overlay: docs/design/mobile-v32/SUPER_APP_OVERLAY_HANDOFF.md
+  mcp_skill: tools/codex-phone-mcp/SKILL.md
   decisions: docs/agent-system/DECISIONS.md
   infrastructure_v3: docs/agent-system/infrastructure-v3/README.md
   infrastructure_v3_adr: docs/agent-system/ADR_INFRASTRUCTURE_V3.md
+  archived_root_handoffs:
+    - docs/STATUS.md
+    - docs/HANDOFF.md
+    - docs/ARCHITECTURE.md
+    - docs/CYCLONE_V2_5_APP_LEARNER_INTEGRATION_PLAN.md
+    - docs/CYCLONE_V2_6_ARCHITECTURE.md
+    - docs/CYCLONE_V2_7_ADAPTIVE_BRAIN.md
+    - docs/CYCLONE_V2_8_PAGE_AWARE_AGENT_PLAN.md
+    - docs/CYCLONE_V2_9_TEACHING.md
 
 mobile:
   package: com.cyclone.mobile
@@ -61,6 +86,7 @@ layers:
       - tools/codex-phone-mcp
       - scripts/phone-gateway
   desktop_core:
+    note: legacy_control_plane_not_phone_dependency
     paths:
       - apps/cyclone-core
       - apps/desktop
@@ -75,42 +101,28 @@ infrastructure_v3:
     capability_registry:
       path: apps/mobile/app/src/main/java/com/cyclone/mobile/platform/capability
       authority: inventory_only
-      health: deterministic_provider_diagnostics
     policy_governor:
       path: apps/mobile/app/src/main/java/com/cyclone/mobile/policy
       authority: phone_action_authorization
-      contract: proposals_before_canonical_executor
     module_supervisor:
       path: apps/mobile/app/src/main/java/com/cyclone/mobile/platform/modules
       authority: module_lifecycle_and_quarantine
-      health: bounded_restart_and_failure_isolation
     memory:
       path: apps/mobile/app/src/main/java/com/cyclone/mobile/brain/memory
       authority: sole_policy_gated_write_seam
-      ordering: current_verified_before_stale_history
     context_ledger:
       path: apps/mobile/app/src/main/java/com/cyclone/mobile/observability
       authority: redacted_causal_event_persistence
-      privacy: no_guessable_digest_for_restricted_raw_text
     runtime_update:
       path: apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/update
       authority: verify_and_stage_only
     recovery:
       path: apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/recovery
       authority: runtime_promotion_rollback_and_safe_mode_decisions
-      data_policy: never_erase_user_data_automatically
     gateway:
       path: apps/device-gateway
       contract: cyclone.gateway.capability.v1
       authority: typed_transport_and_witness_adapter_only
-  required_handoff:
-    - exact_base_and_head_sha
-    - owned_and_changed_paths
-    - public_contract_changes
-    - tests_and_results
-    - health_and_failure_behavior
-    - blast_radius
-    - ci_and_physical_verification_status
 
 invariants:
   - one_android_launcher
@@ -125,46 +137,23 @@ invariants:
   - one_policy_authority
   - one_memory_write_seam
   - recovery_only_runtime_promotion_and_rollback
+  - no_4_0_0_apk_before_pixel_slices_1_4
 
 release:
   verified_marker_pattern: releases/<version>/BUILD_VERIFIED.json
   download_index: MOBILE_DOWNLOADS.md
-  artifact_host: github_actions_and_releases
-  signing_currently_expected: debug_beta_unless_release_says_otherwise
+  artifact_host: github_releases
+  signing_currently_expected: PINNED_RELEASE_KEYSTORE
   authoritative_mobile_ci: .github/workflows/mobile-ci.yml
   reusable_mobile_build: .github/workflows/_mobile-build.yml
   release_artifact_reuse: .github/workflows/mobile-release.yml
-  production_publication_enabled: false
+  production_publication_enabled: true
   combined_beta_publication_enabled_on_release_push: true
-  combined_beta_publication_enabled_on_manual_dispatch: false
-
-workflow_optimization:
-  baseline_date: 2026-08-27
-  evidence_runs:
-    combined_beta_1: 33080472172
-    combined_beta_2: 33089372883
-  measured:
-    beta_2_windows_seconds: 573
-    beta_2_android_seconds: 265
-    beta_2_installer_seconds: 352
-    beta_2_manual_post_ci_publish_seconds: 588
-  targets:
-    routine_code_to_beta_minutes: 10
-    routine_hotfix_total_minutes: 20
-    warm_combined_ci_minutes: 7
-    post_ci_publish_minutes: 2
-  phases:
-    - scope_first_agent_guidance
-    - explicit_safe_manual_publish
-    - npm_pip_cargo_caching
-    - parallel_verification_and_packaging
-    - changed_path_gate_selector
-    - measure_before_dedicated_runner
-  rule: never_rebuild_or_transfer_an_artifact_for_an_unchanged_source_sha
+  current_tag: v3.6.0
 
 agent_bootstrap:
   command: python scripts/agent/cyclone-context.py --markdown
   first_read: docs/agent-system/FAST_WORK_AND_TOKEN_PLAYBOOK.md
-  context_policy: root_rules_then_fast_playbook_then_one_owner_lane
+  context_policy: root_rules_then_working_line_then_fast_playbook_then_one_owner_lane
   task_template: .github/ISSUE_TEMPLATE/agent-task.md
   pr_template: .github/PULL_REQUEST_TEMPLATE.md

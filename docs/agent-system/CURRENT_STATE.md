@@ -1,176 +1,91 @@
 # Current Cyclone State
 
-This document describes the Cyclone 3.5.1 control-workspace candidate. Its product version is `3.5.1`
-(Android `versionCode 37`). Publication remains gated by the evidence in
-`docs/cyclone-3.5.1/RELEASE_REPORT.md`; source integration is not itself a published release.
-Always verify the exact GitHub source SHA, CI run and attached checksums before treating an artifact
-as distributed.
+**Product:** Cyclone **3.6.0** (Android `versionCode` 43)  
+**Working branch:** `release/beta/cyclone-3.6.0`  
+**Release:** https://github.com/premiumcentraal-boop/Cyclone/releases/tag/v3.6.0  
+**Pixel 8 UI slices:** UNVERIFIED
+
+This file describes the running 3.6 product. V4 contracts live in `V4_BUILD_BIBLE.md` and are partially already in 3.6 code (page card, act envelope, skill compile drafts). They are not a rewrite of Infrastructure V3.
+
+If you cloned `main` and this file still says 3.5.1, you are on the stale default branch. See `docs/WORKING_LINE.md`.
 
 ## Mobile product identity
 
 - Android package: `com.cyclone.mobile`.
 - One launcher: `.MainActivity`.
-- Minimum Android API: 34; target/compile SDK currently 35.
-- Core product surfaces remain Home, Teach, AI, Automations, Brain and Settings.
+- Minimum Android API: 34; target/compile SDK 35.
+- APK: arm64-v8a only, v2-signed, not `testOnly`, pinned Cyclone release keystore.
+- Surfaces: Home, Teach, AI, Automations, Brain, Settings.
 - Settings is reached from the profile/avatar.
-- Full PC + Codex Gateway is represented inside the AI experience rather than as a second launcher.
-- User-visible release text is derived from `BuildConfig.VERSION_NAME` through `CycloneRelease`.
+- Full PC + Codex Gateway lives inside the AI experience, not a second launcher.
+- User-visible release text comes from `BuildConfig.VERSION_NAME` through `CycloneRelease`.
 
-## Mobile product experience
+Teamwork Sniper is a **different package**. Do not treat its APK as a Cyclone Mobile upgrade.
 
-`MainActivity` now launches the Cyclone V3.2 calm mobile shell. The canonical UX direction,
-screen hierarchy, visual tokens and staged routine-builder plan live in
-`docs/design/mobile-v32/README.md`.
+## What 3.6 added on top of 3.5.x
 
-The shell preserves Home, Teach, AI, Routines/Automations, Brain and Settings while replacing the
-older dense presentation with progressive detail and readable **When → Then → Check** routine
-language. The Phase A builder saves into the existing `AutomationStore` and uses existing typed
-trigger/action contracts; it is not a second automation runtime or phone executor. Rich selector,
-condition, branch and custom verification editing remains a documented follow-up phase.
+- V4 page-card compact observation (`pageText` / `pageSummary` must survive MCP compact).
+- V4 act envelope (after-state, delta, generation; stale elementId fails closed).
+- Skill compile writes **disabled drafts** into existing `AutomationStore` (not a second store).
+- Agent OS hardening around policy / memory / recovery seams from Infrastructure V3.
+- Sideloadable release APK + NSIS preinstall `taskkill` for locked Companion sidecars.
 
-## Device control/perception
+V4 overlay chrome (ANALYSIS → WORKING → LIVE → GATE → DONE) and the four-tool MCP default loop are the V3.7 / V4 slices still ahead. Do not claim 4.0.0 in the UI.
 
-The app contains `CycloneAccessibilityService` and a canonical `PhoneToolExecutor` path. This is the base capability layer for phone observation and typed actions.
+## Device control / perception
 
-Do not create a second engine for AI, automation, teaching or the PC gateway.
+`CycloneAccessibilityService` + canonical `PhoneToolExecutor` is the only mutation engine.
 
-## Page Awareness
+Do not create a second engine for AI, automation, teaching, overlay buttons, or the PC gateway. Overlay chrome buttons change Cyclone state only; host taps go through the executor.
 
-The 2.9.3-era Page Awareness implementation remains an important internal foundation. Internal V293 names are compatibility identifiers, not the current marketing version.
+## Page awareness
 
-The diagnostic funnel distinguishes roughly:
+Internal V293 names are compatibility identifiers, not the marketing version.
 
-- broad raw Accessibility collection;
-- semantic scan;
-- stored semantic controls;
-- compact production-agent controls.
+`observe.semantic` exposes privacy-sanitized `pageText` (`cyclone-page-text-v1`) and `pageSummary` (`cyclone-page-summary-v1`). Compact observation that drops those fields is a regression (`AGENT_CONTEXT_TRUNCATION`).
 
-The existing diagnostic documentation records the 2500 → 450 → 80 → 36 funnel. Treat these as current implementation limits to measure/optimize, not permanent product requirements.
+Screenshot capture over the gateway is still-image evidence. Live USB view uses pinned scrcpy H.264 in PC Companion. Do not add a second MediaProjection architecture without an ADR.
 
-### Gateway-side page context enrichment (page-text v1)
+## Learning and skills
 
-`observe.semantic` now augments the canonical PageContext with three additive, privacy-sanitized
-views so agents can browse a phone like a page instead of guessing from raw node trees:
+App Graph, Adaptive Brain, Follow Me and Routine Teaching are the teaching paths. Gateway/MCP must call into them.
 
-- `pageText` (`cyclone-page-text-v1`): visible text in top-to-bottom reading order with duplicate
-  overlay text removed. Editable values and sensitive fields are excluded; editable field labels
-  survive as `contentDescription` when available.
-- `pageSummary` (`cyclone-page-summary-v1`): headings, buttons, tabs, form fields, switches,
-  scrollable region count, redacted sensitive field count and a one-line content note.
-- `supplementalControlCount` plus `semantic_supplement` controls: interactive nodes outside the
-  canonical semantic store's 450-node scan window are surfaced as observation-scoped semantic
-  controls so deep pages are not truncated for agents. Canonical `pageKey`/`structuralKey`/
-  `contentKey` and V293 compatibility identifiers are unchanged.
+Skill capsules use status `draft | review | verified | quarantined`. Drafts are disabled until human review in Automations. Worker phones may run `verified` only.
 
-### Android screen capture over the gateway
+## Gateways
 
-The gateway now serves Android frames directly instead of relying on PC-side `adb screencap`:
+- Android: `LocalServerSocket("cyclone_gateway")` / localabstract. Off by default. Random session token. No LAN listener on the phone.
+- PC Device Gateway: ADB select + forward, loopback bearer HTTP, witnesses, evidence, debug bundles.
+- Android session token ≠ PC HTTP bearer token.
+- Android remains the action and verification authority. A fresh PC frame is not semantic verification.
 
-- `capture.screenshot` (authenticated op): captures through the accessibility service screenshot
-  primitive (`android:canTakeScreenshot="true"`, minSdk 34). Returns `width`, `height`, `bytes`,
-  `timestampMs`, `filePath`, `scaled`, and optional compact `pngBase64` (`includeBase64`, capped at
-  900 KB; oversized frames return `base64Omitted: "TOO_LARGE"`). `maxDimension` scales the frame
-  (default full size for the op, 480 px evidence thumbnails from observations).
-- `observe.semantic` accepts `includeScreenshot`, `screenshotMaxDimension` and
-  `includeScreenshotBase64`; when enabled, the payload includes a `screenshot` object and the
-  preview path is attached to the stored page.
+## Codex / any-PC MCP
 
-No `AndroidManifest.xml` change was required for this accessibility-screenshot path. It remains a
-useful still-image evidence/fallback seam, but it is no longer the proposed primary live stream:
-Cyclone 3.3's PC media plane uses the pinned scrcpy H.264 server over the USB/ADB transport. Do not
-add a second MediaProjection architecture without a new requirement and ADR.
+`tools/codex-phone-mcp` is a constrained STDIO client. Default loop (V4):
 
-## Learning
+1. `phone_status`
+2. `phone_locate` / compact observe with goal
+3. `phone_act` (after-state required)
+4. `phone_skill_run` / `phone_skill_save`
 
-App Learner / App Graph and Adaptive Brain are present. The intended behavior is to convert safe, useful navigation into structured reusable knowledge and lower confidence when evidence starts failing.
+The model does not get generic shell or root tools. Official instructions: `tools/codex-phone-mcp/SKILL.md`.
 
-Follow Me and Routine Teaching are canonical teaching paths. The gateway must call into them instead of creating a separate teaching store.
+## Infrastructure V3 (still in force)
 
-## Android gateway
+Capability registry, PolicyGovernor, Module Supervisor, memory write seam, Context Ledger, Recovery/Safe Mode remain the authorities. V4 does not replace them. One policy authority, one memory write seam, Recovery-only promotion/rollback.
 
-The Android gateway uses `LocalServerSocket("cyclone_gateway")` / localabstract transport. It is off by default and uses a random session token. It does not create a normal TCP/LAN listener on the phone.
+## Release / honest limits
 
-The bridge exposes constrained operations around status, semantic/PageDebug observation, UI search/element inspection, App Graph/Brain retrieval, typed action execution, teaching and debug snapshots.
+- Combined workflow builds Windows + Android from one SHA.
+- 3.6.0 publication is authorized in `release/version.toml`.
+- Physical Pixel 8 install/UI path is the acceptance target and is still UNVERIFIED for V4 overlay slices.
+- Virtual-device claims need a booted provider, not lifecycle mocks.
+- Desktop/Core/Hermes/n8n remain in-tree as a legacy control plane. Phone autonomy must work without them.
 
-Sensitive text is redacted again at the gateway boundary.
+## Organizational debt (do not “fix” by rewriting subsystems)
 
-## PC Device Gateway
-
-`apps/device-gateway/**` provides the Windows/PC-side gateway. Its responsibilities include:
-
-- deterministic ADB device selection;
-- forwarding to Android localabstract gateway;
-- loopback bearer-authenticated HTTP API;
-- semantic/raw/independent observation retrieval;
-- screenshots and content-addressed evidence;
-- durable observations/actions/transitions;
-- bounded root telemetry where explicitly allowed;
-- debug bundles and stabilization/verification.
-
-The Android bridge session token and PC HTTP bearer token are separate concepts.
-
-Cyclone 3.5 adds a provider-neutral `DeviceBackend`, one unified physical/virtual inventory,
-persistent groups and explicit selection, and typed batch actions with isolated per-device results.
-Disconnected devices remain visible with durable identity and pairing metadata. Android remains
-the canonical action and verification authority: PC transport success or a fresh frame can never
-be promoted into semantic verification.
-
-The virtual-device layer is lifecycle-only and implements an official Android Emulator/AVD
-provider. It binds management to loopback, persists instance identity, uses fixed argument vectors
-and reports missing host prerequisites as unavailable. Clone and snapshot/restore are not
-advertised. ReDroid remains experimental until proven on a host with binder support.
-
-Cyclone 3.3 uses a pinned scrcpy 4.0 H.264 media plane for primary USB live view, rendered through
-WebCodecs in PC Companion. Screenshot capture remains a bounded degraded fallback. Discovery,
-media, Android bridge and AI trust have independent readiness so a failed live view does not erase
-otherwise healthy semantic/action capabilities. The frozen PC sidecar includes its WebSocket
-runtime; packaged-runtime HTTP and WebSocket readiness are release gates after the Beta 1 startup
-regression.
-
-## Codex MCP
-
-`tools/codex-phone-mcp/**` provides a constrained local STDIO MCP client for Codex. The documented tool surface includes status, observation, UI search, element inspection, screenshot, current page/history, typed action, debug bundle and teaching lifecycle tools.
-
-The model does not get generic shell/root tools.
-
-Cyclone 3.5 MCP surfaces add explicit-target device/group operations and bounded virtual and routine
-lifecycle tools. Empty, wildcard and duplicate target sets are rejected, and command-shaped host
-parameters fail closed.
-
-Teach and Brain score selector stability, verifier strength and evidence completeness before a
-captured workflow becomes durable knowledge. Agent execution adds bounded retries, per-tool
-timeouts, repeated-action/convergence protection, structured events and mandatory post-mutation
-verification without creating a second routine engine.
-
-Infrastructure V3 is now present as compiled Cyclone-native services: capability registry, policy
-governor, memory service and tiered provider, Module Supervisor and offline catalog, Context Ledger,
-temporal App Graph V2, routine capsules/durable runs, vision routing, signed-data runtime staging,
-Recovery/Safe Mode and development agent teams. Shared integration preserves one policy authority,
-one module lifecycle authority, one memory write seam and the existing `PhoneToolExecutor`.
-
-Runtime staging hands candidates to Recovery; only Recovery promotes or rolls back. Recovery asks
-the public Module Supervisor seam to quarantine an optional module. Sensitive Context Ledger text
-is omitted rather than stored as a guessable unkeyed digest. These services are contract-composed,
-but no new product UI or second navigation shell was added merely to expose them.
-
-## Release state / limitations
-
-- The combined workflow builds Windows + Android from one SHA. `release/beta/**` publishes a
-  prerelease and `release/stable/**` may publish a stable release only when
-  `release/version.toml` explicitly authorizes publication.
-- Builds are currently beta/debug-signed unless a later release explicitly changes signing.
-- Stable protected signing is still needed for painless long-term Android upgrades.
-- A physical Pixel 8 is the hardware acceptance target. Virtual and mixed-fleet claims require a
-  genuinely booted provider, not lifecycle mocks. See the hard-launch report for exact outcomes.
-- The broader repository still includes Cyclone Desktop/Core/Hermes/n8n/Host Bridge. Those remain useful as an external control plane and agent environment, but mobile autonomy should not depend on them for basic local phone learning/execution.
-
-## Known organizational debt
-
-- Historical version documents are numerous and can confuse new agents.
-- Some mobile files/classes retain V292/V293 names because they originated in earlier releases.
-- Some large Compose/runtime files are expensive to edit safely.
-- Normal Android push/PR builds are consolidated under `mobile-ci.yml` and `_mobile-build.yml`;
-  historical workflows are manual compatibility entry points.
-- Repo-wide product version synchronization across Android + Python packages should become generated from one release metadata source.
-
-These are organization/refactoring targets, not reasons to rewrite working subsystems wholesale.
+- `main` has not been fast-forwarded to 3.6.
+- Historical V2 documents are now stubs; full text is in git history.
+- Some classes still use V292/V293 names.
+- Some Compose/runtime files are expensive to edit.
+- Do not resurrect archived plans as the current spec.

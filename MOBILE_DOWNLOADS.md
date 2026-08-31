@@ -1,64 +1,34 @@
 # Cyclone Mobile APK Downloads
 
-Use **GitHub Releases** as the permanent download shelf for Cyclone Mobile builds. You no longer need to open an Actions run, download a ZIP, extract `app-debug.apk`, and guess which build is newest.
+Use **GitHub Releases** as the download shelf. Do not treat Actions ZIPs or `app-debug.apk` as the product.
 
-## Current beta
+## Current release — Cyclone 3.6.0
 
-### Cyclone Mobile 2.9.5 Beta — repository-verified shelf record
+- Release page: https://github.com/premiumcentraal-boop/Cyclone/releases/tag/v3.6.0
+- Android APK: `Cyclone-3.6.0.apk` (`versionName` 3.6.0, `versionCode` 43, package `com.cyclone.mobile`)
+- Windows: `Cyclone-PC-Companion-3.6.0-Setup.exe`
+- Separate Picnic app: `Teamwork-Sniper-3.5.3.3.apk` (different package; not an upgrade of Cyclone Mobile)
+- Notes: [`docs/release-notes/v3.6.0.md`](docs/release-notes/v3.6.0.md)
+- Repo identity: [`release/version.toml`](release/version.toml)
 
-- Release page: https://github.com/premiumcentraal-boop/Cyclone/releases/tag/v2.9.5
-- Direct APK: https://github.com/premiumcentraal-boop/Cyclone/releases/download/v2.9.5/Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk
-- Recorded SHA-256: `b6ddfe9b67d16c322536d92ce8468a35cf3f311975b97948d5b9fa815d73300c`
-- Repository proof: `releases/2.9.5/BUILD_VERIFIED.json`
+Physical Pixel 8 UI slices are still **UNVERIFIED**. Do not mark phone behavior VERIFIED from CI alone.
 
-This shelf entry describes the previously verified 2.9.5 beta. It does **not** claim that a local
-Infrastructure V3 build has been uploaded, published or physically tested.
+### Pixel install
 
-## All mobile versions
+1. Settings → Apps → search **Cyclone**. If it exists (including Disabled / Private Space), uninstall it. A leftover 3.5.x signed with another key blocks this package.
+2. Download `Cyclone-3.6.0.apk` on the phone. Wait until Files shows tens of megabytes, not a 1 KB HTML page.
+3. Open the APK → Install. Play Protect: More details → Install anyway.
+4. Do **not** install `Cyclone-3.6.0-beta.apk` or `Cyclone-3.6.0-beta.2.apk`.
 
-Open the repository Releases page and choose the Cyclone Mobile version you want:
+`3.6.0-beta` was `assembleDebug` (`testOnly`). `3.6.0-beta.2` was a large debug-cert APK. This 3.6.0 build is a v2-signed release APK, arm64-only, not `testOnly`, signed with the pinned Cyclone release keystore.
 
-https://github.com/premiumcentraal-boop/Cyclone/releases
+## Older shelves (do not install for current work)
 
-Mobile release tags should use one documented format per channel, for example:
+Historical tags such as `v3.5.3`, `v3.5.1`, `v2.9.5` remain on the Releases page for archaeology. They are not the working product.
 
-```text
-v2.9.5
-mobile-v3.0.0-beta
-```
+## Publishing rules
 
-APK filenames use this format:
-
-```text
-Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk
-Cyclone-Mobile-3.0.0-beta.1.apk
-```
-
-## Publishing future updates
-
-`.github/workflows/mobile-ci.yml` is the only automatic Android lane. It calls the reusable
-`_mobile-build.yml`, which validates metadata, tests and assembles once, and stores one APK with its
-checksum, exact source SHA, run ID and metadata.
-
-For a new mobile release:
-
-1. Bump `versionCode` and `versionName` in `apps/mobile/app/build.gradle.kts`.
-2. Push the mobile change or open a pull request and require a successful `Cyclone Mobile CI` run.
-3. Review the run's APK, source SHA, run ID, metadata and checksum.
-4. Run `mobile-release.yml` manually with that run ID and artifact name. It verifies and reuses the
-   authoritative artifact; it never recompiles it.
-5. Follow `docs/agent-system/FAST_RELEASE_PLAYBOOK.md` for the release evidence and approval gates.
-
-Publication is intentionally disabled. Version code `17`, debug-signed beta output, protected release
-signing and physical-device acceptance are explicit blockers before a new downloadable release can be
-claimed. Do not update this shelf from a local build alone.
-
-## Build verification
-
-Each release includes a `.sha256` file. To verify a downloaded APK on Windows PowerShell:
-
-```powershell
-Get-FileHash .\Cyclone-Mobile-2.9.5-Original-UI-Full-Gateway.apk -Algorithm SHA256
-```
-
-Compare that value with the release checksum file.
+- Bump `versionCode` for every distributed APK. Change `versionName` only for a product identity change.
+- Combined Release CI publishes from `release/beta/**` or `release/stable/**` when `release/version.toml` authorizes publication.
+- Follow [`docs/agent-system/FAST_RELEASE_PLAYBOOK.md`](docs/agent-system/FAST_RELEASE_PLAYBOOK.md).
+- Never claim an APK is updated until the GitHub Release asset matches the source SHA.
