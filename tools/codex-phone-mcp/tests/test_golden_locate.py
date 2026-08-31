@@ -132,7 +132,7 @@ class GoldenLocateTests(unittest.TestCase):
     def test_goldens_have_no_plaintext_secrets_or_raw_trees(self):
         for path, golden in iter_goldens():
             with self.subTest(page=path.stem):
-                assert_no_plaintext_secrets(golden, page_name=page_name if False else path.stem)
+                assert_no_plaintext_secrets(golden, page_name=path.stem)
                 assert_no_raw_tree(observation(golden), page_name=path.stem)
                 blob = str(golden).lower()
                 self.assertNotIn("hunter2", blob)
