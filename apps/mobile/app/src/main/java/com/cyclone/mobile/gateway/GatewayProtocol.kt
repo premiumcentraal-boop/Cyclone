@@ -84,6 +84,9 @@ internal object GatewayProtocol {
         "manual.execute",
         "clipboard.get",
         "clipboard.set",
+        "skill.compile",
+        "skill.run",
+        "skill.match",
     )
 
     fun parse(line: String): GatewayRequest {
