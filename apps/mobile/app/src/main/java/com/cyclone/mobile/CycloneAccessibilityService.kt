@@ -15,6 +15,7 @@ import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONObject
 import java.io.File
@@ -58,6 +59,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         instance = this
         DeviceState.accessibilityConnected = true
         DeviceState.addLog("Accessibility connected")
+
+        runCatching { OverlayChromeRuntime.attach(this) }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.overlay.attach", it) }
 
         // Android owns this callback boundary. Optional Cyclone runtimes are deliberately initialized
         // away from it so a corrupt DB, migration issue, legacy bridge config, or app-learning bug can
@@ -148,6 +152,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         runCatching { guidedOverlay?.dismiss() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.guided", it) }
         guidedOverlay = null
+        runCatching { OverlayChromeRuntime.detach() }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.overlay", it) }
         runCatching { RoutineTeachingOverlayRuntime.dismiss() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.teaching", it) }
         instance = null
