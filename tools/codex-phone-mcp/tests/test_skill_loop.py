@@ -3,7 +3,9 @@ import unittest
 
 from cyclone_phone_mcp.compact import compact_observation
 from cyclone_phone_mcp.mcp_server import DEFAULT_SURFACE, McpServer
+from cyclone_phone_mcp.gateway import GatewayError
 from cyclone_phone_mcp.skills import (
+    ANDROID_SKILL_OPS_MISSING,
     COMPILER,
     STORE_CLASS,
     build_save_payload,
@@ -40,6 +42,7 @@ def _verified_step(tool, page_from, page_to, label="Apps"):
 class SkillGateway:
     def __init__(self):
         self.writes = []
+        self.runs = []
         self.skills = {
             "skill.verified.open-settings": {
                 "id": "skill.verified.open-settings",
@@ -63,7 +66,7 @@ class SkillGateway:
                 "id": "skill.draft.wifi",
                 "status": "draft",
                 "goal": "Open Wi-Fi",
-                "pageKey": "settings",
+                "pageKey": "home",
                 "storeClass": STORE_CLASS,
                 "steps": [{"ok": True}, {"ok": True}],
             },
@@ -88,11 +91,15 @@ class SkillGateway:
 
     def skill_match(self, goal, page_key=""):
         for skill in self.skills.values():
-            if skill["status"] == "verified" and skill["goal"].lower() == goal.lower():
-                if page_key and skill["pageKey"] != page_key:
-                    continue
-                return {"matched": True, "skill": skill}
+            if skill["goal"].lower() != goal.lower():
+                continue
+            if page_key and skill["pageKey"] != page_key:
+                continue
+            return {"matched": skill["status"] == "verified", "skill": skill}
         return {"matched": False, "skills": []}
+
+    def skill_get(self, skill_id):
+        return self.skills.get(skill_id)
 
     def skill_save(self, payload):
         self.writes.append(payload)
@@ -109,10 +116,39 @@ class SkillGateway:
         return {"skill": skill, "storeClass": STORE_CLASS, "status": "draft"}
 
     def skill_run(self, skill_id, *, dry_run=False, params=None):
+        self.runs.append({"skill_id": skill_id, "dry_run": dry_run, "params": params or {}})
         skill = self.skills[skill_id]
         if skill["status"] == "draft" and not dry_run:
             return {"ok": False, "status": "draft", "denied": True, "errorClass": "DRAFT_RUN_DENIED", "steps": []}
         return {"ok": True, "status": skill["status"], "storeClass": STORE_CLASS, "steps": skill["steps"], "dryRun": dry_run}
+
+
+class MissingOpsGateway(SkillGateway):
+    """Android skill.* ops are absent: UNKNOWN_OPERATION / CAPABILITY_UNAVAILABLE."""
+
+    def skill_match(self, goal, page_key=""):
+        raise GatewayError(
+            "Android skill.match is not advertised",
+            body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY"}},
+        )
+
+    def skill_save(self, payload):
+        raise GatewayError(
+            "Android skill.compile is not advertised",
+            body={"error": {"code": "UNKNOWN_OPERATION", "layer": "CAPABILITY"}},
+        )
+
+    def skill_run(self, skill_id, *, dry_run=False, params=None):
+        raise GatewayError(
+            "Android skill.run is not advertised",
+            body={"error": {"code": "UNKNOWN_OPERATION", "layer": "CAPABILITY"}},
+        )
+
+    def skill_get(self, skill_id):
+        raise GatewayError(
+            "Android skill.get is not advertised",
+            body={"error": {"code": "UNKNOWN_OPERATION", "layer": "CAPABILITY"}},
+        )
 
 
 class FakeListTools:
@@ -157,6 +193,7 @@ class SkillLoopTests(unittest.TestCase):
         self.assertEqual("draft", payload["status"])
         self.assertEqual(STORE_CLASS, payload["storeClass"])
         self.assertEqual(COMPILER, payload["compiler"])
+        self.assertIs(False, payload["enabled"])
         self.assertEqual(1, len(gateway.writes))
         written = gateway.writes[0]
         self.assertEqual("draft", written["status"])
@@ -210,12 +247,15 @@ class SkillLoopTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertEqual("DRAFT_RUN_DENIED", payload["errorClass"])
         self.assertEqual([], payload["steps"])
+        self.assertEqual([], gateway.runs)
         dry = json.loads(tools.call("phone_skill_run", {
             "skill_id": "skill.draft.wifi",
             "dryRun": True,
         })[0]["text"])
         self.assertTrue(dry["ok"])
         self.assertTrue(dry["dryRun"])
+        self.assertEqual(1, len(gateway.runs))
+        self.assertTrue(gateway.runs[0]["dry_run"])
 
     def test_locate_goal_includes_page_text_and_page_summary(self):
         tools = PhoneTools(SkillGateway())
@@ -227,6 +267,7 @@ class SkillLoopTests(unittest.TestCase):
         self.assertEqual("home", card["pageKey"])
         self.assertIsNotNone(located["matchedSkill"])
         self.assertTrue(located["matchedSkill"]["skipModel"])
+        self.assertTrue(located["skipModel"])
         self.assertIn("phone_skill_run", located["next"])
 
     def test_secret_slot_stripped_on_save(self):
@@ -262,6 +303,64 @@ class SkillLoopTests(unittest.TestCase):
         self.assertEqual("s1", match["id"])
         run = normalize_run({"status": "draft", "denied": True}, skill_id="draft-1", dry_run=False)
         self.assertEqual("DRAFT_RUN_DENIED", run["errorClass"])
+
+    def test_locate_draft_skill_does_not_skip_model(self):
+        tools = PhoneTools(SkillGateway())
+        located = json.loads(tools.call("phone_locate", {"goal": "Open Wi-Fi"})[0]["text"])
+        self.assertEqual("page_card", located["pageCard"]["kind"])
+        self.assertIsNone(located["matchedSkill"])
+        self.assertFalse(located["skipModel"])
+        self.assertNotIn("phone_skill_run", located["next"])
+
+    def test_save_missing_android_ops_fail_closed(self):
+        gateway = MissingOpsGateway()
+        tools = PhoneTools(gateway)
+        payload = json.loads(tools.call("phone_skill_save", {
+            "goal": "Open Settings",
+            "pageKey": "home",
+            "steps": [
+                _verified_step("phone.click", "home", "settings"),
+                _verified_step("phone.click", "settings", "settings", label="Network"),
+            ],
+        })[0]["text"])
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["written"])
+        self.assertEqual(ANDROID_SKILL_OPS_MISSING, payload["errorClass"])
+        self.assertEqual([], gateway.writes)
+
+    def test_run_missing_android_ops_fail_closed(self):
+        gateway = MissingOpsGateway()
+        tools = PhoneTools(gateway)
+        payload = json.loads(tools.call("phone_skill_run", {
+            "skill_id": "skill.verified.open-settings",
+        })[0]["text"])
+        self.assertFalse(payload["ok"])
+        self.assertEqual(ANDROID_SKILL_OPS_MISSING, payload["errorClass"])
+        self.assertEqual([], payload.get("steps") or [])
+        self.assertEqual([], gateway.runs)
+
+    def test_locate_missing_android_ops_fail_closed_keeps_page_card(self):
+        tools = PhoneTools(MissingOpsGateway())
+        located = json.loads(tools.call("phone_locate", {"goal": "Open Settings"})[0]["text"])
+        self.assertEqual("phone_locate", located["kind"])
+        self.assertEqual("page_card", located["pageCard"]["kind"])
+        self.assertIn("Home screen", located["pageCard"]["pageText"])
+        self.assertIsNone(located["matchedSkill"])
+        self.assertFalse(located["skipModel"])
+        self.assertEqual(ANDROID_SKILL_OPS_MISSING, located["errorClass"])
+        self.assertFalse(located["ok"])
+
+    def test_http_200_run_without_ok_envelopes_is_not_success(self):
+        gateway = SkillGateway()
+        gateway.skills["skill.verified.open-settings"]["steps"] = [
+            {"kind": "phone_action_result", "ok": False, "errorClass": "VERIFICATION_FAILED"},
+            {"kind": "phone_action_result", "ok": True},
+        ]
+        payload = json.loads(PhoneTools(gateway).call("phone_skill_run", {
+            "skill_id": "skill.verified.open-settings",
+        })[0]["text"])
+        self.assertFalse(payload["ok"])
+        self.assertEqual(2, len(payload["steps"]))
 
     def test_compact_observation_keeps_page_text_for_locate_contract(self):
         card = compact_observation({

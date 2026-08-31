@@ -6,14 +6,24 @@ from typing import Any
 from .gateway import GatewayError
 from .gateway_skills import GatewayClient
 from .reports import SessionRecorder
-from .skills import build_save_payload, matched_verified_skill, normalize_run, save_success, strip_secret_slots
+from .skills import (
+    android_skill_ops_missing,
+    attach_missing_android_skill_ops,
+    build_save_payload,
+    draft_run_denied,
+    matched_verified_skill,
+    missing_android_skill_ops,
+    normalize_run,
+    save_success,
+    strip_secret_slots,
+)
 from .tools import PhoneTools as CorePhoneTools
 
 SKILL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 class PhoneTools(CorePhoneTools):
-    """Default V3.7 PC surface: locate/act plus skill save/run on AutomationStore."""
+    """Default V3.8 PC surface: live AutomationStore save/run plus locate skillMatch."""
 
     def __init__(self, gateway: Any | None = None, recorder: SessionRecorder | None = None):
         super().__init__(gateway or GatewayClient(), recorder)
@@ -32,10 +42,17 @@ class PhoneTools(CorePhoneTools):
                 match_raw = self.gateway.device_skill_match(device_id, goal, page_key)
             elif hasattr(self.gateway, "skill_match"):
                 match_raw = self.gateway.skill_match(goal, page_key)
-        except (GatewayError, AttributeError, TypeError, ValueError):
+        except GatewayError as exc:
+            if android_skill_ops_missing(exc):
+                return attach_missing_android_skill_ops(result)
             match_raw = None
+        except (AttributeError, TypeError, ValueError):
+            match_raw = None
+        if android_skill_ops_missing(match_raw):
+            return attach_missing_android_skill_ops(result)
         matched = matched_verified_skill(match_raw, goal, page_key)
         result["matchedSkill"] = matched
+        result["skipModel"] = bool(matched)
         if matched:
             result["next"] = matched["next"]
         return result
@@ -51,10 +68,15 @@ class PhoneTools(CorePhoneTools):
         if not isinstance(payload, dict):
             raise ValueError("skill compile payload is invalid")
         device_id = str(args.get("device_id") or "").strip()
-        if device_id:
-            result = self.gateway.device_skill_save(device_id, payload)
-        else:
-            result = self.gateway.skill_save(payload)
+        try:
+            if device_id:
+                result = self.gateway.device_skill_save(device_id, payload)
+            else:
+                result = self.gateway.skill_save(payload)
+        except GatewayError as exc:
+            if android_skill_ops_missing(exc):
+                return missing_android_skill_ops("phone_skill_save")
+            raise
         return save_success(result, payload)
 
     def phone_skill_run(self, args: dict[str, Any]) -> Any:
@@ -65,11 +87,40 @@ class PhoneTools(CorePhoneTools):
         params = args.get("params") if isinstance(args.get("params"), dict) else {}
         params = strip_secret_slots(params)
         device_id = str(args.get("device_id") or "").strip()
-        if device_id:
-            result = self.gateway.device_skill_run(device_id, skill_id, dry_run=dry_run, params=params)
-        else:
-            result = self.gateway.skill_run(skill_id, dry_run=dry_run, params=params)
+        if not dry_run:
+            meta = _skill_meta(self.gateway, device_id, skill_id)
+            if isinstance(meta, dict) and str(meta.get("status") or "").lower() == "draft":
+                return draft_run_denied(skill_id, "draft")
+        try:
+            if device_id:
+                result = self.gateway.device_skill_run(device_id, skill_id, dry_run=dry_run, params=params)
+            else:
+                result = self.gateway.skill_run(skill_id, dry_run=dry_run, params=params)
+        except GatewayError as exc:
+            if android_skill_ops_missing(exc):
+                return missing_android_skill_ops(
+                    "phone_skill_run",
+                    {"skillId": skill_id, "dryRun": dry_run, "steps": []},
+                )
+            raise
         return normalize_run(result, skill_id=skill_id, dry_run=dry_run)
+
+
+def _skill_meta(gateway: Any, device_id: str, skill_id: str) -> dict[str, Any] | None:
+    """Optional lookup used to deny draft live runs locally before POST /runs."""
+    try:
+        if device_id and hasattr(gateway, "device_skill_get"):
+            raw = gateway.device_skill_get(device_id, skill_id)
+        elif hasattr(gateway, "skill_get"):
+            raw = gateway.skill_get(skill_id)
+        else:
+            return None
+    except (GatewayError, AttributeError, TypeError, ValueError, KeyError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    skill = raw.get("skill") if isinstance(raw.get("skill"), dict) else raw
+    return skill if isinstance(skill, dict) else None
 
 
 def _with_act_contract(result: Any) -> Any:

@@ -10,7 +10,7 @@ Everything else on this server is advanced. Do not invent a fifth default tool.
 
 1. `phone_status` — gateway, ADB, bridge, Accessibility readiness.
 2. `phone_locate(goal)` — bounded Page Card (`pageText` + `pageSummary` must survive) plus goal-ranked hits.
-   If a **verified** skill matches `goal` + `pageKey`, say so and call `phone_skill_run` instead of debating the screen.
+   If a **verified** skill matches `goal` + `pageKey`, `matchedSkill.skipModel` is true: call `phone_skill_run` instead of debating the screen. A draft match never sets skipModel. The Page Card is always returned.
 3. `phone_act` — one typed mutation. HTTP 200 is not success. Read `ok`, `pageChanged`, `before`, `after.pageCard`, `delta`, `errorClass`, `generation`.
 4. `phone_skill_save` / `phone_skill_run` — the existing AutomationStore / `SkillCompiler.compile` draft path. No second JSON brain.
 
