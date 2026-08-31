@@ -61,3 +61,26 @@ class TeachStopRequest(BaseModel):
 
     compileForReview: bool = True
     source: Literal["PC_CODEX"] = "PC_CODEX"
+
+
+class SkillSaveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = ""
+    app: str = ""
+    pageKey: str = ""
+    status: str = "draft"
+    enabled: bool = False
+    storeClass: str = "AutomationStore"
+    compiler: str = "SkillCompiler.compile"
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+    source: Literal["PC_CODEX"] = "PC_CODEX"
+
+
+class SkillRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dryRun: bool = False
+    params: dict[str, Any] = Field(default_factory=dict)
+    source: Literal["PC_CODEX"] = "PC_CODEX"
