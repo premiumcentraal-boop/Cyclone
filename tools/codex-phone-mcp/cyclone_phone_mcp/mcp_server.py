@@ -4,24 +4,37 @@ import json
 import sys
 from typing import Any
 
-from .tools import PhoneTools
+from .surface import PhoneTools
 from .protocol import classify_failure
 
 SERVER_NAME = "cyclone-phone"
 SERVER_VERSION = "3.1-beta"
 
+DEFAULT_SURFACE = (
+    "phone_status",
+    "phone_locate",
+    "phone_act",
+    "phone_skill_save",
+    "phone_skill_run",
+)
+
 INSTRUCTIONS = (
-    "Control the phone semantic-first through Cyclone V3 capabilities. Start with phone_devices, then use phone_locate before every mutation: it returns readiness, a bounded Page Card, and goal-ranked semantic candidates. "
-    "Prefer known verified routes and current observation-scoped elementIds. IDs expire after every mutation: never reuse them. MCP rejects free-form text/fuzzy/coordinate selectors; pass only params.elementId (or params.selector.elementId) from the current Page Card/search result. "
-    "If the Page Card is truncated or the target is absent, use semantic search/inspect before considering a screenshot. "
-    "When multiple phones are connected, pass the device_id returned by phone_devices to every tool so operations target the right phone. "
-    "phone_act returns its own action status and before/after Page Cards after every safe mutation; transport success alone is never verification. Never repeat the same failed action blindly. App Graph/Brain are hints, not unquestionable truth. "
-    "Virtual lifecycle and routine tools accept only explicit Cyclone identifiers and fail closed when the authenticated Gateway route is unavailable. "
-    "user_authorized is only an MCP intent acknowledgement and never bypasses Android policy. Do not expose secrets or use arbitrary shell/root/ADB commands."
+    "Control the phone semantic-first through Cyclone. Default loop: phone_status → phone_locate(goal) → phone_act → phone_skill_save | phone_skill_run. "
+    "phone_locate returns readiness, a bounded Page Card (pageText + pageSummary), and goal-ranked candidates. "
+    "If a verified skill matches goal + pageKey, call phone_skill_run and skip the model. "
+    "Prefer current observation-scoped elementIds. IDs expire after every mutation: never reuse them. "
+    "MCP rejects free-form text/fuzzy/coordinate selectors; pass only params.elementId from the current Page Card. "
+    "phone_act returns ok, pageChanged, before, after.pageCard, delta, errorClass, generation; transport success is never verification. "
+    "phone_skill_save writes status=draft into existing AutomationStore via SkillCompiler.compile only when 2+ steps are verified; secret slots are stripped. "
+    "phone_skill_run runs verified skills (or dryRun on a draft) through PhoneToolExecutor via the gateway and returns per-step act envelopes. "
+    "When multiple phones are connected, pass device_id from phone_devices. "
+    "user_authorized is only an MCP intent acknowledgement and never bypasses Android policy. "
+    "Do not expose secrets or use arbitrary shell/root/ADB commands."
 )
 
 
 def _tool(name: str, description: str, schema: dict[str, Any], *, read_only: bool, destructive: bool = False) -> dict[str, Any]:
+    default = name in DEFAULT_SURFACE
     return {
         "name": name,
         "description": description,
@@ -31,6 +44,7 @@ def _tool(name: str, description: str, schema: dict[str, Any], *, read_only: boo
             "destructiveHint": destructive,
             "idempotentHint": read_only,
             "openWorldHint": True,
+            "cycloneDefaultSurface": default,
         },
     }
 
@@ -51,16 +65,18 @@ def _with_device(schema: dict[str, Any]) -> dict[str, Any]:
 
 TOOLS = [
     _tool("phone_status", "Read Cyclone gateway, ADB, bridge and Accessibility readiness for one phone.", _with_device({"type": "object", "properties": {}}), read_only=True),
+    _tool("phone_locate", "Primary locate-first tool: fuse device status, a bounded Page Card (pageText + pageSummary), and goal-aware semantic search. If a verified skill matches goal + pageKey, skip the model and call phone_skill_run.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "query": {"type": "string"}}, "required": ["goal"]}), read_only=True),
+    _tool("phone_act", "Execute one typed Cyclone phone action through the V3 Android authority seam and canonical PhoneToolExecutor. Locate first. click/long_press/type require a current observation-scoped elementId in params.elementId; free-form selectors and coordinates are rejected. phone.scroll accepts direction=forward/backward; phone.swipe has no safe MCP route. Every mutation returns action status plus before/after Page Cards, pageChanged, delta, errorClass, and generation. phone.type requires user_authorized=true but Android policy remains authoritative.", _with_device({"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object", "description": "Typed safe parameters only. Use current elementId for element actions; raw selector text/fuzzy/bounds/coordinates are rejected."}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}}, "required": ["tool", "params", "goal"]}), read_only=False, destructive=True),
+    _tool("phone_skill_save", "Compile verified 2+ phone_act steps into a disabled draft skill in the existing AutomationStore (SkillCompiler.compile). Unverified steps do not write. Secret slots are stripped. Workers cannot mark verified.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "pageKey": {"type": "string"}, "app": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "minItems": 2}, "params": {"type": "object", "description": "Slot values only. Secret slots are stripped and never persisted."}}, "required": ["goal", "steps"]}), read_only=False),
+    _tool("phone_skill_run", "Run one skill from AutomationStore through PhoneToolExecutor via the gateway. Only status=verified runs live; drafts require dryRun=true. Returns per-step act envelopes.", _with_device({"type": "object", "properties": {"skill_id": {"type": "string"}, "dryRun": {"type": "boolean", "default": False}, "params": {"type": "object"}}, "required": ["skill_id"]}), read_only=False, destructive=True),
     _tool("phone_capabilities", "Discover the typed V3 phone capability inventory and health. Discovery is metadata, not action authority.", _with_device({"type": "object", "properties": {"refresh": {"type": "boolean", "default": False}}}), read_only=True),
     _tool("phone_devices", "Auto-detect connected phones through the PC gateway fleet. Returns device ids, states, pairing and display info; scan=true forces a fresh ADB scan.", {"type": "object", "properties": {"scan": {"type": "boolean", "default": False}}, "additionalProperties": False}, read_only=True),
     _tool("phone_observe", "Read a bounded Page Card. Compact mode is the normal path; provide goal to rank current candidates. Element IDs are observation-scoped and expire after mutation.", _with_device({"type": "object", "properties": {"mode": {"type": "string", "enum": ["compact", "full"], "default": "compact"}, "include_screenshot": {"type": "boolean", "default": False}, "goal": {"type": "string"}}}), read_only=True),
-    _tool("phone_locate", "Primary locate-first tool: fuse device status, a bounded Page Card, and goal-aware semantic search. Use a returned current elementId immediately; re-run after every mutation.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "query": {"type": "string"}}, "required": ["goal"]}), read_only=True),
     _tool("phone_ui_search", "Run bounded semantic search when Page Card context is insufficient. Results retain only safe candidates and current observation-scoped IDs; no raw UI tree is returned.", _with_device({"type": "object", "properties": {"query": {"type": "string"}, "goal": {"type": "string"}}, "required": ["query"]}), read_only=True),
     _tool("phone_inspect_element", "Inspect one current candidate. Its elementId is observation-scoped: act now or re-observe after any mutation.", _with_device({"type": "object", "properties": {"element_id": {"type": "string"}}, "required": ["element_id"]}), read_only=True),
     _tool("phone_screenshot", "Capture/return the current screenshot plus its PageKey-correlated compact observation. Use only when structured UI is insufficient or conflicting.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_current_page", "Read the gateway's current page record for one phone.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_page_history", "Read recent page/action transition history for verification and recovery.", _with_device({"type": "object", "properties": {}}), read_only=True),
-    _tool("phone_act", "Execute one typed Cyclone phone action through the V3 Android authority seam and canonical PhoneToolExecutor. Locate first. click/long_press/type require a current observation-scoped elementId in params.elementId; free-form selectors and coordinates are rejected. phone.scroll accepts direction=forward/backward; phone.swipe has no safe MCP route. Every mutation returns action status plus before/after Page Cards, pageChanged, delta, and errorClass. phone.type requires user_authorized=true but Android policy remains authoritative.", _with_device({"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object", "description": "Typed safe parameters only. Use current elementId for element actions; raw selector text/fuzzy/bounds/coordinates are rejected."}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}}, "required": ["tool", "params", "goal"]}), read_only=False, destructive=True),
     _tool("phone_group_act", "Run one typed non-secret phone action on 1..32 explicitly selected devices. Cyclone observes each target first and returns independent per-device outcomes.", {"type": "object", "properties": {"device_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 32, "uniqueItems": True}, "tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object"}, "goal": {"type": "string"}}, "required": ["device_ids", "tool", "params", "goal"], "additionalProperties": False}, read_only=False, destructive=True),
     _tool("phone_debug_bundle", "Capture the bridge diagnostic bundle when perception, context, execution or verification disagree.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "expected": {"type": "string"}}}), read_only=True),
     _tool("phone_teach_start", "Start Cyclone's canonical Follow Me/Teach session; this does not create a second teaching store.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}}}), read_only=False),
@@ -97,12 +113,13 @@ class McpServer:
         if method == "ping":
             return _result(request_id, {})
         if method == "tools/list":
-            return _result(request_id, {"tools": TOOLS})
+            return _result(request_id, {"tools": listed_tools(self.phone_tools), "defaultSurface": list(DEFAULT_SURFACE)})
         if method == "tools/call":
             params = request.get("params") or {}
             name = params.get("name")
             arguments = params.get("arguments") or {}
-            if name not in {tool["name"] for tool in TOOLS}:
+            listed = {tool["name"] for tool in listed_tools(self.phone_tools)}
+            if name not in listed:
                 return _error(request_id, -32602, f"Unknown tool: {name}")
             content = self.phone_tools.call(str(name), arguments if isinstance(arguments, dict) else {})
             is_error = bool(getattr(self.phone_tools, "last_call_failed", _content_failed(content)))
@@ -127,6 +144,15 @@ class McpServer:
             if response is not None:
                 sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
                 sys.stdout.flush()
+
+
+def listed_tools(phone_tools: Any) -> list[dict[str, Any]]:
+    """Permission-aware listing: omit tools the current phone cannot run when capabilities are known."""
+    omitted = getattr(phone_tools, "omitted_tools", None)
+    if not omitted:
+        return list(TOOLS)
+    blocked = set(omitted)
+    return [tool for tool in TOOLS if tool["name"] not in blocked]
 
 
 def _result(request_id: Any, result: Any) -> dict[str, Any]:

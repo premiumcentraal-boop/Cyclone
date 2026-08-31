@@ -8,6 +8,7 @@ import uvicorn
 from .config import Settings
 from .desktop_runtime.api import create_desktop_app
 from .doctor import BridgeDoctor, format_human
+from .skill_http import attach_to_app
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,7 +32,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report["overall"] == "READY" else 2
 
     settings = Settings.from_env()
-    uvicorn.run(create_desktop_app(settings), host=settings.host, port=settings.port)
+    app = create_desktop_app(settings)
+    attach_to_app(app)
+    uvicorn.run(app, host=settings.host, port=settings.port)
     return 0
 
 
