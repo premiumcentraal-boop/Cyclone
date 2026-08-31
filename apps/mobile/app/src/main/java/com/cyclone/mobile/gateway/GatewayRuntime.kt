@@ -4,8 +4,18 @@ import android.content.Context
 import android.os.Build
 import com.cyclone.mobile.BuildConfig
 import com.cyclone.mobile.DeviceState
+import com.cyclone.mobile.PhoneToolExecutor
+import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.applearner.FollowMeLearnerRuntime
+import com.cyclone.mobile.automation.AutomationRuntime
+import com.cyclone.mobile.automation.skill.SkillCompiler
+import com.cyclone.mobile.automation.skill.SkillDraftSink
 import com.cyclone.mobile.debug.PageDebugSandboxV293
+import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
+import com.cyclone.mobile.policy.GatePolicy
+import com.cyclone.mobile.policy.PolicyPrincipal
+import com.cyclone.mobile.policy.PrincipalKind
+import com.cyclone.mobile.policy.PrincipalRef
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONArray
 import org.json.JSONObject
@@ -338,11 +348,62 @@ internal object GatewayDispatcher {
         "teach.status" -> GatewayTeachingAdapter.status(context)
         "teach.stop" -> GatewayTeachingAdapter.stop(context)
         "debug.snapshot" -> debugSnapshot(context)
+        "skill.compile", "skill.run", "skill.match" -> dispatchSkill(context, request)
         else -> throw GatewayProtocolException(
             "PROTOCOL_MISMATCH",
             "Unsupported gateway operation: ${request.op}",
             request.id,
         )
+    }
+
+    private fun dispatchSkill(context: Context, request: GatewayRequest): JSONObject {
+        AutomationRuntime.initialize(context)
+        val governor = CycloneV31Runtime.initialize(context).policyGovernor
+        val store = AutomationRuntime.store
+        val gate = GatePolicy(governor)
+        val principal = PolicyPrincipal(PrincipalRef("pc.companion", PrincipalKind.EXTERNAL_GATEWAY))
+        val ops = SkillGatewayOps(
+            store = store,
+            sink = SkillDraftSink(SkillCompiler(store), gate, principal),
+            gate = gate,
+            principal = principal,
+            stepExecutor = SkillStepExecutor { commandId, tool, params ->
+                val beforeObs = GatewayObservationStore.current()
+                    ?: runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+                val native = PhoneToolExecutor.execute(context, PhoneToolRequest(commandId, tool, params))
+                val afterObs = runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+                    ?: GatewayObservationStore.current()
+                SkillStepOutcome(
+                    ok = native.ok,
+                    pageChanged = beforeObs?.page?.pageKey != afterObs?.page?.pageKey ||
+                        native.beforeFingerprint != native.afterFingerprint,
+                    beforeFingerprint = native.beforeFingerprint,
+                    afterFingerprint = native.afterFingerprint,
+                    errorClass = native.error?.code?.name,
+                    generation = afterObs?.id ?: beforeObs?.id,
+                    before = beforeObs?.let(::skillPageLocation),
+                    after = afterObs?.let(::skillPageAfter),
+                    delta = JSONObject()
+                        .put("pageKeyChanged", beforeObs?.page?.pageKey != afterObs?.page?.pageKey)
+                        .put("fingerprintChanged", native.beforeFingerprint != native.afterFingerprint),
+                )
+            },
+            observePage = { GatewayObservationStore.current()?.let(::skillPageCard) },
+        )
+        return ops.dispatch(request)
+    }
+
+    private fun skillPageLocation(observation: GatewayObservation): JSONObject = JSONObject()
+        .put("pageKey", observation.page.pageKey)
+        .put("package", observation.page.packageName)
+        .put("activity", observation.payload.opt("activity") ?: JSONObject.NULL)
+
+    private fun skillPageCard(observation: GatewayObservation): JSONObject = skillPageLocation(observation)
+        .put("observationScope", JSONObject().put("id", observation.id))
+
+    private fun skillPageAfter(observation: GatewayObservation): JSONObject {
+        val card = skillPageCard(observation)
+        return skillPageLocation(observation).put("pageCard", card)
     }
 
     private fun debugSnapshot(context: Context): JSONObject {
