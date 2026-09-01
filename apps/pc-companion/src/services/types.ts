@@ -67,6 +67,9 @@ export interface TrustStatusResult {
   completed?: boolean;
   rotated?: boolean;
   revoked?: boolean;
+  localTrustCleared?: boolean;
+  phoneRevocationConfirmed?: boolean;
+  phoneRevocationError?: string | null;
 }
 
 export type StreamUiState =

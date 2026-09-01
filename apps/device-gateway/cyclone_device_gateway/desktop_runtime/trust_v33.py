@@ -606,25 +606,53 @@ class PCTrustCoordinator:
 
     def revoke(self, device_id: str) -> dict[str, Any]:
         with self._lock:
-            token = self._active_token(device_id)
-            session = self._adb_ready(device_id)
+            # Local forgetting must remain available when USB is offline or the phone identity
+            # changed. Remote revocation is attempted below only when a valid session can open.
+            session = self.fleet.get(device_id)
             record = self.store.record(device_id)
             if record is None:
-                return {**self.status(device_id), "revoked": True}
+                self._pending.pop(device_id, None)
+                self._active.pop(device_id, None)
+                self._revoked.add(device_id)
+                self.fleet.remember_credential(session, None)
+                return {
+                    **self.status(device_id),
+                    "revoked": True,
+                    "localTrustCleared": True,
+                    "phoneRevocationConfirmed": False,
+                }
+            phone_revocation_confirmed = False
+            phone_revocation_error: str | None = None
             try:
+                token = self._active_token(device_id)
                 session.bridge(token=token).request(
                     "trust.revoke",
                     {"protocolVersion": TRUST_PROTOCOL_VERSION, "trustId": str(record.get("trustId") or "")},
                     request_id=f"trust-revoke-{secrets.token_urlsafe(12)}",
                 )
+                phone_revocation_confirmed = True
+            except DesktopRuntimeError as exc:
+                # Forgetting a stale/offline phone must not depend on reopening the very trust
+                # session that is being removed. Clear only this PC's bounded record and report
+                # that phone-side revocation could not be confirmed; a new trust handshake still
+                # requires the phone's explicit Allow this PC confirmation.
+                phone_revocation_error = exc.code
             except BridgeOperationError as exc:
-                self._raise_bridge(exc)
+                phone_revocation_error = str(exc.code or "BRIDGE_OPERATION_FAILED")
+            except (BridgeDisconnectedError, BridgeProtocolError) as exc:
+                phone_revocation_error = exc.__class__.__name__
             self.store.remove_record(device_id)
             self._pending.pop(device_id, None)
             self._active.pop(device_id, None)
             self._revoked.add(device_id)
             self.fleet.remember_credential(session, None)
-            return {**self.status(device_id), "revoked": True}
+            return {
+                **self.status(device_id),
+                "revoked": True,
+                "localTrustCleared": True,
+                "phoneRevocationConfirmed": phone_revocation_confirmed,
+                "phoneRevocationError": phone_revocation_error,
+            }
 
     def _active_token(self, device_id: str) -> str:
         active = self._active.get(device_id)

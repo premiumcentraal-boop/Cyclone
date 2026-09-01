@@ -128,6 +128,10 @@ class SemanticBridge:
                 "package": "com.android.launcher3",
                 "activity": "Home",
                 "accessibilityFingerprint": "home-fingerprint",
+                "pageText": {"protocol": "cyclone-page-text-v1", "lines": [{"text": "Home"}]},
+                "pageSummary": {"protocol": "cyclone-page-summary-v1", "title": "Home"},
+                "semanticControls": [{"elementId": "semantic:apps", "label": "Apps"}],
+                "rawAccessibility": {"nodes": [{"id": "must-not-reach-compact"}]},
             }
         if op == "ui.search":
             return {"items": [{"elementId": "semantic:apps", "label": args["query"]}]}
@@ -142,7 +146,38 @@ class SemanticBridge:
         raise AssertionError(op)
 
 
-def make_runtime(tmp_path):
+class DelayedLaunchBridge(SemanticBridge):
+    def __init__(self):
+        super().__init__()
+        self.action_seen = False
+        self.post_action_observations = 0
+
+    def request(self, op, args=None, request_id=None):
+        if op == "action.execute":
+            self.action_seen = True
+            return {
+                "execution": {"ok": True},
+                "androidExecution": {"ok": True},
+                "verification": {"ok": False, "status": "OBSERVED", "semanticSuccessClaimed": False},
+            }
+        if op == "observe.semantic" and self.action_seen:
+            self.observation += 1
+            self.post_action_observations += 1
+            changed = self.post_action_observations >= 2
+            return {
+                "observationId": f"obs-{self.observation}",
+                "pageKey": "SETTINGS" if changed else "HOME",
+                "package": "com.android.settings" if changed else "com.android.launcher3",
+                "activity": "Settings" if changed else "Home",
+                "accessibilityFingerprint": "settings" if changed else "home-fingerprint",
+                "pageText": {"protocol": "cyclone-page-text-v1", "lines": [{"text": "Settings" if changed else "Home"}]},
+                "pageSummary": {"protocol": "cyclone-page-summary-v1", "title": "Settings" if changed else "Home"},
+                "rawAccessibility": {"nodes": [{"id": "must-not-reach-action-after"}]},
+            }
+        return super().request(op, args, request_id)
+
+
+def make_runtime(tmp_path, bridge=None):
     inventory = Inventory([ADBDevice("CONTRACT-1", "device", "Pixel_8")])
     adbs = {}
 
@@ -158,7 +193,7 @@ def make_runtime(tmp_path):
     session.bridge_socket_listening = True
     session.accessibility_connected = True
     session.video = FakeVideo()
-    bridge = SemanticBridge()
+    bridge = bridge or SemanticBridge()
     session.bridge = lambda token=None, auto_forward=False: bridge
     runtime = DesktopRuntime(Settings("gateway-secret", None, "adb", tmp_path), fleet=fleet)
     return runtime, session
@@ -203,11 +238,45 @@ def test_device_scoped_observe_search_inspect_act_and_screenshot_share_a_contrac
     assert screenshot_body["artifact"]["kind"] == "LOCAL_FILE"
     assert Path(screenshot_body["artifact"]["reference"]).is_file()
     assert observed.json()["screenshot"]["artifact"]["kind"] == "LOCAL_FILE"
+    assert observed.json()["observation"]["pageText"]["protocol"] == "cyclone-page-text-v1"
+    assert observed.json()["observation"]["pageSummary"]["protocol"] == "cyclone-page-summary-v1"
+    assert observed.json()["observation"]["compact"]["rawTreeExcluded"] is True
+    assert "rawAccessibility" not in observed.json()["observation"]
+    assert "rawAccessibility" not in acted.json()["after"]
     assert acted.json()["afterState"]["observationId"] == "obs-2"
     assert health.status_code == 200
     assert health.json()["health"]["planes"]["usbAuthorization"]["reasonCode"] == "USB_AUTHORIZED"
     assert {"gateway", "accessibility", "tokenSession", "semantic", "media"}.issubset(health.json()["health"]["planes"])
     assert discovery.json()["devices"][0]["deviceId"] == session.device_id
+
+
+def test_page_transition_waits_for_delayed_android_after_state(tmp_path):
+    bridge = DelayedLaunchBridge()
+    runtime, session = make_runtime(tmp_path, bridge=bridge)
+    runtime.agent._after_action_timeout_seconds = 0.05
+    runtime.agent._after_action_poll_seconds = 0.01
+    app = create_desktop_app(runtime.settings, runtime)
+    headers = {"Authorization": "Bearer gateway-secret"}
+
+    with TestClient(app) as client:
+        base = f"/v1/devices/{session.device_id}/agent"
+        observed = client.post(f"{base}/observe", headers=headers, json={})
+        acted = client.post(
+            f"{base}/action",
+            headers=headers,
+            json={
+                "capability_id": "phone.open_app",
+                "expected_observation_id": observed.json()["observation"]["observationId"],
+                "params": {"package": "com.android.settings"},
+            },
+        )
+
+    assert acted.status_code == 200
+    assert bridge.post_action_observations >= 2
+    assert acted.json()["afterState"]["package"] == "com.android.settings"
+    assert acted.json()["afterState"]["pageKey"] == "SETTINGS"
+    assert acted.json()["after"]["compact"]["rawTreeExcluded"] is True
+    assert "rawAccessibility" not in acted.json()["after"]
 
 
 def test_screenshot_unavailable_is_device_scoped_and_explicit():

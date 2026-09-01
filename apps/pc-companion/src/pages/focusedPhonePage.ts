@@ -1,5 +1,6 @@
 import { keyboardCommandForEvent } from "../core/keyboard.js";
 import { KeyboardCapture } from "../core/keyboardCapture.js";
+import { needsTrustRepair, trustRepairMessage } from "../core/trustRecovery.js";
 import type { DesktopDevice, DesktopService, DeviceControlAction } from "../services/types.js";
 import { button, el, icon } from "../ui/dom.js";
 import { createLivePhoneView } from "../ui/livePhoneView.js";
@@ -16,6 +17,7 @@ export function createFocusedPhonePage(
   device: DesktopDevice,
   onBack: () => void,
   onSettings: () => void,
+  onPair: (device: DesktopDevice) => void,
 ): FocusedPhonePageHandle {
   const page = el("section", "page focus-page");
   const topbar = el("header", "focus-topbar");
@@ -58,6 +60,39 @@ export function createFocusedPhonePage(
   contextPanel.append(health, healthSlot, humanInput, aiInput);
 
   const controlStatus = el("div", "control-status", "Ready");
+  const trustRepairBanner = el("section", "trust-repair-banner");
+  const trustRepairCopy = el("div");
+  trustRepairCopy.append(
+    el("div", "trust-repair-title", "Cyclone AI trust needs repair"),
+    el("p", "trust-repair-copy", trustRepairMessage(device)),
+  );
+  const trustRepairButton = button("Forget & pair again", "button primary compact");
+  trustRepairBanner.append(trustRepairCopy, trustRepairButton);
+  trustRepairBanner.hidden = !needsTrustRepair(device);
+
+  const repairTrust = async () => {
+    if (!service.trustRevoke) {
+      controlStatus.textContent = "Trust repair is unavailable in this Companion build";
+      controlStatus.classList.add("error");
+      return;
+    }
+    const approved = window.confirm(`Forget the stale trust for ${device.name} on this PC? You will need to approve Allow this PC on the phone again.`);
+    if (!approved) return;
+    trustRepairButton.disabled = true;
+    controlStatus.textContent = "Forgetting stale trust…";
+    controlStatus.classList.remove("error");
+    try {
+      await service.trustRevoke(device.id);
+      controlStatus.textContent = "Old trust forgotten · approve the new request on the phone";
+      trustRepairBanner.hidden = true;
+      onPair(device);
+    } catch {
+      controlStatus.textContent = "Trust repair failed safely";
+      controlStatus.classList.add("error");
+      trustRepairButton.disabled = false;
+    }
+  };
+  trustRepairButton.addEventListener("click", () => void repairTrust());
   const liveColumn = el("div", "focus-live-column");
   const live = createLivePhoneView({
     service,
@@ -172,7 +207,7 @@ export function createFocusedPhonePage(
   summary.append(icon("•••"), el("span", "control-label", "More"));
   const menu = el("div", "more-menu-panel");
   const menuItems: Array<[string, () => void]> = [
-    ["Disconnect", () => void service.sendControl(device.id, { type: "disconnect" }).catch(() => undefined)],
+    ["Forget & pair again", () => void repairTrust()],
     ["Reconnect", () => void service.sendControl(device.id, { type: "reconnect" }).catch(() => undefined)],
     ["Device settings", onSettings],
     ["Technical diagnostics", onSettings],
@@ -186,7 +221,7 @@ export function createFocusedPhonePage(
 
   controls.append(primary, more, clipboardPanel);
   workspace.append(contextPanel, liveColumn, controls);
-  page.append(topbar, keyboardIndicator, workspace);
+  page.append(topbar, trustRepairBanner, keyboardIndicator, workspace);
 
   const keydown = (event: KeyboardEvent) => {
     if (!keyboardActive) return;
@@ -232,6 +267,7 @@ export function createFocusedPhonePage(
       healthDot.className = `context-health-dot state-${next.state.toLowerCase()}`;
       healthCopy.textContent = next.connectionLabel;
       healthSlot.replaceChildren(createDeviceHealthPanel(next));
+      trustRepairBanner.hidden = !needsTrustRepair(next);
     },
   };
 }

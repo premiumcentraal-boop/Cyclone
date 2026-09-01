@@ -8,8 +8,10 @@ import {
 import { TopologyRefreshGate } from "./core/topologyRefresh.js";
 import type { DesktopDevice, DesktopService } from "./services/types.js";
 import { createConnectionsPage } from "./pages/connectionsPage.js";
+import { createAutomationsPage } from "./pages/automationsPage.js";
 import { createFleetPage } from "./pages/fleetPage.js";
 import { createFocusedPhonePage } from "./pages/focusedPhonePage.js";
+import { createHomePage } from "./pages/homePage.js";
 import { createSettingsPage } from "./pages/settingsPage.js";
 import { PairingModal } from "./ui/pairingModal.js";
 import { button, el } from "./ui/dom.js";
@@ -78,7 +80,12 @@ export class CyclonePcCompanionApp {
     const nav = el("nav", "primary-nav");
     nav.setAttribute("aria-label", "Cyclone PC Companion");
 
-    const entries: Array<[Exclude<AppRoute, "focused">, string, string]> = [["fleet", "", "Control"]];
+    const entries: Array<[Exclude<AppRoute, "focused">, string, string]> = [
+      ["home", "⌂", "Home"],
+      ["fleet", "▣", "Control"],
+      ["automations", "↻", "Automations"],
+      ["connections", "◇", "Connections"],
+    ];
     for (const [route, symbol, label] of entries) {
       const item = button("", "nav-button");
       if (symbol) item.append(el("span", "nav-icon", symbol));
@@ -215,10 +222,29 @@ export class CyclonePcCompanionApp {
     if (this.state.route === "focused") {
       const device = this.state.devices.find((candidate) => candidate.id === this.state.focusedDeviceId);
       if (device) {
-        this.currentPage = createFocusedPhonePage(this.service, device, () => this.backToFleet(), () => this.navigate("settings"));
+        this.currentPage = createFocusedPhonePage(
+          this.service,
+          device,
+          () => this.backToFleet(),
+          () => this.navigate("settings"),
+          (target) => this.openPairing(target),
+        );
       } else {
         this.state = reduceCompanionState(this.state, { type: "back_to_fleet" });
       }
+    }
+    if (!this.currentPage && this.state.route === "home") {
+      this.currentPage = createHomePage(
+        this.state.devices,
+        () => this.navigate("fleet"),
+        () => this.navigate("automations"),
+        () => this.navigate("connections"),
+      );
+    }
+    if (!this.currentPage && this.state.route === "automations") {
+      this.currentPage = createAutomationsPage(this.state.devices, (device) => {
+        if (device) this.focusDevice(device); else this.navigate("fleet");
+      });
     }
     if (!this.currentPage && this.state.route === "connections") {
       this.currentPage = createConnectionsPage(this.service);
@@ -226,7 +252,7 @@ export class CyclonePcCompanionApp {
     if (!this.currentPage && this.state.route === "settings") {
       this.currentPage = createSettingsPage(this.service, this.state.devices);
     }
-    if (!this.currentPage) {
+    if (!this.currentPage && this.state.route === "fleet") {
       this.currentPage = createFleetPage(
         this.service,
         this.state.devices,
@@ -235,6 +261,15 @@ export class CyclonePcCompanionApp {
         () => this.scanForPhones(),
         () => this.navigate("settings"),
         { offline: this.gatewayError != null, message: this.gatewayError ?? undefined },
+      );
+    }
+    if (!this.currentPage) {
+      this.state = reduceCompanionState(this.state, { type: "navigate", route: "home" });
+      this.currentPage = createHomePage(
+        this.state.devices,
+        () => this.navigate("fleet"),
+        () => this.navigate("automations"),
+        () => this.navigate("connections"),
       );
     }
     this.content.replaceChildren(this.currentPage.element);
