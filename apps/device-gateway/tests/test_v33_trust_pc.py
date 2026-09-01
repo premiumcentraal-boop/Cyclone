@@ -338,3 +338,24 @@ def test_revoke_forgets_local_record_when_connected_phone_identity_changed(tmp_p
     assert result["phoneRevocationError"] == "TRUST_AUTH_FAILED"
     assert store.record("dev_test") is None
     assert session.credential is None
+
+
+def test_revoke_forgets_local_record_while_phone_is_offline(tmp_path):
+    phone = FakePhone()
+    phone.allowed = True
+    session = FakeSession(phone)
+    fleet = FakeFleet(session)
+    store = PCTrustStore(tmp_path)
+    coordinator = PCTrustCoordinator(fleet, store)
+
+    coordinator.begin("dev_test")
+    coordinator.complete("dev_test")
+    coordinator.stop()
+    session.adb_device.state = "offline"
+
+    result = coordinator.revoke("dev_test")
+
+    assert result["localTrustCleared"] is True
+    assert result["phoneRevocationConfirmed"] is False
+    assert result["phoneRevocationError"] == "DEVICE_DISCONNECTED"
+    assert store.record("dev_test") is None

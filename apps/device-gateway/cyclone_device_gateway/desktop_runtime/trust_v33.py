@@ -606,7 +606,9 @@ class PCTrustCoordinator:
 
     def revoke(self, device_id: str) -> dict[str, Any]:
         with self._lock:
-            session = self._adb_ready(device_id)
+            # Local forgetting must remain available when USB is offline or the phone identity
+            # changed. Remote revocation is attempted below only when a valid session can open.
+            session = self.fleet.get(device_id)
             record = self.store.record(device_id)
             if record is None:
                 self._pending.pop(device_id, None)
