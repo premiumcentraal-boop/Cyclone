@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 import secrets
 import threading
+import time
 from typing import Any
 
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
@@ -16,6 +17,36 @@ ALLOWED_PHONE_TOOLS = frozenset({
     "phone.observe", "phone.find", "phone.click", "phone.long_press", "phone.swipe",
     "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for",
 })
+PAGE_TRANSITION_TOOLS = frozenset({
+    "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app",
+})
+
+
+def _compact_observation(observation: dict[str, Any]) -> dict[str, Any]:
+    """Keep the bounded page card while excluding raw accessibility payloads."""
+    compact = dict(observation)
+    compact.pop("rawAccessibility", None)
+    compact.pop("raw_accessibility", None)
+    compact.pop("rawTree", None)
+    compact.pop("accessibilityTree", None)
+    for key in ("semanticControls", "supplementalControls"):
+        controls = compact.get(key)
+        if isinstance(controls, list):
+            compact[key] = controls[:40]
+    page_context = compact.get("pageContext")
+    if isinstance(page_context, dict):
+        page_context = dict(page_context)
+        controls = page_context.get("controls")
+        if isinstance(controls, list):
+            page_context["controls"] = controls[:40]
+        compact["pageContext"] = page_context
+    compact["compact"] = {
+        "rawTreeExcluded": True,
+        "controlLimit": 40,
+        "pageTextPreserved": compact.get("pageText") is not None,
+        "pageSummaryPreserved": compact.get("pageSummary") is not None,
+    }
+    return compact
 
 
 class DesktopAgentService:
@@ -31,10 +62,14 @@ class DesktopAgentService:
         history_limit: int = 40,
         *,
         snapshot=None,
+        after_action_timeout_seconds: float = 1.0,
+        after_action_poll_seconds: float = 0.1,
     ):
         self.fleet = fleet
         self.history_limit = max(5, min(int(history_limit), 100))
         self._snapshot = snapshot
+        self._after_action_timeout_seconds = max(0.0, min(float(after_action_timeout_seconds), 2.0))
+        self._after_action_poll_seconds = max(0.01, min(float(after_action_poll_seconds), 0.25))
         self._history: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=self.history_limit))
         self._lock = threading.RLock()
 
@@ -78,26 +113,28 @@ class DesktopAgentService:
 
     def observe(self, device_id: str, *, mode: str = "compact", include_screenshot: bool = False) -> dict[str, Any]:
         session = self._paired(device_id)
-        observation = self._request(session, "observe.semantic", {})
-        observation_id = str(observation.get("observationId") or "")
+        raw_observation = self._request(session, "observe.semantic", {})
+        selected_mode = mode if mode in {"compact", "full"} else "compact"
+        observation = raw_observation if selected_mode == "full" else _compact_observation(raw_observation)
+        observation_id = str(raw_observation.get("observationId") or "")
         record = {
             "kind": "observation",
             "at": now_ms(),
             "observationId": observation_id,
-            "pageKey": observation.get("pageKey"),
-            "package": observation.get("package"),
+            "pageKey": raw_observation.get("pageKey"),
+            "package": raw_observation.get("package"),
         }
         self._append(device_id, record)
         response = {
             **self._operation_context(session, device_id, "observe"),
-            "mode": mode if mode in {"compact", "full"} else "compact",
+            "mode": selected_mode,
             "observation": observation,
             "witness": {
                 "observation_id": observation_id,
-                "page_key": observation.get("pageKey"),
-                "captured_at": observation.get("timestamp"),
+                "page_key": raw_observation.get("pageKey"),
+                "captured_at": raw_observation.get("timestamp"),
             },
-            "afterState": self._after_state(observation),
+            "afterState": self._after_state(raw_observation),
             # Screenshot transport belongs to Desktop video. This response never contains image
             # bytes, only the same bounded local artifact contract as `agent/screenshot`.
             "screenshot": None,
@@ -158,8 +195,9 @@ class DesktopAgentService:
         if expected:
             args["currentObservationId"] = expected
         execution = self._request(session, "action.execute", args)
-        after = self._request(session, "observe.semantic", {})
-        after_id = str(after.get("observationId") or "")
+        after_raw = self._observe_after_action(session, before, tool, execution)
+        after = _compact_observation(after_raw)
+        after_id = str(after_raw.get("observationId") or "")
         self._append(device_id, {
             "kind": "action",
             "at": now_ms(),
@@ -171,8 +209,8 @@ class DesktopAgentService:
             "kind": "observation",
             "at": now_ms(),
             "observationId": after_id,
-            "pageKey": after.get("pageKey"),
-            "package": after.get("package"),
+            "pageKey": after_raw.get("pageKey"),
+            "package": after_raw.get("package"),
         })
         execution_payload = execution.get("execution") if isinstance(execution, dict) else None
         android_execution = execution.get("androidExecution") if isinstance(execution, dict) else None
@@ -218,11 +256,42 @@ class DesktopAgentService:
                 "authority": "ANDROID_CANONICAL",
                 "before_observation_id": expected or (before or {}).get("observationId"),
                 "after_observation_id": after_id,
-                "after_page_key": after.get("pageKey"),
+                "after_page_key": after_raw.get("pageKey"),
             },
             "after": after,
-            "afterState": self._after_state(after),
+            "afterState": self._after_state(after_raw),
         }
+
+    def _observe_after_action(
+        self,
+        session: DeviceSession,
+        before: dict[str, Any] | None,
+        tool: str,
+        execution: dict[str, Any],
+    ) -> dict[str, Any]:
+        after = self._request(session, "observe.semantic", {})
+        if tool not in PAGE_TRANSITION_TOOLS or before is None:
+            return after
+        verification = execution.get("verification")
+        if (
+            isinstance(verification, dict)
+            and verification.get("ok") is True
+            and str(verification.get("status") or "").upper() in {"PASSED", "NOT_REQUIRED"}
+            and verification.get("semanticSuccessClaimed") is not False
+        ):
+            return after
+        deadline = time.monotonic() + self._after_action_timeout_seconds
+        while self._same_page(before, after) and time.monotonic() < deadline:
+            time.sleep(self._after_action_poll_seconds)
+            after = self._request(session, "observe.semantic", {})
+        return after
+
+    @staticmethod
+    def _same_page(before: dict[str, Any], after: dict[str, Any]) -> bool:
+        return (
+            before.get("package") == after.get("package")
+            and before.get("pageKey") == after.get("pageKey")
+        )
 
     def screenshot(self, device_id: str, *, profile: str = "thumbnail") -> dict[str, Any]:
         """Return a bounded per-device artifact reference, never frame bytes or a hidden default phone."""
