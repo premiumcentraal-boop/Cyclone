@@ -107,6 +107,33 @@ button { color: inherit; }
 .page-title { margin: 0; font-size: 24px; letter-spacing: -.03em; font-weight: 670; }
 .page-subtitle { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 
+.home-page, .automations-page { overflow: auto; padding-bottom: 32px; }
+.home-kicker, .automation-policy-kicker { margin-bottom: 7px; color: var(--purple-bright); font-size: 9px; font-weight: 780; letter-spacing: .12em; }
+.home-summary-grid, .home-action-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 0 32px; }
+.home-action-grid { margin-top: 16px; }
+.home-summary-card, .home-action-card, .automation-policy-card, .automation-device-card {
+  border: 1px solid var(--border); border-radius: 18px; background: rgba(17,19,26,.82); padding: 18px;
+}
+.home-summary-label { color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.home-summary-value { margin-top: 9px; font-size: 30px; font-weight: 720; letter-spacing: -.04em; }
+.home-summary-detail { margin-top: 5px; color: var(--muted); font-size: 10px; }
+.home-action-card { display: flex; min-height: 158px; flex-direction: column; align-items: flex-start; }
+.home-action-title { margin: 0; font-size: 15px; }
+.home-action-copy { flex: 1; margin: 8px 0 16px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.automation-policy-card { margin: 0 32px 14px; background: linear-gradient(145deg, rgba(139,92,246,.11), rgba(17,19,26,.82)); }
+.automation-policy-title { margin: 0; font-size: 18px; }
+.automation-policy-copy { max-width: 760px; margin: 8px 0 0; color: var(--muted-strong); font-size: 11px; line-height: 1.55; }
+.automation-device-list { display: grid; gap: 9px; padding: 0 32px; }
+.automation-device-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 16px; }
+.automation-device-name { font-size: 12px; font-weight: 680; }
+.automation-device-state { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.automation-device-state.attention { color: var(--amber); }
+.automation-device-state.ready { color: var(--green); }
+.trust-repair-banner { margin: 12px 22px 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; border: 1px solid rgba(255,117,143,.28); border-radius: 14px; background: rgba(255,117,143,.07); }
+.trust-repair-banner[hidden] { display: none; }
+.trust-repair-title { color: #ff9aae; font-size: 11px; font-weight: 720; }
+.trust-repair-copy { margin: 4px 0 0; color: var(--muted-strong); font-size: 9px; line-height: 1.45; }
+
 .button, .back-to-fleet, .control-button, .menu-item, .icon-button {
   appearance: none; border: 1px solid var(--border); background: var(--surface-raised); color: var(--text); cursor: pointer;
   transition: background var(--transition), border-color var(--transition), transform var(--transition), opacity var(--transition), box-shadow var(--transition);
@@ -344,6 +371,7 @@ button { color: inherit; }
 .loading-card, .friendly-error { color: var(--muted); font-size: 11px; display: grid; place-items: center; }
 
 @media (max-width: 1100px) {
+  .nav-button { padding: 0 10px; }
   .focus-workspace { grid-template-columns: minmax(280px, 1fr) 150px; }
   .focus-context-panel { display: none; }
 }
@@ -352,6 +380,11 @@ button { color: inherit; }
   .app-topbar { padding: 0 12px; }
   .brand { min-width: 0; }
   .brand-name, .topbar-status, .profile-name, .profile-chevron { display: none; }
+  .nav-button { padding: 0 8px; }
+  .nav-icon { display: none; }
+  .home-summary-grid, .home-action-grid { grid-template-columns: 1fr; padding-left: 20px; padding-right: 20px; }
+  .automation-policy-card { margin-left: 20px; margin-right: 20px; }
+  .automation-device-list { padding-left: 20px; padding-right: 20px; }
   .page-header { padding-left: 20px; padding-right: 20px; }
   .fleet-viewport { padding-left: 14px; padding-right: 14px; }
   .focus-workspace { grid-template-columns: minmax(0, 1fr) 140px; padding-left: 10px; padding-right: 10px; gap: 10px; }

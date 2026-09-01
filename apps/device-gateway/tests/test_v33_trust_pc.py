@@ -306,6 +306,35 @@ def test_revoke_removes_persisted_trust_record(tmp_path):
 
     result = coordinator.revoke("dev_test")
     assert result["revoked"] is True
+    assert result["localTrustCleared"] is True
+    assert result["phoneRevocationConfirmed"] is True
     assert result["state"] == "REVOKED"
+    assert store.record("dev_test") is None
+    assert session.credential is None
+
+
+def test_revoke_forgets_local_record_when_connected_phone_identity_changed(tmp_path):
+    original_phone = FakePhone()
+    original_phone.allowed = True
+    session = FakeSession(original_phone)
+    fleet = FakeFleet(session)
+    store = PCTrustStore(tmp_path)
+    coordinator = PCTrustCoordinator(fleet, store)
+
+    coordinator.begin("dev_test")
+    coordinator.complete("dev_test")
+    assert store.record("dev_test")["phoneId"] == original_phone.phone_id
+
+    coordinator.stop()
+    replacement_phone = FakePhone()
+    session.phone = replacement_phone
+
+    result = coordinator.revoke("dev_test")
+
+    assert result["revoked"] is True
+    assert result["state"] == "REVOKED"
+    assert result["localTrustCleared"] is True
+    assert result["phoneRevocationConfirmed"] is False
+    assert result["phoneRevocationError"] == "TRUST_AUTH_FAILED"
     assert store.record("dev_test") is None
     assert session.credential is None
