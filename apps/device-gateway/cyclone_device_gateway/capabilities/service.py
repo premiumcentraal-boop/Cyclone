@@ -156,7 +156,13 @@ class CapabilityService:
                 source=request.source,
                 request_id=request.correlation_id,
             )
-        except ActionValidationError:
+        except ActionValidationError as exc:
+            if str(getattr(exc, "code", "") or "").upper() == GatewayErrorCode.STALE_OBSERVATION:
+                return self._rejected(
+                    request, safety, GatewayErrorCode.STALE_OBSERVATION,
+                    FailureLayer.PROTOCOL, "Expected observation is no longer current.",
+                    retryable=True,
+                )
             return self._rejected(
                 request, safety, GatewayErrorCode.PROTOCOL_MISMATCH,
                 FailureLayer.PROTOCOL, "Action request failed schema or safety validation.",
