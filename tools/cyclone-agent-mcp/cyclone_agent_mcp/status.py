@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .connector import host_installed, resolve_server_command
+from .connector import _expected_tool_names, host_installed, resolve_server_command
 from .gateway import GatewayClient, GatewayError
 from .profiles import SERVER_KEY, codex_config_path, copilot_config_path, opencode_config_path
 from .tool_catalog import TOOL_NAMES
@@ -38,7 +38,7 @@ def connection_status(*, probe_gateway: bool = False) -> dict[str, Any]:
             "gateway": _gateway_status(),
             "mcp": {
                 "server": SERVER_KEY,
-                "tool_count": len(TOOL_NAMES),
+                "tool_count": len(_expected_tool_names()),
                 "transport": "stdio",
             },
         }

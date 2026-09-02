@@ -59,3 +59,10 @@ def test_official_mcp_sdk_stdio_tools_list_when_sdk_is_available():
     from cyclone_agent_mcp.connector import verify_tools_list
     result = verify_tools_list()
     assert result["ok"] is True
+
+
+def test_packaged_fleet_tool_is_not_misclassified_as_phone_scoped(monkeypatch):
+    from cyclone_agent_mcp import connector
+
+    monkeypatch.setattr(connector.sys, "frozen", True, raising=False)
+    assert "phone_devices" in connector._expected_tool_names()

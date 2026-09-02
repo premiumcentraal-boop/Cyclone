@@ -157,6 +157,19 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         self.assertIn('Command::new("powershell.exe")', runtime)
         self.assertNotIn('Command::new("cmd.exe")', runtime)
 
+    def test_packaged_agent_mcp_serves_canonical_locate_and_skill_surface(self):
+        entrypoint = (ROOT / "scripts/pc-companion/entrypoints/agent_mcp.py").read_text(encoding="utf-8")
+        build = (ROOT / "scripts/pc-companion/build-sidecars.ps1").read_text(encoding="utf-8")
+        spec = (ROOT / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text(encoding="utf-8")
+        phone_server = (ROOT / "tools/codex-phone-mcp/cyclone_phone_mcp/mcp_server.py").read_text(encoding="utf-8")
+        self.assertIn("from cyclone_phone_mcp.mcp_server import McpServer", entrypoint)
+        self.assertIn('sys.argv[1] == "serve"', entrypoint)
+        self.assertIn("McpServer().serve_stdio()", entrypoint)
+        self.assertIn("tools\\codex-phone-mcp", build)
+        self.assertIn('"codex-phone-mcp"', spec)
+        for tool in ("phone_status", "phone_locate", "phone_act", "phone_skill_save", "phone_skill_run"):
+            self.assertIn(f'"{tool}"', phone_server)
+
 
 if __name__ == "__main__":
     unittest.main()

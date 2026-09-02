@@ -34,6 +34,10 @@ internal object GatewayV33ActionAdapter {
         "phone.set_clipboard",
     )
 
+    private val pageTransitionTools = setOf(
+        "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app",
+    )
+
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
         val tool = args.optString("tool").trim()
         if (tool !in allowedTools) {
@@ -110,9 +114,18 @@ internal object GatewayV33ActionAdapter {
         val verificationFailedInExecutor = errorCode == "ASSERTION_FAILED"
         val androidExecutionOk = executorReportedOk || verificationFailedInExecutor
         val afterObservation = if (tool in mutatingTools && androidExecutionOk) {
-            runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+            captureAfterAction(context, tool, normalizedParams, beforeObservation)
         } else null
         val expect = normalizedParams.optJSONObject("expect")
+        val afterStateVerified = afterObservation != null && verifiedByAfterState(
+            tool = tool,
+            expectedPackage = normalizedParams.optString("package"),
+            beforePageKey = beforeObservation?.page?.pageKey.orEmpty(),
+            beforeFingerprint = beforeObservation?.payload?.optString("accessibilityFingerprint").orEmpty(),
+            afterPackage = afterObservation.page.packageName,
+            afterPageKey = afterObservation.page.pageKey,
+            afterFingerprint = afterObservation.payload.optString("accessibilityFingerprint"),
+        )
         val verification = when {
             verificationFailedInExecutor -> JSONObject()
                 .put("ok", false)
@@ -136,6 +149,13 @@ internal object GatewayV33ActionAdapter {
                 .put("ok", true)
                 .put("status", "PASSED")
                 .put("code", JSONObject.NULL)
+                .put("semanticSuccessClaimed", true)
+            afterStateVerified -> JSONObject()
+                .put("ok", true)
+                .put("status", "PASSED")
+                .put("code", JSONObject.NULL)
+                .put("semanticSuccessClaimed", true)
+                .put("basis", if (tool == "phone.open_app") "EXPECTED_PACKAGE" else "FRESH_AFTER_STATE_CHANGED")
             else -> JSONObject()
                 .put("ok", true)
                 .put("status", "OBSERVED")
@@ -166,6 +186,50 @@ internal object GatewayV33ActionAdapter {
             .put("routeLearning", routeLearning)
             .put("requiresReobserveBeforeNextMutation", tool in mutatingTools)
             .put("publicCapability", publicCapability)
+    }
+
+    private fun captureAfterAction(
+        context: Context,
+        tool: String,
+        params: JSONObject,
+        before: GatewayObservation?,
+    ): GatewayObservation? {
+        val deadline = System.currentTimeMillis() + if (tool in pageTransitionTools) 1_800L else 0L
+        var after = runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+        while (
+            after != null &&
+            tool in pageTransitionTools &&
+            !verifiedByAfterState(
+                tool,
+                params.optString("package"),
+                before?.page?.pageKey.orEmpty(),
+                before?.payload?.optString("accessibilityFingerprint").orEmpty(),
+                after.page.packageName,
+                after.page.pageKey,
+                after.payload.optString("accessibilityFingerprint"),
+            ) &&
+            System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(120L)
+            after = runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+        }
+        return after
+    }
+
+    internal fun verifiedByAfterState(
+        tool: String,
+        expectedPackage: String,
+        beforePageKey: String,
+        beforeFingerprint: String,
+        afterPackage: String,
+        afterPageKey: String,
+        afterFingerprint: String,
+    ): Boolean {
+        if (tool == "phone.open_app" && expectedPackage.isNotBlank()) return afterPackage == expectedPackage
+        if (tool !in mutatingTools || beforePageKey.isBlank() || afterPageKey.isBlank()) return false
+        return beforePageKey != afterPageKey || (
+            beforeFingerprint.isNotBlank() && afterFingerprint.isNotBlank() && beforeFingerprint != afterFingerprint
+        )
     }
 
     private fun executeDirect(

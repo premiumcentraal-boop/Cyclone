@@ -43,6 +43,20 @@ class PageAwarenessEngineTest {
         assertEquals(1, safe.length())
     }
 
+    @Test
+    fun unlabeledActionableContainerInheritsDescendantLabel() {
+        val parent = node("", "", "button", true, "0/1")
+        val child = node("android:id/title", "Apps", "text", false, "0/1/0")
+        val page = PageSignatureEngine.fromSnapshot(JSONObject()
+            .put("package", "com.android.settings")
+            .put("class", "com.android.settings.Settings")
+            .put("nodes", JSONArray().put(parent).put(child)))
+
+        val apps = page.controls.single { it.label == "Apps" }
+        assertEquals("Apps", apps.selector.getString("descendantText"))
+        assertEquals(true, apps.selector.getBoolean("clickable"))
+    }
+
     private fun settingsSnapshot(dynamicBattery: String, time: String, order: String): JSONObject = JSONObject()
         .put("package", "com.android.settings")
         .put("class", "com.android.settings.Settings")

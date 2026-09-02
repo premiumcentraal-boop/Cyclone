@@ -102,9 +102,11 @@ internal object GatewayObservationAdapter {
                 node.optString("role") in setOf("button", "tab", "switch", "checkbox", "edit_text", "textbox")
             if (!interactive) continue
             if (signature(node) in controlSignatures) continue
-            val label = node.optString("text").takeUnless { it.isBlank() || it == "<redacted>" }
+            val ownLabel = node.optString("text").takeUnless { it.isBlank() || it == "<redacted>" }
                 ?: node.optString("contentDescription").takeUnless { it.isBlank() || it == "<redacted>" }
                 ?: node.optString("resourceId").substringAfterLast('/').replace('_', ' ').takeIf { it.isNotBlank() }
+            val inheritedLabel = if (ownLabel == null) descendantLabel(node, rawNodes) else ""
+            val label = ownLabel ?: inheritedLabel.takeIf { it.isNotBlank() }
                 ?: continue
             if (label.isBlank()) continue
             supplementalCount++
@@ -117,7 +119,7 @@ internal object GatewayObservationAdapter {
                 .put("label", label.take(140))
                 .put("semanticName", semanticize(label))
                 .put("role", node.optString("role"))
-                .put("selector", GatewayPrivacy.sanitizeDeep(supplementSelector(node)))
+                .put("selector", GatewayPrivacy.sanitizeDeep(supplementSelector(node, inheritedLabel)))
                 .put("androidActions", node.optJSONArray("actions") ?: JSONArray())
                 .put("risk", "SAFE")
                 .put("expectedEffect", JSONObject.NULL)
@@ -348,13 +350,29 @@ internal object GatewayObservationAdapter {
         node.optString("role").takeIf(String::isNotBlank)?.let { add("role:${it.lowercase(Locale.US)}") }
     }.joinToString("|")
 
-    private fun supplementSelector(node: JSONObject): JSONObject = JSONObject().apply {
+    private fun supplementSelector(node: JSONObject, inheritedLabel: String = ""): JSONObject = JSONObject().apply {
         node.optString("resourceId").takeIf { it.isNotBlank() }?.let { put("resourceId", it) }
         node.optString("text").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { put("text", it.take(160)) }
         node.optString("contentDescription").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { put("contentDescription", it.take(160)) }
+        inheritedLabel.takeIf { it.isNotBlank() }?.let { put("descendantText", it.take(160)) }
         node.optString("role").takeIf { it.isNotBlank() }?.let { put("role", it) }
         if (node.optBoolean("clickable")) put("clickable", true)
         if (node.optBoolean("editable")) put("editable", true)
         if (node.optBoolean("scrollable")) put("scrollable", true)
+    }
+
+    private fun descendantLabel(parent: JSONObject, nodes: JSONArray): String {
+        val parentPath = parent.optString("path").trimEnd('/')
+        if (parentPath.isBlank()) return ""
+        val prefix = "$parentPath/"
+        for (index in 0 until nodes.length()) {
+            val candidate = nodes.optJSONObject(index) ?: continue
+            if (!candidate.optBoolean("visibleToUser", true) || !candidate.optString("path").startsWith(prefix)) continue
+            val label = candidate.optString("text").trim()
+                .ifBlank { candidate.optString("contentDescription").trim() }
+                .ifBlank { candidate.optString("resourceId").substringAfterLast('/').replace('_', ' ').trim() }
+            if (label.isNotBlank() && label != "<redacted>") return label.take(160)
+        }
+        return ""
     }
 }

@@ -70,6 +70,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -215,7 +217,16 @@ internal fun V32AiPage(context: Context, refreshTick: Int, onSettings: () -> Uni
         if (mode == V32AiMode.PHONE) {
             item {
                 CycloneHeroCard("What should happen?", "Describe the outcome. Cyclone handles the phone one verified step at a time.", Icons.Rounded.AutoAwesome, tone = CyclonePastel.LILAC) {
-                    OutlinedTextField(phoneRequest, { phoneRequest = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 6, enabled = !busy, label = { Text("Phone task") }, placeholder = { Text("Open my podcast app and find saved episodes") })
+                    OutlinedTextField(
+                        phoneRequest,
+                        { phoneRequest = it },
+                        Modifier.fillMaxWidth().semantics { contentDescription = "Phone task input" },
+                        minLines = 3,
+                        maxLines = 6,
+                        enabled = !busy,
+                        label = { Text("Phone task") },
+                        placeholder = { Text("Open my podcast app and find saved episodes") },
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             busy = true; status = "Starting…"; result = ""
