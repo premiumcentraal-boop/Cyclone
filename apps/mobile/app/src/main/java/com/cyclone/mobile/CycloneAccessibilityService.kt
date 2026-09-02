@@ -267,7 +267,6 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     private inner class AccessibilityTypeLive : PhoneTypeEngine.LiveHost {
-        private data class Handle(val path: String, val node: AccessibilityNodeInfo, val rawNodeId: String)
 
         override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
             val roots = ArrayList<AccessibilityNodeInfo>()
@@ -275,13 +274,13 @@ class CycloneAccessibilityService : AccessibilityService() {
             windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
             for (root in roots) {
                 val node = nodeAtPath(root, plan.path) ?: continue
-                if (node.isEditable) return Handle(plan.path, node, plan.rawNodeId)
+                if (node.isEditable) return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId)
             }
             return null
         }
 
         override fun view(handle: Any): PhoneTypeEngine.LiveView? {
-            val target = handle as? Handle ?: return null
+            val target = handle as? AccessibilityTypeHandle ?: return null
             val node = target.node
             val text = node.text?.toString().orEmpty()
             return PhoneTypeEngine.LiveView(
@@ -297,17 +296,17 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
 
         override fun focus(handle: Any): Boolean {
-            val target = handle as? Handle ?: return false
+            val target = handle as? AccessibilityTypeHandle ?: return false
             return target.node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         }
 
         override fun click(handle: Any): Boolean {
-            val target = handle as? Handle ?: return false
+            val target = handle as? AccessibilityTypeHandle ?: return false
             return target.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         }
 
         override fun setText(handle: Any, value: String): Boolean {
-            val target = handle as? Handle ?: return false
+            val target = handle as? AccessibilityTypeHandle ?: return false
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
             }
@@ -315,13 +314,13 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
 
         override fun refresh(handle: Any): Any? {
-            val target = handle as? Handle ?: return null
+            val target = handle as? AccessibilityTypeHandle ?: return null
             val roots = ArrayList<AccessibilityNodeInfo>()
             rootInActiveWindow?.let(roots::add)
             windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
             for (root in roots) {
                 val node = nodeAtPath(root, target.path) ?: continue
-                if (node.isEditable) return Handle(target.path, node, target.rawNodeId)
+                if (node.isEditable) return AccessibilityTypeHandle(target.path, node, target.rawNodeId)
             }
             return null
         }
@@ -536,3 +535,8 @@ class CycloneAccessibilityService : AccessibilityService() {
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
 }
+private data class AccessibilityTypeHandle(
+    val path: String,
+    val node: AccessibilityNodeInfo,
+    val rawNodeId: String,
+)
