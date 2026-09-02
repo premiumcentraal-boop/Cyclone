@@ -15,6 +15,7 @@ from ..actions.envelope import (
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
+from .page_text import _compact_observation
 from .readiness import enrich_device_public
 
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
@@ -26,33 +27,6 @@ ALLOWED_PHONE_TOOLS = frozenset({
 PAGE_TRANSITION_TOOLS = frozenset({
     "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app",
 })
-
-
-def _compact_observation(observation: dict[str, Any]) -> dict[str, Any]:
-    """Keep the bounded page card while excluding raw accessibility payloads."""
-    compact = dict(observation)
-    compact.pop("rawAccessibility", None)
-    compact.pop("raw_accessibility", None)
-    compact.pop("rawTree", None)
-    compact.pop("accessibilityTree", None)
-    for key in ("semanticControls", "supplementalControls"):
-        controls = compact.get(key)
-        if isinstance(controls, list):
-            compact[key] = controls[:40]
-    page_context = compact.get("pageContext")
-    if isinstance(page_context, dict):
-        page_context = dict(page_context)
-        controls = page_context.get("controls")
-        if isinstance(controls, list):
-            page_context["controls"] = controls[:40]
-        compact["pageContext"] = page_context
-    compact["compact"] = {
-        "rawTreeExcluded": True,
-        "controlLimit": 40,
-        "pageTextPreserved": compact.get("pageText") is not None,
-        "pageSummaryPreserved": compact.get("pageSummary") is not None,
-    }
-    return compact
 
 
 class DesktopAgentService:
@@ -484,6 +458,7 @@ class DesktopAgentService:
                 "STALE_OBSERVATION": RuntimeErrorCode.STALE_OBSERVATION,
                 "POLICY_DENIED": RuntimeErrorCode.POLICY_DENIED,
                 "PROTOCOL_MISMATCH": RuntimeErrorCode.PROTOCOL_MISMATCH,
+                "AGENT_CONTEXT_TRUNCATION": RuntimeErrorCode.AGENT_CONTEXT_TRUNCATION,
             }
             raise DesktopRuntimeError(mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE), f"Android Gateway rejected {op}.") from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
