@@ -33,6 +33,23 @@ class PageContextSummaryTest {
         assertEquals(7, summary.getInt("controlCount"))
         assertEquals(5, summary.getInt("textLineCount"))
         assertTrue(summary.getString("contentNote").contains("5 visible text lines"))
+        assertTrue(summary.getString("text").startsWith("Settings"))
+        assertTrue(summary.getString("text").contains("5 visible text lines"))
+        assertEquals(summary.getString("text"), PageContextSummary.flattened(summary))
+    }
+
+    @Test
+    fun appsSummaryFlattenedTextIsBoundedAndNonBlank() {
+        val snapshot = JSONObject()
+            .put("nodes", JSONArray()
+                .put(node("Apps", "text", clickable = false, depth = 1))
+                .put(node("All apps", "button", clickable = true, depth = 2))
+                .put(node("Default apps", "button", clickable = true, depth = 2)))
+        val summary = PageContextSummary.build(snapshot, "apps", "Apps", controlCount = 2, textLineCount = 3)
+        assertEquals("cyclone-page-summary-v1", summary.getString("protocol"))
+        assertTrue(summary.getString("text").contains("Apps"))
+        assertTrue(summary.getString("text").length <= PageContextSummary.DEFAULT_PLAIN_LIMIT)
+        assertTrue(PageContextSummary.flattened(summary).isNotBlank())
     }
 
     private fun JSONArray.strings(): List<String> = (0 until length()).map { getString(it) }
