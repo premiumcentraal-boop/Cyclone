@@ -238,8 +238,12 @@ def test_device_scoped_observe_search_inspect_act_and_screenshot_share_a_contrac
     assert screenshot_body["artifact"]["kind"] == "LOCAL_FILE"
     assert Path(screenshot_body["artifact"]["reference"]).is_file()
     assert observed.json()["screenshot"]["artifact"]["kind"] == "LOCAL_FILE"
-    assert observed.json()["observation"]["pageText"]["protocol"] == "cyclone-page-text-v1"
-    assert observed.json()["observation"]["pageSummary"]["protocol"] == "cyclone-page-summary-v1"
+    assert observed.json()["observation"]["pageText"] == "Home"
+    assert "Home" in observed.json()["observation"]["pageSummary"]
+    assert observed.json()["observation"]["pageTextCard"]["protocol"] == "cyclone-page-text-v1"
+    assert observed.json()["observation"]["pageSummaryCard"]["protocol"] == "cyclone-page-summary-v1"
+    assert observed.json()["observation"]["compact"]["pageTextPreserved"] is True
+    assert observed.json()["observation"]["compact"]["pageSummaryPreserved"] is True
     assert observed.json()["observation"]["compact"]["rawTreeExcluded"] is True
     assert "rawAccessibility" not in observed.json()["observation"]
     assert "rawAccessibility" not in acted.json()["after"]
