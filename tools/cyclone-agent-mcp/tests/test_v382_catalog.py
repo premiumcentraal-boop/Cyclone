@@ -91,3 +91,53 @@ def test_authorized_type_strips_plaintext_from_result():
 
 def test_strip_typed_plaintext_helper():
     assert strip_typed_plaintext({"typed": "secret-task"}, "secret-task") == {"typed": "<redacted>"}
+
+
+def test_agent_a_translated_envelope_is_not_protocol_mismatch():
+    from cyclone_phone_mcp.gateway import normalize_desktop_action
+    from cyclone_phone_mcp.protocol import classify_failure
+
+    android = {"ok": True, "error": None}
+    translated = {
+        "protocol_version": "cyclone.gateway.capability.v1",
+        "capability_id": "phone.open_app",
+        "ok": True,
+        "transport": {"ok": True},
+        "execution": {
+            "ok": True,
+            "authoritative": "ANDROID",
+            "status": "android_succeeded",
+            "androidExecution": android,
+            "android_execution": android,
+        },
+        "verification": {"ok": True, "passed": True, "status": "PASSED", "after_observation_id": "obs-after-1"},
+        "afterState": {"pageKey": "settings::root"},
+        "error": None,
+    }
+    assert classify_failure(translated) is None
+    passed = normalize_desktop_action("dev_pixel8", "phone.open_app", translated)
+    assert passed is translated
+    assert classify_failure(passed) is None
+
+
+def test_nested_pixel_blob_without_layer_ok_is_ok_after_translation():
+    from cyclone_phone_mcp.gateway import normalize_desktop_action
+    from cyclone_phone_mcp.protocol import classify_failure
+
+    blob = {
+        "execution": {"ok": True, "error": None},
+        "androidExecution": {"ok": True},
+        "verification": {"ok": True, "status": "PASSED", "pageChanged": True},
+        "pageChanged": True,
+    }
+    assert "ok" not in blob
+    leftover = {
+        "transport": {"ok": True},
+        "execution": blob,
+        "verification": {"passed": True, "after_observation_id": "obs-after-1"},
+    }
+    canonical = normalize_desktop_action("dev_pixel8", "phone.open_app", leftover)
+    assert classify_failure(canonical) is None
+    assert canonical["ok"] is True
+    assert canonical["execution"]["ok"] is True
+    assert (canonical.get("error") or {}).get("code") != "PROTOCOL_MISMATCH"
