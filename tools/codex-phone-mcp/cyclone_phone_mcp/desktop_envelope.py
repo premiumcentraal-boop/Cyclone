@@ -125,3 +125,15 @@ def _desktop_verification_ok(verification: Any) -> bool:
         and status in {"PASSED", "VERIFIED", "NOT_REQUIRED"}
         and bool(verification.get("after_observation_id"))
     )
+
+
+def _override_gateway_normalize() -> None:
+    """Agent A passthrough must win over leftover 3.8.1 Desktop adapters."""
+    try:
+        from . import gateway as gw
+    except ImportError:
+        return
+    gw.normalize_desktop_action = normalize_desktop_action
+
+
+_override_gateway_normalize()
