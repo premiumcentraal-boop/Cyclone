@@ -1,3 +1,4 @@
+# Cyclone 3.8.1 stable release manifest.
 schema = 1
 product_version = "3.8.1"
 channel = "stable"
