@@ -51,4 +51,25 @@ object OverlayCopy {
         OverlayAnalysisCta.CONFIRM -> CONFIRM
         OverlayAnalysisCta.COMMERCE -> COMMERCE
     }
+
+    /**
+     * Frozen strings shown for a chrome snapshot. Analysis bullets are caller-supplied
+     * task text (not bible copy) and are omitted here.
+     */
+    fun visibleFor(snapshot: OverlayChromeSnapshot): List<String> = when (snapshot.state) {
+        OverlayChromeState.IDLE -> if (snapshot.idleChipVisible) listOf(COMPOSER) else emptyList()
+        OverlayChromeState.ANALYSIS -> listOf(ANALYSIS_TITLE, primaryCta(snapshot.analysisCta), LEGAL)
+        OverlayChromeState.WORKING -> listOf(
+            WORKING_TITLE,
+            WORKING_BODY,
+            STATUS,
+            PRIMARY,
+            LIVE_LEFT,
+            LIVE_RIGHT,
+            LEGAL,
+        )
+        OverlayChromeState.LIVE -> listOf(STATUS, LIVE_LEFT, LIVE_RIGHT)
+        OverlayChromeState.GATE -> listOf(GATE, CONFIRM, LEGAL)
+        OverlayChromeState.DONE -> listOf(DONE)
+    }
 }
