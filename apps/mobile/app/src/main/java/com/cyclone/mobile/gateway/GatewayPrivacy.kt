@@ -39,12 +39,22 @@ internal object GatewayPrivacy {
     }
 
     fun redactActionParams(tool: String, params: JSONObject): JSONObject {
-        if (tool != "phone.type") return sanitizeDeep(JSONObject(params.toString())) as JSONObject
+        if (tool != "phone.type" && tool != "phone.replace_text") return sanitizeDeep(JSONObject(params.toString())) as JSONObject
         val out = JSONObject()
-        params.optJSONObject("selector")?.let { out.put("selector", sanitizeDeep(JSONObject(it.toString()))) }
+        params.optString("elementId").takeIf { it.isNotBlank() }?.let { out.put("elementId", it) }
+        params.optJSONObject("selector")?.let { selector ->
+            val safeSelector = JSONObject()
+            if (selector.has("elementId")) safeSelector.put("elementId", selector.optString("elementId"))
+            if (selector.has("id")) safeSelector.put("id", selector.optString("id"))
+            out.put("selector", safeSelector)
+        }
         if (params.has("value")) out.put("value", REDACTED)
         if (params.has("text")) out.put("text", REDACTED)
-        listOf("retries", "waitForChangeMs", "timeoutMs").forEach { key -> if (params.has(key)) out.put(key, params.opt(key)) }
+        if (params.has("user_authorized")) out.put("user_authorized", params.optBoolean("user_authorized"))
+        if (params.has("userAuthorized")) out.put("userAuthorized", params.optBoolean("userAuthorized"))
+        listOf("retries", "waitForChangeMs", "timeoutMs", "currentObservationId").forEach { key ->
+            if (params.has(key)) out.put(key, params.opt(key))
+        }
         return out
     }
 

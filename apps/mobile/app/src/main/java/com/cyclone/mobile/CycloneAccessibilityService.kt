@@ -254,15 +254,77 @@ class CycloneAccessibilityService : AccessibilityService() {
         return false
     }
 
-    fun setText(selector: ElementSelector?, value: String): Boolean {
-        if (!agentCanAct()) return false
-        val node = if (selector == null) rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        else resolveLiveTarget(selector)?.second
-        node ?: return false
-        if (!node.isEditable && !node.isFocusable) return false
-        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    fun typeEditable(plan: PhoneTypeEngine.ExecutePlan, value: String): PhoneTypeEngine.LiveResult {
+        if (!agentCanAct()) {
+            return PhoneTypeEngine.LiveResult(
+                ok = false,
+                error = PhoneToolError(PhoneToolErrorCode.ACTION_FAILED, "Agent cannot act"),
+                elementId = plan.elementId,
+                rawNodeId = plan.rawNodeId,
+            )
+        }
+        return PhoneTypeEngine.perform(plan, value, AccessibilityTypeLive())
+    }
+
+    private inner class AccessibilityTypeLive : PhoneTypeEngine.LiveHost {
+        private data class Handle(val path: String, val node: AccessibilityNodeInfo, val rawNodeId: String)
+
+        override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
+            val roots = ArrayList<AccessibilityNodeInfo>()
+            rootInActiveWindow?.let(roots::add)
+            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
+            for (root in roots) {
+                val node = nodeAtPath(root, plan.path) ?: continue
+                if (node.isEditable) return Handle(plan.path, node, plan.rawNodeId)
+            }
+            return null
+        }
+
+        override fun view(handle: Any): PhoneTypeEngine.LiveView? {
+            val target = handle as? Handle ?: return null
+            val node = target.node
+            val text = node.text?.toString().orEmpty()
+            return PhoneTypeEngine.LiveView(
+                rawNodeId = target.rawNodeId,
+                path = target.path,
+                editable = node.isEditable,
+                focused = node.isFocused,
+                enabled = node.isEnabled,
+                textLength = text.length,
+                textDigest = PhoneTypeEngine.digest(text),
+                actions = accessibilityActionNames(node),
+            )
+        }
+
+        override fun focus(handle: Any): Boolean {
+            val target = handle as? Handle ?: return false
+            return target.node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        }
+
+        override fun click(handle: Any): Boolean {
+            val target = handle as? Handle ?: return false
+            return target.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+
+        override fun setText(handle: Any, value: String): Boolean {
+            val target = handle as? Handle ?: return false
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+            }
+            return target.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        }
+
+        override fun refresh(handle: Any): Any? {
+            val target = handle as? Handle ?: return null
+            val roots = ArrayList<AccessibilityNodeInfo>()
+            rootInActiveWindow?.let(roots::add)
+            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
+            for (root in roots) {
+                val node = nodeAtPath(root, target.path) ?: continue
+                if (node.isEditable) return Handle(target.path, node, target.rawNodeId)
+            }
+            return null
+        }
     }
 
     fun scroll(selector: ElementSelector?, forward: Boolean = true): Boolean {
