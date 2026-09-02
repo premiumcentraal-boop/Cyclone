@@ -46,3 +46,18 @@ def validate_typed_params(value: Any, *, path: str = "params") -> None:
             raise ValueError(f"{path} exceeds the bounded list size")
         for index, item in enumerate(value):
             validate_typed_params(item, path=f"{path}[{index}]")
+
+
+def strip_typed_plaintext(value: Any, typed: str | None) -> Any:
+    """Drop echoed phone.type plaintext from MCP results without logging it."""
+    if not typed:
+        return value
+    if value == typed:
+        return "<redacted>"
+    if isinstance(value, dict):
+        return {str(key): strip_typed_plaintext(item, typed) for key, item in value.items()}
+    if isinstance(value, list):
+        return [strip_typed_plaintext(item, typed) for item in value]
+    if isinstance(value, str) and typed in value:
+        return value.replace(typed, "<redacted>")
+    return value
