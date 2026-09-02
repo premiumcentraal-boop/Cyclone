@@ -43,9 +43,9 @@ internal object GatewayPrivacy {
         val out = JSONObject()
         params.optString("elementId").takeIf { it.isNotBlank() }?.let { out.put("elementId", it) }
         params.optJSONObject("selector")?.let { selector ->
-            val safeSelector = JSONObject()
-            if (selector.has("elementId")) safeSelector.put("elementId", selector.optString("elementId"))
-            if (selector.has("id")) safeSelector.put("id", selector.optString("id"))
+            val safeSelector = sanitizeDeep(JSONObject(selector.toString())) as JSONObject
+            if (safeSelector.has("value")) safeSelector.put("value", REDACTED)
+            if (safeSelector.has("text")) safeSelector.put("text", REDACTED)
             out.put("selector", safeSelector)
         }
         if (params.has("value")) out.put("value", REDACTED)
