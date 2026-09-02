@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Base64
+import com.cyclone.mobile.gateway.GatewayObservationStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.LinkedHashMap
@@ -85,11 +86,7 @@ object PhoneToolExecutor {
             "phone.tap" -> actionWithConfirmation(service, request, before) {
                 service?.tap(p.optDouble("x").toFloat(), p.optDouble("y").toFloat()) == true
             }
-            "phone.type", "phone.replace_text" -> actionWithConfirmation(service, request, before) {
-                val selectorJson = p.optJSONObject("selector")
-                val selector = selectorJson?.let(ElementSelector::fromJson)
-                service?.setText(selector, p.optString("value")) == true
-            }
+            "phone.type", "phone.replace_text" -> typeEditable(service, request)
             "phone.scroll" -> actionWithConfirmation(service, request, before) {
                 val selector = p.optJSONObject("selector")?.let(ElementSelector::fromJson)
                 val direction = p.optString("direction", "forward")
@@ -153,6 +150,37 @@ object PhoneToolExecutor {
             "phone.wait_for" -> waitFor(service, p, assertOnly = false)
             "phone.assert" -> waitFor(service, p, assertOnly = true)
             else -> errorResult(PhoneToolErrorCode.UNKNOWN_TOOL, "Unknown tool ${request.tool}")
+        }
+    }
+
+    private fun typeEditable(service: CycloneAccessibilityService?, request: PhoneToolRequest): Outcome {
+        if (service == null) {
+            return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
+        }
+        val epoch = DeviceState.controllerEpoch()
+        if (DeviceState.controller != DeviceState.Controller.AGENT || epoch != DeviceState.controllerEpoch()) {
+            return errorResult(PhoneToolErrorCode.HUMAN_HAS_CONTROL, "Controller changed while action was queued")
+        }
+        val snapshot = service.observe(markFresh = false)
+        val observation = GatewayObservationStore.current()
+        val catalog = PhoneTypeEngine.catalog(
+            observationId = observation?.id,
+            evidenceElements = observation?.elements?.values?.map { element ->
+                PhoneTypeEngine.ObservationElementInput(element.id, element.source, element.role, element.evidence)
+            } ?: emptyList(),
+            snapshot = snapshot,
+        )
+        return when (val decision = PhoneTypeEngine.decide(request.params, catalog)) {
+            is PhoneTypeEngine.Decision.Reject -> errorResult(decision.deny.code, decision.deny.message)
+            is PhoneTypeEngine.Decision.Execute -> {
+                val value = PhoneTypeEngine.typedValue(request.params).orEmpty()
+                val live = service.typeEditable(decision.plan, value)
+                if (!live.ok) {
+                    Outcome(error = live.error ?: PhoneToolError(PhoneToolErrorCode.ACTION_FAILED, "Type failed"))
+                } else {
+                    Outcome(payload = live.toPayload())
+                }
+            }
         }
     }
 
@@ -285,7 +313,11 @@ object PhoneToolExecutor {
     @Synchronized
     private fun isDuplicateAction(request: PhoneToolRequest): Boolean {
         val now = System.currentTimeMillis()
-        val signature = "${request.tool}|${request.params}"
+        val signature = if (request.tool == "phone.type" || request.tool == "phone.replace_text") {
+            PhoneTypeEngine.duplicateSignature(request.tool, request.params)
+        } else {
+            "${request.tool}|${request.params}"
+        }
         val previous = recentActions[signature]
         recentActions[signature] = now
         recentActions.entries.removeIf { now - it.value > 5_000L }
