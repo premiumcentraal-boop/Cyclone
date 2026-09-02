@@ -27,9 +27,10 @@ def classify_failure(result: Any) -> Failure | None:
             return _layer_failure(transport, "DEVICE_DISCONNECTED", "transport")
         execution = result.get("execution")
         if execution is not None:
-            if not isinstance(execution, dict) or "ok" not in execution:
+            execution_ok = _layer_ok(execution)
+            if execution_ok is None:
                 return Failure("PROTOCOL_MISMATCH", "protocol")
-            if execution.get("ok") is not True:
+            if execution_ok is not True:
                 return _layer_failure(execution, "EXECUTION_FAILED", "execution")
         verification = result.get("verification")
         if verification is not None:
@@ -55,6 +56,24 @@ def classify_failure(result: Any) -> Failure | None:
     action = result.get("action")
     if isinstance(action, dict) and (action.get("success") is False or action.get("ok") is False):
         return Failure("LEGACY_ACTION_FAILURE", "legacy")
+    return None
+
+
+def _layer_ok(layer: Any) -> bool | None:
+    """Read an explicit ok from a capability layer or nested Android execution.
+
+    Pixel Desktop actions wrap ``action.execute`` as the execution object. That payload has
+    ``androidExecution.ok`` / nested ``execution.ok`` rather than a top-level ``ok``. Treat that
+    as a valid success/failure bit. A layer with no explicit ok remains PROTOCOL_MISMATCH.
+    """
+    if not isinstance(layer, dict):
+        return None
+    if isinstance(layer.get("ok"), bool):
+        return layer["ok"] is True
+    for key in ("androidExecution", "android_execution", "execution"):
+        nested = layer.get(key)
+        if isinstance(nested, dict) and isinstance(nested.get("ok"), bool):
+            return nested["ok"] is True
     return None
 
 

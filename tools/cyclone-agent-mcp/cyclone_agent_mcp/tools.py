@@ -6,8 +6,16 @@ from typing import Any, Callable
 
 from .audit import SafeAuditLog
 from .gateway import GatewayClient, GatewayError
-from .safe import redact, validate_typed_params
+from .safe import redact, strip_typed_plaintext, validate_typed_params
 from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
+from .phone_mcp import (
+    compact_observation,
+    draft_run_denied,
+    matched_verified_skill,
+    skill_run_normalize,
+    skill_save_payload,
+    skill_save_success,
+)
 
 
 PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,79}$")
@@ -84,6 +92,43 @@ class PhoneTools:
             mode=mode,
         )
 
+    def phone_locate(self, args: dict[str, Any]) -> Any:
+        goal = str(args.get("goal") or "").strip()
+        if not goal:
+            raise ValueError("goal is required")
+        query = str(args.get("query") or goal).strip()
+        device_id = self._device(args)
+        status = self.gateway.status(device_id)
+        raw = self.gateway.observe(device_id, include_screenshot=False, mode="compact")
+        page_card = compact_observation(raw, goal=goal)
+        try:
+            search_raw = self.gateway.ui_search(query, device_id)
+        except GatewayError as exc:
+            search_raw = {"available": False, "error": redact(exc.body)}
+        matched = None
+        skip_model = False
+        try:
+            match_raw = self.gateway.skill_match(goal, str(page_card.get("pageKey") or ""), device_id)
+            matched = matched_verified_skill(match_raw, goal, str(page_card.get("pageKey") or ""))
+            skip_model = bool(matched)
+        except (GatewayError, AttributeError, TypeError, ValueError, ImportError):
+            matched = None
+            skip_model = False
+        return {
+            "kind": "phone_locate",
+            "goal": goal,
+            "status": status if isinstance(status, dict) else {"available": False},
+            "pageCard": page_card,
+            "semanticSearch": search_raw,
+            "matchedSkill": matched,
+            "skipModel": skip_model,
+            "next": (
+                matched["next"] if matched else
+                "Use a goal-ranked/current elementId immediately, then call phone_act. "
+                "After any mutation, use phone_locate again; IDs are not reusable."
+            ),
+        }
+
     def phone_ui_search(self, args: dict[str, Any]) -> Any:
         query = str(args.get("query") or "").strip()
         if not query:
@@ -118,7 +163,42 @@ class PhoneTools:
             raise ValueError("goal is required")
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true; Android policy remains authoritative")
-        return self.gateway.action(tool, params, goal, self._device(args))
+        result = self.gateway.action(tool, params, goal, self._device(args))
+        if tool == "phone.type":
+            typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")
+            result = strip_typed_plaintext(result, typed if isinstance(typed, str) else None)
+        return result
+
+    def phone_skill_save(self, args: dict[str, Any]) -> Any:
+        built = skill_save_payload(args)
+        if built.get("written") is False:
+            return built
+        payload = built.get("_compile")
+        if not isinstance(payload, dict):
+            raise ValueError("skill compile payload is invalid")
+        result = self.gateway.skill_save(payload, self._device(args))
+        return skill_save_success(result, payload)
+
+    def phone_skill_run(self, args: dict[str, Any]) -> Any:
+        skill_id = str(args.get("skill_id") or args.get("skillId") or "").strip()
+        if not skill_id:
+            raise ValueError("skill_id is required")
+        dry_run = bool(args.get("dryRun") or args.get("dry_run"))
+        device_id = self._device(args)
+        if not dry_run:
+            try:
+                meta = self.gateway.skill_get(skill_id, device_id)
+                skill = meta.get("skill") if isinstance(meta, dict) and isinstance(meta.get("skill"), dict) else meta
+                if isinstance(skill, dict) and str(skill.get("status") or "").lower() == "draft":
+                    return draft_run_denied(skill_id, "draft")
+            except (GatewayError, AttributeError, TypeError, ValueError, KeyError):
+                pass
+        result = self.gateway.skill_run(
+            skill_id, dry_run=dry_run,
+            params=args.get("params") if isinstance(args.get("params"), dict) else {},
+            device_id=device_id,
+        )
+        return skill_run_normalize(result, skill_id=skill_id, dry_run=dry_run)
 
     def phone_group_act(self, args: dict[str, Any]) -> Any:
         raw_ids = args.get("device_ids")

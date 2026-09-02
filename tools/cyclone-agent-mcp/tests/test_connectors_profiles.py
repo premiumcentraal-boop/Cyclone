@@ -5,6 +5,7 @@ from pathlib import Path
 import tomllib
 
 import cyclone_agent_mcp.connector as connector
+from cyclone_agent_mcp.tool_catalog import TOOL_NAMES
 from cyclone_agent_mcp.profiles import (
     codex_toml,
     copilot_profile,
@@ -145,7 +146,7 @@ def test_detailed_codex_status_reports_safe_gateway_readiness(monkeypatch, tmp_p
         "device_count": 1,
         "devices": [{"device_id": "phone-safe", "state": "READY"}],
     }
-    assert result["details"]["mcp"]["tool_count"] == 22
+    assert result["details"]["mcp"]["tool_count"] == len(TOOL_NAMES)
     assert "token" not in json.dumps(result).lower()
 
 

@@ -66,5 +66,27 @@ class CompactTests(unittest.TestCase):
         self.assertEqual("phone.click", result["knownRouteHints"][0]["action"]["tool"])
 
 
+    def test_cyclone_page_text_v1_object_is_not_dropped(self):
+        result = compact_observation({
+            "observation": {
+                "pageKey": "settings::root",
+                "pageText": {
+                    "protocol": "cyclone-page-text-v1",
+                    "lines": [{"text": "Settings"}, {"text": "Network & internet"}],
+                },
+                "pageSummary": {
+                    "protocol": "cyclone-page-summary-v1",
+                    "title": "Settings",
+                    "contentNote": "Settings home",
+                    "buttons": ["Apps"],
+                },
+                "controls": [],
+            }
+        })
+        self.assertIn("Network & internet", result["pageText"])
+        self.assertIn("Settings", result["pageSummary"])
+        self.assertIn("Apps", result["pageSummary"])
+
+
 if __name__ == "__main__":
     unittest.main()
