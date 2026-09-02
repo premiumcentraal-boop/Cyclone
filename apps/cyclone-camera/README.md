@@ -26,10 +26,10 @@ camera device. Engine-facing controls are backed by the fake in-memory implement
 
 ## Build
 
-From the repository root, use the existing pinned Gradle wrapper:
+From `apps/cyclone-camera`, use the included pinned Gradle wrapper:
 
 ```powershell
-.\apps\mobile\gradlew.bat -p .\apps\cyclone-camera :app:testDebugUnitTest :app:assembleDebug
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 ```
 
 The APK is written to `apps/cyclone-camera/app/build/outputs/apk/debug/app-debug.apk`.
