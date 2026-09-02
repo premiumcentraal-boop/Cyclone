@@ -29,6 +29,21 @@ PAGE_TRANSITION_TOOLS = frozenset({
 })
 
 
+def _goal_label_present(after_raw: dict[str, Any], after: dict[str, Any], goal: str) -> bool:
+    needle = (goal or "").strip()
+    if len(needle) < 2:
+        return False
+    parts = [
+        str((after_raw or {}).get("pageText") or ""),
+        str((after_raw or {}).get("pageSummary") or ""),
+        str((after_raw or {}).get("pageTitle") or ""),
+        str((after or {}).get("pageText") or ""),
+        str((after or {}).get("pageSummary") or ""),
+        str((after or {}).get("title") or ""),
+    ]
+    return needle.lower() in " ".join(parts).lower()
+
+
 class DesktopAgentService:
     """Device-scoped adapter to the Android Gateway.
 
@@ -217,17 +232,27 @@ class DesktopAgentService:
             else False
         )
         page_changed_status = verification_status in {"PAGE_CHANGED", "PAGECHANGED"}
+        already_on_page = (
+            execution_ok
+            and bool(after_id)
+            and tool in {"phone.click", "phone.long_press"}
+            and isinstance(android_verification, dict)
+            and android_verification.get("ok") is not False
+            and verification_status not in {"FAILED"}
+            and _goal_label_present(after_raw, after, goal)
+        )
         verification_passed = (
             execution_ok
             and bool(after_id)
             and isinstance(android_verification, dict)
             and android_verification.get("ok") is True
             and (
-                verification_status in {"PASSED", "NOT_REQUIRED"}
+                verification_status in {"PASSED", "NOT_REQUIRED", "ALREADY_ON_PAGE"}
                 or page_changed_status
                 or android_verification.get("pageChanged") is True
+                or already_on_page
             )
-            and semantic_success_claimed
+            and (semantic_success_claimed or already_on_page)
         )
         error = None
         if not execution_ok:
@@ -294,6 +319,10 @@ class DesktopAgentService:
             "after_observation_id": after_id,
             "after_page_key": after_raw.get("pageKey"),
         }
+        if already_on_page:
+            verification_layer["basis"] = str(
+                (android_verification or {}).get("basis") or "ALREADY_ON_PAGE"
+            )
         if error is not None and execution_ok and not verification_passed:
             verification_layer["error"] = error
         return {

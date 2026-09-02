@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
@@ -179,7 +180,7 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
         if (markFresh) waitForUiQuiet()
-        val root = rootInActiveWindow
+        val root = preferredForegroundRoot() ?: rootInActiveWindow
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
         if (root != null) collectNode(root, "0", null, 0, nodes)
@@ -221,16 +222,39 @@ class CycloneAccessibilityService : AccessibilityService() {
             val target = resolveLiveTarget(selector) ?: return@repeat
             val (snapshotNode, node) = target
             if (!sameNode(snapshotNode, node)) return@repeat
+            val preferHost = !node.isClickable || snapshotNode.role.equals("generic", ignoreCase = true)
+            if (preferHost && clickClickableAncestor(node)) return true
             if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-            var parent = node.parent
-            repeat(4) {
-                if (parent == null) return@repeat
-                if (parent!!.isClickable && parent!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-                parent = parent!!.parent
-            }
+            if (!preferHost && clickClickableAncestor(node)) return true
             return tap(snapshotNode.bounds.centerX, snapshotNode.bounds.centerY)
         }
         return false
+    }
+
+    private fun clickClickableAncestor(node: AccessibilityNodeInfo): Boolean {
+        var parent = node.parent
+        repeat(4) {
+            if (parent == null) return false
+            if (parent!!.isClickable && parent!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            parent = parent!!.parent
+        }
+        return false
+    }
+
+    private fun preferredForegroundRoot(): AccessibilityNodeInfo? {
+        val active = rootInActiveWindow
+        val activePkg = active?.packageName?.toString().orEmpty()
+        if (activePkg.isNotBlank() && activePkg != "com.android.systemui") return active
+        val listed = windows.orEmpty()
+        val app = listed.firstOrNull { window ->
+            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                (window.isActive || window.isFocused) &&
+                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
+        } ?: listed.firstOrNull { window ->
+            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
+        }
+        return app?.root ?: active
     }
 
     /**

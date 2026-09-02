@@ -22,6 +22,9 @@ def test_frozen_connector_catalog_includes_locate_and_skill_tools(monkeypatch):
 
 
 class LocateGateway:
+    def __init__(self):
+        self.actions = []
+
     def status(self, device_id=None):
         return {"device_id": device_id or "phone-a", "state": "READY"}
 
@@ -54,6 +57,7 @@ class LocateGateway:
         return {"matched": False, "skill": {"id": "skill.draft.wifi", "status": "draft", "goal": goal, "pageKey": page_key}}
 
     def action(self, tool, params, goal, device_id=None):
+        self.actions.append({"tool": tool, "params": dict(params), "goal": goal})
         return {"ok": True, "tool": tool, "echo": params.get("value")}
 
 
@@ -68,7 +72,8 @@ def test_phone_locate_preserves_v1_page_text_and_draft_does_not_skip_model():
 
 
 def test_authorized_type_strips_plaintext_from_result():
-    tools = PhoneTools(gateway=LocateGateway())
+    gateway = LocateGateway()
+    tools = PhoneTools(gateway=gateway)
     secret = "Open Settings Apps"
     denied = tools.call("phone_act", {
         "device_id": "phone-a",
@@ -87,6 +92,11 @@ def test_authorized_type_strips_plaintext_from_result():
     })
     assert secret not in str(allowed)
     assert allowed.get("echo") in (None, "<redacted>")
+    outbound = gateway.actions[-1]["params"]
+    assert outbound["user_authorized"] is True
+    assert outbound["userAuthorized"] is True
+    assert outbound["value"] == secret
+    assert secret not in str(allowed)
 
 
 def test_strip_typed_plaintext_helper():

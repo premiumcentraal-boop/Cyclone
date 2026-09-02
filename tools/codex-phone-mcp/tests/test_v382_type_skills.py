@@ -177,6 +177,10 @@ class TypeSkillTests(unittest.TestCase):
             })[0]["text"])
             dumped = json.dumps(allowed)
             report = json.dumps(json.loads(next(P(report_dir).glob("*.json")).read_text()))
+        outbound = gateway.actions[-1]["params"]
+        self.assertTrue(outbound["user_authorized"])
+        self.assertTrue(outbound["userAuthorized"])
+        self.assertEqual(secret, outbound.get("value"))
         self.assertTrue(allowed["ok"])
         self.assertNotIn(secret, dumped)
         self.assertNotIn(secret, report)

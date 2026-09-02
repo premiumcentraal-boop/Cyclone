@@ -12,9 +12,27 @@ class Failure:
     layer: str
 
 
+def _is_fleet_or_device_list(result: dict[str, Any]) -> bool:
+    """Fleet/device-list payloads reuse capability.v1 but are not typed ACTION envelopes."""
+    if str(result.get("surface") or "").lower() == "fleet":
+        return True
+    if isinstance(result.get("devices"), list) and not any(
+        key in result for key in ("capability_id", "transport", "execution")
+    ):
+        return True
+    return False
+
+
 def classify_failure(result: Any) -> Failure | None:
     """Canonical MCP success/failure decision for legacy and capability responses."""
     if not isinstance(result, dict):
+        return None
+    if _is_fleet_or_device_list(result):
+        error = result.get("error")
+        if error not in (None, {}, ""):
+            return _error_failure(error, "GATEWAY_ERROR", "gateway")
+        if result.get("success") is False or result.get("ok") is False:
+            return Failure(str(result.get("error_class") or "GATEWAY_REPORTED_FAILURE"), "gateway")
         return None
     typed = result.get("protocol_version") == CAPABILITY_PROTOCOL_VERSION or any(
         key in result for key in ("transport", "execution", "verification")

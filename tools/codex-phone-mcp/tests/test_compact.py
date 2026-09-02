@@ -88,5 +88,24 @@ class CompactTests(unittest.TestCase):
         self.assertIn("Apps", result["pageSummary"])
 
 
+    def test_editable_near_end_stays_in_current_candidates(self):
+        controls = [{"id": f"c{i}", "label": f"Row {i}", "clickable": True} for i in range(19)]
+        controls.append({
+            "id": "task-input",
+            "label": "Phone task input",
+            "editable": True,
+            "focused": True,
+            "clickable": False,
+        })
+        result = compact_observation({"pageKey": "overlay", "controls": controls}, goal="Type into the composer")
+        current = result["candidates"]["current"]
+        self.assertEqual(12, len(current))
+        editable = next(item for item in current if item.get("label") == "Phone task input")
+        self.assertTrue(editable["editable"])
+        self.assertEqual("task-input", editable["elementId"])
+        ranked = result["candidates"]["goalRanked"]
+        self.assertEqual("task-input", ranked[0]["elementId"])
+
+
 if __name__ == "__main__":
     unittest.main()

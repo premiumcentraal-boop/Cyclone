@@ -386,5 +386,69 @@ class ToolTests(unittest.TestCase):
         self.assertEqual("STALE_OBSERVATION", summary["error"]["code"])
         self.assertEqual("PROTOCOL", summary["error"]["layer"])
 
+    def test_fleet_payload_is_not_classified_as_failed_action(self):
+        payload = {
+            "protocol_version": "cyclone.gateway.capability.v1",
+            "surface": "fleet",
+            "devices": [
+                {
+                    "deviceId": "dev_pixel8",
+                    "id": "dev_pixel8",
+                    "state": "READY",
+                    "name": "Pixel 8",
+                    "model": "Pixel 8",
+                    "serialSuffix": "061G",
+                    "paired": True,
+                    "screen": "AWAKE",
+                }
+            ],
+            "selectedSerialSuffix": "061G",
+        }
+        self.assertIsNone(classify_failure(payload))
+        listed = json.loads(self.tools.call("phone_devices", {})[0]["text"])
+        self.assertEqual("fleet", listed["surface"])
+        self.assertFalse(self.tools.last_call_failed)
+        alias = json.loads(self.tools.call("phone_list", {})[0]["text"])
+        self.assertEqual(listed["devices"][0]["deviceId"], alias["devices"][0]["deviceId"])
+        self.assertFalse(self.tools.last_call_failed)
+
+    def test_click_already_on_page_is_not_verification_failed(self):
+        class AlreadyOnPageGateway(FakeGateway):
+            def observe(self, **kwargs):
+                return {
+                    "witness": {"observation_id": "obs-home"},
+                    "observation": {
+                        "pageKey": "home",
+                        "title": "Home",
+                        "pageText": "See all 98 apps. Ask Cyclone. Navigate up.",
+                        "controls": [
+                            {"id": "see-all", "label": "See all 98 apps", "clickable": True},
+                        ],
+                    },
+                }
+
+            def action(self, tool, params, goal):
+                return {
+                    "protocol_version": "cyclone.gateway.capability.v1",
+                    "capability_id": tool,
+                    "ok": False,
+                    "transport": {"ok": True},
+                    "execution": {"ok": True},
+                    "verification": {"ok": False, "status": "OBSERVED", "code": "VERIFICATION_FAILED"},
+                    "error": {"code": "VERIFICATION_FAILED", "layer": "VERIFICATION"},
+                }
+
+        tools = PhoneTools(AlreadyOnPageGateway(), SessionRecorder(self.temp.name))
+        tools.call("phone_observe", {})
+        payload = json.loads(tools.call("phone_act", {
+            "tool": "phone.click",
+            "params": {"elementId": "see-all"},
+            "goal": "See all 98 apps",
+        })[0]["text"])
+        self.assertIs(False, payload["pageChanged"])
+        self.assertNotEqual("VERIFICATION_FAILED", payload.get("errorClass"))
+        self.assertTrue(payload["ok"])
+        self.assertEqual("passed", payload["actionStatus"]["gatewayVerification"])
+
 
 if __name__ == "__main__": unittest.main()

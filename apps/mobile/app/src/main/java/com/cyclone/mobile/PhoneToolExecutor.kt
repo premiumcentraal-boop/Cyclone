@@ -107,6 +107,12 @@ object PhoneToolExecutor {
                 val intent = context.packageManager.getLaunchIntentForPackage(packageName)
                     ?: return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "No launchable app for $packageName")
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (packageName == "com.android.settings") {
+                    // Settings otherwise restores the last sub-activity (Apps). Land on Settings home.
+                    intent.action = Intent.ACTION_MAIN
+                    intent.addCategory(Intent.CATEGORY_LAUNCHER)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
                 context.startActivity(intent)
                 Outcome(JSONObject().put("package", packageName).put("launched", true))
             }

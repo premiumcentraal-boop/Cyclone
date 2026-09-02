@@ -16,6 +16,10 @@ _GOAL_STOP_WORDS = frozenset({
     "a", "an", "and", "app", "button", "click", "for", "go", "in", "into", "me", "my",
     "of", "on", "open", "page", "screen", "tap", "the", "this", "to", "with",
 })
+_TYPE_GOAL_HINTS = frozenset({
+    "composer", "edit", "editable", "edittext", "enter", "fill", "input", "task",
+    "text", "textbox", "type", "write",
+})
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -78,6 +82,7 @@ def _candidate(item: Any) -> dict[str, Any] | None:
         "actions": _bounded_actions(_first(item, "androidActions", "actions", default=[])),
         "clickable": item.get("clickable") if isinstance(item.get("clickable"), bool) else None,
         "editable": item.get("editable") if isinstance(item.get("editable"), bool) else None,
+        "focused": item.get("focused") if isinstance(item.get("focused"), bool) else None,
         "scrollable": item.get("scrollable") if isinstance(item.get("scrollable"), bool) else None,
     }
     if isinstance(item.get("risk"), str):
@@ -108,12 +113,55 @@ def _source_controls(data: dict[str, Any], page: dict[str, Any]) -> list[Any]:
     return controls if isinstance(controls, list) else []
 
 
+def _is_password_candidate(candidate: dict[str, Any]) -> bool:
+    searchable = " ".join(
+        str(candidate.get(key) or "") for key in ("label", "resourceId", "role")
+    ).lower()
+    return any(token in searchable for token in ("password", "passwd", "passcode"))
+
+
+def _select_current_candidates(candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Keep editables/focused hosts in the bounded Page Card, then clickable hosts."""
+    limit = max(1, min(limit, PAGE_CARD_CANDIDATE_LIMIT))
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(item: dict[str, Any]) -> None:
+        if len(selected) >= limit:
+            return
+        element_id = str(item.get("elementId") or "")
+        key = element_id or f"anon:{id(item)}"
+        if key in seen:
+            return
+        seen.add(key)
+        selected.append(item)
+
+    for item in candidates:
+        if item.get("editable") is True and item.get("focused") is True and not _is_password_candidate(item):
+            add(item)
+    for item in candidates:
+        if item.get("editable") is True and not _is_password_candidate(item):
+            add(item)
+    for item in candidates:
+        if item.get("focused") is True and not _is_password_candidate(item):
+            add(item)
+    for item in candidates:
+        if item.get("clickable") is True:
+            add(item)
+    for item in candidates:
+        add(item)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _rank_candidates(candidates: list[dict[str, Any]], goal: str, limit: int) -> list[dict[str, Any]]:
     goal_tokens = _tokens(goal)
     if not goal_tokens:
         return []
     ranked: list[tuple[int, int, dict[str, Any], list[str]]] = []
     phrase = goal.lower().strip()
+    type_goal = any(hint in phrase or hint in goal_tokens for hint in _TYPE_GOAL_HINTS)
     for index, candidate in enumerate(candidates):
         searchable = " ".join(
             str(candidate.get(key) or "") for key in ("label", "resourceId", "role")
@@ -122,6 +170,10 @@ def _rank_candidates(candidates: list[dict[str, Any]], goal: str, limit: int) ->
         score = len(matches) * 10
         if phrase and phrase in searchable:
             score += 20
+        if type_goal and candidate.get("editable") is True:
+            score += 25
+        if type_goal and candidate.get("focused") is True:
+            score += 8
         if candidate.get("clickable") is True:
             score += 1
         if score:
@@ -197,7 +249,7 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
     page = data.get("page") if isinstance(data.get("page"), dict) else {}
     controls = _source_controls(data, page)
     candidates = [candidate for item in controls if (candidate := _candidate(item))]
-    current = candidates[:max(1, min(control_limit, PAGE_CARD_CANDIDATE_LIMIT))]
+    current = _select_current_candidates(candidates, max(1, min(control_limit, PAGE_CARD_CANDIDATE_LIMIT)))
     location = _location(page, data)
     # Android V3.5 exposes page-scoped, verified route evidence as ``nextHopHints``. Retain
     # it alongside older gateway aliases so the PC agent sees the same bounded guidance on both

@@ -26,6 +26,16 @@ RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
 
+def _forward_type_authorization(tool: str, args: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    """Copy MCP intent flag into Android params. Never echo the typed plaintext here."""
+    if tool != "phone.type" or args.get("user_authorized") is not True:
+        return params
+    forwarded = dict(params)
+    forwarded["user_authorized"] = True
+    forwarded["userAuthorized"] = True
+    return forwarded
+
+
 def _required_id(args: dict[str, Any], key: str, pattern: re.Pattern[str]) -> str:
     value = str(args.get(key) or "").strip()
     if not pattern.fullmatch(value):
@@ -163,6 +173,7 @@ class PhoneTools:
             raise ValueError("goal is required")
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true; Android policy remains authoritative")
+        params = _forward_type_authorization(tool, args, params)
         result = self.gateway.action(tool, params, goal, self._device(args))
         if tool == "phone.type":
             typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")

@@ -117,6 +117,10 @@ internal object GatewayV33ActionAdapter {
             captureAfterAction(context, tool, normalizedParams, beforeObservation)
         } else null
         val expect = normalizedParams.optJSONObject("expect")
+        val goalLabel = args.optString("goal")
+        val clickedLabel = clickedNodeLabel(normalizedParams, beforeObservation)
+        val afterHaystack = observationHaystack(afterObservation)
+        val alreadyOnPage = afterObservation != null && labelStillPresent(goalLabel, clickedLabel, afterHaystack)
         val afterStateVerified = afterObservation != null && verifiedByAfterState(
             tool = tool,
             expectedPackage = normalizedParams.optString("package"),
@@ -125,6 +129,9 @@ internal object GatewayV33ActionAdapter {
             afterPackage = afterObservation.page.packageName,
             afterPageKey = afterObservation.page.pageKey,
             afterFingerprint = afterObservation.payload.optString("accessibilityFingerprint"),
+            goalLabel = goalLabel,
+            clickedLabel = clickedLabel,
+            afterHaystack = afterHaystack,
         )
         val verification = when {
             verificationFailedInExecutor -> JSONObject()
@@ -155,7 +162,14 @@ internal object GatewayV33ActionAdapter {
                 .put("status", "PASSED")
                 .put("code", JSONObject.NULL)
                 .put("semanticSuccessClaimed", true)
-                .put("basis", if (tool == "phone.open_app") "EXPECTED_PACKAGE" else "FRESH_AFTER_STATE_CHANGED")
+                .put(
+                    "basis",
+                    when {
+                        tool == "phone.open_app" -> "EXPECTED_PACKAGE"
+                        alreadyOnPage && beforeObservation?.page?.pageKey == afterObservation?.page?.pageKey -> "ALREADY_ON_PAGE"
+                        else -> "FRESH_AFTER_STATE_CHANGED"
+                    },
+                )
             else -> JSONObject()
                 .put("ok", true)
                 .put("status", "OBSERVED")
@@ -224,12 +238,59 @@ internal object GatewayV33ActionAdapter {
         afterPackage: String,
         afterPageKey: String,
         afterFingerprint: String,
+        goalLabel: String = "",
+        clickedLabel: String = "",
+        afterHaystack: String = "",
     ): Boolean {
         if (tool == "phone.open_app" && expectedPackage.isNotBlank()) return afterPackage == expectedPackage
+        if (labelStillPresent(goalLabel, clickedLabel, afterHaystack) && tool in setOf(
+                "phone.click", "phone.long_press", "phone.back", "phone.home",
+            )
+        ) {
+            return true
+        }
         if (tool !in mutatingTools || beforePageKey.isBlank() || afterPageKey.isBlank()) return false
         return beforePageKey != afterPageKey || (
             beforeFingerprint.isNotBlank() && afterFingerprint.isNotBlank() && beforeFingerprint != afterFingerprint
         )
+    }
+
+    internal fun labelStillPresent(goalLabel: String, clickedLabel: String, haystack: String): Boolean {
+        if (haystack.isBlank()) return false
+        return listOf(clickedLabel, goalLabel).any { needle ->
+            needle.trim().length >= 2 && haystack.contains(needle.trim(), ignoreCase = true)
+        }
+    }
+
+    internal fun clickedNodeLabel(params: JSONObject, before: GatewayObservation?): String {
+        val elementId = params.optString("elementId").ifBlank {
+            params.optJSONObject("selector")?.optString("elementId").orEmpty()
+                .ifBlank { params.optJSONObject("selector")?.optString("id").orEmpty() }
+        }
+        if (elementId.isBlank() || before == null) return ""
+        return before.elements[elementId]?.label.orEmpty()
+    }
+
+    internal fun observationHaystack(observation: GatewayObservation?): String {
+        observation ?: return ""
+        val parts = mutableListOf<String>()
+        parts += observation.page.title
+        parts += observation.page.pageKey
+        observation.elements.values.forEach { parts += it.label }
+        when (val pageText = observation.payload.opt("pageText")) {
+            is String -> parts += pageText
+            is JSONObject -> {
+                parts += pageText.optString("text")
+                val lines = pageText.optJSONArray("lines")
+                if (lines != null) {
+                    for (index in 0 until lines.length()) {
+                        val line = lines.optJSONObject(index)
+                        parts += line?.optString("text").orEmpty()
+                    }
+                }
+            }
+        }
+        return parts.joinToString(" ")
     }
 
     private fun executeDirect(

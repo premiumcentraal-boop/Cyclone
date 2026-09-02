@@ -225,6 +225,9 @@ class PhoneTools:
     def phone_devices(self, args: dict[str, Any]) -> Any:
         return redact(self.gateway.devices(scan=bool(args.get("scan", False))))
 
+    def phone_list(self, args: dict[str, Any]) -> Any:
+        return self.phone_devices(args)
+
     def phone_observe(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
         mode = str(args.get("mode") or "compact")
@@ -368,6 +371,7 @@ class PhoneTools:
             # This is only an MCP-side intent/UX guard. It is never Android policy authority;
             # the V3 GatewayActionAuthority must still authorize the actual handoff.
             raise ValueError("phone.type requires user_authorized=true as an explicit MCP intent acknowledgement")
+        params = _forward_type_authorization(tool, args, params)
         device_id = _device_id(args)
         if tool not in MUTATING_ACTIONS:
             return self._run_non_mutating_action(device_id, tool, params, goal)
@@ -534,6 +538,16 @@ class PhoneTools:
         changed = page_changed(before, after)
         delta = page_delta(before, after, changed)
         typed_verification = _gateway_verification_passed(action)
+        already_on_page = (
+            _android_execution_ok(action)
+            and after is not None
+            and changed is False
+            and _page_has_goal_label(after, goal)
+        )
+        if failure is not None and failure.code == "VERIFICATION_FAILED" and already_on_page:
+            failure = None
+        if not typed_verification and already_on_page:
+            typed_verification = True
         verified = failure is None and action_error is None and typed_verification and after is not None
         if failure is not None:
             error_class, failure_layer = failure.code, failure.layer
@@ -552,7 +566,9 @@ class PhoneTools:
             "tool": tool,
             "goal": goal,
             "mutating": True,
-            "actionStatus": _action_status(action, failure, after_observed=after is not None),
+            "actionStatus": _action_status(
+                action, failure, after_observed=after is not None, verification_passed=typed_verification,
+            ),
             "beforePageCard": before,
             "afterPageCard": after,
             "pageChanged": changed,
@@ -674,6 +690,50 @@ def _search_element_ids(search: dict[str, Any]) -> set[str]:
     }
 
 
+def _forward_type_authorization(tool: str, args: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    """Copy MCP intent flag into Android params. Never echo the typed plaintext here."""
+    if tool != "phone.type" or args.get("user_authorized") is not True:
+        return params
+    forwarded = dict(params)
+    forwarded["user_authorized"] = True
+    forwarded["userAuthorized"] = True
+    return forwarded
+
+
+def _android_execution_ok(action: Any) -> bool:
+    if not isinstance(action, dict):
+        return False
+    execution = action.get("execution") if isinstance(action.get("execution"), dict) else {}
+    if execution.get("ok") is True:
+        return True
+    nested = execution.get("androidExecution") if isinstance(execution.get("androidExecution"), dict) else {}
+    if nested.get("ok") is True:
+        return True
+    android = action.get("android_execution") if isinstance(action.get("android_execution"), dict) else {}
+    return android.get("ok") is True
+
+
+def _page_has_goal_label(card: dict[str, Any] | None, goal: str) -> bool:
+    needle = (goal or "").strip()
+    if len(needle) < 2 or not isinstance(card, dict):
+        return False
+    parts = [
+        str(card.get("pageText") or ""),
+        str(card.get("pageSummary") or ""),
+        str(card.get("title") or ""),
+    ]
+    location = card.get("location") if isinstance(card.get("location"), dict) else {}
+    parts.append(str(location.get("title") or ""))
+    candidates = card.get("candidates") if isinstance(card.get("candidates"), dict) else {}
+    for row in list(candidates.get("current") or []) + list(candidates.get("goalRanked") or []):
+        if isinstance(row, dict):
+            parts.append(str(row.get("label") or ""))
+    for row in card.get("controls") or []:
+        if isinstance(row, dict):
+            parts.append(str(row.get("label") or ""))
+    return needle.lower() in " ".join(parts).lower()
+
+
 def _gateway_verification_passed(action: Any) -> bool:
     if not isinstance(action, dict):
         return False
@@ -685,19 +745,22 @@ def _gateway_verification_passed(action: Any) -> bool:
     )
 
 
-def _action_status(action: Any, failure: Any, *, after_observed: bool) -> dict[str, Any]:
+def _action_status(
+    action: Any, failure: Any, *, after_observed: bool, verification_passed: bool | None = None,
+) -> dict[str, Any]:
     action = action if isinstance(action, dict) else {}
     transport = action.get("transport") if isinstance(action.get("transport"), dict) else {}
     execution = action.get("execution") if isinstance(action.get("execution"), dict) else {}
     verification = action.get("verification") if isinstance(action.get("verification"), dict) else {}
+    gw_passed = _gateway_verification_passed(action) if verification_passed is None else verification_passed
     return {
         "transport": "ok" if transport.get("ok") is True else ("failed" if transport else "unknown"),
         "execution": "ok" if execution.get("ok") is True else ("failed" if execution else "unknown"),
-        "gatewayVerification": "passed" if _gateway_verification_passed(action) else (
+        "gatewayVerification": "passed" if gw_passed else (
             "failed" if verification else "unavailable"
         ),
         "afterObserved": after_observed,
-        "verified": failure is None and _gateway_verification_passed(action) and after_observed,
+        "verified": failure is None and gw_passed and after_observed,
     }
 
 

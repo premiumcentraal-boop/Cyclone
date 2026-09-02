@@ -83,3 +83,41 @@ def test_desktop_accepts_only_android_passed_semantic_verification():
 
     assert result["verification"]["passed"] is True
     assert result["verification"]["status"] == "PASSED"
+
+
+class GoalAwareBridge(AndroidBridge):
+    def request(self, op, args=None, request_id=None):
+        if op == "observe.semantic":
+            self.observation += 1
+            return {
+                "observationId": f"obs-{self.observation}",
+                "pageKey": "HOME",
+                "package": "com.android.launcher3",
+                "pageTitle": "Home",
+                "pageText": "See all 98 apps. Ask Cyclone.",
+                "pageSummary": "Home launcher with See all 98 apps",
+            }
+        return super().request(op, args, request_id)
+
+
+def test_already_on_page_click_is_verified_even_if_page_key_unchanged():
+    service = DesktopAgentService(
+        OneDeviceFleet(
+            GoalAwareBridge({"ok": True, "status": "OBSERVED", "semanticSuccessClaimed": False})
+        )
+    )
+    result = service.action(
+        "dev_test",
+        {
+            "capability_id": "phone.click",
+            "expected_observation_id": "obs-before",
+            "goal": "See all 98 apps",
+            "params": {"elementId": "see-all"},
+        },
+    )
+    assert result["execution"]["androidExecution"]["ok"] is True
+    assert result["verification"]["passed"] is True
+    assert result["ok"] is True
+    assert result["verification"]["basis"] == "ALREADY_ON_PAGE"
+    assert result["verification"]["authority"] == "ANDROID_CANONICAL"
+    assert result["afterState"]["pageKey"] == "HOME" or result["verification"]["after_page_key"] == "HOME"
