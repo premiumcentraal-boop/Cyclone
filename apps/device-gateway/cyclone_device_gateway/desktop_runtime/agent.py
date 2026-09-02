@@ -6,6 +6,12 @@ import threading
 import time
 from typing import Any
 
+from ..actions.envelope import (
+    android_execution_error_class,
+    canonical_error,
+    extract_android_execution,
+    safe_android_execution,
+)
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
@@ -212,16 +218,20 @@ class DesktopAgentService:
             "pageKey": after_raw.get("pageKey"),
             "package": after_raw.get("package"),
         })
-        execution_payload = execution.get("execution") if isinstance(execution, dict) else None
-        android_execution = execution.get("androidExecution") if isinstance(execution, dict) else None
-        execution_ok = (
-            bool(android_execution.get("ok"))
-            if isinstance(android_execution, dict)
-            else bool(execution_payload.get("ok"))
-            if isinstance(execution_payload, dict)
-            else False
-        )
+        parsed_execution = extract_android_execution(execution)
+        if parsed_execution is None:
+            execution_ok = False
+            execution_error_class = "PROTOCOL_MISMATCH"
+        else:
+            execution_ok = bool(parsed_execution.get("ok"))
+            execution_error_class = (
+                None if execution_ok else android_execution_error_class(parsed_execution)
+            )
+        android_execution = safe_android_execution(execution)
         android_verification = execution.get("verification") if isinstance(execution, dict) else None
+        if not isinstance(android_verification, dict) and isinstance(parsed_execution, dict):
+            nested = parsed_execution.get("verification")
+            android_verification = nested if isinstance(nested, dict) else None
         verification_status = (
             str(android_verification.get("status") or "UNKNOWN").upper()
             if isinstance(android_verification, dict)
@@ -232,34 +242,98 @@ class DesktopAgentService:
             if isinstance(android_verification, dict)
             else False
         )
+        page_changed_status = verification_status in {"PAGE_CHANGED", "PAGECHANGED"}
         verification_passed = (
             execution_ok
             and bool(after_id)
             and isinstance(android_verification, dict)
             and android_verification.get("ok") is True
-            and verification_status in {"PASSED", "NOT_REQUIRED"}
+            and (
+                verification_status in {"PASSED", "NOT_REQUIRED"}
+                or page_changed_status
+                or android_verification.get("pageChanged") is True
+            )
             and semantic_success_claimed
         )
+        error = None
+        if not execution_ok:
+            if execution_error_class == "PROTOCOL_MISMATCH":
+                error = canonical_error(
+                    "PROTOCOL_MISMATCH",
+                    "PROTOCOL",
+                    "Android execution result did not match the capability protocol.",
+                )
+                execution_status = "protocol_mismatch"
+            elif execution_error_class == "POLICY_DENIED":
+                error = canonical_error(
+                    "POLICY_DENIED",
+                    "POLICY",
+                    "Android policy denied the action.",
+                )
+                execution_status = "android_failed"
+            elif execution_error_class == "STALE_OBSERVATION":
+                error = canonical_error(
+                    "STALE_OBSERVATION",
+                    "PROTOCOL",
+                    "Android rejected stale observation evidence.",
+                    retryable=True,
+                )
+                execution_status = "android_failed"
+            else:
+                error = canonical_error(
+                    execution_error_class or "EXECUTION_FAILED",
+                    "EXECUTION",
+                    "Android PhoneToolExecutor reported execution failure.",
+                )
+                execution_status = "android_failed"
+        elif not verification_passed:
+            error = canonical_error(
+                "VERIFICATION_FAILED",
+                "VERIFICATION",
+                "The authoritative after-state did not verify the action.",
+                retryable=True,
+            )
+            execution_status = "android_succeeded"
+        else:
+            execution_status = "android_succeeded"
+        overall_ok = execution_ok and verification_passed
+        execution_layer = {
+            "ok": execution_ok,
+            "authoritative": True,
+            "status": execution_status,
+            "androidExecution": android_execution,
+        }
+        if error is not None and not execution_ok:
+            execution_layer["error"] = error
+        verification_layer = {
+            # Android is the sole verification authority. A successful transport, executor
+            # result, or fresh observation is evidence, but none of those alone proves that
+            # the requested semantic after-state was reached.
+            "ok": verification_passed,
+            "passed": verification_passed,
+            "authoritative": True,
+            "status": verification_status,
+            "code": android_verification.get("code") if isinstance(android_verification, dict) else None,
+            "semantic_success_claimed": semantic_success_claimed,
+            "authority": "ANDROID_CANONICAL",
+            "before_observation_id": expected or (before or {}).get("observationId"),
+            "after_observation_id": after_id,
+            "after_page_key": after_raw.get("pageKey"),
+        }
+        if error is not None and execution_ok and not verification_passed:
+            verification_layer["error"] = error
         return {
             **self._operation_context(session, device_id, "act"),
+            "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "capability_id": tool,
-            "transport": {"ok": True},
-            "execution": execution,
-            "verification": {
-                # Android is the sole verification authority. A successful transport, executor
-                # result, or fresh observation is evidence, but none of those alone proves that
-                # the requested semantic after-state was reached.
-                "passed": verification_passed,
-                "status": verification_status,
-                "code": android_verification.get("code") if isinstance(android_verification, dict) else None,
-                "semantic_success_claimed": semantic_success_claimed,
-                "authority": "ANDROID_CANONICAL",
-                "before_observation_id": expected or (before or {}).get("observationId"),
-                "after_observation_id": after_id,
-                "after_page_key": after_raw.get("pageKey"),
-            },
+            "ok": overall_ok,
+            "transport": {"ok": True, "status": "connected"},
+            "execution": execution_layer,
+            "verification": verification_layer,
+            "android_execution": android_execution,
             "after": after,
             "afterState": self._after_state(after_raw),
+            "error": error,
         }
 
     def _observe_after_action(
@@ -407,7 +481,9 @@ class DesktopAgentService:
             mapping = {
                 "AUTH_REJECTED": RuntimeErrorCode.AUTH_REJECTED,
                 "CAPABILITY_UNAVAILABLE": RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
-                "STALE_OBSERVATION": RuntimeErrorCode.INVALID_REQUEST,
+                "STALE_OBSERVATION": RuntimeErrorCode.STALE_OBSERVATION,
+                "POLICY_DENIED": RuntimeErrorCode.POLICY_DENIED,
+                "PROTOCOL_MISMATCH": RuntimeErrorCode.PROTOCOL_MISMATCH,
             }
             raise DesktopRuntimeError(mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE), f"Android Gateway rejected {op}.") from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
