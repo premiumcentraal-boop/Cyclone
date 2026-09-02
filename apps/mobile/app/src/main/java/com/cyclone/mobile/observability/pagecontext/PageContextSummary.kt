@@ -107,7 +107,7 @@ object PageContextSummary {
 
     private fun headingCandidate(node: JSONObject, label: String): Boolean {
         if (label.length !in 2..60 || node.optInt("depth", 99) > 4) return false
-        if (label.matches(Regex("^[\\d.,%:]\\s/\\-]+$"))) return false
+        if (label.matches(Regex("^[0-9.,:% /-]+$"))) return false
         val role = node.optString("role")
         val cls = node.optString("class").substringAfterLast('.').lowercase()
         return role == "text" || role == "heading" || "textview" in cls
