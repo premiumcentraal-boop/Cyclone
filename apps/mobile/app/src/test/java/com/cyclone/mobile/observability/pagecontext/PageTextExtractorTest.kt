@@ -23,6 +23,8 @@ class PageTextExtractorTest {
         assertEquals(100, lines.getJSONObject(0).getInt("y"))
         assertEquals("Continue", lines.getJSONObject(1).getString("text"))
         assertFalse(text.getBoolean("truncated"))
+        assertTrue(text.getString("text").contains("Header"))
+        assertTrue(text.getString("text").contains("Continue"))
     }
 
     @Test
@@ -65,8 +67,66 @@ class PageTextExtractorTest {
         assertTrue(text.getBoolean("truncated"))
     }
 
-    private fun snapshot(vararg nodes: JSONObject): JSONObject = JSONObject()
-        .put("screen", JSONObject().put("width", 1080).put("height", 2400))
+    @Test
+    fun zeroSizeScreenStillKeepsOnScreenVisibleNodes() {
+        val snapshot = snapshot(
+            node("Settings", "text", false, y = 80, x = 24),
+            node("Network and internet", "text", true, y = 220, x = 24),
+            screenWidth = 0,
+            screenHeight = 0,
+        )
+
+        val text = PageTextExtractor.extract(snapshot)
+        assertEquals("cyclone-page-text-v1", text.getString("protocol"))
+        assertEquals(2, text.getJSONArray("lines").length())
+        assertTrue(text.getString("text").contains("Settings"))
+        assertTrue(text.getString("text").contains("Network and internet"))
+    }
+
+    @Test
+    fun settingsPageFixtureEmitsBoundedFlattenedText() {
+        val snapshot = snapshot(
+            node("Settings", "heading", false, y = 40, x = 24),
+            node("Network and internet", "text", true, y = 180, x = 24),
+            node("Connected devices", "text", true, y = 260, x = 24),
+            node("Apps", "text", true, y = 340, x = 24),
+            node("Notifications", "text", true, y = 420, x = 24),
+            node("Battery", "text", true, y = 500, x = 24),
+        )
+        val text = PageTextExtractor.extract(snapshot)
+        assertEquals("cyclone-page-text-v1", text.getString("protocol"))
+        assertTrue(text.getInt("lineCount") >= 5)
+        assertTrue(text.getString("text").contains("Network and internet"))
+        assertTrue(text.getString("text").length <= PageTextExtractor.DEFAULT_PLAIN_LIMIT)
+        assertEquals(text.getString("text"), PageTextExtractor.flattened(text))
+    }
+
+    @Test
+    fun appsPageFixtureEmitsBoundedFlattenedText() {
+        val snapshot = snapshot(
+            node("Apps", "heading", false, y = 40, x = 24),
+            node("All apps", "text", true, y = 160, x = 24),
+            node("Default apps", "text", true, y = 240, x = 24),
+            node("Screen time", "text", true, y = 320, x = 24),
+        )
+        val text = PageTextExtractor.extract(snapshot)
+        assertEquals("cyclone-page-text-v1", text.getString("protocol"))
+        assertTrue(text.getString("text").contains("All apps"))
+        assertTrue(text.getString("text").contains("Default apps"))
+    }
+
+    @Test
+    fun flattenedJoinsProtocolLinesWhenDirectTextMissing() {
+        val card = JSONObject()
+            .put("protocol", "cyclone-page-text-v1")
+            .put("lines", JSONArray()
+                .put(JSONObject().put("text", "Clock"))
+                .put(JSONObject().put("text", "Alarm")))
+        assertEquals("Clock Alarm", PageTextExtractor.flattened(card))
+    }
+
+    private fun snapshot(vararg nodes: JSONObject, screenWidth: Int = 1080, screenHeight: Int = 2400): JSONObject = JSONObject()
+        .put("screen", JSONObject().put("width", screenWidth).put("height", screenHeight))
         .put("nodes", JSONArray().also { array -> nodes.forEach(array::put) })
 
     private fun node(
