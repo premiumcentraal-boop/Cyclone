@@ -9,6 +9,8 @@ import org.json.JSONObject
  * Accessibility snapshot plus canonical PageContext identity. Pure JSON so it is JVM-testable.
  */
 object PageContextSummary {
+    const val DEFAULT_PLAIN_LIMIT = 500
+
     fun build(
         snapshot: JSONObject,
         pageKey: String,
@@ -58,6 +60,10 @@ object PageContextSummary {
             if (fields.isNotEmpty()) append(", ${fields.size} form field(s)")
             if (scrollableKeys.isNotEmpty()) append(", ${scrollableKeys.size} scrollable region(s)")
         }
+        val plain = listOf(title.trim(), primaryNote)
+            .filter { it.isNotBlank() }
+            .joinToString(". ")
+            .take(DEFAULT_PLAIN_LIMIT)
         return JSONObject()
             .put("protocol", "cyclone-page-summary-v1")
             .put("pageKey", pageKey)
@@ -73,6 +79,21 @@ object PageContextSummary {
             .put("controlCount", controlCount)
             .put("textLineCount", textLineCount)
             .put("contentNote", primaryNote)
+            .put("text", plain)
+    }
+
+    fun flattened(summary: JSONObject, limit: Int = DEFAULT_PLAIN_LIMIT): String {
+        val direct = summary.optString("text").trim()
+        if (direct.isNotBlank()) return direct.take(limit)
+        val parts = mutableListOf<String>()
+        summary.optString("title").trim().takeIf { it.isNotBlank() }?.let(parts::add)
+        summary.optString("contentNote").trim().takeIf { it.isNotBlank() }?.let(parts::add)
+        listOf("headings", "buttons", "tabs", "switches").forEach { key ->
+            val items = summary.optJSONArray(key) ?: return@forEach
+            val labels = (0 until items.length()).mapNotNull { items.optString(it).trim().takeIf(String::isNotBlank) }
+            if (labels.isNotEmpty()) parts += "$key: ${labels.take(8).joinToString(", ")}"
+        }
+        return parts.joinToString(". ").take(limit)
     }
 
     private fun readableLabel(node: JSONObject, editable: Boolean): String {
@@ -86,7 +107,7 @@ object PageContextSummary {
 
     private fun headingCandidate(node: JSONObject, label: String): Boolean {
         if (label.length !in 2..60 || node.optInt("depth", 99) > 4) return false
-        if (label.matches(Regex("^[\\d.,%:\\s/\\-]+$"))) return false
+        if (label.matches(Regex("^[\\d.,%:]\\s/\\-]+$"))) return false
         val role = node.optString("role")
         val cls = node.optString("class").substringAfterLast('.').lowercase()
         return role == "text" || role == "heading" || "textview" in cls
