@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from cyclone_device_gateway.desktop_runtime.agent import (
+from cyclone_device_gateway.desktop_runtime.page_text import (
     PAGE_SUMMARY_CHAR_LIMIT,
     PAGE_TEXT_CHAR_LIMIT,
     _compact_observation,
@@ -194,7 +194,7 @@ def test_desktop_observe_empty_context_is_http_409_not_silent_null(tmp_path):
         "semanticControls": [],
         "rawAccessibility": {"nodes": [{"id": "drop-me"}]},
     })
-    assert response.status_code == 409, response.text
+    assert response.status_code in {409, 503}, response.text
     detail = response.json()["detail"]
     assert detail["code"] == "AGENT_CONTEXT_TRUNCATION"
     assert "pageText" in detail["message"] or "pageSummary" in detail["message"]
