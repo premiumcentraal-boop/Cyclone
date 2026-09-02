@@ -47,6 +47,11 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         return tools.call("phone_observe", {"device_id": device_id, "mode": mode, "include_screenshot": include_screenshot})
 
     @mcp.tool(annotations=READ)
+    def phone_locate(goal: str, device_id: str | None = None, query: str | None = None) -> dict[str, Any]:
+        """Fuse readiness, a bounded Page Card (pageText + pageSummary), and goal-ranked candidates."""
+        return tools.call("phone_locate", {"device_id": device_id, "goal": goal, "query": query})
+
+    @mcp.tool(annotations=READ)
     def phone_ui_search(query: str, device_id: str | None = None) -> dict[str, Any]:
         """Search the semantic/raw UI index for one phone."""
         return tools.call("phone_ui_search", {"device_id": device_id, "query": query})
@@ -81,6 +86,32 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
     ) -> dict[str, Any]:
         """Forward one typed action to Cyclone. There is no generic command/shell/ADB escape hatch."""
         return tools.call("phone_act", {"device_id": device_id, "tool": tool, "params": params, "goal": goal, "user_authorized": user_authorized})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_skill_save(
+        goal: str,
+        steps: list[dict[str, Any]],
+        device_id: str | None = None,
+        pageKey: str = "",
+        app: str = "",
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compile 2+ verified steps into a disabled AutomationStore draft. Unverified steps do not write."""
+        return tools.call("phone_skill_save", {
+            "device_id": device_id, "goal": goal, "steps": steps, "pageKey": pageKey, "app": app, "params": params or {},
+        })
+
+    @mcp.tool(annotations=WRITE)
+    def phone_skill_run(
+        skill_id: str,
+        device_id: str | None = None,
+        dryRun: bool = False,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run a verified skill live, or dry-run a draft without mutation. Draft match never skipModel."""
+        return tools.call("phone_skill_run", {
+            "device_id": device_id, "skill_id": skill_id, "dryRun": dryRun, "params": params or {},
+        })
 
     @mcp.tool(annotations=WRITE)
     def phone_group_act(
