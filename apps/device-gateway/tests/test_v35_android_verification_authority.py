@@ -25,6 +25,9 @@ class AndroidBridge:
                 "observationId": f"obs-{self.observation}",
                 "pageKey": "HOME",
                 "package": "com.android.launcher3",
+                "pageTitle": "Home",
+                "pageText": "Home",
+                "pageSummary": "Home launcher",
             }
         raise AssertionError(op)
 

@@ -1,4 +1,5 @@
 # Cyclone 3.8.2
+# Compact observe requires non-empty pageText/pageSummary strings.
 schema = 1
 product_version = "3.8.2"
 channel = "stable"
