@@ -222,6 +222,7 @@ enum class PhoneToolErrorCode {
     APP_NOT_FOUND,
     NOTIFICATION_NOT_FOUND,
     SECURITY_RESTRICTION,
+    POLICY_DENIED,
     INTERNAL_ERROR,
 }
 
