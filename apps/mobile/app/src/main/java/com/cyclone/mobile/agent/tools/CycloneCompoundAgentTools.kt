@@ -102,7 +102,7 @@ class CycloneCompoundAgentTools internal constructor(
         val page = observed.page ?: return failureJson(observed.failure ?: genericObservationFailure())
         val brain = runtime.brainRecall(goal)
         val routes = runtime.knownRoutes(goal)
-        val apps = CompoundAppResolver.rank(goal, runtime.installedApps(refresh = true)).take(APP_MATCH_LIMIT)
+        val apps = CompoundAppResolver.rank(goal, runtime.installedApps(refresh = false)).take(APP_MATCH_LIMIT)
         val actionHistory = runtime.history()
         val previous = actionHistory.firstOrNull()
         val previousVerified = actionHistory.firstOrNull { it.verification.passed }
@@ -144,7 +144,7 @@ class CycloneCompoundAgentTools internal constructor(
         if (goal.isBlank()) return invalid("Recall goal is required.")
         val brain = runtime.brainRecall(goal)
         val routes = runtime.knownRoutes(goal)
-        val apps = CompoundAppResolver.rank(goal, runtime.installedApps(refresh = true)).take(APP_MATCH_LIMIT)
+        val apps = CompoundAppResolver.rank(goal, runtime.installedApps(refresh = false)).take(APP_MATCH_LIMIT)
         val skills = runtime.verifiedSkills(goal).take(RECALL_SKILL_LIMIT)
         val failures = runtime.history().filter { it.errorClass != AgentFailureClass.NONE }.take(PREVIOUS_FAILURE_LIMIT)
         return JSONObject()
@@ -271,17 +271,28 @@ class CycloneCompoundAgentTools internal constructor(
 
     override fun scroll(direction: String, elementId: String?, goal: String): JSONObject = synchronized(mutationLock) {
         if (direction !in setOf("forward", "backward")) return@synchronized invalid("direction must be forward or backward.")
+        val effectiveGoal = goal.ifBlank { "Scroll $direction" }
+        if (elementId.isNullOrBlank()) {
+            val observed = runtime.observe(effectiveGoal)
+            observed.failure?.let { return@synchronized failureJson(it) }
+        }
         val params = JSONObject().put("direction", direction)
         elementId?.takeIf(String::isNotBlank)?.let { params.put("elementId", it) }
-        actionJson(runtime.act("phone.scroll", params, goal.ifBlank { "Scroll $direction" }))
+        actionJson(runtime.act("phone.scroll", params, effectiveGoal))
     }
 
     override fun back(goal: String): JSONObject = synchronized(mutationLock) {
-        actionJson(runtime.act("phone.back", JSONObject(), goal.ifBlank { "Go back" }))
+        val effectiveGoal = goal.ifBlank { "Go back" }
+        val observed = runtime.observe(effectiveGoal)
+        observed.failure?.let { return@synchronized failureJson(it) }
+        actionJson(runtime.act("phone.back", JSONObject(), effectiveGoal))
     }
 
     override fun home(goal: String): JSONObject = synchronized(mutationLock) {
-        actionJson(runtime.act("phone.home", JSONObject(), goal.ifBlank { "Go home" }))
+        val effectiveGoal = goal.ifBlank { "Go home" }
+        val observed = runtime.observe(effectiveGoal)
+        observed.failure?.let { return@synchronized failureJson(it) }
+        actionJson(runtime.act("phone.home", JSONObject(), effectiveGoal))
     }
 
     override fun runSkill(skillId: String, goal: String): JSONObject = synchronized(mutationLock) {
