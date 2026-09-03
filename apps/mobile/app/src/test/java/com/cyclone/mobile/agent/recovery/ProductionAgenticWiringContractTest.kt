@@ -1,29 +1,56 @@
 package com.cyclone.mobile.agent.recovery
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 
 class ProductionAgenticWiringContractTest {
-    @Test
-    fun productionOverlayOrLocalAgentReferencesIntegratedRuntimeWhenGateEnabled() {
-        assumeTrue(System.getenv(AgenticRecoveryIntegrationContract.PRODUCTION_WIRING_GATE) == "1")
-        val symbol = System.getenv(AgenticRecoveryIntegrationContract.RUNTIME_SYMBOL_OVERRIDE)
-            ?.takeIf { it.isNotBlank() }
-            ?: AgenticRecoveryIntegrationContract.PRODUCTION_BINDING_SYMBOL
-        val candidates = listOf(
-            "app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeMachine.kt",
-            "app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
-            "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeMachine.kt",
-            "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
-        ).map(::File).filter(File::isFile)
+    private fun source(vararg candidates: String): String {
+        val file = candidates.map(::File).firstOrNull(File::isFile)
+            ?: error("Could not find production source: ${candidates.joinToString()}")
+        return file.readText()
+    }
 
-        assertTrue("Could not find production overlay/local-agent source files", candidates.isNotEmpty())
-        assertTrue(
-            "Agentic recovery/runtime exists but production path does not reference '$symbol'. " +
-                "Bind Agent 1's persistent runtime through AgenticRecoveryRuntimePort before integration.",
-            candidates.any { it.readText().contains(symbol) },
+    @Test
+    fun productionOverlayUsesPersistentAgentAndPcParityBridge() {
+        val adaptive = source(
+            "app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
         )
+        val overlay = source(
+            "app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeRuntime.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeRuntime.kt",
+        )
+        assertTrue(adaptive.contains("CycloneLocalAgent"))
+        assertTrue(adaptive.contains("CyclonePcParityBridge"))
+        assertTrue(overlay.contains("OpenRouterAdaptiveAgent"))
+        assertTrue(overlay.contains("resumeSuspendedTask"))
+        assertFalse(adaptive.contains("while (providerRequests < config.maxDecisions)"))
+    }
+
+    @Test
+    fun pcParityBridgeConsumesAgent2AndAgent3Contracts() {
+        val bridge = source(
+            "app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
+        )
+        assertTrue(bridge.contains("CycloneAgentEnvironment"))
+        assertTrue(bridge.contains("AgenticRecoveryRuntimePort"))
+        assertTrue(bridge.contains("classifyProgress"))
+        assertTrue(bridge.contains("selectRecovery"))
+    }
+
+    @Test
+    fun productionActionPathDoesNotEquateExecutorAcceptanceWithVerification() {
+        val adaptive = source(
+            "app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
+        )
+        assertTrue(adaptive.contains("envelope.verification.passed"))
+        assertTrue(adaptive.contains("ANDROID_EXECUTION"))
+        assertTrue(adaptive.contains("AFTER_OBSERVATION"))
+        assertTrue(adaptive.contains("VERIFICATION"))
+        assertFalse(adaptive.contains("val verified = result.ok"))
     }
 }
