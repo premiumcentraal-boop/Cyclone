@@ -1027,20 +1027,11 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
         messages: JSONArray,
         providerSort: String,
     ): JSONObject {
-        val maxTokens = when (model.reasoningEffort) {
-            "max" -> 6_000
-            "high" -> 4_000
-            else -> 2_400
-        }
+        // Keep OpenRouter routing maximally compatible: model + messages only.
+        // Provider/model defaults own output limits, reasoning, sampling and routing.
         val body = JSONObject()
             .put("model", model.id)
             .put("messages", messages)
-            .put("temperature", 0.02)
-            .put("max_tokens", maxTokens)
-            .put("reasoning", JSONObject().put("effort", model.reasoningEffort).put("exclude", true))
-            .put("response_format", JSONObject().put("type", "json_object"))
-            .put("provider", JSONObject().put("sort", providerSort).put("allow_fallbacks", true).put("require_parameters", true))
-            .put("stream", false)
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $apiKey")
