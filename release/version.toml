@@ -1,5 +1,6 @@
 # Cyclone 3.8.8
 # Native LLM tool-calling mobile agent with compound Android tools, verified execution and downloadable run logs.
+# GitHub prerelease for device testing.
 schema = 1
 product_version = "3.8.8"
 channel = "stable"
