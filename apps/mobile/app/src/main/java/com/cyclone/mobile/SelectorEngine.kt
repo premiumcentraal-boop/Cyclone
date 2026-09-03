@@ -25,7 +25,7 @@ object SelectorEngine {
                 if (node.resourceId == it) { score += 3.0; reasons += "resourceId" } else hardFailure = true
             }
             selector.text?.let {
-                if (normalize(node.text) == normalize(it)) { score += 2.5; reasons += "text_exact" } else hardFailure = true
+                if (matchesName(node, it)) { score += 2.5; reasons += "text_exact" } else hardFailure = true
             }
             selector.textContains?.let {
                 if (normalize(node.text).contains(normalize(it))) { score += 1.8; reasons += "text_contains" } else hardFailure = true
@@ -119,6 +119,12 @@ object SelectorEngine {
     private fun matchesText(node: UiNodeSnapshot, expected: String): Boolean {
         val q = normalize(expected)
         return normalize(node.text).contains(q) || normalize(node.contentDescription).contains(q)
+    }
+
+    private fun matchesName(node: UiNodeSnapshot, expected: String): Boolean {
+        val q = normalize(expected)
+        if (q.isBlank()) return false
+        return listOf(node.text, node.contentDescription).any { normalize(it) == q }
     }
 
     private fun matchesRelative(node: UiNodeSnapshot, anchor: UiNodeSnapshot, direction: RelativeDirection): Boolean {

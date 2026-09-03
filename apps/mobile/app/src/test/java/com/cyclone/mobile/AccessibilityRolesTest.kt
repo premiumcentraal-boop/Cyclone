@@ -73,6 +73,113 @@ class AccessibilityRolesTest {
         assertTrue(ignoredId.isEmpty())
     }
 
+    @Test
+    fun navigateUpEvidenceDoesNotForceLabelIntoSelectorText() {
+        val evidence = JSONObject()
+            .put("label", "Navigate up")
+            .put("role", "button")
+            .put("clickable", true)
+            .put("contentDescription", "Navigate up")
+            .put("selector", JSONObject().put("contentDescription", "Navigate up").put("role", "button"))
+        val selector = ObservationSelectorLookup.fromEvidence(evidence, "semantic:obs:up")
+        assertEquals(null, selector.text)
+        assertEquals("Navigate up", selector.contentDescription)
+        assertEquals("button", selector.role)
+    }
+
+    @Test
+    fun filesRowFoldKeepsFilenameAheadOfDateAndSize() {
+        val host = node("row", "0/1", null, listOf("name", "date", "size"), "", "generic", clickable = true)
+        val name = node("name", "0/1/0", "row", emptyList(), "Cyclone-3.6.0-beta.2.apk", "text")
+        val date = node("date", "0/1/1", "row", emptyList(), "Tue, 01 Sept", "text")
+        val size = node("size", "0/1/2", "row", emptyList(), "69,98 MB • 2 days ago", "text")
+        val folded = AccessibilityRoles.foldTalkBackHosts(listOf(host, name, date, size))
+        val promoted = folded.first { it.id == "row" }
+        assertTrue(promoted.text.contains("Cyclone-3.6.0-beta.2.apk"))
+        assertTrue(promoted.clickable)
+        assertTrue("ACTION_CLICK" in promoted.actions)
+    }
+
+    @Test
+    fun calculatorDigitSevenSurvivesFoldAndStaysClickable() {
+        val seven = node(
+            "seven", "0/2/7", "pad", emptyList(), "7", "button",
+            clickable = true, className = "android.widget.Button",
+        )
+        val folded = AccessibilityRoles.foldTalkBackHosts(listOf(seven))
+        assertEquals("7", folded.single().text)
+        assertTrue(folded.single().clickable)
+        assertEquals("button", folded.single().role)
+    }
+
+    @Test
+    fun calculatorUnlabeledHostPromotesDigitChild() {
+        val host = node("key7", "0/2/7", null, listOf("glyph"), "", "generic", clickable = true)
+        val glyph = node("glyph", "0/2/7/0", "key7", emptyList(), "7", "text")
+        val folded = AccessibilityRoles.foldTalkBackHosts(listOf(host, glyph))
+        assertEquals("7", folded.first { it.id == "key7" }.text)
+    }
+
+    @Test
+    fun clockTabViewPrefersActivatableAncestorEvenWhenNotClickable() {
+        assertEquals(
+            "tab",
+            AccessibilityRoles.inferRole(
+                className = "com.google.android.material.tabs.TabLayout.TabView",
+                clickable = false,
+                selected = false,
+                text = "Alarms",
+                actions = listOf("ACTION_CLICK", "ACTION_SELECT"),
+            ),
+        )
+        assertTrue(AccessibilityRoles.isActivatable(false, listOf("ACTION_CLICK")))
+        assertTrue(
+            AccessibilityRoles.preferClickableAncestor(
+                role = "tab",
+                nodeClickable = false,
+                actions = emptyList(),
+            ),
+        )
+        assertFalse(
+            AccessibilityRoles.preferClickableAncestor(
+                role = "tab",
+                nodeClickable = false,
+                actions = listOf("ACTION_SELECT"),
+            ),
+        )
+        val tab = node(
+            "tab", "0/4", null, listOf("label"), "", "generic",
+            clickable = false, className = "com.google.android.material.tabs.TabLayout.TabView",
+            actions = listOf("ACTION_CLICK"), selected = false,
+        )
+        val label = node("label", "0/4/0", "tab", emptyList(), "Alarms", "text")
+        val folded = AccessibilityRoles.foldTalkBackHosts(listOf(tab, label))
+        val host = folded.first { it.id == "tab" }
+        assertEquals("Alarms", host.text)
+        assertEquals("tab", host.role)
+        assertTrue(host.clickable)
+    }
+
+    @Test
+    fun unpublishedKeypadStillPublishesOnScreenInteractiveDigits() {
+        assertTrue(
+            AccessibilityRoles.isPublishedInteractive(
+                visibleToUser = false,
+                interactive = true,
+                boundsWidth = 120,
+                boundsHeight = 120,
+            ),
+        )
+        assertFalse(
+            AccessibilityRoles.isPublishedInteractive(
+                visibleToUser = false,
+                interactive = false,
+                boundsWidth = 120,
+                boundsHeight = 120,
+            ),
+        )
+    }
+
     private fun node(
         id: String,
         path: String,
@@ -82,6 +189,8 @@ class AccessibilityRolesTest {
         role: String,
         clickable: Boolean = false,
         className: String = "android.view.View",
+        actions: List<String>? = null,
+        selected: Boolean = false,
     ) = UiNodeSnapshot(
         id = id,
         path = path,
@@ -100,12 +209,12 @@ class AccessibilityRolesTest {
         editable = false,
         scrollable = false,
         enabled = true,
-        selected = false,
+        selected = selected,
         checked = false,
         checkable = false,
         focused = false,
         focusable = clickable,
         visibleToUser = true,
-        actions = if (clickable) listOf("ACTION_CLICK") else emptyList(),
+        actions = actions ?: if (clickable) listOf("ACTION_CLICK") else emptyList(),
     )
 }

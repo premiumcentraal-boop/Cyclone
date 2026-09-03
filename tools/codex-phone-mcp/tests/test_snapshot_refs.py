@@ -35,6 +35,19 @@ class SnapshotCompactTests(unittest.TestCase):
         self.assertIn("seven", snapshot_ids)
         self.assertEqual(12, len(card["candidates"]["current"]))
 
+    def test_files_row_snapshot_keeps_apk_filename(self):
+        card = compact_observation({
+            "pageKey": "files",
+            "controls": [
+                {"id": "row", "label": "Cyclone-3.6.0-beta.2.apk Tue, 01 Sept 69,98 MB", "role": "row", "clickable": True},
+                {"id": "date", "label": "Tue, 01 Sept", "role": "button", "clickable": True},
+            ],
+        }, goal="Cyclone-3.6.0-beta")
+        self.assertIn("Cyclone-3.6.0-beta.2.apk", card["snapshot"])
+        ranked = card["candidates"]["goalRanked"]
+        self.assertTrue(ranked)
+        self.assertIn("Cyclone-3.6.0-beta.2.apk", ranked[0]["label"])
+
     def test_one_character_goal_ranks_instead_of_emptying(self):
         card = compact_observation({
             "pageKey": "calc",

@@ -2,6 +2,7 @@ package com.cyclone.mobile.gateway
 
 import android.content.Context
 import android.content.res.Configuration
+import com.cyclone.mobile.AccessibilityRoles
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.PageAwarenessRuntime
@@ -96,10 +97,16 @@ internal object GatewayObservationAdapter {
         var supplementalCount = 0
         for (index in 0 until rawNodes.length()) {
             val node = rawNodes.optJSONObject(index) ?: continue
-            if (!node.optBoolean("visibleToUser", true)) continue
             val interactive = node.optBoolean("clickable") || node.optBoolean("longClickable") ||
                 node.optBoolean("editable") || node.optBoolean("scrollable") || node.optBoolean("checkable") ||
                 node.optString("role") in setOf("button", "tab", "switch", "checkbox", "edit_text", "textbox")
+            val bounds = node.optJSONObject("bounds")
+            val boundsWidth = if (bounds == null) 0 else bounds.optInt("right") - bounds.optInt("left")
+            val boundsHeight = if (bounds == null) 0 else bounds.optInt("bottom") - bounds.optInt("top")
+            if (!AccessibilityRoles.isPublishedInteractive(
+                    node.optBoolean("visibleToUser", true), interactive, boundsWidth, boundsHeight,
+                )
+            ) continue
             if (!interactive) continue
             if (signature(node) in controlSignatures) continue
             val ownLabel = node.optString("text").takeUnless { it.isBlank() || it == "<redacted>" }
@@ -334,11 +341,12 @@ internal object GatewayObservationAdapter {
         val corpus = "$label $semantic $resource $description ${normalize(element.role)}"
         if (label == query || semantic == query || resource == query || description == query) return 1.0
         if (label.contains(query) || semantic.contains(query) || resource.contains(query) || description.contains(query)) return 0.92
-        val tokens = query.split(' ').filter { it.length >= 2 }.distinct()
-        if (tokens.isEmpty()) return 0.0
-        val matched = tokens.count(corpus::contains)
+        val tokens = query.split(' ').filter { it.isNotBlank() }.distinct()
+        val usable = tokens.filter { it.length >= 2 || (it.length == 1 && it[0].isLetterOrDigit()) }
+        if (usable.isEmpty()) return 0.0
+        val matched = usable.count(corpus::contains)
         if (matched == 0) return 0.0
-        val ratio = matched.toDouble() / tokens.size
+        val ratio = matched.toDouble() / usable.size
         return (0.50 + ratio * 0.35 + if (element.source == "semantic") 0.05 else 0.0).coerceAtMost(0.89)
     }
 

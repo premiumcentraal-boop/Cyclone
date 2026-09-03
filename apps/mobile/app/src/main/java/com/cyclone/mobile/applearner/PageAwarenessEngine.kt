@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.cyclone.mobile.AccessibilityRoles
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -364,14 +365,20 @@ object PageSignatureEngine {
 
         for (i in 0 until minOf(nodes.length(), 450)) {
             val node = nodes.optJSONObject(i) ?: continue
-            if (!node.optBoolean("visibleToUser", true)) continue
             val resource = node.optString("resourceId").substringAfterLast('/').trim()
             val role = node.optString("role").ifBlank { node.optString("class").substringAfterLast('.') }.lowercase(Locale.US)
             val text = node.optString("text").trim()
             val description = node.optString("contentDescription").trim()
-            val path = node.optString("path").split('/').take(5).joinToString("/")
+            val path = node.optString("path")
             val interactive = node.optBoolean("clickable") || node.optBoolean("editable") || node.optBoolean("scrollable") ||
                 node.optBoolean("longClickable") || node.optBoolean("checkable") || role in setOf("button", "tab", "switch", "checkbox", "edit_text", "textbox")
+            val bounds = node.optJSONObject("bounds")
+            val boundsWidth = if (bounds == null) 0 else bounds.optInt("right") - bounds.optInt("left")
+            val boundsHeight = if (bounds == null) 0 else bounds.optInt("bottom") - bounds.optInt("top")
+            if (!AccessibilityRoles.isPublishedInteractive(
+                    node.optBoolean("visibleToUser", true), interactive, boundsWidth, boundsHeight,
+                )
+            ) continue
             val ownLabel = text.ifBlank { description }.ifBlank { resource.replace('_', ' ') }.trim()
             val inheritedLabel = if (interactive && ownLabel.isBlank()) descendantLabel(node, nodes) else ""
             val label = ownLabel.ifBlank { inheritedLabel }
@@ -397,7 +404,7 @@ object PageSignatureEngine {
                 }
                 val actions = node.optJSONArray("actions")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter(String::isNotBlank) }.orEmpty()
                 val semantic = semanticName(label, role)
-                val key = sha256("$resource|$role|$stableLabel|$path").take(18)
+                val key = sha256("$resource|$role|$stableLabel|$path|${node.optString("id")}").take(18)
                 controls += PageControl(
                     key = key,
                     label = label.take(140),

@@ -97,6 +97,18 @@ class SelectorEngineTest {
     }
 
     @Test
+    fun textSelectorMatchesTalkBackContentDescription() {
+        val nodes = listOf(
+            node(
+                "up", "0/0", null, text = "", description = "Navigate up",
+                role = "button", clickable = true,
+            ),
+        )
+        val result = SelectorEngine.resolve(snapshot(nodes), ElementSelector(text = "Navigate up"))
+        assertEquals("up", result.first().node.id)
+    }
+
+    @Test
     fun relativeSelectorFindsButtonBelowAnchor() {
         val nodes = listOf(
             node("label", "0/0", null, text = "Shift details", bounds = UiBounds(0, 100, 500, 200)),

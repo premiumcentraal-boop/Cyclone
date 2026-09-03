@@ -59,6 +59,31 @@ class PageAwarenessEngineTest {
 
 
     @Test
+    fun calculatorDigitsIncludingSevenSurviveHiddenVisibleFlagAndStayUnique() {
+        val nodes = JSONArray()
+        for (digit in 0..9) {
+            nodes.put(
+                node("com.google.android.calculator:id/digit_$digit", digit.toString(), "button", true, "0/1/2/3/4/$digit")
+                    .put("id", "digit-$digit")
+                    .put("visibleToUser", false)
+                    .put("contentDescription", digit.toString())
+                    .put("bounds", JSONObject().put("left", digit * 80).put("top", 800).put("right", digit * 80 + 70).put("bottom", 900)),
+            )
+        }
+        val page = PageSignatureEngine.fromSnapshot(
+            JSONObject()
+                .put("package", "com.google.android.calculator")
+                .put("class", "com.android.calculator2.Calculator")
+                .put("nodes", nodes),
+        )
+        val sevens = page.controls.filter { it.label == "7" }
+        assertEquals(1, sevens.size)
+        assertTrue(page.controls.any { it.label == "0" })
+        assertTrue(page.controls.any { it.label == "9" })
+        assertEquals(10, page.controls.map { it.label }.distinct().size)
+    }
+
+    @Test
     fun clockTimerVersusAlarmHaveDifferentPageKeys() {
         val timer = PageSignatureEngine.fromSnapshot(clockSnapshot("Timer"))
         val alarm = PageSignatureEngine.fromSnapshot(clockSnapshot("Alarm"))

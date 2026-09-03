@@ -23,12 +23,16 @@ object ObservationSelectorLookup {
             }
             return null
         }
+        val nodeText = pick("text")
+        val nodeDesc = pick("contentDescription")
+        val label = pick("label")
         return ElementSelector(
             resourceId = pick("resourceId"),
-            text = pick("text", "label"),
-            contentDescription = pick("contentDescription"),
+            text = nodeText,
+            contentDescription = nodeDesc,
             role = pick("role"),
             descendantText = pick("descendantText"),
+            fuzzyText = if (nodeText == null && nodeDesc == null) label else null,
             requireClickable = if (evidence.optBoolean("clickable") || nested.optBoolean("clickable")) true else null,
             requireEditable = if (evidence.optBoolean("editable") || nested.optBoolean("editable")) true else null,
             elementId = elementId,
