@@ -15,6 +15,7 @@ import com.cyclone.mobile.observability.pagecontext.PageContextSummary
 import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.max
@@ -44,6 +45,10 @@ internal object GatewayObservationStore {
 }
 
 internal object GatewayObservationAdapter {
+    // Process-local salt lets verification compare editable state without exposing or persisting
+    // user-entered text (including passwords/OTPs) or a stable brute-forceable digest.
+    private val editableStateSalt = UUID.randomUUID().toString()
+
     fun capture(context: Context, args: JSONObject = JSONObject()): GatewayObservation {
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
@@ -54,6 +59,7 @@ internal object GatewayObservationAdapter {
         val safeRaw = GatewayPrivacy.sanitizeAccessibilitySnapshot(raw)
         val observationId = UUID.randomUUID().toString()
         val rawNodes = safeRaw.optJSONArray("nodes") ?: JSONArray()
+        val rawTextById = snapshot.nodes.associate { it.id to it.text }
         val elements = linkedMapOf<String, GatewayElement>()
         val semanticControls = JSONArray()
         val controlSignatures = linkedSetOf<String>()
@@ -86,6 +92,8 @@ internal object GatewayObservationAdapter {
                 .put("selected", matchingNode?.optBoolean("selected") ?: false)
                 .put("checked", matchingNode?.optBoolean("checked") ?: false)
                 .put("checkable", matchingNode?.optBoolean("checkable") ?: false)
+                .put("focused", matchingNode?.optBoolean("focused") ?: false)
+                .put("textStateDigest", editableTextState(matchingNode, rawTextById) ?: JSONObject.NULL)
                 .put("rawNodeId", matchingNode?.optString("id")?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
             semanticControls.put(evidence)
             elements[elementId] = GatewayElement(elementId, "semantic", control.label, control.semanticName, control.role, evidence)
@@ -142,6 +150,8 @@ internal object GatewayObservationAdapter {
                 .put("selected", node.optBoolean("selected"))
                 .put("checked", node.optBoolean("checked"))
                 .put("checkable", node.optBoolean("checkable"))
+                .put("focused", node.optBoolean("focused"))
+                .put("textStateDigest", editableTextState(node, rawTextById) ?: JSONObject.NULL)
                 .put("rawNodeId", node.optString("id").takeIf(String::isNotBlank) ?: JSONObject.NULL)
             semanticControls.put(evidence)
             elements[elementId] = GatewayElement(elementId, "semantic_supplement", label.take(140), semanticize(label), node.optString("role"), evidence)
@@ -295,6 +305,14 @@ internal object GatewayObservationAdapter {
         }
         return observation.elements[elementId]?.evidence
             ?: throw GatewayProtocolException("ELEMENT_NOT_FOUND", "Element ID is not present in the current observation")
+    }
+
+    private fun editableTextState(node: JSONObject?, rawTextById: Map<String, String>): String? {
+        if (node == null || !node.optBoolean("editable")) return null
+        val rawText = rawTextById[node.optString("id")].orEmpty()
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$editableStateSalt|$rawText".toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun bestNode(control: PageControl, nodes: JSONArray): JSONObject? {
