@@ -1,6 +1,8 @@
 package com.cyclone.mobile
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -9,6 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Modifier
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.TaskResultNotifierV292
@@ -23,6 +27,7 @@ import com.cyclone.mobile.gateway.GatewayDesktopPairingManager
 import com.cyclone.mobile.infrastructure.v31.CycloneV31ProductIntegration
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
 import com.cyclone.mobile.ui.v32.CycloneMobileV32App
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,12 +44,14 @@ class MainActivity : ComponentActivity() {
             }
         }
         handlePairingIntent(intent)
+        handleOverlayVoiceIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePairingIntent(intent)
+        handleOverlayVoiceIntent(intent)
     }
 
     override fun onResume() {
@@ -87,6 +94,28 @@ class MainActivity : ComponentActivity() {
         value.data = null
     }
 
+    private fun handleOverlayVoiceIntent(value: Intent?) {
+        if (value?.action != ACTION_REQUEST_OVERLAY_VOICE) return
+        value.action = Intent.ACTION_MAIN
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            moveTaskToBack(true)
+            OverlayChromeRuntime.beginVoiceInput()
+        } else {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_OVERLAY_VOICE_PERMISSION)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_OVERLAY_VOICE_PERMISSION) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            moveTaskToBack(true)
+            OverlayChromeRuntime.beginVoiceInput()
+        } else {
+            Toast.makeText(this, "Voice requests stay off until microphone access is allowed.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun migrateModelDefault() {
         val prefs = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
         if (prefs.getBoolean("model_default_migrated", false)) return
@@ -103,5 +132,10 @@ class MainActivity : ComponentActivity() {
             .putBoolean("cloud_brain_refinement", false)
             .putBoolean("v292_learning_migrated", true)
             .apply()
+    }
+
+    companion object {
+        const val ACTION_REQUEST_OVERLAY_VOICE = "com.cyclone.mobile.action.REQUEST_OVERLAY_VOICE"
+        private const val REQUEST_OVERLAY_VOICE_PERMISSION = 385
     }
 }

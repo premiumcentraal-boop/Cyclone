@@ -57,7 +57,7 @@ class OverlayPhysicalFixturesTest {
         val machine = OverlayChromeMachine()
         machine.startAnalysis("t2-messages", bullets = listOf(OverlayPhysicalFixtures.MESSAGES_GOAL))
         assertEquals(OverlayChromeState.ANALYSIS, machine.state())
-        assertEquals("Analysis", OverlayCopy.visibleFor(machine.snapshot()).first())
+        assertEquals(OverlayCopy.AI_MODE, OverlayCopy.visibleFor(machine.snapshot()).first())
         machine.dispatch(OverlayUserAction.CONFIRM)
         assertEquals(OverlayChromeState.WORKING, machine.state())
         machine.dispatch(OverlayUserAction.VIEW_PROGRESS)

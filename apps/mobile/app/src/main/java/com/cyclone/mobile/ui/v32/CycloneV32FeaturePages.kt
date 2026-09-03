@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -388,6 +390,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 val overlay = CyclonePermissionSetup.overlayEnabled(context)
                 val exactTiming = CyclonePermissionSetup.exactTimingEnabled(context)
                 val calendar = CyclonePermissionSetup.calendarEnabled(context)
+                val microphone = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
                 CyclonePermissionRow(Icons.Rounded.Layers, "Enhanced control engine", "Optional second Accessibility backend for difficult apps and richer takeover tools.", enhancedControl, if (enhancedControl) "Manage" else "Enable") {
                     open(CyclonePermissionSetup.accessibilitySettings())
                 }
@@ -403,6 +406,13 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 CyclonePermissionRow(Icons.Rounded.CalendarMonth, "Calendar context", "Optional read-only matching for calendar-aware routines.", calendar, if (calendar) "Manage" else "Allow") {
                     if (!calendar) {
                         (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_CALENDAR), 321) }
+                    } else {
+                        open(CyclonePermissionSetup.appDetails(context))
+                    }
+                }
+                CyclonePermissionRow(Icons.Rounded.Mic, "Voice requests", "Speak a request into the Cyclone AI-mode composer.", microphone, if (microphone) "Manage" else "Allow") {
+                    if (!microphone) {
+                        (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.RECORD_AUDIO), 322) }
                     } else {
                         open(CyclonePermissionSetup.appDetails(context))
                     }

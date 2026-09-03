@@ -27,8 +27,11 @@ class OverlayGateInterruptTest {
             assertEquals(1, effects.pauses)
             assertEquals(
                 listOf(
+                    OverlayCopy.AI_MODE,
                     "Cyclone needs you to confirm before finishing this.",
                     "Do this",
+                    OverlayCopy.MINIMIZE,
+                    OverlayCopy.EXIT,
                     OverlayCopy.LEGAL,
                 ),
                 OverlayCopy.visibleFor(machine.snapshot()),
@@ -47,7 +50,12 @@ class OverlayGateInterruptTest {
             machine.dispatch(OverlayUserAction.GATE_CONFIRM)
             assertEquals(OverlayChromeState.DONE, machine.state())
             assertEquals(
-                listOf("Saved as a draft skill. Review it in Automations before it can run alone."),
+                listOf(
+                    OverlayCopy.AI_MODE,
+                    "Saved as a draft skill. Review it in Automations before it can run alone.",
+                    OverlayCopy.MINIMIZE,
+                    OverlayCopy.EXIT,
+                ),
                 OverlayCopy.visibleFor(machine.snapshot()),
             )
             assertTrue(events.none { it.clicksHost || it.dispatchAccessibilityAction })
@@ -77,7 +85,7 @@ class OverlayGateInterruptTest {
     }
 
     @Test
-    fun takeControlFromLivePausesCycloneOnlyAndNeverFlagsHostClick() {
+    fun takeControlFromLivePausesInPlaceAndNeverFlagsHostClick() {
         val events = mutableListOf<OverlayChromeEvent>()
         val effects = RecordingEffects()
         val machine = OverlayChromeMachine(emit = { events += it }, cycloneState = effects)
@@ -87,7 +95,8 @@ class OverlayGateInterruptTest {
         effects.pauses = 0
 
         machine.dispatch(OverlayUserAction.TAKE_CONTROL)
-        assertEquals(OverlayChromeState.IDLE, machine.state())
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertTrue(machine.snapshot().userPaused)
         assertEquals("Take control", OverlayCopy.LIVE_RIGHT)
         assertEquals("Stop task", OverlayCopy.LIVE_LEFT)
         assertEquals(1, effects.pauses)
@@ -105,7 +114,10 @@ class OverlayGateInterruptTest {
         machine.dispatch(OverlayUserAction.VIEW_PROGRESS)
         assertEquals(OverlayChromeState.LIVE, machine.state())
         val liveCopy = OverlayCopy.visibleFor(machine.snapshot())
-        assertEquals(listOf("Working on this task", "Stop task", "Take control"), liveCopy)
+        assertEquals(
+            listOf(OverlayCopy.AI_MODE, "Working on this task", OverlayCopy.PAUSE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT, OverlayCopy.COMPOSER),
+            liveCopy,
+        )
         assertTrue(events.none { it.clicksHost || it.dispatchAccessibilityAction })
     }
 

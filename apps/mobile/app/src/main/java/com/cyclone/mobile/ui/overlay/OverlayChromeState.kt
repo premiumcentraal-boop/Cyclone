@@ -52,6 +52,8 @@ enum class OverlayUserAction {
     STOP_TASK,
     TAKE_CONTROL,
     GATE_CONFIRM,
+    MINIMIZE,
+    EXIT,
 }
 
 data class OverlayChromeSnapshot(
@@ -62,4 +64,10 @@ data class OverlayChromeSnapshot(
     val gateClass: OverlayGateClass? = null,
     val idleChipVisible: Boolean = true,
     val pcAutoApproveIgnored: Boolean = false,
+    val minimized: Boolean = false,
+    val userPaused: Boolean = false,
+    val composerText: String = "",
+    val voiceListening: Boolean = false,
+    val voiceMessage: String? = null,
+    val statusMessage: String? = null,
 )

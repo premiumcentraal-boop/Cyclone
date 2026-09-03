@@ -19,11 +19,19 @@ class OverlayChromeObservationTest {
                 isWebish = false,
             ),
         )
+        assertFalse(
+            OverlayChromeObservation.shouldCollectSiblingWindow(
+                OverlayChromeObservation.ACCESSIBILITY_OVERLAY_WINDOW_TYPE,
+                "com.cyclone.mobile",
+                isWebish = false,
+            ),
+        )
         assertTrue(
             OverlayChromeObservation.shouldCollectSiblingWindow(
                 OverlayChromeObservation.ACCESSIBILITY_OVERLAY_WINDOW_TYPE,
                 "com.cyclone.mobile",
                 isWebish = false,
+                includeAccessibilityOverlay = true,
             ),
         )
         assertTrue(

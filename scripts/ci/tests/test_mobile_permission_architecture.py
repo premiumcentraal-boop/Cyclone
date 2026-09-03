@@ -25,6 +25,7 @@ INFRASTRUCTURE_PERMISSIONS = {
 SETUP_ROW_PERMISSIONS = {
     "android.permission.POST_NOTIFICATIONS",  # Result notifications
     "android.permission.READ_CALENDAR",  # Calendar context
+    "android.permission.RECORD_AUDIO",  # Voice requests
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",  # Unrestricted battery
     "android.permission.SYSTEM_ALERT_WINDOW",  # Display over apps
     "android.permission.SCHEDULE_EXACT_ALARM",  # Precise timing

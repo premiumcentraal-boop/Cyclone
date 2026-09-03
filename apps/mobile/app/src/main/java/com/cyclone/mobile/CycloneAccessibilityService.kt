@@ -20,6 +20,7 @@ import com.cyclone.mobile.ui.overlay.ClickGateIntercept
 import com.cyclone.mobile.ui.overlay.GateBlockedException
 import com.cyclone.mobile.ui.overlay.OverlayChromeObservation
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONObject
 import java.io.File
@@ -320,12 +321,14 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     private fun includeSiblingApplicationWindows(nodes: MutableList<UiNodeSnapshot>, consumedWindows: MutableSet<Int>) {
+        val overlay = OverlayChromeRuntime.snapshot()
+        val includeOverlay = overlay.state == OverlayChromeState.GATE && !overlay.minimized
         for (window in windows.orEmpty()) {
             val wroot = window.root ?: continue
             if (wroot.windowId in consumedWindows) continue
             val pkg = wroot.packageName?.toString().orEmpty()
             val isWeb = isWebishWindow(window, wroot)
-            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb)) continue
+            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb, includeOverlay)) continue
             collectNode(wroot, "w${window.id}/0", null, 0, nodes)
             consumedWindows += wroot.windowId
         }

@@ -37,6 +37,8 @@ object OverlayChromeContract {
         "clicksHost",
         "dispatchAccessibilityAction",
         "pcAutoApproveIgnored",
+        "requestText",
+        "userPaused",
         "gateClass",
     )
 }

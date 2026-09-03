@@ -15,6 +15,14 @@ object OverlayCopy {
     const val LIVE_LEFT = "Stop task"
     const val LIVE_RIGHT = "Take control"
     const val COMPOSER = "Ask Cyclone"
+    const val AI_MODE = "You're in Cyclone AI mode"
+    const val PAUSE = "Pause"
+    const val RESUME = "Resume"
+    const val MINIMIZE = "Minimize"
+    const val EXIT = "Exit AI mode"
+    const val VOICE = "Speak request"
+    const val SEND_REQUEST = "Send request"
+    const val LISTENING = "Listening…"
     const val GATE = "Cyclone needs you to confirm before finishing this."
     const val DONE = "Saved as a draft skill. Review it in Automations before it can run alone."
     const val LEGAL = "Supervise closely. Interrupt when needed. Select apps only. Compatibility varies."
@@ -42,6 +50,14 @@ object OverlayCopy {
         LIVE_LEFT,
         LIVE_RIGHT,
         COMPOSER,
+        AI_MODE,
+        PAUSE,
+        RESUME,
+        MINIMIZE,
+        EXIT,
+        VOICE,
+        SEND_REQUEST,
+        LISTENING,
         GATE,
         DONE,
         LEGAL,
@@ -56,20 +72,25 @@ object OverlayCopy {
      * Frozen strings shown for a chrome snapshot. Analysis bullets are caller-supplied
      * task text (not bible copy) and are omitted here.
      */
-    fun visibleFor(snapshot: OverlayChromeSnapshot): List<String> = when (snapshot.state) {
+    fun visibleFor(snapshot: OverlayChromeSnapshot): List<String> = if (snapshot.minimized) {
+        listOf(COMPOSER)
+    } else when (snapshot.state) {
         OverlayChromeState.IDLE -> if (snapshot.idleChipVisible) listOf(COMPOSER) else emptyList()
-        OverlayChromeState.ANALYSIS -> listOf(ANALYSIS_TITLE, primaryCta(snapshot.analysisCta), LEGAL)
+        OverlayChromeState.ANALYSIS -> listOf(AI_MODE, ANALYSIS_TITLE, primaryCta(snapshot.analysisCta), COMPOSER, PAUSE, MINIMIZE, EXIT, LEGAL)
         OverlayChromeState.WORKING -> listOf(
+            AI_MODE,
             WORKING_TITLE,
             WORKING_BODY,
             STATUS,
             PRIMARY,
-            LIVE_LEFT,
-            LIVE_RIGHT,
+            if (snapshot.userPaused) RESUME else PAUSE,
+            MINIMIZE,
+            EXIT,
+            COMPOSER,
             LEGAL,
         )
-        OverlayChromeState.LIVE -> listOf(STATUS, LIVE_LEFT, LIVE_RIGHT)
-        OverlayChromeState.GATE -> listOf(GATE, CONFIRM, LEGAL)
-        OverlayChromeState.DONE -> listOf(DONE)
+        OverlayChromeState.LIVE -> listOf(AI_MODE, STATUS, if (snapshot.userPaused) RESUME else PAUSE, MINIMIZE, EXIT, COMPOSER)
+        OverlayChromeState.GATE -> listOf(AI_MODE, GATE, CONFIRM, MINIMIZE, EXIT, LEGAL)
+        OverlayChromeState.DONE -> listOf(AI_MODE, DONE, MINIMIZE, EXIT)
     }
 }

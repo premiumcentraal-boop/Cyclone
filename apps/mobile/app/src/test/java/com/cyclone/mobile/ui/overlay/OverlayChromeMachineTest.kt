@@ -47,8 +47,12 @@ class OverlayChromeMachineTest {
 
         machine.dispatch(OverlayUserAction.TAKE_CONTROL)
         assertEvent(events.removeAt(0), OverlayChromeEventKind.TAKE_CONTROL, clicksHost = false)
-        assertEquals(OverlayChromeState.IDLE, machine.state())
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertTrue(machine.snapshot().userPaused)
         assertEquals(2, effects.pauses)
+        machine.dispatch(OverlayUserAction.TAKE_CONTROL)
+        assertEvent(events.removeAt(0), OverlayChromeEventKind.TAKE_CONTROL, clicksHost = false)
+        assertFalse(machine.snapshot().userPaused)
 
         machine.enterWorking("s3")
         machine.enterGate(OverlayGateClass.PAY, pcAutoApprove = true)
@@ -92,8 +96,11 @@ class OverlayChromeMachineTest {
         assertEquals(OverlayChromeState.GATE, machine.state())
         assertEquals(
             listOf(
+                OverlayCopy.AI_MODE,
                 "Cyclone needs you to confirm before finishing this.",
                 "Do this",
+                OverlayCopy.MINIMIZE,
+                OverlayCopy.EXIT,
                 OverlayCopy.LEGAL,
             ),
             OverlayCopy.visibleFor(machine.snapshot()),
@@ -103,15 +110,15 @@ class OverlayChromeMachineTest {
     }
 
     @Test
-    fun idleChipAskCycloneEmitsEventWithoutLeavingIdle() {
+    fun idleOrbActivationEntersAiModeAndEmitsEvent() {
         val events = mutableListOf<OverlayChromeEvent>()
         val machine = OverlayChromeMachine(emit = { events += it })
         machine.dispatch(OverlayUserAction.ASK_CYCLONE)
-        assertEquals(OverlayChromeState.IDLE, machine.state())
+        assertEquals(OverlayChromeState.ANALYSIS, machine.state())
         assertEvent(events.single(), OverlayChromeEventKind.ASK_CYCLONE, clicksHost = false)
         machine.dispatch(OverlayUserAction.CONFIRM)
         machine.dispatch(OverlayUserAction.GATE_CONFIRM)
-        assertEquals(1, events.size)
+        assertEquals(listOf(OverlayChromeEventKind.ASK_CYCLONE, OverlayChromeEventKind.CONFIRM), events.map { it.kind })
     }
 
     @Test
@@ -135,18 +142,55 @@ class OverlayChromeMachineTest {
     }
 
     @Test
-    fun stopAndTakeControlVisibleOnlyFromWorkingAndLive() {
+    fun stopRemainsLimitedToWorkingAndLive() {
         val events = mutableListOf<OverlayChromeEvent>()
         val machine = OverlayChromeMachine(emit = { events += it })
         machine.startAnalysis("s")
         machine.dispatch(OverlayUserAction.STOP_TASK)
-        machine.dispatch(OverlayUserAction.TAKE_CONTROL)
         assertTrue(events.isEmpty())
         machine.dispatch(OverlayUserAction.CONFIRM)
         events.clear()
         assertTrue(machine.snapshot().state == OverlayChromeState.WORKING)
         machine.dispatch(OverlayUserAction.STOP_TASK)
         assertEquals(OverlayChromeEventKind.STOP_TASK, events.single().kind)
+    }
+
+    @Test
+    fun minimizeRestoresTheSameStateAndExitNeverConfirmsGate() {
+        val events = mutableListOf<OverlayChromeEvent>()
+        val effects = RecordingEffects()
+        val machine = OverlayChromeMachine(emit = { events += it }, cycloneState = effects)
+        machine.enterWorking("restore")
+        machine.enterLive()
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertTrue(machine.snapshot().minimized)
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertFalse(machine.snapshot().minimized)
+
+        machine.enterGate(OverlayGateClass.DELETE)
+        events.clear()
+        machine.dispatch(OverlayUserAction.EXIT)
+        assertEquals(OverlayChromeState.IDLE, machine.state())
+        assertEquals(listOf(OverlayChromeEventKind.STOP_TASK), events.map { it.kind })
+        assertTrue(events.none { it.kind == OverlayChromeEventKind.GATE_CONFIRM })
+        assertTrue(effects.pauses >= 2)
+    }
+
+    @Test
+    fun composerSubmissionIsBoundedAndNeverClicksTheHost() {
+        val events = mutableListOf<OverlayChromeEvent>()
+        val machine = OverlayChromeMachine(emit = { events += it })
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        events.clear()
+        machine.updateComposer("  Find my latest invoice  ")
+        machine.submitRequest()
+        val request = events.single()
+        assertEquals(OverlayChromeEventKind.ASK_CYCLONE, request.kind)
+        assertEquals("Find my latest invoice", request.requestText)
+        assertEquals(listOf("Find my latest invoice"), machine.snapshot().bullets)
+        assertFalse(request.clicksHost || request.dispatchAccessibilityAction)
     }
 
     private fun assertEvent(event: OverlayChromeEvent, kind: OverlayChromeEventKind, clicksHost: Boolean) {

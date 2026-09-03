@@ -25,9 +25,16 @@ object OverlayChromeObservation {
 
     fun hasGate(snapshot: UiSnapshot): Boolean = hasGate(snapshot.nodes)
 
-    fun shouldCollectSiblingWindow(type: Int, packageName: String, isWebish: Boolean): Boolean {
+    fun shouldCollectSiblingWindow(
+        type: Int,
+        packageName: String,
+        isWebish: Boolean,
+        includeAccessibilityOverlay: Boolean = false,
+    ): Boolean {
         if (packageName.isBlank() || packageName == "com.android.systemui") return false
-        return type == APPLICATION_WINDOW_TYPE || type == ACCESSIBILITY_OVERLAY_WINDOW_TYPE || isWebish
+        return type == APPLICATION_WINDOW_TYPE ||
+            (type == ACCESSIBILITY_OVERLAY_WINDOW_TYPE && includeAccessibilityOverlay) ||
+            isWebish
     }
 
     fun chromeVisibleIn(nodes: List<UiNodeSnapshot>, overlay: OverlayChromeSnapshot): Boolean {
@@ -53,7 +60,10 @@ object OverlayChromeObservation {
         screenWidth: Int,
         screenHeight: Int,
     ) {
-        if (overlay.state == OverlayChromeState.IDLE) return
+        // Only GATE chrome belongs in the host observation. Pulling the full animated Compose
+        // tree into every snapshot can exhaust the ref budget and hide host controls such as
+        // Clock tabs. GATE remains explicit and observable without crowding ordinary pages.
+        if (overlay.state != OverlayChromeState.GATE || overlay.minimized) return
         if (!chromeVisibleIn(nodes, overlay)) {
             nodes += nodesFor(overlay, screenWidth, screenHeight)
         }
@@ -62,7 +72,7 @@ object OverlayChromeObservation {
 
     fun nodesFor(overlay: OverlayChromeSnapshot, screenWidth: Int, screenHeight: Int): List<UiNodeSnapshot> {
         val copies = OverlayCopy.visibleFor(overlay)
-        if (copies.isEmpty() || overlay.state == OverlayChromeState.IDLE) return emptyList()
+        if (copies.isEmpty() || overlay.state != OverlayChromeState.GATE || overlay.minimized) return emptyList()
         val width = screenWidth.coerceAtLeast(8)
         val height = screenHeight.coerceAtLeast(8)
         val line = 10
@@ -108,7 +118,7 @@ object OverlayChromeObservation {
         screenWidth: Int,
         screenHeight: Int,
     ) {
-        if (overlay.state == OverlayChromeState.IDLE) return
+        if (overlay.state != OverlayChromeState.GATE || overlay.minimized) return
         if (windows.any { it.type == ACCESSIBILITY_OVERLAY_WINDOW_TYPE || it.id == OVERLAY_WINDOW_ID }) return
         val height = screenHeight.coerceAtLeast(1)
         val width = screenWidth.coerceAtLeast(1)

@@ -31,7 +31,7 @@ class OverlayTaskEntryFlowTest {
         assertEquals(OverlayChromeState.ANALYSIS, machine.state())
         assertEquals(listOf(acceptedTask), machine.snapshot().bullets)
         assertEquals(
-            listOf("Analysis", "Do this", OverlayCopy.LEGAL),
+            listOf(OverlayCopy.AI_MODE, "Analysis", "Do this", OverlayCopy.COMPOSER, OverlayCopy.PAUSE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT, OverlayCopy.LEGAL),
             OverlayCopy.visibleFor(machine.snapshot()),
         )
         assertEquals("Analysis", OverlayCopy.ANALYSIS_TITLE)
@@ -44,12 +44,15 @@ class OverlayTaskEntryFlowTest {
         assertEventNeverClicksHost(events.single(), OverlayChromeEventKind.CONFIRM)
         assertEquals(
             listOf(
+                OverlayCopy.AI_MODE,
                 "Task automation",
                 "I'm on it. I'll let you know when this is ready to complete. You can leave this screen.",
                 "Working on this task",
                 "View progress",
-                "Stop task",
-                "Take control",
+                OverlayCopy.PAUSE,
+                OverlayCopy.MINIMIZE,
+                OverlayCopy.EXIT,
+                OverlayCopy.COMPOSER,
                 OverlayCopy.LEGAL,
             ),
             OverlayCopy.visibleFor(machine.snapshot()),
@@ -68,7 +71,7 @@ class OverlayTaskEntryFlowTest {
         assertEquals(OverlayChromeState.LIVE, machine.state())
         assertEventNeverClicksHost(events.last(), OverlayChromeEventKind.VIEW_PROGRESS)
         assertEquals(
-            listOf("Working on this task", "Stop task", "Take control"),
+            listOf(OverlayCopy.AI_MODE, "Working on this task", OverlayCopy.PAUSE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT, OverlayCopy.COMPOSER),
             OverlayCopy.visibleFor(machine.snapshot()),
         )
 
@@ -76,7 +79,7 @@ class OverlayTaskEntryFlowTest {
         assertEquals(OverlayChromeState.DONE, machine.state())
         assertEventNeverClicksHost(events.last(), OverlayChromeEventKind.DONE)
         assertEquals(
-            listOf("Saved as a draft skill. Review it in Automations before it can run alone."),
+            listOf(OverlayCopy.AI_MODE, OverlayCopy.DONE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT),
             OverlayCopy.visibleFor(machine.snapshot()),
         )
         assertEquals(
@@ -98,7 +101,7 @@ class OverlayTaskEntryFlowTest {
         )
         assertEquals("Order this from", OverlayCopy.COMMERCE)
         assertEquals(
-            listOf("Analysis", "Order this from", OverlayCopy.LEGAL),
+            listOf(OverlayCopy.AI_MODE, "Analysis", "Order this from", OverlayCopy.COMPOSER, OverlayCopy.PAUSE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT, OverlayCopy.LEGAL),
             OverlayCopy.visibleFor(machine.snapshot()),
         )
         machine.dispatch(OverlayUserAction.COMMERCE)
@@ -115,7 +118,7 @@ class OverlayTaskEntryFlowTest {
         assertEquals(OverlayChromeState.IDLE, machine.state())
         assertEquals("Ask Cyclone", OverlayCopy.visibleFor(machine.snapshot()).single())
         machine.dispatch(OverlayUserAction.ASK_CYCLONE)
-        assertEquals(OverlayChromeState.IDLE, machine.state())
+        assertEquals(OverlayChromeState.ANALYSIS, machine.state())
     }
 
     @Test

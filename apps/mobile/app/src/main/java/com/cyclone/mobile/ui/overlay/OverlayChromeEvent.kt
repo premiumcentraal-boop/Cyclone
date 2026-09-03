@@ -25,6 +25,8 @@ data class OverlayChromeEvent(
     val sessionId: String,
     val gateClass: OverlayGateClass? = null,
     val pcAutoApproveIgnored: Boolean = false,
+    val requestText: String? = null,
+    val userPaused: Boolean = false,
     val clicksHost: Boolean = false,
     val dispatchAccessibilityAction: Boolean = false,
 ) {
@@ -36,6 +38,8 @@ data class OverlayChromeEvent(
         .put("clicksHost", clicksHost)
         .put("dispatchAccessibilityAction", dispatchAccessibilityAction)
         .put("pcAutoApproveIgnored", pcAutoApproveIgnored)
+        .put("requestText", requestText ?: JSONObject.NULL)
+        .put("userPaused", userPaused)
         .put("gateClass", gateClass?.wire ?: JSONObject.NULL)
 }
 
