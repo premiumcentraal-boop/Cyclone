@@ -6,6 +6,7 @@ import com.cyclone.mobile.SelectorEngine
 import com.cyclone.mobile.UiBounds
 import com.cyclone.mobile.UiNodeSnapshot
 import com.cyclone.mobile.UiSnapshot
+import com.cyclone.mobile.UiWindowSnapshot
 import com.cyclone.mobile.policy.GateClass
 import com.cyclone.mobile.policy.GateClassifier
 import org.junit.Assert.assertEquals
@@ -29,6 +30,25 @@ class ClickGateInterceptTest {
                 .contains("Cyclone needs you to confirm before finishing this."),
         )
         assertEquals("Cyclone needs you to confirm before finishing this.", OverlayCopy.GATE)
+    }
+
+    @Test
+    fun moveToBinFromIdleMakesGateCopyObservableInSnapshot() {
+        val machine = OverlayChromeMachine()
+        val host = filesActionSheet()
+        assertFalse(OverlayChromeObservation.hasGate(host))
+        val perform = ClickGateIntercept.apply(machine, "phone.click", listOf("Move to bin"))
+        assertFalse(perform)
+        assertEquals(OverlayChromeState.GATE, machine.state())
+        assertEquals(OverlayGateClass.DELETE, machine.snapshot().gateClass)
+        val observed = OverlayChromeObservation.merge(host, machine.snapshot())
+        assertTrue(OverlayChromeObservation.hasGate(observed))
+        assertTrue(observed.nodes.any { it.text == OverlayCopy.GATE })
+        assertTrue(
+            observed.windows.any { it.type == OverlayChromeObservation.ACCESSIBILITY_OVERLAY_WINDOW_TYPE },
+        )
+        assertEquals("Cyclone needs you to confirm before finishing this.", OverlayCopy.GATE)
+        assertTrue(host.nodes.any { it.text == "Move to bin" })
     }
 
     @Test
@@ -79,8 +99,10 @@ class ClickGateInterceptTest {
         machine.enterLive()
         listOf(
             "See all",
+            "Settings",
             "Network & internet",
             "Alarms",
+            "Clock",
             "7",
             "Download",
             "More options",
@@ -116,6 +138,31 @@ class ClickGateInterceptTest {
         } catch (error: EmptySelectorException) {
             assertTrue(error.message!!.contains("empty selector"))
         }
+    }
+
+    private fun filesActionSheet(): UiSnapshot {
+        val bin = node("bin", "0/1", "0", "Move to bin", "button", clickable = true)
+        return UiSnapshot(
+            packageName = "com.google.android.apps.nbu.files",
+            className = "Files",
+            screenWidth = 1080,
+            screenHeight = 2400,
+            timestampMs = 1,
+            fingerprint = "fp",
+            controller = "agent",
+            windows = listOf(
+                UiWindowSnapshot(
+                    id = 1,
+                    title = "Files",
+                    type = OverlayChromeObservation.APPLICATION_WINDOW_TYPE,
+                    layer = 0,
+                    active = true,
+                    focused = true,
+                    bounds = UiBounds(0, 0, 1080, 2400),
+                ),
+            ),
+            nodes = listOf(bin),
+        )
     }
 
     private fun node(

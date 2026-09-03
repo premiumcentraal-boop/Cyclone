@@ -4,6 +4,7 @@ import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +26,7 @@ import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.ui.overlay.OverlayChrome
 import com.cyclone.mobile.ui.overlay.OverlayChromeSnapshot
 import com.cyclone.mobile.ui.overlay.OverlayChromeState
+import com.cyclone.mobile.ui.overlay.OverlayCopy
 import com.cyclone.mobile.ui.overlay.OverlayUserAction
 
 /**
@@ -54,6 +56,7 @@ class OverlayChromeController(
             }
             lifecycle.start()
             val view = ComposeView(service).apply {
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
                 setViewTreeLifecycleOwner(lifecycle)
                 setViewTreeViewModelStoreOwner(lifecycle)
@@ -63,6 +66,7 @@ class OverlayChromeController(
             val layout = overlayParams(snapshot.state)
             params = layout
             root = view
+            applyLayout(snapshot.state)
             wm.addView(view, layout)
         }
     }
@@ -86,6 +90,8 @@ class OverlayChromeController(
     private fun applyLayout(state: OverlayChromeState) {
         val view = root ?: return
         val layout = params ?: return
+        view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        view.contentDescription = if (state == OverlayChromeState.GATE) OverlayCopy.GATE else null
         val wrapChip = state == OverlayChromeState.IDLE
         val width = if (wrapChip) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT
         if (layout.width != width) {

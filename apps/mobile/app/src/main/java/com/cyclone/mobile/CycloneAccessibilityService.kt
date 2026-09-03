@@ -18,6 +18,7 @@ import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
 import com.cyclone.mobile.ui.overlay.ClickGateIntercept
 import com.cyclone.mobile.ui.overlay.GateBlockedException
+import com.cyclone.mobile.ui.overlay.OverlayChromeObservation
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONObject
@@ -205,7 +206,14 @@ class CycloneAccessibilityService : AccessibilityService() {
                 focused = window.isFocused,
                 bounds = UiBounds(rect.left, rect.top, rect.right, rect.bottom),
             )
-        }
+        }.toMutableList()
+        OverlayChromeObservation.appendChrome(
+            nodes,
+            windowsSnapshot,
+            OverlayChromeRuntime.snapshot(),
+            metrics.widthPixels,
+            metrics.heightPixels,
+        )
         val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() } ?: DeviceState.currentPackage
         val fingerprint = screenFingerprint(packageName, nodes)
         val snapshot = UiSnapshot(
@@ -316,10 +324,8 @@ class CycloneAccessibilityService : AccessibilityService() {
             val wroot = window.root ?: continue
             if (wroot.windowId in consumedWindows) continue
             val pkg = wroot.packageName?.toString().orEmpty()
-            if (pkg.isBlank() || pkg == "com.android.systemui") continue
-            val isApp = window.type == AccessibilityWindowInfo.TYPE_APPLICATION
             val isWeb = isWebishWindow(window, wroot)
-            if (!isApp && !isWeb) continue
+            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb)) continue
             collectNode(wroot, "w${window.id}/0", null, 0, nodes)
             consumedWindows += wroot.windowId
         }
