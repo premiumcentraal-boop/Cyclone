@@ -38,6 +38,7 @@ import com.cyclone.mobile.brain.BrainRefinementWorker
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.ui.overlay.GateBlockedException
 import com.cyclone.mobile.ui.overlay.OverlayGateClass
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -716,7 +717,9 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                     evidenceIdentity = evidenceIdentity,
                     policyAllowed = !policyDenied && !gateRequired,
                     gateRequired = gateRequired,
-                    gateClass = if (gateRequired) deterministicGateClass(action.tool, action.params) else null,
+                    gateClass = if (gateRequired) {
+                        OverlayChromeRuntime.snapshot().gateClass ?: deterministicGateClass(action.tool, action.params)
+                    } else null,
                     hardBlocker = hardBlocker,
                     staleTarget = stale,
                     message = envelope.safeMessage ?: envelope.delta.summary,
@@ -792,6 +795,11 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 (envelope.errorClass == AgentFailureClass.CAPABILITY_UNAVAILABLE &&
                     envelope.safeMessage?.contains("not exposed", ignoreCase = true) != true),
             staleTarget = envelope.errorClass == AgentFailureClass.STALE_OBSERVATION,
+            gateClass = if (envelope.errorClass in setOf(
+                AgentFailureClass.GATE_REQUIRED,
+                AgentFailureClass.HUMAN_HAS_CONTROL,
+                AgentFailureClass.AUTH_REQUIRED,
+            )) OverlayChromeRuntime.snapshot().gateClass else null,
             message = envelope.safeMessage ?: if (verifiedProgress) null else "The learned route did not verify; Cyclone will recover.",
         )
     }

@@ -147,6 +147,22 @@ object OverlayChromeRuntime {
         }
     }
 
+    /** Checks the exact approval without consuming it; final Accessibility interception consumes it. */
+    fun hasGateApproval(gateClass: OverlayGateClass, action: String, labels: List<String>): Boolean =
+        synchronized(lock) {
+            val grant = approvedGateChallenge ?: return@synchronized false
+            val now = System.currentTimeMillis()
+            if (grant.expiresAtMs < now) {
+                approvedGateChallenge = null
+                return@synchronized false
+            }
+            val currentSession = machine.snapshot().sessionId
+            grant.gateClass == gateClass &&
+                grant.action == action &&
+                grant.signature == gateSignature(action, labels) &&
+                (grant.sessionId.isBlank() || grant.sessionId == currentSession)
+        }
+
     /** Consumes one explicit user confirmation for the exact previously blocked action. */
     fun consumeGateApproval(gateClass: OverlayGateClass, action: String, labels: List<String>): Boolean =
         synchronized(lock) {

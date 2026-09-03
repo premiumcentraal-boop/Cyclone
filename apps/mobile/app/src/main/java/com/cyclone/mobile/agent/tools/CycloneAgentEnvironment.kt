@@ -32,6 +32,8 @@ import com.cyclone.mobile.gateway.GatewayObservationAdapter
 import com.cyclone.mobile.gateway.GatewayObservationStore
 import com.cyclone.mobile.gateway.GatewayProtocolException
 import com.cyclone.mobile.gateway.GatewayV33ActionAdapter
+import com.cyclone.mobile.policy.GateClassifier
+import com.cyclone.mobile.ui.overlay.ClickGateIntercept
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import org.json.JSONArray
@@ -906,15 +908,47 @@ private class AndroidCycloneAgentRuntimePort(
             params,
         )
         if (decision.allowed) return null
-        val gateRequired = decision.reasonCode == "LOCAL_CONFIRMATION_REQUIRED"
+        val localConfirmation = decision.reasonCode == "LOCAL_CONFIRMATION_REQUIRED"
+        if (localConfirmation && tool in setOf("phone.click", "phone.long_press")) {
+            val selector = params.optJSONObject("selector") ?: params
+            val labels = listOf(
+                selector.optString("text"),
+                selector.optString("textContains"),
+                selector.optString("contentDescription"),
+                selector.optString("contentDescriptionContains"),
+                selector.optString("fuzzyText"),
+                selector.optString("descendantText"),
+                selector.optString("resourceId"),
+            ).map(String::trim).filter(String::isNotBlank)
+            val gateClass = GateClassifier.classify(tool, labels)?.let(ClickGateIntercept::overlayClass)
+            if (gateClass != null) {
+                // Policy may let an explicitly confirmed exact action proceed, but does not consume
+                // the grant. The final Accessibility click interceptor consumes the one-shot token.
+                if (OverlayChromeRuntime.hasGateApproval(gateClass, tool, labels)) return null
+                OverlayChromeRuntime.registerGateChallenge(gateClass, tool, labels)
+                OverlayChromeRuntime.enterGate(gateClass)
+                return AgentFailure(
+                    AgentFailureClass.GATE_REQUIRED,
+                    AgentFailureLayer.POLICY,
+                    true,
+                    decision.safeMessage,
+                    decision.reasonCode,
+                )
+            }
+        }
+        if (localConfirmation && tool in setOf("phone.type", "phone.replace_text")) {
+            return AgentFailure(
+                AgentFailureClass.AUTH_REQUIRED,
+                AgentFailureLayer.POLICY,
+                true,
+                decision.safeMessage,
+                decision.reasonCode,
+            )
+        }
         return AgentFailure(
-            errorClass = if (gateRequired) {
-                AgentFailureClass.GATE_REQUIRED
-            } else {
-                AgentFailureClass.POLICY_DENIED
-            },
+            errorClass = if (localConfirmation) AgentFailureClass.GATE_REQUIRED else AgentFailureClass.POLICY_DENIED,
             failureLayer = AgentFailureLayer.POLICY,
-            retryable = gateRequired,
+            retryable = localConfirmation,
             message = decision.safeMessage,
             reasonCode = decision.reasonCode,
         )
