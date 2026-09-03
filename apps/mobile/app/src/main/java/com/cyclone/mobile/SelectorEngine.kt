@@ -3,7 +3,7 @@ package com.cyclone.mobile
 import kotlin.math.abs
 import kotlin.math.max
 
-class EmptySelectorException(message: String = "Selector is empty; refusing to match the shallowest node") :
+class EmptySelectorException(message: String = "empty selector; refusing to match the shallowest node") :
     IllegalArgumentException(message)
 
 object SelectorEngine {
