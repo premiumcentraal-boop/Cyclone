@@ -71,11 +71,14 @@ class CyclonePcParityBridge internal constructor(
     fun currentPage(): AgentPageCard? = page
 
     fun observation(): CycloneObservation? = page?.let { card ->
+        // Observation IDs intentionally do NOT participate in convergence. They rotate after every
+        // capture for selector safety, while this witness changes only when semantic evidence does.
+        val semanticWitness = listOf(card.pageKey, card.contentKey, card.accessibilityFingerprint)
+            .joinToString("|")
         CycloneObservation(
-            identity = card.observationId,
+            identity = semanticWitness,
             pageIdentity = card.pageKey,
-            evidenceIdentity = listOf(card.observationId, card.pageKey, card.contentKey, card.accessibilityFingerprint)
-                .joinToString("|"),
+            evidenceIdentity = semanticWitness,
         )
     }
 
