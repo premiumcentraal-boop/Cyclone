@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Base64
 import com.cyclone.mobile.gateway.GatewayObservationStore
+import com.cyclone.mobile.ui.overlay.GateBlockedException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.LinkedHashMap
@@ -51,6 +52,7 @@ object PhoneToolExecutor {
             .getOrElse { err ->
                 if (err is PhoneToolException) Outcome(error = err.error)
                 else if (err is EmptySelectorException) Outcome(error = PhoneToolError(PhoneToolErrorCode.INVALID_REQUEST, err.message ?: "empty selector"))
+                else if (err is GateBlockedException) Outcome(error = PhoneToolError(PhoneToolErrorCode.POLICY_DENIED, err.message ?: "GATE requires confirmation"))
                 else errorResult(PhoneToolErrorCode.INTERNAL_ERROR, err.message ?: err.javaClass.simpleName)
             }
         val after = CycloneAccessibilityService.instance?.observe(markFresh = false)?.fingerprint

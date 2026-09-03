@@ -16,6 +16,8 @@ import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
+import com.cyclone.mobile.ui.overlay.ClickGateIntercept
+import com.cyclone.mobile.ui.overlay.GateBlockedException
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONObject
@@ -233,6 +235,14 @@ class CycloneAccessibilityService : AccessibilityService() {
             val node = liveNodeAtSnapshotPath(snapshotNode) ?: return@repeat
             if (!sameNode(snapshotNode, node)) return@repeat
             val activation = AccessibilityRoles.resolveActivationTarget(snapshot.nodes, snapshotNode)
+            val labels = ClickGateIntercept.labelsFor(snapshotNode, activation, selector)
+            val decision = ClickGateIntercept.decide("phone.click", labels, OverlayChromeRuntime.snapshot().state)
+            if (!decision.performClick) {
+                if (decision.enterGate && decision.gateClass != null) {
+                    OverlayChromeRuntime.enterGate(decision.gateClass)
+                }
+                throw GateBlockedException(decision.gateClass)
+            }
             val targetLive = if (activation.path == snapshotNode.path) {
                 node
             } else {

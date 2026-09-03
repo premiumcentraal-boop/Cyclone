@@ -84,6 +84,25 @@ class OverlayChromeMachineTest {
     }
 
     @Test
+    fun enterGateFromIdleShowsGateCopyWithoutHostClick() {
+        val events = mutableListOf<OverlayChromeEvent>()
+        val machine = OverlayChromeMachine(emit = { events += it })
+        assertEquals(OverlayChromeState.IDLE, machine.state())
+        machine.enterGate(OverlayGateClass.DELETE)
+        assertEquals(OverlayChromeState.GATE, machine.state())
+        assertEquals(
+            listOf(
+                "Cyclone needs you to confirm before finishing this.",
+                "Do this",
+                OverlayCopy.LEGAL,
+            ),
+            OverlayCopy.visibleFor(machine.snapshot()),
+        )
+        assertFalse(events.single().clicksHost)
+        assertFalse(events.single().dispatchAccessibilityAction)
+    }
+
+    @Test
     fun idleChipAskCycloneEmitsEventWithoutLeavingIdle() {
         val events = mutableListOf<OverlayChromeEvent>()
         val machine = OverlayChromeMachine(emit = { events += it })

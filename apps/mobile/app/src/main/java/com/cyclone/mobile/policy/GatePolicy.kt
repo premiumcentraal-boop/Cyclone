@@ -52,12 +52,14 @@ object GateClassifier {
     )
     private val delete = listOf("delete", "remove", "erase", "factory reset", "wipe data", "move to bin", "move to trash", "send to bin", "send to trash", "throw away")
     private val send = listOf("send", "send message", "send email", "post", "publish")
+    private val deleteMoveSendToBinOrTrash =
+        Regex("""(?:move|send)(?:\s+\S+){0,6}\s+to\s+(?:bin|trash)""")
 
     fun classify(action: String, labels: List<String> = emptyList()): GateClass? {
         val text = (listOf(action) + labels).joinToString(" ").lowercase().replace(Regex("[_-]+"), " ")
         if (pay.any { text.contains(it) }) return GateClass.PAY
         if (grant.any { text.contains(it) }) return GateClass.GRANT
-        if (delete.any { text.contains(it) }) return GateClass.DELETE
+        if (delete.any { text.contains(it) } || deleteMoveSendToBinOrTrash.containsMatchIn(text)) return GateClass.DELETE
         if (send.any { text.contains(it) }) return GateClass.SEND
         return null
     }

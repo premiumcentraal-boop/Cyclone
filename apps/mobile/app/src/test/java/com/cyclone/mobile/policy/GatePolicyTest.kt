@@ -95,6 +95,8 @@ class GatePolicyTest {
         assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Send to trash")))
         assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Send to bin")))
         assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Throw away")))
+        assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Move 1 file to bin")))
+        assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Move 2 files to bin")))
     }
 
     @Test

@@ -49,7 +49,7 @@ class OverlayChromeMachine(
     }
 
     fun enterGate(gateClass: OverlayGateClass, pcAutoApprove: Boolean = false, sessionId: String = snapshot.sessionId) {
-        if (snapshot.state != OverlayChromeState.WORKING && snapshot.state != OverlayChromeState.LIVE) return
+        if (snapshot.state == OverlayChromeState.GATE) return
         snapshot = snapshot.copy(
             state = OverlayChromeState.GATE,
             sessionId = sessionId.ifBlank { snapshot.sessionId },
