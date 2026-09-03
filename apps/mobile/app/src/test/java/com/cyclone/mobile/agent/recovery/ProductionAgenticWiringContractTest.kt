@@ -13,7 +13,7 @@ class ProductionAgenticWiringContractTest {
     }
 
     @Test
-    fun productionOverlayUsesPersistentAgentAndPcParityBridge() {
+    fun productionOverlayUsesPersistentNativeToolAgent() {
         val adaptive = source(
             "src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
             "app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
@@ -24,37 +24,56 @@ class ProductionAgenticWiringContractTest {
             "app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeRuntime.kt",
             "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeRuntime.kt",
         )
-        assertTrue(adaptive.contains("CycloneLocalAgent"))
-        assertTrue(adaptive.contains("CyclonePcParityBridge"))
+        assertTrue(adaptive.contains("PersistentToolAgentRuntime"))
+        assertTrue(adaptive.contains("OpenRouterToolCallingProvider"))
+        assertTrue(adaptive.contains("CycloneAndroidToolRuntime"))
+        assertTrue(adaptive.contains("AgentRunRuntime"))
         assertTrue(overlay.contains("OpenRouterAdaptiveAgent"))
         assertTrue(overlay.contains("resumeSuspendedTask"))
+        assertFalse(adaptive.contains("PageAgentProtocol"))
+        assertFalse(adaptive.contains("requestPageDecision"))
         assertFalse(adaptive.contains("while (providerRequests < config.maxDecisions)"))
     }
 
     @Test
-    fun pcParityBridgeConsumesAgent2AndAgent3Contracts() {
-        val bridge = source(
-            "src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
-            "app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
-            "apps/mobile/app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
+    fun nativeToolRuntimeConsumesCompoundVerifiedAndroidContract() {
+        val runtime = source(
+            "src/main/java/com/cyclone/mobile/agent/runtime/CycloneAndroidToolRuntime.kt",
+            "app/src/main/java/com/cyclone/mobile/agent/runtime/CycloneAndroidToolRuntime.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/agent/runtime/CycloneAndroidToolRuntime.kt",
         )
-        assertTrue(bridge.contains("CycloneAgentEnvironment"))
-        assertTrue(bridge.contains("AgenticRecoveryRuntimePort"))
-        assertTrue(bridge.contains("classifyProgress"))
-        assertTrue(bridge.contains("selectRecovery"))
+        val compound = source(
+            "src/main/java/com/cyclone/mobile/agent/tools/CycloneCompoundAgentTools.kt",
+            "app/src/main/java/com/cyclone/mobile/agent/tools/CycloneCompoundAgentTools.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/agent/tools/CycloneCompoundAgentTools.kt",
+        )
+        assertTrue(runtime.contains("CycloneCompoundAgentTools"))
+        assertTrue(runtime.contains("verifyCompletion"))
+        assertTrue(compound.contains("CycloneAgentEnvironment"))
+        assertTrue(compound.contains("envelope.verification.passed"))
+        assertTrue(compound.contains("androidExecutionOk"))
+        assertTrue(compound.contains("openApp(name"))
     }
 
     @Test
-    fun productionActionPathDoesNotEquateExecutorAcceptanceWithVerification() {
-        val adaptive = source(
-            "src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
-            "app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
-            "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
+    fun providerUsesRealToolCallsAndRichToolResults() {
+        val provider = source(
+            "src/main/java/com/cyclone/mobile/agent/runtime/OpenRouterToolCallingProvider.kt",
+            "app/src/main/java/com/cyclone/mobile/agent/runtime/OpenRouterToolCallingProvider.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/agent/runtime/OpenRouterToolCallingProvider.kt",
         )
-        assertTrue(adaptive.contains("envelope.verification.passed"))
-        assertTrue(adaptive.contains("ANDROID_EXECUTION"))
-        assertTrue(adaptive.contains("AFTER_OBSERVATION"))
-        assertTrue(adaptive.contains("VERIFICATION"))
-        assertFalse(adaptive.contains("val verified = result.ok"))
+        val runtime = source(
+            "src/main/java/com/cyclone/mobile/agent/runtime/PersistentToolAgentRuntime.kt",
+            "app/src/main/java/com/cyclone/mobile/agent/runtime/PersistentToolAgentRuntime.kt",
+            "apps/mobile/app/src/main/java/com/cyclone/mobile/agent/runtime/PersistentToolAgentRuntime.kt",
+        )
+        assertTrue(provider.contains("tool_calls"))
+        assertTrue(provider.contains("tool_call_id"))
+        assertTrue(provider.contains("parallel_tool_calls"))
+        assertTrue(provider.contains("tool_choice"))
+        assertTrue(runtime.contains("AgentConversationEntry.ToolResult"))
+        assertTrue(runtime.contains("COMPLETION_NOT_VERIFIED"))
+        assertTrue(runtime.contains("verificationPassed"))
+        assertFalse(runtime.contains("val verified = result.ok"))
     }
 }
