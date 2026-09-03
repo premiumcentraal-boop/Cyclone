@@ -254,10 +254,24 @@ class CyclonePcParityBridge internal constructor(
 
     fun completionEvidence(goal: String): Boolean {
         val card = page ?: return false
-        val tokens = goal.lowercase()
+        val finalSegment = goal
+            .split(Regex("(?i)\\bthen\\b|\\bfinally\\b|->|→|;|,"))
+            .map(String::trim)
+            .lastOrNull(String::isNotBlank)
+            ?: goal
+        var tokens = finalSegment.lowercase()
             .split(Regex("[^a-z0-9]+"))
             .filter { it.length >= 3 && it !in COMPLETION_STOP_WORDS }
+            .distinct()
+        if (tokens.isEmpty()) {
+            tokens = goal.lowercase()
+                .split(Regex("[^a-z0-9]+"))
+                .filter { it.length >= 3 && it !in COMPLETION_STOP_WORDS }
+                .distinct()
+                .takeLast(4)
+        }
         if (tokens.isEmpty()) return false
+        val target = tokens.takeLast(4)
         val haystack = buildString {
             append(card.packageName).append(' ')
             append(card.activity.orEmpty()).append(' ')
@@ -268,7 +282,9 @@ class CyclonePcParityBridge internal constructor(
                 append(it.semanticName).append(' ')
             }
         }.lowercase()
-        return tokens.any(haystack::contains)
+        val matched = target.count(haystack::contains)
+        val required = if (target.size <= 1) 1 else minOf(2, target.size)
+        return matched >= required
     }
 
     fun causeFor(envelope: AgentActionEnvelope): RecoverableCause = when (envelope.errorClass) {
@@ -399,7 +415,8 @@ class CyclonePcParityBridge internal constructor(
             "phone.replace_text",
         )
         private val COMPLETION_STOP_WORDS = setOf(
-            "open", "go", "to", "the", "a", "an", "and", "then", "find", "show", "me", "on", "in", "for",
+            "open", "go", "navigate", "take", "to", "the", "a", "an", "and", "then", "finally",
+            "find", "show", "me", "on", "in", "for", "please", "page", "screen",
         )
     }
 }

@@ -324,7 +324,10 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                         failedActions = session.failedActions,
                         agentContext = agentContext,
                     )
-                } ?: return CyclonePlanResult.Malformed("model.invalid_page_decision")
+                } ?: run {
+                    session.bridge.recover(RecoverableCause.MALFORMED_MODEL_OUTPUT, goal)
+                    return CyclonePlanResult.Malformed("model.invalid_page_decision")
+                }
 
                 if (decision.displaySummary.isNotBlank()) onProgress(decision.displaySummary)
                 return planFromDecision(decision, session.state.page.pageKey)
@@ -692,7 +695,10 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 AgentFailureClass.AUTH_REQUIRED,
             )
             val policyDenied = envelope.errorClass == AgentFailureClass.POLICY_DENIED
-            val hardBlocker = envelope.errorClass == AgentFailureClass.CAPABILITY_UNAVAILABLE || policyDenied
+            val unsupportedModelTool = envelope.errorClass == AgentFailureClass.CAPABILITY_UNAVAILABLE &&
+                envelope.safeMessage?.contains("not exposed", ignoreCase = true) == true
+            val hardBlocker = policyDenied ||
+                (envelope.errorClass == AgentFailureClass.CAPABILITY_UNAVAILABLE && !unsupportedModelTool)
             val stale = envelope.errorClass == AgentFailureClass.STALE_OBSERVATION
 
             if (!verified) {
@@ -790,7 +796,9 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 AgentFailureClass.HUMAN_HAS_CONTROL,
                 AgentFailureClass.AUTH_REQUIRED,
             ),
-            hardBlocker = envelope.errorClass in setOf(AgentFailureClass.POLICY_DENIED, AgentFailureClass.CAPABILITY_UNAVAILABLE),
+            hardBlocker = envelope.errorClass == AgentFailureClass.POLICY_DENIED ||
+                (envelope.errorClass == AgentFailureClass.CAPABILITY_UNAVAILABLE &&
+                    envelope.safeMessage?.contains("not exposed", ignoreCase = true) != true),
             staleTarget = envelope.errorClass == AgentFailureClass.STALE_OBSERVATION,
             message = envelope.safeMessage ?: if (verifiedProgress) null else "The learned route did not verify; Cyclone will recover.",
         )
