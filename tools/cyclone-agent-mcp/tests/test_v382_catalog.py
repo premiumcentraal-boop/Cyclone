@@ -151,3 +151,21 @@ def test_nested_pixel_blob_without_layer_ok_is_ok_after_translation():
     assert canonical["ok"] is True
     assert canonical["execution"]["ok"] is True
     assert (canonical.get("error") or {}).get("code") != "PROTOCOL_MISMATCH"
+
+
+def test_locate_page_card_includes_snapshot_and_one_char_rank():
+    class KeypadGateway(LocateGateway):
+        def observe(self, device_id=None, include_screenshot=False, mode="compact"):
+            payload = super().observe(device_id, include_screenshot, mode)
+            payload["observation"]["controls"] = [
+                {"id": "apps", "label": "Apps", "clickable": True, "role": "button"},
+                {"id": "seven", "label": "7", "clickable": True, "role": "button"},
+            ]
+            return payload
+
+    tools = PhoneTools(gateway=KeypadGateway())
+    located = tools.call("phone_locate", {"device_id": "phone-a", "goal": "7"})
+    card = located["pageCard"]
+    assert "snapshot" in card
+    assert "[ref=e" in card["snapshot"]
+    assert card["candidates"]["goalRanked"][0]["label"] == "7"

@@ -3,8 +3,12 @@ package com.cyclone.mobile
 import kotlin.math.abs
 import kotlin.math.max
 
+class EmptySelectorException(message: String = "Selector is empty; refusing to match the shallowest node") :
+    IllegalArgumentException(message)
+
 object SelectorEngine {
     fun resolve(snapshot: UiSnapshot, selector: ElementSelector, limit: Int = 20): List<SelectorMatch> {
+        if (selector.isEmpty()) throw EmptySelectorException()
         val byId = snapshot.nodes.associateBy { it.id }
         val anchor = selector.relativeToText?.let { text ->
             snapshot.nodes.firstOrNull { node ->
@@ -37,6 +41,13 @@ object SelectorEngine {
             }
             selector.role?.let {
                 if (node.role.equals(it, ignoreCase = true)) { score += 1.2; reasons += "role" } else hardFailure = true
+            }
+            selector.path?.let {
+                if (node.path == it) { score += 3.5; reasons += "path" } else hardFailure = true
+            }
+            selector.elementId?.let { wanted ->
+                val hit = node.id == wanted || node.path == wanted
+                if (hit) { score += 4.0; reasons += "elementId" }
             }
             selector.requireClickable?.let { if (node.clickable == it) { score += 0.4; reasons += "clickable" } else hardFailure = true }
             selector.requireEditable?.let { if (node.editable == it) { score += 0.4; reasons += "editable" } else hardFailure = true }
@@ -73,11 +84,8 @@ object SelectorEngine {
                 } else hardFailure = true
             }
 
-            if (hardFailure) null
+            if (hardFailure || score <= 0.0) null
             else {
-                if (selector == ElementSelector()) {
-                    score += if (node.visibleToUser) 0.1 else 0.0
-                }
                 SelectorMatch(node, score, reasons)
             }
         }.sortedWith(compareByDescending<SelectorMatch> { it.score }

@@ -132,6 +132,8 @@ internal object GatewayV33ActionAdapter {
             goalLabel = goalLabel,
             clickedLabel = clickedLabel,
             afterHaystack = afterHaystack,
+            beforeObservation = beforeObservation,
+            afterObservation = afterObservation,
         )
         val verification = when {
             verificationFailedInExecutor -> JSONObject()
@@ -241,10 +243,13 @@ internal object GatewayV33ActionAdapter {
         goalLabel: String = "",
         clickedLabel: String = "",
         afterHaystack: String = "",
+        beforeObservation: GatewayObservation? = null,
+        afterObservation: GatewayObservation? = null,
     ): Boolean {
         if (tool == "phone.open_app" && expectedPackage.isNotBlank()) return afterPackage == expectedPackage
+        if (samePageProgress(beforeObservation, afterObservation, goalLabel)) return true
         if (labelStillPresent(goalLabel, clickedLabel, afterHaystack) && tool in setOf(
-                "phone.click", "phone.long_press", "phone.back", "phone.home",
+                "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.type",
             )
         ) {
             return true
@@ -255,10 +260,36 @@ internal object GatewayV33ActionAdapter {
         )
     }
 
+    internal fun samePageProgress(
+        before: GatewayObservation?,
+        after: GatewayObservation?,
+        goalLabel: String = "",
+    ): Boolean {
+        if (before == null || after == null) return false
+        val beforeByLabel = before.elements.values.associateBy { normalizeGateLabel(it.label) }
+        for (element in after.elements.values) {
+            val prior = beforeByLabel[normalizeGateLabel(element.label)] ?: continue
+            val afterEv = element.evidence
+            val beforeEv = prior.evidence
+            if (flipped(beforeEv, afterEv, "selected") || flipped(beforeEv, afterEv, "checked") || flipped(beforeEv, afterEv, "focused")) {
+                return true
+            }
+            val beforeText = beforeEv.optString("text").ifBlank { beforeEv.optString("label") }
+            val afterText = afterEv.optString("text").ifBlank { afterEv.optString("label") }
+            if (element.role in setOf("textbox", "edit_text") && beforeText != afterText) return true
+        }
+        return labelStillPresent(goalLabel, "", observationHaystack(after))
+    }
+
+    private fun flipped(before: JSONObject, after: JSONObject, key: String): Boolean =
+        before.optBoolean(key) != after.optBoolean(key)
+
+    private fun normalizeGateLabel(value: String): String = value.lowercase().trim()
+
     internal fun labelStillPresent(goalLabel: String, clickedLabel: String, haystack: String): Boolean {
         if (haystack.isBlank()) return false
         return listOf(clickedLabel, goalLabel).any { needle ->
-            needle.trim().length >= 2 && haystack.contains(needle.trim(), ignoreCase = true)
+            needle.trim().isNotEmpty() && haystack.contains(needle.trim(), ignoreCase = true)
         }
     }
 

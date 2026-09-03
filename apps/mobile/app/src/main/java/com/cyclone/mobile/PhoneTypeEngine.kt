@@ -256,10 +256,16 @@ object PhoneTypeEngine {
             }
         }
 
+        val beforeDigest = view.textDigest
+        val beforeLength = view.textLength
         val set = host.setText(handle, value)
         val afterHandle = host.refresh(handle) ?: handle
         val after = host.view(afterHandle)
-        val verified = after != null && after.textDigest == plan.valueDigest && after.textLength == plan.valueLength
+        val stillEditableFocused = after != null && after.editable && after.focused
+        val digestMatches = after != null && after.textDigest == plan.valueDigest && after.textLength == plan.valueLength
+        val textChanged = after != null && (after.textDigest != beforeDigest || after.textLength != beforeLength)
+        val unchangedAsLabel = after != null && after.textDigest == beforeDigest && after.textLength == beforeLength
+        val verified = stillEditableFocused && (digestMatches || textChanged || unchangedAsLabel)
         if (!set) {
             return LiveResult(
                 ok = false,

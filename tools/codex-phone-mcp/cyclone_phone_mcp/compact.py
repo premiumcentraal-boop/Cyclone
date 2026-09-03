@@ -9,6 +9,7 @@ SENSITIVE_KEYS = {
 }
 
 PAGE_CARD_CANDIDATE_LIMIT = 12
+SNAPSHOT_HOST_LIMIT = 80
 PAGE_CARD_TEXT_LIMIT = 900
 PAGE_CARD_SUMMARY_LIMIT = 500
 SEARCH_RESULT_LIMIT = 10
@@ -65,7 +66,7 @@ def _bounded_scalar(value: Any, limit: int = 160) -> str | None:
 
 def _tokens(value: str) -> list[str]:
     return [
-        token for token in re.findall(r"[a-z0-9]{2,}", value.lower())
+        token for token in re.findall(r"[a-z0-9]+", value.lower())
         if token not in _GOAL_STOP_WORDS
     ][:16]
 
@@ -83,6 +84,8 @@ def _candidate(item: Any) -> dict[str, Any] | None:
         "clickable": item.get("clickable") if isinstance(item.get("clickable"), bool) else None,
         "editable": item.get("editable") if isinstance(item.get("editable"), bool) else None,
         "focused": item.get("focused") if isinstance(item.get("focused"), bool) else None,
+        "selected": item.get("selected") if isinstance(item.get("selected"), bool) else None,
+        "checked": item.get("checked") if isinstance(item.get("checked"), bool) else None,
         "scrollable": item.get("scrollable") if isinstance(item.get("scrollable"), bool) else None,
     }
     if isinstance(item.get("risk"), str):
@@ -237,6 +240,50 @@ def _counts(data: dict[str, Any], controls: list[Any]) -> dict[str, Any]:
     }
 
 
+
+def _is_actionable_host(candidate: dict[str, Any]) -> bool:
+    role = str(candidate.get("role") or "").lower()
+    return (
+        candidate.get("clickable") is True
+        or candidate.get("editable") is True
+        or candidate.get("checkable") is True
+        or role in {"button", "tab", "row", "textbox", "switch", "checkbox", "edit_text"}
+    )
+
+
+def build_snapshot(candidates: list[dict[str, Any]], limit: int = SNAPSHOT_HOST_LIMIT) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Playwright-MCP style accessibility snapshot of actionable hosts."""
+    hosts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if not _is_actionable_host(item):
+            continue
+        key = str(item.get("elementId") or id(item))
+        if key in seen:
+            continue
+        seen.add(key)
+        hosts.append(item)
+        if len(hosts) >= max(1, min(limit, SNAPSHOT_HOST_LIMIT)):
+            break
+    lines: list[str] = []
+    refs: dict[str, dict[str, Any]] = {}
+    for index, host in enumerate(hosts, start=1):
+        ref = f"e{index}"
+        name = str(host.get("label") or host.get("resourceId") or "").replace('"', "'")
+        role = str(host.get("role") or "generic")
+        selected = " [selected]" if host.get("selected") is True else ""
+        lines.append(f'- {role} "{name}" [ref={ref}]{selected}')
+        refs[ref] = {
+            "elementId": host.get("elementId"),
+            "role": role,
+            "name": name,
+            "selected": host.get("selected") is True,
+            "clickable": host.get("clickable") is True,
+            "editable": host.get("editable") is True,
+        }
+    return "\n".join(lines), refs
+
+
 def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_LIMIT, *, goal: str = "") -> dict[str, Any]:
     """Create a bounded, action-safe Page Card from flexible gateway observations.
 
@@ -292,10 +339,14 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
             "rawTreeExcluded": True,
             "sourceCandidateCount": len(candidates),
             "currentCandidateLimit": PAGE_CARD_CANDIDATE_LIMIT,
+            "snapshotHostLimit": SNAPSHOT_HOST_LIMIT,
         },
     }
     # Stable aliases retain compatibility for existing MCP clients while directing new callers to
     # Page Card fields above.
+    snapshot_text, ref_map = build_snapshot(candidates)
+    card["snapshot"] = snapshot_text
+    card["refs"] = ref_map
     card.update({
         "witness": redact(witness),
         "package": location.get("package"),

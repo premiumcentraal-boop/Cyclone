@@ -302,9 +302,25 @@ internal object GatewayObservationAdapter {
             val description = selector.optString("contentDescription")
             val role = selector.optString("role")
             if (resource.isNotBlank()) score += if (resource == node.optString("resourceId")) 8 else -5
-            if (text.isNotBlank()) score += if (normalize(text) == normalize(node.optString("text"))) 5 else 0
+            if (text.isNotBlank()) {
+                val nodeText = normalize(node.optString("text"))
+                val descText = normalize(node.optString("contentDescription"))
+                val wanted = normalize(text)
+                if (wanted == nodeText || wanted == descText) score += 5
+            }
             if (description.isNotBlank()) score += if (normalize(description) == normalize(node.optString("contentDescription"))) 5 else 0
             if (role.isNotBlank() && role.equals(node.optString("role"), ignoreCase = true)) score += 2
+            val clickable = node.optBoolean("clickable")
+            val actions = node.optJSONArray("actions")
+            var hasClick = clickable
+            if (actions != null) {
+                for (i in 0 until actions.length()) {
+                    if (actions.optString(i) == "ACTION_CLICK") hasClick = true
+                }
+            }
+            val nodeRole = node.optString("role").lowercase(Locale.US)
+            if (hasClick || nodeRole in setOf("button", "tab", "row", "textbox", "switch", "checkbox")) score += 6
+            if (!hasClick && nodeRole in setOf("text", "generic")) score -= 4
             if (score > bestScore) { bestScore = score; best = node }
         }
         return best?.takeIf { bestScore > 0 }

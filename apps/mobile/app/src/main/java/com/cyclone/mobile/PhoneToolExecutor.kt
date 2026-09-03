@@ -48,12 +48,24 @@ object PhoneToolExecutor {
         }
 
         val outcome = runCatching { dispatch(context, request, service, before) }
-            .getOrElse { errorResult(PhoneToolErrorCode.INTERNAL_ERROR, it.message ?: it.javaClass.simpleName) }
+            .getOrElse { err ->
+                if (err is PhoneToolException) Outcome(error = err.error)
+                else if (err is EmptySelectorException) Outcome(error = PhoneToolError(PhoneToolErrorCode.INVALID_REQUEST, err.message ?: "empty selector"))
+                else errorResult(PhoneToolErrorCode.INTERNAL_ERROR, err.message ?: err.javaClass.simpleName)
+            }
         val after = CycloneAccessibilityService.instance?.observe(markFresh = false)?.fingerprint
         return finish(request, started, before, after, outcome.payload, outcome.error, outcome.attempts)
     }
 
     private data class Outcome(val payload: Any? = null, val error: PhoneToolError? = null, val attempts: Int = 1)
+
+    private fun requireSelector(params: JSONObject): ElementSelector {
+        val selector = ElementSelector.fromJson(params.optJSONObject("selector") ?: params)
+        if (selector.isEmpty()) {
+            throw PhoneToolException(PhoneToolError(PhoneToolErrorCode.INVALID_REQUEST, "empty selector"))
+        }
+        return selector
+    }
 
     private fun dispatch(context: Context, request: PhoneToolRequest, service: CycloneAccessibilityService?, before: String?): Outcome {
         val p = request.params
@@ -76,11 +88,11 @@ object PhoneToolExecutor {
             }
             "phone.screenshot" -> screenshot(service, p)
             "phone.click" -> actionWithConfirmation(service, request, before) {
-                val selector = ElementSelector.fromJson(p.optJSONObject("selector") ?: p)
+                val selector = requireSelector(p)
                 service?.click(selector) == true
             }
             "phone.long_press" -> actionWithConfirmation(service, request, before) {
-                val selector = ElementSelector.fromJson(p.optJSONObject("selector") ?: p)
+                val selector = requireSelector(p)
                 service?.longPress(selector, p.optLong("durationMs", 650L)) == true
             }
             "phone.tap" -> actionWithConfirmation(service, request, before) {
@@ -373,3 +385,6 @@ object PhoneToolExecutor {
         return result
     }
 }
+
+
+private class PhoneToolException(val error: PhoneToolError) : RuntimeException(error.message)

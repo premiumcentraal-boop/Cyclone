@@ -46,6 +46,8 @@ ANDROID_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)
 
 MUTATING_ACTIONS = ALLOWED_ACTIONS - {"phone.wait_for"}
 ELEMENT_ID_KEYS = {"elementId", "element_id"}
+REF_KEYS = {"ref"}
+ROLE_NAME_KEYS = {"role", "name"}
 COORDINATE_KEYS = {
     "x", "y", "x1", "y1", "x2", "y2", "startx", "starty", "endx", "endy",
     "coordinates", "coordinate", "bounds", "point", "points",
@@ -92,10 +94,10 @@ def _element_id_from_params(params: dict[str, Any]) -> str | None:
     nested = None
     if isinstance(selector, dict):
         nested = next((selector.get(key) for key in ELEMENT_ID_KEYS if selector.get(key)), None)
-        unsupported = set(selector) - ELEMENT_ID_KEYS
+        unsupported = set(selector) - ELEMENT_ID_KEYS - REF_KEYS - ROLE_NAME_KEYS - {"id"}
         if unsupported:
             raise ValueError(
-                "MCP selector input must contain only a current observation-scoped elementId; "
+                "MCP selector input must contain only a current observation-scoped elementId, ref, or role+name; "
                 "use phone_locate or phone_ui_search first."
             )
     if direct and nested and str(direct) != str(nested):
@@ -131,10 +133,17 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
     _reject_coordinate_params(params)
     element_id = _element_id_from_params(params)
 
-    if tool in {"phone.click", "phone.long_press", "phone.type"} and not element_id:
+    ref = str(params.get("ref") or "").strip()
+    role = str(params.get("role") or "").strip()
+    name = str(params.get("name") or "").strip()
+    if isinstance(params.get("selector"), dict):
+        ref = ref or str(params["selector"].get("ref") or "").strip()
+        role = role or str(params["selector"].get("role") or "").strip()
+        name = name or str(params["selector"].get("name") or "").strip()
+    if tool in {"phone.click", "phone.long_press", "phone.type"} and not (element_id or ref or (role and name)):
         raise ValueError(
-            f"{tool} requires a current observation-scoped elementId. Run phone_locate or "
-            "phone_observe, then use one returned candidate ID."
+            f"{tool} requires a current observation-scoped elementId, ref, or role+name. Run phone_locate or "
+            "phone_observe, then use one returned candidate ID or snapshot ref."
         )
     if tool == "phone.swipe":
         raise ValueError(
@@ -149,17 +158,17 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
         if direction not in {"forward", "backward"}:
             raise ValueError("phone.scroll direction must be forward or backward")
     elif tool == "phone.type":
-        allowed = {"value", "text", "selector", *ELEMENT_ID_KEYS}
+        allowed = {"value", "text", "selector", *ELEMENT_ID_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
         if set(params) - allowed or not isinstance(params.get("value", params.get("text")), str):
             raise ValueError("phone.type accepts one text/value and a current elementId")
         if "value" in params and "text" in params and params["value"] != params["text"]:
             raise ValueError("phone.type text and value disagree")
     elif tool == "phone.long_press":
-        allowed = {"durationMs", "selector", *ELEMENT_ID_KEYS}
+        allowed = {"durationMs", "selector", *ELEMENT_ID_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
         if set(params) - allowed:
             raise ValueError("phone.long_press accepts only durationMs and a current elementId")
     elif tool == "phone.click":
-        allowed = {"selector", *ELEMENT_ID_KEYS}
+        allowed = {"selector", *ELEMENT_ID_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
         if set(params) - allowed:
             raise ValueError("phone.click accepts only a current observation-scoped elementId")
     elif tool in {"phone.back", "phone.home"}:
@@ -469,9 +478,50 @@ class PhoneTools:
             "error": None if failure is None else {"code": failure.code, "layer": failure.layer},
         }
 
+    def _auto_observe(self, device_id: str, goal: str):
+        try:
+            raw = (
+                self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
+                if device_id else self.gateway.observe(include_screenshot=False, mode="compact")
+            )
+        except GatewayError:
+            return None
+        if classify_failure(raw) is not None:
+            return None
+        card = self._remember_page_card(device_id, raw, goal=goal)
+        return raw, card
+
+    def _resolve_snapshot_target(self, scope: str, params: dict[str, Any]):
+        cached = self._page_cards.get(scope)
+        card = cached[1] if cached else {}
+        refs = card.get("refs") if isinstance(card.get("refs"), dict) else {}
+        selector = params.get("selector") if isinstance(params.get("selector"), dict) else {}
+        ref = str(params.get("ref") or selector.get("ref") or "").strip()
+        role = str(params.get("role") or selector.get("role") or "").strip()
+        name = str(params.get("name") or selector.get("name") or "").strip()
+        resolved = dict(params)
+        if ref:
+            host = refs.get(ref)
+            if not isinstance(host, dict) or not host.get("elementId"):
+                return "STALE_OBSERVATION"
+            resolved["elementId"] = host["elementId"]
+            return resolved
+        if role and name:
+            needle = name.lower()
+            for host in refs.values():
+                if not isinstance(host, dict):
+                    continue
+                if str(host.get("role") or "") == role and str(host.get("name") or "").lower() == needle:
+                    resolved["elementId"] = host["elementId"]
+                    return resolved
+            return "STALE_OBSERVATION"
+        return resolved
+
     def _run_verified_mutation(self, device_id: str, tool: str, params: dict[str, Any], goal: str) -> dict[str, Any]:
         scope = self._scope_key(device_id)
         cached = self._page_cards.get(scope)
+        if cached is None:
+            cached = self._auto_observe(device_id, goal)
         if cached is None:
             return _failed_action_envelope(
                 tool=tool,
@@ -483,6 +533,19 @@ class PhoneTools:
                 failure_layer="protocol",
                 delta="No current Page Card is available. Run phone_locate or phone_observe before acting.",
             )
+        resolved = self._resolve_snapshot_target(scope, params)
+        if resolved == "STALE_OBSERVATION":
+            return _failed_action_envelope(
+                tool=tool,
+                goal=goal,
+                before=cached[1],
+                after=None,
+                action=None,
+                error_class="STALE_OBSERVATION",
+                failure_layer="protocol",
+                delta="The ref is not from the current snapshot. Locate again before acting.",
+            )
+        params = resolved
         element_id = _element_id_from_params(params)
         if element_id and element_id not in self._current_element_ids.get(scope, set()):
             return _failed_action_envelope(
@@ -677,10 +740,15 @@ def _compact_status(status: Any) -> dict[str, Any]:
 def _card_element_ids(card: dict[str, Any]) -> set[str]:
     candidates = card.get("candidates") if isinstance(card.get("candidates"), dict) else {}
     rows = list(candidates.get("current") or []) + list(candidates.get("goalRanked") or [])
-    return {
+    ids = {
         str(item["elementId"]) for item in rows
         if isinstance(item, dict) and isinstance(item.get("elementId"), str) and item["elementId"]
     }
+    refs = card.get("refs") if isinstance(card.get("refs"), dict) else {}
+    for host in refs.values():
+        if isinstance(host, dict) and isinstance(host.get("elementId"), str) and host["elementId"]:
+            ids.add(host["elementId"])
+    return ids
 
 
 def _search_element_ids(search: dict[str, Any]) -> set[str]:
@@ -715,12 +783,13 @@ def _android_execution_ok(action: Any) -> bool:
 
 def _page_has_goal_label(card: dict[str, Any] | None, goal: str) -> bool:
     needle = (goal or "").strip()
-    if len(needle) < 2 or not isinstance(card, dict):
+    if not needle or not isinstance(card, dict):
         return False
     parts = [
         str(card.get("pageText") or ""),
         str(card.get("pageSummary") or ""),
         str(card.get("title") or ""),
+        str(card.get("snapshot") or ""),
     ]
     location = card.get("location") if isinstance(card.get("location"), dict) else {}
     parts.append(str(location.get("title") or ""))

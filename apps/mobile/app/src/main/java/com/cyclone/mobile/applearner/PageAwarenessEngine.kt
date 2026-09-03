@@ -339,6 +339,28 @@ object PageSignatureEngine {
         val contentParts = mutableListOf<String>()
         val controls = mutableListOf<PageControl>()
         val titleCandidates = mutableListOf<String>()
+        var selectedTab = ""
+        var paneTitle = ""
+        var firstHeading = ""
+
+        for (i in 0 until nodes.length()) {
+            val probe = nodes.optJSONObject(i) ?: continue
+            if (!probe.optBoolean("visibleToUser", true)) continue
+            val probeRole = probe.optString("role").lowercase(Locale.US)
+            val probeText = probe.optString("text").trim().ifBlank { probe.optString("contentDescription").trim() }
+            val probeResource = probe.optString("resourceId").substringAfterLast('/').lowercase(Locale.US)
+            if (selectedTab.isBlank() && probeRole == "tab" && (probe.optBoolean("selected") || probe.optBoolean("checked"))) {
+                selectedTab = probeText
+            }
+            if (paneTitle.isBlank() && probeResource in setOf("action_bar_title", "toolbar_title", "panetitle", "pane_title", "title")) {
+                paneTitle = probeText
+            }
+            if (firstHeading.isBlank() && probeText.length in 2..80 && probe.optInt("depth", 99) <= 4 &&
+                probeRole in setOf("text", "generic", "") && !probe.optBoolean("clickable")
+            ) {
+                firstHeading = probeText
+            }
+        }
 
         for (i in 0 until minOf(nodes.length(), 450)) {
             val node = nodes.optJSONObject(i) ?: continue
@@ -390,10 +412,14 @@ object PageSignatureEngine {
         }
 
         val compactStructure = structuralParts.distinct().take(180).joinToString("\n")
-        val structuralKey = sha256("$packageName|${className.orEmpty()}|$compactStructure").take(28)
+        val identityMix = listOf(selectedTab, paneTitle, firstHeading).filter { it.isNotBlank() }.joinToString("|")
+        val structuralKey = sha256("$packageName|${className.orEmpty()}|$identityMix|$compactStructure").take(28)
         val contentKey = sha256(contentParts.distinct().take(120).joinToString("|")).take(20)
         val pageKey = "$packageName:${className?.substringAfterLast('.') ?: "page"}:$structuralKey"
-        val title = titleCandidates.firstOrNull { normalizeLabel(it).isNotBlank() }
+        val title = paneTitle.takeIf { it.isNotBlank() }
+            ?: selectedTab.takeIf { it.isNotBlank() }
+            ?: firstHeading.takeIf { it.isNotBlank() }
+            ?: titleCandidates.firstOrNull { normalizeLabel(it).isNotBlank() }
             ?.take(80)
             ?: controls.firstOrNull()?.label?.take(80)
             ?: className?.substringAfterLast('.')

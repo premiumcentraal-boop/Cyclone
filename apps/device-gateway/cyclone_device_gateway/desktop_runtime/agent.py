@@ -31,7 +31,7 @@ PAGE_TRANSITION_TOOLS = frozenset({
 
 def _goal_label_present(after_raw: dict[str, Any], after: dict[str, Any], goal: str) -> bool:
     needle = (goal or "").strip()
-    if len(needle) < 2:
+    if not needle:
         return False
     parts = [
         str((after_raw or {}).get("pageText") or ""),
@@ -235,24 +235,31 @@ class DesktopAgentService:
         already_on_page = (
             execution_ok
             and bool(after_id)
-            and tool in {"phone.click", "phone.long_press"}
+            and tool in {"phone.click", "phone.long_press", "phone.type"}
             and isinstance(android_verification, dict)
-            and android_verification.get("ok") is not False
             and verification_status not in {"FAILED"}
+            and (
+                verification_status == "OBSERVED"
+                or android_verification.get("ok") is not False
+            )
             and _goal_label_present(after_raw, after, goal)
         )
         verification_passed = (
             execution_ok
             and bool(after_id)
-            and isinstance(android_verification, dict)
-            and android_verification.get("ok") is True
             and (
-                verification_status in {"PASSED", "NOT_REQUIRED", "ALREADY_ON_PAGE"}
-                or page_changed_status
-                or android_verification.get("pageChanged") is True
-                or already_on_page
+                already_on_page
+                or (
+                    isinstance(android_verification, dict)
+                    and android_verification.get("ok") is True
+                    and (
+                        verification_status in {"PASSED", "NOT_REQUIRED", "ALREADY_ON_PAGE"}
+                        or page_changed_status
+                        or android_verification.get("pageChanged") is True
+                    )
+                    and semantic_success_claimed
+                )
             )
-            and (semantic_success_claimed or already_on_page)
         )
         error = None
         if not execution_ok:

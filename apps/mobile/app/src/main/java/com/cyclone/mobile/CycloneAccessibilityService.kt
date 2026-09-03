@@ -183,7 +183,15 @@ class CycloneAccessibilityService : AccessibilityService() {
         val root = preferredForegroundRoot() ?: rootInActiveWindow
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
-        if (root != null) collectNode(root, "0", null, 0, nodes)
+        val consumedWindows = mutableSetOf<Int>()
+        if (root != null) {
+            collectNode(root, "0", null, 0, nodes)
+            consumedWindows += root.windowId
+        }
+        includeFocusedWebWindows(nodes, consumedWindows)
+        val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
+        nodes.clear()
+        nodes.addAll(folded)
         val windowsSnapshot = windows.orEmpty().map { window ->
             val rect = Rect().also { window.getBoundsInScreen(it) }
             UiWindowSnapshot(
@@ -239,6 +247,25 @@ class CycloneAccessibilityService : AccessibilityService() {
             parent = parent!!.parent
         }
         return false
+    }
+
+    private fun includeFocusedWebWindows(nodes: MutableList<UiNodeSnapshot>, consumedWindows: MutableSet<Int>) {
+        for (window in windows.orEmpty()) {
+            val wroot = window.root ?: continue
+            if (wroot.windowId in consumedWindows) continue
+            if (!(window.isFocused || window.isActive)) continue
+            if (!isWebishWindow(window, wroot)) continue
+            collectNode(wroot, "w${window.id}/0", null, 0, nodes)
+            consumedWindows += wroot.windowId
+        }
+    }
+
+    private fun isWebishWindow(window: AccessibilityWindowInfo, root: AccessibilityNodeInfo): Boolean {
+        val pkg = root.packageName?.toString().orEmpty().lowercase()
+        val title = window.title?.toString().orEmpty().lowercase()
+        val cls = root.className?.toString().orEmpty().lowercase()
+        return "chrome" in pkg || "webview" in pkg || "browser" in pkg ||
+            "chrome" in title || "webview" in cls || "web_view" in cls
     }
 
     private fun preferredForegroundRoot(): AccessibilityNodeInfo? {
@@ -445,8 +472,16 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     private fun nodeAtPath(root: AccessibilityNodeInfo, path: String): AccessibilityNodeInfo? {
         val pieces = path.split('/').filter { it.isNotBlank() }
-        if (pieces.isEmpty() || pieces.first() != "0") return null
-        var node = root
+        if (pieces.isEmpty()) return null
+        val start = pieces.first()
+        val walkRoot = if (start.startsWith("w")) {
+            val windowId = start.removePrefix("w").toIntOrNull() ?: return null
+            windows.orEmpty().firstOrNull { it.id == windowId }?.root ?: return null
+        } else {
+            if (start != "0") return null
+            root
+        }
+        var node = walkRoot
         for (index in pieces.drop(1)) node = node.getChild(index.toIntOrNull() ?: return null) ?: return null
         return node
     }
@@ -458,7 +493,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             snapshot.bounds == UiBounds(rect.left, rect.top, rect.right, rect.bottom)
     }
 
-    private fun collectNode(node: AccessibilityNodeInfo, path: String, parentId: String?, depth: Int, out: MutableList<UiNodeSnapshot>) {
+    private fun collectNode(node: AccessibilityNodeInfo, path: String, parentId: String?, depth: Int, out: MutableList<UiNodeSnapshot>, parentClassName: String = "") {
         if (depth > 40 || out.size >= 2500) return
         val rect = Rect().also { node.getBoundsInScreen(it) }
         val bounds = UiBounds(rect.left, rect.top, rect.right, rect.bottom)
@@ -471,14 +506,15 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
         out += UiNodeSnapshot(
             id = id, path = path, parentId = parentId, childIds = childIds, depth = depth, windowId = node.windowId,
-            className = node.className?.toString().orEmpty(), role = inferRole(node), text = node.text?.toString().orEmpty(),
+            className = node.className?.toString().orEmpty(), role = inferRole(node, parentClassName), text = node.text?.toString().orEmpty(),
             contentDescription = node.contentDescription?.toString().orEmpty(), resourceId = node.viewIdResourceName.orEmpty(), bounds = bounds,
             clickable = node.isClickable, longClickable = node.isLongClickable, editable = node.isEditable, scrollable = node.isScrollable,
             enabled = node.isEnabled, selected = node.isSelected, checked = node.isChecked, checkable = node.isCheckable,
             focused = node.isFocused, focusable = node.isFocusable, visibleToUser = node.isVisibleToUser,
             actions = accessibilityActionNames(node),
         )
-        for (i in 0 until node.childCount) node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out) }
+        val selfClass = node.className?.toString().orEmpty()
+        for (i in 0 until node.childCount) node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out, selfClass) }
     }
 
     private fun accessibilityActionNames(node: AccessibilityNodeInfo): List<String> = node.actionList.orEmpty().map { action ->
@@ -501,7 +537,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         resourceId = node.viewIdResourceName?.takeIf { it.isNotBlank() },
         text = node.text?.toString()?.takeIf { it.isNotBlank() },
         contentDescription = node.contentDescription?.toString()?.takeIf { it.isNotBlank() },
-        role = inferRole(node),
+        role = inferRole(node, ""),
         className = node.className?.toString()?.takeIf { it.isNotBlank() },
         requireClickable = node.isClickable.takeIf { it },
         requireEditable = node.isEditable.takeIf { it },
@@ -514,18 +550,20 @@ class CycloneAccessibilityService : AccessibilityService() {
         return sha256(raw).take(16)
     }
 
-    private fun inferRole(node: AccessibilityNodeInfo): String {
-        val cls = node.className?.toString().orEmpty().lowercase()
-        return when {
-            node.isEditable || "edittext" in cls -> "textbox"
-            "button" in cls || node.isClickable && (node.text?.isNotBlank() == true || node.contentDescription?.isNotBlank() == true) -> "button"
-            "checkbox" in cls || node.isCheckable -> "checkbox"
-            "switch" in cls -> "switch"
-            "image" in cls -> "image"
-            node.isScrollable -> "scroll_container"
-            "textview" in cls -> "text"
-            else -> "generic"
-        }
+    private fun inferRole(node: AccessibilityNodeInfo, parentClassName: String): String {
+        return AccessibilityRoles.inferRole(
+            className = node.className?.toString().orEmpty(),
+            clickable = node.isClickable,
+            editable = node.isEditable,
+            checkable = node.isCheckable,
+            scrollable = node.isScrollable,
+            selected = node.isSelected,
+            text = node.text?.toString().orEmpty(),
+            contentDescription = node.contentDescription?.toString().orEmpty(),
+            resourceId = node.viewIdResourceName.orEmpty(),
+            parentClassName = parentClassName,
+            actions = accessibilityActionNames(node),
+        )
     }
 
     private fun screenFingerprint(packageName: String?, nodes: List<UiNodeSnapshot>): String {

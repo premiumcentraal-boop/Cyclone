@@ -50,7 +50,7 @@ object GateClassifier {
     private val grant = listOf(
         "grant", "allow access", "give permission", "authorize app", "trust this", "enable access",
     )
-    private val delete = listOf("delete", "remove", "erase", "factory reset", "wipe data")
+    private val delete = listOf("delete", "remove", "erase", "factory reset", "wipe data", "move to bin", "move to trash", "send to bin", "send to trash", "throw away")
     private val send = listOf("send", "send message", "send email", "post", "publish")
 
     fun classify(action: String, labels: List<String> = emptyList()): GateClass? {

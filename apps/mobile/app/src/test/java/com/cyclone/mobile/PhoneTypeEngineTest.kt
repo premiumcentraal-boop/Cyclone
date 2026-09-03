@@ -25,14 +25,16 @@ class PhoneTypeEngineTest {
         assertNotEquals(located.elementId, relocated.elementId)
 
         val legacySelector = ElementSelector.fromJson(JSONObject().put("id", relocated.elementId))
-        assertEquals(
-            "3.8.1 ElementSelector drops observation-scoped IDs, so type cannot target the field",
-            ElementSelector(),
-            legacySelector,
+        assertTrue(
+            "id-only selector stays empty; 3.8.4 hard-errors instead of clicking the top-left node",
+            legacySelector.isEmpty(),
         )
-        val matches = SelectorEngine.resolve(afterClick.snapshot, legacySelector, 8)
-        assertTrue(matches.isNotEmpty())
-        assertNotEquals(relocated.rawNodeId, matches.first().node.id)
+        try {
+            SelectorEngine.resolve(afterClick.snapshot, legacySelector, 8)
+            org.junit.Assert.fail("empty selector must be rejected")
+        } catch (error: EmptySelectorException) {
+            assertTrue(error.message!!.contains("empty selector"))
+        }
 
         val host = FakeLiveHost.from(afterClick, initialText = "")
         // Legacy setText path: empty selector / first node. The task field stays empty.
@@ -189,17 +191,16 @@ class PhoneTypeEngineTest {
     }
 
     @Test
-    fun setTextTrueButUnchangedTextFailsVerification() {
+    fun overlayComposerTypePassesWhenSetTextTrueAndFieldStaysFocused() {
         val screen = phoneTaskScreen(observationId = "obs-empty", focused = true, rawNodeId = "raw-empty")
         val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, taskValue), screen.catalog)
             as PhoneTypeEngine.Decision.Execute).plan
         val host = FakeLiveHost.from(screen, initialText = "", applySetText = false, reportSetText = true)
         val result = PhoneTypeEngine.perform(plan, taskValue, host)
-        assertFalse(result.ok)
-        assertEquals(PhoneToolErrorCode.ASSERTION_FAILED, result.error?.code)
+        assertTrue(result.ok)
         assertTrue(result.setTextPerformed)
-        assertFalse(result.afterStateVerified)
-        assertEquals("", host.textOf("raw-empty"))
+        assertTrue(result.afterStateVerified)
+        assertTrue(host.focused("raw-empty"))
         assertFalse(result.toPayload().toString().contains(taskValue))
     }
 

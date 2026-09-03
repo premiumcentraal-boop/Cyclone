@@ -57,6 +57,23 @@ class PageAwarenessEngineTest {
         assertEquals(true, apps.selector.getBoolean("clickable"))
     }
 
+
+    @Test
+    fun clockTimerVersusAlarmHaveDifferentPageKeys() {
+        val timer = PageSignatureEngine.fromSnapshot(clockSnapshot("Timer"))
+        val alarm = PageSignatureEngine.fromSnapshot(clockSnapshot("Alarm"))
+        assertNotEquals(timer.pageKey, alarm.pageKey)
+    }
+
+    private fun clockSnapshot(selectedTab: String): JSONObject = JSONObject()
+        .put("package", "com.google.android.deskclock")
+        .put("class", "com.android.deskclock.DeskClock")
+        .put("nodes", JSONArray()
+            .put(node("android:id/tab", "Alarm", "tab", true, "0/0").put("selected", selectedTab == "Alarm"))
+            .put(node("android:id/tab", "Clock", "tab", true, "0/1").put("selected", selectedTab == "Clock"))
+            .put(node("android:id/tab", "Timer", "tab", true, "0/2").put("selected", selectedTab == "Timer"))
+            .put(node("android:id/chrome", "More options", "button", true, "0/3")))
+
     private fun settingsSnapshot(dynamicBattery: String, time: String, order: String): JSONObject = JSONObject()
         .put("package", "com.android.settings")
         .put("class", "com.android.settings.Settings")

@@ -87,6 +87,14 @@ class GatePolicyTest {
         assertEquals(GateClass.GRANT, GateClassifier.classify("phone.click", listOf("Grant access")))
         assertEquals(GateClass.PAY, GateClassifier.classify("phone.click", listOf("Send payment")))
         assertNull(GateClassifier.classify("phone.click", listOf("Open Apps")))
+        assertNull(GateClassifier.classify("phone.click", listOf("See all")))
+        assertNull(GateClassifier.classify("phone.click", listOf("bin")))
+        assertNull(GateClassifier.classify("phone.click", listOf("trash")))
+        assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Move to trash")))
+        assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Move to bin")))
+        assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Send to trash")))
+        assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Send to bin")))
+        assertEquals(GateClass.DELETE, GateClassifier.classify("phone.click", listOf("Throw away")))
     }
 
     @Test

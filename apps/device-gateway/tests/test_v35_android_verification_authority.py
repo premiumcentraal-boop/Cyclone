@@ -121,3 +121,24 @@ def test_already_on_page_click_is_verified_even_if_page_key_unchanged():
     assert result["verification"]["basis"] == "ALREADY_ON_PAGE"
     assert result["verification"]["authority"] == "ANDROID_CANONICAL"
     assert result["afterState"]["pageKey"] == "HOME" or result["verification"]["after_page_key"] == "HOME"
+
+
+def test_observed_execution_ok_same_page_is_not_verification_failed():
+    service = DesktopAgentService(
+        OneDeviceFleet(
+            GoalAwareBridge({"ok": False, "status": "OBSERVED", "code": "VERIFICATION_FAILED", "semanticSuccessClaimed": False})
+        )
+    )
+    result = service.action(
+        "dev_test",
+        {
+            "capability_id": "phone.click",
+            "expected_observation_id": "obs-before",
+            "goal": "See all 98 apps",
+            "params": {"elementId": "see-all"},
+        },
+    )
+    assert result["execution"]["androidExecution"]["ok"] is True
+    assert result["verification"]["passed"] is True
+    assert result["ok"] is True
+    assert result["verification"]["basis"] == "ALREADY_ON_PAGE"
