@@ -71,6 +71,60 @@ object AccessibilityRoles {
     fun isActivatable(clickable: Boolean, actions: List<String>): Boolean =
         clickable || "ACTION_CLICK" in actions || "ACTION_SELECT" in actions
 
+    fun isStrongActivatable(clickable: Boolean, actions: List<String>): Boolean =
+        "ACTION_CLICK" in actions || "ACTION_SELECT" in actions
+
+    fun shouldPreferActivatableRelative(chosen: UiNodeSnapshot): Boolean {
+        val role = chosen.role.lowercase()
+        if (role == "generic" || role.isBlank()) return true
+        if (!isStrongActivatable(chosen.clickable, chosen.actions) && !chosen.editable) return true
+        return false
+    }
+
+    fun resolveActivationTarget(nodes: List<UiNodeSnapshot>, chosen: UiNodeSnapshot): UiNodeSnapshot {
+        if (nodes.isEmpty()) return chosen
+        val byId = nodes.associateBy { it.id }
+        if (chosen.role.equals("generic", ignoreCase = true) || chosen.role.isBlank()) {
+            firstStrongRelative(chosen, byId)?.let { return it }
+            val parent = chosen.parentId?.let(byId::get)
+            if (parent != null) {
+                firstStrongRelative(parent, byId)?.let { if (it.id != chosen.id) return it }
+            }
+        }
+        if (isStrongActivatable(chosen.clickable, chosen.actions) || chosen.editable) return chosen
+        var parentId = chosen.parentId
+        repeat(6) {
+            val parent = parentId?.let(byId::get) ?: return chosen
+            if (parent.role.equals("generic", ignoreCase = true) || parent.role.isBlank()) {
+                firstStrongRelative(parent, byId)?.let { return it }
+            }
+            if (isStrongActivatable(parent.clickable, parent.actions) || parent.editable || isHostRole(parent.role)) {
+                return parent
+            }
+            parentId = parent.parentId
+        }
+        return chosen
+    }
+
+    internal fun firstStrongRelative(host: UiNodeSnapshot, byId: Map<String, UiNodeSnapshot>): UiNodeSnapshot? {
+        val children = host.childIds.mapNotNull(byId::get)
+        val buttons = children.filter { it.role.equals("button", ignoreCase = true) && isStrongActivatable(it.clickable, it.actions) }
+        if (buttons.isNotEmpty()) return buttons.first()
+        val strong = children.filter { isStrongActivatable(it.clickable, it.actions) }
+        if (strong.isNotEmpty()) return strong.first()
+        for (child in children) {
+            firstStrongRelative(child, byId)?.let { return it }
+        }
+        return null
+    }
+
+    private fun deferGenericHost(parent: UiNodeSnapshot, relative: UiNodeSnapshot): Boolean {
+        if (!isStrongActivatable(relative.clickable, relative.actions)) return false
+        if (isRow(parent.className, parent.resourceId)) return false
+        if (isHostRole(parent.role)) return false
+        return parent.role.equals("generic", ignoreCase = true) || parent.role.isBlank()
+    }
+
     fun preferClickableAncestor(role: String, nodeClickable: Boolean, actions: List<String>): Boolean {
         val roleName = role.lowercase()
         if (roleName in setOf("text", "image")) return true
@@ -110,6 +164,7 @@ object AccessibilityRoles {
         val byId = nodes.associateBy { it.id }
         val labels = linkedMapOf<String, MutableList<String>>()
         val roles = linkedMapOf<String, String>()
+        val demote = linkedSetOf<String>()
         for (node in nodes) {
             if (node.clickable || node.editable || "ACTION_CLICK" in node.actions) continue
             if (node.role !in setOf("text", "generic", "image", "")) continue
@@ -118,40 +173,55 @@ object AccessibilityRoles {
             var parentId = node.parentId
             repeat(6) {
                 val parent = parentId?.let(byId::get) ?: return@repeat
-                val host = parent.editable || isActivatable(parent.clickable, parent.actions)
-                if (host) {
-                    labels.getOrPut(parent.id) { mutableListOf() }.add(ownLabel)
-                    roles[parent.id] = when {
-                        isRow(parent.className, parent.resourceId) -> "row"
+                val relative = firstStrongRelative(parent, byId)
+                val attach = when {
+                    relative != null && deferGenericHost(parent, relative) -> relative
+                    parent.editable || isActivatable(parent.clickable, parent.actions) -> parent
+                    else -> null
+                }
+                if (attach != null) {
+                    labels.getOrPut(attach.id) { mutableListOf() }.add(ownLabel)
+                    roles[attach.id] = when {
+                        isRow(attach.className, attach.resourceId) -> "row"
                         else -> inferRole(
-                            className = parent.className,
+                            className = attach.className,
                             clickable = true,
-                            editable = parent.editable,
-                            checkable = parent.checkable,
-                            scrollable = parent.scrollable,
-                            selected = parent.selected,
-                            text = parent.text.ifBlank { ownLabel },
-                            contentDescription = parent.contentDescription,
-                            resourceId = parent.resourceId,
-                            actions = parent.actions,
+                            editable = attach.editable,
+                            checkable = attach.checkable,
+                            scrollable = attach.scrollable,
+                            selected = attach.selected,
+                            text = attach.text.ifBlank { ownLabel },
+                            contentDescription = attach.contentDescription,
+                            resourceId = attach.resourceId,
+                            actions = attach.actions,
                         )
+                    }
+                    if (attach.id != parent.id && deferGenericHost(parent, attach)) {
+                        demote += parent.id
                     }
                     return@repeat
                 }
                 parentId = parent.parentId
             }
         }
-        if (labels.isEmpty() && roles.isEmpty()) return nodes
+        if (labels.isEmpty() && roles.isEmpty() && demote.isEmpty()) return nodes
         return nodes.map { node ->
             val promoted = labels[node.id]
             val role = roles[node.id]
-            if (promoted == null && role == null) node
-            else node.copy(
-                text = node.text.ifBlank { joinHostLabels(promoted.orEmpty()) },
-                clickable = true,
-                role = role ?: node.role,
-                actions = if ("ACTION_CLICK" in node.actions) node.actions else node.actions + "ACTION_CLICK",
-            )
+            val demoted = node.id in demote && promoted == null
+            when {
+                demoted -> node.copy(
+                    clickable = false,
+                    actions = node.actions.filter { it != "ACTION_CLICK" },
+                )
+                promoted == null && role == null -> node
+                else -> node.copy(
+                    text = node.text.ifBlank { joinHostLabels(promoted.orEmpty()) },
+                    clickable = true,
+                    role = role ?: node.role,
+                    actions = if ("ACTION_CLICK" in node.actions) node.actions else node.actions + "ACTION_CLICK",
+                )
+            }
         }
     }
 }

@@ -227,17 +227,31 @@ class CycloneAccessibilityService : AccessibilityService() {
     fun click(selector: ElementSelector): Boolean {
         if (!agentCanAct()) return false
         repeat(2) {
-            val target = resolveLiveTarget(selector) ?: return@repeat
-            val (snapshotNode, node) = target
+            val snapshot = observe(markFresh = false)
+            val match = SelectorEngine.resolve(snapshot, selector, 1).firstOrNull() ?: return@repeat
+            val snapshotNode = match.node
+            val node = liveNodeAtSnapshotPath(snapshotNode) ?: return@repeat
             if (!sameNode(snapshotNode, node)) return@repeat
-            val liveActions = accessibilityActionNames(node)
+            val activation = AccessibilityRoles.resolveActivationTarget(snapshot.nodes, snapshotNode)
+            val targetLive = if (activation.path == snapshotNode.path) {
+                node
+            } else {
+                liveNodeAtSnapshotPath(activation)?.takeIf { sameNode(activation, it) } ?: node
+            }
+            if (AccessibilityRoles.shouldPreferActivatableRelative(snapshotNode) &&
+                clickActivatableRelative(node)
+            ) {
+                return true
+            }
+            if (targetLive !== node && activateNode(targetLive, activation.role)) return true
+            val liveActions = accessibilityActionNames(targetLive)
             val preferHost = AccessibilityRoles.preferClickableAncestor(
-                snapshotNode.role, node.isClickable, liveActions,
+                activation.role, targetLive.isClickable, liveActions,
             )
-            if (preferHost && clickActivatableAncestor(node)) return true
-            if (activateNode(node, snapshotNode.role)) return true
-            if (!preferHost && clickActivatableAncestor(node)) return true
-            return tap(snapshotNode.bounds.centerX, snapshotNode.bounds.centerY)
+            if (preferHost && clickActivatableAncestor(targetLive)) return true
+            if (activateNode(targetLive, activation.role)) return true
+            if (!preferHost && clickActivatableAncestor(targetLive)) return true
+            return tap(activation.bounds.centerX, activation.bounds.centerY)
         }
         return false
     }
@@ -245,6 +259,31 @@ class CycloneAccessibilityService : AccessibilityService() {
     private fun activateNode(node: AccessibilityNodeInfo, role: String): Boolean {
         if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
         if (role.equals("tab", ignoreCase = true) && node.performAction(AccessibilityNodeInfo.ACTION_SELECT)) return true
+        return false
+    }
+
+    private fun clickActivatableRelative(node: AccessibilityNodeInfo): Boolean {
+        fun tryClick(candidate: AccessibilityNodeInfo): Boolean {
+            val actions = accessibilityActionNames(candidate)
+            if (!AccessibilityRoles.isStrongActivatable(candidate.isClickable, actions)) return false
+            if (candidate.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            if (candidate.performAction(AccessibilityNodeInfo.ACTION_SELECT)) return true
+            return false
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (tryClick(child)) return true
+            for (j in 0 until child.childCount) {
+                val grand = child.getChild(j) ?: continue
+                if (tryClick(grand)) return true
+            }
+        }
+        val parent = node.parent ?: return false
+        for (i in 0 until parent.childCount) {
+            val sib = parent.getChild(i) ?: continue
+            if (sib === node) continue
+            if (tryClick(sib)) return true
+        }
         return false
     }
 

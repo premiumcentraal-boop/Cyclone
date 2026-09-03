@@ -46,6 +46,7 @@ class AccessibilityRolesTest {
         assertEquals("Network & internet", promoted.text)
         assertTrue(promoted.clickable)
         assertEquals("row", promoted.role)
+        assertEquals("host", AccessibilityRoles.resolveActivationTarget(folded, promoted).id)
     }
 
     @Test
@@ -101,6 +102,52 @@ class AccessibilityRolesTest {
     }
 
     @Test
+    fun filesRowFilenameRefActivatesButtonSiblingNotGenericHost() {
+        val parent = node(
+            "row", "0/1", null, listOf("name", "open"), "", "generic",
+            clickable = true, actions = emptyList(),
+        )
+        val name = node("name", "0/1/0", "row", emptyList(), "Cyclone-3.6.0-beta.2.apk", "text")
+        val open = node(
+            "open", "0/1/1", "row", emptyList(), "Cyclone-3.6.0-beta.2.apk", "button",
+            clickable = true, className = "android.widget.Button",
+            actions = listOf("ACTION_CLICK"),
+        )
+        val folded = AccessibilityRoles.foldTalkBackHosts(listOf(parent, name, open))
+        val foldedParent = folded.first { it.id == "row" }
+        val foldedButton = folded.first { it.id == "open" }
+        assertTrue(foldedButton.text.contains("Cyclone-3.6.0-beta.2.apk"))
+        assertTrue("ACTION_CLICK" in foldedButton.actions)
+        assertTrue(foldedButton.clickable)
+        assertFalse(foldedParent.clickable)
+        assertFalse("ACTION_CLICK" in foldedParent.actions)
+
+        val fromParent = AccessibilityRoles.resolveActivationTarget(folded, foldedParent)
+        assertEquals("open", fromParent.id)
+        val fromName = AccessibilityRoles.resolveActivationTarget(folded, folded.first { it.id == "name" })
+        assertEquals("open", fromName.id)
+        val fromButton = AccessibilityRoles.resolveActivationTarget(folded, foldedButton)
+        assertEquals("open", fromButton.id)
+
+        val advertisedParent = node(
+            "row2", "0/2", null, listOf("name2", "open2"), "Cyclone-3.6.0-beta.2.apk", "generic",
+            clickable = true, actions = listOf("ACTION_CLICK"),
+        )
+        val name2 = node("name2", "0/2/0", "row2", emptyList(), "Cyclone-3.6.0-beta.2.apk", "text")
+        val open2 = node(
+            "open2", "0/2/1", "row2", emptyList(), "Cyclone-3.6.0-beta.2.apk", "button",
+            clickable = true, className = "android.widget.Button",
+            actions = listOf("ACTION_CLICK"),
+        )
+        val advertised = listOf(advertisedParent, name2, open2)
+        val filenameRef = advertised.first { it.id == "row2" }
+        assertEquals("generic", filenameRef.role)
+        val live = AccessibilityRoles.resolveActivationTarget(advertised, filenameRef)
+        assertEquals("open2", live.id)
+        assertTrue("ACTION_CLICK" in live.actions)
+    }
+
+    @Test
     fun calculatorDigitSevenSurvivesFoldAndStaysClickable() {
         val seven = node(
             "seven", "0/2/7", "pad", emptyList(), "7", "button",
@@ -110,6 +157,7 @@ class AccessibilityRolesTest {
         assertEquals("7", folded.single().text)
         assertTrue(folded.single().clickable)
         assertEquals("button", folded.single().role)
+        assertEquals("seven", AccessibilityRoles.resolveActivationTarget(folded, folded.single()).id)
     }
 
     @Test
@@ -158,6 +206,7 @@ class AccessibilityRolesTest {
         assertEquals("Alarms", host.text)
         assertEquals("tab", host.role)
         assertTrue(host.clickable)
+        assertEquals("tab", AccessibilityRoles.resolveActivationTarget(folded, host).id)
     }
 
     @Test
