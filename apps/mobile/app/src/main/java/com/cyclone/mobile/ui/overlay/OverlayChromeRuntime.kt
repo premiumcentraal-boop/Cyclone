@@ -8,6 +8,7 @@ import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
 import com.cyclone.mobile.ai.OverlayChromeController
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.QuickAgentConfig
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,6 +56,8 @@ object OverlayChromeRuntime {
                 onVoiceStateChanged = { listening, transcript, message ->
                     updateVoice(listening, transcript, message)
                 },
+                getAiSettings = { readAiSettings(service) },
+                onAiSettingsChanged = { settings -> saveAiSettings(service, settings) },
             )
             controller = next
             next.show(machine.snapshot())
@@ -148,15 +151,14 @@ object OverlayChromeRuntime {
                 it.enterWorking()
                 it.updateStatus("Starting…")
             }
-            val prefs = context.getSharedPreferences("cyclone_ai", android.content.Context.MODE_PRIVATE)
-            val modelSlug = prefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id)
-                .orEmpty()
-                .ifBlank { OpenRouterModelPresets.DEFAULT.id }
+            val settings = readAiSettings(context)
             val accessProfile = CycloneAiAccessProfileStore.read(context)
             val result = OpenRouterAdaptiveAgent(context).execute(
                 request,
                 QuickAgentConfig(
-                    model = OpenRouterModelPresets.byId(modelSlug),
+                    model = OpenRouterModelPresets.byId(settings.modelId).copy(
+                        reasoningEffort = settings.reasoningEffort,
+                    ),
                     safeMode = accessProfile != CycloneAiAccessProfile.FULL,
                     accessProfile = accessProfile,
                 ),
@@ -183,4 +185,29 @@ object OverlayChromeRuntime {
             controller?.render(machine.snapshot())
         }
     }
+
+    private fun readAiSettings(context: Context): OverlayAiSettings {
+        val prefs = context.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE)
+        val savedModel = prefs.getString(MODEL_KEY, OpenRouterModelPresets.DEFAULT.id).orEmpty()
+        val modelId = savedModel.takeIf { id -> OpenRouterModelPresets.all.any { it.id == id } }
+            ?: OpenRouterModelPresets.DEFAULT.id
+        val effort = prefs.getString(EFFORT_KEY, "medium").orEmpty()
+            .takeIf { it in REASONING_LEVELS } ?: "medium"
+        return OverlayAiSettings(modelId, effort)
+    }
+
+    private fun saveAiSettings(context: Context, settings: OverlayAiSettings) {
+        val modelId = settings.modelId.takeIf { id -> OpenRouterModelPresets.all.any { it.id == id } }
+            ?: OpenRouterModelPresets.DEFAULT.id
+        val effort = settings.reasoningEffort.takeIf { it in REASONING_LEVELS } ?: "medium"
+        context.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE).edit()
+            .putString(MODEL_KEY, modelId)
+            .putString(EFFORT_KEY, effort)
+            .apply()
+    }
+
+    private const val AI_PREFS = "cyclone_ai"
+    private const val MODEL_KEY = "openrouter_model"
+    private const val EFFORT_KEY = "openrouter_reasoning_effort"
+    private val REASONING_LEVELS = setOf("low", "medium", "high", "max")
 }

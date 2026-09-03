@@ -21,54 +21,46 @@ data class OpenRouterModelPreset(
     val reasoningEffort: String = "medium",
 )
 
-/**
- * Built-in V2.8 provider presets. Custom OpenRouter model slugs still work through byId().
- *
- * The requested "Gemini 3.7 Flash" is not an official Google model as of August 2026. Google's
- * current stable Flash model is Gemini 3.6 Flash, so Cyclone exposes that real supported endpoint
- * at High reasoning instead of silently inventing an unsupported 3.7 slug.
- */
+/** Five curated OpenRouter endpoints for Cyclone 3.8.6. Custom slugs still work through byId(). */
 object OpenRouterModelPresets {
     val GPT_5_6_LUNA = OpenRouterModelPreset(
         id = "openai/gpt-5.6-luna",
-        label = "GPT-5.6 Luna · Max",
+        label = "GPT-5.6 Luna",
+        vision = true,
+        reasoningEffort = "medium",
+    )
+    val GEMINI_3_8_FLASH = OpenRouterModelPreset(
+        id = "google/gemini-3.8-flash",
+        label = "Gemini 3.8 Flash",
+        vision = true,
+        reasoningEffort = "medium",
+    )
+    val GLM_5_3_FLASH = OpenRouterModelPreset(
+        id = "z-ai/glm-5.3-flash",
+        label = "GLM 5.3 Flash",
+        vision = true,
+        reasoningEffort = "medium",
+    )
+    val MUSE_SPARK_1_3 = OpenRouterModelPreset(
+        id = "meta/muse-spark-1.3",
+        label = "Muse Spark 1.3",
         vision = true,
         reasoningEffort = "max",
     )
-    val GEMINI_3_6_FLASH = OpenRouterModelPreset(
-        id = "google/gemini-3.6-flash",
-        label = "Gemini 3.6 Flash · High",
+    val GPT_5_6_SOL = OpenRouterModelPreset(
+        id = "openai/gpt-5.6-sol",
+        label = "GPT-5.6 Sol",
         vision = true,
         reasoningEffort = "high",
     )
-    val QWEN_3_8_27B = OpenRouterModelPreset(
-        id = "qwen/qwen3.8-27b",
-        label = "Qwen3.8 27B",
-        vision = false,
-        reasoningEffort = "medium",
-    )
-    val DEEPSEEK_V4_FLASH = OpenRouterModelPreset(
-        "deepseek/deepseek-v4-flash-0731",
-        "DeepSeek V4 Flash 0731",
-        false,
-        "medium",
-    )
-    val GEMMA_4_26B = OpenRouterModelPreset(
-        "google/gemma-4-26b-a4b-it",
-        "Gemma 4 26B A4B",
-        true,
-        "medium",
-    )
-    val GEMMA_4_31B = OpenRouterModelPreset(
-        "google/gemma-4-31b-it",
-        "Gemma 4 31B",
-        true,
-        "medium",
-    )
 
-    /** Luna Max is the clean-install V2.8 default requested for Cyclone phone control. */
+    /** Luna is the inexpensive balanced clean-install default. */
     val DEFAULT = GPT_5_6_LUNA
-    val all = listOf(GPT_5_6_LUNA, GEMINI_3_6_FLASH, QWEN_3_8_27B, DEEPSEEK_V4_FLASH, GEMMA_4_26B, GEMMA_4_31B)
+    val all = listOf(GEMINI_3_8_FLASH, GPT_5_6_LUNA, GLM_5_3_FLASH, MUSE_SPARK_1_3, GPT_5_6_SOL)
+
+    // Compatibility names used by older screens; both resolve to current curated endpoints.
+    val GEMINI_3_6_FLASH = GEMINI_3_8_FLASH
+    val DEEPSEEK_V4_FLASH = GLM_5_3_FLASH
 
     // Unknown custom slugs are accepted, but vision support is not assumed until the user picks a
     // known vision preset. This preserves existing behavior and prevents accidental image requests
@@ -79,7 +71,7 @@ object OpenRouterModelPresets {
 
 data class QuickAgentConfig(
     val model: OpenRouterModelPreset = OpenRouterModelPresets.DEFAULT,
-    val visionModel: OpenRouterModelPreset = OpenRouterModelPresets.GEMINI_3_6_FLASH,
+    val visionModel: OpenRouterModelPreset = OpenRouterModelPresets.GEMINI_3_8_FLASH,
     /** V2.8 counts provider calls on unknown semantic pages, not raw phone actions/events. */
     val maxDecisions: Int = 6,
     val safeMode: Boolean = true,

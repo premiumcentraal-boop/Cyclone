@@ -40,16 +40,21 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,18 +83,27 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.roundToInt
 
 private val AuroraBlue = Color(0xFF4A8DFF)
 private val AuroraCyan = Color(0xFF80E9FF)
 private val AuroraViolet = Color(0xFF8568FF)
 private val AuroraMagenta = Color(0xFFE56CFF)
 private val AuroraInk = Color(0xFF060B18)
+
+data class OverlayAiSettings(
+    val modelId: String = OpenRouterModelPresets.DEFAULT.id,
+    val reasoningEffort: String = "medium",
+)
+
+private val intelligenceLevels = listOf("low", "medium", "high", "max")
 
 /**
  * One accessibility overlay for the idle orb and every AI-mode state. The chrome only emits
@@ -102,6 +116,8 @@ fun OverlayChrome(
     onComposerChanged: (String) -> Unit = {},
     onRequestSubmitted: (String) -> Unit = {},
     onVoiceInput: () -> Unit = {},
+    aiSettings: OverlayAiSettings = OverlayAiSettings(),
+    onAiSettingsChanged: (OverlayAiSettings) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     CycloneV32Theme {
@@ -133,6 +149,8 @@ fun OverlayChrome(
                     onComposerChanged = onComposerChanged,
                     onRequestSubmitted = onRequestSubmitted,
                     onVoiceInput = onVoiceInput,
+                    aiSettings = aiSettings,
+                    onAiSettingsChanged = onAiSettingsChanged,
                     modifier = modifier,
                 )
             }
@@ -236,8 +254,11 @@ private fun AuroraPanel(
     onComposerChanged: (String) -> Unit,
     onRequestSubmitted: (String) -> Unit,
     onVoiceInput: () -> Unit,
+    aiSettings: OverlayAiSettings,
+    onAiSettingsChanged: (OverlayAiSettings) -> Unit,
     modifier: Modifier,
 ) {
+    var showAiSettings by remember { mutableStateOf(false) }
     LaunchedEffect(snapshot.state, snapshot.minimized) {
         if (snapshot.state == OverlayChromeState.DONE && !snapshot.minimized) {
             delay(5_500)
@@ -256,7 +277,10 @@ private fun AuroraPanel(
             modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            AuroraControls(snapshot, onAction)
+            AuroraControls(snapshot, onAction, onToggleSettings = { showAiSettings = !showAiSettings })
+            AnimatedVisibility(showAiSettings) {
+                QuickAiSettings(aiSettings, onAiSettingsChanged)
+            }
             AuroraStateContent(snapshot, onAction, Modifier.weight(1f, fill = false))
             if (snapshot.state != OverlayChromeState.GATE && snapshot.state != OverlayChromeState.DONE) {
                 AuroraComposer(snapshot, onComposerChanged, onRequestSubmitted, onVoiceInput)
@@ -354,7 +378,11 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGlow(
 }
 
 @Composable
-private fun AuroraControls(snapshot: OverlayChromeSnapshot, onAction: (OverlayUserAction) -> Unit) {
+private fun AuroraControls(
+    snapshot: OverlayChromeSnapshot,
+    onAction: (OverlayUserAction) -> Unit,
+    onToggleSettings: () -> Unit,
+) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         AuroraIconButton(
             label = if (snapshot.userPaused) OverlayCopy.RESUME else OverlayCopy.PAUSE,
@@ -386,12 +414,71 @@ private fun AuroraControls(snapshot: OverlayChromeSnapshot, onAction: (OverlayUs
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        AuroraIconButton("AI settings", onToggleSettings) {
+            Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(19.dp))
+        }
+        Spacer(Modifier.size(6.dp))
         AuroraIconButton(OverlayCopy.MINIMIZE, { onAction(OverlayUserAction.MINIMIZE) }) {
             Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(21.dp))
         }
         Spacer(Modifier.size(6.dp))
         AuroraIconButton(OverlayCopy.EXIT, { onAction(OverlayUserAction.EXIT) }) {
             Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun QuickAiSettings(
+    settings: OverlayAiSettings,
+    onChanged: (OverlayAiSettings) -> Unit,
+) {
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    val selectedModel = OpenRouterModelPresets.byId(settings.modelId)
+    val levelIndex = intelligenceLevels.indexOf(settings.reasoningEffort).coerceAtLeast(1)
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Color.Black.copy(alpha = 0.24f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Model", color = Color.White.copy(alpha = 0.68f), style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.weight(1f))
+                Box {
+                    TextButton(onClick = { modelMenuOpen = true }) {
+                        Text(selectedModel.label, color = Color.White, maxLines = 1)
+                    }
+                    DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+                        OpenRouterModelPresets.all.forEach { model ->
+                            DropdownMenuItem(
+                                text = { Text(model.label) },
+                                onClick = {
+                                    modelMenuOpen = false
+                                    onChanged(settings.copy(modelId = model.id))
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Fast", color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = levelIndex.toFloat(),
+                    onValueChange = { value ->
+                        onChanged(settings.copy(reasoningEffort = intelligenceLevels[value.roundToInt().coerceIn(0, 3)]))
+                    },
+                    valueRange = 0f..3f,
+                    steps = 2,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                )
+                Text(
+                    settings.reasoningEffort.replaceFirstChar { it.uppercase() },
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
     }
 }

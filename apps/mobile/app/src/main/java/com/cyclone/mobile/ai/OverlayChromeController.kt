@@ -34,6 +34,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.MainActivity
 import com.cyclone.mobile.ui.overlay.OverlayChrome
+import com.cyclone.mobile.ui.overlay.OverlayAiSettings
 import com.cyclone.mobile.ui.overlay.OverlayChromeSnapshot
 import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import com.cyclone.mobile.ui.overlay.OverlayCopy
@@ -52,6 +53,8 @@ class OverlayChromeController(
     private val onComposerChanged: (String) -> Unit,
     private val onRequestSubmitted: (String) -> Unit,
     private val onVoiceStateChanged: (Boolean, String?, String?) -> Unit,
+    private val getAiSettings: () -> OverlayAiSettings,
+    private val onAiSettingsChanged: (OverlayAiSettings) -> Unit,
 ) {
     private val wm = service.getSystemService(WindowManager::class.java)
     private val main = Handler(Looper.getMainLooper())
@@ -59,11 +62,13 @@ class OverlayChromeController(
     private var root: ComposeView? = null
     private var params: WindowManager.LayoutParams? = null
     private var latest by mutableStateOf(OverlayChromeSnapshot())
+    private var aiSettings by mutableStateOf(OverlayAiSettings())
     private var speechRecognizer: SpeechRecognizer? = null
 
     fun show(snapshot: OverlayChromeSnapshot) {
         onMain {
             latest = snapshot
+            aiSettings = getAiSettings()
             if (root != null) {
                 applyLayout(snapshot)
                 return@onMain
@@ -82,6 +87,11 @@ class OverlayChromeController(
                         onComposerChanged = onComposerChanged,
                         onRequestSubmitted = onRequestSubmitted,
                         onVoiceInput = ::beginVoiceInput,
+                        aiSettings = aiSettings,
+                        onAiSettingsChanged = { next ->
+                            aiSettings = next
+                            onAiSettingsChanged(next)
+                        },
                     )
                 }
             }

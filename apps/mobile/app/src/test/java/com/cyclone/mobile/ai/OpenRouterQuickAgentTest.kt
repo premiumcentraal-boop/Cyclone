@@ -9,9 +9,18 @@ import org.junit.Test
 class OpenRouterQuickAgentTest {
     @Test
     fun currentModelPresetsUseExpectedOpenRouterSlugs() {
-        assertEquals("deepseek/deepseek-v4-flash-0731", OpenRouterModelPresets.DEEPSEEK_V4_FLASH.id)
-        assertEquals("google/gemma-4-26b-a4b-it", OpenRouterModelPresets.GEMMA_4_26B.id)
-        assertTrue(OpenRouterModelPresets.GEMMA_4_26B.vision)
+        assertEquals(
+            listOf(
+                "google/gemini-3.8-flash",
+                "openai/gpt-5.6-luna",
+                "z-ai/glm-5.3-flash",
+                "meta/muse-spark-1.3",
+                "openai/gpt-5.6-sol",
+            ),
+            OpenRouterModelPresets.all.map { it.id },
+        )
+        assertTrue(OpenRouterModelPresets.all.all { it.vision })
+        assertEquals("max", OpenRouterModelPresets.MUSE_SPARK_1_3.reasoningEffort)
     }
 
     @Test

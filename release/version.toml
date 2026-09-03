@@ -1,13 +1,13 @@
-# Cyclone 3.8.5
-# Dynamic aurora AI mode, dismissible overlay chrome, composer and voice input.
+# Cyclone 3.8.6
+# Curated OpenRouter models and compact overlay intelligence control.
 schema = 1
-product_version = "3.8.5"
+product_version = "3.8.6"
 channel = "stable"
-android_version_code = 50
+android_version_code = 51
 python_version = "3.8.4"
 
 [components]
-mobile = "3.8.5"
+mobile = "3.8.6"
 teamwork_sniper = "3.5.3.3"
 teamwork_sniper_android_version_code = 6
 pc_companion = "3.8.4"
@@ -23,4 +23,4 @@ virtual_provider = "UNCHANGED_FROM_3.5.1"
 android_signing = "PINNED_RELEASE_KEYSTORE"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-3.8.5"
+candidate_generation = "cyclone-3.8.6"
