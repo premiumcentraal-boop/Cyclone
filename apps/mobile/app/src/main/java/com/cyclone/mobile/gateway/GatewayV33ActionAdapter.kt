@@ -154,7 +154,7 @@ internal object GatewayV33ActionAdapter {
                 .put("status", "DEGRADED")
                 .put("code", "VERIFICATION_FAILED")
                 .put("message", "Action executed but a fresh after-observation could not be captured.")
-            expect != null -> JSONObject()
+            expect != null && sharedVerification.basis == "EXPLICIT_EXPECTATION" -> JSONObject()
                 .put("ok", true)
                 .put("status", "PASSED")
                 .put("code", JSONObject.NULL)

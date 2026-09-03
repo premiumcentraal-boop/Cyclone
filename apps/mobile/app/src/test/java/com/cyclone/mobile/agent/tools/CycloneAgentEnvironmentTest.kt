@@ -132,6 +132,23 @@ class CycloneAgentEnvironmentTest {
         assertEquals(1, runtime.learningCalls)
     }
 
+    @Test fun unsupportedExplicitExpectationCannotPromoteExecutorSuccess() {
+        val unchanged = observation("obs-expect", "home", "fp-expect")
+        val result = GatewayV33ActionAdapter.verifyAfterState(
+            tool = "phone.type",
+            expectedPackage = "",
+            goalLabel = "Continue",
+            beforeObservation = unchanged,
+            afterObservation = unchanged,
+            androidExecutionOk = true,
+            executorAssertionFailed = false,
+            explicitExpectation = true,
+        )
+        assertFalse(result.passed)
+        assertEquals(AgentVerificationStatus.OBSERVED, result.status)
+        assertEquals("NO_SEMANTIC_PROGRESS", result.basis)
+    }
+
     @Test fun pcFacingVerifierRejectsUnchangedAndAcceptsTransition() {
         assertFalse(GatewayV33ActionAdapter.verifiedByAfterState(
             "phone.click", "", "home", "fp-1", "pkg", "home", "fp-1",

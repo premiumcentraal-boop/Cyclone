@@ -53,6 +53,18 @@ object AgentSemanticVerifier {
         "phone.set_clipboard",
     )
 
+    // PhoneToolExecutor evaluates params.expect only for actionWithConfirmation tools.
+    // A model-supplied expectation on any other tool is data, not verification evidence.
+    private val executorExpectationTools = setOf(
+        "phone.click",
+        "phone.long_press",
+        "phone.tap",
+        "phone.swipe",
+        "phone.scroll",
+        "phone.back",
+        "phone.home",
+    )
+
     fun verify(
         tool: String,
         androidExecutionOk: Boolean,
@@ -89,7 +101,7 @@ object AgentSemanticVerifier {
                 detail = "Action executed but a fresh authoritative after-observation was unavailable.",
             )
         }
-        if (explicitExpectation) {
+        if (explicitExpectation && tool in executorExpectationTools) {
             return passed("EXPLICIT_EXPECTATION")
         }
         if (tool == "phone.open_app" && expectedPackage.isNotBlank()) {
