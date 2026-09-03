@@ -283,6 +283,12 @@ internal fun V32AiPage(context: Context, refreshTick: Int, onSettings: () -> Uni
 
 @Composable
 internal fun V32BrainPage(context: Context, refreshTick: Int) {
+    var brainSegment by rememberSaveable { mutableIntStateOf(0) }
+    if (brainSegment == 1) {
+        V32RunsPage(context, refreshTick) { brainSegment = 0 }
+        return
+    }
+
     val store = AdaptiveBrainRuntime.store
     val skills = remember(refreshTick) { store.listMicroSkills(60) }
     val apps = remember(refreshTick) { store.listApps() }
@@ -292,6 +298,7 @@ internal fun V32BrainPage(context: Context, refreshTick: Int) {
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { CyclonePageIntro("Learn once, reuse", "Cyclone Brain", "A simple view of what Cyclone knows, how strong the evidence is and what changed recently.") }
+        item { CycloneSegmentedControl(listOf("Knowledge", "Runs"), 0, { brainSegment = it }) }
         item {
             CycloneHeroCard("${skills.count { it.confidence >= .7 }} strong skills", "Across ${apps.size} apps and ${paths.size} reusable paths.", Icons.Rounded.AccountTree, tone = CyclonePastel.SKY) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

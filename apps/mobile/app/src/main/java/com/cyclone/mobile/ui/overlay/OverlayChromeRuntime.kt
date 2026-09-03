@@ -4,6 +4,8 @@ import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.ai.CycloneAiAccessProfile
 import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
+import com.cyclone.mobile.ai.AgentActivityStreamRuntime
+import com.cyclone.mobile.ai.AgentRunEventBus
 import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
 import com.cyclone.mobile.ai.OverlayChromeController
 import com.cyclone.mobile.ai.OpenRouterModelPresets
@@ -40,6 +42,7 @@ object OverlayChromeRuntime {
     private var controller: OverlayChromeController? = null
     private var service: CycloneAccessibilityService? = null
     private var aiJob: Job? = null
+    private var runEventUnsubscribe: (() -> Unit)? = null
     private var adaptiveAgent: OpenRouterAdaptiveAgent? = null
     private var suspendedTaskId: String? = null
 
@@ -75,6 +78,12 @@ object OverlayChromeRuntime {
             )
             controller = next
             next.show(machine.snapshot())
+            runEventUnsubscribe?.invoke()
+            runEventUnsubscribe = AgentRunEventBus.subscribe { event ->
+                AgentActivityStreamRuntime.message(event)?.let { message ->
+                    mutate { it.updateStatus(message) }
+                }
+            }
         }
     }
 
@@ -83,6 +92,8 @@ object OverlayChromeRuntime {
             controller?.dismiss()
             controller = null
             service = null
+            runEventUnsubscribe?.invoke()
+            runEventUnsubscribe = null
             adaptiveAgent?.cancelActiveTask()
             adaptiveAgent = null
             suspendedTaskId = null
