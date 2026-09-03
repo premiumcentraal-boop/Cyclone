@@ -50,6 +50,7 @@ object ClickGateIntercept {
         action: String,
         labels: List<String>,
         overlayState: OverlayChromeState,
+        useRuntimeApproval: Boolean = true,
     ): Decision {
         val classified = GateClassifier.classify(action, labels) ?: return Decision(
             performClick = true,
@@ -57,6 +58,10 @@ object ClickGateIntercept {
             gateClass = null,
         )
         val overlay = overlayClass(classified)
+        if (useRuntimeApproval && OverlayChromeRuntime.consumeGateApproval(overlay, action, labels)) {
+            return Decision(performClick = true, enterGate = false, gateClass = overlay)
+        }
+        if (useRuntimeApproval) OverlayChromeRuntime.registerGateChallenge(overlay, action, labels)
         return Decision(
             performClick = false,
             enterGate = overlayState != OverlayChromeState.GATE,
@@ -70,7 +75,7 @@ object ClickGateIntercept {
         labels: List<String>,
         pcAutoApprove: Boolean = false,
     ): Boolean {
-        val decision = decide(action, labels, machine.state())
+        val decision = decide(action, labels, machine.state(), useRuntimeApproval = false)
         if (decision.enterGate && decision.gateClass != null) {
             machine.enterGate(decision.gateClass, pcAutoApprove)
         }

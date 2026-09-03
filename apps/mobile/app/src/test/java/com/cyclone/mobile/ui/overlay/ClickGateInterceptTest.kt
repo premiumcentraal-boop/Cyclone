@@ -93,6 +93,43 @@ class ClickGateInterceptTest {
     }
 
     @Test
+    fun confirmedGateApprovalIsExactAndOneShot() {
+        OverlayChromeRuntime.resetIdle()
+        OverlayChromeRuntime.startAnalysis("gate-approval")
+        OverlayChromeRuntime.enterWorking("gate-approval")
+        OverlayChromeRuntime.registerGateChallenge(
+            OverlayGateClass.DELETE,
+            "phone.click",
+            listOf("Move to bin"),
+        )
+        OverlayChromeRuntime.enterGate(OverlayGateClass.DELETE, sessionId = "gate-approval")
+        OverlayChromeRuntime.dispatch(OverlayUserAction.GATE_CONFIRM)
+
+        assertFalse(
+            OverlayChromeRuntime.consumeGateApproval(
+                OverlayGateClass.DELETE,
+                "phone.click",
+                listOf("Delete permanently"),
+            ),
+        )
+        assertTrue(
+            OverlayChromeRuntime.consumeGateApproval(
+                OverlayGateClass.DELETE,
+                "phone.click",
+                listOf("Move to bin"),
+            ),
+        )
+        assertFalse(
+            OverlayChromeRuntime.consumeGateApproval(
+                OverlayGateClass.DELETE,
+                "phone.click",
+                listOf("Move to bin"),
+            ),
+        )
+        OverlayChromeRuntime.resetIdle()
+    }
+
+    @Test
     fun seeAllAndHostClicksStayUngated() {
         val machine = OverlayChromeMachine()
         machine.enterWorking("t4")

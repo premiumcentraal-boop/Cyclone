@@ -43,6 +43,17 @@ object OverlayChromeRuntime {
     private var adaptiveAgent: OpenRouterAdaptiveAgent? = null
     private var suspendedTaskId: String? = null
 
+    private data class GateChallenge(
+        val gateClass: OverlayGateClass,
+        val action: String,
+        val signature: String,
+        val sessionId: String,
+        val expiresAtMs: Long,
+    )
+
+    private var pendingGateChallenge: GateChallenge? = null
+    private var approvedGateChallenge: GateChallenge? = null
+
     fun isAttached(): Boolean = synchronized(lock) { controller != null }
 
     fun snapshot(): OverlayChromeSnapshot = synchronized(lock) { machine.snapshot() }
@@ -75,6 +86,8 @@ object OverlayChromeRuntime {
             adaptiveAgent?.cancelActiveTask()
             adaptiveAgent = null
             suspendedTaskId = null
+            pendingGateChallenge = null
+            approvedGateChallenge = null
             aiJob?.cancel()
             aiJob = null
             machine = OverlayChromeMachine(
@@ -109,17 +122,60 @@ object OverlayChromeRuntime {
     }
 
     fun resetIdle(idleChipVisible: Boolean = true) {
+        synchronized(lock) {
+            pendingGateChallenge = null
+            approvedGateChallenge = null
+        }
         mutate { it.resetIdle(idleChipVisible) }
     }
 
+    /**
+     * Records the exact host action that triggered GATE. Labels are normalized in memory only and
+     * never persisted or logged. Confirmation can authorize this exact challenge once.
+     */
+    fun registerGateChallenge(gateClass: OverlayGateClass, action: String, labels: List<String>) {
+        synchronized(lock) {
+            val now = System.currentTimeMillis()
+            pendingGateChallenge = GateChallenge(
+                gateClass = gateClass,
+                action = action,
+                signature = gateSignature(action, labels),
+                sessionId = machine.snapshot().sessionId,
+                expiresAtMs = now + GATE_CHALLENGE_TTL_MS,
+            )
+            approvedGateChallenge = null
+        }
+    }
+
+    /** Consumes one explicit user confirmation for the exact previously blocked action. */
+    fun consumeGateApproval(gateClass: OverlayGateClass, action: String, labels: List<String>): Boolean =
+        synchronized(lock) {
+            val grant = approvedGateChallenge ?: return@synchronized false
+            val now = System.currentTimeMillis()
+            if (grant.expiresAtMs < now) {
+                approvedGateChallenge = null
+                return@synchronized false
+            }
+            val currentSession = machine.snapshot().sessionId
+            val matches = grant.gateClass == gateClass &&
+                grant.action == action &&
+                grant.signature == gateSignature(action, labels) &&
+                (grant.sessionId.isBlank() || grant.sessionId == currentSession)
+            if (matches) approvedGateChallenge = null
+            matches
+        }
+
     fun dispatch(action: OverlayUserAction) {
         val before = snapshot()
+        if (action == OverlayUserAction.GATE_CONFIRM) approvePendingGateChallenge(before)
         mutate { it.dispatch(action) }
         when (action) {
             OverlayUserAction.EXIT, OverlayUserAction.STOP_TASK -> synchronized(lock) {
                 adaptiveAgent?.cancelActiveTask()
                 adaptiveAgent = null
                 suspendedTaskId = null
+                pendingGateChallenge = null
+                approvedGateChallenge = null
                 aiJob?.cancel()
                 aiJob = null
             }
@@ -141,6 +197,8 @@ object OverlayChromeRuntime {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
         val accepted = synchronized(lock) {
+            pendingGateChallenge = null
+            approvedGateChallenge = null
             val before = machine.snapshot()
             machine.submitRequest(request)
             val changed = before.state == OverlayChromeState.ANALYSIS ||
@@ -274,6 +332,38 @@ object OverlayChromeRuntime {
             controller?.render(machine.snapshot())
         }
     }
+
+    private fun approvePendingGateChallenge(before: OverlayChromeSnapshot) {
+        synchronized(lock) {
+            val pending = pendingGateChallenge ?: return
+            val now = System.currentTimeMillis()
+            if (before.state != OverlayChromeState.GATE ||
+                before.gateClass != pending.gateClass ||
+                pending.expiresAtMs < now ||
+                (pending.sessionId.isNotBlank() && pending.sessionId != before.sessionId)
+            ) {
+                pendingGateChallenge = null
+                return
+            }
+            approvedGateChallenge = pending.copy(expiresAtMs = now + GATE_APPROVAL_TTL_MS)
+            pendingGateChallenge = null
+        }
+    }
+
+    private fun gateSignature(action: String, labels: List<String>): String =
+        buildString {
+            append(action.trim().lowercase())
+            append('|')
+            labels.asSequence()
+                .map { it.trim().lowercase().replace(Regex("\\s+"), " ") }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .sorted()
+                .forEach { label -> append(label).append('|') }
+        }
+
+    private const val GATE_CHALLENGE_TTL_MS = 60_000L
+    private const val GATE_APPROVAL_TTL_MS = 30_000L
 
     private fun readAiSettings(context: Context): OverlayAiSettings {
         val prefs = context.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE)
