@@ -1,13 +1,13 @@
-# Cyclone 3.8.7
-# Persistent standalone mobile agent with PC-parity observation, verification and recovery.
+# Cyclone 3.8.8
+# Native LLM tool-calling mobile agent with compound Android tools, verified execution and downloadable run logs.
 schema = 1
-product_version = "3.8.7"
+product_version = "3.8.8"
 channel = "stable"
-android_version_code = 52
+android_version_code = 53
 python_version = "3.8.4"
 
 [components]
-mobile = "3.8.7"
+mobile = "3.8.8"
 teamwork_sniper = "3.5.3.3"
 teamwork_sniper_android_version_code = 6
 pc_companion = "3.8.4"
@@ -23,4 +23,4 @@ virtual_provider = "UNCHANGED_FROM_3.5.1"
 android_signing = "PINNED_RELEASE_KEYSTORE"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-3.8.7"
+candidate_generation = "cyclone-3.8.8"
