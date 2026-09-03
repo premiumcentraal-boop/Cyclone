@@ -25,3 +25,5 @@ android_signing = "PINNED_RELEASE_KEYSTORE"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
 candidate_generation = "cyclone-3.8.8"
+
+# Exact-SHA publisher repair validated.
