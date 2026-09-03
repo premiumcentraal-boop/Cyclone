@@ -1,8 +1,8 @@
 package com.cyclone.mobile.ui.overlay
 
-import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -58,11 +58,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,7 +83,6 @@ import androidx.compose.ui.unit.sp
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -105,6 +101,76 @@ data class OverlayAiSettings(
 
 private val intelligenceLevels = listOf("low", "medium", "high", "max")
 
+data class OverlayIdleVisualState(
+    val pulseSerial: Int = 0,
+    val pulseLevel: Int = 0,
+    val activating: Boolean = false,
+)
+
+internal data class OverlayIdleTapResult(
+    val pulseSerial: Int,
+    val pulseLevel: Int,
+    val tapCount: Int,
+    val activate: Boolean,
+    val ignored: Boolean,
+)
+
+/**
+ * Pure triple-tap recognizer. It intentionally has no long-press path: a stationary hold can at
+ * most become one ordinary tap when the pointer is released, never an activation shortcut.
+ */
+internal class OverlayIdleActivationTracker(
+    private val maxGapMs: Long = OverlayChromeContract.IDLE_TAP_MAX_GAP_MS,
+    private val maxSequenceMs: Long = OverlayChromeContract.IDLE_TAP_MAX_SEQUENCE_MS,
+) {
+    private var firstTapAtMs = 0L
+    private var lastTapAtMs = 0L
+    private var tapCount = 0
+    private var pulseSerial = 0
+    private var activating = false
+
+    fun onTap(atMs: Long): OverlayIdleTapResult {
+        if (activating) {
+            return OverlayIdleTapResult(pulseSerial, 0, tapCount, activate = false, ignored = true)
+        }
+        val expired = tapCount == 0 ||
+            atMs - lastTapAtMs > maxGapMs ||
+            atMs - firstTapAtMs > maxSequenceMs
+        if (expired) {
+            firstTapAtMs = atMs
+            tapCount = 1
+        } else {
+            tapCount += 1
+        }
+        lastTapAtMs = atMs
+        pulseSerial += 1
+        val level = tapCount.coerceIn(1, 3)
+        val activate = tapCount >= 3
+        if (activate) {
+            activating = true
+            tapCount = 0
+        }
+        return OverlayIdleTapResult(pulseSerial, level, tapCount, activate, ignored = false)
+    }
+
+    fun semanticActivate(): OverlayIdleTapResult {
+        if (activating) {
+            return OverlayIdleTapResult(pulseSerial, 0, tapCount, activate = false, ignored = true)
+        }
+        pulseSerial += 1
+        activating = true
+        tapCount = 0
+        return OverlayIdleTapResult(pulseSerial, 3, 0, activate = true, ignored = false)
+    }
+
+    fun reset() {
+        firstTapAtMs = 0L
+        lastTapAtMs = 0L
+        tapCount = 0
+        activating = false
+    }
+}
+
 /**
  * One accessibility overlay for the idle orb and every AI-mode state. The chrome only emits
  * Cyclone actions; it never dispatches accessibility actions into the app underneath it.
@@ -118,6 +184,9 @@ fun OverlayChrome(
     onVoiceInput: () -> Unit = {},
     aiSettings: OverlayAiSettings = OverlayAiSettings(),
     onAiSettingsChanged: (OverlayAiSettings) -> Unit = {},
+    idleVisualState: OverlayIdleVisualState = OverlayIdleVisualState(),
+    onIdleTap: () -> Unit = {},
+    onIdleSemanticActivate: () -> Unit = { onAction(OverlayUserAction.ASK_CYCLONE) },
     modifier: Modifier = Modifier,
 ) {
     CycloneV32Theme {
@@ -136,12 +205,12 @@ fun OverlayChrome(
             label = "Cyclone AI mode",
         ) { orb ->
             if (orb && snapshot.idleChipVisible) {
-                Box(
-                    modifier = modifier.padding(end = 18.dp, bottom = 18.dp),
-                    contentAlignment = Alignment.BottomEnd,
-                ) {
-                    IdleOrb(onActivate = { onAction(OverlayUserAction.ASK_CYCLONE) })
-                }
+                IdleActivationHotspot(
+                    state = idleVisualState,
+                    onTap = onIdleTap,
+                    onSemanticActivate = onIdleSemanticActivate,
+                    modifier = modifier,
+                )
             } else if (!orb) {
                 AuroraPanel(
                     snapshot = snapshot,
@@ -159,91 +228,109 @@ fun OverlayChrome(
 }
 
 @Composable
-private fun IdleOrb(onActivate: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    var tapCount by remember { mutableIntStateOf(0) }
-    var lastTapAt by remember { mutableLongStateOf(0L) }
-    var activating by remember { mutableStateOf(false) }
-
-    fun activate() {
-        if (activating) return
-        activating = true
-        scope.launch {
-            delay(680)
-            onActivate()
-        }
-    }
-
-    val motion = rememberInfiniteTransition(label = "Idle orb glow")
-    val rotation by motion.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(if (activating) 850 else 5_800, easing = LinearEasing)),
-        label = "Rainbow rotation",
-    )
-    val pulse by motion.animateFloat(
-        initialValue = 0.94f,
-        targetValue = if (activating) 1.16f else 1.04f,
-        animationSpec = infiniteRepeatable(tween(if (activating) 360 else 1_700), RepeatMode.Reverse),
-        label = "Glow pulse",
-    )
-
+private fun IdleActivationHotspot(
+    state: OverlayIdleVisualState,
+    onTap: () -> Unit,
+    onSemanticActivate: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = Modifier
-            .size(if (activating) 72.dp else 62.dp)
-            .graphicsLayer { scaleX = pulse; scaleY = pulse }
+        modifier = modifier
+            .size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp)
             .semantics {
-                contentDescription = "Cyclone AI. Triple tap or hold for 3 seconds."
-                onClick("Open Cyclone AI mode") {
-                    activate()
+                contentDescription = "Cyclone AI. Triple tap to open."
+                onClick("Open Cyclone AI") {
+                    if (!state.activating) onSemanticActivate()
                     true
                 }
             }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        val hold = scope.launch {
-                            delay(3_000)
-                            activate()
-                        }
-                        tryAwaitRelease()
-                        hold.cancel()
-                    },
-                    onTap = {
-                        val now = SystemClock.elapsedRealtime()
-                        tapCount = if (now - lastTapAt <= 650L) tapCount + 1 else 1
-                        lastTapAt = now
-                        if (tapCount >= 3) {
-                            tapCount = 0
-                            activate()
-                        }
-                    },
-                )
+            .pointerInput(state.activating) {
+                if (!state.activating) {
+                    detectTapGestures(onTap = { onTap() })
+                }
             },
         contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.matchParentSize().graphicsLayer { rotationZ = rotation }) {
-            drawCircle(
-                brush = Brush.sweepGradient(
-                    listOf(AuroraCyan, AuroraBlue, AuroraViolet, AuroraMagenta, AuroraCyan),
-                    center,
-                ),
-                radius = size.minDimension * 0.47f,
-                style = Stroke(width = if (activating) 7.dp.toPx() else 3.dp.toPx(), cap = StrokeCap.Round),
+    ) {}
+}
+
+/**
+ * Ambient compact decoration. The controller hosts this in a separate FLAG_NOT_TOUCHABLE window;
+ * this composable must never become the activation hit target.
+ */
+@Composable
+internal fun OverlayIdleHalo(
+    state: OverlayIdleVisualState,
+    modifier: Modifier = Modifier,
+) {
+    val pulseScale = remember { Animatable(1f) }
+    val pulseAlpha = remember { Animatable(0f) }
+    LaunchedEffect(state.pulseSerial) {
+        if (state.pulseSerial <= 0) return@LaunchedEffect
+        pulseScale.snapTo(1f)
+        pulseAlpha.snapTo(0f)
+        val peak = when {
+            state.activating -> 1.15f
+            state.pulseLevel >= 2 -> 1.11f
+            else -> 1.08f
+        }
+        pulseAlpha.animateTo(if (state.activating) 1f else 0.72f, tween(90))
+        pulseScale.animateTo(peak, tween(110, easing = FastOutSlowInEasing))
+        pulseScale.animateTo(1f, tween(if (state.activating) 190 else 150, easing = FastOutSlowInEasing))
+        pulseAlpha.animateTo(0f, tween(170))
+    }
+
+    Canvas(
+        modifier
+            .size(
+                OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp,
+                OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp,
             )
-        }
-        Surface(
-            shape = CircleShape,
-            color = AuroraInk.copy(alpha = if (activating) 0.52f else 0.30f),
-            contentColor = Color.White,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
-            shadowElevation = if (activating) 18.dp else 6.dp,
-            modifier = Modifier.size(if (activating) 56.dp else 50.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(23.dp))
-            }
-        }
+            .graphicsLayer {
+                scaleX = pulseScale.value
+                scaleY = pulseScale.value
+            },
+    ) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val response = pulseAlpha.value
+        drawLine(
+            brush = Brush.horizontalGradient(
+                listOf(
+                    Color.Transparent,
+                    AuroraBlue.copy(alpha = 0.07f + response * 0.07f),
+                    AuroraCyan.copy(alpha = 0.15f + response * 0.11f),
+                    AuroraMagenta.copy(alpha = 0.10f + response * 0.09f),
+                    Color.Transparent,
+                ),
+            ),
+            start = Offset(size.width * 0.08f, center.y),
+            end = Offset(size.width * 0.92f, center.y),
+            strokeWidth = 1.2.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    AuroraCyan.copy(alpha = 0.06f + response * 0.13f),
+                    AuroraViolet.copy(alpha = 0.025f + response * 0.06f),
+                    Color.Transparent,
+                ),
+                center = center,
+                radius = 31.dp.toPx(),
+            ),
+            radius = 31.dp.toPx(),
+            center = center,
+        )
+        drawCircle(
+            color = Color.White.copy(alpha = 0.34f + response * 0.34f),
+            radius = if (state.activating) 3.2.dp.toPx() else 2.3.dp.toPx(),
+            center = center,
+        )
+        drawCircle(
+            color = AuroraCyan.copy(alpha = 0.13f + response * 0.20f),
+            radius = 20.dp.toPx(),
+            center = center,
+            style = Stroke(width = 1.dp.toPx()),
+        )
     }
 }
 
@@ -315,9 +402,10 @@ private fun MovingAurora(modifier: Modifier = Modifier) {
     )
 
     Canvas(modifier) {
+        drawRect(AuroraInk.copy(alpha = OverlayChromeContract.EXPANDED_AURORA_BASE_ALPHA))
         drawRect(
             Brush.verticalGradient(
-                0f to Color.Transparent,
+                0f to AuroraInk.copy(alpha = 0.12f),
                 0.30f to AuroraInk.copy(alpha = 0.34f),
                 1f to AuroraInk.copy(alpha = 0.88f),
             ),
@@ -348,6 +436,14 @@ private fun MovingAurora(modifier: Modifier = Modifier) {
             radius = size.width * 0.34f,
             color = AuroraViolet,
             alpha = 0.42f,
+        )
+        drawLine(
+            brush = Brush.horizontalGradient(
+                listOf(Color.Transparent, Color.White.copy(alpha = 0.22f), AuroraCyan.copy(alpha = 0.18f), Color.Transparent),
+            ),
+            start = Offset(size.width * 0.04f, 1.dp.toPx()),
+            end = Offset(size.width * 0.96f, 1.dp.toPx()),
+            strokeWidth = 1.dp.toPx(),
         )
         drawLine(
             brush = Brush.horizontalGradient(
@@ -438,8 +534,8 @@ private fun QuickAiSettings(
     val levelIndex = intelligenceLevels.indexOf(settings.reasoningEffort).coerceAtLeast(1)
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = Color.Black.copy(alpha = 0.24f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
+        color = Color.Black.copy(alpha = 0.38f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
