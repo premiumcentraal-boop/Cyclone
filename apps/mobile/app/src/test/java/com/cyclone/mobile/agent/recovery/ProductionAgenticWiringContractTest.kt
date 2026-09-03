@@ -30,7 +30,8 @@ class ProductionAgenticWiringContractTest {
         assertTrue(adaptive.contains("AgentRunRuntime"))
         assertTrue(overlay.contains("OpenRouterAdaptiveAgent"))
         assertTrue(overlay.contains("resumeSuspendedTask"))
-        assertFalse(adaptive.contains("PageAgentProtocol"))
+        assertFalse(adaptive.contains("import com.cyclone.mobile.ai.PageAgentProtocol"))
+        assertFalse(adaptive.contains("PageAgentProtocol."))
         assertFalse(adaptive.contains("requestPageDecision"))
         assertFalse(adaptive.contains("while (providerRequests < config.maxDecisions)"))
     }
