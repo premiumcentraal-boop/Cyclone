@@ -2,6 +2,23 @@ package com.cyclone.mobile.ai
 
 import android.content.Context
 import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.DeviceState
+import com.cyclone.mobile.agent.CycloneAgentModel
+import com.cyclone.mobile.agent.CycloneAgentRunResult
+import com.cyclone.mobile.agent.CycloneAgentTools
+import com.cyclone.mobile.agent.CycloneAgentTraceSink
+import com.cyclone.mobile.agent.CycloneConvergencePolicy
+import com.cyclone.mobile.agent.CycloneLocalAgent
+import com.cyclone.mobile.agent.CycloneModelDirective
+import com.cyclone.mobile.agent.CycloneModelTurn
+import com.cyclone.mobile.agent.CycloneObservation
+import com.cyclone.mobile.agent.CyclonePlanResult
+import com.cyclone.mobile.agent.CycloneTaskCheckpointStore
+import com.cyclone.mobile.agent.CycloneTaskClassification
+import com.cyclone.mobile.agent.CycloneTaskState
+import com.cyclone.mobile.agent.CycloneToolResult
+import com.cyclone.mobile.agent.CycloneTraceEventType
+import com.cyclone.mobile.agent.CycloneVerificationResult
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRegistry
 import com.cyclone.mobile.PhoneToolRequest
@@ -16,6 +33,8 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainActionPlan
 import com.cyclone.mobile.brain.BrainRefinementWorker
 import com.cyclone.mobile.brain.CycloneBrainRuntime
+import com.cyclone.mobile.ui.overlay.GateBlockedException
+import com.cyclone.mobile.ui.overlay.OverlayGateClass
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -54,6 +73,44 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val message: String,
     )
 
+    private data class LocalExecution(
+        val state: ObservedState,
+        val ok: Boolean,
+        val progress: Boolean,
+        val evidenceIdentity: String,
+        val policyAllowed: Boolean = true,
+        val gateRequired: Boolean = false,
+        val gateClass: OverlayGateClass? = null,
+        val hardBlocker: Boolean = false,
+        val staleTarget: Boolean = false,
+        val message: String? = null,
+    )
+
+    private data class LocalSessionContext(
+        val traceId: String,
+        val goal: String,
+        val config: QuickAgentConfig,
+        val apiKey: String,
+        val reliability: AgentReliabilitySession,
+        val skillSignatures: MutableList<String>,
+        val successfulActions: MutableList<String>,
+        val failedActions: MutableList<String>,
+        val graphAttempts: MutableSet<String>,
+        val initialPageIdentity: String,
+        var state: ObservedState,
+        var providerRequests: Int = 0,
+        var pendingGateClass: OverlayGateClass? = null,
+        var checkpoint: CycloneTaskState? = null,
+    )
+
+    private data class ActiveLocalSession(
+        val context: LocalSessionContext,
+        val agent: CycloneLocalAgent,
+    )
+
+    @Volatile
+    private var activeLocalSession: ActiveLocalSession? = null
+
     suspend fun execute(
         goal: String,
         config: QuickAgentConfig,
@@ -72,7 +129,12 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
 
         val traceId = AgentTraceRuntime.start(context, goal, config.model.id)
         val reliability = AgentReliabilitySession(
-            AgentReliabilityConfig(maxTurns = (config.maxDecisions * 3).coerceIn(6, 60)),
+            AgentReliabilityConfig(
+                maxTurns = 1_000,
+                maxConsecutiveFailures = 20,
+                maxRepeatedActionWithoutProgress = 10,
+                taskTimeoutMs = 300_000,
+            ),
             sessionId = traceId,
         )
         reliability.start()
@@ -111,223 +173,435 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             )
         }
 
-        val apiKey = OpenRouterSecretStore.read(context)
-        var providerRequests = 0
-        var noProgressCount = 0
+        val session = createLocalSession(
+            traceId = traceId,
+            goal = goal,
+            config = config,
+            initial = state,
+            reliability = reliability,
+            skillSignatures = skillSignatures,
+            successfulActions = successfulActions,
+            failedActions = failedActions,
+            graphAttempts = graphAttempts,
+            onProgress = onProgress,
+        )
+        activeLocalSession = session
+        return@withContext driveLocalSession(session, onProgress)
+    }
 
-        while (providerRequests < config.maxDecisions) {
-            if (reliability.observe(state.page.pageKey) != ReliabilityDirective.CONTINUE) {
-                AgentTraceRuntime.event(context, traceId, "PAUSED", "Cyclone paused because execution stopped converging", code = reliability.snapshot().stopCode, ok = false)
-                break
-            }
-            // Before spending tokens, use a high-confidence first hop from the page-aware App Graph.
-            val graphAction = knownAppGraphAction(state.page, goal, graphAttempts)
-            if (graphAction != null) {
-                if (reliability.requestAction("phone.click", graphAction.selectorJson) != ReliabilityDirective.CONTINUE) {
-                    AgentTraceRuntime.event(context, traceId, "PAUSED", "Cyclone paused before repeating a learned route without progress", code = reliability.snapshot().stopCode, ok = false)
-                    break
+    /**
+     * Resume the exact same suspended task. Returning controller ownership to AGENT is a hard
+     * prerequisite and CycloneLocalAgent forces the first resumed graph step through OBSERVE.
+     */
+    suspend fun resume(onProgress: (String) -> Unit = {}): QuickAgentResult = withContext(Dispatchers.IO) {
+        val session = activeLocalSession
+            ?: return@withContext QuickAgentResult(
+                false,
+                "There is no suspended Cyclone task to resume.",
+                0,
+                "cyclone-local-agent",
+                classification = CycloneTaskClassification.HARD_BLOCKER.name,
+            )
+        if (DeviceState.controller != DeviceState.Controller.AGENT) {
+            return@withContext QuickAgentResult(
+                false,
+                "Cyclone is waiting for control to return to AGENT before it resumes.",
+                session.context.providerRequests,
+                session.context.config.model.id,
+                taskId = session.context.traceId,
+                classification = CycloneTaskClassification.HUMAN_OR_GATE.name,
+                gateClass = session.context.pendingGateClass?.wire,
+            )
+        }
+        session.context.pendingGateClass = null
+        if (!session.agent.resume()) {
+            return@withContext QuickAgentResult(
+                false,
+                "The suspended task is no longer resumable.",
+                session.context.providerRequests,
+                session.context.config.model.id,
+                taskId = session.context.traceId,
+                classification = session.agent.snapshot().finalClassification?.name,
+            )
+        }
+        driveLocalSession(session, onProgress)
+    }
+
+    fun cancelActiveTask() {
+        activeLocalSession?.agent?.cancel()
+    }
+
+    private fun createLocalSession(
+        traceId: String,
+        goal: String,
+        config: QuickAgentConfig,
+        initial: ObservedState,
+        reliability: AgentReliabilitySession,
+        skillSignatures: MutableList<String>,
+        successfulActions: MutableList<String>,
+        failedActions: MutableList<String>,
+        graphAttempts: MutableSet<String>,
+        onProgress: (String) -> Unit,
+    ): ActiveLocalSession {
+        val session = LocalSessionContext(
+            traceId = traceId,
+            goal = goal,
+            config = config,
+            apiKey = OpenRouterSecretStore.read(context),
+            reliability = reliability,
+            skillSignatures = skillSignatures,
+            successfulActions = successfulActions,
+            failedActions = failedActions,
+            graphAttempts = graphAttempts,
+            initialPageIdentity = initial.page.pageKey,
+            state = initial,
+        )
+        lateinit var localAgent: CycloneLocalAgent
+        val model = object : CycloneAgentModel {
+            override fun plan(taskState: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
+                if (DeviceState.controller != DeviceState.Controller.AGENT) {
+                    return CyclonePlanResult.Valid(
+                        CycloneModelTurn(
+                            CycloneModelDirective.NEED_HUMAN,
+                            reason = "controller.human",
+                        ),
+                    )
                 }
-                graphAttempts += "${state.page.pageKey}|${graphAction.id}"
-                onProgress("Using learned app map: ${graphAction.label}")
+
+                val graphAction = knownAppGraphAction(session.state.page, goal, session.graphAttempts)
+                if (graphAction != null) {
+                    session.graphAttempts += "${session.state.page.pageKey}|${graphAction.id}"
+                    return CyclonePlanResult.Valid(
+                        CycloneModelTurn(
+                            directive = CycloneModelDirective.ACT,
+                            actionSignature = "graph:${graphAction.id}",
+                            payload = graphAction,
+                        ),
+                    )
+                }
+
+                if (session.apiKey.isBlank()) {
+                    return CyclonePlanResult.Valid(
+                        CycloneModelTurn(
+                            CycloneModelDirective.BLOCKED,
+                            reason = API_KEY_BLOCKER,
+                        ),
+                    )
+                }
+
+                session.providerRequests++
+                onProgress("Understanding ${session.state.page.title} · AI request ${session.providerRequests}")
                 AgentTraceRuntime.event(
-                    context, traceId, "REPLAY",
-                    "Using learned page route: ${graphAction.label}",
-                    code = "app_graph.step", ok = true,
-                    detail = "No model request used on ${state.page.title}.",
+                    context,
+                    traceId,
+                    "PLAN",
+                    "Understanding this page and choosing the next local step",
+                    code = "model.page_decision",
+                    ok = true,
+                    detail = "Provider request ${session.providerRequests} · ${config.model.label} · page ${session.state.page.title}",
                 )
-                val before = state
-                val params = JSONObject().put("selector", JSONObject(graphAction.selectorJson)).put("retries", 1).put("waitForChangeMs", 1500)
-                val result = PhoneToolExecutor.execute(context, PhoneToolRequest("v28-graph-${UUID.randomUUID()}", "phone.click", params))
-                val after = observeState(goal) ?: before
-                reliability.result(result.ok, result.ok, if (result.ok) null else ReliabilityFailureClass.ACTION)
-                recordOutcome(
-                    traceId = traceId,
+                val decision = requestPageDecision(
+                    apiKey = session.apiKey,
+                    model = config.model,
                     goal = goal,
-                    tool = "phone.click",
-                    params = params,
-                    before = before,
-                    after = after,
-                    ok = result.ok,
-                    source = "APP_GRAPH_REPLAY",
-                    control = matchingControl(before.page, graphAction.selectorJson),
-                    signatures = skillSignatures,
-                    successfulActions = successfulActions,
-                    failedActions = failedActions,
-                )
-                state = after
-                if (result.ok && before.page.pageKey != after.page.pageKey) {
-                    noProgressCount = 0
-                    announceNewPage(traceId, state, onProgress)
-                    continue
-                }
-                // Don't keep hammering the same route. The attempt key prevents repeat; fall through to AI.
-                noProgressCount++
-            }
+                    state = session.state,
+                    providerSort = config.providerSort,
+                    successfulActions = session.successfulActions,
+                    failedActions = session.failedActions,
+                ) ?: return CyclonePlanResult.Malformed("model.invalid_page_decision")
 
-            if (apiKey.isBlank()) {
-                return@withContext completeTrace(
-                    traceId, goal, config.model.id,
-                    QuickAgentResult(
-                        false,
-                        "Cyclone reached a page it has not learned well enough yet. Add an OpenRouter API key so the selected model can understand this page once and teach the Brain.",
-                        providerRequests,
-                        config.model.id,
+                if (decision.displaySummary.isNotBlank()) onProgress(decision.displaySummary)
+                val directive = when (decision.status) {
+                    "act" -> CycloneModelDirective.ACT
+                    "done" -> CycloneModelDirective.DONE
+                    "need_human" -> CycloneModelDirective.NEED_HUMAN
+                    "blocked" -> CycloneModelDirective.BLOCKED
+                    "need_vision" -> CycloneModelDirective.NEED_VISION
+                    else -> return CyclonePlanResult.Malformed("model.unsupported_status")
+                }
+                val signature = when (directive) {
+                    CycloneModelDirective.ACT -> decision.actions
+                        .joinToString("|") { action -> "${action.tool}:${action.controlId.orEmpty()}" }
+                        .takeIf { it.isNotBlank() }
+                    CycloneModelDirective.NEED_VISION -> "vision:${session.state.page.pageKey}"
+                    else -> null
+                }
+                return CyclonePlanResult.Valid(
+                    CycloneModelTurn(
+                        directive = directive,
+                        actionSignature = signature,
+                        reason = decision.reason,
+                        payload = decision,
                     ),
-                    skillSignatures, onProgress,
                 )
-            }
-
-            providerRequests++
-            onProgress("Understanding ${state.page.title} · AI request $providerRequests/${config.maxDecisions}")
-            AgentTraceRuntime.event(
-                context, traceId, "MODEL",
-                "Understanding this page and choosing the next local step",
-                code = "model.page_decision", ok = true,
-                detail = "Provider request $providerRequests/${config.maxDecisions} · ${config.model.label} · page ${state.page.title}",
-            )
-
-            val decision = requestPageDecision(
-                apiKey = apiKey,
-                model = config.model,
-                goal = goal,
-                state = state,
-                providerSort = config.providerSort,
-                successfulActions = successfulActions,
-                failedActions = failedActions,
-            ) ?: return@withContext completeTrace(
-                traceId, goal, config.model.id,
-                QuickAgentResult(false, "The model did not return a valid page decision. Cyclone stopped rather than looping.", providerRequests, config.model.id),
-                skillSignatures, onProgress,
-            )
-
-            val pageSummary = decision.pageSummary.ifBlank { "Page semantics analyzed" }
-            AgentTraceRuntime.event(
-                context, traceId, "PAGE",
-                "${state.page.title}: $pageSummary",
-                code = "page.semantic_understanding", ok = true,
-                detail = decision.displaySummary.takeIf { it.isNotBlank() },
-            )
-            if (decision.displaySummary.isNotBlank()) onProgress(decision.displaySummary)
-
-            when (decision.status) {
-                "done" -> {
-                    if (!PageAgentProtocol.canFinish(decision, state.page)) {
-                        failedActions += "finish_without_page_evidence@${state.page.pageKey}"
-                        noProgressCount++
-                        AgentTraceRuntime.event(context, traceId, "RECOVERY", "The model tried to finish without enough page evidence", code = "page.finish_unverified", ok = false)
-                        continue
-                    }
-                    val answer = decision.answer ?: "Done."
-                    return@withContext completeTrace(
-                        traceId, goal, config.model.id,
-                        QuickAgentResult(true, answer, providerRequests, config.model.id),
-                        skillSignatures, onProgress,
-                    )
-                }
-
-                "need_human", "blocked" -> {
-                    val reason = decision.reason ?: "This page requires your input or approval before Cyclone can continue."
-                    AgentTraceRuntime.event(context, traceId, "BOUNDARY", reason, code = "page.human_boundary", ok = false)
-                    return@withContext completeTrace(
-                        traceId, goal, config.model.id,
-                        QuickAgentResult(false, reason, providerRequests, config.model.id),
-                        skillSignatures, onProgress,
-                    )
-                }
-
-                "need_vision" -> {
-                    if (!visionUsedPages.add(state.page.pageKey)) {
-                        failedActions += "vision_already_used@${state.page.pageKey}"
-                        AgentTraceRuntime.event(context, traceId, "RECOVERY", "Vision was already used on this page; Cyclone will not repeatedly screenshot the same page", code = "vision.duplicate_blocked", ok = false)
-                        noProgressCount++
-                        if (noProgressCount >= 2) break
-                        continue
-                    }
-                    if (providerRequests >= config.maxDecisions) break
-                    val visual = captureVisualDecision(
-                        apiKey = apiKey,
-                        model = config.visionModel,
-                        goal = goal,
-                        state = state,
-                        providerSort = config.providerSort,
-                        traceId = traceId,
-                    )
-                    providerRequests++
-                    if (visual == null) {
-                        failedActions += "vision_failed@${state.page.pageKey}"
-                        noProgressCount++
-                        continue
-                    }
-                    val execution = executeDecisionActions(
-                        traceId, goal, visual, state, config, reliability, skillSignatures,
-                        successfulActions, failedActions, onProgress,
-                    )
-                    state = execution.first
-                    if (execution.second) {
-                        noProgressCount = 0
-                        announceNewPage(traceId, state, onProgress)
-                    } else noProgressCount++
-                    continue
-                }
-
-                "act" -> {
-                    if (decision.actions.isEmpty()) {
-                        failedActions += "empty_plan@${state.page.pageKey}"
-                        noProgressCount++
-                        AgentTraceRuntime.event(context, traceId, "RECOVERY", "The page plan contained no executable action", code = "page.empty_plan", ok = false)
-                        if (noProgressCount >= 2) break
-                        continue
-                    }
-                    val execution = executeDecisionActions(
-                        traceId, goal, decision, state, config, reliability, skillSignatures,
-                        successfulActions, failedActions, onProgress,
-                    )
-                    val oldKey = state.page.pageKey
-                    state = execution.first
-                    val changedPage = execution.second || state.page.pageKey != oldKey
-                    if (changedPage) {
-                        noProgressCount = 0
-                        announceNewPage(traceId, state, onProgress)
-                    } else {
-                        // Same-page batches are allowed (e.g. type then click), but if nothing materially
-                        // changes twice, stop instead of turning the provider into a retry machine.
-                        noProgressCount++
-                    }
-                }
-
-                else -> {
-                    failedActions += "unknown_status:${decision.status}"
-                    noProgressCount++
-                    AgentTraceRuntime.event(context, traceId, "RECOVERY", "The model returned an unsupported page status", code = "page.bad_status", ok = false, detail = decision.status)
-                }
-            }
-
-            if (noProgressCount >= 2) {
-                AgentTraceRuntime.event(
-                    context, traceId, "STOPPED",
-                    "Cyclone stopped after two page decisions without meaningful progress instead of burning more API requests",
-                    code = "safety.no_progress", ok = false,
-                )
-                break
             }
         }
 
-        completeTrace(
-            traceId, goal, config.model.id,
-            QuickAgentResult(
-                false,
-                "Cyclone stopped after $providerRequests AI request${if (providerRequests == 1) "" else "s"}. Everything that worked was still written to the Brain, and failed steps were saved as recovery evidence.",
-                providerRequests,
-                config.model.id,
+        val tools = object : CycloneAgentTools {
+            override fun observe(taskState: CycloneTaskState): CycloneObservation? {
+                val fresh = observeState(goal) ?: return null
+                session.state = fresh
+                DeviceState.markObserved()
+                return cycloneObservation(fresh)
+            }
+
+            override fun execute(
+                taskState: CycloneTaskState,
+                observation: CycloneObservation,
+                turn: CycloneModelTurn,
+            ): CycloneToolResult {
+                if (DeviceState.controller != DeviceState.Controller.AGENT) {
+                    return CycloneToolResult(
+                        ok = false,
+                        actionSignature = turn.actionSignature,
+                        evidenceIdentity = observation.evidenceIdentity,
+                        policyAllowed = false,
+                        gateRequired = true,
+                        message = "Cyclone paused because the user has control.",
+                    )
+                }
+                val execution = when (val payload = turn.payload) {
+                    is LearnedAction -> executeGraphAction(session, payload, onProgress)
+                    is PageAgentDecision -> {
+                        val decision = if (turn.directive == CycloneModelDirective.NEED_VISION) {
+                            session.providerRequests++
+                            captureVisualDecision(
+                                apiKey = session.apiKey,
+                                model = config.visionModel,
+                                goal = goal,
+                                state = session.state,
+                                providerSort = config.providerSort,
+                                traceId = traceId,
+                            ) ?: return CycloneToolResult(
+                                ok = false,
+                                actionSignature = turn.actionSignature,
+                                evidenceIdentity = observation.evidenceIdentity,
+                                message = "Vision fallback did not return a valid decision.",
+                            )
+                        } else {
+                            payload
+                        }
+                        executeDecisionActions(
+                            traceId = traceId,
+                            goal = goal,
+                            decision = decision,
+                            initial = session.state,
+                            config = config,
+                            reliability = reliability,
+                            signatures = session.skillSignatures,
+                            successfulActions = session.successfulActions,
+                            failedActions = session.failedActions,
+                            onProgress = onProgress,
+                        )
+                    }
+                    else -> LocalExecution(
+                        state = session.state,
+                        ok = false,
+                        progress = false,
+                        evidenceIdentity = cycloneObservation(session.state).evidenceIdentity,
+                        message = "The local task graph received no executable payload.",
+                    )
+                }
+                session.state = execution.state
+                session.pendingGateClass = execution.gateClass
+                return CycloneToolResult(
+                    ok = execution.ok,
+                    actionSignature = turn.actionSignature,
+                    evidenceIdentity = execution.evidenceIdentity,
+                    policyAllowed = execution.policyAllowed,
+                    gateRequired = execution.gateRequired,
+                    hardBlocker = execution.hardBlocker,
+                    staleTarget = execution.staleTarget,
+                    message = execution.message,
+                    payload = execution,
+                )
+            }
+
+            override fun verify(
+                taskState: CycloneTaskState,
+                observation: CycloneObservation,
+                turn: CycloneModelTurn,
+                toolResult: CycloneToolResult,
+            ): CycloneVerificationResult {
+                val execution = toolResult.payload as? LocalExecution
+                    ?: return CycloneVerificationResult(false, false, evidenceIdentity = toolResult.evidenceIdentity)
+                return CycloneVerificationResult(
+                    verified = execution.ok,
+                    progress = execution.progress,
+                    complete = false,
+                    evidenceIdentity = execution.evidenceIdentity,
+                    message = execution.message,
+                )
+            }
+
+            override fun classifyModelBoundary(
+                taskState: CycloneTaskState,
+                observation: CycloneObservation,
+                turn: CycloneModelTurn,
+            ): CycloneTaskClassification {
+                if (turn.reason == API_KEY_BLOCKER) return CycloneTaskClassification.HARD_BLOCKER
+                if (DeviceState.controller == DeviceState.Controller.HUMAN || deterministicHumanBoundary(session.state.page)) {
+                    session.pendingGateClass = deterministicGateClass(session.state.page)
+                    return CycloneTaskClassification.HUMAN_OR_GATE
+                }
+                return CycloneTaskClassification.RECOVERABLE
+            }
+
+            override fun verifyCompletion(
+                taskState: CycloneTaskState,
+                observation: CycloneObservation,
+                turn: CycloneModelTurn,
+            ): CycloneVerificationResult {
+                val decision = turn.payload as? PageAgentDecision
+                    ?: return CycloneVerificationResult(false, false)
+                val page = session.state.page
+                val movedFromStart = page.pageKey != session.initialPageIdentity &&
+                    session.successfulActions.isNotEmpty()
+                val verified = PageAgentProtocol.canFinish(decision, page) &&
+                    (movedFromStart || semanticGoalEvidence(goal, page))
+                return CycloneVerificationResult(
+                    verified = verified,
+                    progress = verified,
+                    complete = verified,
+                    evidenceIdentity = cycloneObservation(session.state).evidenceIdentity,
+                    message = decision.answer ?: if (verified) "Done." else null,
+                )
+            }
+        }
+
+        val traceSink = CycloneAgentTraceSink { event ->
+            AgentTraceRuntime.event(
+                context,
+                traceId,
+                event.type.name,
+                event.type.name.replace('_', ' ').lowercase(),
+                code = event.code ?: event.type.name.lowercase(),
+                ok = event.type !in setOf(
+                    CycloneTraceEventType.HARD_BLOCKER,
+                    CycloneTraceEventType.NON_CONVERGENCE,
+                    CycloneTraceEventType.CANCELLED,
+                ),
+                detail = listOfNotNull(
+                    event.pageIdentity?.let { "page=${it.takeLast(16)}" },
+                    event.actionSignature?.let { "action=${it.take(120)}" },
+                ).joinToString(" · ").takeIf { it.isNotBlank() },
+            )
+        }
+        val checkpointStore = object : CycloneTaskCheckpointStore {
+            override fun save(state: CycloneTaskState) {
+                session.checkpoint = state
+            }
+        }
+        localAgent = CycloneLocalAgent(
+            goal = goal,
+            model = model,
+            tools = tools,
+            convergence = CycloneConvergencePolicy(
+                taskTimeoutMs = 300_000,
+                maxRepeatedIdenticalActionWithoutProgress = 2,
+                maxConsecutiveRecoveryCyclesWithoutNewEvidence = 5,
+                maxMalformedModelResponses = 3,
+                maxVisionAttemptsOnUnchangedState = 1,
+                maxBacktrackAttempts = 3,
+                maxStaleTargetRetries = 2,
             ),
-            skillSignatures, onProgress,
+            trace = traceSink,
+            checkpoints = checkpointStore,
+            taskId = traceId,
         )
+        return ActiveLocalSession(session, localAgent)
     }
+
+    private fun driveLocalSession(
+        session: ActiveLocalSession,
+        onProgress: (String) -> Unit,
+    ): QuickAgentResult {
+        return when (val run = session.agent.runUntilBoundary()) {
+            is CycloneAgentRunResult.Completed -> {
+                activeLocalSession = null
+                completeTrace(
+                    session.context.traceId,
+                    session.context.goal,
+                    session.context.config.model.id,
+                    QuickAgentResult(
+                        true,
+                        run.message ?: "Done.",
+                        session.context.providerRequests,
+                        session.context.config.model.id,
+                        taskId = session.context.traceId,
+                        classification = CycloneTaskClassification.COMPLETE.name,
+                    ),
+                    session.context.skillSignatures,
+                    onProgress,
+                )
+            }
+            is CycloneAgentRunResult.Suspended -> {
+                activeLocalSession = session
+                onProgress(run.message ?: "Cyclone is waiting for you.")
+                QuickAgentResult(
+                    false,
+                    run.message ?: "Cyclone suspended at a human or GATE boundary.",
+                    session.context.providerRequests,
+                    session.context.config.model.id,
+                    taskId = session.context.traceId,
+                    classification = CycloneTaskClassification.HUMAN_OR_GATE.name,
+                    gateClass = session.context.pendingGateClass?.wire,
+                )
+            }
+            is CycloneAgentRunResult.Cancelled -> {
+                activeLocalSession = null
+                completeTrace(
+                    session.context.traceId,
+                    session.context.goal,
+                    session.context.config.model.id,
+                    QuickAgentResult(
+                        false,
+                        run.message ?: "Cyclone task cancelled.",
+                        session.context.providerRequests,
+                        session.context.config.model.id,
+                        taskId = session.context.traceId,
+                        classification = CycloneTaskClassification.CANCELLED.name,
+                    ),
+                    session.context.skillSignatures,
+                    onProgress,
+                )
+            }
+            is CycloneAgentRunResult.Stopped -> {
+                activeLocalSession = null
+                val classification = run.state.finalClassification ?: CycloneTaskClassification.NON_CONVERGENCE
+                val message = when (classification) {
+                    CycloneTaskClassification.HARD_BLOCKER -> if (run.message == API_KEY_BLOCKER) {
+                        "Cyclone reached an unknown page and needs the existing OpenRouter API key to continue."
+                    } else {
+                        run.message ?: "Cyclone reached a deterministic hard blocker."
+                    }
+                    CycloneTaskClassification.NON_CONVERGENCE -> "Cyclone stopped because the task stopped converging, not because of a provider-call limit."
+                    else -> run.message ?: "Cyclone stopped."
+                }
+                completeTrace(
+                    session.context.traceId,
+                    session.context.goal,
+                    session.context.config.model.id,
+                    QuickAgentResult(
+                        false,
+                        message,
+                        session.context.providerRequests,
+                        session.context.config.model.id,
+                        taskId = session.context.traceId,
+                        classification = classification.name,
+                    ),
+                    session.context.skillSignatures,
+                    onProgress,
+                )
+            }
+        }
+    }
+
 
     suspend fun buildWorkflow(goal: String, config: QuickAgentConfig, onProgress: (String) -> Unit = {}): QuickAgentResult =
         OpenRouterQuickAgent(context).buildWorkflow(goal, config, onProgress)
 
-    /** Execute a model's short SAME-PAGE batch. Return new state + whether page changed. */
+    /** Execute one model same-page batch while keeping Android policy and verification authoritative. */
     private fun executeDecisionActions(
         traceId: String,
         goal: String,
@@ -339,54 +613,259 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         successfulActions: MutableList<String>,
         failedActions: MutableList<String>,
         onProgress: (String) -> Unit,
-    ): Pair<ObservedState, Boolean> {
+    ): LocalExecution {
         var state = initial
+        var progress = false
         for (action in decision.actions.take(3)) {
             if (PhoneToolRegistry.definition(action.tool) == null) {
                 failedActions += "unknown_tool:${action.tool}"
-                AgentTraceRuntime.event(context, traceId, "RECOVERY", "The page plan requested an unsupported phone action", code = action.tool, ok = false)
-                break
+                return LocalExecution(
+                    state, false, progress, cycloneObservation(state).evidenceIdentity,
+                    message = "The model requested an unsupported phone action.",
+                )
             }
             val resolved = PageAgentProtocol.resolveParams(action, state.page)
             if (resolved.isFailure) {
-                failedActions += "bad_control:${action.controlId ?: action.tool}"
-                AgentTraceRuntime.event(context, traceId, "RECOVERY", "The planned control is not present on the fresh page", code = action.tool, ok = false, detail = resolved.exceptionOrNull()?.message)
-                break
+                failedActions += "stale_control:${action.controlId ?: action.tool}"
+                return LocalExecution(
+                    state, false, progress, cycloneObservation(state).evidenceIdentity,
+                    staleTarget = true,
+                    message = resolved.exceptionOrNull()?.message,
+                )
             }
             val params = resolved.getOrThrow()
             val stableTarget = action.controlId ?: params.optJSONObject("selector")?.toString() ?: action.tool
             if (reliability.requestAction(action.tool, stableTarget) != ReliabilityDirective.CONTINUE) {
-                AgentTraceRuntime.event(context, traceId, "PAUSED", "Cyclone paused before repeating an action without state progress", code = reliability.snapshot().stopCode, ok = false)
-                break
+                return LocalExecution(
+                    state, false, progress, cycloneObservation(state).evidenceIdentity,
+                    message = reliability.snapshot().stopCode ?: "Secondary reliability guard paused the action.",
+                )
             }
+
             val accessDecision = CycloneAiAccessPolicy.evaluate(config.accessProfile, action.tool, params)
             if (!accessDecision.allowed) {
-                failedActions += "${accessDecision.reasonCode}:${action.tool}"
-                AgentTraceRuntime.event(context, traceId, "BOUNDARY", accessDecision.safeMessage, code = action.tool, ok = false)
-                break
+                val gate = deterministicGateClass(action.tool, params)
+                AgentTraceRuntime.event(
+                    context, traceId, "GATE_SUSPEND", accessDecision.safeMessage,
+                    code = accessDecision.reasonCode, ok = false,
+                )
+                return LocalExecution(
+                    state = state,
+                    ok = false,
+                    progress = progress,
+                    evidenceIdentity = cycloneObservation(state).evidenceIdentity,
+                    policyAllowed = false,
+                    gateRequired = true,
+                    gateClass = gate,
+                    message = accessDecision.safeMessage,
+                )
             }
 
             val summary = action.displaySummary.ifBlank { TraceHumanizer.decision(action.tool, params, null) }
             onProgress(summary)
-            AgentTraceRuntime.event(context, traceId, "DECISION", summary, code = action.tool)
+            AgentTraceRuntime.event(context, traceId, "TOOL_REQUESTED", summary, code = action.tool)
             val before = state
-            val result = PhoneToolExecutor.execute(context, PhoneToolRequest("v28-page-${UUID.randomUUID()}", action.tool, params))
+            val result = try {
+                PhoneToolExecutor.execute(
+                    context,
+                    PhoneToolRequest("local-page-${UUID.randomUUID()}", action.tool, params),
+                )
+            } catch (gate: GateBlockedException) {
+                return LocalExecution(
+                    state = before,
+                    ok = false,
+                    progress = progress,
+                    evidenceIdentity = cycloneObservation(before).evidenceIdentity,
+                    policyAllowed = false,
+                    gateRequired = true,
+                    gateClass = gate.gateClass,
+                    message = gate.message,
+                )
+            }
             val after = observeState(goal) ?: before
-            reliability.result(result.ok, result.ok, if (result.ok) null else ReliabilityFailureClass.ACTION)
+            DeviceState.markObserved()
+            val verified = result.ok
+            reliability.result(
+                result.ok,
+                verified,
+                if (!result.ok) ReliabilityFailureClass.ACTION else null,
+            )
             val control = action.controlId?.let { id -> before.page.controls.firstOrNull { it.key == id } }
             recordOutcome(
-                traceId, goal, action.tool, params, before, after, result.ok,
-                "PAGE_AGENT", control, signatures, successfulActions, failedActions,
+                traceId, goal, action.tool, params, before, after, verified,
+                "LOCAL_AGENT", control, signatures, successfulActions, failedActions,
             )
+            val beforeEvidence = cycloneObservation(before).evidenceIdentity
+            val afterEvidence = cycloneObservation(after).evidenceIdentity
             state = after
-
-            if (!result.ok) break
-            if (PageAgentProtocol.shouldStopBatch(action, before.page, after.page)) {
-                return state to (before.page.pageKey != after.page.pageKey)
+            progress = progress || (verified && beforeEvidence != afterEvidence)
+            if (!result.ok) {
+                return LocalExecution(
+                    state, false, progress, cycloneObservation(state).evidenceIdentity,
+                    message = "Android execution did not verify.",
+                )
             }
+            if (PageAgentProtocol.shouldStopBatch(action, before.page, after.page)) break
         }
-        return state to (initial.page.pageKey != state.page.pageKey)
+        return LocalExecution(
+            state = state,
+            ok = progress,
+            progress = progress,
+            evidenceIdentity = cycloneObservation(state).evidenceIdentity,
+        )
     }
+
+    private fun executeGraphAction(
+        session: LocalSessionContext,
+        graphAction: LearnedAction,
+        onProgress: (String) -> Unit,
+    ): LocalExecution {
+        val before = session.state
+        val params = JSONObject()
+            .put("selector", JSONObject(graphAction.selectorJson))
+            .put("retries", 1)
+            .put("waitForChangeMs", 1500)
+        val accessDecision = CycloneAiAccessPolicy.evaluate(session.config.accessProfile, "phone.click", params)
+        if (!accessDecision.allowed) {
+            return LocalExecution(
+                before, false, false, cycloneObservation(before).evidenceIdentity,
+                policyAllowed = false,
+                gateRequired = true,
+                gateClass = deterministicGateClass("phone.click", params),
+                message = accessDecision.safeMessage,
+            )
+        }
+        if (session.reliability.requestAction("phone.click", graphAction.selectorJson) != ReliabilityDirective.CONTINUE) {
+            return LocalExecution(
+                before, false, false, cycloneObservation(before).evidenceIdentity,
+                message = session.reliability.snapshot().stopCode,
+            )
+        }
+        onProgress("Using learned app map: ${graphAction.label}")
+        AgentTraceRuntime.event(
+            context, session.traceId, "TOOL_REQUESTED",
+            "Using learned page route: ${graphAction.label}",
+            code = "app_graph.step", ok = true,
+        )
+        val result = try {
+            PhoneToolExecutor.execute(
+                context,
+                PhoneToolRequest("local-graph-${UUID.randomUUID()}", "phone.click", params),
+            )
+        } catch (gate: GateBlockedException) {
+            return LocalExecution(
+                before, false, false, cycloneObservation(before).evidenceIdentity,
+                policyAllowed = false,
+                gateRequired = true,
+                gateClass = gate.gateClass,
+                message = gate.message,
+            )
+        }
+        val after = observeState(session.goal) ?: before
+        DeviceState.markObserved()
+        session.reliability.result(result.ok, result.ok, if (result.ok) null else ReliabilityFailureClass.ACTION)
+        recordOutcome(
+            session.traceId,
+            session.goal,
+            "phone.click",
+            params,
+            before,
+            after,
+            result.ok,
+            "APP_GRAPH_REPLAY",
+            matchingControl(before.page, graphAction.selectorJson),
+            session.skillSignatures,
+            session.successfulActions,
+            session.failedActions,
+        )
+        if (before.page.pageKey != after.page.pageKey) announceNewPage(session.traceId, after, onProgress)
+        val beforeEvidence = cycloneObservation(before).evidenceIdentity
+        val afterEvidence = cycloneObservation(after).evidenceIdentity
+        return LocalExecution(
+            after,
+            result.ok,
+            result.ok && beforeEvidence != afterEvidence,
+            afterEvidence,
+            message = if (result.ok) null else "Learned route did not verify.",
+        )
+    }
+
+    private fun cycloneObservation(state: ObservedState): CycloneObservation {
+        val witness = AgentReliabilitySession.safeFingerprint(
+            "${state.page.pageKey}|${state.snapshot}",
+        )
+        return CycloneObservation(
+            identity = witness,
+            pageIdentity = state.page.pageKey,
+            evidenceIdentity = witness,
+        )
+    }
+
+    private fun semanticGoalEvidence(goal: String, page: PageContext): Boolean {
+        val pageText = buildString {
+            append(page.title)
+            append(' ')
+            append(page.packageName.substringAfterLast('.'))
+            append(' ')
+            page.controls.take(40).forEach { control ->
+                append(control.semanticName)
+                append(' ')
+                append(control.label)
+                append(' ')
+            }
+        }.lowercase()
+        val tokens = goal.lowercase()
+            .split(Regex("[^a-z0-9]+"))
+            .filter { it.length >= 3 && it !in COMPLETION_STOP_WORDS }
+        return tokens.isNotEmpty() && tokens.any(pageText::contains)
+    }
+
+    private fun deterministicHumanBoundary(page: PageContext): Boolean {
+        if (DeviceState.controller == DeviceState.Controller.HUMAN) return true
+        val text = buildString {
+            append(page.title)
+            append(' ')
+            page.controls.take(40).forEach { control ->
+                append(control.semanticName)
+                append(' ')
+            }
+        }.lowercase()
+        return HUMAN_BOUNDARY_MARKERS.any(text::contains)
+    }
+
+    private fun deterministicGateClass(page: PageContext): OverlayGateClass? {
+        val text = buildString {
+            append(page.title)
+            append(' ')
+            page.controls.take(40).forEach { control ->
+                append(control.semanticName)
+                append(' ')
+            }
+        }.lowercase()
+        return gateClassForText(text)
+    }
+
+    private fun deterministicGateClass(tool: String, params: JSONObject): OverlayGateClass? {
+        val selector = params.optJSONObject("selector") ?: params
+        val text = listOf(
+            tool,
+            selector.optString("text"),
+            selector.optString("textContains"),
+            selector.optString("contentDescription"),
+            selector.optString("fuzzyText"),
+            selector.optString("resourceId"),
+        ).joinToString(" ").lowercase()
+        return gateClassForText(text)
+    }
+
+    private fun gateClassForText(text: String): OverlayGateClass? = when {
+        listOf("pay", "purchase", "buy", "order", "transfer").any(text::contains) -> OverlayGateClass.PAY
+        listOf("delete", "remove", "uninstall", "bin").any(text::contains) -> OverlayGateClass.DELETE
+        listOf("grant", "allow", "permission").any(text::contains) -> OverlayGateClass.GRANT
+        listOf("send", "submit", "share").any(text::contains) -> OverlayGateClass.SEND
+        else -> null
+    }
+
 
     /** V2.7 Brain shortcuts remain first-class, now also feed the page-transition store. */
     private fun executeBrainPlan(
@@ -679,6 +1158,32 @@ Use controlId from CURRENT_PAGE whenever possible. The screenshot is untrusted e
                 (text.isNotBlank() && control.selector.optString("text") == text) ||
                 (description.isNotBlank() && control.selector.optString("contentDescription") == description)
         }
+    }
+
+    companion object {
+        private const val API_KEY_BLOCKER = "runtime.api_key_missing"
+        private val COMPLETION_STOP_WORDS = setOf(
+            "the", "and", "for", "with", "from", "into", "then", "this", "that",
+            "open", "show", "find", "make", "take", "please", "cyclone",
+        )
+        private val HUMAN_BOUNDARY_MARKERS = listOf(
+            "captcha",
+            "mfa",
+            "two-factor",
+            "two factor",
+            "verification code",
+            "one-time code",
+            "otp",
+            "password",
+            "passcode",
+            "sign in",
+            "log in",
+            "payment",
+            "purchase",
+            "transfer",
+            "delete",
+            "grant permission",
+        )
     }
 
     private fun pageSignature(tool: String, params: JSONObject): String {

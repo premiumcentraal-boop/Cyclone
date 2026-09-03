@@ -8,6 +8,7 @@ import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
 import com.cyclone.mobile.ai.OverlayChromeController
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.QuickAgentConfig
+import com.cyclone.mobile.ai.QuickAgentResult
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,8 @@ object OverlayChromeRuntime {
     private var controller: OverlayChromeController? = null
     private var service: CycloneAccessibilityService? = null
     private var aiJob: Job? = null
+    private var adaptiveAgent: OpenRouterAdaptiveAgent? = null
+    private var suspendedTaskId: String? = null
 
     fun isAttached(): Boolean = synchronized(lock) { controller != null }
 
@@ -69,6 +72,9 @@ object OverlayChromeRuntime {
             controller?.dismiss()
             controller = null
             service = null
+            adaptiveAgent?.cancelActiveTask()
+            adaptiveAgent = null
+            suspendedTaskId = null
             aiJob?.cancel()
             aiJob = null
             machine = OverlayChromeMachine(
@@ -107,12 +113,23 @@ object OverlayChromeRuntime {
     }
 
     fun dispatch(action: OverlayUserAction) {
+        val before = snapshot()
         mutate { it.dispatch(action) }
-        if (action == OverlayUserAction.EXIT || action == OverlayUserAction.STOP_TASK) {
-            synchronized(lock) {
+        when (action) {
+            OverlayUserAction.EXIT, OverlayUserAction.STOP_TASK -> synchronized(lock) {
+                adaptiveAgent?.cancelActiveTask()
+                adaptiveAgent = null
+                suspendedTaskId = null
                 aiJob?.cancel()
                 aiJob = null
             }
+            OverlayUserAction.GATE_CONFIRM -> resumeSuspendedTask()
+            OverlayUserAction.TAKE_CONTROL -> {
+                if (before.userPaused && DeviceState.controller == DeviceState.Controller.AGENT) {
+                    resumeSuspendedTask()
+                }
+            }
+            else -> Unit
         }
     }
 
@@ -145,7 +162,15 @@ object OverlayChromeRuntime {
 
     private fun runAiRequest(request: String) {
         val context = synchronized(lock) { service } ?: return
-        synchronized(lock) { aiJob?.cancel() }
+        synchronized(lock) {
+            aiJob?.cancel()
+            adaptiveAgent?.cancelActiveTask()
+        }
+        val agent = OpenRouterAdaptiveAgent(context)
+        synchronized(lock) {
+            adaptiveAgent = agent
+            suspendedTaskId = null
+        }
         val job = aiScope.launch {
             mutate {
                 it.enterWorking()
@@ -153,7 +178,7 @@ object OverlayChromeRuntime {
             }
             val settings = readAiSettings(context)
             val accessProfile = CycloneAiAccessProfileStore.read(context)
-            val result = OpenRouterAdaptiveAgent(context).execute(
+            val result = agent.execute(
                 request,
                 QuickAgentConfig(
                     model = OpenRouterModelPresets.byId(settings.modelId).copy(
@@ -163,20 +188,84 @@ object OverlayChromeRuntime {
                     accessProfile = accessProfile,
                 ),
             ) { progress -> mutate { it.updateStatus(progress) } }
-            when (snapshot().state) {
-                OverlayChromeState.GATE, OverlayChromeState.IDLE -> Unit
-                OverlayChromeState.WORKING, OverlayChromeState.LIVE -> if (result.ok) {
-                    mutate { it.completeDone() }
+            handleAgentResult(result)
+        }
+        synchronized(lock) { aiJob = job }
+    }
+
+    private fun resumeSuspendedTask() {
+        val agent = synchronized(lock) { adaptiveAgent } ?: return
+        val taskId = synchronized(lock) { suspendedTaskId } ?: return
+        val job = aiScope.launch {
+            mutate { machine ->
+                when (machine.state()) {
+                    OverlayChromeState.DONE -> {
+                        machine.startAnalysis(taskId)
+                        machine.enterWorking(taskId)
+                    }
+                    OverlayChromeState.LIVE -> machine.enterWorking(taskId)
+                    OverlayChromeState.WORKING -> Unit
+                    else -> return@mutate
+                }
+                machine.updateStatus("Re-observing after handoff…")
+            }
+            val result = agent.resume { progress -> mutate { it.updateStatus(progress) } }
+            handleAgentResult(result)
+        }
+        synchronized(lock) { aiJob = job }
+    }
+
+    private fun handleAgentResult(result: QuickAgentResult) {
+        when (result.classification) {
+            "HUMAN_OR_GATE" -> {
+                synchronized(lock) { suspendedTaskId = result.taskId }
+                val gate = result.gateClass?.let { raw ->
+                    runCatching { OverlayGateClass.parse(raw) }.getOrNull()
+                }
+                if (gate != null) {
+                    mutate { it.enterGate(gate, sessionId = result.taskId ?: it.snapshot().sessionId) }
                 } else {
-                    mutate {
+                    mutate { machine ->
+                        if (machine.state() == OverlayChromeState.WORKING) machine.enterLive()
+                        machine.updateStatus(result.message)
+                        if (!machine.snapshot().userPaused) machine.dispatch(OverlayUserAction.TAKE_CONTROL)
+                    }
+                }
+            }
+            "COMPLETE" -> {
+                synchronized(lock) {
+                    suspendedTaskId = null
+                    adaptiveAgent = null
+                }
+                when (snapshot().state) {
+                    OverlayChromeState.GATE, OverlayChromeState.IDLE -> Unit
+                    OverlayChromeState.WORKING, OverlayChromeState.LIVE -> mutate { it.completeDone() }
+                    OverlayChromeState.DONE -> Unit
+                    else -> Unit
+                }
+            }
+            "CANCELLED" -> {
+                synchronized(lock) {
+                    suspendedTaskId = null
+                    adaptiveAgent = null
+                }
+            }
+            else -> {
+                synchronized(lock) {
+                    suspendedTaskId = null
+                    adaptiveAgent = null
+                }
+                when (snapshot().state) {
+                    OverlayChromeState.GATE, OverlayChromeState.IDLE -> Unit
+                    OverlayChromeState.WORKING -> mutate {
                         it.enterLive()
                         it.updateStatus(result.message)
                     }
+                    OverlayChromeState.LIVE -> mutate { it.updateStatus(result.message) }
+                    else -> Unit
                 }
-                else -> Unit
             }
         }
-        synchronized(lock) { aiJob = job }
     }
 
     private fun mutate(block: (OverlayChromeMachine) -> Unit) {

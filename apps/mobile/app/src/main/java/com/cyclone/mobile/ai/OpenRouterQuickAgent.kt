@@ -72,7 +72,10 @@ object OpenRouterModelPresets {
 data class QuickAgentConfig(
     val model: OpenRouterModelPreset = OpenRouterModelPresets.DEFAULT,
     val visionModel: OpenRouterModelPreset = OpenRouterModelPresets.GEMINI_3_8_FLASH,
-    /** V2.8 counts provider calls on unknown semantic pages, not raw phone actions/events. */
+    /**
+     * Legacy compatibility knob for older workflow/tests. Foreground CycloneLocalAgent execution
+     * no longer uses provider-call count as a task termination budget.
+     */
     val maxDecisions: Int = 6,
     val safeMode: Boolean = true,
     val accessProfile: CycloneAiAccessProfile = if (safeMode) CycloneAiAccessProfile.BALANCED else CycloneAiAccessProfile.FULL,
@@ -85,6 +88,12 @@ data class QuickAgentResult(
     val decisions: Int,
     val model: String,
     val workflowId: String? = null,
+    /** Persistent local task id; present for foreground task sessions and GATE resume. */
+    val taskId: String? = null,
+    /** CycloneTaskClassification name. Null for legacy one-shot workflow compilation. */
+    val classification: String? = null,
+    /** Overlay GATE wire value when a deterministic Android boundary can name one. */
+    val gateClass: String? = null,
 )
 
 /**
