@@ -34,7 +34,6 @@ import com.cyclone.mobile.applearner.PageAwarenessRuntime
 import com.cyclone.mobile.applearner.PageContext
 import com.cyclone.mobile.applearner.PageControl
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
-import com.cyclone.mobile.brain.BrainActionPlan
 import com.cyclone.mobile.brain.BrainRefinementWorker
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.ui.overlay.GateBlockedException
@@ -69,12 +68,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val snapshot: JSONObject,
         val environment: JSONObject,
         val page: PageContext,
-    )
-
-    private data class ReplayResult(
-        val completed: Boolean,
-        val state: ObservedState,
-        val message: String,
     )
 
     private data class LocalExecution(
@@ -149,7 +142,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val successfulActions = mutableListOf<String>()
         val failedActions = mutableListOf<String>()
         val graphAttempts = mutableSetOf<String>()
-        val visionUsedPages = mutableSetOf<String>()
 
         AgentTraceRuntime.event(
             context, traceId, "PAGE",
@@ -881,52 +873,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
     }
 
 
-    /** V2.7 Brain shortcuts remain first-class, now also feed the page-transition store. */
-    private fun executeBrainPlan(
-        traceId: String,
-        goal: String,
-        plan: BrainActionPlan,
-        initial: ObservedState,
-        config: QuickAgentConfig,
-        reliability: AgentReliabilitySession,
-        signatures: MutableList<String>,
-        successfulActions: MutableList<String>,
-        failedActions: MutableList<String>,
-        onProgress: (String) -> Unit,
-    ): ReplayResult {
-        var state = initial
-        AgentTraceRuntime.event(
-            context, traceId, "BRAIN",
-            "Brain found a ${if (plan.learned) "learned" else "system"} shortcut at ${(plan.confidence * 100).toInt()}% confidence",
-            code = "brain.plan", ok = true, detail = plan.reason,
-        )
-        for (step in plan.steps) {
-            if (reliability.requestAction(step.tool, step.params.optJSONObject("selector")?.toString() ?: step.label) != ReliabilityDirective.CONTINUE) {
-                return ReplayResult(false, state, "Cyclone paused a repeated learned action because the page was not progressing.")
-            }
-            val accessDecision = CycloneAiAccessPolicy.evaluate(config.accessProfile, step.tool, step.params)
-            if (!accessDecision.allowed) {
-                return ReplayResult(false, state, accessDecision.safeMessage)
-            }
-            onProgress("Brain · ${step.label}")
-            AgentTraceRuntime.event(context, traceId, "REPLAY", step.label, code = step.tool, detail = step.evidence)
-            val before = state
-            val result = PhoneToolExecutor.execute(context, PhoneToolRequest("brain-v28-${UUID.randomUUID()}", step.tool, step.params))
-            val after = observeState(goal) ?: before
-            val verified = result.ok && verifyPlanStep(step.tool, step.params, after.environment)
-            reliability.result(result.ok, verified, if (!result.ok) ReliabilityFailureClass.ACTION else ReliabilityFailureClass.VERIFICATION)
-            recordOutcome(
-                traceId, goal, step.tool, step.params, before, after, verified,
-                "BRAIN_REPLAY", matchingControl(before.page, step.params.optJSONObject("selector")?.toString()),
-                signatures, successfulActions, failedActions,
-            )
-            state = after
-            if (!verified) return ReplayResult(false, state, "A learned step did not verify, so page-aware AI recovery is needed.")
-            if (before.page.pageKey != after.page.pageKey) announceNewPage(traceId, state, onProgress)
-        }
-        return ReplayResult(true, state, "Done from Cyclone Brain in ${plan.steps.size} deterministic step${if (plan.steps.size == 1) "" else "s"}; no AI request was needed.")
-    }
-
     private fun knownAppGraphAction(page: PageContext, goal: String, attempted: Set<String>): LearnedAction? {
         val graph = AppLearnerRuntime.graph(page.packageName) ?: return null
         val current = graph.screens.firstOrNull { it.recognition.semanticFingerprint == page.pageKey }
@@ -1180,11 +1126,6 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
         val enabled = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).getBoolean("trace_overlay", false)
         val service = CycloneAccessibilityService.instance
         if (enabled && service != null) AiTraceOverlayV27Runtime.startTask(service, traceId)
-    }
-
-    private fun verifyPlanStep(tool: String, params: JSONObject, environment: JSONObject): Boolean = when (tool) {
-        "phone.open_app" -> environment.optString("currentPackage") == params.optString("package")
-        else -> true
     }
 
     private fun reusableTool(tool: String): Boolean = tool !in setOf(
