@@ -27,10 +27,25 @@ class OpenRouterToolCallingProvider(
         if (apiKey.isBlank()) return AgentProviderTurn.Failure("Add an OpenRouter API key first.", "API_KEY_MISSING", false)
         if (nativeToolsEnabled) {
             val native = nativeTurn(conversation, tools)
-            if (native !is AgentProviderTurn.Failure || !native.retryable) return native
+            if (native !is AgentProviderTurn.Failure) return native
+            if (!native.retryable || !looksLikeNativeToolCompatibilityFailure(native.message)) return native
             nativeToolsEnabled = false
         }
         return compatibilityTurn(conversation, tools)
+    }
+
+    private fun looksLikeNativeToolCompatibilityFailure(message: String): Boolean {
+        val lower = message.lowercase()
+        return listOf(
+            "tool_choice",
+            "tool call",
+            "tool_calls",
+            "tools parameter",
+            "function calling",
+            "function call",
+            "unsupported parameter",
+            "does not support tools",
+        ).any(lower::contains)
     }
 
     private fun nativeTurn(conversation: List<AgentConversationEntry>, tools: JSONArray): AgentProviderTurn {

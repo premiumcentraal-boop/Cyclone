@@ -37,6 +37,7 @@ class PersistentToolAgentRuntime(
     taskId: String = "agent-" + UUID.randomUUID(),
 ) {
     private var cancelled = false
+    private var freshReadRequiredAfterResume = false
     private var state = PersistentAgentTaskState(
         taskId = taskId,
         goal = goal,
@@ -68,6 +69,7 @@ class PersistentToolAgentRuntime(
 
     fun resume(): Boolean {
         if (!state.gateSuspended || state.status != PersistentAgentStatus.GATE) return false
+        freshReadRequiredAfterResume = true
         state = state.copy(
             status = PersistentAgentStatus.RUNNING,
             gateSuspended = false,
@@ -136,14 +138,29 @@ class PersistentToolAgentRuntime(
                         )
                         continue
                     }
-                    for (call in turn.calls) {
+
+                    val containsMutation = turn.calls.any { tools.isMutation(it.name) }
+                    turn.calls.forEachIndexed { index, call ->
                         cancellation()?.let { return it }
+
+                        // Native providers occasionally ignore parallel_tool_calls=false. Read-only
+                        // batches are safe, but once a turn includes mutation the model must see the
+                        // first result before any later call can be trusted against fresh Android state.
+                        if (containsMutation && index > 0) {
+                            deferUntilReplan(call)
+                            return@forEachIndexed
+                        }
+
                         val result = executeTool(call)
                         when (result.boundary) {
                             ToolBoundary.GATE -> return suspendForGate(call.name)
                             ToolBoundary.HARD_BLOCKER -> {
                                 val message = toolMessage(result.payload).ifBlank { "Cyclone reached a deterministic blocker." }
                                 return stop(PersistentAgentStatus.HARD_BLOCKER, message)
+                            }
+                            ToolBoundary.NON_CONVERGENCE -> {
+                                val message = toolMessage(result.payload).ifBlank { "Cyclone stopped because the same action kept making no progress." }
+                                return stop(PersistentAgentStatus.NON_CONVERGENCE, message)
                             }
                             ToolBoundary.CONTINUE -> Unit
                         }
@@ -211,6 +228,48 @@ class PersistentToolAgentRuntime(
         else if (mutation) 1 else state.repeatedIdenticalNoProgress
 
         val nextToolTurn = state.toolTurns + 1
+
+        if (mutation && freshReadRequiredAfterResume) {
+            val payload = JSONObject()
+                .put("success", false)
+                .put("errorClass", "FRESH_OBSERVATION_REQUIRED")
+                .put("failureLayer", "OBSERVATION")
+                .put("retryable", true)
+                .put("message", "Read the current page after human/GATE resume before another mutation.")
+            state = state.copy(
+                toolTurns = nextToolTurn,
+                lastToolErrorClass = "FRESH_OBSERVATION_REQUIRED",
+                conversation = state.conversation + AgentConversationEntry.ToolResult(call.id, call.name, payload),
+            )
+            emit(
+                AgentRuntimeEventType.RECOVERING,
+                tool = call.name,
+                modelTurn = state.modelTurns,
+                toolTurn = nextToolTurn,
+                mutation = true,
+                message = payload.optString("message"),
+                payload = tracePayload(payload, safeArguments(call.name, call.arguments)),
+            )
+            return ToolExecution(ToolBoundary.CONTINUE, payload)
+        }
+
+        if (mutation && repeated > policy.maxRepeatedIdenticalActionWithoutProgress * 2) {
+            val payload = JSONObject()
+                .put("success", false)
+                .put("errorClass", "NON_CONVERGENCE")
+                .put("failureLayer", "CONVERGENCE")
+                .put("retryable", false)
+                .put("message", "The same mutation kept repeating after Cyclone asked for a different strategy.")
+            state = state.copy(
+                toolTurns = nextToolTurn,
+                repeatedIdenticalNoProgress = repeated,
+                lastActionSignature = signature,
+                lastToolErrorClass = "NON_CONVERGENCE",
+                conversation = state.conversation + AgentConversationEntry.ToolResult(call.id, call.name, payload),
+            )
+            return ToolExecution(ToolBoundary.NON_CONVERGENCE, payload)
+        }
+
         if (mutation && repeated > policy.maxRepeatedIdenticalActionWithoutProgress) {
             val blockedRepeat = JSONObject()
                 .put("success", false)
@@ -280,6 +339,10 @@ class PersistentToolAgentRuntime(
         val verifiedProgress = mutation && success && verificationPassed
         val newEvidence = evidenceIdentity != null && evidenceIdentity != state.lastEvidenceIdentity
 
+        if (!mutation && payload.optBoolean("success", false) && call.name in FRESH_EVIDENCE_TOOLS) {
+            freshReadRequiredAfterResume = false
+        }
+
         state = state.copy(
             verifiedProgressCount = state.verifiedProgressCount + if (verifiedProgress) 1 else 0,
             lastEvidenceIdentity = evidenceIdentity ?: state.lastEvidenceIdentity,
@@ -326,6 +389,32 @@ class PersistentToolAgentRuntime(
                 else -> ToolBoundary.CONTINUE
             },
             payload = payload,
+        )
+    }
+
+    private fun deferUntilReplan(call: AgentToolCall) {
+        val mutation = tools.isMutation(call.name)
+        val nextToolTurn = state.toolTurns + 1
+        val safeArgs = safeArguments(call.name, call.arguments)
+        val payload = JSONObject()
+            .put("success", false)
+            .put("errorClass", "SERIAL_REPLAN_REQUIRED")
+            .put("failureLayer", "RUNTIME")
+            .put("retryable", true)
+            .put("message", "A previous tool from this model turn must be observed before this call can run safely. Replan using the returned results.")
+        state = state.copy(
+            toolTurns = nextToolTurn,
+            lastToolErrorClass = "SERIAL_REPLAN_REQUIRED",
+            conversation = state.conversation + AgentConversationEntry.ToolResult(call.id, call.name, payload),
+        )
+        emit(
+            AgentRuntimeEventType.TOOL_RESULT,
+            tool = call.name,
+            modelTurn = state.modelTurns,
+            toolTurn = nextToolTurn,
+            mutation = mutation,
+            message = payload.optString("message"),
+            payload = tracePayload(payload, safeArgs),
         )
     }
 
@@ -492,6 +581,10 @@ class PersistentToolAgentRuntime(
         )
     }
 
-    private enum class ToolBoundary { CONTINUE, GATE, HARD_BLOCKER }
+    private enum class ToolBoundary { CONTINUE, GATE, HARD_BLOCKER, NON_CONVERGENCE }
+
+    private companion object {
+        val FRESH_EVIDENCE_TOOLS = setOf("understand_page", "search", "inspect", "visual_context")
+    }
     private data class ToolExecution(val boundary: ToolBoundary, val payload: JSONObject)
 }

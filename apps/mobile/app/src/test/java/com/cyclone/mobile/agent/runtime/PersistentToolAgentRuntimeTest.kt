@@ -26,6 +26,7 @@ class PersistentToolAgentRuntimeTest {
     ) : AgentToolExecutor {
         private val results = ArrayDeque(results)
         private val completions = ArrayDeque(completions)
+        val calledTools = mutableListOf<String>()
         override fun descriptors(): JSONArray = JSONArray()
             .put(JSONObject().put("name", "open_app").put("mutation", true))
             .put(JSONObject().put("name", "click").put("mutation", true))
@@ -34,8 +35,10 @@ class PersistentToolAgentRuntimeTest {
 
         override fun isMutation(tool: String): Boolean = tool in mutations
 
-        override fun call(tool: String, arguments: JSONObject): JSONObject =
-            results.pollFirst() ?: JSONObject().put("success", true)
+        override fun call(tool: String, arguments: JSONObject): JSONObject {
+            calledTools += tool
+            return results.pollFirst() ?: JSONObject().put("success", true)
+        }
 
         override fun verifyCompletion(goal: String): AgentCompletionEvidence =
             completions.pollFirst() ?: AgentCompletionEvidence(true, "done", "done")
@@ -176,6 +179,104 @@ class PersistentToolAgentRuntimeTest {
         val second = runtime.runUntilBoundary()
         assertTrue(second is PersistentAgentRunResult.Completed)
         assertEquals(first.state.taskId, second.state.taskId)
+    }
+
+    @Test
+    fun gateResumeRequiresFreshReadBeforeAnotherMutation() {
+        val provider = ScriptProvider(listOf(
+            { AgentProviderTurn.ToolCalls(listOf(call("1", "click", JSONObject().put("elementId", "old"))), true) },
+            { AgentProviderTurn.ToolCalls(listOf(call("2", "click", JSONObject().put("elementId", "old"))), true) },
+            { conversation ->
+                val result = conversation.filterIsInstance<AgentConversationEntry.ToolResult>().last()
+                assertEquals("FRESH_OBSERVATION_REQUIRED", result.payload.optString("errorClass"))
+                AgentProviderTurn.ToolCalls(listOf(call("3", "understand_page", JSONObject())), true)
+            },
+            { AgentProviderTurn.ToolCalls(listOf(call("4", "click", JSONObject().put("elementId", "fresh"))), true) },
+            { AgentProviderTurn.Final("Done.", true) },
+        ))
+        val gateResult = JSONObject()
+            .put("success", false)
+            .put("failure", JSONObject()
+                .put("errorClass", "GATE_REQUIRED")
+                .put("failureLayer", "POLICY")
+                .put("retryable", true)
+                .put("message", "Confirmation required."))
+        val tools = FakeTools(
+            results = listOf(
+                gateResult,
+                JSONObject().put("success", true).put("observationId", "fresh-observation"),
+                verifiedAction("com.example"),
+            ),
+        )
+        val runtime = PersistentToolAgentRuntime("Confirm action", provider, tools, "system")
+
+        assertTrue(runtime.runUntilBoundary() is PersistentAgentRunResult.Suspended)
+        assertTrue(runtime.resume())
+        val result = runtime.runUntilBoundary()
+
+        assertTrue(result is PersistentAgentRunResult.Completed)
+        assertEquals(listOf("click", "understand_page", "click"), tools.calledTools)
+    }
+
+    @Test
+    fun modelTurnWithMutationDefersLaterCallsUntilReplan() {
+        val provider = ScriptProvider(listOf(
+            {
+                AgentProviderTurn.ToolCalls(
+                    listOf(
+                        call("1", "click", JSONObject().put("elementId", "first")),
+                        call("2", "click", JSONObject().put("elementId", "second")),
+                    ),
+                    true,
+                )
+            },
+            { conversation ->
+                val results = conversation.filterIsInstance<AgentConversationEntry.ToolResult>()
+                assertEquals(2, results.size)
+                assertEquals("SERIAL_REPLAN_REQUIRED", results.last().payload.optString("errorClass"))
+                AgentProviderTurn.Final("Done.", true)
+            },
+        ))
+        val tools = FakeTools(results = listOf(verifiedAction("com.example")))
+        val runtime = PersistentToolAgentRuntime("Do one safe action", provider, tools, "system")
+
+        val result = runtime.runUntilBoundary()
+
+        assertTrue(result is PersistentAgentRunResult.Completed)
+        assertEquals(listOf("click"), tools.calledTools)
+    }
+
+    @Test
+    fun ignoredRepeatedNoProgressEventuallyStopsAsNonConvergence() {
+        val repeated = List(5) { index ->
+            { _: List<AgentConversationEntry> ->
+                AgentProviderTurn.ToolCalls(
+                    listOf(call("r$index", "click", JSONObject().put("elementId", "same"))),
+                    true,
+                )
+            }
+        }
+        val failure = JSONObject()
+            .put("success", false)
+            .put("failure", JSONObject()
+                .put("errorClass", "VERIFICATION_FAILED")
+                .put("failureLayer", "VERIFICATION")
+                .put("retryable", true)
+                .put("message", "No progress."))
+        val tools = FakeTools(results = listOf(failure, failure))
+        val runtime = PersistentToolAgentRuntime(
+            "Click target",
+            ScriptProvider(repeated),
+            tools,
+            "system",
+        )
+
+        val result = runtime.runUntilBoundary()
+
+        assertTrue(result is PersistentAgentRunResult.Stopped)
+        assertEquals(PersistentAgentStatus.NON_CONVERGENCE, result.state.status)
+        assertEquals(2, tools.calledTools.size)
+        assertEquals(5, result.state.toolTurns)
     }
 
     private fun call(id: String, name: String, args: JSONObject) = AgentToolCall(id, name, args)

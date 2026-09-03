@@ -78,7 +78,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             sessionId = runId,
         )
         val sink = AgentRuntimeEventSink { event ->
-            publishRunEvent(runId, event, onProgress)
+            publishRunEvent(runId, event)
         }
         val runtime = PersistentToolAgentRuntime(
             goal = cleanGoal,
@@ -169,7 +169,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
 
             is PersistentAgentRunResult.Suspended -> {
                 activeSession = session
-                onProgress("I need you for this one.")
                 QuickAgentResult(
                     false,
                     result.message,
@@ -227,7 +226,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
     private fun publishRunEvent(
         runId: String,
         event: AgentRuntimeEvent,
-        onProgress: (String) -> Unit,
     ) {
         if (event.type == AgentRuntimeEventType.TASK_STARTED) return
         val type = runCatching { AgentRunEventType.valueOf(event.type.name) }.getOrNull() ?: return
@@ -243,28 +241,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             payload = JSONObject(event.payload.toString()),
             timestampMs = event.timestampMs,
         )
-        progressText(logged)?.let(onProgress)
-    }
-
-    private fun progressText(event: AgentRunEvent): String? = when (event.type) {
-        AgentRunEventType.THINKING -> "Thinking…"
-        AgentRunEventType.READING_PAGE -> "Reading the page 👀"
-        AgentRunEventType.USING_BRAIN -> "Checking what I know 🧠"
-        AgentRunEventType.USING_VISION -> "Taking a closer look 📸"
-        AgentRunEventType.TOOL_CALL_REQUESTED -> when (event.tool) {
-            "open_app" -> {
-                val name = event.payload.optJSONObject(AgentRunSchema.Payload.SAFE_ARGUMENTS)?.optString("name").orEmpty()
-                if (name.isBlank()) "Using a tool…" else "Opening " + name + " ⚡"
-            }
-            else -> "Using a tool…"
-        }
-        AgentRunEventType.VERIFYING -> "Checking it worked ✓"
-        AgentRunEventType.RECOVERING -> "Another way."
-        AgentRunEventType.GATE_REQUIRED -> "I need you for this one."
-        AgentRunEventType.GATE_RESUMED -> "Got it — continuing."
-        AgentRunEventType.COMPLETE -> "Done ✨"
-        AgentRunEventType.FAILED -> "I hit a blocker."
-        else -> null
     }
 
     companion object {
