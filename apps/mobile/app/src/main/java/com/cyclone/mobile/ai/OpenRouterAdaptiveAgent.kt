@@ -488,7 +488,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             convergence = CycloneConvergencePolicy(
                 taskTimeoutMs = 300_000,
                 maxRepeatedIdenticalActionWithoutProgress = 2,
-                maxConsecutiveRecoveryCyclesWithoutNewEvidence = 5,
+                maxConsecutiveRecoveryCyclesWithoutNewEvidence = 8,
                 maxMalformedModelResponses = 3,
                 maxVisionAttemptsOnUnchangedState = 1,
                 maxBacktrackAttempts = 3,

@@ -119,6 +119,31 @@ class CycloneLocalAgentTest {
         assertEquals(9, result.state.modelTurns)
     }
 
+    @Test fun recoveryBudgetCanTraverseFullProgressivePerceptionLadder() {
+        val plans = MutableList<CyclonePlanResult>(6) {
+            CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.BLOCKED, reason = "still ambiguous"))
+        }.apply {
+            add(act("recovered"))
+            add(done())
+        }
+        val model = ScriptModel(plans)
+        val tools = FakeTools()
+        tools.boundary = CycloneTaskClassification.RECOVERABLE
+        tools.toolResults += CycloneToolResult(ok = true, actionSignature = "recovered", evidenceIdentity = "changed")
+        tools.verifications += CycloneVerificationResult(true, true, false, "changed")
+        tools.completion = CycloneVerificationResult(true, true, true, "changed")
+
+        val result = CycloneLocalAgent(
+            "goal",
+            model,
+            tools,
+            CycloneConvergencePolicy(maxConsecutiveRecoveryCyclesWithoutNewEvidence = 8),
+        ).runUntilBoundary()
+
+        assertTrue(result is CycloneAgentRunResult.Completed)
+        assertTrue(model.calls >= 8)
+    }
+
     @Test fun repeatedIdenticalNoProgressEventuallyStops() {
         val model = ScriptModel(MutableList(5) { act("same") })
         val tools = FakeTools()

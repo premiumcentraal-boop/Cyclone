@@ -11,7 +11,7 @@ enum class CycloneTraceEventType { TASK_STARTED, OBSERVE, PLAN, TOOL_REQUESTED, 
 data class CycloneConvergencePolicy(
     val taskTimeoutMs: Long = 180_000,
     val maxRepeatedIdenticalActionWithoutProgress: Int = 2,
-    val maxConsecutiveRecoveryCyclesWithoutNewEvidence: Int = 5,
+    val maxConsecutiveRecoveryCyclesWithoutNewEvidence: Int = 8,
     val maxMalformedModelResponses: Int = 3,
     val maxVisionAttemptsOnUnchangedState: Int = 1,
     val maxBacktrackAttempts: Int = 3,
