@@ -15,10 +15,12 @@ class ProductionAgenticWiringContractTest {
     @Test
     fun productionOverlayUsesPersistentAgentAndPcParityBridge() {
         val adaptive = source(
+            "src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
             "app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
             "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
         )
         val overlay = source(
+            "src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeRuntime.kt",
             "app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeRuntime.kt",
             "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayChromeRuntime.kt",
         )
@@ -32,6 +34,7 @@ class ProductionAgenticWiringContractTest {
     @Test
     fun pcParityBridgeConsumesAgent2AndAgent3Contracts() {
         val bridge = source(
+            "src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
             "app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
             "apps/mobile/app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt",
         )
@@ -44,6 +47,7 @@ class ProductionAgenticWiringContractTest {
     @Test
     fun productionActionPathDoesNotEquateExecutorAcceptanceWithVerification() {
         val adaptive = source(
+            "src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
             "app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
             "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt",
         )
