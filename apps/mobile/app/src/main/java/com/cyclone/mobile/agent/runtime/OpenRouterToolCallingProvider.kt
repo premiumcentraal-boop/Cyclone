@@ -45,7 +45,7 @@ class OpenRouterToolCallingProvider(
             "function call",
             "unsupported parameter",
             "does not support tools",
-        ).any(lower::contains)
+        ).any { token -> lower.contains(token) }
     }
 
     private fun nativeTurn(conversation: List<AgentConversationEntry>, tools: JSONArray): AgentProviderTurn {
