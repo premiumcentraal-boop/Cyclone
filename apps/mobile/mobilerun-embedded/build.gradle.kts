@@ -3,8 +3,54 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val upstreamMobilerun = file("${rootDir}/../../third_party/mobilerun-portal/app/src/main")
+private const val MOBILERUN_UPSTREAM_URL = "https://github.com/droidrun/mobilerun-portal.git"
+private const val MOBILERUN_UPSTREAM_PIN = "d3dae858ecc5ec3bfd3701ff27d58465c9f661b4"
+
+val upstreamCheckout = layout.buildDirectory.dir("upstream/mobilerun-portal")
+val upstreamMobilerun = upstreamCheckout.get().asFile.resolve("app/src/main")
 val adaptedSources = layout.buildDirectory.dir("generated/mobilerun-src")
+
+fun runGit(vararg args: String): String {
+    val process = ProcessBuilder(listOf("git") + args)
+        .redirectErrorStream(true)
+        .start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }
+    val exit = process.waitFor()
+    require(exit == 0) { "git ${args.joinToString(" ")} failed ($exit): ${output.takeLast(2_000)}" }
+    return output.trim()
+}
+
+/**
+ * Materializes the exact Mobilerun revision Cyclone 3.9 already depended on, but inside this
+ * compatibility module's build directory instead of a root-level third_party submodule.
+ *
+ * The checkout is immutable by contract: every build verifies HEAD against the hard pin before
+ * Android compiles it. Deleting build/ removes the dependency completely; no upstream source is
+ * mistaken for first-party Cyclone code.
+ */
+val materializeMobilerunUpstream by tasks.registering {
+    doLast {
+        val checkout = upstreamCheckout.get().asFile
+        val pinFile = checkout.resolve(".cyclone-pin")
+        val alreadyPinned = pinFile.isFile &&
+            pinFile.readText(Charsets.UTF_8).trim() == MOBILERUN_UPSTREAM_PIN &&
+            checkout.resolve("app/src/main/java").isDirectory &&
+            checkout.resolve("app/src/main/res").isDirectory
+        if (alreadyPinned) return@doLast
+
+        checkout.deleteRecursively()
+        checkout.parentFile.mkdirs()
+        runGit("init", checkout.absolutePath)
+        runGit("-C", checkout.absolutePath, "remote", "add", "origin", MOBILERUN_UPSTREAM_URL)
+        runGit("-C", checkout.absolutePath, "fetch", "--depth", "1", "origin", MOBILERUN_UPSTREAM_PIN)
+        runGit("-C", checkout.absolutePath, "checkout", "--detach", "FETCH_HEAD")
+        val resolved = runGit("-C", checkout.absolutePath, "rev-parse", "HEAD")
+        require(resolved == MOBILERUN_UPSTREAM_PIN) {
+            "Mobilerun pin mismatch: expected $MOBILERUN_UPSTREAM_PIN, resolved $resolved"
+        }
+        pinFile.writeText(MOBILERUN_UPSTREAM_PIN + "\n", Charsets.UTF_8)
+    }
+}
 
 fun wrapGeneratedCallback(
     source: String,
@@ -47,16 +93,15 @@ fun wrapGeneratedCallback(
     return source.substring(0, bodyStart) + guard + source.substring(methodEnd)
 }
 
-// Keep the upstream git submodule pristine and reproducible. Cyclone adapts only generated input:
+// Adapt only generated input from the immutable upstream revision:
 // - Kotlin 2 makes PackageInfo.versionName nullable.
 // - Enhanced Control does not request touch-exploration/two-finger-passthrough modes.
-// - Enhanced Control subscribes only to the event classes it actually consumes, avoiding a second
+// - Enhanced Control subscribes only to the event classes it consumes, avoiding a second
 //   typeAllMask firehose across the entire phone.
-// - Enhanced Control ignores Cyclone's own UI events so showing pairing/status UI cannot feed the
-//   embedded automation stack back into the host process.
-// - Android-owned accessibility callbacks are guarded so an embedded optional subsystem cannot
-//   crash the shared Cyclone process or leave Android reporting "service is malfunctioning".
+// - Enhanced Control ignores Cyclone's own UI events so pairing/status UI cannot feed back into it.
+// - Android-owned callbacks are guarded so optional compatibility code cannot crash Cyclone.
 val prepareMobilerunSources by tasks.registering(Copy::class) {
+    dependsOn(materializeMobilerunUpstream)
     from(upstreamMobilerun.resolve("java"))
     into(adaptedSources)
     filteringCharset = "UTF-8"
@@ -86,8 +131,6 @@ val prepareMobilerunSources by tasks.registering(Copy::class) {
         val root = adaptedSources.get().asFile
 
         val applicationFile = root.resolve("com/mobilerun/portal/PortalApplication.kt")
-        // Git may materialize the pinned submodule with CRLF on Windows. Normalize the generated
-        // copy so the exact-source guards remain reproducible without modifying the submodule.
         var applicationSource = applicationFile.readText(Charsets.UTF_8).replace("\r\n", "\n")
         val applicationNeedle = "        super.onCreate()\n"
         require(applicationSource.contains(applicationNeedle)) { "Pinned PortalApplication onCreate changed upstream" }
@@ -174,7 +217,12 @@ android {
 }
 
 tasks.named("preBuild").configure {
+    dependsOn(materializeMobilerunUpstream)
     dependsOn(prepareMobilerunSources)
+}
+
+tasks.matching { it.name.startsWith("process") && it.name.endsWith("Resources") }.configureEach {
+    dependsOn(materializeMobilerunUpstream)
 }
 
 dependencies {
