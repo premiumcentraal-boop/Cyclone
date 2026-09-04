@@ -113,10 +113,12 @@ class CycloneLocalAgent(
     private var cancelled = false
     private var state = restoredState
         ?.also { require(it.goal == goal) { "Restored task goal does not match requested goal" } }
-        ?.copy(
-            currentStage = if (it.currentStage == CycloneAgentStage.TERMINAL) CycloneAgentStage.TERMINAL else CycloneAgentStage.OBSERVE,
-            requireFreshObservation = it.currentStage != CycloneAgentStage.TERMINAL,
-        )
+        ?.let { restored ->
+            restored.copy(
+                currentStage = if (restored.currentStage == CycloneAgentStage.TERMINAL) CycloneAgentStage.TERMINAL else CycloneAgentStage.OBSERVE,
+                requireFreshObservation = restored.currentStage != CycloneAgentStage.TERMINAL,
+            )
+        }
         ?: CycloneTaskState(taskId, goal, CycloneAgentStage.START, null, null, emptyList(), emptyList(), emptyMap(), emptyMap(), now(), now(), false, true, null, 0, 0, 0, 0, 0, null)
 
     init {
