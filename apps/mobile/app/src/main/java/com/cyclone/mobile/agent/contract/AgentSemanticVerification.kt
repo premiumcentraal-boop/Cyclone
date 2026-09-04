@@ -37,6 +37,11 @@ data class AgentSemanticVerification(
 /**
  * Transport/executor acceptance is deliberately separate from semantic verification.
  * This object is Android-free so the PC gateway and local mobile agent consume identical rules.
+ *
+ * A changing page hash/fingerprint is evidence that Android changed, but it is NOT task progress.
+ * Cyclone only claims semantic success when the fresh after-state contains a stronger witness:
+ * expected package, package transition, goal evidence, interaction state, or materially changed
+ * semantic controls. This is the main guard against state-hash churn resetting recovery forever.
  */
 object AgentSemanticVerifier {
     private val mutatingTools = setOf(
@@ -50,6 +55,7 @@ object AgentSemanticVerifier {
         "phone.back",
         "phone.home",
         "phone.open_app",
+        "phone.launch_intent",
         "phone.set_clipboard",
     )
 
@@ -119,20 +125,25 @@ object AgentSemanticVerifier {
         }
 
         if (before != null) {
-            if (before.pageKey.isNotBlank() && after.pageKey.isNotBlank() && before.pageKey != after.pageKey) {
-                return passed("PAGE_KEY_CHANGED")
+            if (
+                before.packageName.isNotBlank() &&
+                after.packageName.isNotBlank() &&
+                before.packageName != after.packageName
+            ) {
+                return passed("PACKAGE_CHANGED")
             }
-            val semanticBasis = samePageSemanticProgress(before, after)
-            if (semanticBasis != null) return passed(semanticBasis)
+            val interactionBasis = semanticInteractionProgress(before, after)
+            if (interactionBasis != null) return passed(interactionBasis)
             if (goalLabelAppeared(before.haystack, after.haystack, goalLabel)) {
                 return passed("GOAL_LABEL_APPEARED")
             }
             if (
-                before.accessibilityFingerprint.isNotBlank() &&
-                after.accessibilityFingerprint.isNotBlank() &&
-                before.accessibilityFingerprint != after.accessibilityFingerprint
+                before.pageKey.isNotBlank() &&
+                after.pageKey.isNotBlank() &&
+                before.pageKey != after.pageKey &&
+                semanticSurfaceChanged(before, after)
             ) {
-                return passed("ACCESSIBILITY_FINGERPRINT_CHANGED")
+                return passed("SEMANTIC_PAGE_CHANGED")
             }
         }
 
@@ -141,15 +152,18 @@ object AgentSemanticVerifier {
             passed = false,
             semanticSuccessClaimed = false,
             basis = "NO_SEMANTIC_PROGRESS",
-            detail = "Android accepted the action, but the fresh after-state did not prove semantic progress.",
+            detail = "Android accepted the action, but the fresh after-state did not prove semantic progress. Page/fingerprint churn alone is not progress.",
         )
     }
 
-    fun samePageSemanticProgress(
+    /**
+     * State changes on a stable semantic element are strong task-progress witnesses even if the
+     * surrounding page identity also changes. Raw page/fingerprint changes are intentionally ignored.
+     */
+    fun semanticInteractionProgress(
         before: SemanticObservationState,
         after: SemanticObservationState,
     ): String? {
-        if (before.pageKey.isNotBlank() && after.pageKey.isNotBlank() && before.pageKey != after.pageKey) return null
         val beforeByKey = before.elements.associateBy { it.stableKey }
         for (element in after.elements) {
             val prior = beforeByKey[element.stableKey] ?: continue
@@ -160,14 +174,34 @@ object AgentSemanticVerifier {
             val afterText = element.editableTextState
             if (
                 element.role in setOf("textbox", "edit_text") &&
-                !beforeText.isNullOrBlank() &&
-                !afterText.isNullOrBlank() &&
+                beforeText != null &&
+                afterText != null &&
                 beforeText != afterText
             ) {
                 return "EDITABLE_TEXT_CHANGED"
             }
         }
         return null
+    }
+
+    // Kept for callers/tests using the previous name. Its semantics are now intentionally stronger:
+    // it verifies semantic interaction progress, not merely that a hash/page key stayed the same.
+    fun samePageSemanticProgress(
+        before: SemanticObservationState,
+        after: SemanticObservationState,
+    ): String? = semanticInteractionProgress(before, after)
+
+    fun semanticSurfaceChanged(before: SemanticObservationState, after: SemanticObservationState): Boolean {
+        fun surface(state: SemanticObservationState): Set<String> = state.elements
+            .asSequence()
+            .map { "${it.stableKey}|${it.role}|${it.label.trim().lowercase()}" }
+            .filter { it.isNotBlank() }
+            .take(80)
+            .toSet()
+        val beforeSurface = surface(before)
+        val afterSurface = surface(after)
+        if (beforeSurface.isEmpty() && afterSurface.isEmpty()) return false
+        return beforeSurface != afterSurface
     }
 
     fun goalLabelAppeared(beforeHaystack: String, afterHaystack: String, goalLabel: String): Boolean {
