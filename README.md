@@ -4,20 +4,23 @@
 
 This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-## Current baseline — Cyclone 3.9
+## Current baseline — Cyclone 3.9.2
 
-Cyclone 3.9 builds on the standalone Android agent runtime with a cleaner day-to-day product experience:
+Cyclone 3.9.2 focuses on adaptive reliability and useful failure evidence:
 
 - **Ask Cyclone** — chat-style task composer with model selection and a single send action.
-- **Agent runtime** — Android Accessibility observation/action tools with verification and recovery.
-- **Brain → Recent runs** — durable success/failure history with compact, sanitized `.txt` diagnostics for debugging.
+- **Structured + Free Mode agent** — Cyclone starts with reliable semantic/learned routes, then automatically gives the model more freedom to choose a materially different strategy when verified progress stalls; GATE and policy boundaries remain mandatory.
+- **Progress-bounded recovery** — changing Android fingerprints do not count as task progress, repeated failures are bounded, and only verified semantic progress resets no-progress budgets.
+- **Strict phone-tool contracts** — app launches require resolvable packages and browser navigation can use the existing allowlisted Android HTTPS intent path as a different recovery strategy.
+- **Brain → Recent runs** — durable run history with compact, sanitized `.txt` diagnostics that can be exported while a task is running, suspended, failed or completed.
+- **Truthful task states** — running, suspended, completed and failed runs are represented consistently across the result timeline and durable trace.
 - **Aurora** — unobtrusive bottom-center persistent activation overlay with a small touch target.
 - **Teach + Routines** — reusable app knowledge and repeatable phone workflows.
 - **PC integration** — optional Device Gateway, Windows Companion and constrained MCP adapters without creating a second phone-control engine.
 
 Android package: `com.cyclone.mobile`  
 Minimum Android: 14 (API 34)  
-Current mobile identity: `3.9.0` / versionCode `54`
+Current mobile identity: `3.9.2` / versionCode `56`
 
 ## Repository
 
