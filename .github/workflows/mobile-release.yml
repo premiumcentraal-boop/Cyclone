@@ -106,7 +106,7 @@ jobs:
         shell: bash
         run: sdkmanager --install 'build-tools;35.0.0'
 
-      - name: Sign verified candidate
+      - name: Sign verified candidate with rotated key
         shell: bash
         env:
           APK_NAME: ${{ steps.candidate.outputs.apk_name }}
@@ -114,29 +114,40 @@ jobs:
           CYCLONE_STORE_PASSWORD: ${{ secrets.CYCLONE_ANDROID_STORE_PASSWORD }}
           CYCLONE_KEY_ALIAS: ${{ secrets.CYCLONE_ANDROID_KEY_ALIAS }}
           CYCLONE_KEY_PASSWORD: ${{ secrets.CYCLONE_ANDROID_KEY_PASSWORD }}
+          CYCLONE_SIGNING_LINEAGE_B64: ${{ secrets.CYCLONE_ANDROID_SIGNING_LINEAGE_B64 }}
         run: |
           set -euo pipefail
           test -n "$CYCLONE_KEYSTORE_B64"
           test -n "$CYCLONE_STORE_PASSWORD"
           test -n "$CYCLONE_KEY_ALIAS"
           test -n "$CYCLONE_KEY_PASSWORD"
+          test -n "$CYCLONE_SIGNING_LINEAGE_B64"
           mkdir -p signed
           keystore="$RUNNER_TEMP/cyclone-release.keystore"
+          lineage="$RUNNER_TEMP/cyclone-signing-lineage"
           printf '%s' "$CYCLONE_KEYSTORE_B64" | base64 --decode > "$keystore"
-          chmod 600 "$keystore"
+          printf '%s' "$CYCLONE_SIGNING_LINEAGE_B64" | base64 --decode > "$lineage"
+          chmod 600 "$keystore" "$lineage"
           apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
+          "$apksigner" lineage --in "$lineage" --print-certs -v
           "$apksigner" sign \
             --ks "$keystore" \
             --ks-key-alias "$CYCLONE_KEY_ALIAS" \
             --ks-pass env:CYCLONE_STORE_PASSWORD \
             --key-pass env:CYCLONE_KEY_PASSWORD \
+            --lineage "$lineage" \
+            --rotation-min-sdk-version 34 \
+            --v1-signing-enabled false \
+            --v2-signing-enabled false \
+            --v3-signing-enabled true \
             --out "signed/$APK_NAME" \
             "candidate/$APK_NAME"
-          "$apksigner" verify --verbose --print-certs "signed/$APK_NAME"
-          rm -f "$keystore"
+          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs "signed/$APK_NAME"
+          "$apksigner" lineage --in "signed/$APK_NAME" --print-certs -v > signed/signing-lineage.txt
+          rm -f "$keystore" "$lineage"
           (cd signed && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
           cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
-          printf '%s\n' 'SIGNED_PROTECTED_ENVIRONMENT' > signed/signing-state.txt
+          printf '%s\n' 'SIGNED_PROTECTED_ENVIRONMENT_ROTATED' > signed/signing-state.txt
 
       - name: Upload signed release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
