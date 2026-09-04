@@ -1,53 +1,49 @@
 # Local environment and secrets
 .env
 .env.*
-!.env.example
 *.pem
 *.key
 *.p12
 *.pfx
 secrets/
 
-# Runtime data
-.runtime/
-data/
-artifacts/
-logs/
-coverage/
-.pytest_cache/
+# Python / test artifacts
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
+.pytest_cache/
+.coverage
+coverage/
 
-# Local vault contents (the templates are versioned; personal working knowledge is not)
-vault/CycloneVault/
+# Build / runtime output
+build/
+dist/
+target/
+artifacts/
+logs/
+data/
+.runtime/
 
 # Node / frontend
 node_modules/
-dist/
 .vite/
 *.tsbuildinfo
 
-# Tauri / Rust build artifacts
-target/
-apps/desktop/src-tauri/target/
+# Android / Gradle
+.gradle/
+apps/mobile/**/build/
+apps/device-gateway/third_party/scrcpy/scrcpy-server-v4.0
+
+# PC Companion generated binaries
 apps/pc-companion/src-tauri/binaries/
 
 # IDE / OS
 .vscode/
 .idea/
-.gradle/
-apps/mobile/**/build/
-apps/device-gateway/third_party/scrcpy/scrcpy-server-v4.0
 .DS_Store
 Thumbs.db
 
-# n8n local imports / exports
-services/n8n/local/
-
-# Test artifacts
+# Test/report output
 playwright-report/
 test-results/
 .cyclone/agent-runs/
-apps/desktop/.visual/

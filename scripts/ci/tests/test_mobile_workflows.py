@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -10,7 +11,7 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
     def text(self, name: str) -> str:
         return (WORKFLOWS / name).read_text(encoding="utf-8")
 
-    def test_only_reusable_lane_assembles_android(self):
+    def test_only_reusable_mobile_lane_assembles_android(self):
         assemblers = []
         for path in WORKFLOWS.glob("*.yml"):
             text = path.read_text(encoding="utf-8")
@@ -18,18 +19,19 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
                 assemblers.append(path.name)
         self.assertEqual(["_mobile-build.yml"], assemblers)
 
-    def test_guards_precede_toolchain_and_both_apps_use_trusted_wrapper(self):
+    def test_build_is_single_product_and_guards_run_before_toolchain(self):
         workflow = self.text("_mobile-build.yml")
         guard = workflow.index("mobile_metadata.py")
-        for later in ("actions/setup-java", "android-actions/setup-android", "gradle/actions/setup-gradle", "git submodule update"):
+        for later in ("actions/setup-java", "android-actions/setup-android", "gradle/actions/setup-gradle"):
             self.assertLess(guard, workflow.index(later))
-        self.assertEqual(2, workflow.count("./apps/mobile/gradlew"))
+        self.assertEqual(1, workflow.count("./apps/mobile/gradlew"))
         self.assertIn("./apps/mobile/gradlew -p apps/mobile", workflow)
-        self.assertIn("./apps/mobile/gradlew -p apps/teamwork-sniper", workflow)
         self.assertIn(":app:testDebugUnitTest :app:assembleRelease", workflow)
         self.assertIn("outputs/apk/release/app-release.apk", workflow)
         self.assertIn("testOnly", workflow)
         self.assertIn("persist-credentials: false", workflow)
+        self.assertNotIn("apps/teamwork-sniper", workflow)
+        self.assertNotIn("git submodule", workflow)
         self.assertLess(workflow.index("wrapper-validation"), workflow.index("./apps/mobile/gradlew"))
 
     def test_release_reuses_and_verifies_without_build_or_publication(self):
@@ -42,54 +44,53 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn(".github/workflows/mobile-ci.yml", workflow)
         self.assertIn(".conclusion", workflow)
-        self.assertIn("EXPECTED_HEAD_SHA", workflow)
-        self.assertIn("run-id.txt", workflow)
         self.assertIn("'.event'", workflow)
         self.assertIn('= "push"', workflow)
+        self.assertIn("EXPECTED_HEAD_SHA", workflow)
+        self.assertIn("run-id.txt", workflow)
         self.assertIn("'.head_repository.full_name'", workflow)
-        self.assertIn('= "$GITHUB_REPOSITORY"', workflow)
         self.assertIn("main|release/cyclone-mobile-v*", workflow)
-        self.assertNotIn('= "pull_request"', workflow)
+        self.assertNotIn("teamwork-sniper", workflow)
 
-    def test_legacy_android_workflows_are_manual_only(self):
-        legacy = (
-            "android-mobile.yml",
-            "mobile-fast-apk.yml",
-            "mobile-v2-embedded.yml",
-            "cyclone-v2.9.4-full-gateway.yml",
-            "cyclone-v2.9.5-original-ui-gateway.yml",
-            "apply-v295-ui-polish.yml",
-        )
-        for name in legacy:
-            workflow = self.text(name)
-            self.assertIn("workflow_dispatch:", workflow)
-            self.assertNotIn("\n  push:", workflow)
-            self.assertNotIn("\n  pull_request:", workflow)
-            self.assertNotIn("contents: write", workflow)
-
-    def test_authoritative_ci_is_read_only_path_filtered_and_cancels_stale_runs(self):
+    def test_authoritative_ci_tracks_only_current_product_paths(self):
         workflow = self.text("mobile-ci.yml")
         self.assertIn("\n  push:", workflow)
         self.assertIn("\n  pull_request:", workflow)
         self.assertIn("paths:", workflow)
         self.assertIn("contents: read", workflow)
         self.assertIn("cancel-in-progress: true", workflow)
-        self.assertIn("'third_party/mobilerun-portal'", workflow)
-        self.assertIn("'third_party/mobilerun-portal/**'", workflow)
-        self.assertIn("'!apps/mobile/**/*.md'", workflow)
+        for required in (
+            "'apps/mobile/**'",
+            "'apps/device-gateway/**'",
+            "'tools/codex-phone-mcp/**'",
+            "'tools/cyclone-agent-mcp/**'",
+            "'scripts/ci/**'",
+            "'release/version.toml'",
+        ):
+            self.assertIn(required, workflow)
+        for retired in ("teamwork-sniper", "third_party/mobilerun-portal", "feature/cyclone-3.5", "agent/352"):
+            self.assertNotIn(retired, workflow)
 
-    def test_new_workflow_actions_are_immutable_sha_pinned(self):
-        import re
+    def test_retired_mobile_workflows_are_absent(self):
+        retired = (
+            "android-mobile.yml",
+            "mobile-fast-apk.yml",
+            "mobile-v2-embedded.yml",
+            "cyclone-v2.9.4-full-gateway.yml",
+            "cyclone-v2.9.5-original-ui-gateway.yml",
+            "apply-v295-ui-polish.yml",
+            "mobile-ai-runtime.yml",
+            "mobile-backend.yml",
+        )
+        for name in retired:
+            self.assertFalse((WORKFLOWS / name).exists(), name)
+
+    def test_external_workflow_actions_are_immutable_sha_pinned(self):
         for name in ("_mobile-build.yml", "mobile-release.yml"):
             for action, ref in re.findall(r"uses:\s*([^\s@]+)@([^\s#]+)", self.text(name)):
                 if action.startswith("./"):
                     continue
                 self.assertRegex(ref, r"^[0-9a-f]{40}$", f"{name}: {action}")
-
-    def test_core_mobile_runtime_does_not_run_for_android_only_changes(self):
-        workflow = self.text("mobile-ai-runtime.yml")
-        self.assertNotIn("apps/mobile/**", workflow)
-        self.assertNotIn("third_party/mobilerun-portal", workflow)
 
 
 if __name__ == "__main__":

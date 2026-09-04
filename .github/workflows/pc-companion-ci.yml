@@ -1,41 +1,25 @@
-name: Cyclone Combined Release CI
+name: Cyclone PC Companion CI
 
-# Dedicated release branches publish one paired GitHub release after both build gates pass.
-# Mobile accessibility/bridge guards are part of the paired desktop+phone release gate.
 on:
   pull_request:
     paths:
-      - 'apps/device-gateway/**'
-      - 'apps/mobile/**'
-      - 'apps/teamwork-sniper/**'
       - 'apps/pc-companion/**'
+      - 'apps/device-gateway/**'
       - 'tools/cyclone-agent-mcp/**'
       - 'tools/codex-phone-mcp/**'
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
-      - 'scripts/ci/tests/**'
-      - 'release/version.toml'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   push:
-    branches:
-      - 'release/cyclone-desktop-v1'
-      - 'release/cyclone-mobile-v3.1-beta'
-      - 'release/beta/**'
-      - 'release/stable/**'
-      - 'release/cyclone-3.5.3-beta'
-      - 'release/cyclone-3.6-beta'
+    branches: [main, 'release/cyclone-mobile-v*']
     paths:
-      - 'apps/device-gateway/**'
-      - 'apps/mobile/**'
-      - 'apps/teamwork-sniper/**'
       - 'apps/pc-companion/**'
+      - 'apps/device-gateway/**'
       - 'tools/cyclone-agent-mcp/**'
       - 'tools/codex-phone-mcp/**'
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
-      - 'scripts/ci/**'
-      - 'release/version.toml'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   workflow_dispatch:
@@ -43,47 +27,34 @@ on:
 permissions:
   contents: read
 
-jobs:
-  mark-release-pending:
-    name: Mark paired release pending
-    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/') || startsWith(github.ref, 'refs/heads/release/stable/')) }}
-    runs-on: ubuntu-latest
-    permissions:
-      statuses: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Publish pending commit status
-        shell: bash
-        run: |
-          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -f state='pending' \
-            -f context='cyclone/paired-release' \
-            -f description='Windows + Android release gates are running' \
-            -f target_url="$RUN_URL"
+concurrency:
+  group: pc-companion-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
+jobs:
   windows-companion:
-    name: Cyclone Windows PC Companion
+    name: Windows companion
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: false
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13.7'
-      - name: Test fleet runtime and agent MCP
+      - name: Test gateway and MCP contracts
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check -e 'apps/device-gateway[test]' -e 'tools/cyclone-agent-mcp[test]' -e tools/codex-phone-mcp
-          python -m pytest -q apps/device-gateway/tests/test_desktop_fleet_runtime.py apps/device-gateway/tests/test_desktop_discovery_hotfix.py apps/device-gateway/tests/test_desktop_discovery_v2.py
+          python -m pytest -q apps/device-gateway/tests
           python -m pytest -q tools/cyclone-agent-mcp/tests
           python -m unittest discover -s tools/codex-phone-mcp/tests -v
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test and compile PC UI
+          cache: npm
+          cache-dependency-path: apps/pc-companion/package-lock.json
+      - name: Test and compile PC Companion
         shell: pwsh
         run: |
           Push-Location apps/pc-companion
@@ -91,212 +62,28 @@ jobs:
           npm test
           npm run build
           Pop-Location
-      - name: Build and stage frozen Python sidecars
+      - name: Build frozen Python sidecars
         shell: pwsh
         run: ./scripts/pc-companion/build-sidecars.ps1
-      - name: Verify Rust toolchain
-        shell: pwsh
-        run: |
-          rustc --version
-          cargo --version
-      - name: Build Cyclone PC Companion NSIS installer
+      - name: Build NSIS installer
         shell: pwsh
         run: |
           Push-Location apps/pc-companion
           npm run tauri build -- --bundles nsis
           Pop-Location
-      - name: Collect installer and release metadata
+      - name: Stage candidate and provenance
         shell: pwsh
         run: |
           $Installer = Get-ChildItem 'apps/pc-companion/src-tauri/target/release/bundle/nsis/*.exe' | Select-Object -First 1
           if ($null -eq $Installer) { throw 'Cyclone NSIS installer was not produced.' }
           $PcVersion = (Get-Content 'apps/pc-companion/package.json' | ConvertFrom-Json).version
-          $InstallerName = "Cyclone-PC-Companion-$PcVersion-Setup.exe"
           New-Item -ItemType Directory -Force -Path dist/pc-companion | Out-Null
-          Copy-Item $Installer.FullName (Join-Path 'dist/pc-companion' $InstallerName) -Force
+          Copy-Item $Installer.FullName (Join-Path 'dist/pc-companion' "Cyclone-PC-Companion-$PcVersion-Setup.exe") -Force
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
           python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
       - uses: actions/upload-artifact@v4
         with:
           name: cyclone-pc-companion-${{ github.sha }}
-          path: |
-            dist/pc-companion/Cyclone-PC-Companion-*-Setup.exe
-            dist/pc-companion/SHA256SUMS.txt
-            dist/pc-companion/source-sha.txt
-            dist/pc-companion/release-provenance.json
-            dist/pc-companion/THIRD_PARTY_NOTICES
+          path: dist/pc-companion/
           if-no-files-found: error
           retention-days: 30
-
-  mobile-companion:
-    name: Matching Cyclone Mobile
-    uses: ./.github/workflows/_mobile-build.yml
-
-  publish-release:
-    name: Publish combined release
-    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/') || startsWith(github.ref, 'refs/heads/release/stable/')) }}
-    needs:
-      - windows-companion
-      - mobile-companion
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Checkout exact release source
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          submodules: false
-
-      - name: Resolve release versions
-        id: versions
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import tomllib
-          from pathlib import Path
-
-          release = tomllib.loads(Path('release/version.toml').read_text(encoding='utf-8'))['release']
-          if release.get('publication_authorized') is not True:
-              raise SystemExit('release/version.toml has publication_authorized=false; refusing publication')
-          PY
-          PC_VERSION="$(node -p "require('./apps/pc-companion/package.json').version")"
-          MOBILE_VERSION="$(python3 - <<'PY'
-          import re
-          from pathlib import Path
-          text = Path('apps/mobile/app/build.gradle.kts').read_text(encoding='utf-8')
-          match = re.search(r'versionName\s*=\s*"([^"]+)"', text)
-          if not match:
-              raise SystemExit('Could not resolve Android versionName')
-          print(match.group(1))
-          PY
-          )"
-          if [[ "$PC_VERSION" == "$MOBILE_VERSION" ]]; then
-            RELEASE_TAG="v${MOBILE_VERSION}"
-            RELEASE_TITLE="Cyclone ${MOBILE_VERSION}"
-          else
-            RELEASE_TAG="v${MOBILE_VERSION}-pc-${PC_VERSION}"
-            RELEASE_TITLE="Cyclone Mobile ${MOBILE_VERSION} + PC Companion ${PC_VERSION}"
-          fi
-          echo "pc_version=$PC_VERSION" >> "$GITHUB_OUTPUT"
-          echo "mobile_version=$MOBILE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "release_title=$RELEASE_TITLE" >> "$GITHUB_OUTPUT"
-          if [[ "$MOBILE_VERSION" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download desktop and mobile build artifacts
-        shell: bash
-        env:
-          MOBILE_VERSION: ${{ steps.versions.outputs.mobile_version }}
-        run: |
-          set -euo pipefail
-          mkdir -p release-assets/desktop release-assets/mobile
-          gh run download "$GITHUB_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name "cyclone-pc-companion-$GITHUB_SHA" \
-            --dir release-assets/desktop
-          gh run download "$GITHUB_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name "Cyclone-Android-$MOBILE_VERSION" \
-            --dir release-assets/mobile
-          if [[ -f release-assets/desktop/source-sha.txt ]]; then
-            mv release-assets/desktop/source-sha.txt release-assets/desktop/Cyclone-PC-source-sha.txt
-          fi
-          if [[ -f release-assets/mobile/source-sha.txt ]]; then
-            mv release-assets/mobile/source-sha.txt release-assets/mobile/Cyclone-Mobile-source-sha.txt
-          fi
-
-      - name: Write release notes
-        shell: bash
-        env:
-          PC_VERSION: ${{ steps.versions.outputs.pc_version }}
-          MOBILE_VERSION: ${{ steps.versions.outputs.mobile_version }}
-        run: |
-          set -euo pipefail
-          NOTES_CANDIDATE="docs/release-notes/v${MOBILE_VERSION}.md"
-          if [[ -f "$NOTES_CANDIDATE" ]]; then
-            cp "$NOTES_CANDIDATE" release-notes.md
-          else
-            cat > release-notes.md <<EOF
-          # Cyclone ${MOBILE_VERSION}
-
-          Coordinated Mobile + PC Companion pre-release built from the same source revision.
-
-          ## Downloads
-          - **Cyclone Mobile ${MOBILE_VERSION}** — Android APK
-          - **Cyclone PC Companion ${PC_VERSION}** — Windows installer with Device Gateway and Agent MCP
-          - Checksums, source SHA, build provenance and third-party notices are attached
-
-          ## Installation notes
-          The Android APK is currently CI debug-signed and the Windows installer is unsigned. A differently signed prior Android build may need to be removed before installation, which removes that app's local data.
-          EOF
-          fi
-
-      - name: Create or replace GitHub release
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ steps.versions.outputs.release_tag }}
-          RELEASE_TITLE: ${{ steps.versions.outputs.release_title }}
-          IS_PRERELEASE: ${{ steps.versions.outputs.prerelease }}
-        run: |
-          set -euo pipefail
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
-          fi
-          mapfile -t assets < <(find release-assets -type f -print | sort)
-          if [[ ${#assets[@]} -eq 0 ]]; then
-            echo 'No release assets were produced.' >&2
-            exit 1
-          fi
-          release_args=()
-          if [[ "$IS_PRERELEASE" == "true" ]]; then
-            release_args+=(--prerelease)
-          fi
-          gh release create "$RELEASE_TAG" "${assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "$RELEASE_TITLE" \
-            --notes-file release-notes.md \
-            "${release_args[@]}"
-
-  report-release-status:
-    name: Report paired release result
-    if: ${{ always() && github.event_name == 'push' && (github.ref == 'refs/heads/release/cyclone-mobile-v3.1-beta' || startsWith(github.ref, 'refs/heads/release/beta/') || startsWith(github.ref, 'refs/heads/release/stable/')) }}
-    needs:
-      - windows-companion
-      - mobile-companion
-      - publish-release
-    runs-on: ubuntu-latest
-    permissions:
-      statuses: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Publish final commit status
-        shell: bash
-        env:
-          WINDOWS_RESULT: ${{ needs.windows-companion.result }}
-          MOBILE_RESULT: ${{ needs.mobile-companion.result }}
-          PUBLISH_RESULT: ${{ needs.publish-release.result }}
-        run: |
-          STATE='failure'
-          DESCRIPTION="Windows=$WINDOWS_RESULT Android=$MOBILE_RESULT Publish=$PUBLISH_RESULT"
-          if [[ "$WINDOWS_RESULT" == 'success' && "$MOBILE_RESULT" == 'success' && "$PUBLISH_RESULT" == 'success' ]]; then
-            STATE='success'
-          fi
-          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$WINDOWS_RESULT" -f context='cyclone/windows-companion' -f description="Windows PC Companion: $WINDOWS_RESULT" -f target_url="$RUN_URL"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$MOBILE_RESULT" -f context='cyclone/mobile-companion' -f description="Matching Cyclone Mobile: $MOBILE_RESULT" -f target_url="$RUN_URL"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$PUBLISH_RESULT" -f context='cyclone/publish-release' -f description="Combined release: $PUBLISH_RESULT" -f target_url="$RUN_URL"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
-            -f state="$STATE" \
-            -f context='cyclone/paired-release' \
-            -f description="${DESCRIPTION:0:140}" \
-            -f target_url="$RUN_URL"

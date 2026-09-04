@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_run_id:
-        description: Successful Cyclone Mobile CI run ID to reuse (never rebuilt)
+        description: Successful Cyclone Mobile CI run ID to reuse
         required: true
         type: string
       artifact_name:
@@ -25,7 +25,7 @@ jobs:
     environment: mobile-release-approval
     runs-on: ubuntu-latest
     steps:
-      - name: Validate authoritative successful build run
+      - name: Validate successful source build
         id: source
         shell: bash
         env:
@@ -42,12 +42,13 @@ jobs:
           test "$(jq -r '.head_repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
           head_branch="$(jq -r '.head_branch' <<< "$run_json")"
           case "$head_branch" in
-            main|release/cyclone-mobile-v*|feature/cyclone-3.5.2-beta|release/cyclone-3.5.3-beta) ;;
-            *) echo "Untrusted mobile release source branch: $head_branch" >&2; exit 1 ;;
+            main|release/cyclone-mobile-v*) ;;
+            *) echo "Untrusted release source branch: $head_branch" >&2; exit 1 ;;
           esac
           head_sha="$(jq -r '.head_sha' <<< "$run_json")"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
           printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
+
       - name: Download authoritative CI artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -55,6 +56,7 @@ jobs:
           run-id: ${{ inputs.build_run_id }}
           github-token: ${{ github.token }}
           path: candidate
+
       - name: Verify checksum and provenance
         shell: bash
         env:
@@ -69,27 +71,15 @@ jobs:
           test "$(tr -d '\r\n' < candidate/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
           test "$(tr -d '\r\n' < candidate/run-id.txt)" = "$EXPECTED_RUN_ID"
           python3 - <<'PY'
-          import json
-          import os
+          import json, os
           from pathlib import Path
-
-          root = Path("candidate")
-          metadata = json.loads((root / "mobile-metadata.json").read_text(encoding="utf-8"))
-          apks = sorted(root.glob("*.apk"))
-          assert metadata["artifact_name"] == os.environ["EXPECTED_ARTIFACT_NAME"]
-          assert metadata["application_id"] == "com.cyclone.mobile"
-          mobile_apk = root / metadata["apk_name"]
-          assert mobile_apk.is_file(), f"missing Cyclone APK: {mobile_apk.name}"
-          sniper_metadata_path = root / "teamwork-sniper-metadata.json"
-          if sniper_metadata_path.is_file():
-              sniper = json.loads(sniper_metadata_path.read_text(encoding="utf-8"))
-              assert sniper["present"] is True
-              assert sniper["application_id"] == "com.cyclone.teamworksniper"
-              sniper_apk = root / sniper["apk_name"]
-              assert sniper_apk.is_file(), f"missing Teamwork Sniper APK: {sniper_apk.name}"
-              assert len(apks) == 2
-          else:
-              assert len(apks) == 1
+          root = Path('candidate')
+          metadata = json.loads((root / 'mobile-metadata.json').read_text())
+          assert metadata['artifact_name'] == os.environ['EXPECTED_ARTIFACT_NAME']
+          assert metadata['application_id'] == 'com.cyclone.mobile'
+          apk = root / metadata['apk_name']
+          assert apk.is_file(), f'missing Cyclone APK: {apk.name}'
+          assert len(list(root.glob('*.apk'))) == 1
           PY
           (cd candidate && sha256sum --check ./*.apk.sha256)
-          echo "Publication is intentionally disabled; this job only verifies the reused CI artifact." >> "$GITHUB_STEP_SUMMARY"
+          echo "Candidate verified. Publication remains a separate explicit action." >> "$GITHUB_STEP_SUMMARY"

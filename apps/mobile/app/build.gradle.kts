@@ -22,11 +22,9 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 53
-        versionName = "3.8.9"
+        versionCode = 54
+        versionName = "3.9.0"
         ndk {
-            // Pixel 8 is arm64. Dropping other ABIs shrinks the sideload APK and
-            // avoids packaging 4KB-aligned 32-bit WebRTC libs Android 15 rejects.
             abiFilters += listOf("arm64-v8a")
         }
     }
