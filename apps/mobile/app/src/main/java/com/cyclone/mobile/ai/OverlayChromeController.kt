@@ -7,6 +7,7 @@ import android.graphics.PixelFormat
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -34,18 +35,83 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.MainActivity
 import com.cyclone.mobile.ui.overlay.OverlayChrome
+import com.cyclone.mobile.ui.overlay.OverlayChromeContract
 import com.cyclone.mobile.ui.overlay.OverlayAiSettings
+import com.cyclone.mobile.ui.overlay.OverlayIdleActivationTracker
+import com.cyclone.mobile.ui.overlay.OverlayIdleHalo
+import com.cyclone.mobile.ui.overlay.OverlayIdleTapResult
+import com.cyclone.mobile.ui.overlay.OverlayIdleVisualState
 import com.cyclone.mobile.ui.overlay.OverlayChromeSnapshot
 import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import com.cyclone.mobile.ui.overlay.OverlayCopy
 import com.cyclone.mobile.ui.overlay.OverlayUserAction
 
+internal data class OverlayWindowContract(
+    val matchParentWidth: Boolean,
+    val widthDp: Int?,
+    val heightDp: Int?,
+    val bottomCenter: Boolean,
+    val notFocusable: Boolean,
+    val notTouchModal: Boolean,
+    val notTouchable: Boolean,
+    val bottomMarginDp: Int,
+)
+
+internal object OverlayChromeWindowPolicy {
+    fun main(compact: Boolean): OverlayWindowContract = if (compact) {
+        OverlayWindowContract(
+            matchParentWidth = false,
+            widthDp = OverlayChromeContract.IDLE_TOUCH_SIZE_DP,
+            heightDp = OverlayChromeContract.IDLE_TOUCH_SIZE_DP,
+            bottomCenter = true,
+            notFocusable = true,
+            notTouchModal = true,
+            notTouchable = false,
+            bottomMarginDp = OverlayChromeContract.IDLE_TOUCH_BOTTOM_MARGIN_DP,
+        )
+    } else {
+        OverlayWindowContract(
+            matchParentWidth = true,
+            widthDp = null,
+            heightDp = null,
+            bottomCenter = true,
+            notFocusable = false,
+            notTouchModal = true,
+            notTouchable = false,
+            bottomMarginDp = 0,
+        )
+    }
+
+    val halo: OverlayWindowContract = OverlayWindowContract(
+        matchParentWidth = false,
+        widthDp = OverlayChromeContract.IDLE_VISUAL_WIDTH_DP,
+        heightDp = OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP,
+        bottomCenter = true,
+        notFocusable = true,
+        notTouchModal = true,
+        notTouchable = true,
+        bottomMarginDp = OverlayChromeContract.IDLE_VISUAL_BOTTOM_MARGIN_DP,
+    )
+
+    fun flags(spec: OverlayWindowContract): Int {
+        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        if (spec.notTouchModal) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        if (spec.notFocusable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        if (spec.notTouchable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        return flags
+    }
+
+    fun gravity(spec: OverlayWindowContract): Int =
+        Gravity.BOTTOM or if (spec.bottomCenter) Gravity.CENTER_HORIZONTAL else Gravity.END
+}
+
 /**
  * Sibling of [AiTraceOverlayController]. Hosts the V4 Compose overlay on
  * TYPE_ACCESSIBILITY_OVERLAY so Cyclone chrome is not a new Activity.
  *
- * Overlay buttons are touchable. The window is WRAP_CONTENT, so host taps outside the chrome
- * reach the current app and must go through PhoneToolExecutor.
+ * Expanded chrome is one touchable panel window. Compact mode deliberately splits the logical
+ * overlay into a non-touchable 144x72dp visual halo and a centered 48x48dp activation window.
+ * The larger decoration never owns input; host taps outside the 48dp hotspot remain host taps.
  */
 class OverlayChromeController(
     private val service: CycloneAccessibilityService,
@@ -59,10 +125,14 @@ class OverlayChromeController(
     private val wm = service.getSystemService(WindowManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private val lifecycle = OverlayComposeLifecycle()
+    private val idleActivation = OverlayIdleActivationTracker()
     private var root: ComposeView? = null
     private var params: WindowManager.LayoutParams? = null
+    private var haloRoot: ComposeView? = null
+    private var haloParams: WindowManager.LayoutParams? = null
     private var latest by mutableStateOf(OverlayChromeSnapshot())
     private var aiSettings by mutableStateOf(OverlayAiSettings())
+    private var idleVisualState by mutableStateOf(OverlayIdleVisualState())
     private var speechRecognizer: SpeechRecognizer? = null
 
     fun show(snapshot: OverlayChromeSnapshot) {
@@ -74,6 +144,16 @@ class OverlayChromeController(
                 return@onMain
             }
             lifecycle.start()
+            val halo = ComposeView(service).apply {
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                setViewTreeLifecycleOwner(lifecycle)
+                setViewTreeViewModelStoreOwner(lifecycle)
+                setViewTreeSavedStateRegistryOwner(lifecycle)
+                setContent {
+                    OverlayIdleHalo(state = idleVisualState)
+                }
+            }
             val view = ComposeView(service).apply {
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -92,13 +172,21 @@ class OverlayChromeController(
                             aiSettings = next
                             onAiSettingsChanged(next)
                         },
+                        idleVisualState = idleVisualState,
+                        onIdleTap = ::recordIdleTap,
+                        onIdleSemanticActivate = ::recordSemanticActivation,
                     )
                 }
             }
+            val haloLayout = windowParams(OverlayChromeWindowPolicy.halo)
             val layout = overlayParams(snapshot)
+            haloParams = haloLayout
             params = layout
+            haloRoot = halo
             root = view
             applyLayout(snapshot)
+            // Add decoration first so the small semantic/touch hotspot stays above it.
+            wm.addView(halo, haloLayout)
             wm.addView(view, layout)
         }
     }
@@ -106,6 +194,7 @@ class OverlayChromeController(
     fun render(snapshot: OverlayChromeSnapshot) {
         onMain {
             latest = snapshot
+            if (!isCompact(snapshot)) resetIdleActivation()
             applyLayout(snapshot)
         }
     }
@@ -113,8 +202,12 @@ class OverlayChromeController(
     fun dismiss() {
         onMain {
             root?.let { runCatching { wm.removeView(it) } }
+            haloRoot?.let { runCatching { wm.removeView(it) } }
             root = null
             params = null
+            haloRoot = null
+            haloParams = null
+            resetIdleActivation()
             speechRecognizer?.destroy()
             speechRecognizer = null
             lifecycle.destroy()
@@ -124,17 +217,60 @@ class OverlayChromeController(
     private fun applyLayout(snapshot: OverlayChromeSnapshot) {
         val view = root ?: return
         val layout = params ?: return
+        val compact = isCompact(snapshot)
+        val visible = !compact || snapshot.idleChipVisible
+
         view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-        view.contentDescription = if (snapshot.state == OverlayChromeState.GATE && !snapshot.minimized) OverlayCopy.GATE else null
-        val compact = snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
-        val width = if (compact) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT
-        val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            if (compact) WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE else 0
-        val gravity = if (compact) Gravity.BOTTOM or Gravity.END else Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+        view.contentDescription =
+            if (snapshot.state == OverlayChromeState.GATE && !snapshot.minimized) OverlayCopy.GATE else null
+        view.visibility = if (visible) View.VISIBLE else View.GONE
+
+        val spec = OverlayChromeWindowPolicy.main(compact)
+        var changed = applyWindowContract(layout, spec)
+        if (changed) runCatching { wm.updateViewLayout(view, layout) }
+
+        haloRoot?.let { halo ->
+            halo.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            halo.visibility = if (compact && snapshot.idleChipVisible) View.VISIBLE else View.GONE
+        }
+        haloParams?.let { hp ->
+            val haloChanged = applyWindowContract(hp, OverlayChromeWindowPolicy.halo)
+            if (haloChanged) haloRoot?.let { halo -> runCatching { wm.updateViewLayout(halo, hp) } }
+        }
+    }
+
+    private fun overlayParams(snapshot: OverlayChromeSnapshot): WindowManager.LayoutParams =
+        windowParams(OverlayChromeWindowPolicy.main(isCompact(snapshot)))
+
+    private fun windowParams(spec: OverlayWindowContract): WindowManager.LayoutParams =
+        WindowManager.LayoutParams(
+            widthFor(spec),
+            heightFor(spec),
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            flagsFor(spec),
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = gravityFor(spec)
+            y = dp(spec.bottomMarginDp)
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        }
+
+    private fun applyWindowContract(
+        layout: WindowManager.LayoutParams,
+        spec: OverlayWindowContract,
+    ): Boolean {
         var changed = false
+        val width = widthFor(spec)
+        val height = heightFor(spec)
+        val flags = flagsFor(spec)
+        val gravity = gravityFor(spec)
+        val y = dp(spec.bottomMarginDp)
         if (layout.width != width) {
             layout.width = width
+            changed = true
+        }
+        if (layout.height != height) {
+            layout.height = height
             changed = true
         }
         if (layout.flags != flags) {
@@ -145,30 +281,56 @@ class OverlayChromeController(
             layout.gravity = gravity
             changed = true
         }
-        val y = if (compact) dp(4) else 0
         if (layout.y != y) {
             layout.y = y
             changed = true
         }
-        if (changed) runCatching { wm.updateViewLayout(view, layout) }
+        return changed
     }
 
-    private fun overlayParams(snapshot: OverlayChromeSnapshot): WindowManager.LayoutParams {
-        val compact = snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
-        return WindowManager.LayoutParams(
-            if (compact) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                if (compact) WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE else 0,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = if (compact) Gravity.BOTTOM or Gravity.END else Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = if (compact) dp(4) else 0
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-        }
+    private fun widthFor(spec: OverlayWindowContract): Int =
+        if (spec.matchParentWidth) WindowManager.LayoutParams.MATCH_PARENT else dp(requireNotNull(spec.widthDp))
+
+    private fun heightFor(spec: OverlayWindowContract): Int =
+        spec.heightDp?.let(::dp) ?: WindowManager.LayoutParams.WRAP_CONTENT
+
+    private fun gravityFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.gravity(spec)
+
+    private fun flagsFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.flags(spec)
+
+    private fun recordIdleTap() {
+        applyIdleTapResult(idleActivation.onTap(SystemClock.elapsedRealtime()))
     }
+
+    private fun recordSemanticActivation() {
+        applyIdleTapResult(idleActivation.semanticActivate())
+    }
+
+    private fun applyIdleTapResult(result: OverlayIdleTapResult) {
+        if (result.ignored) return
+        idleVisualState = OverlayIdleVisualState(
+            pulseSerial = result.pulseSerial,
+            pulseLevel = result.pulseLevel,
+            activating = result.activate,
+        )
+        if (!result.activate) return
+        main.postDelayed(
+            {
+                if (isCompact(latest) && latest.idleChipVisible && idleVisualState.activating) {
+                    onAction(OverlayUserAction.ASK_CYCLONE)
+                }
+            },
+            OverlayChromeContract.IDLE_ACTIVATION_DELAY_MS,
+        )
+    }
+
+    private fun resetIdleActivation() {
+        idleActivation.reset()
+        idleVisualState = OverlayIdleVisualState()
+    }
+
+    private fun isCompact(snapshot: OverlayChromeSnapshot): Boolean =
+        snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
 
     fun beginVoiceInput() {
         onMain {
