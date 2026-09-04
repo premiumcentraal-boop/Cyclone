@@ -31,48 +31,31 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         )
         self._assert_system_bindable(service)
 
-    def test_enhanced_control_is_system_bindable_and_uses_own_config(self):
-        service = self._service(
-            ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml",
-            "com.mobilerun.portal.service.MobilerunAccessibilityService",
-        )
-        self._assert_system_bindable(service)
-        metadata = service.find("meta-data")
-        self.assertIsNotNone(metadata)
-        self.assertEqual(
-            "@xml/cyclone_enhanced_accessibility_service_config",
-            metadata.get(f"{ANDROID}resource"),
-        )
-
-        config = ROOT / "apps/mobile/mobilerun-embedded/src/main/res/xml/cyclone_enhanced_accessibility_service_config.xml"
-        self.assertTrue(config.is_file())
+    def test_primary_accessibility_does_not_subscribe_to_type_all_mask(self):
+        config = ROOT / "apps/mobile/app/src/main/res/xml/accessibility_service_config.xml"
         root = ET.parse(config).getroot()
-        self.assertEqual("true", root.get(f"{ANDROID}canPerformGestures"))
-        self.assertEqual("true", root.get(f"{ANDROID}canRetrieveWindowContent"))
-        self.assertEqual("true", root.get(f"{ANDROID}canTakeScreenshot"))
+        events = root.get(f"{ANDROID}accessibilityEventTypes", "")
+        self.assertNotIn("typeAllMask", events, config)
+        self.assertIn("typeWindowStateChanged", events, config)
 
-    def test_accessibility_services_do_not_subscribe_to_type_all_mask(self):
-        configs = [
-            ROOT / "apps/mobile/app/src/main/res/xml/accessibility_service_config.xml",
-            ROOT / "apps/mobile/mobilerun-embedded/src/main/res/xml/cyclone_enhanced_accessibility_service_config.xml",
-        ]
-        for config in configs:
-            root = ET.parse(config).getroot()
-            events = root.get(f"{ANDROID}accessibilityEventTypes", "")
-            self.assertNotIn("typeAllMask", events, config)
-            self.assertIn("typeWindowStateChanged", events, config)
-
-    def test_embedded_source_adapter_is_bounded_and_callback_guarded(self):
+    def test_embedded_module_is_diagnostics_only_and_offline_buildable(self):
         gradle = (ROOT / "apps/mobile/mobilerun-embedded/build.gradle.kts").read_text(encoding="utf-8")
-        self.assertIn('"AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE",\n                    "0"', gradle)
-        self.assertIn(
-            '"flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_2_FINGER_PASSTHROUGH",\n                    "flags = flags"',
-            gradle,
-        )
-        self.assertIn('"eventTypes = AccessibilityEvent.TYPES_ALL_MASK"', gradle)
-        self.assertIn("CycloneProcessDiagnostics.recordNonFatal", gradle)
-        self.assertIn("enhanced.accessibility.onServiceConnected", gradle)
-        self.assertIn("disableOnFailure = false", gradle)
+        manifest_path = ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml"
+        manifest = ET.parse(manifest_path).getroot()
+        diagnostics = ROOT / "apps/mobile/mobilerun-embedded/src/main/java/com/mobilerun/portal/diagnostics/CycloneProcessDiagnostics.kt"
+
+        for retired in (
+            "upstreamMobilerun",
+            "materializeMobilerunUpstream",
+            "prepareMobilerunSources",
+            "MOBILERUN_UPSTREAM_URL",
+            "webrtc-sdk",
+            "Java-WebSocket",
+        ):
+            self.assertNotIn(retired, gradle)
+        self.assertIsNone(manifest.find("application"))
+        self.assertEqual([], manifest.findall("uses-permission"))
+        self.assertTrue(diagnostics.is_file())
 
     def test_primary_accessibility_callback_boundary_cannot_run_heavy_init_directly(self):
         source = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/CycloneAccessibilityService.kt").read_text(encoding="utf-8")
