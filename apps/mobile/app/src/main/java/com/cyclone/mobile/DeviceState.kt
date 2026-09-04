@@ -18,7 +18,19 @@ object DeviceState {
     @Volatile var latestNotification: StatusBarNotification? = null
     @Volatile var lastScreenshotPath: String? = null
     @Volatile var requireFreshObservation: Boolean = false
-    @Volatile var lastUiEventAtMs: Long = 0L
+
+    private val uiEventMonitor = Object()
+    private val uiEventGeneration = AtomicLong(0)
+    @Volatile private var _lastUiEventAtMs: Long = 0L
+    var lastUiEventAtMs: Long
+        get() = _lastUiEventAtMs
+        set(value) {
+            _lastUiEventAtMs = value
+            synchronized(uiEventMonitor) {
+                uiEventGeneration.incrementAndGet()
+                uiEventMonitor.notifyAll()
+            }
+        }
 
     private val controllerEpoch = AtomicLong(0)
     private val notifications = ConcurrentHashMap<String, StatusBarNotification>()
@@ -37,6 +49,26 @@ object DeviceState {
     )
 
     fun controllerEpoch(): Long = controllerEpoch.get()
+    fun uiGeneration(): Long = uiEventGeneration.get()
+
+    /**
+     * Waits for Android Accessibility to publish a newer UI event generation. Unlike the old
+     * fingerprint polling loop this does not traverse the Accessibility tree while the UI is idle.
+     * The returned generation equals [generation] on timeout.
+     */
+    fun awaitUiEventAfter(generation: Long, timeoutMs: Long): Long {
+        if (timeoutMs <= 0L || uiEventGeneration.get() > generation) return uiEventGeneration.get()
+        val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+        synchronized(uiEventMonitor) {
+            while (uiEventGeneration.get() <= generation) {
+                val remainingNs = deadline - System.nanoTime()
+                if (remainingNs <= 0L) break
+                val waitMs = (remainingNs / 1_000_000L).coerceAtLeast(1L)
+                uiEventMonitor.wait(waitMs)
+            }
+        }
+        return uiEventGeneration.get()
+    }
 
     @Synchronized
     fun setController(controller: Controller) {

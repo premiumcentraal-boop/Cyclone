@@ -23,6 +23,7 @@ jobs:
           python3 scripts/ci/release_versions.py --check
           python3 scripts/ci/mobile_metadata.py --github-output "$GITHUB_OUTPUT" --json mobile-metadata.json
           python3 scripts/ci/mobile_product_guard.py
+          python3 scripts/ci/repository_security_guard.py
           python3 -m unittest discover -s scripts/ci/tests -v
 
       - name: Verify PC Gateway and MCP contracts
@@ -55,9 +56,9 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
-      - name: Test and assemble release candidate
+      - name: Test, lint and assemble unsigned release candidate
         shell: bash
-        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:assembleRelease --stacktrace
+        run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:lintDebug :app:assembleRelease --stacktrace
 
       - name: Package provenance
         shell: bash
@@ -66,7 +67,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/mobile
-          cp apps/mobile/app/build/outputs/apk/release/app-release.apk "dist/mobile/$APK_NAME"
+          CANDIDATE=apps/mobile/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$CANDIDATE"
+          cp "$CANDIDATE" "dist/mobile/$APK_NAME"
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           AAPT="$SDK_ROOT/build-tools/35.0.0/aapt"
           BADGING=$("$AAPT" dump badging "dist/mobile/$APK_NAME")
@@ -78,6 +81,7 @@ jobs:
           (cd dist/mobile && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
           printf '%s\n' "$GITHUB_SHA" > dist/mobile/source-sha.txt
           printf '%s\n' "$GITHUB_RUN_ID" > dist/mobile/run-id.txt
+          printf '%s\n' 'UNSIGNED_VERIFIED_CANDIDATE' > dist/mobile/signing-state.txt
           cp mobile-metadata.json dist/mobile/mobile-metadata.json
 
       - name: Upload release candidate

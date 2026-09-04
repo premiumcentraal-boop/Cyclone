@@ -1,18 +1,7 @@
-import java.util.Base64
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-}
-
-fun materializeKeystore(storeName: String, encodedName: String): File {
-    val store = rootProject.file(storeName)
-    val encoded = rootProject.file(encodedName)
-    if (!store.exists() && encoded.exists()) {
-        store.writeBytes(Base64.getDecoder().decode(encoded.readText().trim()))
-    }
-    return store
 }
 
 android {
@@ -22,33 +11,17 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 54
-        versionName = "3.9.0"
+        versionCode = 55
+        versionName = "3.9.1"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
     }
-    signingConfigs {
-        create("ciDebug") {
-            storeFile = materializeKeystore("debug.keystore", "debug.keystore.b64")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
-        create("ciRelease") {
-            storeFile = materializeKeystore("release.keystore", "release.keystore.b64")
-            storePassword = "Cyclone36Release!"
-            keyAlias = "cyclone"
-            keyPassword = "Cyclone36Release!"
-        }
-    }
     buildTypes {
-        getByName("debug") {
-            signingConfig = signingConfigs.getByName("ciDebug")
-        }
         release {
+            // Ordinary CI intentionally produces an unsigned release candidate. The protected
+            // release workflow signs the verified artifact with credentials injected at release time.
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("ciRelease")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -67,6 +40,9 @@ dependencies {
     implementation(project(":mobilerun-embedded"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.10.1")
+    // ActivityResult lint requires Fragment 1.3.0+ when a Fragment dependency is present.
+    // Pin the current stable release so transitive dependencies cannot drag the app below that floor.
+    implementation("androidx.fragment:fragment:1.9.0")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

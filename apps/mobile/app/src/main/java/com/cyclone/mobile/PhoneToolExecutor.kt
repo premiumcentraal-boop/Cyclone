@@ -20,23 +20,38 @@ object PhoneToolExecutor {
     private const val MAX_TIMEOUT_MS = 30_000L
     private const val DUPLICATE_WINDOW_MS = 350L
 
+    private val mutatingTools = setOf(
+        "phone.click", "phone.long_press", "phone.tap", "phone.type", "phone.replace_text",
+        "phone.scroll", "phone.swipe", "phone.back", "phone.home", "phone.open_app",
+        "phone.open_notification", "phone.set_clipboard", "phone.share", "phone.launch_intent",
+    )
+    private val mutationLock = Object()
     private val resultCache = object : LinkedHashMap<String, PhoneToolResult>(128, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PhoneToolResult>?): Boolean = size > 250
     }
     private val recentActions = LinkedHashMap<String, Long>()
 
-    @Synchronized
+    /**
+     * Read-only tools may run concurrently. Phone mutations remain strictly serialized, but a
+     * wait/screenshot/read can no longer hold one global monitor and block unrelated observation.
+     */
     fun execute(context: Context, request: PhoneToolRequest): PhoneToolResult {
-        resultCache[request.commandId]?.let { return it }
+        cached(request.commandId)?.let { return it }
+        return if (request.tool in mutatingTools) {
+            synchronized(mutationLock) {
+                cached(request.commandId) ?: executeInternal(context, request, mutating = true)
+            }
+        } else {
+            executeInternal(context, request, mutating = false)
+        }
+    }
+
+    private fun executeInternal(context: Context, request: PhoneToolRequest, mutating: Boolean): PhoneToolResult {
         val started = System.currentTimeMillis()
         val service = CycloneAccessibilityService.instance
-        val before = service?.observe(markFresh = false)?.fingerprint
-
-        val mutating = request.tool in setOf(
-            "phone.click", "phone.long_press", "phone.tap", "phone.type", "phone.replace_text",
-            "phone.scroll", "phone.swipe", "phone.back", "phone.home", "phone.open_app",
-            "phone.open_notification", "phone.set_clipboard", "phone.share", "phone.launch_intent",
-        )
+        // Reuse the authoritative current gateway frame whenever possible. The old executor rebuilt
+        // the Accessibility tree before every command, even phone.observe itself.
+        val before = if (mutating) currentFingerprint(service) else null
 
         if (mutating && DeviceState.controller != DeviceState.Controller.AGENT) {
             return finish(request, started, before, before, error = PhoneToolError(PhoneToolErrorCode.HUMAN_HAS_CONTROL, "Human currently owns device input"))
@@ -55,11 +70,30 @@ object PhoneToolExecutor {
                 else if (err is GateBlockedException) Outcome(error = PhoneToolError(PhoneToolErrorCode.POLICY_DENIED, err.message ?: "GATE requires confirmation"))
                 else errorResult(PhoneToolErrorCode.INTERNAL_ERROR, err.message ?: err.javaClass.simpleName)
             }
-        val after = CycloneAccessibilityService.instance?.observe(markFresh = false)?.fingerprint
+        val after = when {
+            !mutating -> null
+            outcome.afterFingerprint != null -> outcome.afterFingerprint
+            else -> CycloneAccessibilityService.instance?.observe(markFresh = false)?.fingerprint
+        }
         return finish(request, started, before, after, outcome.payload, outcome.error, outcome.attempts)
     }
 
-    private data class Outcome(val payload: Any? = null, val error: PhoneToolError? = null, val attempts: Int = 1)
+    private fun currentFingerprint(service: CycloneAccessibilityService?): String? {
+        val cached = GatewayObservationStore.current()
+            ?.payload
+            ?.optString("accessibilityFingerprint")
+            ?.takeIf(String::isNotBlank)
+        return cached ?: service?.observe(markFresh = false)?.fingerprint
+    }
+
+    private fun cached(commandId: String): PhoneToolResult? = synchronized(resultCache) { resultCache[commandId] }
+
+    private data class Outcome(
+        val payload: Any? = null,
+        val error: PhoneToolError? = null,
+        val attempts: Int = 1,
+        val afterFingerprint: String? = null,
+    )
 
     private fun requireSelector(params: JSONObject): ElementSelector {
         val selector = ElementSelector.fromJson(params.optJSONObject("selector") ?: params)
@@ -122,7 +156,6 @@ object PhoneToolExecutor {
                     ?: return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "No launchable app for $packageName")
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (packageName == "com.android.settings") {
-                    // Settings otherwise restores the last sub-activity (Apps). Land on Settings home.
                     intent.action = Intent.ACTION_MAIN
                     intent.addCategory(Intent.CATEGORY_LAUNCHER)
                     intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -219,17 +252,35 @@ object PhoneToolExecutor {
             if (DeviceState.controller != DeviceState.Controller.AGENT || epoch != DeviceState.controllerEpoch()) {
                 return errorResult(PhoneToolErrorCode.HUMAN_HAS_CONTROL, "Controller changed while action was queued", attempts)
             }
+            val eventGeneration = DeviceState.uiGeneration()
             if (action()) {
                 val waitForChangeMs = request.params.optLong("waitForChangeMs", 900L).coerceIn(0L, 5_000L)
-                val changed = if (waitForChangeMs == 0L || before == null) null else waitForFingerprintChange(service, before, waitForChangeMs)
+                if (waitForChangeMs > 0L) DeviceState.awaitUiEventAfter(eventGeneration, waitForChangeMs)
+
+                // Exactly one post-action observation is enough to verify both fingerprint change and
+                // explicit expectations. The old code rebuilt the full tree every ~90 ms while waiting.
+                val afterSnapshot = if (before != null || request.params.optJSONObject("expect") != null) {
+                    service.observe(markFresh = false)
+                } else null
+                val changed = if (before == null || afterSnapshot == null) null else afterSnapshot.fingerprint != before
                 val expected = request.params.optJSONObject("expect")
-                if (expected != null) {
-                    val verification = evaluateCondition(service.observe(markFresh = false), expected)
-                    if (!verification.first) return errorResult(PhoneToolErrorCode.ASSERTION_FAILED, verification.second, attempts)
+                if (expected != null && afterSnapshot != null) {
+                    val verification = evaluateCondition(afterSnapshot, expected)
+                    if (!verification.first) {
+                        return Outcome(
+                            error = PhoneToolError(PhoneToolErrorCode.ASSERTION_FAILED, verification.second),
+                            attempts = attempts,
+                            afterFingerprint = afterSnapshot.fingerprint,
+                        )
+                    }
                 }
-                return Outcome(JSONObject().put("performed", true).put("screenChanged", changed ?: JSONObject.NULL), attempts = attempts)
+                return Outcome(
+                    payload = JSONObject().put("performed", true).put("screenChanged", changed ?: JSONObject.NULL),
+                    attempts = attempts,
+                    afterFingerprint = afterSnapshot?.fingerprint,
+                )
             }
-            Thread.sleep(100L * attempts)
+            if (attempts <= retries) DeviceState.awaitUiEventAfter(eventGeneration, 100L * attempts)
         }
         return errorResult(PhoneToolErrorCode.ACTION_FAILED, "Android rejected or could not perform the action", attempts)
     }
@@ -256,18 +307,20 @@ object PhoneToolExecutor {
         service ?: return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
         val condition = params.optJSONObject("condition") ?: params
         val timeout = if (assertOnly) 0L else params.optLong("timeoutMs", DEFAULT_TIMEOUT_MS).coerceIn(0L, MAX_TIMEOUT_MS)
-        val poll = params.optLong("pollMs", 120L).coerceIn(50L, 1_000L)
+        val heartbeat = params.optLong("pollMs", 250L).coerceIn(50L, 1_000L)
         val started = System.currentTimeMillis()
         var attempts = 0
         do {
+            val generation = DeviceState.uiGeneration()
             attempts++
             val snapshot = service.observe(markFresh = false)
             val result = evaluateCondition(snapshot, condition)
             if (result.first) return Outcome(JSONObject().put("matched", true).put("snapshot", snapshot.toJson()), attempts = attempts)
-            if (assertOnly || System.currentTimeMillis() - started >= timeout) {
+            val elapsed = System.currentTimeMillis() - started
+            if (assertOnly || elapsed >= timeout) {
                 return errorResult(if (assertOnly) PhoneToolErrorCode.ASSERTION_FAILED else PhoneToolErrorCode.TIMEOUT, result.second, attempts)
             }
-            Thread.sleep(poll)
+            DeviceState.awaitUiEventAfter(generation, minOf(heartbeat, timeout - elapsed))
         } while (true)
     }
 
@@ -289,15 +342,6 @@ object PhoneToolExecutor {
             "fingerprint_changed" -> (snapshot.fingerprint != condition.optString("from")) to "Screen fingerprint has not changed"
             else -> false to "Unknown condition type ${condition.optString("type")}" 
         }
-    }
-
-    private fun waitForFingerprintChange(service: CycloneAccessibilityService, before: String, timeoutMs: Long): Boolean {
-        val started = System.currentTimeMillis()
-        while (System.currentTimeMillis() - started < timeoutMs) {
-            if (service.observe(markFresh = false).fingerprint != before) return true
-            Thread.sleep(90)
-        }
-        return false
     }
 
     private fun notificationJson(): JSONArray = JSONArray().also { array ->
@@ -366,7 +410,7 @@ object PhoneToolExecutor {
             payload = payload,
             error = error,
         )
-        resultCache[request.commandId] = result
+        synchronized(resultCache) { resultCache[request.commandId] = result }
         DeviceState.addAudit(DeviceState.CommandAuditRecord(
             commandId = request.commandId,
             tool = request.tool,
@@ -387,6 +431,5 @@ object PhoneToolExecutor {
         return result
     }
 }
-
 
 private class PhoneToolException(val error: PhoneToolError) : RuntimeException(error.message)

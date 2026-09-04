@@ -108,11 +108,25 @@ class CycloneLocalAgent(
     private val now: () -> Long = System::currentTimeMillis,
     private val externallyCancelled: () -> Boolean = { false },
     taskId: String = "local-${UUID.randomUUID()}",
+    restoredState: CycloneTaskState? = null,
 ) {
     private var cancelled = false
-    private var state = CycloneTaskState(taskId, goal, CycloneAgentStage.START, null, null, emptyList(), emptyList(), emptyMap(), emptyMap(), now(), now(), false, true, null, 0, 0, 0, 0, 0, null)
+    private var state = restoredState
+        ?.also { require(it.goal == goal) { "Restored task goal does not match requested goal" } }
+        ?.let { restored ->
+            restored.copy(
+                currentStage = if (restored.currentStage == CycloneAgentStage.TERMINAL) CycloneAgentStage.TERMINAL else CycloneAgentStage.OBSERVE,
+                requireFreshObservation = restored.currentStage != CycloneAgentStage.TERMINAL,
+            )
+        }
+        ?: CycloneTaskState(taskId, goal, CycloneAgentStage.START, null, null, emptyList(), emptyList(), emptyMap(), emptyMap(), now(), now(), false, true, null, 0, 0, 0, 0, 0, null)
 
-    init { require(goal.isNotBlank()); emit(CycloneTraceEventType.TASK_STARTED); checkpoint() }
+    init {
+        require(goal.isNotBlank())
+        if (restoredState == null) emit(CycloneTraceEventType.TASK_STARTED)
+        checkpoint()
+    }
+
     fun snapshot(): CycloneTaskState = state
     fun cancel() { cancelled = true }
     fun resume(): Boolean {
@@ -290,6 +304,9 @@ class CycloneLocalAgent(
     private fun emit(type: CycloneTraceEventType, code: String? = null, observation: CycloneObservation? = null, actionSignature: String? = null) {
         trace.emit(CycloneTraceEvent(type, now(), state.taskId, state.currentStage, code?.take(160), observation?.identity, observation?.pageIdentity, actionSignature?.take(160)))
     }
-    private fun checkpoint() = checkpoints.save(state)
+    private fun checkpoint() {
+        checkpoints.save(state)
+        CycloneTaskJournal.save(state)
+    }
     private fun bounded(values: List<String>, max: Int) = if (values.size <= max) values else values.takeLast(max)
 }

@@ -5,7 +5,6 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[3]
 ANDROID = "{http://schemas.android.com/apk/res/android}"
-TOOLS = "{http://schemas.android.com/tools}"
 
 # Auto-granted infrastructure permissions that keep the app alive and connected but do not
 # expose user data or device capabilities; they intentionally have no setup row.
@@ -39,19 +38,38 @@ FORBIDDEN_PERMISSIONS = {
 }
 
 
+def manifest_root(path: Path) -> ET.Element:
+    return ET.parse(path).getroot()
+
+
 def declared_permissions(path: Path) -> set[str]:
-    root = ET.parse(path).getroot()
     return {
         node.get(f"{ANDROID}name", "")
-        for node in root.findall("uses-permission")
+        for node in manifest_root(path).findall("uses-permission")
     }
 
 
+def application_node(path: Path) -> ET.Element | None:
+    return manifest_root(path).find("application")
+
+
 def service_nodes(path: Path) -> dict[str, ET.Element]:
-    application = ET.parse(path).getroot().find("application")
+    application = application_node(path)
+    if application is None:
+        return {}
     return {
         service.get(f"{ANDROID}name", ""): service
         for service in application.findall("service")
+    }
+
+
+def receiver_names(path: Path) -> set[str]:
+    application = application_node(path)
+    if application is None:
+        return set()
+    return {
+        receiver.get(f"{ANDROID}name", "")
+        for receiver in application.findall("receiver")
     }
 
 
@@ -64,20 +82,19 @@ def service_actions(service: ET.Element) -> set[str]:
 
 
 class MobilePermissionArchitectureGuards(unittest.TestCase):
-    def test_core_setup_permissions_are_declared(self):
-        app = declared_permissions(ROOT / "apps/mobile/app/src/main/AndroidManifest.xml")
-        embedded = declared_permissions(ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml")
-        self.assertIn("android.permission.READ_CALENDAR", app)
-        self.assertIn("android.permission.POST_NOTIFICATIONS", app)
-        self.assertIn("android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", app)
-        self.assertIn("android.permission.SYSTEM_ALERT_WINDOW", embedded)
-        self.assertIn("android.permission.SCHEDULE_EXACT_ALARM", embedded)
+    def setUp(self):
+        self.app_manifest = ROOT / "apps/mobile/app/src/main/AndroidManifest.xml"
+        self.diagnostics_manifest = ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml"
 
-    def test_final_apk_exposes_one_cyclone_accessibility_and_notification_endpoint(self):
-        app_manifest = ROOT / "apps/mobile/app/src/main/AndroidManifest.xml"
-        embedded_manifest = ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml"
-        app = service_nodes(app_manifest)
-        embedded = service_nodes(embedded_manifest)
+    def test_core_setup_permissions_are_declared_by_canonical_app(self):
+        app = declared_permissions(self.app_manifest)
+        for permission in SETUP_ROW_PERMISSIONS:
+            self.assertIn(permission, app)
+        self.assertEqual(set(), declared_permissions(self.diagnostics_manifest))
+
+    def test_final_apk_exposes_only_native_cyclone_control_endpoints(self):
+        app = service_nodes(self.app_manifest)
+        embedded = service_nodes(self.diagnostics_manifest)
 
         canonical_accessibility = app[".CycloneAccessibilityService"]
         canonical_notifications = app[".CycloneNotificationListener"]
@@ -89,19 +106,14 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
             "android.service.notification.NotificationListenerService",
             service_actions(canonical_notifications),
         )
+        self.assertEqual(set(), set(embedded))
+        self.assertFalse(any(name.startswith("com.mobilerun.portal.") for name in app))
 
-        suppressed = (
-            "com.mobilerun.portal.service.MobilerunAccessibilityService",
-            "com.mobilerun.portal.service.MobilerunNotificationListener",
-        )
-        for service_name in suppressed:
-            self.assertIn(service_name, embedded, f"expected embedded compatibility service {service_name}")
-            self.assertIn(service_name, app, f"app manifest must explicitly suppress {service_name}")
-            self.assertEqual(
-                "remove",
-                app[service_name].get(f"{TOOLS}node"),
-                f"{service_name} must not survive manifest merge as a second user permission",
-            )
+    def test_diagnostics_library_cannot_expand_final_manifest(self):
+        root = manifest_root(self.diagnostics_manifest)
+        self.assertEqual([], root.findall("uses-permission"))
+        self.assertIsNone(root.find("application"))
+        self.assertEqual([], root.findall("queries"))
 
     def test_main_shell_respects_android_status_bar_inset(self):
         main_activity = (
@@ -131,10 +143,7 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
         )
 
     def test_no_manifest_can_silently_expand_into_sensitive_domains(self):
-        for manifest in (
-            ROOT / "apps/mobile/app/src/main/AndroidManifest.xml",
-            ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml",
-        ):
+        for manifest in (self.app_manifest, self.diagnostics_manifest):
             permissions = declared_permissions(manifest)
             self.assertFalse(
                 FORBIDDEN_PERMISSIONS & permissions,
@@ -142,29 +151,15 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
             )
 
     def test_sms_trigger_receiver_is_not_exposed_anywhere(self):
-        for manifest in (
-            ROOT / "apps/mobile/app/src/main/AndroidManifest.xml",
-            ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml",
-        ):
-            root = ET.parse(manifest).getroot()
-            application = root.find("application")
-            receivers = {
-                receiver.get(f"{ANDROID}name", "")
-                for receiver in application.findall("receiver")
-            }
+        for manifest in (self.app_manifest, self.diagnostics_manifest):
             self.assertNotIn(
                 "com.mobilerun.portal.triggers.TriggerSmsReceiver",
-                receivers,
+                receiver_names(manifest),
                 manifest.name,
             )
 
     def test_every_declared_permission_is_infrastructure_or_has_a_setup_row(self):
-        declared = (
-            declared_permissions(ROOT / "apps/mobile/app/src/main/AndroidManifest.xml")
-            | declared_permissions(
-                ROOT / "apps/mobile/mobilerun-embedded/src/main/AndroidManifest.xml"
-            )
-        )
+        declared = declared_permissions(self.app_manifest) | declared_permissions(self.diagnostics_manifest)
         unexplained = declared - INFRASTRUCTURE_PERMISSIONS - SETUP_ROW_PERMISSIONS
         self.assertEqual(
             set(),

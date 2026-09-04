@@ -56,7 +56,10 @@ class AgentRunDiagnosticV39Test {
     @Test
     fun largeLogsRemainBoundedAndKeepPrivacyTail() {
         val events = (1..120).map { index ->
-            AiTraceEvent(index.toString(), "ai-test-session", 1_000L + index, "MODEL_CONTEXT", "context $index", null, true, "x".repeat(7_500))
+            // Keep this deliberately non-Base64-shaped so the privacy sanitizer does not collapse
+            // the fixture before the diagnostic byte-boundary code itself is exercised.
+            val largeTextDetail = "context-payload-$index|".repeat(500)
+            AiTraceEvent(index.toString(), "ai-test-session", 1_000L + index, "MODEL_CONTEXT", "context $index", null, true, largeTextDetail)
         }
         val text = AgentRunDiagnosticV39.format(session(), events)
         assertTrue(text.toByteArray().size <= AgentRunDiagnosticV39.MAX_BYTES)

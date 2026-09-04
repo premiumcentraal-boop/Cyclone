@@ -1,12 +1,12 @@
-# Cyclone 3.9.0 baseline
+# Cyclone 3.9.1 hardening baseline
 schema = 1
-product_version = "3.9.0"
+product_version = "3.9.1"
 channel = "development"
-android_version_code = 54
+android_version_code = 55
 python_version = "3.8.4"
 
 [components]
-mobile = "3.9.0"
+mobile = "3.9.1"
 pc_companion = "3.8.4"
 device_gateway = "3.8.4"
 mcp = "3.8.4"
@@ -15,7 +15,7 @@ mcp = "3.8.4"
 publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
-android_signing = "PINNED_RELEASE_KEYSTORE"
+android_signing = "PROTECTED_RELEASE_ENVIRONMENT"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-3.9.0"
+candidate_generation = "cyclone-3.9.1"
