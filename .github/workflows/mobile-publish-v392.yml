@@ -68,7 +68,7 @@ jobs:
         shell: bash
         run: sdkmanager --install 'build-tools;35.0.0'
 
-      - name: Verify update signer and embedded lineage
+      - name: Verify signer rotation and embedded lineage
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,16 +77,25 @@ jobs:
           mkdir -p prior
           gh release download v3.9.1 --repo "$GITHUB_REPOSITORY" --pattern 'Cyclone-3.9.1.apk' --dir prior
           apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
-          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs signed/Cyclone-3.9.2.apk >/tmp/new-cert.txt
-          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs prior/Cyclone-3.9.1.apk >/tmp/prior-cert.txt
-          "$apksigner" lineage --in signed/Cyclone-3.9.2.apk --print-certs -v >/tmp/lineage.txt
-          test -s /tmp/lineage.txt
-          new_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/new-cert.txt | head -n 1 | tr 'A-F' 'a-f')"
-          prior_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/prior-cert.txt | head -n 1 | tr 'A-F' 'a-f')"
+          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs signed/Cyclone-3.9.2.apk > "$RUNNER_TEMP/new-cert.txt"
+          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs prior/Cyclone-3.9.1.apk > "$RUNNER_TEMP/prior-cert.txt"
+          "$apksigner" lineage --in signed/Cyclone-3.9.2.apk --print-certs -v > "$RUNNER_TEMP/lineage.txt"
+          test -s "$RUNNER_TEMP/lineage.txt"
+
+          new_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/new-cert.txt" | head -n 1 | tr 'A-F' 'a-f')"
+          prior_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/prior-cert.txt" | head -n 1 | tr 'A-F' 'a-f')"
           test -n "$new_cert"
           test -n "$prior_cert"
-          test "$new_cert" = "$prior_cert"
-          echo '3.9.2 uses the protected rotated signer from 3.9.1 and contains a valid signing lineage.'
+
+          if [ "$new_cert" = "$prior_cert" ]; then
+            echo 'ERROR: 3.9.2 still uses the exposed 3.9.1 signing certificate; protected rotation did not occur.' >&2
+            exit 1
+          fi
+
+          lineage_digests="$(sed -n 's/^Signer #[0-9][0-9]* in lineage certificate SHA-256 digest: //p' "$RUNNER_TEMP/lineage.txt" | tr 'A-F' 'a-f')"
+          printf '%s\n' "$lineage_digests" | grep -Fx "$prior_cert" >/dev/null
+          printf '%s\n' "$lineage_digests" | grep -Fx "$new_cert" >/dev/null
+          echo 'Verified: 3.9.2 uses a new protected signer and embeds a lineage containing both the published 3.9.1 certificate and the current certificate.'
 
       - name: Prepare release notes
         shell: bash
@@ -120,9 +129,9 @@ jobs:
           - Signed only after source/run/checksum provenance verification in the protected mobile release environment
           - Physical Pixel 8 acceptance: UNVERIFIED in this environment
 
-          ## Signing
+          ## Signing-key rotation
 
-          Cyclone 3.9.2 uses the protected rotated Android signer introduced for 3.9.1 and verifies the embedded APK Signature Scheme v3 signing lineage before publication.
+          The published 3.9.1 APK was signed with a historically exposed certificate as an emergency recovery measure. Cyclone 3.9.2 therefore requires the protected release environment to sign with a different private key and embeds an APK Signature Scheme v3 signing-certificate lineage containing both the published 3.9.1 certificate and the new certificate. Publication is blocked unless that rotation and lineage verify.
           EOF
 
       - name: Publish GitHub prerelease
