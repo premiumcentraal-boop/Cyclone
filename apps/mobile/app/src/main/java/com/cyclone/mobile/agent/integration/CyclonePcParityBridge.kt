@@ -20,6 +20,7 @@ import com.cyclone.mobile.agent.recovery.RecoveryRequest
 import com.cyclone.mobile.agent.tools.CycloneAgentEnvironment
 import com.cyclone.mobile.agent.tools.CycloneAgentEnvironmentApi
 import com.cyclone.mobile.ai.PageAgentAction
+import com.cyclone.mobile.ai.PageAgentProtocol
 import com.cyclone.mobile.applearner.LearnedAction
 import com.cyclone.mobile.applearner.PageContext
 import org.json.JSONArray
@@ -118,7 +119,11 @@ class CyclonePcParityBridge internal constructor(
     }
 
     fun act(action: PageAgentAction, legacyPage: PageContext, goal: String): AgentActionEnvelope {
-        val params = JSONObject(action.params.toString())
+        // Normalize strict non-element tool arguments (for example Chrome -> package)
+        // before entering the PC-parity action boundary. Element targeting is still re-resolved
+        // against the authoritative current observation below.
+        val params = PageAgentProtocol.resolveParams(action, legacyPage)
+            .getOrElse { JSONObject(action.params.toString()) }
         params.remove("selector")
         val needsElement = action.tool in ELEMENT_TOOLS
         if (needsElement) {
