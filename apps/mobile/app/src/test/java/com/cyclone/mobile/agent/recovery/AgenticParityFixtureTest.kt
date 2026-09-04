@@ -25,11 +25,31 @@ class AgenticParityFixtureTest {
     fun longSuccessfulTaskHasNoArbitrarySixCycleStop() {
         val progresses = (1..9).map { cycle ->
             AgenticProgressClassifier.classify(
-                ObservationEvidence(semanticStateKey = "p$cycle", accessibilityFingerprint = "a$cycle"),
-                ObservationEvidence(semanticStateKey = "p${cycle + 1}", accessibilityFingerprint = "a${cycle + 1}"),
+                ObservationEvidence(
+                    semanticStateKey = "p$cycle",
+                    accessibilityFingerprint = "a$cycle",
+                    interactionState = mapOf("verifiedStep" to cycle.toString()),
+                ),
+                ObservationEvidence(
+                    semanticStateKey = "p${cycle + 1}",
+                    accessibilityFingerprint = "a${cycle + 1}",
+                    interactionState = mapOf("verifiedStep" to (cycle + 1).toString()),
+                ),
             )
         }
         assertTrue(progresses.all { it.classification == ProgressClassification.VERIFIED_PROGRESS })
+    }
+
+    @Test
+    fun identityChurnAloneNeverMasqueradesAsVerifiedProgress() {
+        val progresses = (1..9).map { cycle ->
+            AgenticProgressClassifier.classify(
+                ObservationEvidence(semanticStateKey = "p$cycle", accessibilityFingerprint = "a$cycle", contentKey = "c$cycle"),
+                ObservationEvidence(semanticStateKey = "p${cycle + 1}", accessibilityFingerprint = "a${cycle + 1}", contentKey = "c${cycle + 1}"),
+            )
+        }
+        assertTrue(progresses.all { it.classification == ProgressClassification.NEW_EVIDENCE })
+        assertTrue(progresses.all { it.incrementsNoProgressCounter })
     }
 
     @Test
