@@ -104,6 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           source "$RUNNER_TEMP/legacy-signing.env"
+          export STORE_PASSWORD KEY_ALIAS KEY_PASSWORD
           echo "::add-mask::$STORE_PASSWORD"
           echo "::add-mask::$KEY_ALIAS"
           echo "::add-mask::$KEY_PASSWORD"
