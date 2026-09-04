@@ -1,0 +1,155 @@
+name: Cyclone Mobile Publish 3.9.2
+
+on:
+  push:
+    branches: ['release/cyclone-mobile-v3.9.2']
+    paths:
+      - '.github/workflows/mobile-publish-v392.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: mobile-publish-v3.9.2
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    uses: ./.github/workflows/mobile-release.yml
+    with:
+      build_run_id: '33927225311'
+      artifact_name: Cyclone-Android-3.9.2
+    secrets: inherit
+
+  publish:
+    needs: sign
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download protected signed artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Cyclone-Android-3.9.2-signed
+          path: signed
+
+      - name: Verify signed provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s signed/Cyclone-3.9.2.apk
+          test -s signed/Cyclone-3.9.2.apk.sha256
+          test -s signed/source-sha.txt
+          test -s signed/run-id.txt
+          test -s signed/mobile-metadata.json
+          test -s signed/signing-state.txt
+          test -s signed/signing-lineage.txt
+          test "$(tr -d '\r\n' < signed/source-sha.txt)" = "778f70e47c34d5dc798ccf8a0e315bb01836ac4d"
+          test "$(tr -d '\r\n' < signed/run-id.txt)" = "33927225311"
+          test "$(tr -d '\r\n' < signed/signing-state.txt)" = "SIGNED_PROTECTED_ENVIRONMENT_ROTATED"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          metadata = json.loads(Path('signed/mobile-metadata.json').read_text())
+          assert metadata == {
+              'apk_name': 'Cyclone-3.9.2.apk',
+              'application_id': 'com.cyclone.mobile',
+              'artifact_name': 'Cyclone-Android-3.9.2',
+              'version_code': 56,
+              'version_name': '3.9.2',
+          }
+          PY
+          (cd signed && sha256sum --check Cyclone-3.9.2.apk.sha256)
+
+      - name: Set up Android verification tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android build tools
+        shell: bash
+        run: sdkmanager --install 'build-tools;35.0.0'
+
+      - name: Verify update signer and embedded lineage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p prior
+          gh release download v3.9.1 --repo "$GITHUB_REPOSITORY" --pattern 'Cyclone-3.9.1.apk' --dir prior
+          apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
+          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs signed/Cyclone-3.9.2.apk >/tmp/new-cert.txt
+          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs prior/Cyclone-3.9.1.apk >/tmp/prior-cert.txt
+          "$apksigner" lineage --in signed/Cyclone-3.9.2.apk --print-certs -v >/tmp/lineage.txt
+          test -s /tmp/lineage.txt
+          new_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/new-cert.txt | head -n 1 | tr 'A-F' 'a-f')"
+          prior_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/prior-cert.txt | head -n 1 | tr 'A-F' 'a-f')"
+          test -n "$new_cert"
+          test -n "$prior_cert"
+          test "$new_cert" = "$prior_cert"
+          echo '3.9.2 uses the protected rotated signer from 3.9.1 and contains a valid signing lineage.'
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          # Cyclone 3.9.2
+
+          Cyclone 3.9.2 is a mobile reliability and observability prerelease focused on making the persistent phone agent converge, recover, and explain failures cleanly.
+
+          ## Highlights
+
+          - Fixes downloadable Brain run diagnostics for active and suspended runs instead of refusing export until terminal completion.
+          - Persists suspended/human-gate task state so the result UI shows “Waiting for you” rather than misclassifying a resumable task as failed.
+          - Hardens semantic verification: changing page hashes, fingerprints, or content keys alone no longer count as user-goal progress.
+          - Adds a hard mutation-without-verified-progress circuit breaker so page identity churn cannot create dozens of repeated recovery actions.
+          - Strengthens Chrome/browser execution contracts: `phone.open_app` resolves common app names to packages and `phone.launch_intent` provides a materially different HTTPS fallback.
+          - Adds privacy-safe parameter-aware action signatures and diagnostic details for app packages and URLs while continuing to redact typed values and secrets.
+          - Keeps failed execution evidence out of verified Brain learning and aligns local/mobile/PC parity tests with the same semantic-success contract.
+          - Preserves the 3.9 Ask Cyclone composer, Brain Runs experience, Aurora overlay changes, native control plane, PC Gateway, MCP, and release-security guards.
+
+          ## Verification
+
+          - Version: `3.9.2`
+          - Android versionCode: `56`
+          - Package: `com.cyclone.mobile`
+          - Authoritative source SHA: `778f70e47c34d5dc798ccf8a0e315bb01836ac4d`
+          - Authoritative CI run: `33927225311`
+          - Product/security metadata guards: PASS
+          - PC Gateway and MCP contract suites: PASS
+          - Android unit tests, lint, and unsigned release assembly: PASS
+          - Signed only after source/run/checksum provenance verification in the protected mobile release environment
+          - Physical Pixel 8 acceptance: UNVERIFIED in this environment
+
+          ## Signing
+
+          Cyclone 3.9.2 uses the protected rotated Android signer introduced for 3.9.1 and verifies the embedded APK Signature Scheme v3 signing lineage before publication.
+          EOF
+
+      - name: Publish GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='v3.9.2'
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "ERROR: $tag already exists as a GitHub release." >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "ERROR: tag $tag already exists without the expected release." >&2
+            exit 1
+          fi
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target '778f70e47c34d5dc798ccf8a0e315bb01836ac4d' \
+            --title 'Cyclone 3.9.2' \
+            --prerelease \
+            --notes-file release-notes.md \
+            signed/Cyclone-3.9.2.apk \
+            signed/Cyclone-3.9.2.apk.sha256 \
+            signed/mobile-metadata.json \
+            signed/source-sha.txt \
+            signed/run-id.txt \
+            signed/signing-state.txt \
+            signed/signing-lineage.txt
