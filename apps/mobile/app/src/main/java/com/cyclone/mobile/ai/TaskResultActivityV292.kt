@@ -111,8 +111,8 @@ class TaskResultActivityV292 : ComponentActivity() {
         val sessionId = exportSessionId
         exportSessionId = null
         if (uri == null || sessionId == null) return@registerForActivityResult
-        val ok = AgentRunDiagnosticV39.writeToUri(this, sessionId, uri)
-        Toast.makeText(this, if (ok) "Diagnostic log saved" else "Could not save diagnostic log", Toast.LENGTH_SHORT).show()
+        val result = AgentRunDiagnosticV39.writeToUriDetailed(this, sessionId, uri)
+        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -137,11 +137,17 @@ class TaskResultActivityV292 : ComponentActivity() {
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit, onDownload: (String) -> Unit) {
-    val session = AgentTraceRuntime.store.listSessions(200).firstOrNull { it.id == sessionId }
+    val session = AgentTraceRuntime.store.session(sessionId)
     val events = if (session == null) emptyList() else AgentTraceRuntime.store.events(session.id)
-    val ok = session?.status == "COMPLETED"
+    val status = session?.status
+    val ok = status == "COMPLETED"
+    val activeOrWaiting = status in setOf("RUNNING", "SUSPENDED", "HUMAN_OR_GATE")
     val visible = events.filter { it.kind !in setOf("MODEL", "OBSERVE") }
     val metrics = AgentRunDiagnosticV39.metrics(events)
+    val liveTurns = maxOf(
+        session?.decisions ?: 0,
+        events.count { it.kind == "PLAN" && it.code == "model.page_decision" },
+    )
 
     Scaffold(
         topBar = {
@@ -149,7 +155,7 @@ private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit, onDownl
                 title = {
                     Column {
                         Text("Cyclone task result", fontWeight = FontWeight.SemiBold)
-                        Text("Decision & evidence timeline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("3.9.2 decision & evidence timeline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Rounded.ArrowBack, "Back") } },
@@ -162,22 +168,35 @@ private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit, onDownl
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
+                val container = when {
+                    ok -> MaterialTheme.colorScheme.secondaryContainer
+                    activeOrWaiting -> MaterialTheme.colorScheme.tertiaryContainer
+                    else -> MaterialTheme.colorScheme.errorContainer
+                }
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = if (ok) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer),
+                    colors = CardDefaults.cardColors(containerColor = container),
                     shape = RoundedCornerShape(26.dp),
                 ) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(if (ok) Icons.Rounded.CheckCircle else Icons.Rounded.Error, null, modifier = Modifier.size(34.dp))
+                            Icon(
+                                when {
+                                    ok -> Icons.Rounded.CheckCircle
+                                    activeOrWaiting -> Icons.Rounded.AutoAwesome
+                                    else -> Icons.Rounded.Error
+                                },
+                                null,
+                                modifier = Modifier.size(34.dp),
+                            )
                             Spacer(Modifier.size(9.dp))
-                            Text(traceStatusTitle(session?.status), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                            Text(traceStatusTitle(status), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         }
                         Text(session?.goal ?: "Task history unavailable")
                         session?.result?.takeIf(String::isNotBlank)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         session?.endedAt?.let { Text(formatTraceTime(it), style = MaterialTheme.typography.labelSmall) }
                         if (session != null) {
                             Text(
-                                "${session.decisions} turns · ${metrics.toolCalls} tools · ${metrics.failures} failures · ${metrics.recoveries} recovery events",
+                                "$liveTurns turns · ${metrics.toolCalls} tools · ${metrics.failures} failures · ${metrics.recoveries} recovery events",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -243,8 +262,11 @@ private fun TraceEventCardV292(event: AiTraceEvent) {
         "REPLAY" -> "Learned route"
         "RESULT" -> "Verified"
         "RECOVERY", "RECOVERY_SELECTED" -> "Recovery"
+        "FREE_MODE_ENTER" -> "Free mode"
+        "FREE_MODE_EXIT" -> "Structured mode"
         "VISION", "VISION_ESCALATION" -> "Visual check"
-        "BOUNDARY", "GATE" -> "Needs you"
+        "BOUNDARY", "GATE", "GATE_SUSPEND" -> "Needs you"
+        "GATE_RESUME" -> "Resumed"
         "LEARNING", "LEARNING_ACCEPTED", "LEARNING_REJECTED" -> "Learning"
         "DONE" -> "Completed"
         "STOPPED" -> "Failed / stopped"
@@ -272,15 +294,16 @@ private fun TraceEventCardV292(event: AiTraceEvent) {
 }
 
 private val DETAIL_KINDS = setOf(
-    "MODEL_CONTEXT", "MODEL_DECISION", "TOOL_RESULT", "ANDROID_EXECUTION", "VERIFICATION",
-    "RECOVERY", "RECOVERY_SELECTED", "BOUNDARY", "GATE", "LEARNING", "LEARNING_ACCEPTED",
+    "MODEL_CONTEXT", "MODEL_DECISION", "TOOL_REQUESTED", "ACTION_REQUESTED", "TOOL_RESULT", "ANDROID_EXECUTION", "VERIFICATION",
+    "RECOVERY", "RECOVERY_SELECTED", "FREE_MODE_ENTER", "FREE_MODE_EXIT", "BOUNDARY", "GATE", "GATE_SUSPEND", "LEARNING", "LEARNING_ACCEPTED",
     "LEARNING_REJECTED", "RESULT",
 )
 
 private fun traceStatusTitle(status: String?): String = when (status) {
     "COMPLETED" -> "Task completed"
+    "RUNNING" -> "Task running"
+    "SUSPENDED", "HUMAN_OR_GATE" -> "Waiting for you"
     "CANCELLED" -> "Task cancelled"
-    "HUMAN_OR_GATE" -> "Waiting for you"
     "NON_CONVERGENT", "NON_CONVERGENCE" -> "Task did not converge"
     else -> "Task failed"
 }
