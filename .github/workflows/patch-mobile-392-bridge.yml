@@ -1,0 +1,47 @@
+name: Patch Cyclone 3.9.2 Bridge Normalization
+
+on:
+  push:
+    branches: ['release/cyclone-mobile-v3.9.2']
+    paths: ['.github/workflows/patch-mobile-392-bridge.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/cyclone-mobile-v3.9.2
+          fetch-depth: 0
+      - name: Normalize page-agent system tool arguments before canonical execution
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/mobile/app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt')
+          text = p.read_text()
+          old_import = 'import com.cyclone.mobile.ai.PageAgentAction\n'
+          new_import = old_import + 'import com.cyclone.mobile.ai.PageAgentProtocol\n'
+          if text.count(old_import) != 1:
+              raise SystemExit('unexpected PageAgentAction import count')
+          text = text.replace(old_import, new_import, 1)
+          old = '        val params = JSONObject(action.params.toString())\n        params.remove("selector")\n'
+          new = '''        // Normalize strict non-element tool arguments (for example Chrome -> package)\n        // before entering the PC-parity action boundary. Element targeting is still re-resolved\n        // against the authoritative current observation below.\n        val params = PageAgentProtocol.resolveParams(action, legacyPage)\n            .getOrElse { JSONObject(action.params.toString()) }\n        params.remove("selector")\n'''
+          if text.count(old) != 1:
+              raise SystemExit('unexpected act params block count')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+      - name: Commit bridge normalization
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/mobile/app/src/main/java/com/cyclone/mobile/agent/integration/CyclonePcParityBridge.kt
+          git commit -m 'fix(mobile): normalize app launch arguments at PC-parity boundary'
+          git push origin HEAD:release/cyclone-mobile-v3.9.2
