@@ -40,6 +40,9 @@ dependencies {
     implementation(project(":mobilerun-embedded"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.10.1")
+    // ActivityResult lint requires Fragment 1.3.0+ when a Fragment dependency is present.
+    // Pin the current stable release so transitive dependencies cannot drag the app below that floor.
+    implementation("androidx.fragment:fragment:1.9.0")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
