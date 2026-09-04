@@ -1,6 +1,16 @@
 name: Cyclone Mobile Release Signing
 
 on:
+  workflow_call:
+    inputs:
+      build_run_id:
+        description: Successful Cyclone Mobile CI run ID to reuse
+        required: true
+        type: string
+      artifact_name:
+        description: Exact unsigned artifact name reported by that run
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       build_run_id:
