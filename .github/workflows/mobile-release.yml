@@ -1,4 +1,4 @@
-name: Cyclone Mobile Release Candidate Verification
+name: Cyclone Mobile Release Signing
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       artifact_name:
-        description: Exact artifact name reported by that run
+        description: Exact unsigned artifact name reported by that run
         required: true
         type: string
 
@@ -21,11 +21,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify-candidate:
+  sign-candidate:
     environment: mobile-release-approval
     runs-on: ubuntu-latest
     steps:
-      - name: Validate successful source build
+      - name: Validate successful release-branch source build
         id: source
         shell: bash
         env:
@@ -42,14 +42,14 @@ jobs:
           test "$(jq -r '.head_repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
           head_branch="$(jq -r '.head_branch' <<< "$run_json")"
           case "$head_branch" in
-            main|release/cyclone-mobile-v*) ;;
+            release/cyclone-mobile-v*) ;;
             *) echo "Untrusted release source branch: $head_branch" >&2; exit 1 ;;
           esac
           head_sha="$(jq -r '.head_sha' <<< "$run_json")"
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
           printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Download authoritative CI artifact
+      - name: Download authoritative unsigned CI artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ inputs.artifact_name }}
@@ -58,6 +58,7 @@ jobs:
           path: candidate
 
       - name: Verify checksum and provenance
+        id: candidate
         shell: bash
         env:
           EXPECTED_HEAD_SHA: ${{ steps.source.outputs.head_sha }}
@@ -68,9 +69,11 @@ jobs:
           test -s candidate/source-sha.txt
           test -s candidate/run-id.txt
           test -s candidate/mobile-metadata.json
+          test -s candidate/signing-state.txt
           test "$(tr -d '\r\n' < candidate/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
           test "$(tr -d '\r\n' < candidate/run-id.txt)" = "$EXPECTED_RUN_ID"
-          python3 - <<'PY'
+          test "$(tr -d '\r\n' < candidate/signing-state.txt)" = "UNSIGNED_VERIFIED_CANDIDATE"
+          apk_name="$(python3 - <<'PY'
           import json, os
           from pathlib import Path
           root = Path('candidate')
@@ -80,6 +83,55 @@ jobs:
           apk = root / metadata['apk_name']
           assert apk.is_file(), f'missing Cyclone APK: {apk.name}'
           assert len(list(root.glob('*.apk'))) == 1
+          print(metadata['apk_name'])
           PY
+          )"
           (cd candidate && sha256sum --check ./*.apk.sha256)
-          echo "Candidate verified. Publication remains a separate explicit action." >> "$GITHUB_STEP_SUMMARY"
+          printf 'apk_name=%s\n' "$apk_name" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Android SDK signing tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android build tools
+        shell: bash
+        run: sdkmanager --install 'build-tools;35.0.0'
+
+      - name: Sign verified candidate
+        shell: bash
+        env:
+          APK_NAME: ${{ steps.candidate.outputs.apk_name }}
+          CYCLONE_KEYSTORE_B64: ${{ secrets.CYCLONE_ANDROID_KEYSTORE_B64 }}
+          CYCLONE_STORE_PASSWORD: ${{ secrets.CYCLONE_ANDROID_STORE_PASSWORD }}
+          CYCLONE_KEY_ALIAS: ${{ secrets.CYCLONE_ANDROID_KEY_ALIAS }}
+          CYCLONE_KEY_PASSWORD: ${{ secrets.CYCLONE_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$CYCLONE_KEYSTORE_B64"
+          test -n "$CYCLONE_STORE_PASSWORD"
+          test -n "$CYCLONE_KEY_ALIAS"
+          test -n "$CYCLONE_KEY_PASSWORD"
+          mkdir -p signed
+          keystore="$RUNNER_TEMP/cyclone-release.keystore"
+          printf '%s' "$CYCLONE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
+          "$apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$CYCLONE_KEY_ALIAS" \
+            --ks-pass env:CYCLONE_STORE_PASSWORD \
+            --key-pass env:CYCLONE_KEY_PASSWORD \
+            --out "signed/$APK_NAME" \
+            "candidate/$APK_NAME"
+          "$apksigner" verify --verbose --print-certs "signed/$APK_NAME"
+          rm -f "$keystore"
+          (cd signed && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
+          cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
+          printf '%s\n' 'SIGNED_PROTECTED_ENVIRONMENT' > signed/signing-state.txt
+
+      - name: Upload signed release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifact_name }}-signed
+          path: signed/
+          if-no-files-found: error
+          retention-days: 30
