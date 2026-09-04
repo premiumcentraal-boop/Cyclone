@@ -40,14 +40,22 @@ class CycloneAgentEnvironmentTest {
         }
     }
 
-    @Test fun pageTransitionIsVerified() {
-        val result = AgentSemanticVerifier.verify(
+    @Test fun pageTransitionRequiresSemanticSurfaceChange() {
+        val churnOnly = AgentSemanticVerifier.verify(
             "phone.click", true, false, false, "", "",
             semantic(pageKey = "home", fingerprint = "fp-1"),
             semantic(pageKey = "settings", fingerprint = "fp-2"),
         )
-        assertTrue(result.passed)
-        assertEquals("PAGE_KEY_CHANGED", result.basis)
+        assertFalse(churnOnly.passed)
+        assertEquals("NO_SEMANTIC_PROGRESS", churnOnly.basis)
+
+        val semanticTransition = AgentSemanticVerifier.verify(
+            "phone.click", true, false, false, "", "",
+            semantic(pageKey = "home", fingerprint = "fp-1", label = "Continue"),
+            semantic(pageKey = "settings", fingerprint = "fp-2", label = "Settings"),
+        )
+        assertTrue(semanticTransition.passed)
+        assertEquals("SEMANTIC_PAGE_CHANGED", semanticTransition.basis)
     }
 
     @Test fun staleElementIdExpiresImmediatelyAfterMutation() {
@@ -122,12 +130,13 @@ class CycloneAgentEnvironmentTest {
     }
 
     @Test fun verifiedSafePageRouteEntersCanonicalLearningPort() {
-        val before = observation("obs-1", "home", "fp-1")
-        val runtime = FakeRuntime(before, observation("obs-2", "settings", "fp-2"))
+        val before = observation("obs-1", "home", "fp-1", "Continue")
+        val runtime = FakeRuntime(before, observation("obs-2", "settings", "fp-2", "Settings"))
         val env = CycloneAgentEnvironment(runtime)
         env.observe("Continue")
         val result = env.act("phone.click", JSONObject().put("elementId", elementId(before)), "Continue")
         assertTrue(result.verification.passed)
+        assertEquals("SEMANTIC_PAGE_CHANGED", result.verification.basis)
         assertTrue(result.learning.recorded)
         assertEquals(1, runtime.learningCalls)
     }
@@ -149,12 +158,17 @@ class CycloneAgentEnvironmentTest {
         assertEquals("NO_SEMANTIC_PROGRESS", result.basis)
     }
 
-    @Test fun pcFacingVerifierRejectsUnchangedAndAcceptsTransition() {
+    @Test fun pcFacingVerifierRejectsIdentityChurnAndAcceptsSemanticWitness() {
         assertFalse(GatewayV33ActionAdapter.verifiedByAfterState(
             "phone.click", "", "home", "fp-1", "pkg", "home", "fp-1",
         ))
+        assertFalse(GatewayV33ActionAdapter.verifiedByAfterState(
+            "phone.click", "", "home", "fp-1", "pkg", "settings", "fp-2",
+        ))
         assertTrue(GatewayV33ActionAdapter.verifiedByAfterState(
             "phone.click", "", "home", "fp-1", "pkg", "settings", "fp-2",
+            goalLabel = "Settings",
+            afterHaystack = "Settings",
         ))
     }
 
@@ -176,10 +190,11 @@ class CycloneAgentEnvironmentTest {
         checked: Boolean = false,
         focused: Boolean = false,
         textState: String? = null,
+        label: String = "Continue",
     ) = SemanticObservationState(
-        "pkg", pageKey, fingerprint, "Home Continue",
+        "pkg", pageKey, fingerprint, "Home $label",
         listOf(SemanticElementState(
-            "control", "Continue", if (textState == null) "button" else "textbox",
+            "control", label, if (textState == null) "button" else "textbox",
             selected, checked, focused, textState,
         )),
     )
