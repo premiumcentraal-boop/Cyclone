@@ -46,10 +46,17 @@ data class ObservationEvidence(
 )
 
 data class ProgressResult(val classification: ProgressClassification, val reasons: Set<String> = emptySet()) {
+    /** New evidence may help the next decision, but it is not verified user-goal progress. */
     val incrementsNoProgressCounter: Boolean
-        get() = classification in setOf(ProgressClassification.NO_PROGRESS, ProgressClassification.REGRESSION)
+        get() = classification in setOf(ProgressClassification.NEW_EVIDENCE, ProgressClassification.NO_PROGRESS, ProgressClassification.REGRESSION)
 }
 
+/**
+ * Classifies task progress from semantic evidence. Raw page keys, content hashes and Accessibility
+ * fingerprints are deliberately weak evidence: they may change because of animations, clocks,
+ * overlays or framework churn. They can inform the next decision, but they never reset a no-progress
+ * budget by themselves.
+ */
 object AgenticProgressClassifier {
     fun classify(before: ObservationEvidence?, after: ObservationEvidence): ProgressResult {
         if (after.hardBlockerEvidence.isNotEmpty()) return ProgressResult(ProgressClassification.HARD_BLOCKER, after.hardBlockerEvidence)
@@ -58,29 +65,33 @@ object AgenticProgressClassifier {
             ProgressResult(ProgressClassification.NEW_EVIDENCE, setOf("initial_observation"))
         else ProgressResult(ProgressClassification.NO_PROGRESS)
 
-        val reasons = linkedSetOf<String>()
+        val regressionReasons = linkedSetOf<String>()
         val beforeDistance = before.appGraphDistanceToGoal
         val afterDistance = after.appGraphDistanceToGoal
-        if (after.wrongBranch && !before.wrongBranch) reasons += "wrong_branch"
-        if (beforeDistance != null && afterDistance != null && afterDistance > beforeDistance) reasons += "app_graph_distance_increased"
-        if (reasons.isNotEmpty()) return ProgressResult(ProgressClassification.REGRESSION, reasons)
+        if (after.wrongBranch && !before.wrongBranch) regressionReasons += "wrong_branch"
+        if (beforeDistance != null && afterDistance != null && afterDistance > beforeDistance) regressionReasons += "app_graph_distance_increased"
+        if (regressionReasons.isNotEmpty()) return ProgressResult(ProgressClassification.REGRESSION, regressionReasons)
 
-        if (after.alternateRouteOpenedByBacktrack && !before.alternateRouteOpenedByBacktrack) reasons += "backtrack_opened_alternate_route"
-        if (beforeDistance != null && afterDistance != null && afterDistance < beforeDistance) reasons += "app_graph_distance_decreased"
-        if (after.verifiedAssertions.any { it !in before.verifiedAssertions }) reasons += "verified_assertion_became_true"
-        if (after.semanticStateKey != before.semanticStateKey) reasons += "semantic_state_changed"
-        if (after.accessibilityFingerprint != before.accessibilityFingerprint) reasons += "accessibility_fingerprint_changed"
-        if (after.contentKey != before.contentKey) reasons += "content_key_changed"
-        if (after.goalRelevantControls != before.goalRelevantControls) reasons += "goal_relevant_controls_changed"
-        if (after.interactionState != before.interactionState) reasons += "interaction_state_changed"
-        if (after.packageName != before.packageName || after.activityName != before.activityName) reasons += "package_or_activity_changed"
-        if (reasons.isNotEmpty()) return ProgressResult(ProgressClassification.VERIFIED_PROGRESS, reasons)
+        val verifiedReasons = linkedSetOf<String>()
+        if (after.alternateRouteOpenedByBacktrack && !before.alternateRouteOpenedByBacktrack) verifiedReasons += "backtrack_opened_alternate_route"
+        if (beforeDistance != null && afterDistance != null && afterDistance < beforeDistance) verifiedReasons += "app_graph_distance_decreased"
+        if (after.verifiedAssertions.any { it !in before.verifiedAssertions }) verifiedReasons += "verified_assertion_became_true"
+        if (after.goalRelevantControls != before.goalRelevantControls) verifiedReasons += "goal_relevant_controls_changed"
+        if (after.interactionState != before.interactionState) verifiedReasons += "interaction_state_changed"
+        if (after.packageName != before.packageName || after.activityName != before.activityName) verifiedReasons += "package_or_activity_changed"
+        if (verifiedReasons.isNotEmpty()) return ProgressResult(ProgressClassification.VERIFIED_PROGRESS, verifiedReasons)
 
+        val evidenceReasons = linkedSetOf<String>()
+        if (after.semanticStateKey != before.semanticStateKey) evidenceReasons += "semantic_state_changed_unverified"
+        if (after.accessibilityFingerprint != before.accessibilityFingerprint) evidenceReasons += "accessibility_fingerprint_changed_unverified"
+        if (after.contentKey != before.contentKey) evidenceReasons += "content_key_changed_unverified"
         val newEvidence = after.collectedEvidence - before.collectedEvidence
-        return if (newEvidence.isNotEmpty()) ProgressResult(
-            ProgressClassification.NEW_EVIDENCE,
-            newEvidence.mapTo(linkedSetOf()) { "evidence_${it.name.lowercase()}" },
-        ) else ProgressResult(ProgressClassification.NO_PROGRESS)
+        newEvidence.mapTo(evidenceReasons) { "evidence_${it.name.lowercase()}" }
+        return if (evidenceReasons.isNotEmpty()) {
+            ProgressResult(ProgressClassification.NEW_EVIDENCE, evidenceReasons)
+        } else {
+            ProgressResult(ProgressClassification.NO_PROGRESS)
+        }
     }
 }
 
