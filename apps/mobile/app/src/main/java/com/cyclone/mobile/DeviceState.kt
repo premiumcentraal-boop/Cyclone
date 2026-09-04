@@ -104,11 +104,11 @@ object DeviceState {
 
     fun addAudit(record: CommandAuditRecord) {
         commandAudit.add(0, record)
-        while (commandAudit.size > 250) commandAudit.removeLast()
+        while (commandAudit.size > 250) commandAudit.removeAt(commandAudit.size - 1)
     }
 
     fun addLog(message: String) {
         log.add(0, "${System.currentTimeMillis()} $message")
-        while (log.size > 100) log.removeLast()
+        while (log.size > 100) log.removeAt(log.size - 1)
     }
 }
