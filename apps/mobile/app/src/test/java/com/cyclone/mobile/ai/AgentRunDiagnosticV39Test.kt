@@ -5,14 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentRunDiagnosticV39Test {
-    private fun session(status: String = "FAILED") = AiTraceSession(
+    private fun session(status: String = "FAILED", terminal: Boolean = true) = AiTraceSession(
         id = "ai-test-session",
         goal = "go to ad.nl",
         model = "test/model",
         status = status,
         startedAt = 1_000L,
-        endedAt = 4_000L,
-        result = "Stopped after invalid tool request",
+        endedAt = if (terminal) 4_000L else null,
+        result = if (terminal) "Stopped after invalid tool request" else "Cyclone is waiting for you",
         decisions = 2,
     )
 
@@ -21,21 +21,40 @@ class AgentRunDiagnosticV39Test {
         val events = listOf(
             AiTraceEvent("1", "ai-test-session", 1_100, "PAGE", "Current page understood: Cyclone AI", "page.capture", true, "8 semantic controls"),
             AiTraceEvent("2", "ai-test-session", 1_200, "PLAN", "Understanding this page and choosing the next local step", "model.page_decision", true, "Provider request 1"),
-            AiTraceEvent("3", "ai-test-session", 1_300, "ACTION_REQUESTED", "Open Chrome", "phone.open_app", null, null),
+            AiTraceEvent("3", "ai-test-session", 1_300, "ACTION_REQUESTED", "Open Chrome", "phone.open_app", null, "package=com.android.chrome"),
             AiTraceEvent("4", "ai-test-session", 1_400, "ANDROID_EXECUTION", "Android rejected the action", "INVALID_REQUEST", false, "package is required"),
             AiTraceEvent("5", "ai-test-session", 1_500, "VERIFICATION", "Execution did not prove semantic success", "EXECUTION_FAILED", false, null),
             AiTraceEvent("6", "ai-test-session", 1_600, "RECOVERY_SELECTED", "known verified route", "KNOWN_VERIFIED_ROUTE", true, null),
+            AiTraceEvent("7", "ai-test-session", 1_700, "FREE_MODE_ENTER", "Structured recovery stalled; Cyclone is trying a different strategy", "adaptive.free.enter", true, "noProgressFailures=2"),
         )
         val text = AgentRunDiagnosticV39.format(session(), events)
+        assertTrue(text.contains("cyclone-run-diagnostic-v39/2"))
         assertTrue(text.contains("MODEL SAW / CONTEXT"))
         assertTrue(text.contains("MODEL DECISION"))
         assertTrue(text.contains("TOOL REQUEST"))
         assertTrue(text.contains("phone.open_app"))
+        assertTrue(text.contains("package=com.android.chrome"))
         assertTrue(text.contains("INVALID_REQUEST"))
         assertTrue(text.contains("package is required"))
         assertTrue(text.contains("VERIFICATION"))
         assertTrue(text.contains("RECOVERY"))
-        assertTrue(text.contains("FINAL RESULT"))
+        assertTrue(text.contains("ADAPTIVE FREE MODE"))
+        assertTrue(text.contains("FINAL / CURRENT RESULT"))
+    }
+
+    @Test
+    fun runningAndSuspendedSnapshotsAreExplicitlyExportableDiagnostics() {
+        val events = listOf(
+            AiTraceEvent("1", "ai-test-session", 1_100, "GATE_SUSPEND", "Waiting for user confirmation", "gate", true, null),
+        )
+        val suspended = AgentRunDiagnosticV39.format(session("SUSPENDED", terminal = false), events)
+        assertTrue(suspended.contains("Status at export: SUSPENDED"))
+        assertTrue(suspended.contains("point-in-time snapshot"))
+        assertTrue(suspended.contains("verified completion: false"))
+
+        val running = AgentRunDiagnosticV39.format(session("RUNNING", terminal = false), emptyList())
+        assertTrue(running.contains("Status at export: RUNNING"))
+        assertTrue(running.contains("point-in-time snapshot"))
     }
 
     @Test
@@ -74,13 +93,14 @@ class AgentRunDiagnosticV39Test {
             AiTraceEvent("2", "s", 2, "ANDROID_EXECUTION", "bad", "ACTION_FAILED", false, null),
             AiTraceEvent("3", "s", 3, "VERIFICATION", "ok", "PAGE_CHANGED", true, null),
             AiTraceEvent("4", "s", 4, "RECOVERY_SELECTED", "r", "SEARCH", true, null),
-            AiTraceEvent("5", "s", 5, "VISION_ESCALATION", "v", null, true, null),
+            AiTraceEvent("5", "s", 5, "FREE_MODE_ENTER", "free", "adaptive.free.enter", true, null),
+            AiTraceEvent("6", "s", 6, "VISION_ESCALATION", "v", null, true, null),
         )
         val metrics = AgentRunDiagnosticV39.metrics(events)
         assertTrue(metrics.toolCalls == 1)
         assertTrue(metrics.failures == 1)
         assertTrue(metrics.verifiedActions == 1)
-        assertTrue(metrics.recoveries == 1)
+        assertTrue(metrics.recoveries == 2)
         assertTrue(metrics.visionChecks == 1)
     }
 }
