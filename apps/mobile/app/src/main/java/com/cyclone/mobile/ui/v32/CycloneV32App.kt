@@ -129,7 +129,7 @@ fun CycloneMobileV32App() {
                         V32Destination.TEACH -> V32TeachPage(context, refreshTick)
                         V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }
                         V32Destination.ROUTINES -> V32RoutinesPage(context, refreshTick) { refreshTick++ }
-                        V32Destination.BRAIN -> V32BrainPage(context, refreshTick)
+                        V32Destination.BRAIN -> CycloneV39BrainPage(context, refreshTick)
                     }
                 }
             }

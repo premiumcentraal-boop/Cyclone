@@ -51,8 +51,6 @@ object AgentTraceRuntime {
     fun start(context: Context, goal: String, model: String): String {
         initialize(context)
         val id = store.startSession(goal, model)
-        // V2.9.2 makes the transparent decision HUD a core part of phone-task execution rather than
-        // a buried toggle. If Accessibility is connected it appears automatically for every trace.
         CycloneAccessibilityService.instance?.let { AiTraceOverlayV27Runtime.startTask(it, id) }
         return id
     }
@@ -74,12 +72,14 @@ object AgentTraceRuntime {
         initialize(context)
         val ok = status == "COMPLETED"
         store.finishSession(sessionId, status, result, decisions)
+        runCatching { AgentRunDiagnosticV39.ensureCanonical(context.applicationContext, sessionId) }
         AiTraceOverlayV27Runtime.finishTask(sessionId, ok, result)
 
-        // One post-mission consolidation pass. This runs after the task result is durable and cannot
-        // drive the phone. It only adds evidence-based semantic notes to the existing Brain.
+        // Consolidation may append useful learning events. Refresh the same canonical file afterward;
+        // the stable session-id filename guarantees one diagnostic artifact per run.
         MissionLearningConsolidatorV292.enqueue(context, sessionId) { compiled ->
             AiTraceOverlayV27Runtime.compilationComplete(sessionId, compiled.summary)
+            runCatching { AgentRunDiagnosticV39.ensureCanonical(context.applicationContext, sessionId) }
             TaskResultNotifierV292.notify(context, sessionId, ok, result, compiled.summary)
         }
     }

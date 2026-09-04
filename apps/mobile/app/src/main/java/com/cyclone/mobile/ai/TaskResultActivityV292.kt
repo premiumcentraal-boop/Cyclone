@@ -9,8 +9,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material3.Card
@@ -36,6 +39,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -102,21 +106,42 @@ object TaskResultNotifierV292 {
 class TaskResultActivityV292 : ComponentActivity() {
     companion object { const val EXTRA_SESSION_ID = "cycloneAiTraceSessionId" }
 
+    private var exportSessionId: String? = null
+    private val createDiagnosticDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val sessionId = exportSessionId
+        exportSessionId = null
+        if (uri == null || sessionId == null) return@registerForActivityResult
+        val ok = AgentRunDiagnosticV39.writeToUri(this, sessionId, uri)
+        Toast.makeText(this, if (ok) "Diagnostic log saved" else "Could not save diagnostic log", Toast.LENGTH_SHORT).show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AgentTraceRuntime.initialize(this)
         val sessionId = intent.getStringExtra(EXTRA_SESSION_ID).orEmpty()
-        setContent { CycloneTheme { TaskResultScreenV292(sessionId, onClose = { finish() }) } }
+        setContent {
+            CycloneTheme {
+                TaskResultScreenV292(
+                    sessionId = sessionId,
+                    onClose = { finish() },
+                    onDownload = { filename ->
+                        exportSessionId = sessionId
+                        createDiagnosticDocument.launch(filename)
+                    },
+                )
+            }
+        }
     }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit) {
+private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit, onDownload: (String) -> Unit) {
     val session = AgentTraceRuntime.store.listSessions(200).firstOrNull { it.id == sessionId }
     val events = if (session == null) emptyList() else AgentTraceRuntime.store.events(session.id)
     val ok = session?.status == "COMPLETED"
     val visible = events.filter { it.kind !in setOf("MODEL", "OBSERVE") }
+    val metrics = AgentRunDiagnosticV39.metrics(events)
 
     Scaffold(
         topBar = {
@@ -124,7 +149,7 @@ private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit) {
                 title = {
                     Column {
                         Text("Cyclone task result", fontWeight = FontWeight.SemiBold)
-                        Text("2.9.2 decision & evidence timeline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Decision & evidence timeline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Rounded.ArrowBack, "Back") } },
@@ -145,11 +170,26 @@ private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(if (ok) Icons.Rounded.CheckCircle else Icons.Rounded.Error, null, modifier = Modifier.size(34.dp))
                             Spacer(Modifier.size(9.dp))
-                            Text(if (ok) "Task completed" else "Task failed", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                            Text(traceStatusTitle(session?.status), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         }
                         Text(session?.goal ?: "Task history unavailable")
                         session?.result?.takeIf(String::isNotBlank)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         session?.endedAt?.let { Text(formatTraceTime(it), style = MaterialTheme.typography.labelSmall) }
+                        if (session != null) {
+                            Text(
+                                "${session.decisions} turns · ${metrics.toolCalls} tools · ${metrics.failures} failures · ${metrics.recoveries} recovery events",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            OutlinedButton(
+                                onClick = { onDownload(AgentRunDiagnosticV39.suggestedFilename(session)) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(Icons.Rounded.Download, null)
+                                Spacer(Modifier.size(7.dp))
+                                Text("Download diagnostic log")
+                            }
+                        }
                     }
                 }
             }
@@ -160,14 +200,14 @@ private fun TaskResultScreenV292(sessionId: String, onClose: () -> Unit) {
                         Spacer(Modifier.size(8.dp))
                         Column {
                             Text("What you are seeing", fontWeight = FontWeight.SemiBold)
-                            Text("Cyclone shows its page interpretations, decisions, actions, verification and recovery evidence. Provider-private hidden chain-of-thought and secrets are never recorded.", style = MaterialTheme.typography.bodySmall)
+                            Text("Cyclone records compact model-visible context, explicit decisions, requested tools, Android results, verification and recovery evidence. Provider-private hidden chain-of-thought and secrets are never recorded.", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
             items(visible, key = { it.id }) { event -> TraceEventCardV292(event) }
             item {
-                val learning = visible.filter { it.kind == "LEARNING" }.lastOrNull()
+                val learning = visible.filter { it.kind == "LEARNING" || it.kind.startsWith("LEARNING_") }.lastOrNull()
                 if (learning != null) {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(20.dp)) {
                         Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.Top) {
@@ -196,13 +236,16 @@ private fun TraceEventCardV292(event: AiTraceEvent) {
     val title = when (event.kind) {
         "PAGE" -> "UI understood"
         "BRAIN" -> "Brain recall"
+        "MODEL_CONTEXT" -> "Model saw"
+        "MODEL_DECISION", "DECISION" -> "Model decision"
+        "TOOL_REQUESTED", "ACTION_REQUESTED" -> "Tool requested"
+        "TOOL_RESULT", "ANDROID_EXECUTION" -> "Tool result"
         "REPLAY" -> "Learned route"
-        "DECISION" -> "Decision"
         "RESULT" -> "Verified"
-        "RECOVERY" -> "Recovery"
-        "VISION" -> "Visual check"
-        "BOUNDARY" -> "Needs you"
-        "LEARNING" -> "Learning"
+        "RECOVERY", "RECOVERY_SELECTED" -> "Recovery"
+        "VISION", "VISION_ESCALATION" -> "Visual check"
+        "BOUNDARY", "GATE" -> "Needs you"
+        "LEARNING", "LEARNING_ACCEPTED", "LEARNING_REJECTED" -> "Learning"
         "DONE" -> "Completed"
         "STOPPED" -> "Failed / stopped"
         else -> event.kind.lowercase().replace('_', ' ').replaceFirstChar(Char::uppercase)
@@ -217,12 +260,29 @@ private fun TraceEventCardV292(event: AiTraceEvent) {
                     Text(formatTraceClock(event.timestampMs), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(event.displayText)
-                event.detail?.takeIf { it.isNotBlank() && event.kind in setOf("RECOVERY", "BOUNDARY", "LEARNING", "RESULT") }?.let {
+                event.code?.takeIf { it.isNotBlank() && event.ok == false }?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
+                event.detail?.takeIf { it.isNotBlank() && event.kind in DETAIL_KINDS }?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
     }
+}
+
+private val DETAIL_KINDS = setOf(
+    "MODEL_CONTEXT", "MODEL_DECISION", "TOOL_RESULT", "ANDROID_EXECUTION", "VERIFICATION",
+    "RECOVERY", "RECOVERY_SELECTED", "BOUNDARY", "GATE", "LEARNING", "LEARNING_ACCEPTED",
+    "LEARNING_REJECTED", "RESULT",
+)
+
+private fun traceStatusTitle(status: String?): String = when (status) {
+    "COMPLETED" -> "Task completed"
+    "CANCELLED" -> "Task cancelled"
+    "HUMAN_OR_GATE" -> "Waiting for you"
+    "NON_CONVERGENT", "NON_CONVERGENCE" -> "Task did not converge"
+    else -> "Task failed"
 }
 
 private fun formatTraceTime(time: Long) = SimpleDateFormat("dd MMM yyyy · HH:mm", Locale.getDefault()).format(Date(time))
