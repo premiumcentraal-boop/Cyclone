@@ -100,6 +100,8 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         var providerRequests: Int = 0,
         var pendingGateClass: OverlayGateClass? = null,
         var checkpoint: CycloneTaskState? = null,
+        var adaptiveMode: String = "STRUCTURED",
+        var consecutiveNoProgressFailures: Int = 0,
     )
 
     private data class ActiveLocalSession(
@@ -258,7 +260,8 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                     )
                 }
 
-                val graphAction = knownAppGraphAction(session.state.page, goal, session.graphAttempts)
+                val graphAction = if (session.adaptiveMode == "FREE") null
+                else knownAppGraphAction(session.state.page, goal, session.graphAttempts)
                 if (graphAction != null) {
                     session.graphAttempts += "${session.state.page.pageKey}|${graphAction.id}"
                     return CyclonePlanResult.Valid(
@@ -281,10 +284,21 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
 
                 session.providerRequests++
                 val agentContext = session.bridge.promptContext(goal)
+                    .put("operatingMode", session.adaptiveMode)
+                    .put("noProgressFailures", session.consecutiveNoProgressFailures)
+                if (session.adaptiveMode == "FREE") {
+                    agentContext.put(
+                        "freeModeRule",
+                        "Structured recovery failed repeatedly. Choose a materially different bounded strategy using current evidence; do not replay failed routes. All GATE/policy boundaries remain mandatory.",
+                    )
+                }
                 val forcedVision = session.bridge.consumeForcedVision()
                 onProgress(
-                    if (forcedVision) "Using silent visual evidence · AI request ${session.providerRequests}"
-                    else "Understanding ${session.state.page.title} · AI request ${session.providerRequests}"
+                    when {
+                        forcedVision -> "Using silent visual evidence · AI request ${session.providerRequests}"
+                        session.adaptiveMode == "FREE" -> "Adapting freely on ${session.state.page.title} · AI request ${session.providerRequests}"
+                        else -> "Understanding ${session.state.page.title} · AI request ${session.providerRequests}"
+                    }
                 )
                 AgentTraceRuntime.event(
                     context,
@@ -294,7 +308,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                     else "Understanding this page and choosing the next local step",
                     code = if (forcedVision) "recovery.vision" else "model.page_decision",
                     ok = true,
-                    detail = "Provider request ${session.providerRequests} · ${config.model.label} · page ${session.state.page.title}",
+                    detail = "Provider request ${session.providerRequests} · ${config.model.label} · mode ${session.adaptiveMode} · page ${session.state.page.title}",
                 )
                 val decision = if (forcedVision) {
                     captureVisualDecision(
@@ -618,13 +632,17 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
 
             val summary = action.displaySummary.ifBlank { action.tool.removePrefix("phone.").replace('_', ' ') }
             onProgress(summary)
-            AgentTraceRuntime.event(context, session.traceId, "ACTION_REQUESTED", summary, code = action.tool)
+            AgentTraceRuntime.event(
+                context, session.traceId, "ACTION_REQUESTED", summary, code = action.tool,
+                detail = PageAgentProtocol.diagnosticActionDetail(action),
+            )
 
             val envelope = session.bridge.act(action, state.page, session.goal)
             AgentTraceRuntime.event(
                 context, session.traceId, "ANDROID_EXECUTION",
                 if (envelope.androidExecutionOk) "Android accepted the action" else "Android rejected the action",
                 code = envelope.errorClass.name, ok = envelope.androidExecutionOk,
+                detail = envelope.safeMessage,
             )
             AgentTraceRuntime.event(
                 context, session.traceId, "AFTER_OBSERVATION",
@@ -669,10 +687,30 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 if (!envelope.androidExecutionOk) ReliabilityFailureClass.ACTION else ReliabilityFailureClass.VERIFICATION,
             )
 
-            if (verified) {
+            val madeProgress = verified && progress.classification == ProgressClassification.VERIFIED_PROGRESS
+            val previousMode = session.adaptiveMode
+            if (madeProgress) {
                 session.successfulActions += "${action.tool}:${action.controlId.orEmpty()}@${state.page.pageKey.takeLast(10)}"
+                session.consecutiveNoProgressFailures = 0
+                session.adaptiveMode = "STRUCTURED"
             } else {
-                session.failedActions += "${action.tool}:${action.controlId.orEmpty()}:${envelope.errorClass.name}"
+                val failureCode = if (verified) "NO_VERIFIED_PROGRESS" else envelope.errorClass.name
+                session.failedActions += "${action.tool}:${action.controlId.orEmpty()}:$failureCode"
+                session.consecutiveNoProgressFailures += 1
+                if (session.consecutiveNoProgressFailures >= 2) session.adaptiveMode = "FREE"
+            }
+            if (previousMode != session.adaptiveMode) {
+                val entering = session.adaptiveMode == "FREE"
+                AgentTraceRuntime.event(
+                    context, session.traceId,
+                    if (entering) "FREE_MODE_ENTER" else "FREE_MODE_EXIT",
+                    if (entering) "Structured recovery stalled; Cyclone is trying a different strategy"
+                    else "Verified progress restored; returning to structured execution",
+                    code = if (entering) "adaptive.free.enter" else "adaptive.free.exit",
+                    ok = true,
+                    detail = "noProgressFailures=${session.consecutiveNoProgressFailures}",
+                )
+                onProgress(if (entering) "Trying a different way…" else "Progress verified · returning to the reliable route")
             }
 
             // Rebuild the legacy PageContext first, then publish a new actionable PC-quality scope.
@@ -772,13 +810,30 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val evidenceIdentity = session.bridge.observation()?.evidenceIdentity ?: cycloneObservation(after).evidenceIdentity
         val verifiedProgress = envelope.verification.passed &&
             progress.classification == ProgressClassification.VERIFIED_PROGRESS
+        val previousMode = session.adaptiveMode
         if (verifiedProgress) {
             session.bridge.markVerifiedProgress()
             session.successfulActions += "phone.click:${graphAction.label}@${before.page.pageKey.takeLast(10)}"
+            session.consecutiveNoProgressFailures = 0
+            session.adaptiveMode = "STRUCTURED"
             if (before.page.pageKey != after.page.pageKey) announceNewPage(session.traceId, after, onProgress)
         } else {
             session.failedActions += "phone.click:${graphAction.label}:${envelope.errorClass.name}"
+            session.consecutiveNoProgressFailures += 1
+            if (session.consecutiveNoProgressFailures >= 2) session.adaptiveMode = "FREE"
             session.bridge.recover(session.bridge.causeFor(envelope), session.goal)
+        }
+        if (previousMode != session.adaptiveMode) {
+            val entering = session.adaptiveMode == "FREE"
+            AgentTraceRuntime.event(
+                context, session.traceId,
+                if (entering) "FREE_MODE_ENTER" else "FREE_MODE_EXIT",
+                if (entering) "Known routes stopped verifying; Cyclone is trying a different strategy"
+                else "Verified progress restored; returning to structured execution",
+                code = if (entering) "adaptive.free.enter" else "adaptive.free.exit",
+                ok = true,
+                detail = "noProgressFailures=${session.consecutiveNoProgressFailures}",
+            )
         }
         return LocalExecution(
             state = after,
@@ -938,9 +993,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             else -> return CyclonePlanResult.Malformed("model.unsupported_status")
         }
         val signature = when (directive) {
-            CycloneModelDirective.ACT -> decision.actions
-                .joinToString("|") { action -> "${action.tool}:${action.controlId.orEmpty()}" }
-                .takeIf { it.isNotBlank() }
+            CycloneModelDirective.ACT -> PageAgentProtocol.actionSignature(decision, pageKey)
             CycloneModelDirective.NEED_VISION -> "vision:$pageKey"
             else -> null
         }

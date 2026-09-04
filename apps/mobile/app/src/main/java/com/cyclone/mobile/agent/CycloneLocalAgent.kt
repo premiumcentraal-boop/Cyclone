@@ -16,6 +16,7 @@ data class CycloneConvergencePolicy(
     val maxVisionAttemptsOnUnchangedState: Int = 1,
     val maxBacktrackAttempts: Int = 3,
     val maxStaleTargetRetries: Int = 2,
+    val maxMutationsWithoutVerifiedProgress: Int = 10,
 ) {
     init {
         require(taskTimeoutMs > 0)
@@ -25,6 +26,7 @@ data class CycloneConvergencePolicy(
         require(maxVisionAttemptsOnUnchangedState > 0)
         require(maxBacktrackAttempts > 0)
         require(maxStaleTargetRetries > 0)
+        require(maxMutationsWithoutVerifiedProgress > 0)
     }
 }
 
@@ -111,6 +113,7 @@ class CycloneLocalAgent(
     restoredState: CycloneTaskState? = null,
 ) {
     private var cancelled = false
+    private var mutationsWithoutVerifiedProgress = 0
     private var state = restoredState
         ?.also { require(it.goal == goal) { "Restored task goal does not match requested goal" } }
         ?.let { restored ->
@@ -155,9 +158,6 @@ class CycloneLocalAgent(
                 latestObservationIdentity = observation.identity,
                 latestPageIdentity = observation.pageIdentity,
                 requireFreshObservation = false,
-                repeatedIdenticalActionWithoutProgress = if (newEvidence) 0 else state.repeatedIdenticalActionWithoutProgress,
-                lastActionSignature = if (newEvidence) null else state.lastActionSignature,
-                consecutiveRecoveryCyclesWithoutNewEvidence = if (newEvidence) 0 else state.consecutiveRecoveryCyclesWithoutNewEvidence,
             )
             emit(CycloneTraceEventType.OBSERVE, observation = observation); checkpoint()
             cancellation()?.let { return it }
@@ -218,6 +218,10 @@ class CycloneLocalAgent(
             state = state.copy(currentStage = CycloneAgentStage.ACT, lastActionSignature = turn.actionSignature, repeatedIdenticalActionWithoutProgress = repeated)
             emit(CycloneTraceEventType.TOOL_REQUESTED, "tool.requested", observation, turn.actionSignature)
             if (repeated > convergence.maxRepeatedIdenticalActionWithoutProgress) return nonConvergence("convergence.repeated_action")
+            mutationsWithoutVerifiedProgress += 1
+            if (mutationsWithoutVerifiedProgress > convergence.maxMutationsWithoutVerifiedProgress) {
+                return nonConvergence("convergence.mutations_without_verified_progress")
+            }
 
             val tool = tools.execute(state, observation, turn)
             emit(CycloneTraceEventType.TOOL_RESULT, if (tool.ok) "tool.ok" else "tool.failed", observation, tool.actionSignature ?: turn.actionSignature); checkpoint()
@@ -253,13 +257,16 @@ class CycloneLocalAgent(
                 state = state.copy(
                     currentStage = CycloneAgentStage.CLASSIFY_RESULT,
                     recentSuccessfulVerifiedActions = bounded(state.recentSuccessfulVerifiedActions + turn.actionSignature, 24),
+                    recentFailedActions = emptyList(),
                     lastVerifiedProgressTimeMs = now(),
                     latestObservationIdentity = verification.evidenceIdentity ?: tool.evidenceIdentity ?: observation.evidenceIdentity,
                     consecutiveRecoveryCyclesWithoutNewEvidence = 0,
                     repeatedIdenticalActionWithoutProgress = 0,
                     staleTargetRetries = 0,
+                    lastActionSignature = null,
                     finalClassification = CycloneTaskClassification.RECOVERABLE,
                 )
+                mutationsWithoutVerifiedProgress = 0
                 emit(CycloneTraceEventType.RECOVERY_CLASSIFIED, "progress.continue", observation, turn.actionSignature); checkpoint(); continue
             }
             recover(CycloneRecoveryKind.VERIFICATION_FAILURE, "verify.no_progress", verification.evidenceIdentity != null && verification.evidenceIdentity != observation.evidenceIdentity)?.let { return it }
@@ -268,7 +275,9 @@ class CycloneLocalAgent(
 
     private fun recover(kind: CycloneRecoveryKind, code: String, newEvidence: Boolean): CycloneAgentRunResult? {
         val attempts = (state.recoveryAttempts[kind] ?: 0) + 1
-        val consecutive = if (newEvidence) 0 else state.consecutiveRecoveryCyclesWithoutNewEvidence + 1
+        // Observation/page fingerprints can churn without helping the user's task. Only verified
+        // semantic progress resets this counter (see the verified-progress branch above).
+        val consecutive = state.consecutiveRecoveryCyclesWithoutNewEvidence + 1
         state = state.copy(
             currentStage = CycloneAgentStage.CLASSIFY_RESULT,
             recoveryAttempts = state.recoveryAttempts + (kind to attempts),

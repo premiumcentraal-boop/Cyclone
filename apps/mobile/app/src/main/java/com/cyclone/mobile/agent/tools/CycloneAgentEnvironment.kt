@@ -763,6 +763,7 @@ class CycloneAgentEnvironment internal constructor(
             "phone.back",
             "phone.home",
             "phone.open_app",
+            "phone.launch_intent",
         )
         private val ELEMENT_ID_REQUIRED_TOOLS = setOf(
             "phone.click",
