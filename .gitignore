@@ -5,6 +5,9 @@
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore
+*.keystore.b64
 secrets/
 
 # Python / test artifacts
