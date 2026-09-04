@@ -1,83 +1,76 @@
 # Cyclone
 
-Cyclone is a **phone skill OS**: observe an Android screen, act with verification, learn a durable skill, and replay it without the model rediscovering the UI.
+**Cyclone is an Android agent that can observe a phone, decide what to do, act through constrained native tools, verify the result, recover from failures and learn reusable app knowledge.**
 
-> Current shipped product: **Cyclone 3.6.0** (`versionCode` 43).  
-> Next infrastructure layer: **V4** (overlay + page card + act envelope + skill compile). Do not call an APK `4.0.0` until Pixel slices 1–4 are green.
+This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-📱 **Install the phone app:** [`MOBILE_DOWNLOADS.md`](MOBILE_DOWNLOADS.md)  
-🤖 **Agents start here:** [`AGENTS.md`](AGENTS.md) → [`docs/agent-system/README.md`](docs/agent-system/README.md)  
-📍 **Working git line:** [`docs/WORKING_LINE.md`](docs/WORKING_LINE.md)
+## Current baseline — Cyclone 3.9
 
-## What the product is
+Cyclone 3.9 builds on the standalone Android agent runtime with a cleaner day-to-day product experience:
 
-A user asks for a phone goal or teaches a routine. Cyclone should:
+- **Ask Cyclone** — chat-style task composer with model selection and a single send action.
+- **Agent runtime** — Android Accessibility observation/action tools with verification and recovery.
+- **Brain → Recent runs** — durable success/failure history with compact, sanitized `.txt` diagnostics for debugging.
+- **Aurora** — unobtrusive bottom-center persistent activation overlay with a small touch target.
+- **Teach + Routines** — reusable app knowledge and repeatable phone workflows.
+- **PC integration** — optional Device Gateway, Windows Companion and constrained MCP adapters without creating a second phone-control engine.
 
-1. **Observe** a compact page card (`pageText`, `pageSummary`, goal-ranked controls).
-2. **Act** through one engine: `PhoneToolExecutor`.
-3. **Verify** after-state. Transport success is not action success.
-4. **Learn** two-or-more verified steps into a draft skill in `AutomationStore`.
-5. **Replay** a `verified` skill with the model quiet.
+Android package: `com.cyclone.mobile`  
+Minimum Android: 14 (API 34)  
+Current mobile identity: `3.9.0` / versionCode `54`
 
-Policy stays on the phone. Pay / send / delete / grant require GATE. PC AIs talk through four MCP tools, not a generic shell.
-
-## Current stack (3.6)
-
-| Piece | Path | Role |
-|---|---|---|
-| Cyclone Mobile | `apps/mobile` | Android app `com.cyclone.mobile`. Surfaces: Home, Teach, AI, Automations, Brain, Settings. |
-| PC Device Gateway | `apps/device-gateway` | Loopback HTTP + ADB forward to the phone localabstract gateway. |
-| PC Companion | `apps/pc-companion` | Tauri Windows companion + live view. |
-| Codex / any-PC MCP | `tools/codex-phone-mcp` | Constrained STDIO tools. Official loop: `tools/codex-phone-mcp/SKILL.md`. |
-| Teamwork Sniper | `apps/teamwork-sniper` | Separate Picnic app. Not the Cyclone Mobile package. |
-
-Desktop / Core / Hermes / n8n / Host Bridge still live under `apps/cyclone-core`, `apps/desktop`, `services/`, `docker/`. They are a **legacy control-plane**, not the path for phone learning. Do not add phone autonomy dependencies on them.
-
-## Agent source of truth
-
-When documents disagree:
-
-1. Current executable code and tests.
-2. Release evidence (`release/version.toml`, GitHub Release assets, `releases/<version>/BUILD_VERIFIED.json`).
-3. `AGENTS.md`, `docs/agent-system/CURRENT_STATE.md`, `docs/agent-system/project.yaml`.
-4. V4 steering: `docs/agent-system/V4_BUILD_BIBLE.md`.
-5. Historical version folders and stubs — context only.
-
-Root files named `STATUS.md` / `HANDOFF.md` / `CYCLONE_V2_*` are archived pointers. They are not current authority.
-
-## Repository layout
+## Repository
 
 ```text
-apps/mobile/              Android phone autonomy app
-apps/device-gateway/      PC Device Gateway (FastAPI)
-apps/pc-companion/        Windows companion
-apps/teamwork-sniper/     Separate Picnic APK
-tools/codex-phone-mcp/    Constrained MCP for PC AIs
-docs/agent-system/        Canonical agent knowledge
-docs/design/mobile-v32/   Current mobile UX + overlay handoff
-docs/release-notes/       Per-version notes
-release/version.toml      Product version + publication flags
+apps/
+  mobile/              Android product
+  device-gateway/      PC ↔ phone gateway
+  pc-companion/        Windows companion
+
+tools/
+  codex-phone-mcp/     constrained PC agent tools
+  cyclone-agent-mcp/   generic Cyclone MCP adapter
+
+scripts/
+  ci/                  product/version guards
+  phone-gateway/       gateway setup and acceptance helpers
+  pc-companion/        companion tooling
+
+docs/                  current architecture/development/release docs
+release/version.toml    product/component version source
+.github/workflows/      current CI and candidate verification
 ```
 
-Legacy desktop layout (`apps/cyclone-core`, `apps/desktop`, `docker/`, `vault/`) remains in-tree for that product line.
+## Build the Android app
 
-## Install / run (phone path)
+Requirements: JDK 17 and Android SDK 35.
 
-1. Install `Cyclone-3.6.0.apk` from the [v3.6.0 release](https://github.com/premiumcentraal-boop/Cyclone/releases/tag/v3.6.0). Uninstall any previous `com.cyclone.mobile` first.
-2. Enable Accessibility for Cyclone. Pairing and gateway stay off until you turn them on.
-3. On Windows, install `Cyclone-PC-Companion-3.6.0-Setup.exe` from the same release. Quit a running Companion before upgrading (it locks `CycloneAgentMCP.exe`).
-4. Point Codex or another PC AI at `tools/codex-phone-mcp` and follow `SKILL.md`.
+```bash
+cd apps/mobile
+./gradlew :app:testDebugUnitTest
+./gradlew :app:assembleDebug
+```
 
-## Invariants agents must not break
+Use GitHub Actions for release candidates so APK provenance, checksum and source SHA stay connected.
 
-- One package: `com.cyclone.mobile`. One launcher: `.MainActivity`.
-- One mutation engine: `PhoneToolExecutor`.
-- Semantic first, vision last. Re-observe after page-changing acts.
-- No generic `adb shell` / root / PowerShell tools for the model.
-- No secrets in Brain or learning stores.
-- CI green is not physical VERIFIED.
-- Do not advertise UI version `4.0.0` until V4 slices 1–4 are green on a Pixel.
+## Development rules
+
+Read [`AGENTS.md`](AGENTS.md) before substantial work and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing runtime boundaries.
+
+Core invariants:
+
+- one Android package and launcher;
+- one canonical phone mutation engine (`PhoneToolExecutor`);
+- semantic evidence before coordinate/vision fallback;
+- re-observe and verify after page-changing actions;
+- explicit approval boundaries for consequential actions;
+- no credentials or raw typed secrets in Brain/run diagnostics;
+- CI evidence and physical-device evidence are reported separately.
+
+## History
+
+Old Cyclone versions, experiments and retired architecture remain available through Git history, tags, branches and GitHub Releases. They are deliberately not duplicated in the current working tree.
 
 ## License
 
-Proprietary. Third-party components remain under their own licenses. See `docs/OPEN_SOURCE_COMPONENTS.md`.
+Proprietary. Third-party components remain under their respective licenses; see [`docs/OPEN_SOURCE_COMPONENTS.md`](docs/OPEN_SOURCE_COMPONENTS.md).

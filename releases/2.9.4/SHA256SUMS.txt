@@ -1,2 +1,0 @@
-1b887a03e7eea9a1a7d8337d9354dd8d1418212add0c3223c4b24854185bd823  Cyclone-Mobile-2.9.4-Full-Gateway.apk
-1bf9cfe28eeb05e8e628bf4efffbe2eb4add3149ebc1ad6bdd3e9e817d1b6f9d  Cyclone-2.9.4-Full-Gateway-Bundle.zip

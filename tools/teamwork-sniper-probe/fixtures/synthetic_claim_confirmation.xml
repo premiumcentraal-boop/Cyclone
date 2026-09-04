@@ -1,1 +1,0 @@
-<?xml version="1.0"?><!-- SYNTHETIC contract shape only --><hierarchy synthetic="true"><node class="android.app.Dialog"><node text="Confirm shift"/><node text="Cancel" clickable="true"/><node text="Take shift" clickable="true"/></node></hierarchy>
