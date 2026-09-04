@@ -38,6 +38,7 @@ jobs:
           test "$(jq -r '.name' <<< "$run_json")" = "Cyclone Mobile CI"
           test "$(jq -r '.path' <<< "$run_json")" = ".github/workflows/mobile-ci.yml"
           test "$(jq -r '.conclusion' <<< "$run_json")" = "success"
+          test "$(jq -r '.event' <<< "$run_json")" = "push"
           test "$(jq -r '.head_repository.full_name' <<< "$run_json")" = "$GITHUB_REPOSITORY"
           head_branch="$(jq -r '.head_branch' <<< "$run_json")"
           case "$head_branch" in
