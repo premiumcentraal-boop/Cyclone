@@ -159,14 +159,20 @@ class GatewayBridgeV293Test {
     }
 
     @Test
-    fun androidVerificationRequiresExpectedPackageOrFreshChangedAfterState() {
+    fun androidVerificationRequiresExpectedPackageOrSemanticAfterStateWitness() {
         assertTrue(GatewayV33ActionAdapter.verifiedByAfterState(
             "phone.open_app", "com.android.settings", "before", "fp-1",
             "com.android.settings", "after", "fp-2",
         ))
+        assertFalse(GatewayV33ActionAdapter.verifiedByAfterState(
+            "phone.click", "", "settings-home", "fp-1",
+            "com.android.settings", "settings-apps", "fp-2",
+        ))
         assertTrue(GatewayV33ActionAdapter.verifiedByAfterState(
             "phone.click", "", "settings-home", "fp-1",
             "com.android.settings", "settings-apps", "fp-2",
+            goalLabel = "Apps",
+            afterHaystack = "Settings Apps",
         ))
         assertFalse(GatewayV33ActionAdapter.verifiedByAfterState(
             "phone.click", "", "settings-home", "fp-1",
