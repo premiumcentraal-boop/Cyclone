@@ -99,6 +99,28 @@ jobs:
           (cd candidate && sha256sum --check ./*.apk.sha256)
           printf 'apk_name=%s\n' "$apk_name" >> "$GITHUB_OUTPUT"
 
+      - name: Validate protected Android signing secrets
+        shell: bash
+        env:
+          CYCLONE_KEYSTORE_B64: ${{ secrets.CYCLONE_ANDROID_KEYSTORE_B64 }}
+          CYCLONE_STORE_PASSWORD: ${{ secrets.CYCLONE_ANDROID_STORE_PASSWORD }}
+          CYCLONE_KEY_ALIAS: ${{ secrets.CYCLONE_ANDROID_KEY_ALIAS }}
+          CYCLONE_KEY_PASSWORD: ${{ secrets.CYCLONE_ANDROID_KEY_PASSWORD }}
+          CYCLONE_SIGNING_LINEAGE_B64: ${{ secrets.CYCLONE_ANDROID_SIGNING_LINEAGE_B64 }}
+        run: |
+          set -euo pipefail
+          missing=()
+          test -n "$CYCLONE_KEYSTORE_B64" || missing+=(CYCLONE_ANDROID_KEYSTORE_B64)
+          test -n "$CYCLONE_STORE_PASSWORD" || missing+=(CYCLONE_ANDROID_STORE_PASSWORD)
+          test -n "$CYCLONE_KEY_ALIAS" || missing+=(CYCLONE_ANDROID_KEY_ALIAS)
+          test -n "$CYCLONE_KEY_PASSWORD" || missing+=(CYCLONE_ANDROID_KEY_PASSWORD)
+          test -n "$CYCLONE_SIGNING_LINEAGE_B64" || missing+=(CYCLONE_ANDROID_SIGNING_LINEAGE_B64)
+          if ((${#missing[@]})); then
+            printf 'ERROR: mobile-release-approval is missing required protected secret: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+          echo 'Protected Android signing inputs are configured.'
+
       - name: Set up Android SDK signing tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
@@ -117,11 +139,6 @@ jobs:
           CYCLONE_SIGNING_LINEAGE_B64: ${{ secrets.CYCLONE_ANDROID_SIGNING_LINEAGE_B64 }}
         run: |
           set -euo pipefail
-          test -n "$CYCLONE_KEYSTORE_B64"
-          test -n "$CYCLONE_STORE_PASSWORD"
-          test -n "$CYCLONE_KEY_ALIAS"
-          test -n "$CYCLONE_KEY_PASSWORD"
-          test -n "$CYCLONE_SIGNING_LINEAGE_B64"
           mkdir -p signed
           keystore="$RUNNER_TEMP/cyclone-release.keystore"
           lineage="$RUNNER_TEMP/cyclone-signing-lineage"
@@ -144,10 +161,15 @@ jobs:
             "candidate/$APK_NAME"
           "$apksigner" verify --min-sdk-version 34 --verbose --print-certs "signed/$APK_NAME"
           "$apksigner" lineage --in "signed/$APK_NAME" --print-certs -v > signed/signing-lineage.txt
-          rm -f "$keystore" "$lineage"
           (cd signed && sha256sum "$APK_NAME" > "$APK_NAME.sha256")
           cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
           printf '%s\n' 'SIGNED_PROTECTED_ENVIRONMENT_ROTATED' > signed/signing-state.txt
+
+      - name: Destroy temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/cyclone-release.keystore" "$RUNNER_TEMP/cyclone-signing-lineage"
 
       - name: Upload signed release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
