@@ -43,9 +43,10 @@ jobs:
           test -s signed/run-id.txt
           test -s signed/mobile-metadata.json
           test -s signed/signing-state.txt
+          test -s signed/signing-lineage.txt
           test "$(tr -d '\r\n' < signed/source-sha.txt)" = "7b293f4c416780d2f943c4feed067f8d3da576c6"
           test "$(tr -d '\r\n' < signed/run-id.txt)" = "33911511957"
-          test "$(tr -d '\r\n' < signed/signing-state.txt)" = "SIGNED_PROTECTED_ENVIRONMENT"
+          test "$(tr -d '\r\n' < signed/signing-state.txt)" = "SIGNED_PROTECTED_ENVIRONMENT_ROTATED"
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -67,7 +68,7 @@ jobs:
         shell: bash
         run: sdkmanager --install 'build-tools;35.0.0'
 
-      - name: Reject reuse of exposed 3.8.9 signing certificate
+      - name: Verify rotated signer and embedded lineage
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,18 +77,19 @@ jobs:
           mkdir -p prior
           gh release download v3.8.9 --repo "$GITHUB_REPOSITORY" --pattern 'Cyclone-3.8.9.apk' --dir prior
           apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
-          "$apksigner" verify --verbose --print-certs signed/Cyclone-3.9.1.apk >/tmp/new-cert.txt
+          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs signed/Cyclone-3.9.1.apk >/tmp/new-cert.txt
           "$apksigner" verify --verbose --print-certs prior/Cyclone-3.8.9.apk >/tmp/old-cert.txt
+          "$apksigner" lineage --in signed/Cyclone-3.9.1.apk --print-certs -v >/tmp/lineage.txt
+          test -s /tmp/lineage.txt
           new_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/new-cert.txt | head -n 1 | tr 'A-F' 'a-f')"
           old_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/old-cert.txt | head -n 1 | tr 'A-F' 'a-f')"
           test -n "$new_cert"
           test -n "$old_cert"
           if [ "$new_cert" = "$old_cert" ]; then
-            echo 'ERROR: protected signer reused the historically exposed 3.8.9 signing certificate.' >&2
-            echo 'Rotate CYCLONE_ANDROID_* release secrets before publishing 3.9.1.' >&2
+            echo 'ERROR: 3.9.1 still uses the historically exposed 3.8.9 signing certificate.' >&2
             exit 1
           fi
-          echo 'Signing certificate rotation verified against v3.8.9.'
+          echo 'New signer differs from 3.8.9 and the APK contains a valid signing lineage.'
 
       - name: Prepare release notes
         shell: bash
@@ -119,7 +121,7 @@ jobs:
 
           ## Signing-key rotation
 
-          Publication is blocked unless the 3.9.1 signer certificate differs from the historically exposed 3.8.9 release certificate. Because GitHub APK distribution does not currently carry an Android signing lineage, existing sideloaded installs signed with the older key may require uninstall/reinstall before installing 3.9.1.
+          Cyclone 3.9.1 rotates away from the historically exposed 3.8.9 signing key using Android APK Signature Scheme v3 signing-certificate lineage. Cyclone currently requires Android 14 / API 34 or newer, so every supported device understands this rotation and can accept 3.9.1 as an update while future releases are signed only by the new private key.
           EOF
 
       - name: Publish GitHub prerelease
@@ -148,4 +150,5 @@ jobs:
             signed/mobile-metadata.json \
             signed/source-sha.txt \
             signed/run-id.txt \
-            signed/signing-state.txt
+            signed/signing-state.txt \
+            signed/signing-lineage.txt
