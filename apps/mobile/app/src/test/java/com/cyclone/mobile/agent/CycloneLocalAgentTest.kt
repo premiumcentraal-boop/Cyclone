@@ -159,6 +159,83 @@ class CycloneLocalAgentTest {
         assertEquals(CycloneTaskClassification.NON_CONVERGENCE, result.state.finalClassification)
     }
 
+    @Test fun changingPageFingerprintsDoNotResetNoProgressRecoveryBudget() {
+        val model = ScriptModel(mutableListOf(act("a1"), act("a2"), act("a3"), act("a4")))
+        val tools = FakeTools(
+            listOf(
+                CycloneObservation("o1", "p1"),
+                CycloneObservation("o2", "p2"),
+                CycloneObservation("o3", "p3"),
+                CycloneObservation("o4", "p4"),
+            ),
+        )
+        repeat(4) { i -> tools.toolResults += CycloneToolResult(ok = false, actionSignature = "a${i + 1}") }
+
+        val result = CycloneLocalAgent(
+            "goal",
+            model,
+            tools,
+            CycloneConvergencePolicy(
+                maxConsecutiveRecoveryCyclesWithoutNewEvidence = 2,
+                maxRepeatedIdenticalActionWithoutProgress = 10,
+                maxMutationsWithoutVerifiedProgress = 20,
+            ),
+        ).runUntilBoundary()
+
+        assertTrue(result is CycloneAgentRunResult.Stopped)
+        assertEquals(CycloneTaskClassification.NON_CONVERGENCE, result.state.finalClassification)
+        assertEquals(3, tools.executeCalls)
+    }
+
+    @Test fun differentActionsCannotCreateAnInfiniteNoProgressMutationLoop() {
+        val model = ScriptModel((1..8).map { act("different-$it") }.toMutableList())
+        val tools = FakeTools((1..9).map { CycloneObservation("o$it", "p$it") })
+        repeat(8) { i ->
+            tools.toolResults += CycloneToolResult(ok = true, actionSignature = "different-${i + 1}")
+            tools.verifications += CycloneVerificationResult(verified = false, progress = false)
+        }
+
+        val result = CycloneLocalAgent(
+            "goal",
+            model,
+            tools,
+            CycloneConvergencePolicy(
+                maxConsecutiveRecoveryCyclesWithoutNewEvidence = 50,
+                maxRepeatedIdenticalActionWithoutProgress = 10,
+                maxMutationsWithoutVerifiedProgress = 3,
+            ),
+        ).runUntilBoundary()
+
+        assertTrue(result is CycloneAgentRunResult.Stopped)
+        assertEquals(CycloneTaskClassification.NON_CONVERGENCE, result.state.finalClassification)
+        assertEquals(3, tools.executeCalls)
+    }
+
+    @Test fun verifiedSemanticProgressResetsGlobalNoProgressBudget() {
+        val model = ScriptModel(mutableListOf(act("a1"), act("a2"), act("a3"), act("a4"), done()))
+        val tools = FakeTools((1..6).map { CycloneObservation("o$it", "p$it") })
+        repeat(4) { i -> tools.toolResults += CycloneToolResult(ok = true, actionSignature = "a${i + 1}") }
+        tools.verifications += CycloneVerificationResult(false, false)
+        tools.verifications += CycloneVerificationResult(true, true, false, "progress-1")
+        tools.verifications += CycloneVerificationResult(false, false)
+        tools.verifications += CycloneVerificationResult(true, true, false, "progress-2")
+        tools.completion = CycloneVerificationResult(true, true, true, "done")
+
+        val result = CycloneLocalAgent(
+            "goal",
+            model,
+            tools,
+            CycloneConvergencePolicy(
+                maxConsecutiveRecoveryCyclesWithoutNewEvidence = 10,
+                maxRepeatedIdenticalActionWithoutProgress = 10,
+                maxMutationsWithoutVerifiedProgress = 2,
+            ),
+        ).runUntilBoundary()
+
+        assertTrue(result is CycloneAgentRunResult.Completed)
+        assertEquals(4, tools.executeCalls)
+    }
+
     @Test fun gateSuspendsRatherThanFails() {
         val model = ScriptModel(mutableListOf(CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.NEED_HUMAN))))
         val tools = FakeTools().apply { boundary = CycloneTaskClassification.HUMAN_OR_GATE }
