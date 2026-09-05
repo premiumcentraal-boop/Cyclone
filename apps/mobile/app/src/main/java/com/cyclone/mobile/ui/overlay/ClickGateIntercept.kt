@@ -2,12 +2,14 @@ package com.cyclone.mobile.ui.overlay
 
 import com.cyclone.mobile.ElementSelector
 import com.cyclone.mobile.UiNodeSnapshot
+import com.cyclone.mobile.policy.ActionIntentClassifier
 import com.cyclone.mobile.policy.GateClass
-import com.cyclone.mobile.policy.GateClassifier
 
 /**
  * Intercept host clicks that classify as GATE before Accessibility ACTION_CLICK.
  * Files "Move to bin" must enter overlay GATE from IDLE or LIVE and must not be performed.
+ * The selected control is classified before surrounding modal prose so a safe notification
+ * Block/Deny action cannot be poisoned by text such as "wants to send you notifications".
  */
 class GateBlockedException(
     val gateClass: OverlayGateClass?,
@@ -52,7 +54,8 @@ object ClickGateIntercept {
         overlayState: OverlayChromeState,
         useRuntimeApproval: Boolean = true,
     ): Decision {
-        val classified = GateClassifier.classify(action, labels) ?: return Decision(
+        val intent = ActionIntentClassifier.classify(action, labels)
+        val classified = ActionIntentClassifier.gateClass(intent) ?: return Decision(
             performClick = true,
             enterGate = false,
             gateClass = null,
