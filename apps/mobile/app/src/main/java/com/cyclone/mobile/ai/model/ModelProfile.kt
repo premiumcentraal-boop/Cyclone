@@ -29,6 +29,8 @@ data class ModelProfile(
     val livePricing: LivePricingHint? = null,
     val description: String = "",
     val reasoningEffort: String = "medium",
+    val allowProviderFallbacks: Boolean = true,
+    val providerPreferences: List<String> = emptyList(),
 ) {
     val isContributor: Boolean get() = privacyClass == PrivacyClass.CONTRIBUTOR
 }
