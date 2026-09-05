@@ -40,6 +40,16 @@ class CycloneV39AiChatPageTest {
         assertEquals(chosen.label, V39AiChatContract.modelForStored(chosen.id).label)
     }
 
+    @Test fun contributorModelIsSeparateAndDisclosed() {
+        val normal = OpenRouterModelPresets.MUSE_SPARK_1_3
+        val contributor = OpenRouterModelPresets.MUSE_SPARK_1_3_CONTRIBUTOR
+        assertFalse(normal.isContributor)
+        assertTrue(contributor.isContributor)
+        assertNull(V39AiChatContract.modelDisclosure(normal))
+        assertTrue(V39AiChatContract.modelDisclosure(contributor).orEmpty().contains("may be used", ignoreCase = true))
+        assertEquals(contributor.id, V39AiChatContract.modelForStored(contributor.id).id)
+    }
+
     @Test fun missingStoredModelUsesCanonicalDefault() {
         assertEquals(OpenRouterModelPresets.DEFAULT.id, V39AiChatContract.modelForStored(null).id)
         assertEquals(OpenRouterModelPresets.DEFAULT.id, V39AiChatContract.modelForStored(" ").id)
@@ -91,6 +101,7 @@ class CycloneV39AiChatPageTest {
         assertTrue(page.contains("const val PREFS = \"cyclone_ai\""))
         assertTrue(page.contains("const val MODEL_KEY = \"openrouter_model\""))
         assertTrue(page.contains("prefs.edit().putString(V39AiChatContract.MODEL_KEY, model.id).apply()"))
+        assertTrue(page.contains("Contributor · data-sharing tier"))
     }
 
     @Test fun missingKeyHasClearSettingsAffordance() {
