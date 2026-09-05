@@ -100,6 +100,35 @@ class GatePolicyTest {
     }
 
     @Test
+    fun notificationBlockDoesNotBecomeSendBecauseContextContainsSend() {
+        val labels = listOf(
+            "Block",
+            "www.ad.nl wants to send you notifications",
+            "Allow",
+        )
+        assertEquals(ActionIntent.DENY_SITE_NOTIFICATION, ActionIntentClassifier.classify("phone.click", labels))
+        assertNull(GateClassifier.classify("phone.click", labels))
+    }
+
+    @Test
+    fun notificationAllowRemainsAnExplicitGrantBoundary() {
+        val labels = listOf(
+            "Allow",
+            "www.ad.nl wants to send you notifications",
+            "Block",
+        )
+        assertEquals(ActionIntent.ALLOW_SITE_NOTIFICATION, ActionIntentClassifier.classify("phone.click", labels))
+        assertEquals(GateClass.GRANT, GateClassifier.classify("phone.click", labels))
+    }
+
+    @Test
+    fun surroundingNotificationTextCannotHideARealSendControl() {
+        val labels = listOf("Send message", "Notifications are enabled")
+        assertEquals(ActionIntent.SEND_EXTERNAL, ActionIntentClassifier.classify("phone.click", labels))
+        assertEquals(GateClass.SEND, GateClassifier.classify("phone.click", labels))
+    }
+
+    @Test
     fun phoneConfirmationAllowsPayOnce() {
         val governor = InMemoryPolicyGovernor(PolicyClock { 100L })
         governor.issueGrant(
