@@ -24,7 +24,10 @@ object AgentRunDiagnosticV39 {
         val completionRejections: Int,
         val modelContextSnapshots: Int,
         val freeModeEntries: Int,
-    )
+    ) {
+        /** Compatibility aggregate for existing Brain/result UI while diagnostics keep failure classes separate. */
+        val failures: Int get() = toolFailures + verificationFailures
+    }
 
     data class ExportResult(
         val ok: Boolean,
