@@ -4,16 +4,19 @@
 
 This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-## Current baseline — Cyclone 3.9.4
+## Current baseline — Cyclone 3.9.5
 
-Cyclone 3.9.4 focuses on trustworthy agent completion, better grounding and developer-grade failure evidence:
+Cyclone 3.9.5 focuses on trustworthy standalone execution, cancellation safety, completion grounding and developer-grade failure evidence:
 
 - **Ask Cyclone** — chat-style task composer with model selection and a single send action.
 - **Goal Contracts** — common goals compile into independently verifiable semantic effects, so model confidence alone cannot mark a task complete.
 - **Bounded completion recovery** — rejected `DONE` claims trigger stronger local verification/escalation instead of an expensive repeated-DONE spiral.
 - **Structured + Free Mode agent** — Cyclone starts with reliable semantic/learned routes, then changes strategy when verified progress stalls; GATE and policy boundaries remain mandatory.
 - **Authoritative target perception** — active execution minimizes Cyclone's own overlay and keeps target-app state separate from Cyclone chrome so the model does not plan against its own UI.
-- **Richer model context** — compact scene, route, semantic-control and action-history evidence gives capable models a clearer picture of what Android actually shows.
+- **Standalone provider execution** — internal API models run directly from the Android app; PC pairing is optional and provider/auth/network failures terminate with clear user-facing reasons instead of malformed-plan loops.
+- **Cancellation and deadline boundaries** — Stop and task timeout are rechecked after blocking observation/provider calls and before mutations, so late model plans cannot act after cancellation.
+- **Grounded website completion** — simple verified host navigation can finish locally without another provider turn, while intent dispatch or Cyclone's own echoed goal text never counts as proof that a website loaded.
+- **Richer model context** — compact scene, route, semantic-control, action-history and runtime-recovery evidence gives capable models a clearer picture of what Android actually shows.
 - **Progress-bounded recovery** — changing Android fingerprints do not count as task progress, repeated failures are bounded, and only verified semantic progress resets no-progress budgets.
 - **Strict phone-tool contracts** — app launches require resolvable packages and browser navigation can use the allowlisted Android HTTPS intent path as a deterministic route.
 - **Brain → Recent runs** — durable run history with sanitized `.txt` diagnostics, split tool/verification failure metrics, completion/recovery telemetry and up to 1 MiB of useful trace evidence.
@@ -24,15 +27,15 @@ Cyclone 3.9.4 focuses on trustworthy agent completion, better grounding and deve
 
 Android package: `com.cyclone.mobile`  
 Minimum Android: 14 (API 34)  
-Current mobile identity: `3.9.4` / versionCode `58`
+Current mobile identity: `3.9.5` / versionCode `59`
 
 The product has two deliverables: the Android APK and the optional Windows PC companion.
 Internal API models run from the phone with internet access and an API key; PC pairing is not
 required. Core/Hermes and the separate Teamwork Sniper app are retired integrations.
 
-VersionCode 58 is a candidate, not a verified stable release. See the
-[reliability review and acceptance plan](docs/DUO_RELIABILITY_REVIEW.md) for build evidence,
-current corrections and the remaining release blockers.
+Cyclone 3.9.5 is promoted only from the exact Mobile CI artifact after unit tests, lint, repository
+and security guards pass. Physical Pixel 8 acceptance remains a separate evidence gate and must not
+be inferred from a green CI build. See the [reliability review and acceptance plan](docs/DUO_RELIABILITY_REVIEW.md).
 
 ## Repository
 
