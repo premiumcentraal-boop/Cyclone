@@ -35,7 +35,8 @@ required. Core/Hermes and the separate Teamwork Sniper app are retired integrati
 
 Cyclone 3.9.5 is promoted only from the exact Mobile CI artifact after unit tests, lint, repository
 and security guards pass. Physical Pixel 8 acceptance remains a separate evidence gate and must not
-be inferred from a green CI build. See the [reliability review and acceptance plan](docs/DUO_RELIABILITY_REVIEW.md).
+be inferred from a green CI build. See the [3.9.5 release review](docs/RELEASE_3.9.5.md) and the
+[broader reliability acceptance plan](docs/DUO_RELIABILITY_REVIEW.md).
 
 ## Repository
 
