@@ -53,7 +53,7 @@ object AgentRunDiagnosticV39 {
                 it.kind == "VERIFY" && it.code.orEmpty().startsWith("completion.")
             },
             completionRejections = events.count {
-                it.kind == "VERIFY" && it.code in setOf(
+                it.kind == "VERIFY" && it.code.orEmpty() in setOf(
                     "completion.unverified",
                     "completion.still_unverified",
                 )
