@@ -47,6 +47,20 @@ class DeviceRealityArbiterTest {
     }
 
     @Test
+    fun genuinelyForegroundCycloneApplicationBeatsStaleExternalApplication() {
+        val reality = DeviceRealityArbiter.select(
+            listOf(
+                window(40, "com.android.chrome", DeviceRealitySurfaceKind.APPLICATION, layer = 3, active = false, focused = false),
+                window(41, DeviceRealityArbiter.CYCLONE_PACKAGE, DeviceRealitySurfaceKind.APPLICATION, layer = 5, active = true, focused = true),
+            ),
+        )
+        assertEquals(41, reality.taskWindowId)
+        assertEquals(DeviceRealityArbiter.CYCLONE_PACKAGE, reality.taskPackage)
+        assertEquals("cyclone_application_is_task", reality.reason)
+        assertFalse(reality.groundingConflict)
+    }
+
+    @Test
     fun cycloneApplicationCanBeTaskWhenNoExternalApplicationExists() {
         val reality = DeviceRealityArbiter.select(
             listOf(
