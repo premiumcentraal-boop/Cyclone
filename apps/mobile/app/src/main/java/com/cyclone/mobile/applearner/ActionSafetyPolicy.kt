@@ -14,10 +14,27 @@ object ActionSafetyPolicy {
         "otp", "one-time code", "one time code", "passkey", "security key", "sign in", "log in",
         "login", "password", "authentication", "biometric", "fingerprint", "face id",
     )
+    private val notificationDenyLabels = setOf("block", "deny", "don't allow", "do not allow", "not now", "no thanks")
+    private val notificationAllowLabels = setOf("allow", "enable", "turn on")
 
     fun classify(label: String, resourceId: String = "", contentDescription: String = ""): ActionRisk {
-        val text = listOf(label, resourceId.substringAfterLast('/'), contentDescription)
-            .joinToString(" ").lowercase().replace(Regex("[_-]+"), " ").trim()
+        val selected = normalize(label)
+        val context = normalize(contentDescription)
+        val resource = normalize(resourceId.substringAfterLast('/'))
+        val notificationContext = listOf(selected, context, resource).joinToString(" ").let { text ->
+            "notification" in text || "notifications" in text || "wants to send you" in text
+        }
+
+        // The selected action is authoritative. Explanatory modal prose cannot turn Block/Deny into
+        // a SEND action merely because the sentence says "wants to send you notifications".
+        if (notificationContext && notificationDenyLabels.any { selected == it || selected.startsWith("$it ") }) {
+            return ActionRisk.SAFE
+        }
+        if (notificationContext && notificationAllowLabels.any { selected == it || selected.startsWith("$it ") }) {
+            return ActionRisk.CONSEQUENTIAL
+        }
+
+        val text = listOf(selected, resource, context).joinToString(" ").trim()
         if (authentication.any { token -> text.contains(token) }) return ActionRisk.AUTHENTICATION
         if (consequential.any { token -> text.contains(token) }) return ActionRisk.CONSEQUENTIAL
         // A visible, labelled navigation/action control with no high-risk semantics is safe to inspect.
@@ -48,4 +65,10 @@ object ActionSafetyPolicy {
         }
         return copy
     }
+
+    private fun normalize(value: String): String = value
+        .lowercase()
+        .replace(Regex("[_-]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 }
