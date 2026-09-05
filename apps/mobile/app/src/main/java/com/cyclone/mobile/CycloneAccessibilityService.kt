@@ -184,7 +184,7 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
         if (markFresh) waitForUiQuiet()
-        val root = preferredForegroundRoot() ?: rootInActiveWindow
+        val root = preferredForegroundRoot()
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
         val consumedWindows = mutableSetOf<Int>()
@@ -215,11 +215,15 @@ class CycloneAccessibilityService : AccessibilityService() {
             metrics.widthPixels,
             metrics.heightPixels,
         )
-        val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() } ?: DeviceState.currentPackage
+        val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() }
+            ?: DeviceState.currentPackage?.takeIf { it != DeviceRealityArbiter.SYSTEM_UI_PACKAGE }
+        val className = root?.className?.toString()?.takeIf { it.isNotBlank() } ?: DeviceState.currentClassName
+        packageName?.let { DeviceState.currentPackage = it }
+        className?.let { DeviceState.currentClassName = it }
         val fingerprint = screenFingerprint(packageName, nodes)
         val snapshot = UiSnapshot(
             packageName = packageName,
-            className = DeviceState.currentClassName,
+            className = className,
             screenWidth = metrics.widthPixels,
             screenHeight = metrics.heightPixels,
             timestampMs = System.currentTimeMillis(),
@@ -342,20 +346,52 @@ class CycloneAccessibilityService : AccessibilityService() {
             "chrome" in title || "webview" in cls || "web_view" in cls
     }
 
+    /**
+     * Canonical phone reality is the task application, not whichever auxiliary overlay Android
+     * currently reports as active/focused. GATE remains observable through OverlayChromeObservation,
+     * but cannot replace Chrome/Gmail/another real app as the root used for page understanding.
+     */
     private fun preferredForegroundRoot(): AccessibilityNodeInfo? {
+        val listed = windows.orEmpty()
+        if (listed.isNotEmpty()) {
+            val candidates = listed.mapNotNull { window ->
+                val wroot = window.root ?: return@mapNotNull null
+                val pkg = wroot.packageName?.toString().orEmpty()
+                if (pkg.isBlank()) return@mapNotNull null
+                val kind = when {
+                    window.type == AccessibilityWindowInfo.TYPE_APPLICATION -> DeviceRealitySurfaceKind.APPLICATION
+                    window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> DeviceRealitySurfaceKind.ACCESSIBILITY_OVERLAY
+                    pkg == DeviceRealityArbiter.SYSTEM_UI_PACKAGE || window.type == AccessibilityWindowInfo.TYPE_SYSTEM -> DeviceRealitySurfaceKind.SYSTEM
+                    else -> DeviceRealitySurfaceKind.OTHER
+                }
+                DeviceRealityWindowCandidate(
+                    id = window.id,
+                    packageName = pkg,
+                    kind = kind,
+                    layer = window.layer,
+                    active = window.isActive,
+                    focused = window.isFocused,
+                    title = window.title?.toString().orEmpty(),
+                )
+            }
+            val reality = DeviceRealityArbiter.select(candidates, applicationContext.packageName)
+            reality.taskWindowId?.let { taskId ->
+                listed.firstOrNull { it.id == taskId }?.root?.let { taskRoot ->
+                    if (reality.groundingConflict) {
+                        DeviceState.addLog("Grounding corrected: ${reality.reason} -> ${reality.taskPackage}")
+                    }
+                    return taskRoot
+                }
+            }
+        }
+
+        // Compatibility fallback for devices/ROMs that do not expose getWindows() even though the
+        // active application root is available. System UI is never accepted as task reality here.
         val active = rootInActiveWindow
         val activePkg = active?.packageName?.toString().orEmpty()
-        if (activePkg.isNotBlank() && activePkg != "com.android.systemui") return active
-        val listed = windows.orEmpty()
-        val app = listed.firstOrNull { window ->
-            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
-                (window.isActive || window.isFocused) &&
-                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
-        } ?: listed.firstOrNull { window ->
-            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
-                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
+        return active?.takeIf {
+            activePkg.isNotBlank() && activePkg != DeviceRealityArbiter.SYSTEM_UI_PACKAGE
         }
-        return app?.root ?: active
     }
 
     /**
