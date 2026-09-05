@@ -20,6 +20,7 @@ import com.cyclone.mobile.agent.recovery.RecoveryMemory
 import com.cyclone.mobile.agent.recovery.RecoveryRequest
 import com.cyclone.mobile.agent.tools.CycloneAgentEnvironment
 import com.cyclone.mobile.agent.tools.CycloneAgentEnvironmentApi
+import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.PageAgentAction
 import com.cyclone.mobile.ai.PageAgentProtocol
 import com.cyclone.mobile.applearner.LearnedAction
@@ -136,6 +137,7 @@ class CyclonePcParityBridge internal constructor(
         brainEvidence?.let { recoveryJson.put("brainRecall", JSONObject(it.toString())) }
         routeEvidence?.let { recoveryJson.put("knownRoutes", JSONObject(it.toString())) }
         out.put("recovery", recoveryJson)
+        traceModelContext(out, card, history)
         return out
     }
 
@@ -428,6 +430,50 @@ class CyclonePcParityBridge internal constructor(
                     .put("delta", envelope.delta.summary.take(240))
                     .put("errorClass", envelope.errorClass.name)
                     .put("learningRecorded", envelope.learning.recorded),
+            )
+        }
+    }
+
+    /**
+     * The downloadable trace should show what the model was actually grounded on without storing a
+     * raw accessibility tree or hidden provider reasoning. AgentTraceRuntime is already initialized
+     * before production promptContext calls; tests/offline callers fail this optional trace safely.
+     */
+    private fun traceModelContext(
+        contextJson: JSONObject,
+        card: AgentPageCard?,
+        history: List<AgentActionEnvelope>,
+    ) {
+        runCatching {
+            val active = AgentTraceRuntime.store.listSessions(8)
+                .firstOrNull { it.status == "RUNNING" || it.status == "SUSPENDED" }
+                ?: return@runCatching
+            val goalContract = contextJson.optJSONObject("goalContract")
+            val completion = contextJson.optJSONObject("completionState")
+            val controls = card?.controls.orEmpty().take(14).joinToString(" | ") { control ->
+                val label = control.semanticName.ifBlank { control.label }.replace(Regex("\\s+"), " ").take(70)
+                "${control.role}:$label"
+            }
+            val recent = history.takeLast(4).joinToString(" | ") { outcome ->
+                "${outcome.tool}:${outcome.verification.status.name}:${outcome.verification.basis.orEmpty()}"
+            }
+            val detail = buildString {
+                append("package=").append(card?.packageName.orEmpty())
+                append(" activity=").append(card?.activity.orEmpty())
+                append(" page=").append(card?.pageKey?.takeLast(16).orEmpty())
+                append(" completion=").append(completion?.optBoolean("satisfied", false))
+                append(" goalContract=").append(goalContract?.optJSONArray("requirements")?.toString().orEmpty().take(420))
+                append(" summary=").append(card?.pageSummary?.toString().orEmpty().replace(Regex("\\s+"), " ").take(360))
+                append(" controls=").append(controls.take(900))
+                if (recent.isNotBlank()) append(" recent=").append(recent.take(500))
+            }
+            AgentTraceRuntime.store.append(
+                active.id,
+                "MODEL_CONTEXT",
+                "Sanitized model context prepared",
+                code = "model.context.v2",
+                ok = true,
+                detail = detail,
             )
         }
     }
