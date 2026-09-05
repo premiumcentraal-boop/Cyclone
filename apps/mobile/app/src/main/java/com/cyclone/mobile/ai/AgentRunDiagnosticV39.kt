@@ -10,15 +10,20 @@ import java.util.Locale
 
 /** High-signal, user-shareable projection of Cyclone's durable trace database. */
 object AgentRunDiagnosticV39 {
-    const val SCHEMA = "cyclone-run-diagnostic-v39/2"
-    const val MAX_BYTES = 384 * 1024
+    const val SCHEMA = "cyclone-run-diagnostic-v39/3"
+    const val MAX_BYTES = 1024 * 1024
 
     data class Metrics(
         val toolCalls: Int,
-        val failures: Int,
+        val toolFailures: Int,
+        val verificationFailures: Int,
         val recoveries: Int,
         val visionChecks: Int,
         val verifiedActions: Int,
+        val completionChecks: Int,
+        val completionRejections: Int,
+        val modelContextSnapshots: Int,
+        val freeModeEntries: Int,
     )
 
     data class ExportResult(
@@ -26,15 +31,37 @@ object AgentRunDiagnosticV39 {
         val message: String,
     )
 
-    fun metrics(events: List<AiTraceEvent>): Metrics = Metrics(
-        toolCalls = events.count { it.kind in setOf("ACTION_REQUESTED", "TOOL_REQUESTED", "TOOL_CALL") },
-        failures = events.count {
-            it.ok == false && it.kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT", "VERIFICATION", "PROGRESS_CLASSIFIED")
-        },
-        recoveries = events.count { it.kind.startsWith("RECOVERY") || it.kind == "REPLAN" || it.kind == "FREE_MODE_ENTER" },
-        visionChecks = events.count { it.kind.contains("VISION") },
-        verifiedActions = events.count { it.kind == "VERIFICATION" && it.ok == true },
-    )
+    fun metrics(events: List<AiTraceEvent>): Metrics {
+        val explicitToolCalls = events.count { it.kind in setOf("ACTION_REQUESTED", "TOOL_CALL") }
+        val runtimeToolCalls = events.count { it.kind == "TOOL_REQUESTED" }
+        return Metrics(
+            toolCalls = maxOf(explicitToolCalls, runtimeToolCalls),
+            toolFailures = events.count {
+                it.ok == false && it.kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT")
+            },
+            verificationFailures = events.count {
+                it.ok == false && it.kind in setOf("VERIFICATION", "PROGRESS_CLASSIFIED", "VERIFY")
+            },
+            recoveries = events.count { event ->
+                event.kind == "REPLAN" ||
+                    event.kind == "RECOVERY_SELECTED" ||
+                    (event.kind == "RECOVERY_CLASSIFIED" && event.code != "progress.continue")
+            },
+            visionChecks = events.count { it.kind.contains("VISION") },
+            verifiedActions = events.count { it.kind == "VERIFICATION" && it.ok == true },
+            completionChecks = events.count {
+                it.kind == "VERIFY" && it.code.orEmpty().startsWith("completion.")
+            },
+            completionRejections = events.count {
+                it.kind == "VERIFY" && it.code in setOf(
+                    "completion.unverified",
+                    "completion.still_unverified",
+                )
+            },
+            modelContextSnapshots = events.count { it.kind == "MODEL_CONTEXT" },
+            freeModeEntries = events.count { it.kind == "FREE_MODE_ENTER" },
+        )
+    }
 
     /**
      * Produce a point-in-time snapshot for every run state, including RUNNING and SUSPENDED.
@@ -84,6 +111,12 @@ object AgentRunDiagnosticV39 {
             session.decisions,
             events.count { it.kind == "PLAN" && it.code == "model.page_decision" },
         )
+        val firstDoneAt = events.firstOrNull {
+            it.kind == "PLAN" && it.code == "done"
+        }?.timestampMs
+        val timeAfterFirstDone = firstDoneAt?.let { doneAt ->
+            ((session.endedAt ?: System.currentTimeMillis()) - doneAt).coerceAtLeast(0)
+        }
         val header = buildString {
             appendLine("============================================================")
             appendLine("CYCLONE RUN DIAGNOSTIC")
@@ -104,9 +137,15 @@ object AgentRunDiagnosticV39 {
             appendLine("Model/decision turns: $effectiveTurns")
             appendLine("Tool calls: ${metrics.toolCalls}")
             appendLine("Verified actions: ${metrics.verifiedActions}")
-            appendLine("Failures: ${metrics.failures}")
-            appendLine("Recovery events: ${metrics.recoveries}")
+            appendLine("Tool failures: ${metrics.toolFailures}")
+            appendLine("Verification failures: ${metrics.verificationFailures}")
+            appendLine("Actual recovery cycles: ${metrics.recoveries}")
+            appendLine("Completion checks: ${metrics.completionChecks}")
+            appendLine("Completion rejections: ${metrics.completionRejections}")
+            appendLine("Model context snapshots: ${metrics.modelContextSnapshots}")
+            appendLine("Free Mode entries: ${metrics.freeModeEntries}")
             appendLine("Vision events: ${metrics.visionChecks}")
+            timeAfterFirstDone?.let { appendLine("Time after first DONE ms: $it") }
             appendLine()
             appendLine("TIMELINE")
             appendLine("============================================================")
@@ -134,7 +173,7 @@ object AgentRunDiagnosticV39 {
             appendLine()
             appendLine("PRIVACY")
             appendLine("============================================================")
-            appendLine("This file intentionally excludes hidden provider reasoning, credentials, raw typed values, screenshot pixels/Base64 and full accessibility trees.")
+            appendLine("This file includes sanitized model-visible context summaries, decisions, canonical tool/verification events and recovery. It intentionally excludes hidden provider reasoning, credentials, raw typed secret values, screenshot pixels/Base64 and full accessibility trees.")
         }
         return bounded(header, timeline, tail)
     }
@@ -144,7 +183,7 @@ object AgentRunDiagnosticV39 {
         kind in setOf("PLAN", "DECISION", "MODEL_DECISION") -> "MODEL DECISION"
         kind in setOf("ACTION_REQUESTED", "TOOL_REQUESTED", "TOOL_CALL") -> "TOOL REQUEST"
         kind in setOf("ANDROID_EXECUTION", "TOOL_RESULT") -> "TOOL RESULT"
-        kind in setOf("AFTER_OBSERVATION", "VERIFICATION", "PROGRESS_CLASSIFIED") -> "VERIFICATION"
+        kind in setOf("AFTER_OBSERVATION", "VERIFICATION", "PROGRESS_CLASSIFIED", "VERIFY") -> "VERIFICATION"
         kind.startsWith("RECOVERY") || kind == "REPLAN" -> "RECOVERY"
         kind == "FREE_MODE_ENTER" || kind == "FREE_MODE_EXIT" -> "ADAPTIVE FREE MODE"
         kind.contains("VISION") -> "VISION"
@@ -159,7 +198,7 @@ object AgentRunDiagnosticV39 {
         .replace(Regex("(?is)\\\"(?:text|value)\\\"\\s*:\\s*\\\"[^\\\"]*\\\"")) { match ->
             if (match.value.contains("typed", ignoreCase = true)) "\"value\":\"[REDACTED_TYPED_VALUE]\"" else match.value
         }
-        .take(8_000)
+        .take(12_000)
 
     private fun bounded(header: String, timeline: String, tail: String): String {
         val fixed = header.toByteArray().size + tail.toByteArray().size
