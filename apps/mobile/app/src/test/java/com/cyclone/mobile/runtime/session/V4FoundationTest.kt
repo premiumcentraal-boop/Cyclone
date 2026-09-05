@@ -5,7 +5,7 @@ import com.cyclone.mobile.ai.vision.live.FrameSourceType
 import com.cyclone.mobile.ai.vision.live.InMemoryLiveFrameBroker
 import com.cyclone.mobile.ai.vision.live.LiveFrame
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -17,71 +17,170 @@ import java.util.concurrent.TimeUnit
 
 class V4FoundationTest {
     @Test
-    fun defaultSessionIsStableDisplayZero() {
+    fun defaultSessionIsStableDisplayZeroAndLegacyLookupResolvesIt() {
         val store = ExecutionSessionStore()
-        val a = store.defaultForeground()
-        val b = store.lookup(null)
-        val c = store.lookup("")
-        assertEquals(ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID, a.sessionId)
-        assertEquals(0, a.displayId)
-        assertEquals(a.sessionId, b.sessionId)
-        assertEquals(c.sessionId, a.sessionId)
-        assertTrue(a.executable)
-        assertEquals(ExecutionBackendKind.FOREGROUND_ACCESSIBILITY, a.backend)
-        assertEquals(InputOwner.HUMAN, a.inputOwner)
+        val direct = store.defaultForeground()
+        val missing = store.lookup(null)
+        val blank = store.lookup("")
+
+        assertEquals(ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID, direct.sessionId)
+        assertEquals(0, direct.displayId)
+        assertEquals(direct, missing)
+        assertEquals(direct, blank)
+        assertTrue(direct.executable)
+        assertEquals(ExecutionBackendKind.FOREGROUND_ACCESSIBILITY, direct.backend)
+        assertEquals(InputOwner.HUMAN, direct.inputOwner)
+        assertEquals(ExecutionContext.DEFAULT, ExecutionContext.from(direct))
     }
 
     @Test
-    fun syntheticSessionsCoexistAndAreNotExecutable() {
+    fun onlyDefaultForegroundSessionCanBeExecutableIn396() {
+        try {
+            ExecutionSession(
+                sessionId = "future",
+                displayId = 12,
+                backend = ExecutionBackendKind.VIRTUAL_DISPLAY,
+                executable = true,
+                createdAtEpochMs = 1L,
+            )
+            fail("future backend must not become executable in 3.9.6")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
+    @Test
+    fun syntheticSessionsCoexistAreImmutableSnapshotsAndAreNotExecutable() {
         val store = ExecutionSessionStore()
         val one = store.registerSynthetic("hidden-a", 12, ExecutionBackendKind.VIRTUAL_DISPLAY)
         val two = store.registerSynthetic("hidden-b", 13, ExecutionBackendKind.SHIZUKU)
-        assertTrue(!one.executable)
-        assertTrue(!two.executable)
-        assertEquals(one.sessionId, store.lookup("hidden-a").sessionId)
+
+        assertFalse(one.executable)
+        assertFalse(two.executable)
+        assertEquals(one, store.lookup("hidden-a"))
         assertEquals(3, store.snapshot().size)
+        assertEquals(12, store.requireSessionDisplay("hidden-a", 12).displayId)
+
+        try {
+            store.requireSessionDisplay("hidden-a", 13)
+            fail("display mismatch must be rejected")
+        } catch (_: SessionIdentityException) {
+        }
+
         try {
             store.registerSynthetic("hidden-a", 14, ExecutionBackendKind.ROOT)
-            fail("duplicate")
+            fail("duplicate identity must be rejected")
         } catch (_: SessionIdentityException) {
         }
     }
 
     @Test
-    fun observationsDoNotCrossSessions() {
-        val store = SessionObservationStore()
-        store.publish("A", 0, "obs-a", "payload-a", 1)
-        store.publish("B", 1, "obs-b", "payload-b", 2)
-        assertEquals("obs-a", store.current("A")?.observationId)
-        assertEquals("obs-b", store.current("B", 1)?.observationId)
-        store.publish("A", 0, "obs-a2", "payload-a2", 3)
-        assertEquals(2L, store.current("A")?.generation)
+    fun observationsAreSessionLocalAndForeignDisplayOrObservationIsRejected() {
+        val sessions = ExecutionSessionStore()
+        sessions.registerSynthetic("A", 12, ExecutionBackendKind.VIRTUAL_DISPLAY)
+        sessions.registerSynthetic("B", 13, ExecutionBackendKind.VIRTUAL_DISPLAY)
+        val observations = SessionObservationStore(sessions)
+
+        val a1 = observations.publish("A", 12, "obs-a1", "payload-a1", 1L)
+        val b1 = observations.publish("B", 13, "obs-b1", "payload-b1", 2L)
+        val a2 = observations.publish("A", 12, "obs-a2", "payload-a2", 3L)
+
+        assertEquals(1L, a1.generation)
+        assertEquals(1L, b1.generation)
+        assertEquals(2L, a2.generation)
+        assertEquals("obs-a2", observations.current("A")?.observationId)
+        assertEquals("obs-b1", observations.current("B")?.observationId)
+
         try {
-            store.associate("A", 0, "obs-b")
-            fail("mismatch")
+            observations.publish("A", 13, "bad-display", null, 4L)
+            fail("foreign display must be rejected")
         } catch (_: SessionIdentityException) {
         }
-        store.associate("A", 0, "obs-a2")
+
+        try {
+            observations.associate("A", 12, "obs-b1")
+            fail("foreign observation must be rejected")
+        } catch (_: SessionIdentityException) {
+        }
+
+        observations.associate("A", 12, "obs-a2")
     }
 
     @Test
-    fun framesAreIsolatedBoundedAndLatestDoesNotCapture() {
-        val broker = InMemoryLiveFrameBroker(capacityPerSession = 2)
-        val source = AccessibilityScreenshotFrameSource("A", 0)
-        source.adaptOneShot(broker, 100, 200, "h1", 10, 1)
-        broker.publish(LiveFrame("A", 0, 2, 11, 100, 200, FrameSourceType.ACCESSIBILITY_SCREENSHOT, "h2"))
-        broker.publish(LiveFrame("A", 0, 3, 12, 100, 200, FrameSourceType.ACCESSIBILITY_SCREENSHOT, "h3"))
-        broker.publish(LiveFrame("B", 1, 1, 13, 10, 10, FrameSourceType.SCRCPY, "b1"))
+    fun legacyObservationBridgeMapsMissingSessionToDefaultForeground() {
+        val observations = SessionObservationStore()
+        val published = observations.publish(
+            sessionId = null,
+            displayId = null,
+            observationId = "legacy-obs",
+            payload = "legacy",
+            timestampEpochMs = 1L,
+        )
+
+        assertEquals(ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID, published.sessionId)
+        assertEquals(0, published.displayId)
+        assertEquals("legacy-obs", observations.currentOrLegacy(null)?.observationId)
+    }
+
+    @Test
+    fun framesAreSessionIsolatedBoundedMonotonicAndLatestDoesNotCapture() {
+        val sessions = ExecutionSessionStore()
+        sessions.registerSynthetic("A", 12, ExecutionBackendKind.VIRTUAL_DISPLAY)
+        sessions.registerSynthetic("B", 13, ExecutionBackendKind.VIRTUAL_DISPLAY)
+        val broker = InMemoryLiveFrameBroker(capacityPerSession = 2, sessions = sessions)
+        val source = AccessibilityScreenshotFrameSource("A", 12)
+
+        val first = source.adaptOneShot(broker, 100, 200, "h1", 10L)
+        assertEquals(1L, first.frameId)
+        broker.publish(frame("A", 12, 2L, 11L, "h2"))
+        broker.publish(frame("A", 12, 3L, 12L, "h3"))
+        broker.publish(frame("B", 13, 1L, 13L, "b1", FrameSourceType.SCRCPY))
+
         assertEquals("h3", broker.latest("A")?.payloadHandle)
-        assertEquals(2, broker.framesSince("A", 0).size)
+        assertEquals(listOf(2L, 3L), broker.framesSince("A", 0L).map { it.frameId })
         assertEquals("b1", broker.latest("B")?.payloadHandle)
+
+        val beforeLatestReads = broker.framesSince("A", 0L)
+        repeat(5) { broker.latest("A") }
+        assertEquals(beforeLatestReads, broker.framesSince("A", 0L))
+
         broker.clear("A")
         assertNull(broker.latest("A"))
         assertNotNull(broker.latest("B"))
-        assertEquals(0, broker.captureInvocations)
+
+        val afterClear = broker.publish(frame("A", 12, 0L, 14L, "h4"))
+        assertEquals(4L, afterClear.frameId)
+    }
+
+    @Test
+    fun firstFrameDisplayMismatchAndNonMonotonicIdsAreRejected() {
+        val sessions = ExecutionSessionStore()
+        sessions.registerSynthetic("A", 12, ExecutionBackendKind.VIRTUAL_DISPLAY)
+        val broker = InMemoryLiveFrameBroker(capacityPerSession = 2, sessions = sessions)
+
         try {
-            broker.publish(LiveFrame("B", 9, 2, 14, 10, 10, FrameSourceType.SCRCPY, "bad"))
-            fail("mismatch")
+            broker.publish(frame("A", 13, 1L, 1L, "wrong-display"))
+            fail("first frame display mismatch must be rejected")
+        } catch (_: SessionIdentityException) {
+        }
+
+        broker.publish(frame("A", 12, 5L, 2L, "five"))
+        try {
+            broker.publish(frame("A", 12, 5L, 3L, "duplicate"))
+            fail("duplicate frame id must be rejected")
+        } catch (_: IllegalArgumentException) {
+        }
+        try {
+            broker.publish(frame("A", 12, 4L, 4L, "backwards"))
+            fail("backwards frame id must be rejected")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
+    @Test
+    fun invalidBrokerCapacityIsRejected() {
+        try {
+            InMemoryLiveFrameBroker(capacityPerSession = 0)
+            fail("zero capacity must be rejected")
         } catch (_: IllegalArgumentException) {
         }
     }
@@ -94,7 +193,7 @@ class V4FoundationTest {
         repeat(40) { index ->
             pool.execute {
                 try {
-                    runCatching { store.registerSynthetic("s-$index", index + 1, ExecutionBackendKind.VIRTUAL_DISPLAY) }
+                    store.registerSynthetic("s-$index", index + 1, ExecutionBackendKind.VIRTUAL_DISPLAY)
                     store.lookup(null)
                     store.snapshot()
                 } finally {
@@ -102,8 +201,55 @@ class V4FoundationTest {
                 }
             }
         }
+
         assertTrue(latch.await(5, TimeUnit.SECONDS))
         pool.shutdownNow()
+        assertEquals(41, store.snapshot().size)
         assertEquals(ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID, store.defaultForeground().sessionId)
     }
+
+    @Test
+    fun frameBrokerAssignsIndependentIdsSafelyUnderConcurrency() {
+        val sessions = ExecutionSessionStore()
+        sessions.registerSynthetic("A", 12, ExecutionBackendKind.VIRTUAL_DISPLAY)
+        sessions.registerSynthetic("B", 13, ExecutionBackendKind.VIRTUAL_DISPLAY)
+        val broker = InMemoryLiveFrameBroker(capacityPerSession = 64, sessions = sessions)
+        val pool = Executors.newFixedThreadPool(8)
+        val latch = CountDownLatch(40)
+
+        repeat(40) { index ->
+            pool.execute {
+                try {
+                    val sessionId = if (index % 2 == 0) "A" else "B"
+                    val displayId = if (sessionId == "A") 12 else 13
+                    broker.publish(frame(sessionId, displayId, 0L, index.toLong() + 1L, "f-$index"))
+                } finally {
+                    latch.countDown()
+                }
+            }
+        }
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS))
+        pool.shutdownNow()
+        assertEquals((1L..20L).toList(), broker.framesSince("A", 0L).map { it.frameId })
+        assertEquals((1L..20L).toList(), broker.framesSince("B", 0L).map { it.frameId })
+    }
+
+    private fun frame(
+        sessionId: String,
+        displayId: Int,
+        frameId: Long,
+        capturedAtMonotonicMs: Long,
+        handle: String,
+        source: FrameSourceType = FrameSourceType.ACCESSIBILITY_SCREENSHOT,
+    ) = LiveFrame(
+        sessionId = sessionId,
+        displayId = displayId,
+        frameId = frameId,
+        capturedAtMonotonicMs = capturedAtMonotonicMs,
+        width = 100,
+        height = 200,
+        source = source,
+        payloadHandle = handle,
+    )
 }

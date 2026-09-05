@@ -14,49 +14,60 @@ data class SessionObservationEnvelope(
     val timestampEpochMs: Long,
 )
 
-class SessionObservationStore {
+class SessionObservationStore(
+    private val sessions: ExecutionSessionStore = ExecutionSessionStore(),
+) {
     private val lock = Any()
     private val current = mutableMapOf<SessionObservationKey, SessionObservationEnvelope>()
     private val generations = mutableMapOf<String, Long>()
 
     fun publish(
-        sessionId: String,
-        displayId: Int,
+        sessionId: String?,
+        displayId: Int? = null,
         observationId: String,
         payload: Any?,
         timestampEpochMs: Long,
     ): SessionObservationEnvelope = synchronized(lock) {
-        require(observationId.isNotBlank())
-        val next = (generations[sessionId] ?: 0L) + 1L
-        generations[sessionId] = next
+        require(observationId.isNotBlank()) { "observationId required" }
+        require(timestampEpochMs >= 0L) { "timestampEpochMs must be non-negative" }
+        val session = sessions.requireSessionDisplay(sessionId, displayId)
+        val key = SessionObservationKey(session.sessionId, session.displayId)
+        val next = (generations[session.sessionId] ?: 0L) + 1L
+        generations[session.sessionId] = next
         val envelope = SessionObservationEnvelope(
-            sessionId = sessionId,
-            displayId = displayId,
+            sessionId = session.sessionId,
+            displayId = session.displayId,
             observationId = observationId,
             generation = next,
             payload = payload,
             timestampEpochMs = timestampEpochMs,
         )
-        current[SessionObservationKey(sessionId, displayId)] = envelope
+        current[key] = envelope
         envelope
     }
 
-    fun current(sessionId: String, displayId: Int = ExecutionSession.DEFAULT_DISPLAY_ID): SessionObservationEnvelope? =
-        synchronized(lock) { current[SessionObservationKey(sessionId, displayId)] }
-
-    fun currentOrLegacy(sessionId: String?): SessionObservationEnvelope? {
-        val resolved = sessionId?.takeIf { it.isNotBlank() } ?: ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID
-        return current(resolved)
+    fun current(sessionId: String?, displayId: Int? = null): SessionObservationEnvelope? = synchronized(lock) {
+        val session = sessions.requireSessionDisplay(sessionId, displayId)
+        current[SessionObservationKey(session.sessionId, session.displayId)]
     }
 
-    fun associate(sessionId: String, displayId: Int, observationId: String) {
-        val existing = current(sessionId, displayId)
-            ?: throw SessionIdentityException("no observation for session")
+    fun currentOrLegacy(sessionId: String?): SessionObservationEnvelope? = current(sessionId)
+
+    fun associate(sessionId: String?, displayId: Int? = null, observationId: String) = synchronized(lock) {
+        require(observationId.isNotBlank()) { "observationId required" }
+        val session = sessions.requireSessionDisplay(sessionId, displayId)
+        val key = SessionObservationKey(session.sessionId, session.displayId)
+        val existing = current[key] ?: throw SessionIdentityException("no observation for session ${session.sessionId}")
         if (existing.observationId != observationId) {
-            throw SessionIdentityException("foreign observation/session mismatch")
+            throw SessionIdentityException(
+                "foreign observation/session mismatch: requested $observationId, current ${existing.observationId}",
+            )
         }
-        if (existing.displayId != displayId) {
-            throw SessionIdentityException("display/session mismatch")
-        }
+    }
+
+    fun clear(sessionId: String?, displayId: Int? = null) = synchronized(lock) {
+        val session = sessions.requireSessionDisplay(sessionId, displayId)
+        current.remove(SessionObservationKey(session.sessionId, session.displayId))
+        Unit
     }
 }
