@@ -43,26 +43,13 @@ data class PcGateEnvelope(
 )
 
 object GateClassifier {
-    private val pay = listOf(
-        "pay", "payment", "checkout", "place order", "buy now", "purchase", "confirm order",
-        "order this", "complete purchase",
-    )
-    private val grant = listOf(
-        "grant", "allow access", "give permission", "authorize app", "trust this", "enable access",
-    )
-    private val delete = listOf("delete", "remove", "erase", "factory reset", "wipe data", "move to bin", "move to trash", "send to bin", "send to trash", "throw away")
-    private val send = listOf("send", "send message", "send email", "post", "publish")
-    private val deleteMoveSendToBinOrTrash =
-        Regex("""(?:move|send)(?:\s+\S+){0,6}\s+to\s+(?:bin|trash)""")
-
-    fun classify(action: String, labels: List<String> = emptyList()): GateClass? {
-        val text = (listOf(action) + labels).joinToString(" ").lowercase().replace(Regex("[_-]+"), " ")
-        if (pay.any { text.contains(it) }) return GateClass.PAY
-        if (grant.any { text.contains(it) }) return GateClass.GRANT
-        if (delete.any { text.contains(it) } || deleteMoveSendToBinOrTrash.containsMatchIn(text)) return GateClass.DELETE
-        if (send.any { text.contains(it) }) return GateClass.SEND
-        return null
-    }
+    /**
+     * Classify the selected action before looking at surrounding prose. This prevents a safe
+     * notification-denial control named "Block" from becoming SEND merely because its modal says
+     * "wants to send you notifications".
+     */
+    fun classify(action: String, labels: List<String> = emptyList()): GateClass? =
+        ActionIntentClassifier.gateClass(ActionIntentClassifier.classify(action, labels))
 }
 
 sealed interface GateDecision {
