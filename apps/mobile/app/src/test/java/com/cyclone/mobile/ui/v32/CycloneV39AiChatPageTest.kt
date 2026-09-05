@@ -90,7 +90,8 @@ class CycloneV39AiChatPageTest {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("const val PREFS = \"cyclone_ai\""))
         assertTrue(page.contains("const val MODEL_KEY = \"openrouter_model\""))
-        assertTrue(page.contains("prefs.edit().putString(V39AiChatContract.MODEL_KEY, model.id).apply()"))
+        assertTrue(page.contains("selectedModelId = V39AiChatContract.storageId(model)"))
+        assertTrue(page.contains("prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()"))
     }
 
     @Test fun missingKeyHasClearSettingsAffordance() {
