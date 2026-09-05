@@ -14,14 +14,35 @@ import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
+enum class OpenRouterStructuredOutputMode {
+    JSON_SCHEMA,
+    JSON_OBJECT,
+}
+
+enum class OpenRouterDataPolicy {
+    STANDARD,
+    CONTRIBUTOR,
+}
+
 data class OpenRouterModelPreset(
     val id: String,
     val label: String,
     val vision: Boolean,
     val reasoningEffort: String = "medium",
-)
+    val structuredOutputMode: OpenRouterStructuredOutputMode = OpenRouterStructuredOutputMode.JSON_OBJECT,
+    val dataPolicy: OpenRouterDataPolicy = OpenRouterDataPolicy.STANDARD,
+    val contributorDisclosure: String? = null,
+) {
+    val isContributor: Boolean get() = dataPolicy == OpenRouterDataPolicy.CONTRIBUTOR
 
-/** Five curated OpenRouter endpoints for Cyclone 3.8.6. Custom slugs still work through byId(). */
+    fun providerRouting(sort: String): JSONObject = JSONObject()
+        .put("sort", sort)
+        .put("allow_fallbacks", true)
+        .put("require_parameters", true)
+        .put("data_collection", if (isContributor) "allow" else "deny")
+}
+
+/** Curated OpenRouter endpoints supported by Cyclone. Custom slugs still work through byId(). */
 object OpenRouterModelPresets {
     val GPT_5_6_LUNA = OpenRouterModelPreset(
         id = "openai/gpt-5.6-luna",
@@ -46,6 +67,30 @@ object OpenRouterModelPresets {
         label = "Muse Spark 1.3",
         vision = true,
         reasoningEffort = "max",
+        structuredOutputMode = OpenRouterStructuredOutputMode.JSON_SCHEMA,
+    )
+    val MUSE_SPARK_1_3_CONTRIBUTOR = OpenRouterModelPreset(
+        id = "meta/muse-spark-1.3-contributor",
+        label = "Muse Spark 1.3 Contributor",
+        vision = true,
+        reasoningEffort = "max",
+        structuredOutputMode = OpenRouterStructuredOutputMode.JSON_SCHEMA,
+        dataPolicy = OpenRouterDataPolicy.CONTRIBUTOR,
+        contributorDisclosure = "Lower-cost contributor tier. Prompts and outputs may be used by the provider to improve models or products.",
+    )
+    val GPT_6_ASTRA = OpenRouterModelPreset(
+        id = "openai/gpt-6-astra",
+        label = "GPT-6 Astra",
+        vision = true,
+        reasoningEffort = "high",
+        structuredOutputMode = OpenRouterStructuredOutputMode.JSON_SCHEMA,
+    )
+    val CLAUDE_FABLE_5_1 = OpenRouterModelPreset(
+        id = "anthropic/claude-fable-5.1",
+        label = "Claude Fable 5.1",
+        vision = true,
+        reasoningEffort = "high",
+        structuredOutputMode = OpenRouterStructuredOutputMode.JSON_OBJECT,
     )
     val GPT_5_6_SOL = OpenRouterModelPreset(
         id = "openai/gpt-5.6-sol",
@@ -56,7 +101,16 @@ object OpenRouterModelPresets {
 
     /** Luna is the inexpensive balanced clean-install default. */
     val DEFAULT = GPT_5_6_LUNA
-    val all = listOf(GEMINI_3_8_FLASH, GPT_5_6_LUNA, GLM_5_3_FLASH, MUSE_SPARK_1_3, GPT_5_6_SOL)
+    val all = listOf(
+        GEMINI_3_8_FLASH,
+        GPT_5_6_LUNA,
+        GLM_5_3_FLASH,
+        MUSE_SPARK_1_3,
+        MUSE_SPARK_1_3_CONTRIBUTOR,
+        GPT_6_ASTRA,
+        CLAUDE_FABLE_5_1,
+        GPT_5_6_SOL,
+    )
 
     // Compatibility names used by older screens; both resolve to current curated endpoints.
     val GEMINI_3_6_FLASH = GEMINI_3_8_FLASH
@@ -64,7 +118,8 @@ object OpenRouterModelPresets {
 
     // Unknown custom slugs are accepted, but vision support is not assumed until the user picks a
     // known vision preset. This preserves existing behavior and prevents accidental image requests
-    // to text-only custom providers.
+    // to text-only custom providers. Custom models are always treated as standard/private routing;
+    // contributor behavior can only be selected through the explicit curated contributor preset.
     fun byId(id: String): OpenRouterModelPreset = all.firstOrNull { it.id == id }
         ?: OpenRouterModelPreset(id, id, false, reasoningEffort = "medium")
 }
@@ -173,7 +228,7 @@ class OpenRouterQuickAgent(private val context: Context) {
             .put("max_tokens", maxTokens)
             .put("reasoning", JSONObject().put("effort", model.reasoningEffort).put("exclude", true))
             .put("session_id", "cyclone-workflow-${UUID.randomUUID()}")
-            .put("provider", JSONObject().put("sort", providerSort).put("allow_fallbacks", true).put("require_parameters", true))
+            .put("provider", model.providerRouting(providerSort))
             .put("response_format", JSONObject().put("type", "json_object"))
             .put("stream", false)
         val request = Request.Builder()
@@ -181,7 +236,7 @@ class OpenRouterQuickAgent(private val context: Context) {
             .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")
             .header("HTTP-Referer", "https://github.com/premiumcentraal-boop/Cyclone")
-            .header("X-Title", "Cyclone Mobile V2.8")
+            .header("X-Title", "Cyclone Mobile")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         return http.newCall(request).execute().use { response ->
