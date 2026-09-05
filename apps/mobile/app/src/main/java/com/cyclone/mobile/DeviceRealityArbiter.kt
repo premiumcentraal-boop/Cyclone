@@ -28,8 +28,8 @@ data class DeviceRealitySelection(
 /**
  * Selects the application Cyclone should reason about independently from Cyclone's accessibility
  * overlay. An active/focused accessibility overlay is never allowed to shadow a real external
- * application window. This is intentionally pure so the arbitration contract is regression tested
- * without Android window objects.
+ * application window. A genuinely foreground Cyclone application remains legitimate task reality;
+ * only overlay focus is treated as auxiliary chrome.
  */
 object DeviceRealityArbiter {
     const val CYCLONE_PACKAGE = "com.cyclone.mobile"
@@ -46,18 +46,28 @@ object DeviceRealityArbiter {
 
         val applications = usable.filter { it.kind == DeviceRealitySurfaceKind.APPLICATION }
         val externalApplications = applications.filter { it.packageName != cyclonePackage }
+        val foregroundApplications = applications.filter { it.active || it.focused }
 
-        val task = chooseApplication(externalApplications)
+        // First trust a real foreground application. Only when Android reports overlay focus with no
+        // foreground application do we recover the underlying task from external application windows.
+        val task = chooseApplication(foregroundApplications)
+            ?: chooseApplication(externalApplications)
             ?: chooseApplication(applications)
 
-        val activeNonTask = usable.firstOrNull { it.active || it.focused }
+        val activeNonTask = usable
+            .filter { (it.active || it.focused) && it.id != task?.id }
+            .maxWithOrNull(
+                compareBy<DeviceRealityWindowCandidate> { it.focused }
+                    .thenBy { it.active }
+                    .thenBy { it.layer }
+                    .thenBy { it.id },
+            )
         val conflict = task != null && activeNonTask != null &&
-            activeNonTask.id != task.id &&
             activeNonTask.kind == DeviceRealitySurfaceKind.ACCESSIBILITY_OVERLAY
 
         val reason = when {
             task == null -> "no_application_window"
-            conflict && activeNonTask.packageName == cyclonePackage -> "cyclone_overlay_excluded_from_task_reality"
+            conflict && activeNonTask?.packageName == cyclonePackage -> "cyclone_overlay_excluded_from_task_reality"
             conflict -> "overlay_excluded_from_task_reality"
             task.packageName == cyclonePackage -> "cyclone_application_is_task"
             else -> "external_application_is_task"
