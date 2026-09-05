@@ -131,11 +131,45 @@ class PageAgentProtocolTest {
     }
 
     @Test
+    fun changingObservationUuidsCannotEvadeSemanticStrategyIdentity() {
+        val first = PageAgentAction(
+            "phone.click",
+            "ca7a2dcb-6d6e-42ef-93f3-3ad94822c414",
+            JSONObject(),
+            true,
+            "Open Gmail account switcher",
+        )
+        val second = first.copy(controlId = "492e378d-3eb6-4f0f-8075-31ccbfbce6be")
+        val key1 = PageAgentProtocol.actionSignature(PageAgentDecision("act", "", "", listOf(first), null, null), "page-a")
+        val key2 = PageAgentProtocol.actionSignature(PageAgentDecision("act", "", "", listOf(second), null, null), "page-b")
+        assertEquals(key1, key2)
+        assertEquals("phone.click:intent=open gmail account switcher", key1)
+        assertFalse(key1.orEmpty().contains("page-a"))
+    }
+
+    @Test
+    fun portableParserRepairsOnlyFormattingEnvelopeOnce() {
+        val raw = "Model output follows:\n{\"status\":\"done\",\"pageSummary\":\"Gmail\",\"displaySummary\":\"Done\",\"actions\":[],\"answer\":\"Ready\",\"reason\":\"\"}\nEnd."
+        val parsed = PageAgentProtocol.parsePortable(raw)
+        assertTrue(parsed.repaired)
+        assertEquals("done", parsed.decision.status)
+        assertEquals("Ready", parsed.decision.answer)
+    }
+
+    @Test
+    fun responseFormatNegotiatesSchemaVersusJsonObject() {
+        assertEquals("json_schema", PageAgentProtocol.responseFormat(OpenRouterModelPresets.GPT_6_ASTRA).getString("type"))
+        assertEquals("json_schema", PageAgentProtocol.responseFormat(OpenRouterModelPresets.MUSE_SPARK_1_3).getString("type"))
+        assertEquals("json_object", PageAgentProtocol.responseFormat(OpenRouterModelPresets.CLAUDE_FABLE_5_1).getString("type"))
+    }
+
+    @Test
     fun freeModeInstructionsRemainBoundedByPolicyAndRequireDifferentStrategy() {
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("FREE mode"))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("materially different", ignoreCase = true))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("never bypasses policy", ignoreCase = true))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("phone.launch_intent"))
+        assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("Block", ignoreCase = true))
 
         val context = PageAgentProtocol.context(
             goal = "open Chrome and visit ad.nl",
