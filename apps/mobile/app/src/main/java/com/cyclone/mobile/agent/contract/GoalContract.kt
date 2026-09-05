@@ -265,8 +265,8 @@ object GoalContractCompiler {
         .map { it.value }
         .filter { it.length >= 3 && it !in stopWords }
         .distinct()
-        .takeLast(8)
         .toList()
+        .takeLast(8)
 
     private fun normalizedWords(value: String): List<String> = wordPattern.findAll(value.lowercase())
         .map { it.value }
