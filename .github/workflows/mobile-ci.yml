@@ -13,6 +13,7 @@ on:
       - 'release/version.toml'
       - '.github/workflows/_mobile-build.yml'
       - '.github/workflows/mobile-ci.yml'
+      - '.github/workflows/mobile-dev-publish-v395.yml'
   pull_request:
     paths:
       - 'apps/mobile/**'
@@ -24,6 +25,7 @@ on:
       - 'release/version.toml'
       - '.github/workflows/_mobile-build.yml'
       - '.github/workflows/mobile-ci.yml'
+      - '.github/workflows/mobile-dev-publish-v395.yml'
   workflow_dispatch:
 
 permissions:
