@@ -9,9 +9,16 @@ class CycloneCompletionLoopTest {
     fun rejectedDoneReobservesLocallyBeforeAnotherModelTurn() {
         var modelCalls = 0
         var observeCalls = 0
-        val model = CycloneAgentModel { _, _ ->
-            modelCalls++
-            CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.DONE, payload = "done"))
+        val model = object : CycloneAgentModel {
+            override fun plan(
+                state: CycloneTaskState,
+                observation: CycloneObservation,
+            ): CyclonePlanResult {
+                modelCalls++
+                return CyclonePlanResult.Valid(
+                    CycloneModelTurn(CycloneModelDirective.DONE, payload = "done"),
+                )
+            }
         }
         val tools = object : CycloneAgentTools {
             override fun observe(state: CycloneTaskState): CycloneObservation {
@@ -54,9 +61,16 @@ class CycloneCompletionLoopTest {
     fun repeatedUnverifiedDoneStopsAfterTwoClaimsInsteadOfBurningProviderTurns() {
         var modelCalls = 0
         var observeCalls = 0
-        val model = CycloneAgentModel { _, _ ->
-            modelCalls++
-            CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.DONE, payload = "done"))
+        val model = object : CycloneAgentModel {
+            override fun plan(
+                state: CycloneTaskState,
+                observation: CycloneObservation,
+            ): CyclonePlanResult {
+                modelCalls++
+                return CyclonePlanResult.Valid(
+                    CycloneModelTurn(CycloneModelDirective.DONE, payload = "done"),
+                )
+            }
         }
         val tools = object : CycloneAgentTools {
             override fun observe(state: CycloneTaskState): CycloneObservation {
