@@ -248,6 +248,10 @@ object OverlayChromeRuntime {
         val job = aiScope.launch {
             mutate {
                 it.enterWorking()
+                // Once execution begins, collapse Cyclone's own accessibility overlay mechanically.
+                // The model should reason about the host app, not spend a provider turn discovering
+                // and clicking Cyclone's "Minimize" chrome. GATE later expands itself when needed.
+                it.dispatch(OverlayUserAction.MINIMIZE)
                 it.updateStatus("Starting…")
             }
             val settings = readAiSettings(context)
