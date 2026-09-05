@@ -28,7 +28,7 @@ class AgentRunDiagnosticV39Test {
             AiTraceEvent("7", "ai-test-session", 1_700, "FREE_MODE_ENTER", "Structured recovery stalled; Cyclone is trying a different strategy", "adaptive.free.enter", true, "noProgressFailures=2"),
         )
         val text = AgentRunDiagnosticV39.format(session(), events)
-        assertTrue(text.contains("cyclone-run-diagnostic-v39/2"))
+        assertTrue(text.contains("Schema: cyclone-run-diagnostic-v39/3"))
         assertTrue(text.contains("MODEL SAW / CONTEXT"))
         assertTrue(text.contains("MODEL DECISION"))
         assertTrue(text.contains("TOOL REQUEST"))
@@ -87,6 +87,24 @@ class AgentRunDiagnosticV39Test {
     }
 
     @Test
+    fun completionRechecksStaySeparateFromFreeModeAndToolFailures() {
+        val events = listOf(
+            AiTraceEvent("1", "s", 1, "VERIFY", "rejected", "completion.unverified", false, null),
+            AiTraceEvent("2", "s", 2, "VERIFY", "rejected again", "completion.still_unverified", false, null),
+            AiTraceEvent("3", "s", 3, "FREE_MODE_ENTER", "adapt", null, true, null),
+            AiTraceEvent("4", "s", 4, "MODEL_CONTEXT", "context", null, true, null),
+        )
+        val metrics = AgentRunDiagnosticV39.metrics(events)
+        assertTrue(metrics.completionChecks == 2)
+        assertTrue(metrics.completionRejections == 2)
+        assertTrue(metrics.verificationFailures == 2)
+        assertTrue(metrics.toolFailures == 0)
+        assertTrue(metrics.recoveries == 0)
+        assertTrue(metrics.freeModeEntries == 1)
+        assertTrue(metrics.modelContextSnapshots == 1)
+    }
+
+    @Test
     fun metricsCountUsefulRunSignals() {
         val events = listOf(
             AiTraceEvent("1", "s", 1, "ACTION_REQUESTED", "a", "phone.click", null, null),
@@ -100,7 +118,10 @@ class AgentRunDiagnosticV39Test {
         assertTrue(metrics.toolCalls == 1)
         assertTrue(metrics.failures == 1)
         assertTrue(metrics.verifiedActions == 1)
-        assertTrue(metrics.recoveries == 2)
+        assertTrue(metrics.recoveries == 1)
+        assertTrue(metrics.freeModeEntries == 1)
+        assertTrue(metrics.toolFailures == 1)
+        assertTrue(metrics.verificationFailures == 0)
         assertTrue(metrics.visionChecks == 1)
     }
 }

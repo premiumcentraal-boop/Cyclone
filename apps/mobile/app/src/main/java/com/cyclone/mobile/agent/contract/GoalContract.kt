@@ -69,6 +69,12 @@ data class GoalContractEvaluation(
  * defines what independently verifiable success means.
  */
 object GoalContractCompiler {
+    /** Only complete simple navigation locally; compound/content goals still need model decisions. */
+    fun isSimpleWebNavigation(goal: String): Boolean = Regex(
+        "(?i)^(?:please\\s+)?(?:open|go to|navigate to)\\s+(?:https?://)?(?:www\\.)?" +
+            "(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,63}/?\\s*$",
+    ).matches(goal.trim())
+
     private val hostPattern = Regex(
         "(?i)(?:https?://)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63})(?=[:/?#\\s]|$)",
     )
@@ -145,19 +151,14 @@ object GoalContractCompiler {
         return when (requirement.kind) {
             GoalRequirementKind.WEB_HOST -> {
                 val host = requirement.value.orEmpty()
-                val pageMatch = currentPage?.let(::pageHaystack)?.contains(host, ignoreCase = true) == true
-                val launchMatch = successful.any { envelope ->
-                    envelope.tool == "phone.launch_intent" &&
-                        envelope.after?.let { isBrowserLike(it.packageName) } == true &&
-                        (envelope.after?.let(::pageHaystack)?.contains(host, ignoreCase = true) == true ||
-                            contract.sourceGoal.contains(host, ignoreCase = true))
-                }
+                // A launch request and a browser package transition do not prove which site loaded.
+                // The user's goal (including its echo in Cyclone's chat) is never after-state evidence.
+                val pageMatch = currentPage?.let { pageShowsHost(it, host) } == true
                 GoalRequirementResult(
                     requirement,
-                    pageMatch || launchMatch,
+                    pageMatch,
                     when {
                         pageMatch -> "requested host is present in the authoritative current scene"
-                        launchMatch -> "verified browser launch-intent transition for the requested host"
                         else -> "requested host has not been verified"
                     },
                 )
@@ -221,7 +222,7 @@ object GoalContractCompiler {
     }
 
     private fun pageMatchesTerms(page: AgentPageCard?, terms: List<String>): Boolean {
-        if (page == null || terms.isEmpty()) return false
+        if (page == null || page.packageName == "com.cyclone.mobile" || terms.isEmpty()) return false
         val words = normalizedWords(pageHaystack(page))
         if (words.isEmpty()) return false
         val matched = terms.count { term -> words.any { word -> fuzzyEquivalent(term, word) } }
@@ -254,6 +255,21 @@ object GoalContractCompiler {
             append(control.evidence.optString("resourceId")).append(' ')
         }
     }.lowercase()
+
+    private fun pageShowsHost(page: AgentPageCard, host: String): Boolean {
+        if (!isBrowserLike(page.packageName) || host.isBlank()) return false
+        val exactHost = Regex("(?i)(?<![a-z0-9_.@-])(?:https?://)?(?:[a-z0-9-]+\\.)*" +
+            Regex.escape(host) + "(?=[:/?#\\s\"']|$)")
+        val addressControls = page.controls.filter {
+            val id = it.evidence.optString("resourceId").lowercase()
+            listOf("url_bar", "urlbar", "location_bar", "address_bar").any(id::contains)
+        }
+        // If the address bar is available it wins over mentions in search results or link text.
+        val text = if (addressControls.isNotEmpty()) addressControls.joinToString(" ") {
+            "${it.label} ${it.semanticName}"
+        } else "${page.pageSummary} ${page.pageText}"
+        return exactHost.containsMatchIn(text)
+    }
 
     private fun finalGoalSegment(value: String): String = value
         .split(Regex("(?i)\\bthen\\b|\\bfinally\\b|->|→|;|,"))

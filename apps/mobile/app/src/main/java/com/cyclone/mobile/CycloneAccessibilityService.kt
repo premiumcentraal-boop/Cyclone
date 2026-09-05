@@ -91,13 +91,6 @@ class CycloneAccessibilityService : AccessibilityService() {
                     DeviceState.addLog("App Learner disabled after safe initialization failure")
                 }.getOrDefault(false)
 
-                runCatching {
-                    CycloneProcessDiagnostics.markStage(applicationContext, "primary.runtime.legacy_bridge.init")
-                    BridgeClient.start(applicationContext)
-                }.onFailure {
-                    CycloneProcessDiagnostics.recordNonFatal(applicationContext, "primary.runtime.legacy_bridge.init", it)
-                    DeviceState.addLog("Legacy Core bridge disabled after safe initialization failure")
-                }
                 CycloneProcessDiagnostics.markStage(
                     applicationContext,
                     "primary.runtime.ready.a${if (automationRuntimeReady) 1 else 0}.l${if (appLearnerRuntimeReady) 1 else 0}",
@@ -165,7 +158,6 @@ class CycloneAccessibilityService : AccessibilityService() {
         automationRuntimeReady = false
         appLearnerRuntimeReady = false
         DeviceState.accessibilityConnected = false
-        runCatching { BridgeClient.stop() }
         runCatching { runtimeInitExecutor.shutdownNow() }
         runCatching { screenshotExecutor.shutdownNow() }
         super.onDestroy()

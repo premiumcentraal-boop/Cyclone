@@ -114,7 +114,7 @@ class CycloneLocalAgent(
     taskId: String = "local-${UUID.randomUUID()}",
     restoredState: CycloneTaskState? = null,
 ) {
-    private var cancelled = false
+    @Volatile private var cancelled = false
     private var mutationsWithoutVerifiedProgress = 0
     private var repeatedUnverifiedDone = 0
     private var state = restoredState
@@ -146,13 +146,13 @@ class CycloneLocalAgent(
         if (state.currentStage == CycloneAgentStage.TERMINAL) return terminalResult()
         if (state.gateSuspended) return CycloneAgentRunResult.Suspended(state)
         while (true) {
-            cancellation()?.let { return it }
-            if (now() - state.taskStartTimeMs > convergence.taskTimeoutMs) return nonConvergence("convergence.task_timeout")
+            executionBoundary()?.let { return it }
 
             state = state.copy(currentStage = CycloneAgentStage.OBSERVE)
             val oldObs = state.latestObservationIdentity
             val oldPage = state.latestPageIdentity
             val observation = tools.observe(state)
+            executionBoundary()?.let { return it }
             if (observation == null) {
                 recover(CycloneRecoveryKind.OBSERVATION_FAILURE, "observe.failed", false)?.let { return it }
                 continue
@@ -169,6 +169,8 @@ class CycloneLocalAgent(
             state = state.copy(currentStage = CycloneAgentStage.PLAN_OR_RECALL)
             val plan = model.plan(state, observation)
             state = state.copy(modelTurns = state.modelTurns + 1)
+            // A slow provider may return after Stop or the task deadline. Never execute its plan.
+            executionBoundary()?.let { return it }
             if (plan is CyclonePlanResult.Malformed) {
                 emit(CycloneTraceEventType.PLAN, "model.malformed", observation)
                 recover(CycloneRecoveryKind.MALFORMED_MODEL, "model.malformed", newEvidence)?.let { return it }
@@ -182,6 +184,7 @@ class CycloneLocalAgent(
                     state = state.copy(currentStage = CycloneAgentStage.VERIFY)
                     var completionObservation = observation
                     var v = tools.verifyCompletion(state, completionObservation, turn)
+                    executionBoundary()?.let { return it }
                     emit(CycloneTraceEventType.VERIFY, if (v.verified && v.complete) "completion.verified" else "completion.unverified", completionObservation)
                     if (v.verified && v.complete) return complete(v.message)
 
@@ -190,6 +193,7 @@ class CycloneLocalAgent(
                     // provider turn. This catches delayed browser/modal transitions and stale page cards.
                     state = state.copy(currentStage = CycloneAgentStage.OBSERVE, requireFreshObservation = true)
                     val fresh = tools.observe(state)
+                    executionBoundary()?.let { return it }
                     if (fresh != null) {
                         completionObservation = fresh
                         state = state.copy(
@@ -200,6 +204,7 @@ class CycloneLocalAgent(
                         )
                         emit(CycloneTraceEventType.OBSERVE, "completion.reobserve", fresh)
                         v = tools.verifyCompletion(state, fresh, turn)
+                        executionBoundary()?.let { return it }
                         emit(CycloneTraceEventType.VERIFY, if (v.verified && v.complete) "completion.verified_after_reobserve" else "completion.still_unverified", fresh)
                         if (v.verified && v.complete) return complete(v.message)
                     }
@@ -214,7 +219,6 @@ class CycloneLocalAgent(
                     continue
                 }
                 CycloneModelDirective.BLOCKED, CycloneModelDirective.NEED_HUMAN -> {
-                    repeatedUnverifiedDone = 0
                     state = state.copy(currentStage = CycloneAgentStage.CLASSIFY_RESULT)
                     when (tools.classifyModelBoundary(state, observation, turn)) {
                         CycloneTaskClassification.HUMAN_OR_GATE -> return suspendForGate(turn.reason)
@@ -231,7 +235,6 @@ class CycloneLocalAgent(
                     continue
                 }
                 CycloneModelDirective.NEED_VISION -> {
-                    repeatedUnverifiedDone = 0
                     val used = state.visionUseState[observation.identity] ?: 0
                     if (used >= convergence.maxVisionAttemptsOnUnchangedState) {
                         recover(CycloneRecoveryKind.VISION_UNCHANGED, "vision.unchanged", false)?.let { return it }
@@ -240,7 +243,7 @@ class CycloneLocalAgent(
                     state = state.copy(visionUseState = state.visionUseState + (observation.identity to used + 1))
                     emit(CycloneTraceEventType.VISION_ESCALATION, "vision.escalate", observation)
                 }
-                CycloneModelDirective.ACT -> repeatedUnverifiedDone = 0
+                CycloneModelDirective.ACT -> Unit
             }
 
             if (turn.actionSignature.isNullOrBlank()) {
@@ -256,9 +259,10 @@ class CycloneLocalAgent(
                 return nonConvergence("convergence.mutations_without_verified_progress")
             }
 
+            executionBoundary()?.let { return it }
             val tool = tools.execute(state, observation, turn)
             emit(CycloneTraceEventType.TOOL_RESULT, if (tool.ok) "tool.ok" else "tool.failed", observation, tool.actionSignature ?: turn.actionSignature); checkpoint()
-            cancellation()?.let { return it }
+            executionBoundary()?.let { return it }
             if (!tool.policyAllowed) {
                 if (tool.gateRequired) return suspendForGate(tool.message)
                 if (tool.hardBlocker) return hardBlocker(tool.message)
@@ -284,6 +288,7 @@ class CycloneLocalAgent(
 
             state = state.copy(currentStage = CycloneAgentStage.VERIFY)
             val verification = tools.verify(state, observation, turn, tool)
+            executionBoundary()?.let { return it }
             emit(CycloneTraceEventType.VERIFY, when { verification.complete && verification.verified -> "verify.complete"; verification.verified && verification.progress -> "verify.progress"; else -> "verify.failed" }, observation, turn.actionSignature)
             if (verification.complete && verification.verified) return complete(verification.message)
             if (verification.verified && verification.progress) {
@@ -300,6 +305,7 @@ class CycloneLocalAgent(
                     finalClassification = CycloneTaskClassification.RECOVERABLE,
                 )
                 mutationsWithoutVerifiedProgress = 0
+                repeatedUnverifiedDone = 0
                 emit(CycloneTraceEventType.RECOVERY_CLASSIFIED, "progress.continue", observation, turn.actionSignature); checkpoint(); continue
             }
             recover(CycloneRecoveryKind.VERIFICATION_FAILURE, "verify.no_progress", verification.evidenceIdentity != null && verification.evidenceIdentity != observation.evidenceIdentity)?.let { return it }
@@ -325,6 +331,8 @@ class CycloneLocalAgent(
     }
 
     private fun cancellation(): CycloneAgentRunResult? = if (cancelled || externallyCancelled()) cancelResult("user.cancel") else null
+    private fun executionBoundary(): CycloneAgentRunResult? = cancellation()
+        ?: if (now() - state.taskStartTimeMs >= convergence.taskTimeoutMs) nonConvergence("convergence.task_timeout") else null
     private fun cancelResult(message: String?) = finish(CycloneTaskClassification.CANCELLED, CycloneTraceEventType.CANCELLED, message) { CycloneAgentRunResult.Cancelled(it, message) }
     private fun complete(message: String?) = finish(CycloneTaskClassification.COMPLETE, CycloneTraceEventType.COMPLETE, "task.complete") { CycloneAgentRunResult.Completed(it, message) }
     private fun suspendForGate(message: String?): CycloneAgentRunResult.Suspended {

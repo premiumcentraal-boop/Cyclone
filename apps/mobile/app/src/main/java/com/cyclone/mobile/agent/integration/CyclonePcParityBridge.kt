@@ -288,6 +288,9 @@ class CyclonePcParityBridge internal constructor(
         return GoalContractCompiler.evaluate(contract, page, environment.history()).satisfied
     }
 
+    fun verifiedSimpleNavigation(goal: String): Boolean =
+        GoalContractCompiler.isSimpleWebNavigation(goal) && completionEvidence(goal)
+
     fun completionEvaluation(goal: String): JSONObject {
         val contract = GoalContractCompiler.compile(goal)
         return GoalContractCompiler.evaluate(contract, page, environment.history()).toJson()

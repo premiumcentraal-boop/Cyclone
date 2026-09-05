@@ -7,8 +7,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GoalContractTest {
+    @Test fun onlySimpleHostNavigationQualifiesForLocalCompletion() {
+        listOf("open ad.nl", "Go to https://www.ad.nl/", "please navigate to victor.ceo").forEach {
+            assertTrue(GoalContractCompiler.isSimpleWebNavigation(it))
+        }
+        listOf("open ad.nl and scroll down", "open ad.nl then click login", "open ad.nl/news/article", "read ad.nl", "search for ad.nl").forEach {
+            assertFalse(GoalContractCompiler.isSimpleWebNavigation(it))
+        }
+    }
+
     @Test
-    fun shortHostCompletesFromVerifiedBrowserLaunchWithoutKeywordTokenization() {
+    fun shortHostRequiresCurrentHostEvidenceAfterBrowserLaunch() {
         val goal = "open ad.nl"
         val before = page("com.cyclone.mobile", "Cyclone AI mode")
         val after = page("com.android.chrome", "News home")
@@ -20,7 +29,33 @@ class GoalContractTest {
             history,
         )
 
-        assertTrue(evaluation.satisfied)
+        assertFalse(evaluation.satisfied)
+        assertTrue(GoalContractCompiler.evaluate(GoalContractCompiler.compile(goal),
+            page("com.android.chrome", "https://ad.nl/"), history).satisfied)
+    }
+
+    @Test fun hostMentionInCycloneAndLookalikeDomainsCannotCompleteNavigation() {
+        val contract = GoalContractCompiler.compile("open ad.nl")
+        listOf(
+            page("com.cyclone.mobile", "You: open ad.nl"),
+            page("com.android.chrome", "https://bad.nl/"),
+            page("com.android.chrome", "https://ad.nl.evil.com/"),
+        ).forEach { assertFalse(GoalContractCompiler.evaluate(contract, it, emptyList()).satisfied) }
+    }
+
+    @Test fun oldSuccessfulLaunchDoesNotCompleteOnCurrentUnrelatedSite() {
+        val before = page("com.cyclone.mobile", "Cyclone")
+        val loaded = page("com.android.chrome", "https://ad.nl/")
+        val unrelated = page("com.android.chrome", "https://example.com/")
+        assertFalse(GoalContractCompiler.evaluate(GoalContractCompiler.compile("open ad.nl"), unrelated,
+            listOf(outcome("phone.launch_intent", "open ad.nl", before, loaded))).satisfied)
+    }
+
+    @Test fun addressBarOverridesHostMentionInSearchResults() {
+        val bar = control("https://google.com/search", "edittext").copy(
+            evidence = JSONObject().put("resourceId", "com.android.chrome:id/url_bar"))
+        val results = page("com.android.chrome", "Search results for ad.nl", listOf(bar))
+        assertFalse(GoalContractCompiler.evaluate(GoalContractCompiler.compile("open ad.nl"), results, emptyList()).satisfied)
     }
 
     @Test

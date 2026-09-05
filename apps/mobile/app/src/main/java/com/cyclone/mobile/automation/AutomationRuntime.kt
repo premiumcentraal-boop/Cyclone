@@ -249,5 +249,5 @@ private class CycloneIntegrationGateway(private val context: Context) : Integrat
 
     override fun sendCycloneEvent(type: String, payload: Map<String, String>): PhoneToolResult =
         if (BridgeClient.sendAutomationEvent(type, payload)) PhoneToolResult(true, mapOf("event" to type))
-        else PhoneToolResult(false, errorCode = "CYCLONE_NOT_CONNECTED", message = "Cyclone Core bridge is offline")
+        else PhoneToolResult(false, errorCode = "LEGACY_INTEGRATION_RETIRED", message = "This routine uses the retired Core/Hermes integration. Rebuild it with local phone actions.")
 }

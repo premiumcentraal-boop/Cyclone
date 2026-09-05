@@ -74,7 +74,6 @@ class MainActivity : ComponentActivity() {
         AdaptiveBrainRuntime.initialize(this)
         BrainChatRuntime.initialize(this)
         RoutineTeachingRuntime.initialize(this)
-        BridgeClient.start(this)
 
         val v31 = CycloneV31Runtime.initialize(this)
         CycloneV31ProductIntegration.install(this, v31)

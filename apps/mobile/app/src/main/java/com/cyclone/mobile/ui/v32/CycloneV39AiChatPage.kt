@@ -166,6 +166,7 @@ internal fun V39AiChatPage(
                 session.status = V39AiChatContract.finalStatus(run)
                 session.append(V39ChatRole.CYCLONE, run.message, run.ok)
             } catch (cancelled: CancellationException) {
+                agent.cancelActiveTask()
                 throw cancelled
             } catch (_: Exception) {
                 session.status = "Stopped safely"
@@ -184,6 +185,13 @@ internal fun V39AiChatPage(
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text("Cyclone AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("Ask for one outcome. Cyclone handles the verified phone steps.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Works on this phone with your API key. PC companion is optional.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (session.busy) {
+                TextButton(onClick = {
+                    session.status = "Stopping…"
+                    agent.cancelActiveTask()
+                }) { Text("Stop task") }
+            }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {

@@ -35,6 +35,8 @@ class MobileWorkflowArchitectureTest(unittest.TestCase):
         self.assertNotIn("apps/teamwork-sniper", workflow)
         self.assertNotIn("git submodule", workflow)
         self.assertLess(workflow.index("wrapper-validation"), workflow.index("./apps/mobile/gradlew"))
+        self.assertIn("Upload Android test and lint reports\n        if: always()", workflow)
+        self.assertIn("apps/mobile/app/build/test-results/", workflow)
 
     def test_release_reuses_verifies_and_signs_without_publication(self):
         workflow = self.text("mobile-release.yml")

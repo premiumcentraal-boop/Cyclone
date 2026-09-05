@@ -40,6 +40,8 @@ import com.cyclone.mobile.ui.overlay.GateBlockedException
 import com.cyclone.mobile.ui.overlay.OverlayGateClass
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -48,6 +50,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -63,6 +66,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(75, TimeUnit.SECONDS)
         .writeTimeout(25, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private data class ObservedState(
@@ -76,6 +80,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val ok: Boolean,
         val progress: Boolean,
         val evidenceIdentity: String,
+        val complete: Boolean = false,
         val policyAllowed: Boolean = true,
         val gateRequired: Boolean = false,
         val gateClass: OverlayGateClass? = null,
@@ -95,13 +100,14 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val successfulActions: MutableList<String>,
         val failedActions: MutableList<String>,
         val graphAttempts: MutableSet<String>,
-        val initialPageIdentity: String,
         var state: ObservedState,
         var providerRequests: Int = 0,
         var pendingGateClass: OverlayGateClass? = null,
         var checkpoint: CycloneTaskState? = null,
         var adaptiveMode: String = "STRUCTURED",
         var consecutiveNoProgressFailures: Int = 0,
+        var cancelled: () -> Boolean = { false },
+        @Volatile var stopRequested: Boolean = false,
     )
 
     private data class ActiveLocalSession(
@@ -177,6 +183,8 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             onProgress = onProgress,
         )
         activeLocalSession = session
+        val executionJob = currentCoroutineContext().job
+        session.context.cancelled = { !executionJob.isActive }
         return@withContext driveLocalSession(session, onProgress)
     }
 
@@ -215,11 +223,15 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 classification = session.agent.snapshot().finalClassification?.name,
             )
         }
+        val executionJob = currentCoroutineContext().job
+        session.context.cancelled = { !executionJob.isActive }
         driveLocalSession(session, onProgress)
     }
 
     fun cancelActiveTask() {
+        activeLocalSession?.context?.stopRequested = true
         activeLocalSession?.agent?.cancel()
+        http.dispatcher.cancelAll()
     }
 
     private fun createLocalSession(
@@ -245,7 +257,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             successfulActions = successfulActions,
             failedActions = failedActions,
             graphAttempts = graphAttempts,
-            initialPageIdentity = initial.page.pageKey,
             state = initial,
         )
         lateinit var localAgent: CycloneLocalAgent
@@ -258,6 +269,14 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                             reason = "controller.human",
                         ),
                     )
+                }
+
+                if (session.bridge.verifiedSimpleNavigation(goal)) {
+                    return CyclonePlanResult.Valid(CycloneModelTurn(
+                        CycloneModelDirective.DONE,
+                        payload = PageAgentDecision("done", "", "The requested website is visible.",
+                            emptyList(), "Opened the requested website.", null),
+                    ))
                 }
 
                 val graphAction = if (session.adaptiveMode == "FREE") null
@@ -286,6 +305,10 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 val agentContext = session.bridge.promptContext(goal)
                     .put("operatingMode", session.adaptiveMode)
                     .put("noProgressFailures", session.consecutiveNoProgressFailures)
+                    .put("runtimeFeedback", JSONObject()
+                        .put("recentFailures", JSONArray(taskState.recentFailedActions.takeLast(8)))
+                        .put("recoveryCyclesWithoutProgress", taskState.consecutiveRecoveryCyclesWithoutNewEvidence)
+                        .put("rule", "A rejected completion claim requires missing goal evidence or a different action, not another unsupported DONE."))
                 if (session.adaptiveMode == "FREE") {
                     agentContext.put(
                         "freeModeRule",
@@ -389,6 +412,17 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                         } else {
                             payload
                         }
+                        if (decision.status != "act") {
+                            val complete = decision.status == "done" && session.bridge.completionEvidence(goal)
+                            val providerMessage = ProviderFailure.message(decision.reason.orEmpty())
+                            return CycloneToolResult(
+                                ok = complete,
+                                hardBlocker = providerMessage != null,
+                                message = providerMessage ?: decision.answer,
+                                payload = LocalExecution(session.state, complete, complete, observation.evidenceIdentity,
+                                    complete = complete, message = decision.answer),
+                            )
+                        }
                         executeDecisionActions(
                             session = session,
                             decision = decision,
@@ -429,7 +463,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 return CycloneVerificationResult(
                     verified = execution.ok,
                     progress = execution.progress,
-                    complete = false,
+                    complete = execution.complete,
                     evidenceIdentity = execution.evidenceIdentity,
                     message = execution.message,
                 )
@@ -441,6 +475,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 turn: CycloneModelTurn,
             ): CycloneTaskClassification {
                 if (turn.reason == API_KEY_BLOCKER) return CycloneTaskClassification.HARD_BLOCKER
+                if (ProviderFailure.message(turn.reason.orEmpty()) != null) return CycloneTaskClassification.HARD_BLOCKER
                 if (DeviceState.controller == DeviceState.Controller.HUMAN || deterministicHumanBoundary(session.state.page)) {
                     session.pendingGateClass = deterministicGateClass(session.state.page)
                     return CycloneTaskClassification.HUMAN_OR_GATE
@@ -456,12 +491,9 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             ): CycloneVerificationResult {
                 val decision = turn.payload as? PageAgentDecision
                     ?: return CycloneVerificationResult(false, false)
-                val page = session.state.page
-                val movedFromStart = page.pageKey != session.initialPageIdentity &&
-                    session.successfulActions.isNotEmpty()
-                val verified = PageAgentProtocol.canFinish(decision, page) &&
-                    session.bridge.completionEvidence(goal) &&
-                    (movedFromStart || semanticGoalEvidence(goal, page))
+                // One authoritative completion contract. A second keyword matcher on the legacy
+                // page rejects valid short hosts (ad.nl) and already-satisfied navigation goals.
+                val verified = decision.status == "done" && session.bridge.completionEvidence(goal)
                 return CycloneVerificationResult(
                     verified = verified,
                     progress = verified,
@@ -479,11 +511,16 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 event.type.name,
                 event.type.name.replace('_', ' ').lowercase(),
                 code = event.code ?: event.type.name.lowercase(),
-                ok = event.type !in setOf(
+                ok = when (event.type) {
+                    CycloneTraceEventType.VERIFY -> event.code in setOf(
+                        "completion.verified", "completion.verified_after_reobserve", "verify.complete", "verify.progress")
+                    CycloneTraceEventType.TOOL_RESULT -> event.code == "tool.ok"
+                    else -> event.type !in setOf(
                     CycloneTraceEventType.HARD_BLOCKER,
                     CycloneTraceEventType.NON_CONVERGENCE,
                     CycloneTraceEventType.CANCELLED,
-                ),
+                    )
+                },
                 detail = listOfNotNull(
                     event.pageIdentity?.let { "page=${it.takeLast(16)}" },
                     event.actionSignature?.let { "action=${it.take(120)}" },
@@ -510,6 +547,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             ),
             trace = traceSink,
             checkpoints = checkpointStore,
+            externallyCancelled = { session.cancelled() },
             taskId = traceId,
         )
         return ActiveLocalSession(session, localAgent)
@@ -576,9 +614,13 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                     CycloneTaskClassification.HARD_BLOCKER -> if (run.message == API_KEY_BLOCKER) {
                         "Cyclone reached an unknown page and needs the existing OpenRouter API key to continue."
                     } else {
-                        run.message ?: "Cyclone reached a deterministic hard blocker."
+                        ProviderFailure.message(run.message.orEmpty()) ?: run.message ?: "Cyclone reached a deterministic hard blocker."
                     }
-                    CycloneTaskClassification.NON_CONVERGENCE -> "Cyclone stopped because the task stopped converging, not because of a provider-call limit."
+                    CycloneTaskClassification.NON_CONVERGENCE -> when (run.message) {
+                        "completion.ambiguous_after_recheck" -> "Cyclone could not verify completion after two checks. Open the run details to see the missing evidence."
+                        "convergence.task_timeout" -> "Cyclone reached the task time limit before it could verify completion."
+                        else -> "Cyclone stopped after repeated steps failed to make verified progress. Try a smaller task or inspect the run details."
+                    }
                     else -> run.message ?: "Cyclone stopped."
                 }
                 completeTrace(
@@ -613,6 +655,10 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         var state = session.state
         var verifiedProgress = false
         for (action in decision.actions.take(3)) {
+            if (session.cancelled() || session.stopRequested) {
+                return LocalExecution(state, false, verifiedProgress, cycloneObservation(state).evidenceIdentity,
+                    message = "Cyclone task cancelled.")
+            }
             if (PhoneToolRegistry.definition(action.tool) == null) {
                 session.failedActions += "unknown_tool:${action.tool}"
                 session.bridge.recover(RecoverableCause.RETRYABLE_TOOL_OR_TRANSPORT_ERROR, session.goal)
@@ -870,25 +916,6 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         )
     }
 
-    private fun semanticGoalEvidence(goal: String, page: PageContext): Boolean {
-        val pageText = buildString {
-            append(page.title)
-            append(' ')
-            append(page.packageName.substringAfterLast('.'))
-            append(' ')
-            page.controls.take(40).forEach { control ->
-                append(control.semanticName)
-                append(' ')
-                append(control.label)
-                append(' ')
-            }
-        }.lowercase()
-        val tokens = goal.lowercase()
-            .split(Regex("[^a-z0-9]+"))
-            .filter { it.length >= 3 && it !in COMPLETION_STOP_WORDS }
-        return tokens.isNotEmpty() && tokens.any(pageText::contains)
-    }
-
     private fun deterministicHumanBoundary(page: PageContext): Boolean {
         if (DeviceState.controller == DeviceState.Controller.HUMAN) return true
         val text = buildString {
@@ -1032,6 +1059,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         val response = pageChat(apiKey, model, JSONArray()
             .put(JSONObject().put("role", "system").put("content", PageAgentProtocol.SYSTEM_PROMPT))
             .put(JSONObject().put("role", "user").put("content", prompt.toString())), providerSort)
+        providerBoundary(response)?.let { return it }
         val raw = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         if (raw.isBlank()) return null
         return runCatching { PageAgentProtocol.parse(raw) }.getOrNull()
@@ -1070,8 +1098,15 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
                 .put(JSONObject().put("role", "user").put("content", content)),
             providerSort,
         )
+        providerBoundary(response)?.let { return it }
         val raw = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         return runCatching { PageAgentProtocol.parse(raw) }.getOrNull()
+    }
+
+    private fun providerBoundary(response: JSONObject): PageAgentDecision? {
+        if (!response.has("error")) return null
+        val code = ProviderFailure.code(response.optJSONObject("error")?.optInt("code", 500) ?: 500)
+        return PageAgentDecision("blocked", "", ProviderFailure.message(code).orEmpty(), emptyList(), null, code)
     }
 
     private fun pageChat(
@@ -1093,13 +1128,15 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
             .header("X-Title", "Cyclone Mobile V2.8 Page Agent")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        return http.newCall(request).execute().use { response ->
+        return try { http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             val json = runCatching { JSONObject(text) }.getOrElse {
                 JSONObject().put("error", JSONObject().put("message", text.ifBlank { "HTTP ${response.code}" }))
             }
-            if (!response.isSuccessful && !json.has("error")) json.put("error", JSONObject().put("message", "HTTP ${response.code}"))
+            if (!response.isSuccessful) json.put("error", JSONObject().put("code", response.code))
             json
+        } } catch (_: IOException) {
+            JSONObject().put("error", JSONObject().put("code", 0))
         }
     }
 
@@ -1145,7 +1182,9 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
         runCatching { AdaptiveBrainRuntime.recordRunPath(context, goal, skillSignatures, result.ok) }
 
         // Finish first so the legacy V2.6 task report sees the real final status and endedAt.
-        AgentTraceRuntime.finish(context, traceId, if (result.ok) "COMPLETED" else "FAILED", result.message, result.decisions)
+        val status = if (result.ok) "COMPLETED"
+            else if (result.classification == CycloneTaskClassification.CANCELLED.name) "CANCELLED" else "FAILED"
+        AgentTraceRuntime.finish(context, traceId, status, result.message, result.decisions)
         val traceStore = AgentTraceRuntime.store
         traceStore.listSessions(100).firstOrNull { it.id == traceId }?.let { session ->
             runCatching { CycloneBrainRuntime.record(context, session, traceStore.events(traceId)) }
@@ -1199,10 +1238,6 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
 
     companion object {
         private const val API_KEY_BLOCKER = "runtime.api_key_missing"
-        private val COMPLETION_STOP_WORDS = setOf(
-            "the", "and", "for", "with", "from", "into", "then", "this", "that",
-            "open", "show", "find", "make", "take", "please", "cyclone",
-        )
         private val HUMAN_BOUNDARY_MARKERS = listOf(
             "captcha",
             "mfa",

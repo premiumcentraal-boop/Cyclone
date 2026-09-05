@@ -27,8 +27,7 @@ REQUIRED_FEATURES = (
     "internal fun V32BrainPage",
     "internal fun V32SettingsPage",
     "GatewayAiCard(context, refreshTick)",
-    'TEAMWORK_SNIPER_PACKAGE = "com.cyclone.teamworksniper"',
-    '"Teamwork Sniper"',
+    'CycloneSectionTitle("Optional PC companion")',
 )
 REQUIRED_AI_CHAT = (
     "internal fun V39AiChatPage",
@@ -53,7 +52,6 @@ REQUIRED_MAIN = (
     "AutomationRuntime.initialize(this)",
     "AppLearnerRuntime.initialize(this)",
     "CycloneBrainRuntime.initialize(this)",
-    "BridgeClient.start(this)",
 )
 
 
@@ -63,6 +61,10 @@ def missing_tokens(text: str, required: tuple[str, ...]) -> list[str]:
 
 def check() -> list[str]:
     errors: list[str] = []
+    supported_apps = {"mobile", "device-gateway", "pc-companion"}
+    for path in (ROOT / "apps").iterdir():
+        if path.is_dir() and path.name not in supported_apps:
+            errors.append(f"Unsupported product component: apps/{path.name}")
     for path, required in (
         (APP, REQUIRED_APP),
         (FEATURES, REQUIRED_FEATURES),
@@ -78,6 +80,10 @@ def check() -> list[str]:
             continue
         for token in missing_tokens(text, required):
             errors.append(f"{path.relative_to(ROOT)} missing invariant: {token}")
+        if path in (APP, FEATURES, AI_CHAT, MAIN):
+            for retired in ("Teamwork Sniper", "TEAMWORK_SNIPER_PACKAGE", "coreWsUrl", "coreToken", "BridgeClient.start"):
+                if retired in text:
+                    errors.append(f"{path.relative_to(ROOT)} exposes retired integration: {retired}")
     return errors
 
 

@@ -79,7 +79,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
-import com.cyclone.mobile.BridgeClient
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.DeviceState
@@ -106,7 +105,6 @@ import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.ui.GatewayAiCard
 import kotlinx.coroutines.launch
 
-private const val TEAMWORK_SNIPER_PACKAGE = "com.cyclone.teamworksniper"
 
 @Composable
 internal fun V32TeachPage(context: Context, refreshTick: Int) {
@@ -329,24 +327,16 @@ internal fun V32BrainPage(context: Context, refreshTick: Int) {
 
 @Composable
 internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> Unit) {
-    val prefs = context.getSharedPreferences("cyclone", Context.MODE_PRIVATE)
     val aiPrefs = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
-    val defaultName = listOf(Build.MANUFACTURER, Build.MODEL).filter(String::isNotBlank).joinToString(" ")
     var keyDraft by rememberSaveable { mutableStateOf("") }
     var hasKey by remember(refreshTick) { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
     var selectedModel by rememberSaveable { mutableStateOf(aiPrefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }) }
     var accessProfile by rememberSaveable { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
-    var url by rememberSaveable { mutableStateOf(prefs.getString("coreWsUrl", "").orEmpty()) }
-    var token by rememberSaveable { mutableStateOf(prefs.getString("coreToken", "").orEmpty()) }
-    var name by rememberSaveable { mutableStateOf(prefs.getString("deviceName", defaultName).orEmpty()) }
     val primaryControl = CyclonePermissionSetup.primaryControlEnabled(context)
     val notificationAccess = CyclonePermissionSetup.notificationAccessEnabled(context)
     val resultNotifications = CyclonePermissionSetup.resultNotificationsEnabled(context)
     val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
     val essentialReady = listOf(primaryControl, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
-    val teamworkSniperInstalled = remember(refreshTick) {
-        context.packageManager.getLaunchIntentForPackage(TEAMWORK_SNIPER_PACKAGE) != null
-    }
     fun open(intent: Intent) = context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -458,58 +448,13 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
         }
         item {
             CycloneSimpleCard {
-                CycloneSectionTitle("Companion apps")
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Teamwork Sniper", fontWeight = FontWeight.Bold)
-                        Text(
-                            "Automatic Picnic Teamwork shift matching. Rules, permissions and armed state stay in the separate companion app.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    CycloneStatusPill(if (teamworkSniperInstalled) "Installed" else "Separate APK", teamworkSniperInstalled)
+                CycloneSectionTitle("Optional PC companion")
+                Text("Ask Cyclone, Teach, Routines and Brain run on this phone. Internal API models need an internet connection and your API key, with no PC pairing required.")
+                Button(onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Smartphone, null)
+                    Spacer(Modifier.size(6.dp))
+                    Text("PC Gateway & QR pairing")
                 }
-                if (teamworkSniperInstalled) {
-                    Button(
-                        onClick = {
-                            val launch = context.packageManager.getLaunchIntentForPackage(TEAMWORK_SNIPER_PACKAGE)
-                            if (launch == null) {
-                                Toast.makeText(context, "Teamwork Sniper is not installed.", Toast.LENGTH_SHORT).show()
-                            } else {
-                                context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Rounded.Bolt, null)
-                        Spacer(Modifier.size(6.dp))
-                        Text("Open Teamwork Sniper")
-                    }
-                } else {
-                    Text(
-                        "Install Teamwork-Sniper-3.5.3.apk separately to use shift matching.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-        item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("Connections")
-                Button(onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Smartphone, null); Spacer(Modifier.size(6.dp)); Text("PC Gateway & QR pairing") }
-                OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text("Optional Cyclone Core URL") })
-                OutlinedTextField(token, { token = it }, Modifier.fillMaxWidth(), label = { Text("Core pairing token") }, visualTransformation = PasswordVisualTransformation())
-                OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Device name") })
-                FilledTonalButton(onClick = {
-                    prefs.edit().putString("coreWsUrl", url.trim()).putString("coreToken", token.trim()).putString("deviceName", name.trim().ifBlank { defaultName }).apply()
-                    BridgeClient.stop(); BridgeClient.start(context); refresh()
-                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Link, null); Spacer(Modifier.size(6.dp)); Text(if (DeviceState.bridgeConnected) "Reconnect Core" else "Save Core connection") }
             }
         }
         item {

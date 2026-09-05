@@ -60,6 +60,18 @@ jobs:
         shell: bash
         run: ./apps/mobile/gradlew -p apps/mobile :app:testDebugUnitTest :app:lintDebug :app:assembleRelease --stacktrace
 
+      - name: Upload Android test and lint reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-reports-${{ github.sha }}
+          path: |
+            apps/mobile/app/build/reports/tests/
+            apps/mobile/app/build/test-results/
+            apps/mobile/app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Package provenance
         shell: bash
         env:

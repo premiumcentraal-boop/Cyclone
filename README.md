@@ -26,6 +26,14 @@ Android package: `com.cyclone.mobile`
 Minimum Android: 14 (API 34)  
 Current mobile identity: `3.9.4` / versionCode `58`
 
+The product has two deliverables: the Android APK and the optional Windows PC companion.
+Internal API models run from the phone with internet access and an API key; PC pairing is not
+required. Core/Hermes and the separate Teamwork Sniper app are retired integrations.
+
+VersionCode 58 is a candidate, not a verified stable release. See the
+[reliability review and acceptance plan](docs/DUO_RELIABILITY_REVIEW.md) for build evidence,
+current corrections and the remaining release blockers.
+
 ## Repository
 
 ```text

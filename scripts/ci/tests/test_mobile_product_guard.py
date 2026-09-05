@@ -10,6 +10,9 @@ SPEC.loader.exec_module(guard)
 
 
 class MobileProductGuardTest(unittest.TestCase):
+    def test_current_product_is_android_and_optional_companion_only(self):
+        self.assertEqual([], guard.check())
+
     def test_missing_tokens_reports_only_absent_invariants(self):
         self.assertEqual(
             ["Teach", "Brain"],

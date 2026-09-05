@@ -79,12 +79,13 @@ class MobileAccessibilityBridgeGuards(unittest.TestCase):
         self.assertIn("REASON_CRASH_NATIVE", source)
         self.assertIn("REASON_ANR", source)
 
-    def test_bridge_startup_has_url_validation_and_nonfatal_construction(self):
+    def test_retired_core_transport_cannot_start_or_forward_data(self):
         source = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/BridgeClient.kt").read_text(encoding="utf-8")
-        self.assertIn("isSupportedWebSocketUrl(url)", source)
-        self.assertIn("val started = runCatching", source)
-        self.assertIn("Core bridge could not start; accessibility remains available", source)
-        self.assertNotIn('DeviceState.addLog("Bridge failure: ${t.message}")', source)
+        for retired in ("okhttp", "newWebSocket", "coreWsUrl", "coreToken", "PhoneToolExecutor", "SetupReminderState"):
+            self.assertNotIn(retired, source)
+        for filename in ("MainActivity.kt", "CycloneAccessibilityService.kt"):
+            entry = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile" / filename).read_text()
+            self.assertNotIn("BridgeClient.start", entry)
 
     def test_desktop_pairing_does_not_auto_start_fleet_video_and_has_crash_capture(self):
         fleet = (ROOT / "apps/pc-companion/src/pages/fleetPage.ts").read_text(encoding="utf-8")
