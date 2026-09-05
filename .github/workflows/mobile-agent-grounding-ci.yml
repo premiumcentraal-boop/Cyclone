@@ -11,8 +11,7 @@ on:
       - 'scripts/ci/**'
       - 'scripts/phone-gateway/**'
       - 'release/version.toml'
-      - '.github/workflows/_mobile-build.yml'
-      - '.github/workflows/mobile-agent-grounding-ci.yml'
+      - '.github/workflows/*.yml'
   workflow_dispatch:
 
 permissions:
