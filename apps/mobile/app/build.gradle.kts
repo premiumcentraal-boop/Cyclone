@@ -11,16 +11,16 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 56
-        versionName = "3.9.2"
+        versionCode = 57
+        versionName = "3.9.3"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
     }
     buildTypes {
         release {
-            // Ordinary CI intentionally produces an unsigned release candidate. The protected
-            // release workflow signs the verified artifact with credentials injected at release time.
+            // Ordinary CI intentionally produces an unsigned release candidate. The fast publish
+            // workflow signs the verified artifact with the update-compatible development key.
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
