@@ -78,7 +78,10 @@ Schema:
 }
 """.trimIndent()
 
-    fun parse(raw: String): PageAgentDecision {
+    /** Production parser: strict JSON first, then exactly one formatting-envelope repair. */
+    fun parse(raw: String): PageAgentDecision = parsePortable(raw).decision
+
+    private fun parseStrict(raw: String): PageAgentDecision {
         val json = JSONObject(stripFence(raw))
         val actions = mutableListOf<PageAgentAction>()
         val array = json.optJSONArray("actions") ?: JSONArray()
@@ -106,12 +109,12 @@ Schema:
 
     /** One bounded formatting repair; semantic/model retries are owned by the task runtime. */
     fun parsePortable(raw: String): PageAgentParseResult {
-        runCatching { parse(raw) }.getOrNull()?.let { return PageAgentParseResult(it, repaired = false) }
+        runCatching { parseStrict(raw) }.getOrNull()?.let { return PageAgentParseResult(it, repaired = false) }
         val trimmed = raw.trim()
         val start = trimmed.indexOf('{')
         val end = trimmed.lastIndexOf('}')
         require(start >= 0 && end > start) { "Model output did not contain a JSON object" }
-        val repaired = parse(trimmed.substring(start, end + 1))
+        val repaired = parseStrict(trimmed.substring(start, end + 1))
         return PageAgentParseResult(repaired, repaired = true)
     }
 
