@@ -4,23 +4,27 @@
 
 This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-## Current baseline — Cyclone 3.9.2
+## Current baseline — Cyclone 3.9.4
 
-Cyclone 3.9.2 focuses on adaptive reliability and useful failure evidence:
+Cyclone 3.9.4 focuses on trustworthy agent completion, better grounding and developer-grade failure evidence:
 
 - **Ask Cyclone** — chat-style task composer with model selection and a single send action.
-- **Structured + Free Mode agent** — Cyclone starts with reliable semantic/learned routes, then automatically gives the model more freedom to choose a materially different strategy when verified progress stalls; GATE and policy boundaries remain mandatory.
+- **Goal Contracts** — common goals compile into independently verifiable semantic effects, so model confidence alone cannot mark a task complete.
+- **Bounded completion recovery** — rejected `DONE` claims trigger stronger local verification/escalation instead of an expensive repeated-DONE spiral.
+- **Structured + Free Mode agent** — Cyclone starts with reliable semantic/learned routes, then changes strategy when verified progress stalls; GATE and policy boundaries remain mandatory.
+- **Authoritative target perception** — active execution minimizes Cyclone's own overlay and keeps target-app state separate from Cyclone chrome so the model does not plan against its own UI.
+- **Richer model context** — compact scene, route, semantic-control and action-history evidence gives capable models a clearer picture of what Android actually shows.
 - **Progress-bounded recovery** — changing Android fingerprints do not count as task progress, repeated failures are bounded, and only verified semantic progress resets no-progress budgets.
-- **Strict phone-tool contracts** — app launches require resolvable packages and browser navigation can use the existing allowlisted Android HTTPS intent path as a different recovery strategy.
-- **Brain → Recent runs** — durable run history with compact, sanitized `.txt` diagnostics that can be exported while a task is running, suspended, failed or completed.
-- **Truthful task states** — running, suspended, completed and failed runs are represented consistently across the result timeline and durable trace.
+- **Strict phone-tool contracts** — app launches require resolvable packages and browser navigation can use the allowlisted Android HTTPS intent path as a deterministic route.
+- **Brain → Recent runs** — durable run history with sanitized `.txt` diagnostics, split tool/verification failure metrics, completion/recovery telemetry and up to 1 MiB of useful trace evidence.
+- **Privacy-first interruption handling** — cookie/consent surfaces are treated semantically without persisting raw secret input, screenshot pixels/Base64 or full accessibility trees in diagnostics.
 - **Aurora** — unobtrusive bottom-center persistent activation overlay with a small touch target.
 - **Teach + Routines** — reusable app knowledge and repeatable phone workflows.
 - **PC integration** — optional Device Gateway, Windows Companion and constrained MCP adapters without creating a second phone-control engine.
 
 Android package: `com.cyclone.mobile`  
 Minimum Android: 14 (API 34)  
-Current mobile identity: `3.9.2` / versionCode `56`
+Current mobile identity: `3.9.4` / versionCode `58`
 
 ## Repository
 
