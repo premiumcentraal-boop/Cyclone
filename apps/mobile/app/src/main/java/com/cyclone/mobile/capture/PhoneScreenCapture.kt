@@ -60,7 +60,7 @@ object PhoneScreenCapture {
         try {
             val latch = CountDownLatch(1)
             val outcome = AtomicReference<Result<JSONObject>?>()
-            service.takeScreenshot(null) { result ->
+            val deliver: (Result<CycloneAccessibilityService.ScreenshotArtifact>) -> Unit = { result ->
                 outcome.set(result.mapCatching { artifact ->
                     val scale = scaleToMaxDimension(artifact.width, artifact.height, maxDimension)
                     val (bytes, outWidth, outHeight) = if (scale.isScaling) {
@@ -77,7 +77,7 @@ object PhoneScreenCapture {
                         Base64.encodeToString(bytes, Base64.NO_WRAP)
                     } else null
                     payload(
-                        source = SOURCE_ACCESSIBILITY,
+                        source = artifact.liveFrame?.source?.name ?: SOURCE_ACCESSIBILITY,
                         filePath = artifact.file.absolutePath,
                         width = outWidth,
                         height = outHeight,
@@ -91,6 +91,8 @@ object PhoneScreenCapture {
                 })
                 latch.countDown()
             }
+            val live = com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.capture(service.cacheDir)
+            if (live != null) deliver(Result.success(live)) else service.takeScreenshot(null, deliver)
             if (!latch.await(CAPTURE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
                 throw ScreenCaptureException("SCREENSHOT_TIMEOUT", "Screen capture did not finish in time")
             }

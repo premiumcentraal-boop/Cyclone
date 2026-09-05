@@ -37,7 +37,8 @@ class CyclonePcParityBridge internal constructor(
     private val environment: CycloneAgentEnvironmentApi,
     private val recovery: AgenticRecoveryRuntimePort = DefaultAgenticRecoveryRuntimePort(),
 ) {
-    constructor(context: Context) : this(CycloneAgentEnvironment(context.applicationContext))
+    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT) :
+        this(CycloneAgentEnvironment(context.applicationContext, execution))
 
     private var page: AgentPageCard? = null
     private var memory: RecoveryMemory = RecoveryMemory()

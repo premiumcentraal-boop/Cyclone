@@ -16,6 +16,9 @@ INFRASTRUCTURE_PERMISSIONS = {
     "android.permission.ACCESS_NETWORK_STATE",
     "android.permission.FOREGROUND_SERVICE",
     "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION",
+    # Normal foreground-service permission; the task service declares its special-use subtype.
+    # It has no runtime grant dialog and does not grant access to another app's data.
+    "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
     "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
 }
 

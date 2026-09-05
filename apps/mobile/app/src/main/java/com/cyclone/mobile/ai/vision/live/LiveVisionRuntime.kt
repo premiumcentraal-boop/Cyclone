@@ -1,0 +1,111 @@
+package com.cyclone.mobile.ai.vision.live
+
+import android.graphics.Bitmap
+import android.os.SystemClock
+import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.UiBounds
+import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.ExecutionSessionStore
+import java.io.File
+import java.util.UUID
+
+/** Short operational pixel buffer; disk output is created only when a consumer requests evidence. */
+object LiveVisionRuntime {
+    val sessions = ExecutionSessionStore()
+    val broker: LiveFrameBroker = InMemoryLiveFrameBroker(3, sessions)
+    private val lock = Object()
+    private val pixels = linkedMapOf<String, Bitmap>()
+    private val boundaries = mutableMapOf<String, ActionFrameBoundary>()
+    private val sources = mutableMapOf<String, FrameSourceType>()
+    private val revisions = mutableMapOf<String, Long>()
+
+    fun startSource(sessionId: String, displayId: Int, source: FrameSourceType): Long = synchronized(lock) {
+        sessions.requireSessionDisplay(sessionId, displayId)
+        stopSource(sessionId)
+        sources[sessionId] = source
+        revisions.getValue(sessionId)
+    }
+
+    fun stopSource(sessionId: String) = synchronized(lock) {
+        sources.remove(sessionId)
+        revisions[sessionId] = (revisions[sessionId] ?: 0L) + 1
+        val handles = broker.framesSince(sessionId, 0).mapNotNull { it.payloadHandle }
+        handles.forEach { pixels.remove(it)?.recycle() }
+        broker.clear(sessionId)
+        lock.notifyAll()
+    }
+
+    /** Ownership of bitmap transfers to this buffer, including when the frame is rejected. */
+    fun publish(sessionId: String, displayId: Int, source: FrameSourceType, revision: Long,
+                capturedAtMs: Long, bitmap: Bitmap): Boolean = synchronized(lock) {
+        if (sources[sessionId] != source || revisions[sessionId] != revision ||
+            capturedAtMs < 0 || SystemClock.uptimeMillis() - capturedAtMs !in 0..2_000) {
+            bitmap.recycle()
+            return false
+        }
+        val handle = UUID.randomUUID().toString()
+        val frame = try {
+            broker.publish(LiveFrame(sessionId, displayId, 0, capturedAtMs, bitmap.width, bitmap.height, source, handle))
+        } catch (_: IllegalArgumentException) {
+            bitmap.recycle()
+            return false
+        }
+        pixels[handle] = bitmap
+        val retained = sessions.snapshot().flatMap { broker.framesSince(it.sessionId, 0) }
+            .mapNotNull { it.payloadHandle }.toSet()
+        pixels.keys.toList().filter { it !in retained }.forEach { pixels.remove(it)?.recycle() }
+        lock.notifyAll()
+        frame.frameId > 0
+    }
+
+    fun mutationFinished(sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) = synchronized(lock) {
+        val session = sessions.lookup(sessionId)
+        boundaries[sessionId] = ActionFrameBoundary(sessionId, session.displayId,
+            broker.latest(sessionId)?.frameId ?: 0, SystemClock.uptimeMillis())
+    }
+
+    fun healthy(sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID): Boolean = synchronized(lock) {
+        sources.containsKey(sessionId) && broker.ageMs(sessionId, SystemClock.uptimeMillis())?.let { it in 0..750 } == true
+    }
+
+    fun capture(cacheDir: File, crop: UiBounds? = null,
+                sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID,
+                waitMs: Long = 800): CycloneAccessibilityService.ScreenshotArtifact? {
+        val selected: Pair<LiveFrame, Bitmap> = synchronized(lock) {
+            val session = sessions.lookup(sessionId)
+            if (!sources.containsKey(sessionId)) return null
+            val revision = revisions[sessionId]
+            val deadline = SystemClock.uptimeMillis() + waitMs.coerceIn(0, 2_000)
+            var candidate: LiveFrame?
+            while (true) {
+                if (revisions[sessionId] != revision) return null
+                candidate = broker.framesSince(sessionId, 0).lastOrNull {
+                    FrameSelection.eligible(it, sessionId, session.displayId, SystemClock.uptimeMillis(), 750, boundaries[sessionId])
+                }
+                if (candidate != null) break
+                val remaining = deadline - SystemClock.uptimeMillis()
+                if (remaining <= 0) return null
+                lock.wait(remaining)
+            }
+            val frame = candidate ?: return null
+            val bitmap = pixels[frame.payloadHandle] ?: return null
+            frame to (bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return null)
+        }
+        val (frame, bitmap) = selected
+        try {
+            val bounds = crop?.let {
+                UiBounds(it.left.coerceIn(0, bitmap.width), it.top.coerceIn(0, bitmap.height),
+                    it.right.coerceIn(0, bitmap.width), it.bottom.coerceIn(0, bitmap.height))
+            }?.takeIf { it.width > 0 && it.height > 0 }
+            val output = bounds?.let { Bitmap.createBitmap(bitmap, it.left, it.top, it.width, it.height) } ?: bitmap
+            try {
+                val directory = File(cacheDir, "live-evidence").apply { mkdirs() }
+                val file = File(directory, "${UUID.randomUUID()}.png")
+                file.outputStream().use { check(output.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
+                return CycloneAccessibilityService.ScreenshotArtifact(file, output.width, output.height, bounds,
+                    System.currentTimeMillis(), frame)
+            } finally { if (output !== bitmap) output.recycle() }
+        } finally { bitmap.recycle() }
+    }
+}

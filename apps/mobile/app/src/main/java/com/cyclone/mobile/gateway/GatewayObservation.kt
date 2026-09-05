@@ -35,13 +35,18 @@ internal data class GatewayObservation(
     val page: PageContext,
     val payload: JSONObject,
     val elements: Map<String, GatewayElement>,
+    val execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT,
 )
 
 internal object GatewayObservationStore {
-    @Volatile private var current: GatewayObservation? = null
-    fun current(): GatewayObservation? = current
-    fun replace(observation: GatewayObservation) { current = observation }
-    fun clear() { current = null }
+    private val scoped = com.cyclone.mobile.runtime.session.SessionObservationStore(
+        com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions)
+    fun current(sessionId: String? = null): GatewayObservation? = scoped.current(sessionId)?.payload as? GatewayObservation
+    fun replace(observation: GatewayObservation) {
+        scoped.publish(observation.execution.sessionId, observation.execution.displayId, observation.id,
+            observation, observation.capturedAt)
+    }
+    fun clear(sessionId: String? = null) { scoped.clear(sessionId) }
 }
 
 internal object GatewayObservationAdapter {
@@ -50,10 +55,14 @@ internal object GatewayObservationAdapter {
     private val editableStateSalt = UUID.randomUUID().toString()
 
     fun capture(context: Context, args: JSONObject = JSONObject()): GatewayObservation {
+        val execution = com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(args)
+        val background = execution.sessionId != "default-foreground"
+        if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.requireScope(execution)
+        else com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(args)
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         PageAwarenessRuntime.initialize(context)
-        val snapshot = service.observe(markFresh = true)
+        val snapshot = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = true)
         val raw = snapshot.toJson()
         val page = PageAwarenessRuntime.capture(context, raw)
         val safeRaw = GatewayPrivacy.sanitizeAccessibilitySnapshot(raw)
@@ -208,7 +217,7 @@ internal object GatewayObservationAdapter {
             windows = windows.length(),
             nextHopHints = nextHopHints,
         )
-        val includeScreenshot = args.optBoolean("includeScreenshot", false)
+        val includeScreenshot = args.optBoolean("includeScreenshot", false) && !background
         val screenshot = if (includeScreenshot) {
             runCatching {
                 PhoneScreenCapture.capture(
@@ -266,7 +275,10 @@ internal object GatewayObservationAdapter {
             .put("rawAccessibility", safeRaw)
             .put("rawNodeCount", rawNodes.length())
 
-        return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements).also(GatewayObservationStore::replace)
+        payload.put("sessionId", execution.sessionId).put("displayId", execution.displayId)
+        if (background) payload.put("executionGeneration", com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId))
+        elements.values.forEach { it.evidence.put("sessionId", execution.sessionId).put("displayId", execution.displayId) }
+        return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements, execution).also { GatewayObservationStore.replace(it) }
     }
 
     fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray {

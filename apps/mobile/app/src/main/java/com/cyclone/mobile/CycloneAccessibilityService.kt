@@ -35,6 +35,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         val height: Int,
         val crop: UiBounds?,
         val timestampMs: Long,
+        val liveFrame: com.cyclone.mobile.ai.vision.live.LiveFrame? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("filePath", file.absolutePath)
@@ -43,6 +44,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             .put("height", height)
             .put("timestampMs", timestampMs)
             .put("crop", crop?.toJson() ?: JSONObject.NULL)
+            .put("sessionId", liveFrame?.sessionId ?: "default-foreground")
+            .put("displayId", liveFrame?.displayId ?: 0)
+            .put("frameId", liveFrame?.frameId ?: JSONObject.NULL)
+            .put("capturedAtMonotonicMs", liveFrame?.capturedAtMonotonicMs ?: JSONObject.NULL)
+            .put("source", liveFrame?.source?.name ?: "ACCESSIBILITY_SCREENSHOT")
     }
 
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
@@ -103,6 +109,8 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        // Background windows must not update the global foreground package, learning or UI state.
+        if (event.windowId != -1 && windowsOnAllDisplays.get(0).orEmpty().none { it.id == event.windowId }) return
         try {
             val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
             packageName?.let { DeviceState.currentPackage = it }
@@ -143,9 +151,10 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onInterrupt() = Unit
+    override fun onInterrupt() { com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll() }
 
     override fun onDestroy() {
+        com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll()
         CycloneProcessDiagnostics.markStage(this, "primary.accessibility.onDestroy")
         runCatching { guidedOverlay?.dismiss() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.guided", it) }
@@ -222,6 +231,34 @@ class CycloneAccessibilityService : AccessibilityService() {
         )
         if (markFresh) DeviceState.markObserved()
         return snapshot
+    }
+
+    /** Reads only windows returned for this display; never uses rootInActiveWindow. */
+    fun observeDisplay(displayId: Int, targetPackage: String): UiSnapshot {
+        require(displayId > 0)
+        val display = getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(displayId)
+            ?: error("DISPLAY_GONE")
+        val listed = windowsOnAllDisplays.get(displayId).orEmpty()
+        val root = listed.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .sortedByDescending { it.layer }.mapNotNull { it.root }
+            .firstOrNull { it.packageName?.toString() == targetPackage }
+            ?: error("BACKGROUND_MODE_UNAVAILABLE: no target Accessibility window on this display")
+        val nodes = mutableListOf<UiNodeSnapshot>()
+        val ownedWindows = listed.filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
+        ownedWindows.forEach { window ->
+            window.root?.takeIf { it.packageName?.toString() != packageName }?.let {
+                collectNode(it, "w${window.id}/0", null, 0, nodes)
+            }
+        }
+        val metrics = createDisplayContext(display).resources.displayMetrics
+        val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
+        return UiSnapshot(targetPackage, root.className?.toString(), metrics.widthPixels, metrics.heightPixels,
+            System.currentTimeMillis(), screenFingerprint(targetPackage, folded), "agent",
+            ownedWindows.map { window ->
+                val rect = Rect().also { window.getBoundsInScreen(it) }
+                UiWindowSnapshot(window.id, window.title?.toString().orEmpty(), window.type, window.layer,
+                    window.isActive, window.isFocused, UiBounds(rect.left, rect.top, rect.right, rect.bottom))
+            }, folded)
     }
 
     fun find(selector: ElementSelector, limit: Int = 20): List<SelectorMatch> =

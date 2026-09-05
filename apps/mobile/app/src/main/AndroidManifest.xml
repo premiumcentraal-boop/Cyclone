@@ -10,6 +10,10 @@
          exemption use case, but the user still grants or declines it in a system-owned dialog. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -32,6 +36,19 @@
             android:authorities="${applicationId}.gateway-init"
             android:exported="false"
             android:initOrder="100" />
+
+        <provider android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku" android:exported="true"
+            android:multiprocess="false" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <activity android:name=".runtime.background.WorkspaceActivity" android:exported="false" />
+        <service android:name=".runtime.background.WorkspaceTaskService" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-requested isolated app task with visible pause, stop and human handoff controls" />
+        </service>
+        <activity android:name=".capture.LiveCaptureConsentActivity" android:exported="false" />
+        <service android:name=".capture.LiveCaptureService" android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <activity
             android:name=".MainActivity"

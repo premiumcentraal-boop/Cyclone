@@ -35,12 +35,10 @@ data class ExecutionSession(
             require(executable) { "default foreground session must remain executable" }
         }
 
-        if (executable) {
-            require(
-                sessionId == DEFAULT_FOREGROUND_SESSION_ID &&
-                    displayId == DEFAULT_DISPLAY_ID &&
-                    backend == ExecutionBackendKind.FOREGROUND_ACCESSIBILITY,
-            ) { "3.9.6 only permits the default foreground Accessibility session to execute" }
+        if (executable && sessionId != DEFAULT_FOREGROUND_SESSION_ID) {
+            require(displayId > 0 && backend == ExecutionBackendKind.SHIZUKU) {
+                "Background execution requires an owned nonzero Shizuku display"
+            }
         }
     }
 

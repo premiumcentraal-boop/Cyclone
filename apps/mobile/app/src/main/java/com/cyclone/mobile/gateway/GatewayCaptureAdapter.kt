@@ -14,6 +14,7 @@ import org.json.JSONObject
  */
 internal object GatewayCaptureAdapter {
     fun capture(context: Context, args: JSONObject): JSONObject {
+        com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(args)
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         val maxDimension = args.optInt("maxDimension", 0).takeIf { it > 0 }

@@ -34,7 +34,7 @@ class V4FoundationTest {
     }
 
     @Test
-    fun onlyDefaultForegroundSessionCanBeExecutableIn396() {
+    fun virtualDisplayMetadataAloneDoesNotAuthorizeExecution() {
         try {
             ExecutionSession(
                 sessionId = "future",
@@ -43,7 +43,7 @@ class V4FoundationTest {
                 executable = true,
                 createdAtEpochMs = 1L,
             )
-            fail("future backend must not become executable in 3.9.6")
+            fail("unowned backend metadata must not authorize execution")
         } catch (_: IllegalArgumentException) {
         }
     }

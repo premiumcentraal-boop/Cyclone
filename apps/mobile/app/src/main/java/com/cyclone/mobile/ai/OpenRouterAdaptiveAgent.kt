@@ -61,7 +61,13 @@ import java.util.concurrent.TimeUnit
  * one provider response can plan up to three safe same-page actions. The instant navigation reaches
  * a new page, Cyclone stops the batch, observes the complete new page and replans from that state.
  */
-class OpenRouterAdaptiveAgent(private val context: Context) {
+class OpenRouterAdaptiveAgent(private val context: Context,
+    private val execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT) {
+    private val background get() = execution.sessionId != "default-foreground"
+    private fun ownsInput(): Boolean = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.ownsInput(execution.sessionId)
+        else DeviceState.controller == DeviceState.Controller.AGENT
+    private fun scoped(params: JSONObject = JSONObject()) = com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(
+        JSONObject().put("sessionId", execution.sessionId).put("displayId", execution.displayId), params)
     private val http = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(75, TimeUnit.SECONDS)
@@ -146,7 +152,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         )
         reliability.start()
         reliability.observe(state.page.pageKey)
-        maybeStartOverlay(traceId)
+        if (!background) maybeStartOverlay(traceId)
         val skillSignatures = mutableListOf<String>()
         val successfulActions = mutableListOf<String>()
         val failedActions = mutableListOf<String>()
@@ -201,7 +207,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 "cyclone-local-agent",
                 classification = CycloneTaskClassification.HARD_BLOCKER.name,
             )
-        if (DeviceState.controller != DeviceState.Controller.AGENT) {
+        if (!ownsInput()) {
             return@withContext QuickAgentResult(
                 false,
                 "Cyclone is waiting for control to return to AGENT before it resumes.",
@@ -250,7 +256,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             traceId = traceId,
             goal = goal,
             config = config,
-            bridge = CyclonePcParityBridge(context),
+            bridge = CyclonePcParityBridge(context, execution),
             apiKey = OpenRouterSecretStore.read(context),
             reliability = reliability,
             skillSignatures = skillSignatures,
@@ -262,7 +268,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         lateinit var localAgent: CycloneLocalAgent
         val model = object : CycloneAgentModel {
             override fun plan(taskState: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
-                if (DeviceState.controller != DeviceState.Controller.AGENT) {
+                if (!ownsInput()) {
                     return CyclonePlanResult.Valid(
                         CycloneModelTurn(
                             CycloneModelDirective.NEED_HUMAN,
@@ -371,7 +377,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 val fresh = observeState(goal) ?: return null
                 session.state = fresh
                 session.bridge.observe(goal) ?: return null
-                DeviceState.markObserved()
+                if (!background) DeviceState.markObserved()
                 return session.bridge.observation()
             }
 
@@ -380,7 +386,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
                 observation: CycloneObservation,
                 turn: CycloneModelTurn,
             ): CycloneToolResult {
-                if (DeviceState.controller != DeviceState.Controller.AGENT) {
+                if (!ownsInput()) {
                     return CycloneToolResult(
                         ok = false,
                         actionSignature = turn.actionSignature,
@@ -476,7 +482,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             ): CycloneTaskClassification {
                 if (turn.reason == API_KEY_BLOCKER) return CycloneTaskClassification.HARD_BLOCKER
                 if (ProviderFailure.message(turn.reason.orEmpty()) != null) return CycloneTaskClassification.HARD_BLOCKER
-                if (DeviceState.controller == DeviceState.Controller.HUMAN || deterministicHumanBoundary(session.state.page)) {
+                if (!ownsInput() || deterministicHumanBoundary(session.state.page)) {
                     session.pendingGateClass = deterministicGateClass(session.state.page)
                     return CycloneTaskClassification.HUMAN_OR_GATE
                 }
@@ -917,7 +923,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
     }
 
     private fun deterministicHumanBoundary(page: PageContext): Boolean {
-        if (DeviceState.controller == DeviceState.Controller.HUMAN) return true
+        if (!ownsInput()) return true
         val text = buildString {
             append(page.title)
             append(' ')
@@ -1056,9 +1062,18 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
             failedActions = failedActions,
         )
         if (agentContext != null) prompt.put("PC_AGENT_CONTEXT", agentContext)
+        val content: Any = if (model.vision && com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.healthy(execution.sessionId)) {
+            val shot = PhoneToolExecutor.execute(context, PhoneToolRequest(
+                "live-model-${UUID.randomUUID()}", "phone.screenshot", scoped(JSONObject().put("includeBase64", true))))
+            val image = (shot.payload as? JSONObject)?.optString("pngBase64").orEmpty()
+            if (shot.ok && image.isNotBlank()) JSONArray()
+                .put(JSONObject().put("type", "text").put("text", prompt.toString()))
+                .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/png;base64,$image")))
+            else prompt.toString()
+        } else prompt.toString()
         val response = pageChat(apiKey, model, JSONArray()
             .put(JSONObject().put("role", "system").put("content", PageAgentProtocol.SYSTEM_PROMPT))
-            .put(JSONObject().put("role", "user").put("content", prompt.toString())), providerSort)
+            .put(JSONObject().put("role", "user").put("content", content)), providerSort)
         providerBoundary(response)?.let { return it }
         val raw = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         if (raw.isBlank()) return null
@@ -1078,7 +1093,7 @@ class OpenRouterAdaptiveAgent(private val context: Context) {
         AgentTraceRuntime.event(context, traceId, "VISION", "Structured page context is ambiguous; capturing one visual fallback for this page", code = "page.vision_once", ok = true)
         val shot = PhoneToolExecutor.execute(
             context,
-            PhoneToolRequest("v28-vision-${UUID.randomUUID()}", "phone.screenshot", JSONObject().put("includeBase64", true)),
+            PhoneToolRequest("v28-vision-${UUID.randomUUID()}", "phone.screenshot", scoped(JSONObject().put("includeBase64", true))),
         )
         val base64 = (shot.payload as? JSONObject)?.optString("pngBase64").orEmpty()
         if (!shot.ok || base64.isBlank()) return null
@@ -1144,10 +1159,10 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
     private fun observeState(goal: String): ObservedState? {
         val result = PhoneToolExecutor.execute(
             context,
-            PhoneToolRequest("v28-observe-${UUID.randomUUID()}", "phone.observe", JSONObject()),
+            PhoneToolRequest("v28-observe-${UUID.randomUUID()}", "phone.observe", scoped()),
         )
         val snapshot = result.payload as? JSONObject ?: return null
-        val environment = MobileContextHarness.build(context, goal, snapshot)
+        val environment = if (background) JSONObject().put("sessionId", execution.sessionId).put("displayId", execution.displayId).put("snapshot", snapshot) else MobileContextHarness.build(context, goal, snapshot)
         val page = PageAwarenessRuntime.capture(context, snapshot)
         return ObservedState(snapshot, environment, page)
     }

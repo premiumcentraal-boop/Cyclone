@@ -57,7 +57,8 @@ interface CycloneAgentEnvironmentApi {
 class CycloneAgentEnvironment internal constructor(
     private val runtime: CycloneAgentRuntimePort,
 ) : CycloneAgentEnvironmentApi {
-    constructor(context: Context) : this(AndroidCycloneAgentRuntimePort(context.applicationContext))
+    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT) :
+        this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution))
 
     private val scope = AgentObservationScope()
     private val actionHistory = ArrayDeque<AgentActionEnvelope>()
@@ -231,6 +232,10 @@ class CycloneAgentEnvironment internal constructor(
         }
 
         val normalizedParams = JSONObject(params.toString())
+            .put("observationId", before.id)
+        if (before.execution.sessionId != "default-foreground") {
+            normalizedParams.put("executionGeneration", before.payload.optLong("executionGeneration"))
+        }
         if (rawElementId != null) {
             val evidence = runCatching { runtime.element(before, rawElementId) }.getOrElse { error ->
                 return@synchronized failureEnvelope(
@@ -853,11 +858,14 @@ internal interface CycloneAgentRuntimePort {
 
 private class AndroidCycloneAgentRuntimePort(
     private val context: Context,
+    private val execution: com.cyclone.mobile.runtime.session.ExecutionContext,
 ) : CycloneAgentRuntimePort {
-    override fun capture(): GatewayObservation =
-        GatewayObservationAdapter.capture(context, JSONObject())
+    private val background get() = execution.sessionId != "default-foreground"
+    private fun scoped(params: JSONObject = JSONObject()) = com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(
+        JSONObject().put("sessionId", execution.sessionId).put("displayId", execution.displayId), params)
 
-    override fun current(): GatewayObservation? = GatewayObservationStore.current()
+    override fun capture(): GatewayObservation = GatewayObservationAdapter.capture(context, scoped())
+    override fun current(): GatewayObservation? = GatewayObservationStore.current(execution.sessionId)
 
     override fun search(
         observation: GatewayObservation,
@@ -870,7 +878,11 @@ private class AndroidCycloneAgentRuntimePort(
         elementId: String,
     ): JSONObject = GatewayObservationAdapter.element(observation, elementId)
 
-    override fun screenshot(goal: String): JSONObject = GatewayCaptureAdapter.capture(
+    override fun screenshot(goal: String): JSONObject = if (background) {
+        val result = PhoneToolExecutor.execute(context, PhoneToolRequest("workspace-capture-${UUID.randomUUID()}", "phone.screenshot", scoped()))
+        if (!result.ok) throw IllegalStateException(result.error?.message)
+        result.payload as JSONObject
+    } else GatewayCaptureAdapter.capture(
         context,
         JSONObject().put("maxDimension", 960).put("includeBase64", false),
     ).apply {
@@ -885,14 +897,15 @@ private class AndroidCycloneAgentRuntimePort(
             "Cyclone Accessibility is not connected.",
             "ACCESSIBILITY_UNAVAILABLE",
         )
-        DeviceState.controller != DeviceState.Controller.AGENT -> AgentFailure(
+        (if (background) !com.cyclone.mobile.runtime.background.WorkspaceRuntime.ownsInput(execution.sessionId)
+            else DeviceState.controller != DeviceState.Controller.AGENT) -> AgentFailure(
             AgentFailureClass.HUMAN_HAS_CONTROL,
             AgentFailureLayer.DEVICE,
             true,
             "Human currently owns device input.",
             "HUMAN_HAS_CONTROL",
         )
-        DeviceState.requireFreshObservation -> AgentFailure(
+        !background && DeviceState.requireFreshObservation -> AgentFailure(
             AgentFailureClass.STALE_OBSERVATION,
             AgentFailureLayer.OBSERVATION,
             true,
@@ -961,7 +974,7 @@ private class AndroidCycloneAgentRuntimePort(
         params: JSONObject,
     ): PhoneToolResult = PhoneToolExecutor.execute(
         context,
-        PhoneToolRequest(requestId, tool, JSONObject(params.toString())),
+        PhoneToolRequest(requestId, tool, scoped(params)),
     )
 
     override fun captureAfter(
@@ -969,7 +982,7 @@ private class AndroidCycloneAgentRuntimePort(
         params: JSONObject,
         before: GatewayObservation,
     ): GatewayObservation? =
-        GatewayV33ActionAdapter.captureAfterAction(context, tool, params, before)
+        GatewayV33ActionAdapter.captureAfterAction(context, tool, scoped(params), before)
 
     override fun verify(
         tool: String,

@@ -315,6 +315,14 @@ internal fun V39AiChatPage(
             Text("Cyclone AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("Ask for one outcome. Cyclone handles the verified phone steps.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Works on this phone with your API key. PC companion is optional.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row {
+                TextButton(onClick = {
+                    context.startActivity(android.content.Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
+                }, enabled = !session.busy) { Text("Enable live view") }
+                TextButton(onClick = {
+                    context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java))
+                }, enabled = !session.busy) { Text("Background task") }
+            }
             if (session.busy) {
                 TextButton(onClick = {
                     session.status = "Stopping…"

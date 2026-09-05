@@ -62,6 +62,18 @@ class ExecutionSessionStore {
         session
     }
 
+    internal fun registerOwned(sessionId: String, displayId: Int, targetPackage: String): ExecutionSession = synchronized(lock) {
+        require(displayId > 0 && sessionId !in sessions && sessions.values.none { it.displayId == displayId })
+        ExecutionSession(sessionId, displayId, targetPackage, ExecutionBackendKind.SHIZUKU,
+            InputOwner.CYCLONE, true, System.currentTimeMillis()).also { sessions[sessionId] = it }
+    }
+
+    internal fun setOwner(sessionId: String, owner: InputOwner): ExecutionSession = synchronized(lock) {
+        val old = resolveLocked(sessionId)
+        require(!old.isDefaultForeground)
+        old.copy(inputOwner = owner).also { sessions[sessionId] = it }
+    }
+
     fun remove(sessionId: String): ExecutionSession? = synchronized(lock) {
         if (sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) {
             throw SessionIdentityException("cannot remove default foreground session")

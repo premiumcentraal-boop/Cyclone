@@ -36,6 +36,13 @@ object PhoneToolExecutor {
      * wait/screenshot/read can no longer hold one global monitor and block unrelated observation.
      */
     fun execute(context: Context, request: PhoneToolRequest): PhoneToolResult {
+        // Validate before cache lookup AND before observing the human display.
+        val scope = try { com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(request.params) }
+        catch (error: IllegalArgumentException) { return scopeFailure(request, error) }
+        if (scope.sessionId != "default-foreground") {
+            return synchronized(mutationLock) { executeWorkspace(context, request, scope) }
+        }
+        if (scope.displayId != 0) return scopeFailure(request, IllegalArgumentException("Display/session mismatch"))
         cached(request.commandId)?.let { return it }
         return if (request.tool in mutatingTools) {
             synchronized(mutationLock) {
@@ -43,6 +50,113 @@ object PhoneToolExecutor {
             }
         } else {
             executeInternal(context, request, mutating = false)
+        }
+    }
+
+    private fun scopeFailure(request: PhoneToolRequest, error: Exception): PhoneToolResult {
+        val now = System.currentTimeMillis()
+        return PhoneToolResult(request.commandId, request.tool, false, now, now,
+            error = PhoneToolError(PhoneToolErrorCode.CAPABILITY_UNAVAILABLE, error.message.orEmpty()))
+    }
+
+    private fun executeWorkspace(context: Context, request: PhoneToolRequest,
+        scope: com.cyclone.mobile.runtime.session.ExecutionContext): PhoneToolResult {
+        val started = System.currentTimeMillis()
+        return try {
+            val runtime = com.cyclone.mobile.runtime.background.WorkspaceRuntime
+            val session = runtime.requireScope(scope)
+            val p = request.params
+            val service = CycloneAccessibilityService.instance ?: error("ACCESSIBILITY_NOT_CONNECTED")
+            if (request.tool !in mutatingTools) {
+                val payload: Any = when (request.tool) {
+                    "phone.observe" -> runtime.observe(scope).toJson().put("sessionId", scope.sessionId).put("displayId", scope.displayId)
+                    "phone.get_current_app" -> JSONObject().put("package", session.targetPackage).put("sessionId", scope.sessionId).put("displayId", scope.displayId)
+                    "phone.screenshot" -> {
+                        val artifact = com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.capture(service.cacheDir, sessionId = scope.sessionId)
+                            ?: error("FRAME_STREAM_STALLED: no fresh frame from the requested display")
+                        artifact.toJson().apply {
+                            if (p.optBoolean("includeBase64")) put("pngBase64", Base64.encodeToString(artifact.file.readBytes(), Base64.NO_WRAP))
+                        }
+                    }
+                    "phone.find" -> JSONArray(SelectorEngine.resolve(runtime.observe(scope), requireSelector(p), 20).map { it.toJson() })
+                    else -> error("UNSUPPORTED: this workspace capability is unavailable")
+                }
+                return PhoneToolResult(request.commandId, request.tool, true, started, System.currentTimeMillis(), payload = payload)
+            }
+            val observation = GatewayObservationStore.current(scope.sessionId) ?: error("STALE_OBSERVATION")
+            check(p.optString("observationId") == observation.id) { "STALE_OBSERVATION: observe this workspace again" }
+            val generation = p.optLong("executionGeneration", -1)
+            check(generation == observation.payload.optLong("executionGeneration", -2)) { "STALE_SESSION" }
+            val snapshot = runtime.observe(scope)
+            check(snapshot.fingerprint == observation.payload.optString("accessibilityFingerprint")) { "STALE_OBSERVATION" }
+            val policy = com.cyclone.mobile.ai.CycloneAiAccessPolicy.evaluate(
+                com.cyclone.mobile.ai.CycloneAiAccessProfileStore.read(context), request.tool, p)
+            if (!policy.allowed) {
+                runtime.pause(scope.sessionId, com.cyclone.mobile.runtime.background.WorkspaceState.BACKGROUND_NEEDS_HANDOFF)
+                error("POLICY_DENIED: ${policy.safeMessage}")
+            }
+            val selector = p.optJSONObject("selector")?.let(ElementSelector::fromJson)
+            val chosen = selector?.let { SelectorEngine.resolve(snapshot, it, 1).firstOrNull()?.node }
+            fun guardedPoint(): UiNodeSnapshot {
+                val node = chosen ?: snapshot.nodes.filter {
+                    val x = p.optDouble("x"); val y = p.optDouble("y")
+                    x >= it.bounds.left && x < it.bounds.right && y >= it.bounds.top && y < it.bounds.bottom && it.clickable
+                }.minByOrNull { it.bounds.width * it.bounds.height } ?: error("UNSUPPORTED: a grounded control is required")
+                val gate = com.cyclone.mobile.policy.GateClassifier.classify(request.tool,
+                    com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector))
+                if (gate != null) {
+                    runtime.pause(scope.sessionId, com.cyclone.mobile.runtime.background.WorkspaceState.BACKGROUND_NEEDS_HANDOFF)
+                    error("POLICY_DENIED: human review is required")
+                }
+                return node
+            }
+            val commands = com.cyclone.mobile.runtime.background.WorkspaceCommands
+            when (request.tool) {
+                "phone.click", "phone.tap", "phone.long_press" -> {
+                    val node = guardedPoint()
+                    val x = node.bounds.centerX; val y = node.bounds.centerY
+                    if (request.tool == "phone.long_press") runtime.input(scope, generation, commands.SWIPE, floatArrayOf(x, y, x, y, 650f))
+                    else runtime.input(scope, generation, commands.TAP, floatArrayOf(x, y))
+                }
+                "phone.scroll" -> {
+                    val node = chosen?.takeIf { it.scrollable } ?: snapshot.nodes.firstOrNull { it.scrollable }
+                        ?: error("UNSUPPORTED: no scrollable control")
+                    val x = node.bounds.centerX
+                    val top = node.bounds.top + node.bounds.height * 0.25f
+                    val bottom = node.bounds.top + node.bounds.height * 0.75f
+                    val backwards = p.optString("direction") == "backward"
+                    runtime.input(scope, generation, commands.SWIPE, floatArrayOf(x, if (backwards) top else bottom, x, if (backwards) bottom else top, 350f))
+                }
+                "phone.swipe" -> {
+                    val x1 = p.optDouble("x1").toFloat(); val y1 = p.optDouble("y1").toFloat()
+                    val x2 = p.optDouble("x2").toFloat(); val y2 = p.optDouble("y2").toFloat()
+                    check(kotlin.math.abs(y2 - y1) > kotlin.math.abs(x2 - x1) && snapshot.nodes.any {
+                        it.scrollable && it.bounds.contains(x1.toInt(), y1.toInt()) && it.bounds.contains(x2.toInt(), y2.toInt())
+                    }) { "UNSUPPORTED: workspace swipes require a vertical scrollable target" }
+                    runtime.input(scope, generation, commands.SWIPE, floatArrayOf(x1, y1, x2, y2, p.optLong("durationMs", 350).toFloat()))
+                }
+                "phone.back" -> runtime.input(scope, generation, commands.BACK)
+                "phone.type", "phone.replace_text" -> {
+                    val node = chosen?.takeIf { it.editable && it.text.isBlank() } ?: error("UNSUPPORTED: background typing currently requires an empty editable control")
+                    guardedPoint()
+                    val value = PhoneTypeEngine.typedValue(p).orEmpty()
+                    commands.input(scope.displayId, commands.TEXT, floatArrayOf(), value)
+                    runtime.input(scope, generation, commands.TAP, floatArrayOf(node.bounds.centerX, node.bounds.centerY))
+                    runtime.input(scope, generation, commands.TEXT, text = value)
+                }
+                "phone.open_app" -> check(p.optString("package") == session.targetPackage) { "UNSUPPORTED: open another workspace for a different app" }
+                else -> error("UNSUPPORTED: this operation cannot safely target a workspace")
+            }
+            GatewayObservationStore.clear(scope.sessionId)
+            val after = runtime.observe(scope)
+            PhoneToolResult(request.commandId, request.tool, true, started, System.currentTimeMillis(),
+                beforeFingerprint = snapshot.fingerprint, afterFingerprint = after.fingerprint,
+                payload = JSONObject().put("performed", true).put("verified", false).put("sessionId", scope.sessionId).put("displayId", scope.displayId))
+        } catch (error: Exception) {
+            if (request.tool in mutatingTools) runCatching { GatewayObservationStore.clear(scope.sessionId) }
+            PhoneToolResult(request.commandId, request.tool, false, started, System.currentTimeMillis(),
+                error = PhoneToolError(if (error.message?.contains("POLICY_DENIED") == true) PhoneToolErrorCode.POLICY_DENIED else PhoneToolErrorCode.CAPABILITY_UNAVAILABLE,
+                    error.message?.take(240) ?: "Workspace operation failed"))
         }
     }
 
@@ -70,6 +184,7 @@ object PhoneToolExecutor {
                 else if (err is GateBlockedException) Outcome(error = PhoneToolError(PhoneToolErrorCode.POLICY_DENIED, err.message ?: "GATE requires confirmation"))
                 else errorResult(PhoneToolErrorCode.INTERNAL_ERROR, err.message ?: err.javaClass.simpleName)
             }
+        if (mutating) com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.mutationFinished()
         val after = when {
             !mutating -> null
             outcome.afterFingerprint != null -> outcome.afterFingerprint
@@ -289,6 +404,13 @@ object PhoneToolExecutor {
         service ?: return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
         val crop = params.optJSONObject("crop")?.let {
             UiBounds(it.optInt("left"), it.optInt("top"), it.optInt("right"), it.optInt("bottom"))
+        }
+        com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.capture(service.cacheDir, crop)?.let { artifact ->
+            return Outcome(artifact.toJson().apply {
+                if (params.optBoolean("includeBase64", false)) {
+                    put("pngBase64", Base64.encodeToString(artifact.file.readBytes(), Base64.NO_WRAP))
+                }
+            })
         }
         val latch = CountDownLatch(1)
         var captured: Result<CycloneAccessibilityService.ScreenshotArtifact>? = null

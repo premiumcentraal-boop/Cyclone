@@ -258,7 +258,7 @@ data class PhoneToolRequest(
         fun fromJson(json: JSONObject): PhoneToolRequest = PhoneToolRequest(
             commandId = json.optString("id").ifBlank { "cmd-${System.nanoTime()}" },
             tool = json.optString("tool", json.optString("action")),
-            params = json.optJSONObject("params") ?: JSONObject(),
+            params = com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(json, json.optJSONObject("params") ?: JSONObject()),
         )
     }
 }

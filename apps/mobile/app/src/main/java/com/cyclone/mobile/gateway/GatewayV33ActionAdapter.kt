@@ -43,6 +43,9 @@ internal object GatewayV33ActionAdapter {
     )
 
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
+        com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(
+            com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()),
+        )
         val tool = args.optString("tool").trim()
         if (tool !in allowedTools) {
             throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Tool is not enabled for the current PC gateway", requestId)
@@ -204,7 +207,7 @@ internal object GatewayV33ActionAdapter {
         before: GatewayObservation?,
     ): GatewayObservation? {
         val deadline = System.currentTimeMillis() + if (tool in pageTransitionTools) 1_800L else 0L
-        var after = runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+        var after = runCatching { GatewayObservationAdapter.capture(context, com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(params, JSONObject())) }.getOrNull()
         while (
             after != null &&
             tool in pageTransitionTools &&
@@ -220,7 +223,7 @@ internal object GatewayV33ActionAdapter {
             System.currentTimeMillis() < deadline
         ) {
             Thread.sleep(120L)
-            after = runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+            after = runCatching { GatewayObservationAdapter.capture(context, com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(params, JSONObject())) }.getOrNull()
         }
         return after
     }

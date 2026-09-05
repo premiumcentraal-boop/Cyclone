@@ -294,7 +294,16 @@ internal object GatewayDispatcher {
         }
     }
 
-    private fun dispatch(context: Context, request: GatewayRequest): Any = when (request.op) {
+    private fun dispatch(context: Context, request: GatewayRequest): Any {
+        // Trust-session IDs belong to authentication. Only execution operations use this scope.
+        if (request.op in setOf("manual.execute", "clipboard.get", "clipboard.set", "observe.semantic",
+                "observe.page_debug", "capture.screenshot", "ui.search", "ui.element", "action.execute",
+                "skill.run")) {
+            com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(
+                com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(request.args, request.args.optJSONObject("params") ?: JSONObject()),
+            )
+        }
+        return when (request.op) {
         "trust.negotiate" -> GatewayV33TrustManager.negotiate(context, request.args)
         "trust.begin" -> GatewayV33TrustManager.beginTrust(context, request.args)
         "trust.complete" -> GatewayV33TrustManager.completeTrust(context, request.args).also {
@@ -354,6 +363,8 @@ internal object GatewayDispatcher {
             "Unsupported gateway operation: ${request.op}",
             request.id,
         )
+    }
+
     }
 
     private fun dispatchSkill(context: Context, request: GatewayRequest): JSONObject {

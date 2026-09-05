@@ -2,7 +2,7 @@ name: Cyclone Mobile CI
 
 on:
   push:
-    branches: [main, 'release/cyclone-mobile-v*']
+    branches: [main, 'release/cyclone-mobile-v*', 'agent/397-v4-live-background-completion']
     paths:
       - 'apps/mobile/**'
       - 'apps/device-gateway/**'
