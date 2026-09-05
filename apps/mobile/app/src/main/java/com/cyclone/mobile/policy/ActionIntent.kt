@@ -18,6 +18,7 @@ object ActionIntentClassifier {
     private val nuisanceDismiss = setOf("close", "dismiss", "maybe later", "no thanks", "not now")
     private val pay = setOf("pay", "payment", "checkout", "place order", "buy now", "purchase", "confirm order", "complete purchase")
     private val delete = setOf("delete", "remove", "erase", "factory reset", "wipe data", "move to bin", "move to trash", "send to bin", "send to trash", "throw away")
+    private val deleteMoveToBinOrTrash = Regex("""(?:move|send)(?:\s+\S+){0,6}\s+to\s+(?:bin|trash)""")
     private val send = setOf("send", "send message", "send email", "post", "publish")
     private val grant = setOf("grant", "allow access", "give permission", "authorize app", "trust this", "enable access")
 
@@ -41,14 +42,16 @@ object ActionIntentClassifier {
         }
 
         if (pay.any { selected.contains(it) || actionText.contains(it) }) return ActionIntent.PAY
-        if (delete.any { selected.contains(it) || actionText.contains(it) }) return ActionIntent.DELETE
+        if (delete.any { selected.contains(it) || actionText.contains(it) } || deleteMoveToBinOrTrash.containsMatchIn(selected)) {
+            return ActionIntent.DELETE
+        }
         if (send.any { selected == it || selected.startsWith("$it ") || actionText == it }) return ActionIntent.SEND_EXTERNAL
         if (grant.any { selected.contains(it) || actionText.contains(it) }) return ActionIntent.GRANT_PERMISSION
 
         // Fall back to full context only for phrases whose semantic target is intrinsically
         // consequential. Generic words inside explanatory prose are deliberately ignored.
         if (pay.any(combined::contains)) return ActionIntent.PAY
-        if (delete.any(combined::contains)) return ActionIntent.DELETE
+        if (delete.any(combined::contains) || deleteMoveToBinOrTrash.containsMatchIn(combined)) return ActionIntent.DELETE
         if (grant.any(combined::contains)) return ActionIntent.GRANT_PERMISSION
         if (nuisanceDismiss.any { selected == it || selected.startsWith("$it ") }) return ActionIntent.DISMISS_NUISANCE
         return ActionIntent.SAFE_OTHER
