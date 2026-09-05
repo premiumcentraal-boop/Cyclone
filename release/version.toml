@@ -1,12 +1,12 @@
-# Cyclone 3.9.4 agent reliability release
+# Cyclone 3.9.5 standalone reliability release
 schema = 1
-product_version = "3.9.4"
+product_version = "3.9.5"
 channel = "development"
-android_version_code = 58
+android_version_code = 59
 python_version = "3.8.4"
 
 [components]
-mobile = "3.9.4"
+mobile = "3.9.5"
 pc_companion = "3.8.4"
 device_gateway = "3.8.4"
 mcp = "3.8.4"
@@ -18,4 +18,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-3.9.4"
+candidate_generation = "cyclone-3.9.5"
