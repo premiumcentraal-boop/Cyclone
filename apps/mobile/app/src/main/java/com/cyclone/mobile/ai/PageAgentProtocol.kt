@@ -22,6 +22,11 @@ data class PageAgentDecision(
     val reason: String?,
 )
 
+data class PageAgentParseResult(
+    val decision: PageAgentDecision,
+    val repaired: Boolean,
+)
+
 object PageAgentProtocol {
     val SYSTEM_PROMPT: String = """
 You are Cyclone Page Agent, an autonomous Android agent that operates one semantic page at a time inside one continuous user task.
@@ -51,7 +56,8 @@ Rules:
 10. Behave as one agentic task session: use a provider response to resolve an unknown semantic state, execute locally, verify, then continue. Do not create model calls for raw Accessibility events or every atomic action.
 11. Tool contracts are strict. `phone.open_app` requires `params.package` unless `params.app`/`params.appName` clearly names a common app Cyclone can resolve. Example: Chrome package is `com.android.chrome`. `phone.launch_intent` requires an allowlisted `http` or `https` URI in `params.uri`; it is a useful materially different browser fallback when a normal app launch fails.
 12. In FREE mode, prefer a different mechanism after a repeated failure. Example: if launching Chrome directly fails, opening the requested HTTPS URL through `phone.launch_intent` is materially different. Do not loop between equivalent app-launch requests.
-13. Return strict JSON only. No markdown.
+13. When a modal is present, reason about the SELECTED CONTROL separately from explanatory modal text. A `Block`/`Deny` notification action is not a message-send action merely because the dialog says a site “wants to send you notifications”.
+14. Return strict JSON only. No markdown.
 
 Schema:
 {
@@ -98,6 +104,52 @@ Schema:
         )
     }
 
+    /** One bounded formatting repair; semantic/model retries are owned by the task runtime. */
+    fun parsePortable(raw: String): PageAgentParseResult {
+        runCatching { parse(raw) }.getOrNull()?.let { return PageAgentParseResult(it, repaired = false) }
+        val trimmed = raw.trim()
+        val start = trimmed.indexOf('{')
+        val end = trimmed.lastIndexOf('}')
+        require(start >= 0 && end > start) { "Model output did not contain a JSON object" }
+        val repaired = parse(trimmed.substring(start, end + 1))
+        return PageAgentParseResult(repaired, repaired = true)
+    }
+
+    /** Provider-portable response format: schema when supported, strict JSON object otherwise. */
+    fun responseFormat(model: OpenRouterModelPreset): JSONObject {
+        if (model.structuredOutputMode == OpenRouterStructuredOutputMode.JSON_OBJECT) {
+            return JSONObject().put("type", "json_object")
+        }
+        val string = JSONObject().put("type", "string")
+        val action = JSONObject()
+            .put("type", "object")
+            .put("additionalProperties", false)
+            .put("properties", JSONObject()
+                .put("tool", string)
+                .put("controlId", string)
+                .put("params", JSONObject().put("type", "object").put("additionalProperties", true))
+                .put("expectedPageChange", JSONObject().put("type", "boolean"))
+                .put("displaySummary", string))
+            .put("required", JSONArray(listOf("tool", "controlId", "params", "expectedPageChange", "displaySummary")))
+        val schema = JSONObject()
+            .put("type", "object")
+            .put("additionalProperties", false)
+            .put("properties", JSONObject()
+                .put("status", string)
+                .put("pageSummary", string)
+                .put("displaySummary", string)
+                .put("actions", JSONObject().put("type", "array").put("maxItems", 3).put("items", action))
+                .put("answer", string)
+                .put("reason", string))
+            .put("required", JSONArray(listOf("status", "pageSummary", "displaySummary", "actions", "answer", "reason")))
+        return JSONObject()
+            .put("type", "json_schema")
+            .put("json_schema", JSONObject()
+                .put("name", "cyclone_page_agent_decision")
+                .put("strict", false)
+                .put("schema", schema))
+    }
+
     fun context(
         goal: String,
         page: PageContext,
@@ -141,15 +193,20 @@ Schema:
         params
     }
 
-    /** Stable, privacy-safe signature used by convergence logic. Typed values are never included. */
+    /**
+     * Stable, privacy-safe strategy signature used by convergence logic. Observation UUIDs/page
+     * hashes are deliberately excluded so semantically identical retries cannot evade quarantine.
+     * Typed values and URL query/fragment data are never included.
+     */
     fun actionSignature(decision: PageAgentDecision, pageKey: String): String? {
         if (decision.status != "act" || decision.actions.isEmpty()) return null
         return decision.actions.joinToString("|") { action ->
             when (action.tool) {
                 "phone.open_app" -> "phone.open_app:package=${inferAppPackage(action).orEmpty()}"
                 "phone.launch_intent" -> "phone.launch_intent:uri=${safeUriForTrace(action.params.optString("uri"))}"
-                "phone.type", "phone.replace_text" -> "${action.tool}:control=${action.controlId.orEmpty()}"
-                else -> "${action.tool}:control=${action.controlId.orEmpty()}:page=${pageKey.takeLast(12)}"
+                "phone.type", "phone.replace_text" -> "${action.tool}:${stableTarget(action)}"
+                "phone.scroll" -> "phone.scroll:${stableTarget(action)}:direction=${action.params.optString("direction", "forward").lowercase()}"
+                else -> "${action.tool}:${stableTarget(action)}"
             }
         }.take(480)
     }
@@ -169,6 +226,23 @@ Schema:
         if (decision.status != "done") return false
         return page.title.isNotBlank() && (page.controls.isNotEmpty() || page.packageName.isNotBlank())
     }
+
+    private fun stableTarget(action: PageAgentAction): String {
+        val id = action.controlId.orEmpty().trim()
+        if (id.isNotBlank() && !looksEphemeral(id)) return "control=${id.take(120)}"
+        val semantic = normalizeIntent(action.displaySummary)
+            .ifBlank { normalizeIntent(action.tool.removePrefix("phone.")) }
+            .take(120)
+        return "intent=$semantic"
+    }
+
+    private fun looksEphemeral(value: String): Boolean =
+        UUIDISH.containsMatchIn(value) || LONG_HEX.containsMatchIn(value)
+
+    private fun normalizeIntent(value: String): String = value.lowercase()
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
     private fun inferAppPackage(action: PageAgentAction): String? {
         action.params.optString("package").trim().takeIf { it.isNotBlank() }?.let { return it }
@@ -200,6 +274,8 @@ Schema:
         "phone.click", "phone.long_press", "phone.type", "phone.replace_text", "phone.scroll", "phone.wait_for", "phone.assert",
     )
     private val NAVIGATING_TOOLS = setOf("phone.click", "phone.swipe", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent")
+    private val UUIDISH = Regex("(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    private val LONG_HEX = Regex("(?i)(?:^|[^0-9a-f])[0-9a-f]{16,}(?:$|[^0-9a-f])")
 
     internal fun stripFence(value: String): String = value.trim()
         .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
