@@ -7,6 +7,7 @@ enum class GoalRequirementKind {
     WEB_HOST,
     VERIFIED_SCROLL,
     DISMISS_COOKIE_CONSENT,
+    SITE_NOTIFICATION_PERMISSION,
     VERIFIED_TARGET_INTERACTION,
     GENERIC_SEMANTIC_EVIDENCE,
 }
@@ -113,6 +114,22 @@ object GoalContractCompiler {
             )
         }
 
+        val notificationIntent = listOf("notification", "notifications").any(lower::contains)
+        if (notificationIntent) {
+            val desiredState = when {
+                listOf("block", "deny", "disable", "don't allow", "dont allow").any(lower::contains) -> "DENY"
+                listOf("allow", "enable").any(lower::contains) -> "ALLOW"
+                else -> null
+            }
+            if (desiredState != null) {
+                requirements += GoalRequirement(
+                    GoalRequirementKind.SITE_NOTIFICATION_PERMISSION,
+                    value = desiredState,
+                    terms = significantTerms(clean),
+                )
+            }
+        }
+
         if (requirements.isEmpty() && Regex("(?i)\\b(click|tap|press|select|choose)\\b").containsMatchIn(clean)) {
             requirements += GoalRequirement(
                 GoalRequirementKind.VERIFIED_TARGET_INTERACTION,
@@ -151,16 +168,11 @@ object GoalContractCompiler {
         return when (requirement.kind) {
             GoalRequirementKind.WEB_HOST -> {
                 val host = requirement.value.orEmpty()
-                // A launch request and a browser package transition do not prove which site loaded.
-                // The user's goal (including its echo in Cyclone's chat) is never after-state evidence.
                 val pageMatch = currentPage?.let { pageShowsHost(it, host) } == true
                 GoalRequirementResult(
                     requirement,
                     pageMatch,
-                    when {
-                        pageMatch -> "requested host is present in the authoritative current scene"
-                        else -> "requested host has not been verified"
-                    },
+                    if (pageMatch) "requested host is present in the authoritative current scene" else "requested host has not been verified",
                 )
             }
 
@@ -185,11 +197,26 @@ object GoalContractCompiler {
                 GoalRequirementResult(
                     requirement,
                     matched != null,
-                    if (matched != null) {
-                        "verified click reduced or removed the consent surface"
-                    } else {
-                        "no verified consent-surface dismissal is present in the action ledger"
-                    },
+                    if (matched != null) "verified click reduced or removed the consent surface" else "no verified consent-surface dismissal is present in the action ledger",
+                )
+            }
+
+            GoalRequirementKind.SITE_NOTIFICATION_PERMISSION -> {
+                val desired = requirement.value.orEmpty()
+                val matched = successful.asReversed().firstOrNull { envelope ->
+                    if (envelope.tool != "phone.click") return@firstOrNull false
+                    val before = envelope.before ?: return@firstOrNull false
+                    val after = envelope.after ?: return@firstOrNull false
+                    val beforeScore = notificationSurfaceScore(before)
+                    val afterScore = notificationSurfaceScore(after)
+                    if (beforeScore <= 0 || afterScore >= beforeScore) return@firstOrNull false
+                    val expectedLabels = if (desired == "ALLOW") listOf("allow", "enable", "yes") else listOf("block", "deny", "don't allow", "dont allow", "not now")
+                    before.controls.any { control -> expectedLabels.any { expected -> control.label.contains(expected, ignoreCase = true) || control.semanticName.contains(expected, ignoreCase = true) } }
+                }
+                GoalRequirementResult(
+                    requirement,
+                    matched != null,
+                    if (matched != null) "verified notification decision removed the relevant permission surface" else "notification decision is not yet proven by the verified action ledger",
                 )
             }
 
@@ -243,6 +270,19 @@ object GoalContractCompiler {
         return score
     }
 
+    private fun notificationSurfaceScore(page: AgentPageCard): Int {
+        val notificationTerms = listOf("notification", "notifications")
+        val actionTerms = listOf("block", "allow", "deny")
+        var score = 0
+        page.controls.forEach { control ->
+            val text = "${control.label} ${control.semanticName}".lowercase()
+            if (actionTerms.any(text::contains)) score += 2
+        }
+        val surfaceText = "${page.pageSummary} ${page.pageText}".lowercase()
+        if (notificationTerms.any(surfaceText::contains)) score += 2
+        return score
+    }
+
     private fun pageHaystack(page: AgentPageCard): String = buildString {
         append(page.packageName).append(' ')
         append(page.activity.orEmpty()).append(' ')
@@ -264,7 +304,6 @@ object GoalContractCompiler {
             val id = it.evidence.optString("resourceId").lowercase()
             listOf("url_bar", "urlbar", "location_bar", "address_bar").any(id::contains)
         }
-        // If the address bar is available it wins over mentions in search results or link text.
         val text = if (addressControls.isNotEmpty()) addressControls.joinToString(" ") {
             "${it.label} ${it.semanticName}"
         } else "${page.pageSummary} ${page.pageText}"
@@ -296,7 +335,6 @@ object GoalContractCompiler {
         return editDistanceAtMostOne(a, b)
     }
 
-    /** Optimized distance<=1 test so typo tolerance never becomes an expensive fuzzy search. */
     private fun editDistanceAtMostOne(a: String, b: String): Boolean {
         if (a == b) return true
         if (kotlin.math.abs(a.length - b.length) > 1) return false
