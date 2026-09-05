@@ -17,6 +17,7 @@ data class CycloneConvergencePolicy(
     val maxBacktrackAttempts: Int = 3,
     val maxStaleTargetRetries: Int = 2,
     val maxMutationsWithoutVerifiedProgress: Int = 10,
+    val maxRepeatedUnverifiedDone: Int = 2,
 ) {
     init {
         require(taskTimeoutMs > 0)
@@ -27,6 +28,7 @@ data class CycloneConvergencePolicy(
         require(maxBacktrackAttempts > 0)
         require(maxStaleTargetRetries > 0)
         require(maxMutationsWithoutVerifiedProgress > 0)
+        require(maxRepeatedUnverifiedDone > 0)
     }
 }
 
@@ -114,6 +116,7 @@ class CycloneLocalAgent(
 ) {
     private var cancelled = false
     private var mutationsWithoutVerifiedProgress = 0
+    private var repeatedUnverifiedDone = 0
     private var state = restoredState
         ?.also { require(it.goal == goal) { "Restored task goal does not match requested goal" } }
         ?.let { restored ->
@@ -135,6 +138,7 @@ class CycloneLocalAgent(
     fun resume(): Boolean {
         if (!state.gateSuspended || state.finalClassification != CycloneTaskClassification.HUMAN_OR_GATE) return false
         state = state.copy(currentStage = CycloneAgentStage.OBSERVE, gateSuspended = false, requireFreshObservation = true, finalClassification = null, consecutiveRecoveryCyclesWithoutNewEvidence = 0, repeatedIdenticalActionWithoutProgress = 0)
+        repeatedUnverifiedDone = 0
         emit(CycloneTraceEventType.GATE_RESUME); checkpoint(); return true
     }
 
@@ -176,13 +180,41 @@ class CycloneLocalAgent(
             when (turn.directive) {
                 CycloneModelDirective.DONE -> {
                     state = state.copy(currentStage = CycloneAgentStage.VERIFY)
-                    val v = tools.verifyCompletion(state, observation, turn)
-                    emit(CycloneTraceEventType.VERIFY, if (v.verified && v.complete) "completion.verified" else "completion.unverified", observation)
+                    var completionObservation = observation
+                    var v = tools.verifyCompletion(state, completionObservation, turn)
+                    emit(CycloneTraceEventType.VERIFY, if (v.verified && v.complete) "completion.verified" else "completion.unverified", completionObservation)
                     if (v.verified && v.complete) return complete(v.message)
-                    recover(CycloneRecoveryKind.VERIFICATION_FAILURE, "completion.unverified", newEvidence)?.let { return it }
+
+                    // A rejected DONE is a verification problem first, not a planning problem. Re-read
+                    // the phone locally and retry the same completion contract without burning another
+                    // provider turn. This catches delayed browser/modal transitions and stale page cards.
+                    state = state.copy(currentStage = CycloneAgentStage.OBSERVE, requireFreshObservation = true)
+                    val fresh = tools.observe(state)
+                    if (fresh != null) {
+                        completionObservation = fresh
+                        state = state.copy(
+                            latestObservationIdentity = fresh.identity,
+                            latestPageIdentity = fresh.pageIdentity,
+                            requireFreshObservation = false,
+                            currentStage = CycloneAgentStage.VERIFY,
+                        )
+                        emit(CycloneTraceEventType.OBSERVE, "completion.reobserve", fresh)
+                        v = tools.verifyCompletion(state, fresh, turn)
+                        emit(CycloneTraceEventType.VERIFY, if (v.verified && v.complete) "completion.verified_after_reobserve" else "completion.still_unverified", fresh)
+                        if (v.verified && v.complete) return complete(v.message)
+                    }
+
+                    repeatedUnverifiedDone += 1
+                    if (repeatedUnverifiedDone >= convergence.maxRepeatedUnverifiedDone) {
+                        return nonConvergence("completion.ambiguous_after_recheck")
+                    }
+                    val freshEvidence = completionObservation.identity != observation.identity ||
+                        completionObservation.pageIdentity != observation.pageIdentity
+                    recover(CycloneRecoveryKind.VERIFICATION_FAILURE, "completion.unverified", freshEvidence)?.let { return it }
                     continue
                 }
                 CycloneModelDirective.BLOCKED, CycloneModelDirective.NEED_HUMAN -> {
+                    repeatedUnverifiedDone = 0
                     state = state.copy(currentStage = CycloneAgentStage.CLASSIFY_RESULT)
                     when (tools.classifyModelBoundary(state, observation, turn)) {
                         CycloneTaskClassification.HUMAN_OR_GATE -> return suspendForGate(turn.reason)
@@ -199,6 +231,7 @@ class CycloneLocalAgent(
                     continue
                 }
                 CycloneModelDirective.NEED_VISION -> {
+                    repeatedUnverifiedDone = 0
                     val used = state.visionUseState[observation.identity] ?: 0
                     if (used >= convergence.maxVisionAttemptsOnUnchangedState) {
                         recover(CycloneRecoveryKind.VISION_UNCHANGED, "vision.unchanged", false)?.let { return it }
@@ -207,7 +240,7 @@ class CycloneLocalAgent(
                     state = state.copy(visionUseState = state.visionUseState + (observation.identity to used + 1))
                     emit(CycloneTraceEventType.VISION_ESCALATION, "vision.escalate", observation)
                 }
-                CycloneModelDirective.ACT -> Unit
+                CycloneModelDirective.ACT -> repeatedUnverifiedDone = 0
             }
 
             if (turn.actionSignature.isNullOrBlank()) {
