@@ -110,14 +110,14 @@ object GoalContractCompiler {
         if (requirements.isEmpty() && Regex("(?i)\\b(click|tap|press|select|choose)\\b").containsMatchIn(clean)) {
             requirements += GoalRequirement(
                 GoalRequirementKind.VERIFIED_TARGET_INTERACTION,
-                terms = significantTerms(clean),
+                terms = significantTerms(finalGoalSegment(clean)),
             )
         }
 
         if (requirements.isEmpty()) {
             requirements += GoalRequirement(
                 GoalRequirementKind.GENERIC_SEMANTIC_EVIDENCE,
-                terms = significantTerms(clean),
+                terms = significantTerms(finalGoalSegment(clean)),
             )
         }
 
@@ -254,6 +254,12 @@ object GoalContractCompiler {
             append(control.evidence.optString("resourceId")).append(' ')
         }
     }.lowercase()
+
+    private fun finalGoalSegment(value: String): String = value
+        .split(Regex("(?i)\\bthen\\b|\\bfinally\\b|->|→|;|,"))
+        .map(String::trim)
+        .lastOrNull(String::isNotBlank)
+        ?: value
 
     private fun significantTerms(value: String): List<String> = wordPattern.findAll(value.lowercase())
         .map { it.value }
