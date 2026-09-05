@@ -6,6 +6,7 @@ import com.cyclone.mobile.agent.contract.AgentActionEnvelope
 import com.cyclone.mobile.agent.contract.AgentElementCandidate
 import com.cyclone.mobile.agent.contract.AgentFailureClass
 import com.cyclone.mobile.agent.contract.AgentPageCard
+import com.cyclone.mobile.agent.contract.GoalContractCompiler
 import com.cyclone.mobile.agent.recovery.AgenticRecoveryRuntimePort
 import com.cyclone.mobile.agent.recovery.DefaultAgenticRecoveryRuntimePort
 import com.cyclone.mobile.agent.recovery.EvidenceSource
@@ -85,12 +86,32 @@ class CyclonePcParityBridge internal constructor(
 
     fun promptContext(goal: String): JSONObject {
         val card = page
+        val history = environment.history()
+        val contract = GoalContractCompiler.compile(goal)
+        val completion = GoalContractCompiler.evaluate(contract, card, history)
         val out = JSONObject()
-            .put("contract", "cyclone-pc-parity-local-v1")
+            .put("contract", "cyclone-pc-parity-local-v2")
             .put("goal", goal)
+            .put("goalContract", contract.toJson())
+            .put("completionState", completion.toJson())
             .put("staleIdRule", "elementId is valid only for the current observation; re-locate after every mutation")
             .put("verificationRule", "executor acceptance is never semantic success; Android after-state verification is authoritative")
-        if (card != null) out.put("pageCard", pageCardJson(card))
+            .put("completionRule", "done means every goalContract requirement is independently satisfied; do not keep acting after the contract is satisfied")
+        if (card != null) {
+            out.put("pageCard", pageCardJson(card))
+            out.put(
+                "scene",
+                JSONObject()
+                    .put("authoritativePackage", card.packageName)
+                    .put("activity", card.activity ?: JSONObject.NULL)
+                    .put("pageKey", card.pageKey)
+                    .put("taskSurfaceLooksCycloneOwned", card.packageName == "com.cyclone.mobile")
+                    .put("pageSummary", JSONObject(card.pageSummary.toString()))
+                    .put("visibleTextExcerpt", compactText(card))
+                    .put("interruptions", interruptionCandidates(card)),
+            )
+        }
+        out.put("recentOutcomes", recentOutcomeJson(history))
         val recoveryJson = JSONObject()
             .put("attemptedLevels", JSONArray(memory.attemptedLevels.sortedBy { it.stage }.map { it.name }))
             .put("attemptedEvidence", JSONArray(memory.attemptedEvidence.map { it.name }))
@@ -261,38 +282,13 @@ class CyclonePcParityBridge internal constructor(
     }
 
     fun completionEvidence(goal: String): Boolean {
-        val card = page ?: return false
-        val finalSegment = goal
-            .split(Regex("(?i)\\bthen\\b|\\bfinally\\b|->|→|;|,"))
-            .map(String::trim)
-            .lastOrNull(String::isNotBlank)
-            ?: goal
-        var tokens = finalSegment.lowercase()
-            .split(Regex("[^a-z0-9]+"))
-            .filter { it.length >= 3 && it !in COMPLETION_STOP_WORDS }
-            .distinct()
-        if (tokens.isEmpty()) {
-            tokens = goal.lowercase()
-                .split(Regex("[^a-z0-9]+"))
-                .filter { it.length >= 3 && it !in COMPLETION_STOP_WORDS }
-                .distinct()
-                .takeLast(4)
-        }
-        if (tokens.isEmpty()) return false
-        val target = tokens.takeLast(4)
-        val haystack = buildString {
-            append(card.packageName).append(' ')
-            append(card.activity.orEmpty()).append(' ')
-            append(card.pageSummary.toString()).append(' ')
-            append(card.pageText.toString()).append(' ')
-            card.controls.take(36).forEach {
-                append(it.label).append(' ')
-                append(it.semanticName).append(' ')
-            }
-        }.lowercase()
-        val matched = target.count(haystack::contains)
-        val required = if (target.size <= 1) 1 else minOf(2, target.size)
-        return matched >= required
+        val contract = GoalContractCompiler.compile(goal)
+        return GoalContractCompiler.evaluate(contract, page, environment.history()).satisfied
+    }
+
+    fun completionEvaluation(goal: String): JSONObject {
+        val contract = GoalContractCompiler.compile(goal)
+        return GoalContractCompiler.evaluate(contract, page, environment.history()).toJson()
     }
 
     fun causeFor(envelope: AgentActionEnvelope): RecoverableCause = when (envelope.errorClass) {
@@ -392,6 +388,50 @@ class CyclonePcParityBridge internal constructor(
         .put("controls", JSONArray().also { array -> card.controls.forEach { array.put(candidateJson(it)) } })
         .put("nextHopHints", JSONArray(card.nextHopHints.toString()))
 
+    private fun compactText(card: AgentPageCard): String {
+        val combined = buildString {
+            append(card.pageText.toString()).append(' ')
+            card.controls.take(40).forEach { control ->
+                append(control.label).append(' ')
+                append(control.semanticName).append(' ')
+            }
+        }.replace(Regex("\\s+"), " ").trim()
+        return combined.take(2_400)
+    }
+
+    private fun interruptionCandidates(card: AgentPageCard): JSONArray {
+        val markers = listOf(
+            "cookie", "consent", "privacy", "tracking", "translate", "notification", "permission",
+            "allow", "deny", "newsletter", "sign in", "login", "captcha", "open in app",
+        )
+        val array = JSONArray()
+        card.controls.asSequence()
+            .filter { control ->
+                val text = "${control.label} ${control.semanticName}".lowercase()
+                markers.any(text::contains)
+            }
+            .take(12)
+            .forEach { array.put(candidateJson(it)) }
+        return array
+    }
+
+    private fun recentOutcomeJson(history: List<AgentActionEnvelope>): JSONArray = JSONArray().also { array ->
+        history.takeLast(8).forEach { envelope ->
+            array.put(
+                JSONObject()
+                    .put("tool", envelope.tool)
+                    .put("androidExecutionOk", envelope.androidExecutionOk)
+                    .put("verificationStatus", envelope.verification.status.name)
+                    .put("verificationPassed", envelope.verification.passed)
+                    .put("verificationBasis", envelope.verification.basis ?: JSONObject.NULL)
+                    .put("semanticSuccessClaimed", envelope.semanticSuccessClaimed)
+                    .put("delta", envelope.delta.summary.take(240))
+                    .put("errorClass", envelope.errorClass.name)
+                    .put("learningRecorded", envelope.learning.recorded),
+            )
+        }
+    }
+
     private fun candidateJson(candidate: AgentElementCandidate): JSONObject = JSONObject()
         .put("controlId", candidate.elementId)
         .put("elementId", candidate.elementId)
@@ -421,10 +461,6 @@ class CyclonePcParityBridge internal constructor(
             "phone.long_press",
             "phone.type",
             "phone.replace_text",
-        )
-        private val COMPLETION_STOP_WORDS = setOf(
-            "open", "go", "navigate", "take", "to", "the", "a", "an", "and", "then", "finally",
-            "find", "show", "me", "on", "in", "for", "please", "page", "screen",
         )
     }
 }
