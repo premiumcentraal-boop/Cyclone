@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ai
 
+import com.cyclone.mobile.ai.model.BoundedJsonRepair
 import com.cyclone.mobile.applearner.PageContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -203,6 +204,10 @@ Schema:
     )
     private val NAVIGATING_TOOLS = setOf("phone.click", "phone.swipe", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent")
 
-    internal fun stripFence(value: String): String = value.trim()
-        .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+    internal fun stripFence(value: String): String {
+        val clean = value.trim()
+        if (clean.startsWith("{") && clean.endsWith("}")) return clean
+        return BoundedJsonRepair.extractSingleObject(clean)
+            ?: clean.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+    }
 }

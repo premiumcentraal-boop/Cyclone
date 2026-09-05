@@ -51,6 +51,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.ai.AgentRunDiagnosticV39
 import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.CycloneAiAccessProfile
 import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
@@ -58,9 +59,13 @@ import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
 import com.cyclone.mobile.ai.OpenRouterModelPreset
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.OpenRouterSecretStore
+import com.cyclone.mobile.ai.ProviderFailureClass
 import com.cyclone.mobile.ai.QuickAgentConfig
 import com.cyclone.mobile.ai.QuickAgentResult
 import com.cyclone.mobile.ai.TaskResultActivityV292
+import com.cyclone.mobile.ai.model.ModelQualificationOutcome
+import com.cyclone.mobile.ai.model.ModelQualificationRunner
+import com.cyclone.mobile.ai.model.ModelRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -99,13 +104,22 @@ internal object V39AiChatContract {
     fun modelForStored(stored: String?): OpenRouterModelPreset =
         OpenRouterModelPresets.byId(stored.orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id })
 
+    fun storageId(model: OpenRouterModelPreset): String =
+        ModelRegistry.profileForPreset(model)?.cycloneId ?: model.id
+
     fun models(): List<OpenRouterModelPreset> = OpenRouterModelPresets.all
 
-    fun config(modelId: String, accessProfile: CycloneAiAccessProfile): QuickAgentConfig = QuickAgentConfig(
-        model = OpenRouterModelPresets.byId(modelId),
-        safeMode = accessProfile != CycloneAiAccessProfile.FULL,
-        accessProfile = accessProfile,
-    )
+    fun config(modelId: String, accessProfile: CycloneAiAccessProfile): QuickAgentConfig {
+        val model = modelForStored(modelId)
+        val profile = ModelRegistry.profileForPreset(model)
+        return QuickAgentConfig(
+            model = model,
+            // Contributor never crosses into the normal default vision identity.
+            visionModel = if (profile?.isContributor == true) model else OpenRouterModelPresets.GEMINI_3_8_FLASH,
+            safeMode = accessProfile != CycloneAiAccessProfile.FULL,
+            accessProfile = accessProfile,
+        )
+    }
 
     fun finalStatus(result: QuickAgentResult): String = if (result.ok) "Completed and checked" else "Stopped safely"
 }
@@ -127,6 +141,103 @@ internal class V39AiSubmitGate {
     }
 }
 
+private fun recordPreflightFailure(
+    context: Context,
+    request: String,
+    outcome: ModelQualificationOutcome.Failed,
+): String {
+    val traceId = AgentTraceRuntime.start(context, request, outcome.profile.cycloneId)
+    AgentTraceRuntime.event(
+        context, traceId, "MODEL_SELECTED", outcome.profile.displayName,
+        code = outcome.profile.cycloneId, ok = true,
+        detail = "slug=${outcome.profile.openRouterSlug} · privacy=${outcome.profile.privacyClass}",
+    )
+    AgentTraceRuntime.event(
+        context, traceId, "MODEL_PREFLIGHT_STARTED", "Provider-only model qualification started before Android observation",
+        code = "model.preflight", ok = true,
+        detail = "phoneMutations=0 · phoneObservation=false · screenshot=false",
+    )
+    if (outcome.failure.failureClass == ProviderFailureClass.MALFORMED_MODEL_OUTPUT) {
+        AgentTraceRuntime.event(
+            context, traceId, "MODEL_OUTPUT_RECEIVED", "Qualification response received",
+            code = "model.output", ok = true,
+        )
+        AgentTraceRuntime.event(
+            context, traceId, "MODEL_OUTPUT_REJECTED", "Qualification output did not satisfy Cyclone's contract",
+            code = outcome.failure.code, ok = false,
+        )
+    }
+    AgentTraceRuntime.event(
+        context, traceId, "PROVIDER_ERROR", outcome.failure.userMessage,
+        code = outcome.failure.code, ok = false,
+        detail = listOfNotNull(
+            "http=${outcome.failure.httpStatus}",
+            outcome.failure.providerCode?.let { "providerCode=$it" },
+            outcome.failure.providerName?.let { "provider=$it" },
+            outcome.failure.requestId?.let { "requestId=$it" },
+            "retryable=${outcome.failure.retryable}",
+            "phoneMutations=0",
+        ).joinToString(" · "),
+    )
+    AgentTraceRuntime.event(
+        context, traceId, "MODEL_PREFLIGHT_FAILED", "Model qualification failed before Android execution",
+        code = outcome.failure.code, ok = false,
+        detail = "No Android failure attribution and no negative navigation evidence were recorded.",
+    )
+    AgentTraceRuntime.finish(context, traceId, "FAILED", outcome.failure.userMessage, 0)
+    AgentRunDiagnosticV39.ensureCanonical(context, traceId)
+    return traceId
+}
+
+private fun attachPreflightSuccess(
+    context: Context,
+    run: QuickAgentResult,
+    outcome: ModelQualificationOutcome.Passed,
+) {
+    val traceId = run.taskId ?: return
+    AgentTraceRuntime.event(
+        context, traceId, "MODEL_SELECTED", outcome.profile.displayName,
+        code = outcome.profile.cycloneId, ok = true,
+        detail = "slug=${outcome.profile.openRouterSlug} · privacy=${outcome.profile.privacyClass} · causalStage=pre_android",
+    )
+    AgentTraceRuntime.event(
+        context, traceId, "MODEL_PREFLIGHT_STARTED", "Provider-only qualification occurred before Android observation",
+        code = "model.preflight", ok = true,
+        detail = "phoneMutations=0 · phoneObservation=false · cached=${outcome.cached}",
+    )
+    if (!outcome.cached) {
+        AgentTraceRuntime.event(
+            context, traceId, "PROVIDER_ROUTED", "Qualification provider served the selected model identity",
+            code = outcome.profile.openRouterSlug, ok = true,
+            detail = listOfNotNull(
+                outcome.providerName?.let { "provider=$it" },
+                outcome.requestId?.let { "requestId=$it" },
+                "allowFallbacks=${outcome.profile.allowProviderFallbacks}",
+            ).joinToString(" · "),
+        )
+        AgentTraceRuntime.event(
+            context, traceId, "MODEL_OUTPUT_RECEIVED", "Qualification output received",
+            code = "model.output", ok = true,
+        )
+        if (outcome.repaired) {
+            AgentTraceRuntime.event(
+                context, traceId, "MODEL_OUTPUT_REPAIRED", "One harmless JSON wrapper was normalized",
+                code = "model.output.single_repair", ok = true,
+            )
+        }
+        AgentTraceRuntime.event(
+            context, traceId, "MODEL_OUTPUT_VALIDATED", "Qualification output matched the Cyclone contract",
+            code = "model.output.valid", ok = true,
+        )
+    }
+    AgentTraceRuntime.event(
+        context, traceId, "MODEL_PREFLIGHT_PASSED", if (outcome.cached) "Cached model qualification accepted" else "Model qualification passed",
+        code = "model.preflight", ok = true,
+        detail = "Qualification completed before phone observation/mutation; attached to this run after execution so it remains one downloadable diagnostic.",
+    )
+    AgentRunDiagnosticV39.ensureCanonical(context, traceId)
+}
+
 @Composable
 internal fun V39AiChatPage(
     context: Context,
@@ -136,13 +247,19 @@ internal fun V39AiChatPage(
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     val scope = rememberCoroutineScope()
     val agent = remember { OpenRouterAdaptiveAgent(context) }
+    val qualifier = remember { ModelQualificationRunner(context) }
     val session = V39AiChatSessionRuntime
     var composer by rememberSaveable { mutableStateOf("") }
     var modelMenuOpen by remember { mutableStateOf(false) }
     var selectedModelId by rememberSaveable {
-        mutableStateOf(V39AiChatContract.modelForStored(prefs.getString(V39AiChatContract.MODEL_KEY, null)).id)
+        mutableStateOf(
+            V39AiChatContract.storageId(
+                V39AiChatContract.modelForStored(prefs.getString(V39AiChatContract.MODEL_KEY, null)),
+            ),
+        )
     }
     val selectedModel = V39AiChatContract.modelForStored(selectedModelId)
+    val selectedProfile = ModelRegistry.profileForPreset(selectedModel)
     val accessProfile = remember(refreshTick) { CycloneAiAccessProfileStore.read(context) }
     val hasKey = remember(refreshTick) { OpenRouterSecretStore.hasKey(context) }
     val latestRun = remember(refreshTick, session.busy, session.messages.size) {
@@ -154,17 +271,29 @@ internal fun V39AiChatPage(
         val config = V39AiChatContract.config(selectedModelId, accessProfile)
         composer = ""
         session.busy = true
-        session.status = "Starting…"
+        session.status = "Qualifying ${config.model.label}…"
         session.append(V39ChatRole.USER, request)
         scope.launch {
             try {
-                val run = agent.execute(request, config) { progress ->
-                    scope.launch {
-                        if (session.submitGate.busy) session.status = progress.trim().ifBlank { "Working…" }
+                when (val qualification = qualifier.qualify(config.model)) {
+                    is ModelQualificationOutcome.Failed -> {
+                        recordPreflightFailure(context, request, qualification)
+                        session.status = "Model unavailable"
+                        session.append(V39ChatRole.CYCLONE, qualification.failure.userMessage, false)
+                        return@launch
+                    }
+                    is ModelQualificationOutcome.Passed -> {
+                        session.status = if (qualification.cached) "Model ready · starting…" else "Model qualified · starting…"
+                        val run = agent.execute(request, config) { progress ->
+                            scope.launch {
+                                if (session.submitGate.busy) session.status = progress.trim().ifBlank { "Working…" }
+                            }
+                        }
+                        attachPreflightSuccess(context, run, qualification)
+                        session.status = V39AiChatContract.finalStatus(run)
+                        session.append(V39ChatRole.CYCLONE, run.message, run.ok)
                     }
                 }
-                session.status = V39AiChatContract.finalStatus(run)
-                session.append(V39ChatRole.CYCLONE, run.message, run.ok)
             } catch (cancelled: CancellationException) {
                 agent.cancelActiveTask()
                 throw cancelled
@@ -211,13 +340,20 @@ internal fun V39AiChatPage(
                         DropdownMenuItem(
                             text = { Text(model.label) },
                             onClick = {
-                                selectedModelId = model.id
-                                prefs.edit().putString(V39AiChatContract.MODEL_KEY, model.id).apply()
+                                selectedModelId = V39AiChatContract.storageId(model)
+                                prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()
                                 modelMenuOpen = false
                             },
                         )
                     }
                 }
+            }
+            if (selectedProfile?.isContributor == true) {
+                Text(
+                    "Data-contributing / lower-cost tier. Selection is explicit; Cyclone never uses Contributor as a fallback for standard Muse.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
