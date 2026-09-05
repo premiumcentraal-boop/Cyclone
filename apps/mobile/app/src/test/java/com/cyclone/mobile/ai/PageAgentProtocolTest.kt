@@ -52,93 +52,43 @@ class PageAgentProtocolTest {
 
     @Test
     fun openAppRepairsCommonAppNameIntoRequiredPackage() {
-        val action = PageAgentAction(
-            "phone.open_app",
-            null,
-            JSONObject().put("appName", "Chrome"),
-            true,
-            "Open Chrome",
-        )
+        val action = PageAgentAction("phone.open_app", null, JSONObject().put("appName", "Chrome"), true, "Open Chrome")
         val params = PageAgentProtocol.resolveParams(action, page).getOrThrow()
         assertEquals("com.android.chrome", params.getString("package"))
-        assertEquals(
-            "phone.open_app:package=com.android.chrome",
-            PageAgentProtocol.actionSignature(
-                PageAgentDecision("act", "", "", listOf(action), null, null),
-                page.pageKey,
-            ),
-        )
+        assertEquals("phone.open_app:package=com.android.chrome", PageAgentProtocol.actionSignature(PageAgentDecision("act", "", "", listOf(action), null, null), page.pageKey))
     }
 
     @Test
     fun openAppWithoutResolvablePackageIsRejectedBeforeAndroid() {
-        val action = PageAgentAction(
-            "phone.open_app",
-            null,
-            JSONObject().put("appName", "Unrecognizable Browser XYZ"),
-            true,
-            "Open the requested app",
-        )
+        val action = PageAgentAction("phone.open_app", null, JSONObject().put("appName", "Unrecognizable Browser XYZ"), true, "Open the requested app")
         assertTrue(PageAgentProtocol.resolveParams(action, page).isFailure)
     }
 
     @Test
     fun launchIntentAcceptsOnlyHttpOrHttpsInLocalModelContract() {
-        val safe = PageAgentAction(
-            "phone.launch_intent",
-            null,
-            JSONObject().put("uri", "https://ad.nl"),
-            true,
-            "Open ad.nl another way",
-        )
+        val safe = PageAgentAction("phone.launch_intent", null, JSONObject().put("uri", "https://ad.nl"), true, "Open ad.nl another way")
         assertTrue(PageAgentProtocol.resolveParams(safe, page).isSuccess)
-
-        val unsafe = safe.copy(params = JSONObject().put("uri", "javascript:alert(1)"))
-        assertTrue(PageAgentProtocol.resolveParams(unsafe, page).isFailure)
+        assertTrue(PageAgentProtocol.resolveParams(safe.copy(params = JSONObject().put("uri", "javascript:alert(1)")), page).isFailure)
     }
 
     @Test
     fun signaturesAndDiagnosticsNeverEchoTypedSecretsOrUrlQueries() {
-        val typed = PageAgentAction(
-            "phone.type",
-            "battery-control",
-            JSONObject().put("value", "secret-typed-value"),
-            false,
-            "Fill field",
-        )
+        val typed = PageAgentAction("phone.type", "battery-control", JSONObject().put("value", "secret-typed-value"), false, "Fill field")
         val detail = PageAgentProtocol.diagnosticActionDetail(typed)
-        val typedSignature = PageAgentProtocol.actionSignature(
-            PageAgentDecision("act", "", "", listOf(typed), null, null),
-            page.pageKey,
-        ).orEmpty()
+        val typedSignature = PageAgentProtocol.actionSignature(PageAgentDecision("act", "", "", listOf(typed), null, null), page.pageKey).orEmpty()
         assertFalse(detail.contains("secret-typed-value"))
         assertFalse(typedSignature.contains("secret-typed-value"))
         assertTrue(detail.contains("REDACTED_TYPED_VALUE"))
 
-        val launch = PageAgentAction(
-            "phone.launch_intent",
-            null,
-            JSONObject().put("uri", "https://ad.nl/search?q=private#fragment"),
-            true,
-            "Open site",
-        )
-        val launchSignature = PageAgentProtocol.actionSignature(
-            PageAgentDecision("act", "", "", listOf(launch), null, null),
-            page.pageKey,
-        ).orEmpty()
+        val launch = PageAgentAction("phone.launch_intent", null, JSONObject().put("uri", "https://ad.nl/search?q=private#fragment"), true, "Open site")
+        val launchSignature = PageAgentProtocol.actionSignature(PageAgentDecision("act", "", "", listOf(launch), null, null), page.pageKey).orEmpty()
         assertEquals("phone.launch_intent:uri=https://ad.nl/search", launchSignature)
         assertFalse(launchSignature.contains("private"))
     }
 
     @Test
     fun changingObservationUuidsCannotEvadeSemanticStrategyIdentity() {
-        val first = PageAgentAction(
-            "phone.click",
-            "ca7a2dcb-6d6e-42ef-93f3-3ad94822c414",
-            JSONObject(),
-            true,
-            "Open Gmail account switcher",
-        )
+        val first = PageAgentAction("phone.click", "ca7a2dcb-6d6e-42ef-93f3-3ad94822c414", JSONObject(), true, "Open Gmail account switcher")
         val second = first.copy(controlId = "492e378d-3eb6-4f0f-8075-31ccbfbce6be")
         val key1 = PageAgentProtocol.actionSignature(PageAgentDecision("act", "", "", listOf(first), null, null), "page-a")
         val key2 = PageAgentProtocol.actionSignature(PageAgentDecision("act", "", "", listOf(second), null, null), "page-b")
@@ -157,6 +107,14 @@ class PageAgentProtocolTest {
     }
 
     @Test
+    fun productionParserUsesSameBoundedFormattingRepair() {
+        val raw = "Result:\n{\"status\":\"done\",\"pageSummary\":\"Chrome\",\"displaySummary\":\"Loaded\",\"actions\":[],\"answer\":\"ad.nl is open\",\"reason\":\"\"}\nEOF"
+        val parsed = PageAgentProtocol.parse(raw)
+        assertEquals("done", parsed.status)
+        assertEquals("ad.nl is open", parsed.answer)
+    }
+
+    @Test
     fun responseFormatNegotiatesSchemaVersusJsonObject() {
         assertEquals("json_schema", PageAgentProtocol.responseFormat(OpenRouterModelPresets.GPT_6_ASTRA).getString("type"))
         assertEquals("json_schema", PageAgentProtocol.responseFormat(OpenRouterModelPresets.MUSE_SPARK_1_3).getString("type"))
@@ -170,16 +128,7 @@ class PageAgentProtocolTest {
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("never bypasses policy", ignoreCase = true))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("phone.launch_intent"))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("Block", ignoreCase = true))
-
-        val context = PageAgentProtocol.context(
-            goal = "open Chrome and visit ad.nl",
-            page = page,
-            transitions = JSONArray(),
-            appGraph = null,
-            brain = JSONObject(),
-            successfulActions = emptyList(),
-            failedActions = listOf("phone.open_app::INVALID_REQUEST"),
-        )
+        val context = PageAgentProtocol.context("open Chrome and visit ad.nl", page, JSONArray(), null, JSONObject(), emptyList(), listOf("phone.open_app::INVALID_REQUEST"))
         assertTrue(context.getJSONObject("RUN_STATE").getJSONArray("failedActions").length() == 1)
     }
 
