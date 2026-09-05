@@ -93,6 +93,44 @@ class ClickGateInterceptTest {
     }
 
     @Test
+    fun notificationBlockIsPerformedWithoutEnteringSendGate() {
+        val labels = listOf(
+            "Block",
+            "www.ad.nl wants to send you notifications",
+            "Allow",
+        )
+        val machine = OverlayChromeMachine()
+        machine.enterWorking("notification-block")
+        machine.enterLive()
+        val decision = ClickGateIntercept.decide(
+            action = "phone.click",
+            labels = labels,
+            overlayState = machine.state(),
+            useRuntimeApproval = false,
+        )
+        assertTrue(decision.performClick)
+        assertFalse(decision.enterGate)
+        assertNull(decision.gateClass)
+        assertTrue(ClickGateIntercept.apply(machine, "phone.click", labels))
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+    }
+
+    @Test
+    fun notificationAllowStillRequiresGrantGate() {
+        val labels = listOf(
+            "Allow",
+            "www.ad.nl wants to send you notifications",
+            "Block",
+        )
+        val machine = OverlayChromeMachine()
+        machine.enterWorking("notification-allow")
+        machine.enterLive()
+        assertFalse(ClickGateIntercept.apply(machine, "phone.click", labels))
+        assertEquals(OverlayChromeState.GATE, machine.state())
+        assertEquals(OverlayGateClass.GRANT, machine.snapshot().gateClass)
+    }
+
+    @Test
     fun confirmedGateApprovalIsExactAndOneShot() {
         OverlayChromeRuntime.resetIdle()
         OverlayChromeRuntime.startAnalysis("gate-approval")
