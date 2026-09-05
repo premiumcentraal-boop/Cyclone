@@ -8,7 +8,7 @@ import com.cyclone.mobile.policy.GateClass
 /**
  * Intercept host clicks that classify as GATE before Accessibility ACTION_CLICK.
  * Files "Move to bin" must enter overlay GATE from IDLE or LIVE and must not be performed.
- * The selected control is classified before surrounding modal prose so a safe notification
+ * The activated control is classified before surrounding modal prose so a safe notification
  * Block/Deny action cannot be poisoned by text such as "wants to send you notifications".
  */
 class GateBlockedException(
@@ -33,10 +33,12 @@ object ClickGateIntercept {
             val trimmed = value?.trim().orEmpty()
             if (trimmed.isNotEmpty() && trimmed !in labels) labels += trimmed
         }
-        add(chosen.text)
-        add(chosen.contentDescription)
+        // Activation is the control Android will actually mutate. Put it first so ActionIntentClassifier
+        // cannot mistake nearby explanatory text for the selected action.
         add(activation.text)
         add(activation.contentDescription)
+        add(chosen.text)
+        add(chosen.contentDescription)
         add(selector?.text)
         add(selector?.textContains)
         add(selector?.contentDescription)
