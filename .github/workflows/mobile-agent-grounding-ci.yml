@@ -1,0 +1,29 @@
+name: Cyclone Mobile Grounding CI
+
+on:
+  push:
+    branches: ['agent/393-grounded-model-portability']
+    paths:
+      - 'apps/mobile/**'
+      - 'apps/device-gateway/**'
+      - 'tools/codex-phone-mcp/**'
+      - 'tools/cyclone-agent-mcp/**'
+      - 'scripts/ci/**'
+      - 'scripts/phone-gateway/**'
+      - 'release/version.toml'
+      - '.github/workflows/_mobile-build.yml'
+      - '.github/workflows/mobile-agent-grounding-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-grounding-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile:
+    uses: ./.github/workflows/_mobile-build.yml
+    permissions:
+      contents: read
