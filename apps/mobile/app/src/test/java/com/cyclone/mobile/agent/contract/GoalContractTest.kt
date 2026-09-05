@@ -24,6 +24,20 @@ class GoalContractTest {
     }
 
     @Test
+    fun shortHostDoesNotCompleteFromUnrelatedBrowserStateWithoutVerifiedLaunch() {
+        val goal = "open ad.nl"
+        val unrelated = page("com.android.chrome", "example.com unrelated page")
+
+        val evaluation = GoalContractCompiler.evaluate(
+            GoalContractCompiler.compile(goal),
+            unrelated,
+            emptyList(),
+        )
+
+        assertFalse(evaluation.satisfied)
+    }
+
+    @Test
     fun cookieDismissalUsesVerifiedDisappearanceAndToleratesTargetTypo() {
         val goal = "click akloord for the cookies"
         val before = page(
