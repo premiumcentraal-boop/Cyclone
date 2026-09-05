@@ -1,5 +1,9 @@
 package com.cyclone.mobile.policy
 
+import com.cyclone.mobile.runtime.grounding.ActionIntent
+import com.cyclone.mobile.runtime.grounding.ActionIntentClassifier
+import com.cyclone.mobile.runtime.grounding.ModalType
+
 /**
  * GATE classes owned by [PolicyGovernor]: pay, send, delete, grant.
  *
@@ -55,8 +59,46 @@ object GateClassifier {
     private val deleteMoveSendToBinOrTrash =
         Regex("""(?:move|send)(?:\s+\S+){0,6}\s+to\s+(?:bin|trash)""")
 
+    /**
+     * Classifies the grounded target before reading surrounding prose. This prevents contextual text
+     * such as "wants to send you notifications" from turning the actual `Block` control into SEND.
+     */
     fun classify(action: String, labels: List<String> = emptyList()): GateClass? {
-        val text = (listOf(action) + labels).joinToString(" ").lowercase().replace(Regex("[_-]+"), " ")
+        val normalizedLabels = labels.map(String::trim).filter(String::isNotBlank)
+        val selectedLabel = normalizedLabels.firstOrNull().orEmpty()
+        val contextual = normalizedLabels.drop(1)
+        val allText = (listOf(action) + normalizedLabels).joinToString(" ").lowercase().replace(Regex("[_-]+"), " ")
+        val modalType = when {
+            allText.contains("notification") && normalizedLabels.any { it.equals("block", true) || it.equals("allow", true) || it.equals("deny", true) } -> ModalType.SITE_NOTIFICATION_PERMISSION
+            allText.contains("cookie") || allText.contains("tracking") -> ModalType.COOKIE_CONSENT
+            allText.contains("payment") || allText.contains("checkout") -> ModalType.PAYMENT
+            allText.contains("permission") -> ModalType.ANDROID_PERMISSION
+            else -> null
+        }
+        val intent = ActionIntentClassifier.classify(
+            actionLabel = selectedLabel,
+            modalType = modalType,
+            context = contextual,
+        )
+        when (intent) {
+            ActionIntent.DENY_SITE_NOTIFICATION,
+            ActionIntent.DISMISS_MARKETING_PROMPT,
+            ActionIntent.REJECT_OPTIONAL_COOKIES,
+            ActionIntent.GENERIC_SAFE_ACTION,
+            -> return null
+            ActionIntent.ALLOW_SITE_NOTIFICATION,
+            ActionIntent.GRANT_SENSITIVE_PERMISSION,
+            -> return GateClass.GRANT
+            ActionIntent.SEND_MESSAGE,
+            ActionIntent.SUBMIT_FORM_EXTERNALLY,
+            -> return GateClass.SEND
+            ActionIntent.PAY -> return GateClass.PAY
+            ActionIntent.DELETE_DATA -> return GateClass.DELETE
+            ActionIntent.UNKNOWN -> Unit
+        }
+
+        // Compatibility fallback for non-element actions and older callers with no grounded label.
+        val text = allText
         if (pay.any { text.contains(it) }) return GateClass.PAY
         if (grant.any { text.contains(it) }) return GateClass.GRANT
         if (delete.any { text.contains(it) } || deleteMoveSendToBinOrTrash.containsMatchIn(text)) return GateClass.DELETE
