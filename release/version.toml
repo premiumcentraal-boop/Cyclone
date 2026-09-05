@@ -1,12 +1,12 @@
-# Cyclone 3.9.2 adaptive reliability release candidate
+# Cyclone 3.9.3 fast mobile release
 schema = 1
-product_version = "3.9.2"
+product_version = "3.9.3"
 channel = "development"
-android_version_code = 56
+android_version_code = 57
 python_version = "3.8.4"
 
 [components]
-mobile = "3.9.2"
+mobile = "3.9.3"
 pc_companion = "3.8.4"
 device_gateway = "3.8.4"
 mcp = "3.8.4"
@@ -15,7 +15,7 @@ mcp = "3.8.4"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
-android_signing = "PROTECTED_RELEASE_ENVIRONMENT"
+android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-3.9.2"
+candidate_generation = "cyclone-3.9.3-fast"
