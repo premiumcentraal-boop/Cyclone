@@ -107,6 +107,8 @@ internal object V39AiChatContract {
         accessProfile = accessProfile,
     )
 
+    fun modelDisclosure(model: OpenRouterModelPreset): String? = model.contributorDisclosure
+
     fun finalStatus(result: QuickAgentResult): String = if (result.ok) "Completed and checked" else "Stopped safely"
 }
 
@@ -201,7 +203,14 @@ internal fun V39AiChatPage(
                 DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
                     V39AiChatContract.models().forEach { model ->
                         DropdownMenuItem(
-                            text = { Text(model.label) },
+                            text = {
+                                Column {
+                                    Text(model.label)
+                                    if (model.isContributor) {
+                                        Text("Contributor · data-sharing tier", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            },
                             onClick = {
                                 selectedModelId = model.id
                                 prefs.edit().putString(V39AiChatContract.MODEL_KEY, model.id).apply()
@@ -209,6 +218,19 @@ internal fun V39AiChatPage(
                             },
                         )
                     }
+                }
+            }
+            V39AiChatContract.modelDisclosure(selectedModel)?.let { disclosure ->
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        disclosure,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         }
