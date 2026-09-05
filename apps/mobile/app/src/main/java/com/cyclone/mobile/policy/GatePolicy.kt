@@ -81,10 +81,12 @@ object GateClassifier {
             context = contextual,
         )
         when (intent) {
+            // These are the only confidently grounded low-risk actions that should bypass the
+            // legacy keyword fallback. GENERIC_SAFE_ACTION must continue into compatibility
+            // classification because older callers encode consequential meaning in action/context.
             ActionIntent.DENY_SITE_NOTIFICATION,
             ActionIntent.DISMISS_MARKETING_PROMPT,
             ActionIntent.REJECT_OPTIONAL_COOKIES,
-            ActionIntent.GENERIC_SAFE_ACTION,
             -> return null
             ActionIntent.ALLOW_SITE_NOTIFICATION,
             ActionIntent.GRANT_SENSITIVE_PERMISSION,
@@ -94,7 +96,9 @@ object GateClassifier {
             -> return GateClass.SEND
             ActionIntent.PAY -> return GateClass.PAY
             ActionIntent.DELETE_DATA -> return GateClass.DELETE
-            ActionIntent.UNKNOWN -> Unit
+            ActionIntent.GENERIC_SAFE_ACTION,
+            ActionIntent.UNKNOWN,
+            -> Unit
         }
 
         // Compatibility fallback for non-element actions and older callers with no grounded label.
