@@ -40,8 +40,10 @@ class WorkspaceTaskService : Service() {
                 "confirm" -> {
                     val token = intent.getStringExtra("confirmation")
                     if (token != null && token == current?.confirmation?.token && current?.phase == TaskPhase.REVIEW) {
-                        runCatching { sessionId?.let { WorkspaceRuntime.approveConfirmation(it, token) } }
-                            .onSuccess { update { it.copy(confirmation = null) }; continueTask() }
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { sessionId?.let { WorkspaceRuntime.approveConfirmation(it, token) } } }
+                                .onSuccess { update { it.copy(confirmation = null) }; continueTask() }
+                        }
                     }
                 }
                 "pause" -> pauseTask()
@@ -56,7 +58,7 @@ class WorkspaceTaskService : Service() {
             NotificationChannel(CHANNEL, "Cyclone tasks", NotificationManager.IMPORTANCE_LOW))
         startForeground(NOTIFICATION, notification(task), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         observer = scope.launch { WorkspaceTasks.state.collect { state ->
-            if (state?.taskId == taskId) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification(state))
+            if (state != null && state.taskId == taskId) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification(state))
         } }
         running = scope.launch {
             try {
@@ -78,7 +80,7 @@ class WorkspaceTaskService : Service() {
                     attachment = PendingTaskAttachment.take())
                 awaitWorkspace(session.sessionId, ExecutionContext.from(session))
                 agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session))
-                finishTask(agent!!.execute(task.goal, config))
+                finishTask(agent!!.execute(task.goal, config) { text -> progress(text) })
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) {
                 sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it, WorkspaceState.FAILED) } }
@@ -122,6 +124,8 @@ class WorkspaceTaskService : Service() {
             try {
                 withContext(Dispatchers.IO) { WorkspaceRuntime.pause(id) }
                 update { it.copy(phase = TaskPhase.PAUSED, message = "Take your time. Your place is saved.") }
+            } catch (_: Exception) {
+                update { it.copy(phase = TaskPhase.PAUSED, message = "The workspace is unavailable. Your task has stopped safely.") }
             } finally { switching = false }
         }
     }
@@ -154,7 +158,7 @@ class WorkspaceTaskService : Service() {
                 awaitWorkspace(id, ExecutionContext(id, com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions.lookup(id).displayId))
                 update { it.copy(phase = TaskPhase.WORKING, message = "Continuing in ${it.app}…") }
                 switching = false
-                finishTask(agent?.resume() ?: error("Task unavailable"))
+                finishTask(agent?.resume { text -> progress(text) } ?: error("Task unavailable"))
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) {
                 withContext(Dispatchers.IO) { runCatching { WorkspaceRuntime.pause(id) } }
@@ -183,6 +187,14 @@ class WorkspaceTaskService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+    private fun progress(text: String) {
+        val message = when {
+            text.contains("verif", true) -> "Checking the result…"
+            text.contains("observ", true) -> "Checking the page…"
+            else -> return
+        }
+        update { if (it.working) it.copy(message = message) else it }
     }
     private fun update(change: (WorkspaceTaskUi) -> WorkspaceTaskUi) { taskId?.let { WorkspaceTasks.update(it, change) } }
     private fun notification(task: WorkspaceTaskUi): Notification {
