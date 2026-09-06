@@ -9,12 +9,15 @@ from .gateway import GatewayClient, GatewayError
 from .safe import redact, strip_typed_plaintext, validate_typed_params
 from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
 from .phone_mcp import (
+    apply_action_soft_success,
     compact_observation,
     draft_run_denied,
     matched_verified_skill,
+    resolve_action,
     skill_run_normalize,
     skill_save_payload,
     skill_save_success,
+    supported_actions_message,
 )
 
 
@@ -162,19 +165,25 @@ class PhoneTools:
 
     def phone_act(self, args: dict[str, Any]) -> Any:
         tool = str(args.get("tool") or "")
-        if tool not in ALLOWED_ACTIONS:
-            raise ValueError(f"Unsupported phone action: {tool}")
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
+        tool, params = resolve_action(tool, params)
+        if tool not in ALLOWED_ACTIONS:
+            raise ValueError(f"Unsupported phone action: {tool}. {supported_actions_message()}")
         validate_typed_params(params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
         if tool == "phone.type" and args.get("user_authorized") is not True:
-            raise ValueError("phone.type requires user_authorized=true; Android policy remains authoritative")
+            raise ValueError(
+                "phone.type requires user_authorized=true; Android policy remains authoritative. "
+                "Sequence: phone_locate → phone.click to focus → phone.type with the current elementId. "
+                'Example: {"elementId": "<current id>", "text": "Cyclone"}'
+            )
         params = _forward_type_authorization(tool, args, params)
         result = self.gateway.action(tool, params, goal, self._device(args))
+        result = apply_action_soft_success(tool, params, result)
         if tool == "phone.type":
             typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")
             result = strip_typed_plaintext(result, typed if isinstance(typed, str) else None)
@@ -221,11 +230,12 @@ class PhoneTools:
         if len(device_ids) > 32 or len(set(device_ids)) != len(device_ids):
             raise ValueError("device_ids must contain 1..32 unique explicit targets")
         tool = str(args.get("tool") or "")
-        if tool not in ALLOWED_GROUP_ACTIONS:
-            raise ValueError(f"Unsupported group phone action: {tool}")
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
+        tool, params = resolve_action(tool, params)
+        if tool not in ALLOWED_GROUP_ACTIONS:
+            raise ValueError(f"Unsupported group phone action: {tool}. {supported_actions_message()}")
         validate_typed_params(params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
@@ -302,7 +312,13 @@ class PhoneTools:
 def _error_code(value: Any) -> str | None:
     if not isinstance(value, dict):
         return None
+    if value.get("ok") is True:
+        return None
     error = value.get("error")
     if isinstance(error, dict) and isinstance(error.get("code"), str):
+        if error["code"] == "PROTOCOL_MISMATCH" and (
+            value.get("pageChanged") is True or value.get("afterPackage") or value.get("warning")
+        ):
+            return None
         return error["code"]
     return None

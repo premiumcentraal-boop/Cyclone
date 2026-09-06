@@ -6,6 +6,7 @@ import secrets
 import threading
 from typing import Any
 
+from ..actions.contract import canonical_tool, normalize_action
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import CYCLONE_ONE_SESSION_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorCode
@@ -16,11 +17,13 @@ SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 DEFAULT_FOREGROUND_SESSION_ID = "default-foreground"
 SESSION_MUTATING_TOOLS = frozenset({
     "phone.click", "phone.long_press", "phone.tap", "phone.swipe", "phone.scroll",
-    "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.set_clipboard",
+    "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
+    "phone.set_clipboard",
 })
 SESSION_ACTIONS = frozenset({
     "phone.click", "phone.long_press", "phone.tap", "phone.swipe", "phone.scroll",
-    "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for",
+    "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
+    "phone.wait_for",
 })
 
 
@@ -164,10 +167,17 @@ class ExecutionSessionService:
         params: dict[str, Any],
         goal: str,
     ) -> dict[str, Any]:
-        if tool not in SESSION_ACTIONS:
-            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, f"Session action {tool} is unavailable.")
         if not isinstance(params, dict):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object")
+        try:
+            tool, params = normalize_action(canonical_tool(tool), params)
+        except ValueError as exc:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, str(exc)) from exc
+        if tool not in SESSION_ACTIONS:
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
+                f"Session action {tool} is unavailable. phone.tap aliases phone.click.",
+            )
         selected, descriptor = self._resolve_background(device_id, session_id)
         observation = self._require_cached(device_id, descriptor["sessionId"]) if tool in SESSION_MUTATING_TOOLS else self._cached(device_id, descriptor["sessionId"])
         payload: dict[str, Any] = {

@@ -6,6 +6,7 @@ from typing import Any
 
 from .audit import SafeAuditLog
 from .gateway import GatewayError
+from .phone_mcp import apply_action_soft_success, resolve_action, supported_actions_message
 from .safe import redact, strip_typed_plaintext, validate_typed_params
 from .session_gateway import SessionGatewayClient
 
@@ -14,7 +15,8 @@ PACKAGE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$"
 SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 SESSION_ACTIONS = frozenset({
     "phone.click", "phone.long_press", "phone.tap", "phone.swipe", "phone.scroll",
-    "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for",
+    "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
+    "phone.wait_for",
 })
 SESSION_TOOL_NAMES = frozenset({
     "phone_session_list", "phone_session_start", "phone_session_status", "phone_session_pause",
@@ -115,11 +117,12 @@ class SessionPhoneTools:
 
     def phone_session_act(self, args: dict[str, Any]) -> Any:
         tool = str(args.get("tool") or "")
-        if tool not in SESSION_ACTIONS:
-            raise ValueError(f"Unsupported session action: {tool}")
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
+        tool, params = resolve_action(tool, params)
+        if tool not in SESSION_ACTIONS:
+            raise ValueError(f"Unsupported session action: {tool}. {supported_actions_message()}")
         validate_typed_params(params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
@@ -131,6 +134,7 @@ class SessionPhoneTools:
             params["user_authorized"] = True
             params["userAuthorized"] = True
         result = self.gateway.action(self._session(args), tool, params, goal, self._device(args))
+        result = apply_action_soft_success(tool, params, result)
         if tool == "phone.type":
             typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")
             result = strip_typed_plaintext(result, typed if isinstance(typed, str) else None)

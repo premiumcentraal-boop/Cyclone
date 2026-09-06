@@ -12,11 +12,16 @@ SERVER_NAME = "cyclone-phone"
 SERVER_VERSION = "1.0.0"
 
 INSTRUCTIONS = (
-    "Use Cyclone directly whenever the user asks to inspect or control a connected phone. Start with phone_list, then use the selected phone's typed tools. "
-    "If exactly one phone is READY it may be selected automatically; if more than one is READY, pass device_id explicitly and never guess. "
-    "For the human-visible display use the existing phone_* tools. For isolated Android background workspaces use phone_session_* tools; never invent a display id. "
-    "Observe or locate the exact session before every session mutation and re-observe afterward. Android remains authoritative for policy, GATE confirmation and execution. "
-    "Virtual lifecycle and routine tools accept only explicit Cyclone identifiers and fail closed when the authenticated Gateway route is unavailable. "
+    "Use Cyclone One whenever the user asks to inspect or control a connected phone. "
+    "The live path is the Windows Companion loopback Device Gateway, not a standalone :8765 process. "
+    "Keep Cyclone One open with a USB-READY phone; MCP inherits that loopback URL from the Companion store. "
+    "Start with phone_list, then phone_status → phone_locate(goal) → phone_act. phone_locate does not navigate. "
+    "phone.tap is an alias of phone.click. phone.open_app uses params.package (example com.android.vending). "
+    "phone.type requires a current observation-scoped elementId: locate → click to focus → type with user_authorized=true. "
+    "Play Store details: phone.launch_intent uri=market://details?id=<package>, then phone.wait_for package_equals. "
+    "If pageChanged or afterPackage matches, ok follows the UI effect; PROTOCOL_MISMATCH is a warning, not a stop. "
+    "If exactly one phone is READY it may be selected automatically; if more than one is READY, pass device_id explicitly. "
+    "Android remains authoritative for policy, GATE confirmation and execution. "
     "This server has no shell, PowerShell, arbitrary ADB, root, su, subprocess or script-evaluation tool."
 )
 
@@ -84,13 +89,13 @@ def build_server(
 
     @mcp.tool(annotations=WRITE)
     def phone_act(
-        tool: Literal["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"],
+        tool: Literal["phone.click", "phone.tap", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent", "phone.wait_for"],
         params: dict[str, Any],
         goal: str,
         device_id: str | None = None,
         user_authorized: bool = False,
     ) -> dict[str, Any]:
-        """Forward one typed action to the normal foreground session. There is no generic command escape hatch."""
+        """Typed PhoneToolExecutor action. phone.tap→phone.click. open_app params.package=com.android.vending. type needs current elementId. launch_intent uri=market://details?id=<package>."""
         return tools.call("phone_act", {"device_id": device_id, "tool": tool, "params": params, "goal": goal, "user_authorized": user_authorized})
 
     # Cyclone One background execution-session contract. Models name only session_id; the Device
@@ -167,7 +172,7 @@ def build_server(
     @mcp.tool(annotations=WRITE)
     def phone_session_act(
         session_id: str,
-        tool: Literal["phone.click", "phone.long_press", "phone.tap", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"],
+        tool: Literal["phone.click", "phone.tap", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent", "phone.wait_for"],
         params: dict[str, Any],
         goal: str,
         device_id: str | None = None,
@@ -212,7 +217,7 @@ def build_server(
     @mcp.tool(annotations=WRITE)
     def phone_group_act(
         device_ids: list[str],
-        tool: Literal["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"],
+        tool: Literal["phone.click", "phone.tap", "phone.long_press", "phone.swipe", "phone.scroll", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent", "phone.wait_for"],
         params: dict[str, Any],
         goal: str,
     ) -> dict[str, Any]:

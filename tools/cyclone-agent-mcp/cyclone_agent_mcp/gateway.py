@@ -11,6 +11,10 @@ from typing import Any
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
 NON_MUTATING_CAPABILITIES = {"phone.observe", "phone.find", "phone.wait_for"}
+COMPANION_GATEWAY_HINT = (
+    "Classic loopback :8765 is not the Cyclone One path. Keep Cyclone One open with a USB-READY "
+    "phone; MCP inherits the Companion loopback URL from the local store."
+)
 
 
 class GatewayError(RuntimeError):
@@ -128,9 +132,16 @@ class GatewayClient:
                 body = {"error": {"code": detail.get("code", "GATEWAY_ERROR"), "message": detail.get("message", "Gateway request failed"), "retryable": detail.get("retryable", False)}}
             raise GatewayError(f"Gateway HTTP {exc.code}", status=exc.code, body=body) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
+            previous = self.base_url
+            if self._reload_secure_connection() and self.base_url != previous:
+                return self._request_once(method, path, payload)
+            hint = COMPANION_GATEWAY_HINT if "8765" in previous else ""
+            message = "Cyclone Device Gateway is unavailable"
+            if hint:
+                message = f"{message}. {hint}"
             raise GatewayError(
-                "Cyclone Device Gateway is unavailable",
-                body={"error": {"code": "DEVICE_DISCONNECTED", "layer": "TRANSPORT", "retryable": True}},
+                message,
+                body={"error": {"code": "DEVICE_DISCONNECTED", "layer": "TRANSPORT", "retryable": True, "message": message}},
             ) from exc
         except json.JSONDecodeError as exc:
             raise GatewayError(

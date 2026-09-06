@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .soft_success import apply_action_soft_success, page_changed_flag
+
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
 
 
@@ -32,8 +34,9 @@ def normalize_desktop_action(device_id: str, tool: str, raw: Any) -> dict[str, A
         and isinstance(raw.get("verification"), dict)
         and isinstance(raw["verification"].get("ok"), bool)
     ):
-        # Already a canonical capability envelope (Agent A / V3 action path). Do not re-wrap.
-        return raw
+        # Already a canonical capability envelope (Agent A / V3 action path). Do not re-wrap
+        # unless PROTOCOL_MISMATCH can be softened by an observed UI effect.
+        return apply_action_soft_success(tool, {}, raw)
     transport = raw.get("transport")
     transport_ok = isinstance(transport, dict) and transport.get("ok") is True
     execution = raw.get("execution")
@@ -47,7 +50,19 @@ def normalize_desktop_action(device_id: str, tool: str, raw: Any) -> dict[str, A
     if not verification_out.get("status"):
         verification_out["status"] = "verified" if verification_ok else "failed"
     after_state = raw.get("afterState") if isinstance(raw.get("afterState"), dict) else raw.get("after")
-    return {
+    missing_execution_ok = isinstance(execution, dict) and _explicit_ok(execution) is None and not execution_ok
+    if not canonical_ok:
+        if not transport_ok:
+            error = {"code": "DEVICE_DISCONNECTED", "layer": "TRANSPORT"}
+        elif missing_execution_ok or not isinstance(execution, dict):
+            error = {"code": "PROTOCOL_MISMATCH", "layer": "PROTOCOL"}
+        elif not execution_ok:
+            error = {"code": "EXECUTION_FAILED", "layer": "EXECUTION"}
+        else:
+            error = {"code": "VERIFICATION_FAILED", "layer": "VERIFICATION"}
+    else:
+        error = None
+    envelope = {
         "protocol_version": CAPABILITY_PROTOCOL_VERSION,
         "correlation_id": raw.get("correlation_id"),
         "capability_id": raw.get("capability_id") or tool,
@@ -58,19 +73,10 @@ def normalize_desktop_action(device_id: str, tool: str, raw: Any) -> dict[str, A
         "verification": verification_out,
         "after": raw.get("after") or after_state,
         "afterState": after_state,
-        "error": None if canonical_ok else {
-            "code": (
-                "DEVICE_DISCONNECTED" if not transport_ok
-                else "EXECUTION_FAILED" if not execution_ok
-                else "VERIFICATION_FAILED"
-            ),
-            "layer": (
-                "TRANSPORT" if not transport_ok
-                else "EXECUTION" if not execution_ok
-                else "VERIFICATION"
-            ),
-        },
+        "error": error,
+        "pageChanged": raw.get("pageChanged") if isinstance(raw.get("pageChanged"), bool) else page_changed_flag(raw),
     }
+    return apply_action_soft_success(tool, {}, envelope)
 
 
 def _explicit_ok(value: Any) -> bool | None:

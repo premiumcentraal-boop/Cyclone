@@ -32,7 +32,7 @@ cyclone.gateway.capability.v1
 | `phone_locate` | locate | Default PC-agent entry point: readiness + Page Card + semantic search ranked for one stated goal. |
 | `phone_ui_search` | search | Use before screenshots when target missing from compact context. |
 | `phone_inspect_element` | inspect | Element IDs remain observation-scoped. |
-| `phone_act` | act | Typed allowlist only. Requires a current observation-scoped element ID and returns before/after Page Cards, delta, action status, and verification result. |
+| `phone_act` | act | Typed allowlist only. `phone.tap` aliases `phone.click`. `phone.open_app` uses `params.package` (example `com.android.vending`). `phone.launch_intent` is the Play Store `market://details?id=` helper. `phone.type` needs a current `elementId`. If `pageChanged` / `afterPackage` matches, `ok` follows the UI effect. |
 | `phone_teach_start/status/stop` | teach | Existing canonical teaching store only. |
 | `phone_debug_bundle` | debug | Transport/execution/verification disagreements. |
 | `phone_screenshot` | vision fallback | Use only when structured evidence is insufficient/conflicting. |
@@ -100,7 +100,7 @@ Canonical public error codes:
 | `EXECUTION_FAILED` | PhoneToolExecutor failed | execution |
 | `VERIFICATION_FAILED` | authoritative after-state did not verify | verification |
 | `DEVICE_DISCONNECTED` | ADB/socket/USB transport unavailable | transport |
-| `PROTOCOL_MISMATCH` | incompatible/malformed V3 contract | protocol |
+| `PROTOCOL_MISMATCH` | incompatible/malformed V3 contract | protocol. If `pageChanged` or expected `afterPackage` already matches, MCP/Gateway stamp `ok` from the UI effect and keep this code as `warning`. |
 | `AUTH_REJECTED` | PC or Android session credential rejected | protocol/auth boundary |
 
 HTTP 200 is never sufficient evidence of phone success. MCP's success flag is computed from the typed transport/execution/verification body.

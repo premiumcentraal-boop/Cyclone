@@ -10,13 +10,16 @@ from ..auth import AuditLog, redact_params
 from ..cyclone_bridge.client import BridgeOperationError, BridgeProtocolError
 from ..retrieval.service import RetrievalService
 from ..state.store import StateStore
+from .contract import canonical_tool, normalize_action
 from .envelope import android_execution_error_class, extract_android_execution
+from .soft_success import apply_protocol_mismatch_soft_success
 
 
 ALLOWED_TOOLS = {
     "phone.observe",
     "phone.find",
     "phone.click",
+    "phone.tap",
     "phone.long_press",
     "phone.swipe",
     "phone.scroll",
@@ -24,6 +27,7 @@ ALLOWED_TOOLS = {
     "phone.back",
     "phone.home",
     "phone.open_app",
+    "phone.launch_intent",
     "phone.wait_for",
 }
 NON_MUTATING_TOOLS = {"phone.observe", "phone.find", "phone.wait_for"}
@@ -102,8 +106,13 @@ def _normalize_aliases(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_action(tool: str, params: dict[str, Any]) -> None:
+    tool = canonical_tool(tool)
     if tool not in ALLOWED_TOOLS:
-        raise ActionValidationError(f"Unsupported phone tool: {tool}")
+        raise ActionValidationError(
+            f"Unsupported phone tool: {tool}. Supported: phone.click (phone.tap alias), "
+            "phone.open_app, phone.launch_intent, phone.wait_for, phone.type, phone.long_press, "
+            "phone.scroll, phone.back, phone.home."
+        )
     if not isinstance(params, dict):
         raise ActionValidationError("params must be an object")
     bad = _forbidden_paths(params)
@@ -305,6 +314,10 @@ class ActionRouter:
         source: str = "PC_CODEX",
         request_id: str | None = None,
     ) -> dict:
+        try:
+            tool, params = normalize_action(canonical_tool(tool), params)
+        except ValueError as exc:
+            raise ActionValidationError(str(exc)) from exc
         validate_action(tool, params)
         if source != "PC_CODEX":
             raise ActionValidationError("Action source must be PC_CODEX")
@@ -412,6 +425,25 @@ class ActionRouter:
             verification = "not_required"
             verification_ok = True
 
+        warning = None
+        if error_class == "PROTOCOL_MISMATCH" or (not success and extract_android_execution(result) is None):
+            _exec_ok, _overall, _error, warning, _status = apply_protocol_mismatch_soft_success(
+                tool=tool,
+                params=resolved_params,
+                before=before,
+                after=after,
+                execution=result if isinstance(result, dict) else None,
+                execution_ok=bool(success),
+                execution_error_class=error_class,
+                verification_passed=verification_ok,
+                error=None,
+            )
+            if warning is not None:
+                success = True
+                verification_ok = True
+                error_class = None
+                verification = "ui_effect_soft_success"
+
         overall_success = transport_ok and success and verification_ok
 
         stored_result = result if tool != "phone.type" else {
@@ -455,9 +487,10 @@ class ActionRouter:
                 "source_client": source,
             }
         )
-        return {
+        payload = {
             "request_id": request_id,
             "success": overall_success,
+            "ok": overall_success,
             "transport_ok": transport_ok,
             "execution_ok": success,
             "verification_ok": verification_ok,
@@ -465,6 +498,8 @@ class ActionRouter:
             "transition_id": transition_id,
             "before_page": before.get("page_key"),
             "after_page": after.get("page_key"),
+            "afterPackage": _witness(after).get("package"),
+            "pageChanged": before.get("page_key") != after.get("page_key") or _witness(before).get("package") != _witness(after).get("package"),
             "latency_ms": duration_ms,
             "verification": verification,
             "verification_error_class": verification_error_class,
@@ -472,3 +507,6 @@ class ActionRouter:
             "before_witness": _witness(before),
             "after_witness": _witness(after),
         }
+        if warning is not None:
+            payload["warning"] = warning
+        return payload

@@ -19,15 +19,19 @@ DEFAULT_SURFACE = (
 )
 
 INSTRUCTIONS = (
-    "Control the phone semantic-first through Cyclone. Default loop: phone_status → phone_locate(goal) → phone_act → phone_skill_save | phone_skill_run. "
+    "Control the phone semantic-first through Cyclone One. The live path is the Windows Companion "
+    "(Cyclone One) loopback Device Gateway — not a standalone :8765 process. Keep Cyclone One open "
+    "and USB-ready; MCP inherits that loopback URL from the Companion store. "
+    "Default loop: phone_status → phone_locate(goal) → phone_act → phone_skill_save | phone_skill_run. "
+    "phone_locate does not navigate; use phone.open_app, phone.launch_intent, or phone.wait_for to move. "
+    "phone.tap is an alias of phone.click. phone.open_app uses params.package (example com.android.vending). "
+    "phone.type requires a current observation-scoped elementId: locate → click to focus → type. "
+    "Play Store listings: phone.launch_intent uri=market://details?id=<package>, then phone.wait_for package_equals. "
+    "If pageChanged or afterPackage matches, ok follows the UI effect; PROTOCOL_MISMATCH is a warning, not a stop. "
     "phone_locate returns readiness, a bounded Page Card (pageText + pageSummary), and goal-ranked candidates. "
     "If a verified skill matches goal + pageKey, call phone_skill_run and skip the model. "
-    "Prefer the Page Card snapshot (YAML hosts with ref=eN) as the page context. Refs die on the next snapshot. "
-    "MCP rejects free-form text/fuzzy/coordinate selectors; pass params.elementId, params.ref, or role+name from the current snapshot. "
-    "phone_act returns ok, pageChanged, before, after.pageCard, delta, errorClass, generation; transport success is never verification. "
-    "phone_skill_save writes status=draft into existing AutomationStore via SkillCompiler.compile only when 2+ steps are verified; secret slots are stripped. "
-    "phone_skill_run runs verified skills (or dryRun on a draft) through PhoneToolExecutor via the gateway and returns per-step act envelopes. "
-    "When multiple phones are connected, pass device_id from phone_devices. "
+    "MCP rejects free-form text/fuzzy/coordinate selectors; pass params.elementId from the current snapshot. "
+    "phone_act returns ok, pageChanged, afterPackage, before/after Page Cards, delta, errorClass, warning. "
     "user_authorized is only an MCP intent acknowledgement and never bypasses Android policy. "
     "Do not expose secrets or use arbitrary shell/root/ADB commands."
 )
@@ -66,7 +70,44 @@ def _with_device(schema: dict[str, Any]) -> dict[str, Any]:
 TOOLS = [
     _tool("phone_status", "Read Cyclone gateway, ADB, bridge and Accessibility readiness for one phone.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_locate", "Primary locate-first tool: fuse device status, a bounded Page Card (pageText + pageSummary), and goal-aware semantic search. If a verified skill matches goal + pageKey, skip the model and call phone_skill_run.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "query": {"type": "string"}}, "required": ["goal"]}), read_only=True),
-    _tool("phone_act", "Execute one typed Cyclone phone action through the V3 Android authority seam and canonical PhoneToolExecutor. Locate first. click/long_press/type require a current observation-scoped elementId, snapshot ref, or role+name; free-form selectors and coordinates are rejected. A fresh session auto-observes before the first mutate. phone.scroll accepts direction=forward/backward; phone.swipe has no safe MCP route. Every mutation returns action status plus before/after Page Cards, pageChanged, delta, errorClass, and generation. phone.type requires user_authorized=true but Android policy remains authoritative.", _with_device({"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object", "description": "Typed safe parameters only. Use current elementId for element actions; raw selector text/fuzzy/bounds/coordinates are rejected."}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}}, "required": ["tool", "params", "goal"]}), read_only=False, destructive=True),
+    _tool(
+        "phone_act",
+        "Execute one typed Cyclone phone action through PhoneToolExecutor. "
+        "phone.tap is accepted as phone.click. "
+        "click/long_press/type require a current observation-scoped elementId. "
+        "phone.open_app params: {\"package\": \"com.android.vending\"} (packageName is an alias). "
+        "phone.type params: {\"elementId\": \"<current id>\", \"text\": \"query\"} after locate→focus; user_authorized=true is MCP intent only. "
+        "Play Store details: tool=phone.launch_intent params={\"uri\": \"market://details?id=<package>\"}, then phone.wait_for condition package_equals. "
+        "phone_locate does not navigate. If pageChanged/afterPackage matches, ok follows the UI; PROTOCOL_MISMATCH is a warning.",
+        _with_device({
+            "type": "object",
+            "properties": {
+                "tool": {
+                    "type": "string",
+                    "enum": [
+                        "phone.click", "phone.tap", "phone.long_press", "phone.swipe", "phone.scroll",
+                        "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
+                        "phone.wait_for",
+                    ],
+                    "description": "phone.tap aliases phone.click. phone.launch_intent is the Play Store deep-link helper.",
+                },
+                "params": {
+                    "type": "object",
+                    "description": (
+                        "Typed params only. click/type: elementId from the current Page Card. "
+                        "open_app: package=com.android.vending. "
+                        "launch_intent: uri=market://details?id=<package>. "
+                        "wait_for: {timeoutMs, condition:{type:package_equals, package:com.android.vending}}."
+                    ),
+                },
+                "goal": {"type": "string"},
+                "user_authorized": {"type": "boolean", "default": False},
+            },
+            "required": ["tool", "params", "goal"],
+        }),
+        read_only=False,
+        destructive=True,
+    ),
     _tool("phone_skill_save", "Compile verified 2+ phone_act steps into a disabled draft skill in the existing AutomationStore (SkillCompiler.compile). Unverified steps do not write. Secret slots are stripped. Workers cannot mark verified.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "pageKey": {"type": "string"}, "app": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "minItems": 2}, "params": {"type": "object", "description": "Slot values only. Secret slots are stripped and never persisted."}}, "required": ["goal", "steps"]}), read_only=False),
     _tool("phone_skill_run", "Run one skill from AutomationStore through PhoneToolExecutor via the gateway. Only status=verified runs live; drafts require dryRun=true. Returns per-step act envelopes.", _with_device({"type": "object", "properties": {"skill_id": {"type": "string"}, "dryRun": {"type": "boolean", "default": False}, "params": {"type": "object"}}, "required": ["skill_id"]}), read_only=False, destructive=True),
     _tool("phone_capabilities", "Discover the typed V3 phone capability inventory and health. Discovery is metadata, not action authority.", _with_device({"type": "object", "properties": {"refresh": {"type": "boolean", "default": False}}}), read_only=True),
@@ -78,7 +119,7 @@ TOOLS = [
     _tool("phone_screenshot", "Capture/return the current screenshot plus its PageKey-correlated compact observation. Use only when structured UI is insufficient or conflicting.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_current_page", "Read the gateway's current page record for one phone.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_page_history", "Read recent page/action transition history for verification and recovery.", _with_device({"type": "object", "properties": {}}), read_only=True),
-    _tool("phone_group_act", "Run one typed non-secret phone action on 1..32 explicitly selected devices. Cyclone observes each target first and returns independent per-device outcomes.", {"type": "object", "properties": {"device_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 32, "uniqueItems": True}, "tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object"}, "goal": {"type": "string"}}, "required": ["device_ids", "tool", "params", "goal"], "additionalProperties": False}, read_only=False, destructive=True),
+    _tool("phone_group_act", "Run one typed non-secret phone action on 1..32 explicitly selected devices. Cyclone observes each target first and returns independent per-device outcomes.", {"type": "object", "properties": {"device_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 32, "uniqueItems": True}, "tool": {"type": "string", "enum": ["phone.click", "phone.tap", "phone.long_press", "phone.swipe", "phone.scroll", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent", "phone.wait_for"]}, "params": {"type": "object"}, "goal": {"type": "string"}}, "required": ["device_ids", "tool", "params", "goal"], "additionalProperties": False}, read_only=False, destructive=True),
     _tool("phone_debug_bundle", "Capture the bridge diagnostic bundle when perception, context, execution or verification disagree.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "expected": {"type": "string"}}}), read_only=True),
     _tool("phone_teach_start", "Start Cyclone's canonical Follow Me/Teach session; this does not create a second teaching store.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}}}), read_only=False),
     _tool("phone_teach_status", "Read the active Cyclone teaching session state.", _with_device({"type": "object", "properties": {}}), read_only=True),

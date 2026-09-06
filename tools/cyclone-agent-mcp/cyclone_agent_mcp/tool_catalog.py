@@ -69,6 +69,7 @@ FORBIDDEN_TOOL_FRAGMENTS = (
 ALLOWED_ACTIONS = frozenset(
     {
         "phone.click",
+        "phone.tap",
         "phone.long_press",
         "phone.swipe",
         "phone.scroll",
@@ -76,6 +77,7 @@ ALLOWED_ACTIONS = frozenset(
         "phone.back",
         "phone.home",
         "phone.open_app",
+        "phone.launch_intent",
         "phone.wait_for",
     }
 )
@@ -83,12 +85,14 @@ ALLOWED_ACTIONS = frozenset(
 ALLOWED_GROUP_ACTIONS = frozenset(
     {
         "phone.click",
+        "phone.tap",
         "phone.long_press",
         "phone.swipe",
         "phone.scroll",
         "phone.back",
         "phone.home",
         "phone.open_app",
+        "phone.launch_intent",
         "phone.wait_for",
     }
 )

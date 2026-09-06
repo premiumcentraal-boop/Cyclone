@@ -181,7 +181,7 @@ def test_desktop_android_failure_remains_failure():
     })))
     result = service.action(
         "dev_test",
-        {"capability_id": "phone.open_app", "expected_observation_id": "obs-before"},
+        {"capability_id": "phone.open_app", "expected_observation_id": "obs-before", "params": {"package": "com.android.settings"}},
     )
     assert result["ok"] is False
     assert result["execution"]["ok"] is False
@@ -210,17 +210,51 @@ def test_desktop_verification_disagreement_is_fail_closed():
     assert result["error"]["layer"] == "VERIFICATION"
 
 
-def test_desktop_malformed_android_envelope_is_protocol_mismatch():
+def test_desktop_malformed_android_envelope_with_ui_effect_is_soft_success():
     service = DesktopAgentService(OneDeviceFleet(PixelOpenAppBridge({
         "pageChanged": True,
         "verification": {"ok": True, "status": "PASSED"},
     })))
     result = service.action(
         "dev_test",
-        {"capability_id": "phone.open_app", "expected_observation_id": "obs-before"},
+        {
+            "capability_id": "phone.open_app",
+            "expected_observation_id": "obs-before",
+            "params": {"package": "com.android.settings"},
+        },
+    )
+    assert result["ok"] is True
+    assert result["execution"]["ok"] is True
+    assert result["error"] is None
+    assert result["warning"]["code"] == "PROTOCOL_MISMATCH"
+    assert result["afterPackage"] == "com.android.settings"
+    assert result["pageChanged"] is True
+
+
+def test_desktop_malformed_android_envelope_without_ui_effect_stays_protocol_mismatch():
+    class FrozenPageBridge(PixelOpenAppBridge):
+        def request(self, op, args=None, request_id=None):
+            if op == "observe.semantic":
+                self.observation += 1
+                return {
+                    "observationId": f"obs-{self.observation}",
+                    "pageKey": "HOME",
+                    "package": "com.android.launcher3",
+                    "activity": "Home",
+                    "accessibilityFingerprint": "home",
+                    "pageText": {"protocol": "cyclone-page-text-v1", "lines": [{"text": "Home"}]},
+                    "pageSummary": {"protocol": "cyclone-page-summary-v1", "title": "Home"},
+                }
+            return super().request(op, args, request_id)
+
+    service = DesktopAgentService(OneDeviceFleet(FrozenPageBridge({
+        "verification": {"status": "UNKNOWN"},
+    })))
+    result = service.action(
+        "dev_test",
+        {"capability_id": "phone.home", "expected_observation_id": "obs-before"},
     )
     assert result["ok"] is False
-    assert result["execution"]["ok"] is False
     assert result["error"]["code"] == "PROTOCOL_MISMATCH"
     assert result["error"]["layer"] == "PROTOCOL"
 
@@ -289,6 +323,19 @@ def test_action_router_pixel_success_without_nested_ok_at_result_root(tmp_path):
     assert result["execution_ok"] is True
     assert result["verification_ok"] is True
     assert result["error_class"] is None
+
+
+def test_action_router_accepts_package_name_and_tap_alias(tmp_path):
+    from cyclone_device_gateway.actions.contract import normalize_action
+
+    tool, params = normalize_action("phone.tap", {"elementId": "e1"})
+    assert tool == "phone.click"
+    tool, params = normalize_action("phone.open_app", {"packageName": "com.android.vending"})
+    assert tool == "phone.open_app"
+    assert params == {"package": "com.android.vending"}
+    tool, params = normalize_action("phone.open_app", {"uri": "market://details?id=com.android.chrome"})
+    assert tool == "phone.launch_intent"
+    assert params["uri"] == "market://details?id=com.android.chrome"
 
 
 def test_action_router_android_failure_remains_failure(tmp_path):
