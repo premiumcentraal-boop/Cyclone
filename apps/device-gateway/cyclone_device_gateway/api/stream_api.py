@@ -1,18 +1,8 @@
-"""Loopback stream API for the desktop gateway.
+"""Loopback stream and Cyclone One session API for the desktop gateway.
 
-V3.3 keeps the media plane independent from Cyclone AI trust. An ADB-authorized phone may expose a
-live/snapshot display while the Android bridge is unpaired, reconnecting, or unavailable. These
-routes therefore require the ephemeral PC Gateway bearer plus ADB authorization, never the Android
-AI credential.
-
-Endpoints (both require ``Authorization: Bearer <token>``):
-
-- ``GET /v1/devices/{device_id}/stream/snapshot?profile=thumbnail|focus``
-    Returns the latest safe phone frame with ``Cache-Control: no-store``. A media backend may use a
-    cached decoded frame or one bounded fallback capture; high-rate screenshot polling is not the
-    product live path.
-- ``GET /v1/devices/{device_id}/stream/status``
-    Bounded per-device stream diagnostics without frame bytes.
+V3.3 keeps the foreground media plane independent from Cyclone AI trust. Cyclone One background
+execution sessions are different: their lifecycle, semantic state, exact-session snapshots and
+actions are authenticated through the Android Gateway and are mounted here as a sibling router.
 """
 
 from __future__ import annotations
@@ -27,6 +17,7 @@ from ..desktop_runtime.models import (
     VIDEO_PROFILES,
     VIDEO_PROTOCOL_VERSION,
 )
+from .session_api import create_session_router
 
 
 def create_stream_router(runtime: Any, token: str) -> APIRouter:
@@ -82,4 +73,7 @@ def create_stream_router(runtime: Any, token: str) -> APIRouter:
             "video": diagnostics,
         }
 
+    # Session routes share the same ephemeral local bearer, but every operation behind them also
+    # requires the phone's trusted Android Gateway credential. No direct ADB execution route exists.
+    router.include_router(create_session_router(runtime, token))
     return router
