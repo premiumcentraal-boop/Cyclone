@@ -44,3 +44,9 @@ Merge One 0.2.1 JPEG/handoff; session.added/removed; tiles; MCP requires session
 
 ## Coordination rule
 Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent orchestrator only starts next stage after PR exists.
+
+## Orchestrator coordination (user 2026-09-07)
+- Check progress about **every 30 minutes**; advance **one stage at a time** through to a **V4 release**.
+- **Stage 1** (current): single Grok session as launched — do not restart mid-run.
+- **Stages 2–5**: each Grok prompt MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
+- After Stage 1 PR: offer/use Grok **usage reset** before heavy Stage 2+ burns if the user initiates it.
