@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -349,7 +348,11 @@ private fun ComposerPanel(
             .fillMaxWidth()
             .navigationBarsPadding()
             .imePadding()
-            .padding(horizontal = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp)
+            .padding(
+                start = 12.dp,
+                end = 12.dp,
+                bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp,
+            )
             .graphicsLayer { translationY = dragOffset }
             .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) },
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -501,7 +504,11 @@ private fun GatePanel(
             .fillMaxWidth()
             .navigationBarsPadding()
             .imePadding()
-            .padding(horizontal = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp),
+            .padding(
+                start = 12.dp,
+                end = 12.dp,
+                bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp,
+            ),
     ) {
         Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 10.dp) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
