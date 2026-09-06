@@ -14,6 +14,7 @@ def main() -> int:
     p.add_argument("--artifact-dir", type=Path, required=True)
     p.add_argument("--source-sha", required=True)
     p.add_argument("--version", required=True)
+    p.add_argument("--product", default="Cyclone PC Companion")
     p.add_argument("--third-party-lock", type=Path, required=True)
     args = p.parse_args()
     if not args.source_sha or any(c not in "0123456789abcdef" for c in args.source_sha.lower()):
@@ -30,7 +31,7 @@ def main() -> int:
     third_party = json.loads(args.third_party_lock.read_text(encoding="utf-8"))
     provenance = {
         "schema_version": 1,
-        "product": "Cyclone PC Companion",
+        "product": args.product,
         "version": args.version,
         "source_sha": args.source_sha.lower(),
         "artifacts": hashes,
