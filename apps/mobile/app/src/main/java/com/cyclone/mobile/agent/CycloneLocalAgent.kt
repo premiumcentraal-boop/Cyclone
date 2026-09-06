@@ -332,9 +332,11 @@ class CycloneLocalAgent(
     }
 
     private fun cancellation(): CycloneAgentRunResult? = if (cancelled || externallyCancelled()) cancelResult("user.cancel") else null
-    private fun executionBoundary(): CycloneAgentRunResult? = cancellation()
-        ?: if (externallyPaused()) suspendForGate("Control is with you") else null
-        ?: if (now() - state.taskStartTimeMs >= convergence.taskTimeoutMs) nonConvergence("convergence.task_timeout") else null
+    private fun executionBoundary(): CycloneAgentRunResult? {
+        cancellation()?.let { return it }
+        if (externallyPaused()) return suspendForGate("Control is with you")
+        return if (now() - state.taskStartTimeMs >= convergence.taskTimeoutMs) nonConvergence("convergence.task_timeout") else null
+    }
     private fun cancelResult(message: String?) = finish(CycloneTaskClassification.CANCELLED, CycloneTraceEventType.CANCELLED, message) { CycloneAgentRunResult.Cancelled(it, message) }
     private fun complete(message: String?) = finish(CycloneTaskClassification.COMPLETE, CycloneTraceEventType.COMPLETE, "task.complete") { CycloneAgentRunResult.Completed(it, message) }
     private fun suspendForGate(message: String?): CycloneAgentRunResult.Suspended {

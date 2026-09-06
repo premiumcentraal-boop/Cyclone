@@ -59,6 +59,20 @@ class CycloneLocalAgentTest {
     private fun act(signature: String) = CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.ACT, signature))
     private fun done() = CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.DONE))
 
+    @Test fun backgroundAuthorityLossSuspendsAndResumesSameTask() {
+        var paused = true
+        val model = ScriptModel(mutableListOf(done()))
+        val tools = FakeTools().apply { completion = CycloneVerificationResult(true, true, true, "verified") }
+        val agent = CycloneLocalAgent("same goal", model, tools, taskId = "owned-task", externallyPaused = { paused })
+        assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Suspended)
+        assertEquals(0, model.calls)
+        assertEquals(0, tools.executeCalls)
+        paused = false
+        assertTrue(agent.resume())
+        assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Completed)
+        assertEquals("owned-task", agent.snapshot().taskId)
+    }
+
     @Test fun recoverableToolFailureDoesNotTerminateTask() {
         val model = ScriptModel(mutableListOf(act("a1"), act("a2"), done()))
         val tools = FakeTools(listOf(CycloneObservation("o1", "p1"), CycloneObservation("o2", "p1"), CycloneObservation("o3", "p2")))

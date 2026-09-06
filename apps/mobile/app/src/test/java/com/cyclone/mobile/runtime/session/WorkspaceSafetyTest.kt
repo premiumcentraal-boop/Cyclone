@@ -8,6 +8,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WorkspaceSafetyTest {
+    @Test fun handbackRequiresOriginalTaskPackageAndDisplay() {
+        val original = WorkspaceCommands.Task(10, 42, 0, "com.example.app")
+        assertEquals(original, WorkspaceCommands.exactTask(listOf(original), 42, 0, "com.example.app"))
+        for (changed in listOf(original.copy(taskId = 43), original.copy(displayId = 9), original.copy(packageName = "other"))) {
+            assertThrows(IllegalStateException::class.java) {
+                WorkspaceCommands.exactTask(listOf(changed), 42, 0, "com.example.app")
+            }
+        }
+    }
+    @Test fun notificationCannotRouteToAnotherTaskOrSession() {
+        val task = com.cyclone.mobile.runtime.background.WorkspaceTaskUi("task-a", "session-a", "App", "app", "goal")
+        assertTrue(com.cyclone.mobile.runtime.background.WorkspaceTasks.matches(task, "task-a", "session-a"))
+        assertFalse(com.cyclone.mobile.runtime.background.WorkspaceTasks.matches(task, "task-b", "session-a"))
+        assertFalse(com.cyclone.mobile.runtime.background.WorkspaceTasks.matches(task, "task-a", "session-b"))
+        assertFalse(com.cyclone.mobile.runtime.background.WorkspaceTasks.matches(null, "task-a", "session-a"))
+    }
+
     @Test fun queuedLeaseCannotActAfterPauseHandoffOrResume() {
         for (state in listOf(WorkspaceState.PAUSED, WorkspaceState.WAITING_FOR_CONFIRMATION,
                 WorkspaceState.FAILED, WorkspaceState.CANCELLED)) {

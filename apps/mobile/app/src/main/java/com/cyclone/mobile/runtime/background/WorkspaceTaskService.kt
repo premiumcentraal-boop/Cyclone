@@ -18,11 +18,11 @@ import kotlinx.coroutines.*
 class WorkspaceTaskService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var taskId: String? = null
-    private var sessionId: String? = null
+    @Volatile private var sessionId: String? = null
     private var agent: OpenRouterAdaptiveAgent? = null
     private var running: Job? = null
     private var switching = false
-    private var stopped = false
+    @Volatile private var stopped = false
     private var observer: Job? = null
     private val current get() = WorkspaceTasks.state.value?.takeIf { it.taskId == taskId }
 
@@ -53,7 +53,12 @@ class WorkspaceTaskService : Service() {
         } }
         running = scope.launch {
             try {
-                val session = withContext(Dispatchers.IO) { WorkspaceRuntime.create(applicationContext, task.packageName) }
+                val session = withContext(Dispatchers.IO + NonCancellable) {
+                    WorkspaceRuntime.create(applicationContext, task.packageName).also {
+                        sessionId = it.sessionId
+                        if (stopped) WorkspaceRuntime.close(it.sessionId)
+                    }
+                }
                 sessionId = session.sessionId
                 if (stopped) { withContext(Dispatchers.IO) { WorkspaceRuntime.close(session.sessionId) }; return@launch }
                 update { it.copy(sessionId = session.sessionId, phase = TaskPhase.WORKING,
@@ -81,7 +86,11 @@ class WorkspaceTaskService : Service() {
     private suspend fun finishTask(result: QuickAgentResult) {
         if (stopped) return
         val task = current ?: return
-        if (task.phase == TaskPhase.HUMAN || task.phase == TaskPhase.PAUSED || switching) return
+        if (task.phase == TaskPhase.HUMAN || task.phase == TaskPhase.PAUSED || switching) {
+            if (result.ok || result.classification != "HUMAN_OR_GATE")
+                update { it.copy(resumable = false) }
+            return
+        }
         val id = sessionId ?: return
         // Even verified completion retains its exact app page until Open or Stop.
         withContext(Dispatchers.IO) { WorkspaceRuntime.pause(id, WorkspaceState.BACKGROUND_NEEDS_HANDOFF) }
@@ -183,6 +192,7 @@ class WorkspaceTaskService : Service() {
         return builder.build()
     }
     override fun onDestroy() {
+        stopped = true
         agent?.cancelActiveTask()
         scope.cancel()
         sessionId?.let { id -> Thread { runCatching { WorkspaceRuntime.close(id) } }.start() }

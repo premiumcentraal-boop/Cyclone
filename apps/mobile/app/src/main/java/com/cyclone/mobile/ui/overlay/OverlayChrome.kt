@@ -37,6 +37,9 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Close
+import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.runtime.background.TaskPhase
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.FilledIconButton
@@ -341,6 +344,12 @@ private fun ComposerPanel(
     val view = LocalView.current
     var editorFocused by remember { mutableStateOf(false) }
     var restoreEditor by remember { mutableStateOf(false) }
+    val workspace by WorkspaceTasks.state.collectAsState()
+    val task = workspace?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) }
+    val compactRunning = task?.working == true && !editorFocused
+    LaunchedEffect(task?.taskId, task?.working) {
+        if (task?.working == true) { focusManager.clearFocus(); accessory = ComposerAccessory.NONE }
+    }
     DisposableEffect(view) {
         val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { focused ->
             if (focused && restoreEditor) {
@@ -423,6 +432,18 @@ private fun ComposerPanel(
             Box(Modifier.size(34.dp, 4.dp).clip(CircleShape).background(Color.White.copy(alpha = .36f)))
         }
 
+        if (task != null) {
+            Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 8.dp) {
+                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(task.title, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    Text(task.message, color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                    if (task.queued != null) Text("Follow-up saved", color = AuroraCyan, style = MaterialTheme.typography.labelMedium)
+                    Button(onClick = { launchExternal(WorkspaceTasks.progressIntent(context, task)) },
+                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AuroraBlue)) { Text("View progress") }
+                }
+            }
+        }
         if (sharing.phase != ScreenSharePhase.OFF) {
             ScreenSharePill(sharing) { LiveCaptureService.stop(context) }
         }
@@ -483,7 +504,7 @@ private fun ComposerPanel(
                 ) {
                     Icon(Icons.Rounded.Add, "Add attachment", tint = Color.White, modifier = Modifier.size(27.dp))
                 }
-                IconButton(
+                if (!compactRunning) IconButton(
                     onClick = { accessory = accessory.toggle(ComposerAccessory.MODEL) },
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                 ) {
@@ -519,7 +540,7 @@ private fun ComposerPanel(
                     },
                 )
 
-                IconButton(
+                if (!compactRunning) IconButton(
                     onClick = onVoiceInput,
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                 ) {
@@ -532,8 +553,8 @@ private fun ComposerPanel(
                 }
 
                 FilledIconButton(
-                    onClick = submit,
-                    enabled = snapshot.composerText.isNotBlank(),
+                    onClick = { if (task?.working == true && snapshot.composerText.isBlank()) WorkspaceTasks.command(context, task, "cancel") else submit() },
+                    enabled = task?.working == true || snapshot.composerText.isNotBlank(),
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = AuroraBlue,
@@ -542,7 +563,8 @@ private fun ComposerPanel(
                         disabledContentColor = Color.White.copy(alpha = .30f),
                     ),
                 ) {
-                    Icon(Icons.Rounded.ArrowUpward, "Send request", modifier = Modifier.size(23.dp))
+                    Icon(if (task?.working == true && snapshot.composerText.isBlank()) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
+                        if (task?.working == true && snapshot.composerText.isBlank()) "Stop task" else "Send request", modifier = Modifier.size(23.dp))
                 }
             }
         }
