@@ -214,6 +214,8 @@ button { color: inherit; }
 }
 .phone-state-overlay.visible { display: grid; }
 .phone-state-overlay.passive { background: rgba(5,6,9,.25); backdrop-filter: none; }
+.phone-state-overlay.input-enabled { pointer-events: none; }
+.phone-state-overlay.input-enabled .stream-recovery-actions { pointer-events: auto; }
 .state-kicker { color: var(--purple-bright); text-transform: uppercase; letter-spacing: .12em; font-size: 9px; font-weight: 800; margin-bottom: 7px; }
 .state-title { font-size: 14px; font-weight: 670; }
 .state-copy { color: var(--muted); font-size: 10px; margin: 6px 0 12px; max-width: 240px; }

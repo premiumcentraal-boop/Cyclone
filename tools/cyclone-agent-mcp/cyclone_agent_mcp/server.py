@@ -15,12 +15,13 @@ INSTRUCTIONS = (
     "Use Cyclone One whenever the user asks to inspect or control a connected phone. "
     "The live path is the Windows Companion loopback Device Gateway, not a standalone :8765 process. "
     "Keep Cyclone One open with a USB-READY phone; MCP inherits that loopback URL from the Companion store. "
-    "Start with phone_list, then phone_status → phone_locate(goal) → phone_act. phone_locate does not navigate. "
+    "Start with phone_list, then phone_status -> phone_locate(goal) -> phone_act. phone_locate does not navigate. "
     "phone.tap is an alias of phone.click. phone.open_app uses params.package (example com.android.vending). "
-    "phone.type requires a current observation-scoped elementId: locate → click to focus → type with user_authorized=true. "
+    "phone.type requires a current observation-scoped elementId: locate -> click to focus -> type with user_authorized=true. "
     "Play Store details: phone.launch_intent uri=market://details?id=<package>, then phone.wait_for package_equals. "
     "If pageChanged or afterPackage matches, ok follows the UI effect; PROTOCOL_MISMATCH is a warning, not a stop. "
     "If exactly one phone is READY it may be selected automatically; if more than one is READY, pass device_id explicitly. "
+    "If mutate returns HUMAN_HAS_CONTROL, yield input in Cyclone One or retry with request_ai_control=true; a locked phone is not stolen. "
     "Android remains authoritative for policy, GATE confirmation and execution. "
     "This server has no shell, PowerShell, arbitrary ADB, root, su, subprocess or script-evaluation tool."
 )
@@ -94,9 +95,10 @@ def build_server(
         goal: str,
         device_id: str | None = None,
         user_authorized: bool = False,
+        request_ai_control: bool = False,
     ) -> dict[str, Any]:
-        """Typed PhoneToolExecutor action. phone.tap→phone.click. open_app params.package=com.android.vending. type needs current elementId. launch_intent uri=market://details?id=<package>."""
-        return tools.call("phone_act", {"device_id": device_id, "tool": tool, "params": params, "goal": goal, "user_authorized": user_authorized})
+        """Typed PhoneToolExecutor action. phone.tap→phone.click. open_app params.package=com.android.vending. type needs current elementId. launch_intent uri=market://details?id=<package>. If Companion owns input, yield in Cyclone One or set request_ai_control=true (never steals a locked phone)."""
+        return tools.call("phone_act", {"device_id": device_id, "tool": tool, "params": params, "goal": goal, "user_authorized": user_authorized, "request_ai_control": request_ai_control})
 
     # Cyclone One background execution-session contract. Models name only session_id; the Device
     # Gateway resolves Android's non-zero display id and rejects any response that escapes it.

@@ -316,7 +316,7 @@ class ScrcpyBackendTests(unittest.TestCase):
             credential = None
             adb_device = type("AdbDevice", (), {"state": "device"})()
 
-        controller = VideoStreamController(Device(), VideoFleetLimiter(), media_backend=FakeBackend())
+        controller = VideoStreamController(Device(), VideoFleetLimiter(), media_backend=FakeBackend(), jpeg_first=False)
         q = controller.subscribe("focus")
         init = q.get(timeout=2)
         config_msg = q.get(timeout=2)

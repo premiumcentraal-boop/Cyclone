@@ -11,6 +11,7 @@ from cyclone_device_gateway.adb.client import ADBDevice, ADBError
 from cyclone_device_gateway.config import Settings
 from cyclone_device_gateway.cyclone_bridge.client import BridgeDisconnectedError
 from cyclone_device_gateway.desktop_runtime.api import DesktopRuntime, create_desktop_app
+from cyclone_device_gateway.desktop_runtime.agent import DesktopAgentService
 from cyclone_device_gateway.desktop_runtime.controls import MANUAL_KINDS, ClipboardService, ManualControlService, clipboard_looks_sensitive
 from cyclone_device_gateway.desktop_runtime.fleet import DeviceFleetManager
 from cyclone_device_gateway.desktop_runtime.models import DesktopRuntimeError, DeviceFleetState, VIDEO_PROFILES, deterministic_device_id
@@ -496,7 +497,7 @@ def test_focus_stream_uses_bounded_image_fallback_when_scrcpy_is_unavailable():
 
     assert init.kind == "text"
     assert '"codec":"image/' in init.data
-    assert '"backend":"adb-screenshot-degraded"' in init.data
+    assert '"backend":"adb-screenshot"' in init.data
     assert frame.kind == "binary"
     assert session.adb.process_calls == []
     controller.unsubscribe("focus", q)
@@ -529,9 +530,38 @@ def test_video_reports_bounded_capture_failure_instead_of_silent_infinite_wait()
     controller.stop_all()
 
 
+def test_companion_input_ownership_blocks_mcp_until_yield_and_never_steals_locked_phone():
+    fleet, session, _bridge = paired_session_for_services()
+    controls = ManualControlService(fleet)
+    agent = DesktopAgentService(fleet)
+    assert session.input_owner == "AI"
+    controls.execute(session.device_id, {"kind": "tap", "x": .2, "y": .3})
+    assert session.input_owner == "HUMAN"
+    with pytest.raises(DesktopRuntimeError) as blocked:
+        agent._require_ai_ownership(session, False)
+    assert blocked.value.code == "HUMAN_HAS_CONTROL"
+    session.screen_awake = False
+    with pytest.raises(DesktopRuntimeError) as locked:
+        agent._require_ai_ownership(session, True)
+    assert locked.value.code == "PHONE_LOCKED"
+    session.screen_awake = True
+    agent._require_ai_ownership(session, True)
+    assert session.input_owner == "AI"
+    yielded = controls.execute(session.device_id, {"kind": "yield_ai"})
+    assert yielded["ok"] is True
+    assert yielded["inputOwner"] == "AI"
+    status = agent.status(session.device_id)
+    assert status["inputOwner"] == "AI"
+    assert status["sessions"][0]["sessionId"] == "default-foreground"
+    assert status["sessions"][0]["kind"] == "FOREGROUND"
+
+
 def test_no_generic_shell_or_arbitrary_adb_surface():
     forbidden = ("shell", "powershell", "root", "su", "command", "script", "adb")
-    assert MANUAL_KINDS == {"tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"}
+    assert MANUAL_KINDS == {
+        "tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake",
+        "yield_ai", "take_human",
+    }
     assert all(not any(word in op.lower() for word in forbidden) for op in ALLOWED_OPS)
 
 

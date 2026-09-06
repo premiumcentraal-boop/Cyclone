@@ -76,18 +76,21 @@ def test_release_workflow_is_manual_and_never_publishes_release():
         assert forbidden not in lower
     assert "actions/upload-artifact" in text
 
-def test_cyclone_one_v02_beta_includes_execution_gateway_and_installer_name():
+def test_cyclone_one_v021_beta_includes_execution_gateway_and_installer_name():
     text = (REPO / ".github/workflows/cyclone-one-windows-beta.yml").read_text()
     assert "android-gate:" in text
     assert "_mobile-build.yml" in text
     assert "smoke-android-execution-gateway.py" in text
-    assert "Cyclone-One-0.2.0-Beta-1-Setup.exe" in text
+    assert "grok/cyclone-one-v0.2.1-beta" in text
+    assert "Cyclone-One-0.2.1-Beta-1-Setup.exe" in text
+    assert "cyclone-one-v0.2.1-beta.1" in text
+    assert "0.2.1" in text
     assert "CycloneAgentMCP" in (REPO / "packaging/pc-companion/pyinstaller/CycloneAgentMCP.spec").read_text()
     assert (REPO / "scripts/pc-companion/smoke-android-execution-gateway.py").is_file()
-    notes = (REPO / "docs/RELEASE_CYCLONE_ONE_0.2.md").read_text()
-    assert "Android execution-gateway gate" in notes
-    assert "PROTOCOL_MISMATCH" in notes
-    assert "market://details" in notes
+    notes = (REPO / "docs/RELEASE_CYCLONE_ONE_0.2.1.md").read_text()
+    assert "JPEG" in notes
+    assert "HUMAN_HAS_CONTROL" in notes
+    assert "UNVERIFIED" in notes
 
 
 def test_ci_runs_focused_mcp_tests_and_windows_sidecars():

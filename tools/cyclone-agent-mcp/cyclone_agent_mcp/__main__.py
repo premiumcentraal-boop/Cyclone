@@ -4,6 +4,18 @@ import argparse
 import json
 import sys
 
+
+def _configure_stdio() -> None:
+    """Keep --help printable on Windows cp1252 consoles (no UnicodeEncodeError)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from .connector import connect, disconnect, verify_tools_list
 from .phone_mcp import format_phone_act_examples, phone_act_examples
 from .profiles import deepseek_copilot_notes, deepseek_opencode_notes, dumps_json
@@ -47,6 +59,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdio()
     args = _parser().parse_args(argv)
     if args.command == "serve":
         run_stdio()

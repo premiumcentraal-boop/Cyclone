@@ -61,7 +61,7 @@ PHONE_ACT_EXAMPLES = {
         "params": {"elementId": "<current observation-scoped elementId>", "text": "Cyclone"},
         "goal": "Type into the Play Store search field",
         "user_authorized": True,
-        "note": "Sequence: phone_locate → phone.click to focus → phone.type with the new elementId. user_authorized=true is MCP intent only.",
+        "note": "Sequence: phone_locate -> phone.click to focus -> phone.type with the new elementId. user_authorized=true is MCP intent only.",
     },
     "phone.wait_for": {
         "tool": "phone.wait_for",

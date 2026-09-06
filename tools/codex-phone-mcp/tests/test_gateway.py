@@ -188,6 +188,11 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual("PAIRING_REQUIRED", raised.exception.body["error"]["code"])
         self.assertTrue(raised.exception.body["error"]["retryable"])
 
+    def test_unscoped_status_auto_picks_single_ready_device(self):
+        result = GatewayClient(self.url, "test-token").status()
+        self.assertEqual("dev_a", result.get("device_id"))
+        self.assertIn("status", result)
+
     def test_devices_lists_fleet_and_forces_scan(self):
         client = GatewayClient(self.url, "test-token")
         result = client.devices(scan=True)

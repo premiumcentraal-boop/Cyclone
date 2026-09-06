@@ -44,7 +44,7 @@ class PairQrCompleteBody(BaseModel):
 
 class ManualControlBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"]
+    kind: Literal["tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake", "yield_ai", "take_human"]
     x: float | None = None
     y: float | None = None
     x1: float | None = None
@@ -72,6 +72,7 @@ class AgentActionBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     goal: str = ""
     expected_observation_id: str | None = None
+    request_ai_control: bool = False
 
 
 class AgentDebugBody(BaseModel):
@@ -804,6 +805,7 @@ def _call(fn):
             RuntimeErrorCode.TRUST_AUTH_FAILED.value: 403,
             RuntimeErrorCode.PROTOCOL_MISMATCH.value: 426,
             RuntimeErrorCode.PHONE_LOCKED.value: 423,
+            RuntimeErrorCode.HUMAN_HAS_CONTROL.value: 409,
             RuntimeErrorCode.AUTH_REJECTED.value: 403,
             RuntimeErrorCode.INVALID_REQUEST.value: 400,
             RuntimeErrorCode.STREAM_CAPACITY.value: 503,

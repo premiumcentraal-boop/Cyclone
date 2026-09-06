@@ -169,6 +169,7 @@ export interface DesktopDevice {
   source?: "USB" | "LAN" | "VIRTUAL";
   provider?: string | null;
   providerInstanceId?: string | null;
+  inputOwner?: "AI" | "HUMAN" | string;
 }
 
 export interface FleetGroup {
@@ -234,7 +235,9 @@ export type DeviceControlAction =
   | { type: "clipboard_paste"; text: string }
   | { type: "wake" }
   | { type: "disconnect" }
-  | { type: "reconnect" };
+  | { type: "reconnect" }
+  | { type: "yield_ai" }
+  | { type: "take_human" };
 
 export interface ControlResult {
   ok: boolean;
