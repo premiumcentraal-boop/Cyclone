@@ -156,11 +156,21 @@ def verify_tools_list(executable: str | None = None) -> dict[str, Any]:
                 schema_errors.append("phone_group_act_missing_device_ids")
         elif name in expected and "device_id" not in properties:
             schema_errors.append(f"{name}_missing_device_id")
+    from .phone_mcp import phone_act_examples
+
     return {
         "ok": discovered == expected and not schema_errors,
         "tools": discovered,
         "expected": expected,
         "schema_errors": schema_errors,
+        "examples": {
+            "phone.click": phone_act_examples()["phone.click"],
+            "phone.open_app": phone_act_examples()["phone.open_app"],
+            "phone.type": phone_act_examples()["phone.type"],
+        },
+        "companionPath": (
+            "Start Cyclone One. MCP uses the Companion loopback Device Gateway, not classic :8765."
+        ),
     }
 
 

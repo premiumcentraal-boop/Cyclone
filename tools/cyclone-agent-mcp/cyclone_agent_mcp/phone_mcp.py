@@ -59,3 +59,33 @@ def matched_verified_skill(match_raw: Any, goal: str, page_key: str) -> dict[str
     _ensure_phone_mcp()
     from cyclone_phone_mcp.skills import matched_verified_skill as _match
     return _match(match_raw, goal, page_key)
+
+
+def resolve_action(tool: str, params: Any) -> tuple[str, dict[str, Any]]:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.action_contract import resolve_action as _resolve
+    return _resolve(tool, params)
+
+
+def supported_actions_message() -> str:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.action_contract import supported_actions_message as _message
+    return _message()
+
+
+def apply_action_soft_success(tool: str, params: dict[str, Any] | None, result: Any, **kwargs: Any) -> Any:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.soft_success import apply_action_soft_success as _apply
+    return _apply(tool, params, result, **kwargs)
+
+
+def format_phone_act_examples() -> str:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.action_contract import format_phone_act_examples as _examples
+    return _examples()
+
+
+def phone_act_examples() -> dict[str, Any]:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.action_contract import PHONE_ACT_EXAMPLES
+    return dict(PHONE_ACT_EXAMPLES)

@@ -11,6 +11,7 @@
 secrets/
 
 # Python / test artifacts
+.venv/
 __pycache__/
 *.py[cod]
 *.egg-info/

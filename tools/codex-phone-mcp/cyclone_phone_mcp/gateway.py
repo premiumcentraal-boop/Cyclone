@@ -12,6 +12,10 @@ from typing import Any
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
 NON_MUTATING_CAPABILITIES = {"phone.observe", "phone.find", "phone.wait_for"}
+COMPANION_GATEWAY_HINT = (
+    "Classic loopback :8765 is not the Cyclone One path. Keep Cyclone One (Windows Companion) "
+    "open with a USB-READY phone; MCP inherits the Companion loopback URL from the local store."
+)
 
 
 class GatewayError(RuntimeError):
@@ -44,11 +48,37 @@ class GatewayClient:
         self._device_capabilities: dict[str, dict[str, Any]] = {}
         self._device_capability_ids: dict[str, frozenset[str]] = {}
 
+    def _reload_companion_connection(self) -> bool:
+        """Load the Cyclone One Companion DPAPI/env store when classic :8765 is empty or stale."""
+        try:
+            from secure_gateway_token import load_connection
+        except ImportError:
+            return False
+        try:
+            connection = load_connection()
+        except Exception:
+            return False
+        if not isinstance(connection, dict):
+            return False
+        token = str(connection.get("token") or "").strip()
+        base_url = str(connection.get("url") or "").strip().rstrip("/")
+        if not token or not base_url:
+            return False
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            return False
+        changed = token != self.token or base_url != self.base_url
+        self.token = token
+        self.base_url = base_url
+        return changed
+
     def _request(self, method: str, path: str, payload: Any | None = None) -> Any:
         if not self.token:
+            self._reload_companion_connection()
+        if not self.token:
             raise GatewayError(
-                "CYCLONE_DEVICE_GATEWAY_TOKEN is not set",
-                body={"error": {"code": "AUTH_REJECTED", "layer": "PROTOCOL"}},
+                "CYCLONE_DEVICE_GATEWAY_TOKEN is not set. Start Cyclone One so MCP can inherit the Companion loopback credential.",
+                body={"error": {"code": "AUTH_REJECTED", "layer": "PROTOCOL", "message": COMPANION_GATEWAY_HINT}},
             )
         url = f"{self.base_url}{path}"
         data = None
@@ -91,9 +121,16 @@ class GatewayClient:
                 }
             raise GatewayError(f"Gateway HTTP {exc.code} for {path}", status=exc.code, body=body) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
+            previous = self.base_url
+            if self._reload_companion_connection() and self.base_url != previous:
+                return self._request(method, path, payload)
+            hint = COMPANION_GATEWAY_HINT if "8765" in previous else ""
+            message = f"Gateway unavailable at {previous}"
+            if hint:
+                message = f"{message}. {hint}"
             raise GatewayError(
-                f"Gateway unavailable at {self.base_url}",
-                body={"error": {"code": "DEVICE_DISCONNECTED", "layer": "TRANSPORT", "retryable": True}},
+                message,
+                body={"error": {"code": "DEVICE_DISCONNECTED", "layer": "TRANSPORT", "retryable": True, "message": message}},
             ) from exc
         except json.JSONDecodeError as exc:
             raise GatewayError(

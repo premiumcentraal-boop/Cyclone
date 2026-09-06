@@ -14,7 +14,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const heading = el("div");
   heading.append(
     el("h1", "page-title", "AI connections"),
-    el("p", "page-subtitle", "Let Codex see and control paired phones through Cyclone's secure local Gateway."),
+    el("p", "page-subtitle", "Keep Cyclone One open. MCP uses this Companion's loopback Device Gateway — not a standalone :8765 server."),
   );
   const refreshButton = button("Refresh", "button ghost compact");
   header.append(heading, refreshButton);
@@ -77,7 +77,7 @@ function renderCodexConnector(
   identity.append(
     el("div", "codex-wordmark", "CODEX × CYCLONE"),
     el("h2", "codex-connect-title", connector.state === "CONNECTED" ? "Codex phone control is connected" : "Connect Codex to your phones"),
-    el("p", "codex-connect-copy", "One click adds Cyclone's multi-phone MCP server to Codex. Credentials stay encrypted on this PC; Android policy still approves phone actions."),
+    el("p", "codex-connect-copy", "One click adds Cyclone's multi-phone MCP server to Codex. Keep this window open so the USB-READY phone stays on the Companion loopback gateway. Credentials stay encrypted on this PC; Android policy still approves phone actions."),
   );
   const state = el("span", `codex-connect-state state-${connector.state.toLowerCase().replaceAll("_", "-")}`, friendlyState(connector.state));
   top.append(identity, state);

@@ -6,12 +6,14 @@ import threading
 import time
 from typing import Any
 
+from ..actions.contract import canonical_tool, normalize_action
 from ..actions.envelope import (
     android_execution_error_class,
     canonical_error,
     extract_android_execution,
     safe_android_execution,
 )
+from ..actions.soft_success import apply_protocol_mismatch_soft_success
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
@@ -21,11 +23,12 @@ from .readiness import enrich_device_public
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
 DEVICE_OPERATION_CONTRACT_VERSION = "cyclone.desktop.device-operation.v1"
 ALLOWED_PHONE_TOOLS = frozenset({
-    "phone.observe", "phone.find", "phone.click", "phone.long_press", "phone.swipe",
-    "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for",
+    "phone.observe", "phone.find", "phone.click", "phone.tap", "phone.long_press", "phone.swipe",
+    "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
+    "phone.wait_for",
 })
 PAGE_TRANSITION_TOOLS = frozenset({
-    "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app",
+    "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
 })
 
 
@@ -168,12 +171,21 @@ class DesktopAgentService:
 
     def action(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         session = self._paired(device_id)
-        tool = str(payload.get("capability_id") or payload.get("tool") or "")
-        if tool not in ALLOWED_PHONE_TOOLS:
-            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Requested phone capability is unavailable.")
+        tool = canonical_tool(str(payload.get("capability_id") or payload.get("tool") or ""))
         params = payload.get("params") or {}
         if not isinstance(params, dict):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object.")
+        try:
+            tool, params = normalize_action(tool, params)
+        except ValueError as exc:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, str(exc)) from exc
+        if tool not in ALLOWED_PHONE_TOOLS:
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.CAPABILITY_UNAVAILABLE,
+                "Requested phone capability is unavailable. "
+                "Supported: phone.click (phone.tap alias), phone.open_app, phone.launch_intent, phone.wait_for, "
+                "phone.type, phone.long_press, phone.scroll, phone.back, phone.home.",
+            )
         goal = str(payload.get("goal") or tool.replace("phone.", "").replace("_", " "))[:1000]
         expected = str(payload.get("expected_observation_id") or payload.get("currentObservationId") or "")
         if tool not in {"phone.observe", "phone.find", "phone.wait_for"} and not expected:
@@ -262,7 +274,22 @@ class DesktopAgentService:
             )
         )
         error = None
-        if not execution_ok:
+        warning = None
+        execution_ok, overall_soft, error, warning, soft_status = apply_protocol_mismatch_soft_success(
+            tool=tool,
+            params=params,
+            before=before,
+            after=after_raw,
+            execution=execution if isinstance(execution, dict) else parsed_execution,
+            execution_ok=execution_ok,
+            execution_error_class=execution_error_class,
+            verification_passed=False,
+            error=None,
+        )
+        if warning is not None:
+            verification_passed = True
+            execution_status = soft_status
+        elif not execution_ok:
             if execution_error_class == "PROTOCOL_MISMATCH":
                 error = canonical_error(
                     "PROTOCOL_MISMATCH",
@@ -332,7 +359,8 @@ class DesktopAgentService:
             )
         if error is not None and execution_ok and not verification_passed:
             verification_layer["error"] = error
-        return {
+        after_state = self._after_state(after_raw)
+        result = {
             **self._operation_context(session, device_id, "act"),
             "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "capability_id": tool,
@@ -342,9 +370,18 @@ class DesktopAgentService:
             "verification": verification_layer,
             "android_execution": android_execution,
             "after": after,
-            "afterState": self._after_state(after_raw),
+            "afterState": after_state,
+            "afterPackage": after_state.get("package"),
+            "pageChanged": bool(
+                (before or {}).get("pageKey") != after_raw.get("pageKey")
+                or (before or {}).get("package") != after_raw.get("package")
+            ),
             "error": error,
         }
+        if warning is not None:
+            result["warning"] = warning
+            execution_layer["softSuccess"] = True
+        return result
 
     def _observe_after_action(
         self,

@@ -23,6 +23,10 @@ def codex_toml(command: str, args: list[str]) -> str:
         'default_tools_approval_mode = "writes"',
         "# Read-only phone inspection is immediate; Codex asks before mutating tools.",
         "# Gateway credentials are inherited at runtime; no token is stored in TOML.",
+        "# Keep Cyclone One open. MCP uses the Companion loopback gateway, not classic :8765.",
+        '# Example phone.click: params={elementId="<current id>"}',
+        '# Example phone.open_app: params={package="com.android.vending"}',
+        '# Example phone.type: locate then focus then params={elementId="<current id>", text="Cyclone"} user_authorized=true',
         "# END CYCLONE AGENT MCP",
     ]
     return "\n".join(lines) + "\n"

@@ -8,22 +8,18 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from .action_contract import (
+    CANONICAL_ACTIONS,
+    resolve_action,
+    supported_actions_message,
+)
 from .compact import compact_element, compact_observation, compact_search, page_changed, page_delta, redact
 from .gateway import GatewayClient, GatewayError
 from .reports import SessionRecorder
 from .protocol import Failure, classify_failure
+from .soft_success import apply_action_soft_success, maybe_clear_protocol_mismatch, ui_effect_evidence
 
-ALLOWED_ACTIONS = {
-    "phone.click",
-    "phone.long_press",
-    "phone.swipe",
-    "phone.scroll",
-    "phone.type",
-    "phone.back",
-    "phone.home",
-    "phone.open_app",
-    "phone.wait_for",
-}
+ALLOWED_ACTIONS = set(CANONICAL_ACTIONS) | {"phone.tap", "phone.press", "phone.launch", "phone.open"}
 ALLOWED_GROUP_ACTIONS = ALLOWED_ACTIONS - {"phone.type"}
 FORBIDDEN_OPERATION_KEY = re.compile(
     r"(?i)^(?:cmd|command|shell|adb|powershell|subprocess|executable|script|root|su|docker|host_command)$"
@@ -176,11 +172,28 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
             raise ValueError(f"{tool} accepts no parameters")
     elif tool == "phone.open_app":
         if set(params) != {"package"} or not ANDROID_PACKAGE.fullmatch(str(params.get("package") or "")):
-            raise ValueError("phone.open_app requires one valid Android package name")
+            raise ValueError(
+                "phone.open_app requires params.package with a valid Android package name. "
+                'Example: {"package": "com.android.vending"}'
+            )
+    elif tool == "phone.launch_intent":
+        if set(params) - {"uri", "package"}:
+            raise ValueError(
+                "phone.launch_intent accepts uri and optional package. "
+                'Example: {"uri": "market://details?id=com.android.chrome"}'
+            )
+        if not str(params.get("uri") or "").strip():
+            raise ValueError('phone.launch_intent requires params.uri, e.g. market://details?id=<package>')
     elif tool == "phone.wait_for":
-        allowed = {"condition", "timeoutMs", "pollMs", "selector", *ELEMENT_ID_KEYS}
+        allowed = {
+            "condition", "timeoutMs", "pollMs", "selector", "type", "package", "packageName",
+            "text", "from", *ELEMENT_ID_KEYS,
+        }
         if set(params) - allowed:
-            raise ValueError("phone.wait_for accepts only a bounded condition, timeout, poll interval, and elementId")
+            raise ValueError(
+                "phone.wait_for accepts a bounded condition, timeout, poll interval, and elementId. "
+                'Example: {"timeoutMs": 8000, "condition": {"type": "package_equals", "package": "com.android.vending"}}'
+            )
         condition = params.get("condition")
         if condition is not None and not isinstance(condition, dict):
             raise ValueError("phone.wait_for condition must be an object")
@@ -367,11 +380,17 @@ class PhoneTools:
 
     def phone_act(self, args: dict[str, Any]) -> Any:
         tool = str(args.get("tool") or "")
-        if tool not in ALLOWED_ACTIONS:
-            raise ValueError(f"Unsupported phone action: {tool}")
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
+        try:
+            tool, params = resolve_action(tool, params)
+        except ValueError as exc:
+            if "Unsupported phone action" in str(exc):
+                raise ValueError(f"{exc}") from exc
+            raise
+        if tool not in ALLOWED_ACTIONS:
+            raise ValueError(f"Unsupported phone action: {tool}. {supported_actions_message()}")
         _validate_mcp_action_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
@@ -396,11 +415,12 @@ class PhoneTools:
         if len(device_ids) > 32 or len(set(device_ids)) != len(device_ids):
             raise ValueError("device_ids must contain 1..32 unique explicit targets")
         tool = str(args.get("tool") or "")
-        if tool not in ALLOWED_GROUP_ACTIONS:
-            raise ValueError(f"Unsupported group phone action: {tool}")
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
+        tool, params = resolve_action(tool, params)
+        if tool not in ALLOWED_GROUP_ACTIONS:
+            raise ValueError(f"Unsupported group phone action: {tool}. {supported_actions_message()}")
         _validate_mcp_action_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
@@ -572,10 +592,12 @@ class PhoneTools:
                 self.gateway.device_action(device_id, tool, params, goal)
                 if device_id else self.gateway.action(tool, params, goal)
             )
+            action = apply_action_soft_success(tool, params, action)
             failure = classify_failure(action)
         except GatewayError as exc:
             action_error = exc
             action = redact(exc.body) if exc.body is not None else {"error": str(exc)}
+            action = apply_action_soft_success(tool, params, action)
             failure = classify_failure(action)
 
         after: dict[str, Any] | None = None
@@ -600,6 +622,12 @@ class PhoneTools:
 
         changed = page_changed(before, after)
         delta = page_delta(before, after, changed)
+        evidence = ui_effect_evidence(tool, params, before=before, after=after, raw=action)
+        if evidence["matched"] and (changed is not True):
+            changed = True
+            delta = page_delta(before, after, True)
+        action = apply_action_soft_success(tool, params, action, before=before, after=after)
+        failure = maybe_clear_protocol_mismatch(classify_failure(action), evidence)
         typed_verification = _gateway_verification_passed(action)
         already_on_page = (
             _android_execution_ok(action)
@@ -611,6 +639,10 @@ class PhoneTools:
             failure = None
         if not typed_verification and already_on_page:
             typed_verification = True
+        if evidence["matched"] and (failure is None or failure.code == "PROTOCOL_MISMATCH"):
+            failure = None
+            typed_verification = True
+            action_error = None
         verified = failure is None and action_error is None and typed_verification and after is not None
         if failure is not None:
             error_class, failure_layer = failure.code, failure.layer
@@ -624,7 +656,12 @@ class PhoneTools:
             error_class, failure_layer = "AFTER_OBSERVATION_FAILED", "verification"
         else:
             error_class, failure_layer = None, None
-        return {
+        warning = None
+        if isinstance(action, dict) and isinstance(action.get("warning"), dict):
+            warning = action["warning"]
+        elif evidence["matched"] and error_class in (None, "PROTOCOL_MISMATCH"):
+            warning = action.get("warning") if isinstance(action, dict) else None
+        payload = {
             "kind": "phone_action_result",
             "tool": tool,
             "goal": goal,
@@ -635,12 +672,16 @@ class PhoneTools:
             "beforePageCard": before,
             "afterPageCard": after,
             "pageChanged": changed,
+            "afterPackage": evidence.get("afterPackage"),
             "delta": delta,
             "errorClass": error_class,
             "failureLayer": failure_layer,
             "ok": verified,
             "error": None if verified else {"code": error_class, "layer": failure_layer},
         }
+        if warning:
+            payload["warning"] = warning
+        return payload
 
     def phone_debug_bundle(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)

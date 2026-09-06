@@ -5,13 +5,19 @@ import json
 import sys
 
 from .connector import connect, disconnect, verify_tools_list
+from .phone_mcp import format_phone_act_examples, phone_act_examples
 from .profiles import deepseek_copilot_notes, deepseek_opencode_notes, dumps_json
 from .server import run_stdio
 from .status import connection_status
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="cyclone-agent-mcp", description="Generic Cyclone Agent MCP connector")
+    parser = argparse.ArgumentParser(
+        prog="cyclone-agent-mcp",
+        description="Generic Cyclone Agent MCP connector. Talks to the Cyclone One Companion loopback gateway, not a standalone :8765 process.",
+        epilog=format_phone_act_examples(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     serve = sub.add_parser("serve", help="Run MCP over STDIO")
@@ -65,13 +71,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "copy-config":
         result = connect(args.host, dry_run=True, executable=args.executable)
         config = result["configuration"]
-        print(config if isinstance(config, str) else dumps_json(config), end="")
+        rendered = config if isinstance(config, str) else dumps_json(config)
+        print(rendered.rstrip())
+        print()
+        print(format_phone_act_examples())
         return 0
     if args.command == "status":
         print(json.dumps(connection_status(probe_gateway=args.probe_gateway), separators=(",", ":")))
         return 0
     if args.command == "verify":
         result = verify_tools_list(args.executable)
+        result["examples"] = phone_act_examples()
+        result["companionPath"] = (
+            "Start Cyclone One (Windows Companion). MCP inherits the loopback Device Gateway "
+            "URL from the Companion store. Do not point agents at a standalone :8765 process."
+        )
         print(json.dumps(result, indent=2))
         return 0 if result["ok"] else 2
     if args.command == "profile":

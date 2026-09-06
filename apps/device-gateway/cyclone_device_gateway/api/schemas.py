@@ -26,6 +26,7 @@ class ActionRequest(BaseModel):
         "phone.observe",
         "phone.find",
         "phone.click",
+        "phone.tap",
         "phone.long_press",
         "phone.swipe",
         "phone.scroll",
@@ -33,6 +34,7 @@ class ActionRequest(BaseModel):
         "phone.back",
         "phone.home",
         "phone.open_app",
+        "phone.launch_intent",
         "phone.wait_for",
     ]
     params: dict[str, Any] = Field(default_factory=dict)

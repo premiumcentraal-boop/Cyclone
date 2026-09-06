@@ -12,21 +12,21 @@ SPEC.loader.exec_module(release_versions)
 class ReleaseVersionsTest(unittest.TestCase):
     def coherent_values(self):
         return {
-            "product": "3.9.0",
-            "expectedMobile": "3.9.0",
-            "expectedPc": "3.8.4",
-            "expectedGatewayPython": "3.8.4",
-            "expectedMcpPython": "3.8.4",
-            "androidVersionName": "3.9.0",
-            "androidVersionCode": 54,
-            "gatewayPython": "3.8.4",
-            "mcpPython": "3.8.4",
-            "agentMcpPython": "3.8.4",
-            "pcPackage": "3.8.4",
-            "pcPackageLock": "3.8.4",
-            "pcCargo": "3.8.4",
-            "pcTauri": "3.8.4",
-            "expectedAndroidVersionCode": 54,
+            "product": "3.9.8",
+            "expectedMobile": "3.9.8",
+            "expectedPc": "0.2.0",
+            "expectedGatewayPython": "3.9.8",
+            "expectedMcpPython": "3.9.8",
+            "androidVersionName": "3.9.8",
+            "androidVersionCode": 62,
+            "gatewayPython": "3.9.8",
+            "mcpPython": "3.9.8",
+            "agentMcpPython": "3.9.8",
+            "pcPackage": "0.2.0",
+            "pcPackageLock": "0.2.0",
+            "pcCargo": "0.2.0",
+            "pcTauri": "0.2.0",
+            "expectedAndroidVersionCode": 62,
         }
 
     def test_current_component_versions_are_allowed_to_be_independent(self):
@@ -36,7 +36,7 @@ class ReleaseVersionsTest(unittest.TestCase):
         values = self.coherent_values()
         values["androidVersionName"] = "3.8.9"
         self.assertIn(
-            "androidVersionName='3.8.9' expected '3.9.0'",
+            "androidVersionName='3.8.9' expected '3.9.8'",
             release_versions.check(values),
         )
 
