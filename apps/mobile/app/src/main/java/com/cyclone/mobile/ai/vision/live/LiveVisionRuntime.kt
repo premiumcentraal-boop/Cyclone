@@ -68,6 +68,19 @@ object LiveVisionRuntime {
         sources.containsKey(sessionId) && broker.ageMs(sessionId, SystemClock.uptimeMillis())?.let { it in 0..750 } == true
     }
 
+    /** UI-only copy: no new capture, no disk writes and no ownership/action side effects. Caller recycles. */
+    fun preview(sessionId: String): Bitmap? = synchronized(lock) {
+        if (!healthy(sessionId)) return null
+        val session = sessions.lookup(sessionId)
+        val frame = broker.latest(sessionId) ?: return null
+        if (!FrameSelection.eligible(frame, sessionId, session.displayId, SystemClock.uptimeMillis(), 750, null)) return null
+        val source = pixels[frame.payloadHandle] ?: return null
+        val scale = minOf(1f, 480f / source.width.coerceAtLeast(1))
+        val scaled = Bitmap.createScaledBitmap(source, (source.width * scale).toInt().coerceAtLeast(1),
+            (source.height * scale).toInt().coerceAtLeast(1), true)
+        if (scaled === source) source.copy(Bitmap.Config.ARGB_8888, false) else scaled
+    }
+
     fun capture(cacheDir: File, crop: UiBounds? = null,
                 sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID,
                 waitMs: Long = 800): CycloneAccessibilityService.ScreenshotArtifact? {

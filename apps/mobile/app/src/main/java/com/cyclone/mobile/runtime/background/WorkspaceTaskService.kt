@@ -7,7 +7,13 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.content.res.ColorStateList
+import android.widget.ImageView
+import android.widget.ProgressBar
+import com.cyclone.mobile.ai.vision.live.LiveVisionRuntime
+import com.cyclone.mobile.R
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -46,6 +52,20 @@ class WorkspaceTaskService : Service() {
     private var handoff = false
     private var label = "your app"
     private var message = "Opening workspace…"
+    private var finished = false
+    private var previewView: ImageView? = null
+    private var previewLabel: TextView? = null
+    private var previewBitmap: Bitmap? = null
+    private val previewTick = object : Runnable {
+        override fun run() {
+            if (!expanded || sheet == null) return
+            val next = sessionId?.let { runCatching { LiveVisionRuntime.preview(it) }.getOrNull() }
+            previewView?.setImageBitmap(next)
+            previewBitmap?.recycle(); previewBitmap = next
+            previewLabel?.text = if (next != null) "Live workspace · view only" else "Preview unavailable"
+            main.postDelayed(this, 750)
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -94,7 +114,7 @@ class WorkspaceTaskService : Service() {
                 update("Working in $label…")
                 val modelId = getSharedPreferences("cyclone_ai", MODE_PRIVATE).getString("openrouter_model", null)
                 val config = QuickAgentConfig(model = modelId?.let(OpenRouterModelPresets::byId) ?: OpenRouterModelPresets.DEFAULT)
-                finishTask(agent!!.execute(goal, config))
+                finishTask(agent!!.execute(goal, config) { progress -> update(progress) })
             }.onFailure {
                 sessionId?.let { id -> runCatching { WorkspaceRuntime.close(id, WorkspaceState.FAILED) } }
                 update("Background work is unavailable on this phone. ${it.message?.take(180).orEmpty()}")
@@ -113,6 +133,7 @@ class WorkspaceTaskService : Service() {
                 update("Your review is needed")
             }
             result.ok -> {
+                finished = true
                 update("Task completed and checked")
                 sessionId?.let { WorkspaceRuntime.close(it, WorkspaceState.COMPLETED) }
                 sessionId = null
@@ -132,49 +153,114 @@ class WorkspaceTaskService : Service() {
     } }
     private fun action(name: String) = PendingIntent.getService(this, name.hashCode(),
         Intent(this, WorkspaceTaskService::class.java).setAction(name), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-    private fun notification(): Notification = Notification.Builder(this, CHANNEL)
-        .setSmallIcon(android.R.drawable.ic_menu_view).setContentTitle("Cyclone · $label")
-        .setContentText(message).setOngoing(true).setContentIntent(action("view"))
-        .addAction(Notification.Action.Builder(null, "View", action("view")).build())
-        .addAction(Notification.Action.Builder(null, "Cancel", action("cancel")).build()).build()
+    private fun notification(): Notification {
+        val title = when {
+            finished -> "Task completed"
+            handoff -> "Ready for your review"
+            paused -> "Task paused"
+            else -> "Working in $label"
+        }
+        val builder = Notification.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_cyclone_status).setColor(Color.rgb(141, 227, 210))
+            .setContentTitle(title).setContentText(message).setSubText("Cyclone")
+            .setStyle(Notification.BigTextStyle().bigText(message))
+            .setOnlyAlertOnce(true).setShowWhen(false).setOngoing(!finished)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)
+                .setContentTitle("Cyclone task").setContentText("Unlock to view task progress").build())
+            .setContentIntent(action("view"))
+        if (!finished && !paused && !handoff) builder.setProgress(0, 0, true)
+        if (handoff) builder.addAction(Notification.Action.Builder(null, "Review in app", action("handoff")).build())
+        else if (!finished) builder.addAction(Notification.Action.Builder(null,
+            if (paused) "Resume" else "Pause", action(if (paused) "resume" else "pause")).build())
+        builder.addAction(Notification.Action.Builder(null, "View progress", action("view")).build())
+        if (!finished) builder.addAction(Notification.Action.Builder(null, "Stop task", action("cancel")).build())
+        return builder.build()
+    }
 
     private fun render() {
         val accessibility = CycloneAccessibilityService.instance ?: return
         val manager = accessibility.getSystemService(WindowManager::class.java)
+        main.removeCallbacks(previewTick)
         sheet?.let { runCatching { windowManager?.removeView(it) } }
+        previewView = null; previewLabel = null
+        previewBitmap?.recycle(); previewBitmap = null
         val density = resources.displayMetrics.density
         fun dp(value: Int) = (value * density).toInt()
+        val mint = Color.rgb(141, 227, 210)
+        fun rounded(color: Int, radius: Int) = GradientDrawable().apply {
+            setColor(color); cornerRadius = dp(radius).toFloat()
+            setStroke(dp(1).coerceAtLeast(1), Color.rgb(57, 71, 78))
+        }
         val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(10), dp(18), dp(10))
-            background = GradientDrawable().apply { setColor(Color.rgb(28, 30, 40)); cornerRadius = dp(26).toFloat() }
-            elevation = dp(10).toFloat()
+            orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(14), dp(18), dp(14))
+            background = rounded(Color.rgb(20, 28, 33), 28); elevation = dp(12).toFloat()
         }
-        card.addView(TextView(this).apply {
-            text = "Cyclone · $label"; textSize = 13f; setTextColor(Color.rgb(168, 177, 210))
+        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        header.addView(TextView(this).apply {
+            text = "CYCLONE"; textSize = 11f; letterSpacing = .14f; setTextColor(mint)
             setTypeface(null, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        header.addView(Button(this).apply {
+            text = if (expanded) "Hide" else "View"; textSize = 12f; isAllCaps = false
+            setTextColor(mint); background = rounded(Color.rgb(29, 41, 47), 24)
+            contentDescription = if (expanded) "Hide progress. Task keeps running." else "View task progress"
+            setOnClickListener { expanded = !expanded; render() }
+        }, LinearLayout.LayoutParams(dp(72), dp(48)))
+        card.addView(header)
+        card.addView(TextView(this).apply {
+            text = when { finished -> "Task completed"; handoff -> "Over to you"; paused -> "Paused"; else -> "Working in $label" }
+            textSize = 20f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(10), 0, dp(6))
         })
         card.addView(TextView(this).apply {
-            text = message; textSize = 16f; setTextColor(Color.WHITE); minHeight = dp(48)
-            gravity = Gravity.CENTER_VERTICAL
-            setOnClickListener { expanded = !expanded; render() }
-            contentDescription = "$message. Tap to ${if (expanded) "collapse" else "expand"} task controls"
+            text = message; textSize = 14f; setTextColor(Color.rgb(188, 203, 211))
+            maxLines = if (expanded) 4 else 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, 0, 0, dp(12))
+            accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
         })
-        if (expanded) {
-            fun control(title: String, command: String) {
-                card.addView(Button(this).apply {
-                    text = title; minHeight = dp(48)
-                    setOnClickListener { startService(Intent(this@WorkspaceTaskService, WorkspaceTaskService::class.java).setAction(command)) }
-                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            }
-            if (handoff) control("Review in app", "handoff")
-            else control(if (paused) "Resume" else "Pause", if (paused) "resume" else "pause")
-            control("Cancel task", "cancel")
+        if (!paused && !handoff && !finished) card.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true; indeterminateTintList = ColorStateList.valueOf(mint)
+            importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
+        if (expanded && !finished) {
+            previewLabel = TextView(this).apply {
+                text = "Connecting preview…"; textSize = 11f; setTextColor(mint); setPadding(0, dp(12), 0, dp(8))
+            }.also(card::addView)
+            previewView = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = "View-only preview of the task workspace"
+                background = rounded(Color.rgb(10, 16, 20), 16)
+                clipToOutline = true
+            }.also { card.addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                minOf(dp(210), resources.displayMetrics.heightPixels / 4))) }
         }
-        val params = WindowManager.LayoutParams(dp(if (expanded) 320 else 270), ViewGroup.LayoutParams.WRAP_CONTENT,
+        val actions = LinearLayout(this).apply { setPadding(0, dp(14), 0, 0) }
+        fun control(title: String, command: String, primary: Boolean) {
+            actions.addView(Button(this).apply {
+                text = title; textSize = 13f; isAllCaps = false; minHeight = dp(48)
+                setTextColor(if (primary) Color.rgb(13, 49, 41) else mint)
+                background = rounded(if (primary) mint else Color.rgb(26, 38, 43), 24)
+                setOnClickListener { startService(Intent(this@WorkspaceTaskService, WorkspaceTaskService::class.java).setAction(command)) }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
+        }
+        if (!finished) {
+            control("Stop task", "cancel", false)
+            if (handoff) control("Review in app", "handoff", true)
+            else control(if (paused) "Resume" else "Pause", if (paused) "resume" else "pause", true)
+            card.addView(actions)
+        }
+        val width = minOf(dp(360), resources.displayMetrics.widthPixels - dp(24))
+        val params = WindowManager.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(48) }
-        runCatching { manager.addView(card, params); windowManager = manager; sheet = card }
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_SECURE,
+            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(44) }
+        runCatching {
+            manager.addView(card, params); windowManager = manager; sheet = card
+            if (expanded) main.post(previewTick)
+        }
     }
 
     override fun onDestroy() {
@@ -184,6 +270,8 @@ class WorkspaceTaskService : Service() {
         // Revocation happens even if the model/network call outlives the UI coroutine.
         if (id != null) Thread { runCatching { WorkspaceRuntime.close(id) } }.start()
         main.removeCallbacksAndMessages(null)
+        previewView?.setImageDrawable(null)
+        previewBitmap?.recycle(); previewBitmap = null
         sheet?.let { runCatching { windowManager?.removeView(it) } }
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()

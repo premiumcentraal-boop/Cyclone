@@ -46,3 +46,7 @@ Dark charcoal composer, original orbit mark, quiet blue/mint accents, larger edi
 ## Design checkpoint 2 — Floating assistant
 
 Charcoal floating sheet with restrained aurora edge, original orbit identity, swipe/tap minimization handle and 48 dp controls. Primary chrome has an explicit Stop task action during execution; Exit is tucked into settings. Dictation and policy confirmation retain their existing handlers. Constant animated color fields behind text were replaced by a static edge treatment. Android/device validation pending.
+
+## Design checkpoint 3 — Workspace and notifications
+
+Matching background task setup, charcoal progress card, contextual pause/resume/review actions and private lock-screen notification content. Progress is indeterminate and follows real agent callbacks. Expanded progress reads only existing session-scoped live pixels at bounded resolution; hiding the preview leaves execution alone. Freshness failure clears the image. No synthetic progress, example task content or fabricated live frame is used. Preview is protected from screen capture. CI and physical validation pending.
