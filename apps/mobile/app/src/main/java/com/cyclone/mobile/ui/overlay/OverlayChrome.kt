@@ -15,6 +15,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import com.cyclone.mobile.ui.v32.CycloneOrbitMark
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -92,7 +98,7 @@ private val AuroraBlue = Color(0xFF4A8DFF)
 private val AuroraCyan = Color(0xFF80E9FF)
 private val AuroraViolet = Color(0xFF8568FF)
 private val AuroraMagenta = Color(0xFFE56CFF)
-private val AuroraInk = Color(0xFF060B18)
+private val AuroraInk = Color(0xFF12171C)
 
 data class OverlayAiSettings(
     val modelId: String = OpenRouterModelPresets.DEFAULT.id,
@@ -364,9 +370,25 @@ private fun AuroraPanel(
             modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            Box(Modifier.fillMaxWidth().height(24.dp)
+                .semantics { contentDescription = "Minimize Cyclone. Swipe down or double tap." }
+                .clickable { onAction(OverlayUserAction.MINIMIZE) }
+                .pointerInput(Unit) {
+                    var travel = 0f
+                    detectVerticalDragGestures(onDragStart = { travel = 0f },
+                        onVerticalDrag = { change, amount -> change.consume(); travel += amount },
+                        onDragEnd = { if (travel > 36.dp.toPx()) onAction(OverlayUserAction.MINIMIZE) })
+                }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(36.dp, 4.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.32f)))
+            }
             AuroraControls(snapshot, onAction, onToggleSettings = { showAiSettings = !showAiSettings })
             AnimatedVisibility(showAiSettings) {
-                QuickAiSettings(aiSettings, onAiSettingsChanged)
+                Column {
+                    QuickAiSettings(aiSettings, onAiSettingsChanged)
+                    TextButton(onClick = { onAction(OverlayUserAction.EXIT) }) {
+                        Text(OverlayCopy.EXIT, color = Color.White.copy(alpha = 0.72f))
+                    }
+                }
             }
             AuroraStateContent(snapshot, onAction, Modifier.weight(1f, fill = false))
             if (snapshot.state != OverlayChromeState.GATE && snapshot.state != OverlayChromeState.DONE) {
@@ -387,72 +409,13 @@ private fun AuroraPanel(
 
 @Composable
 private fun MovingAurora(modifier: Modifier = Modifier) {
-    val motion = rememberInfiniteTransition(label = "Moving aurora")
-    val phase by motion.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(tween(7_600, easing = LinearEasing)),
-        label = "Aurora phase",
-    )
-    val breathe by motion.animateFloat(
-        initialValue = 0.82f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(tween(2_900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "Aurora breathing",
-    )
-
+    // Static edge light avoids constant movement behind text and respects reduced-motion users.
     Canvas(modifier) {
-        drawRect(AuroraInk.copy(alpha = OverlayChromeContract.EXPANDED_AURORA_BASE_ALPHA))
-        drawRect(
-            Brush.verticalGradient(
-                0f to AuroraInk.copy(alpha = 0.12f),
-                0.30f to AuroraInk.copy(alpha = 0.34f),
-                1f to AuroraInk.copy(alpha = 0.88f),
-            ),
-        )
-        val baseY = size.height * 0.86f
-        val spread = size.width * 0.28f
-        val wave = sin(phase) * spread
-        drawGlow(
-            center = Offset(size.width * 0.48f + wave * 0.34f, baseY - size.height * 0.08f * cos(phase)),
-            radius = size.width * 0.43f * breathe,
-            color = AuroraCyan,
-            alpha = 0.43f,
-        )
-        drawGlow(
-            center = Offset(size.width * 0.18f + wave * 0.22f, baseY + size.height * 0.04f * sin(phase * 1.4f)),
-            radius = size.width * 0.42f,
-            color = AuroraBlue,
-            alpha = 0.50f,
-        )
-        drawGlow(
-            center = Offset(size.width * 0.83f - wave * 0.26f, baseY - size.height * 0.03f * cos(phase * 1.2f)),
-            radius = size.width * 0.40f,
-            color = AuroraMagenta,
-            alpha = 0.46f,
-        )
-        drawGlow(
-            center = Offset(size.width * 0.65f + wave * 0.18f, size.height * 0.96f),
-            radius = size.width * 0.34f,
-            color = AuroraViolet,
-            alpha = 0.42f,
-        )
-        drawLine(
-            brush = Brush.horizontalGradient(
-                listOf(Color.Transparent, Color.White.copy(alpha = 0.22f), AuroraCyan.copy(alpha = 0.18f), Color.Transparent),
-            ),
-            start = Offset(size.width * 0.04f, 1.dp.toPx()),
-            end = Offset(size.width * 0.96f, 1.dp.toPx()),
-            strokeWidth = 1.dp.toPx(),
-        )
-        drawLine(
-            brush = Brush.horizontalGradient(
-                listOf(AuroraBlue.copy(alpha = 0f), AuroraCyan.copy(alpha = 0.8f), AuroraMagenta.copy(alpha = 0.66f), AuroraMagenta.copy(alpha = 0f)),
-            ),
-            start = Offset(0f, size.height - 1.5.dp.toPx()),
-            end = Offset(size.width, size.height - 1.5.dp.toPx()),
-            strokeWidth = 3.dp.toPx(),
-        )
+        drawRect(AuroraInk)
+        drawRect(Brush.verticalGradient(listOf(Color(0xFF202932), AuroraInk)))
+        drawLine(Brush.horizontalGradient(listOf(Color.Transparent, AuroraBlue, AuroraCyan,
+            AuroraViolet, Color.Transparent)), Offset(size.width * .08f, 1.dp.toPx()),
+            Offset(size.width * .92f, 1.dp.toPx()), strokeWidth = 2.dp.toPx())
     }
 }
 
@@ -480,23 +443,11 @@ private fun AuroraControls(
     onToggleSettings: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        AuroraIconButton(
-            label = if (snapshot.userPaused) OverlayCopy.RESUME else OverlayCopy.PAUSE,
-            onClick = { onAction(OverlayUserAction.TAKE_CONTROL) },
-            enabled = snapshot.state == OverlayChromeState.ANALYSIS ||
-                snapshot.state == OverlayChromeState.WORKING ||
-                snapshot.state == OverlayChromeState.LIVE,
-        ) {
-            Icon(
-                if (snapshot.userPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                contentDescription = null,
-                modifier = Modifier.size(19.dp),
-            )
-        }
+        CycloneOrbitMark(Modifier.size(36.dp))
         Spacer(Modifier.size(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                OverlayCopy.AI_MODE,
+                "Cyclone",
                 color = Color.White.copy(alpha = 0.72f),
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
@@ -513,14 +464,12 @@ private fun AuroraControls(
         AuroraIconButton("AI settings", onToggleSettings) {
             Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(19.dp))
         }
-        Spacer(Modifier.size(6.dp))
-        AuroraIconButton(OverlayCopy.MINIMIZE, { onAction(OverlayUserAction.MINIMIZE) }) {
-            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(21.dp))
+        if (snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE) {
+            TextButton(onClick = { onAction(OverlayUserAction.STOP_TASK) }) {
+                Text("Stop task", color = Color.White)
+            }
         }
-        Spacer(Modifier.size(6.dp))
-        AuroraIconButton(OverlayCopy.EXIT, { onAction(OverlayUserAction.EXIT) }) {
-            Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(20.dp))
-        }
+
     }
 }
 
@@ -595,7 +544,7 @@ private fun AuroraIconButton(
             disabledContainerColor = Color.White.copy(alpha = 0.04f),
             disabledContentColor = Color.White.copy(alpha = 0.32f),
         ),
-        modifier = Modifier.size(38.dp).semantics { contentDescription = label },
+        modifier = Modifier.size(48.dp).semantics { contentDescription = label },
         content = content,
     )
 }
@@ -692,27 +641,19 @@ private fun AuroraComposer(
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = snapshot.composerText,
-                onValueChange = onComposerChanged,
+            BasicTextField(value = snapshot.composerText, onValueChange = onComposerChanged,
                 singleLine = true,
-                placeholder = { Text(OverlayCopy.COMPOSER) },
-                shape = RoundedCornerShape(22.dp),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.White),
+                cursorBrush = SolidColor(AuroraCyan),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { submit() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Black.copy(alpha = 0.22f),
-                    unfocusedContainerColor = Color.Black.copy(alpha = 0.18f),
-                    focusedBorderColor = AuroraCyan.copy(alpha = 0.74f),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.20f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    cursorColor = AuroraCyan,
-                    focusedPlaceholderColor = Color.White.copy(alpha = 0.55f),
-                    unfocusedPlaceholderColor = Color.White.copy(alpha = 0.48f),
-                ),
-                modifier = Modifier.weight(1f).height(52.dp),
-            )
+                modifier = Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(24.dp))
+                    .background(Color.White.copy(alpha = 0.06f)).padding(horizontal = 16.dp, vertical = 15.dp)
+                    .semantics { contentDescription = OverlayCopy.COMPOSER },
+                decorationBox = { field -> Box {
+                    if (snapshot.composerText.isEmpty()) Text(OverlayCopy.COMPOSER, color = Color.White.copy(alpha = 0.6f))
+                    field()
+                } })
             AuroraIconButton(
                 label = if (snapshot.voiceListening) OverlayCopy.LISTENING else OverlayCopy.VOICE,
                 onClick = onVoiceInput,

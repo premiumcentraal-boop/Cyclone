@@ -42,3 +42,7 @@ Baseline/review checkpoint only. Implementation and 3.9.8 validation are in prog
 ## Design checkpoint 1 — Ask Cyclone
 
 Dark charcoal composer, original orbit mark, quiet blue/mint accents, larger editorial empty state, model menu, settings, speech dictation and contextual screen/background menu. Existing submission/preflight/policy paths retained. The provider request guard now checks the preceding runtime checkpoint's explicit routing restrictions. Python guards pass; Android CI is enabled for this branch and will validate this checkpoint. Device visual acceptance remains unverified.
+
+## Design checkpoint 2 — Floating assistant
+
+Charcoal floating sheet with restrained aurora edge, original orbit identity, swipe/tap minimization handle and 48 dp controls. Primary chrome has an explicit Stop task action during execution; Exit is tucked into settings. Dictation and policy confirmation retain their existing handlers. Constant animated color fields behind text were replaced by a static edge treatment. Android/device validation pending.
