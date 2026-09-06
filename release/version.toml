@@ -1,4 +1,4 @@
-# Cyclone 3.9.9 live vision and background workspace development prerelease
+# Cyclone 3.9.9 full release candidate; physical device acceptance remains unverified
 schema = 1
 product_version = "3.9.9"
 channel = "development"
