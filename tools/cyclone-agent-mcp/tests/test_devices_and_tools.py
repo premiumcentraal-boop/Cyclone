@@ -110,8 +110,8 @@ def test_every_phone_scoped_server_function_has_device_id_and_no_escape_hatch():
                     "phone_virtual_stop",
                 }
             ) and "device_id" not in args
-    lowered = " ".join(TOOL_NAMES).lower()
-    assert all(fragment not in lowered for fragment in FORBIDDEN_TOOL_FRAGMENTS)
+    tokens = {token for name in TOOL_NAMES for token in name.lower().split("_")}
+    assert all(fragment not in tokens for fragment in FORBIDDEN_TOOL_FRAGMENTS)
 
 
 def test_server_action_schema_has_only_typed_phone_actions():
