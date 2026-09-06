@@ -49,19 +49,27 @@ interface CycloneAgentEnvironmentApi {
     fun inspect(elementId: String): AgentInspectResult
     fun screenshot(goal: String = ""): AgentScreenshotResult
     fun act(tool: String, params: JSONObject = JSONObject(), goal: String = ""): AgentActionEnvelope
+    /** Oldest to newest. takeLast(n) always returns the most recent outcomes. */
     fun history(): List<AgentActionEnvelope>
+    fun photoEffect(): PhotoEffectLedger.State = PhotoEffectLedger.State.NOT_ATTEMPTED
     fun brainRecall(goal: String): AgentKnowledgeResult
     fun knownRoutes(goal: String): AgentKnowledgeResult
 }
 
 class CycloneAgentEnvironment internal constructor(
     private val runtime: CycloneAgentRuntimePort,
+    private val userTaskGoal: String? = null,
 ) : CycloneAgentEnvironmentApi {
-    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT) :
-        this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution))
+    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
+        this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal)
 
     private val scope = AgentObservationScope()
     private val actionHistory = ArrayDeque<AgentActionEnvelope>()
+    private val photoLedger = PhotoEffectLedger()
+    override fun photoEffect(): PhotoEffectLedger.State {
+        if (photoLedger.state == PhotoEffectLedger.State.AWAITING_PROOF) photoLedger.observe(runtime.cameraImages())
+        return photoLedger.state
+    }
 
     override fun observe(goal: String): AgentObservationResult = synchronized(this) {
         runCatching {
@@ -254,6 +262,17 @@ class CycloneAgentEnvironment internal constructor(
                 }
             }
             normalizedParams.put("elementId", rawElementId)
+            if (tool in setOf("phone.type", "phone.replace_text")) {
+                // Discard self-authorization and text selectors from the planner. The engine retains
+                // its independent ID, freshness, editable-field and sensitive-input checks.
+                normalizedParams.remove("user_authorized")
+                normalizedParams.remove("selector")
+                normalizedParams.put("currentObservationId", before.id)
+                if (TaskTypingAuthorization.allows(userTaskGoal, before.page.packageName, evidence,
+                        normalizedParams.optString("value", normalizedParams.optString("text")))) {
+                    normalizedParams.put("user_authorized", true)
+                }
+            }
         }
 
         runtime.readinessFailure()?.let { failure ->
@@ -261,6 +280,18 @@ class CycloneAgentEnvironment internal constructor(
         }
         runtime.policyFailure(tool, normalizedParams)?.let { failure ->
             return@synchronized failureEnvelope(tool, effectiveGoal, failure, before, visibleGeneration)
+        }
+
+        if (PhotoEffectLedger.isSinglePhotoGoal(userTaskGoal) && tool == "phone.click" && rawElementId != null) {
+            val target = runtime.element(before, rawElementId)
+            if (PhotoEffectLedger.isShutter(before.page.packageName,
+                    "${target.optString("label")} ${target.optString("resourceId")} ${target.optString("contentDescription")}")) {
+                if (!photoLedger.request(runtime.cameraImages()?.keys, System.currentTimeMillis())) {
+                    return@synchronized failureEnvelope(tool, effectiveGoal,
+                        AgentFailure(AgentFailureClass.GATE_REQUIRED, AgentFailureLayer.POLICY, false,
+                            "A shutter was already requested. Review the saved photo; Cyclone will not take another.", "PHOTO_ALREADY_ATTEMPTED"), before, visibleGeneration)
+                }
+            }
         }
 
         // IDs expire the instant a mutation is handed to the canonical PhoneToolExecutor.
@@ -713,13 +744,13 @@ class CycloneAgentEnvironment internal constructor(
     }
 
     private fun remember(envelope: AgentActionEnvelope) {
-        actionHistory.addFirst(
+        actionHistory.addLast(
             envelope.copy(
                 before = envelope.before?.copy(controls = emptyList()),
                 after = envelope.after?.copy(controls = emptyList()),
             ),
         )
-        while (actionHistory.size > HISTORY_LIMIT) actionHistory.removeLast()
+        while (actionHistory.size > HISTORY_LIMIT) actionHistory.removeFirst()
     }
 
     private fun hasFreeformSelector(params: JSONObject): Boolean =
@@ -817,6 +848,7 @@ internal class AgentObservationScope {
 }
 
 internal interface CycloneAgentRuntimePort {
+    fun cameraImages(): Map<Long, Long>? = null
     fun capture(): GatewayObservation
     fun current(): GatewayObservation?
     fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray
@@ -860,6 +892,17 @@ private class AndroidCycloneAgentRuntimePort(
     private val context: Context,
     private val execution: com.cyclone.mobile.runtime.session.ExecutionContext,
 ) : CycloneAgentRuntimePort {
+    override fun cameraImages(): Map<Long, Long>? = runCatching {
+        // No permission request or image bytes: only an already-authorized camera media witness.
+        if (context.checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) != android.content.pm.PackageManager.PERMISSION_GRANTED) return null
+        val media = android.provider.MediaStore.Images.Media
+        context.contentResolver.query(media.EXTERNAL_CONTENT_URI,
+            arrayOf(media._ID, media.DATE_TAKEN), "${media.RELATIVE_PATH} LIKE ? AND ${media.IS_PENDING}=0",
+            arrayOf("DCIM/Camera/%"), "${media._ID} DESC")?.use { cursor ->
+                buildMap { while (cursor.moveToNext() && size < 32) put(cursor.getLong(0), cursor.getLong(1)) }
+            }
+    }.getOrNull()
+
     private val background get() = execution.sessionId != "default-foreground"
     private fun scoped(params: JSONObject = JSONObject()) = com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(
         JSONObject().put("sessionId", execution.sessionId).put("displayId", execution.displayId), params)

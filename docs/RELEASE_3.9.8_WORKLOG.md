@@ -29,3 +29,12 @@ The durable earlier work is commit `05f7d6ea88572d4d0170e93778d94b0c758cbc24` (s
 ## Status
 
 Baseline/review checkpoint only. Implementation and 3.9.8 validation are in progress.
+
+## Runtime checkpoint (implementation, validation pending)
+
+- Chronological action ledger makes newest outcomes visible to the planner.
+- Provider failures retain HTTP status, safe message/code, request ID and exact selected model; Contributor routing remains explicit with fallback disabled.
+- The canonical consolidator obeys local-only preference and distinguishes verification from Android acceptance; optional cloud requests/usage are recorded separately.
+- Browser typing authorization comes from the real task and observed address field; named-site completion retains the requested browser.
+- Single-photo effect ledger prevents a second shutter after an uncertain result and checks new camera MediaStore evidence when already authorized. Without media access it hands back for review rather than claiming success or retaking.
+- Added history, typing and photo regression tests. Android dependencies are still being provisioned; this checkpoint is not a tested release.

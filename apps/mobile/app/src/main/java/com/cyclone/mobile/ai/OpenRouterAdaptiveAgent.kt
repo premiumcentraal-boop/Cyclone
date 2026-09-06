@@ -256,7 +256,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             traceId = traceId,
             goal = goal,
             config = config,
-            bridge = CyclonePcParityBridge(context, execution),
+            bridge = CyclonePcParityBridge(context, execution, goal),
             apiKey = OpenRouterSecretStore.read(context),
             reliability = reliability,
             skillSignatures = skillSignatures,
@@ -275,6 +275,15 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                             reason = "controller.human",
                         ),
                     )
+                }
+
+                when (session.bridge.photoEffect()) {
+                    com.cyclone.mobile.agent.tools.PhotoEffectLedger.State.VERIFIED -> return CyclonePlanResult.Valid(
+                        CycloneModelTurn(CycloneModelDirective.DONE, payload = PageAgentDecision("done", "", "A new saved camera photo was verified.", emptyList(), "Photo saved and checked.", null)))
+                    com.cyclone.mobile.agent.tools.PhotoEffectLedger.State.AWAITING_PROOF -> return CyclonePlanResult.Valid(
+                        CycloneModelTurn(CycloneModelDirective.NEED_HUMAN, reason = "photo.saved_evidence_unavailable",
+                            payload = PageAgentDecision("need_human", "", "The shutter was requested once. Please check the photo; I cannot verify a newly saved image and will not take another.", emptyList(), null, "photo.saved_evidence_unavailable")))
+                    else -> Unit
                 }
 
                 if (session.bridge.verifiedSimpleNavigation(goal)) {
@@ -356,6 +365,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                         goal = goal,
                         state = session.state,
                         providerSort = config.providerSort,
+                        traceId = traceId,
                         successfulActions = session.successfulActions,
                         failedActions = session.failedActions,
                         agentContext = agentContext,
@@ -1046,6 +1056,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         goal: String,
         state: ObservedState,
         providerSort: String,
+        traceId: String,
         successfulActions: List<String>,
         failedActions: List<String>,
         agentContext: JSONObject? = null,
@@ -1074,7 +1085,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         val response = pageChat(apiKey, model, JSONArray()
             .put(JSONObject().put("role", "system").put("content", PageAgentProtocol.SYSTEM_PROMPT))
             .put(JSONObject().put("role", "user").put("content", content)), providerSort)
-        providerBoundary(response)?.let { return it }
+        providerBoundary(response, traceId)?.let { return it }
         val raw = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         if (raw.isBlank()) return null
         return runCatching { PageAgentProtocol.parse(raw) }.getOrNull()
@@ -1113,14 +1124,22 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
                 .put(JSONObject().put("role", "user").put("content", content)),
             providerSort,
         )
-        providerBoundary(response)?.let { return it }
+        providerBoundary(response, traceId)?.let { return it }
         val raw = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         return runCatching { PageAgentProtocol.parse(raw) }.getOrNull()
     }
 
-    private fun providerBoundary(response: JSONObject): PageAgentDecision? {
+    private fun providerBoundary(response: JSONObject, traceId: String): PageAgentDecision? {
         if (!response.has("error")) return null
-        val code = ProviderFailure.code(response.optJSONObject("error")?.optInt("code", 500) ?: 500)
+        val failure = ProviderFailure.classify(
+            response.optInt("_httpStatus", response.optJSONObject("error")?.optInt("code", 500) ?: 500),
+            response.optJSONObject("error")?.toString(),
+            response.optString("_selectedModel"), requestId = response.optString("_requestId"),
+        )
+        val code = failure.code
+        AgentTraceRuntime.event(context, traceId, "BOUNDARY", failure.userMessage, code = code, ok = false,
+            detail = "HTTP ${failure.httpStatus}; model=${failure.selectedModelId}; request=${failure.requestId}; " +
+                "providerCode=${failure.providerCode}; message=${failure.providerMessage}; retryable=${failure.retryable}")
         return PageAgentDecision("blocked", "", ProviderFailure.message(code).orEmpty(), emptyList(), null, code)
     }
 
@@ -1130,11 +1149,14 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
         messages: JSONArray,
         providerSort: String,
     ): JSONObject {
-        // Keep OpenRouter routing maximally compatible: model + messages only.
-        // Provider/model defaults own output limits, reasoning, sampling and routing.
+        val profile = com.cyclone.mobile.ai.model.ModelRegistry.resolve(model.id)
         val body = JSONObject()
             .put("model", model.id)
             .put("messages", messages)
+            .put("stream", false)
+            .put("provider", JSONObject().put("sort", providerSort)
+                .put("allow_fallbacks", profile?.allowProviderFallbacks ?: false))
+        // Never substitute a model or weaken account privacy to work around a denial.
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $apiKey")
@@ -1148,7 +1170,11 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
             val json = runCatching { JSONObject(text) }.getOrElse {
                 JSONObject().put("error", JSONObject().put("message", text.ifBlank { "HTTP ${response.code}" }))
             }
-            if (!response.isSuccessful) json.put("error", JSONObject().put("code", response.code))
+            if (!response.isSuccessful) {
+                if (!json.has("error")) json.put("error", JSONObject().put("code", response.code))
+                json.put("_httpStatus", response.code).put("_selectedModel", model.id)
+                    .put("_requestId", response.header("x-request-id") ?: response.header("x-openrouter-request-id") ?: "")
+            }
             json
         } } catch (_: IOException) {
             JSONObject().put("error", JSONObject().put("code", 0))

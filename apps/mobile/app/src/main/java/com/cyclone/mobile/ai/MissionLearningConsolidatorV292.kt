@@ -41,14 +41,9 @@ object MissionLearningConsolidatorV292 {
         if (sessionId in completed || !inFlight.add(sessionId)) return
         val app = context.applicationContext
         executor.submit {
-            val startedAt = System.currentTimeMillis()
             val result = runCatching { consolidate(app, sessionId) }.getOrElse {
                 Result(0, "Result compiled locally. No additional model lesson was stored.", false)
             }
-            // Even a zero-token local compilation should remain visible long enough for the user to
-            // see TASK COMPLETED/FAILED -> COMPILING RESULTS -> RESULTS COMPILED as three clear states.
-            val remaining = 1_050L - (System.currentTimeMillis() - startedAt)
-            if (remaining > 0) Thread.sleep(remaining)
             synchronized(this) {
                 inFlight.remove(sessionId)
                 completed.add(sessionId)
@@ -63,12 +58,13 @@ object MissionLearningConsolidatorV292 {
         val session = AgentTraceRuntime.store.listSessions(200).firstOrNull { it.id == sessionId }
             ?: return Result(0, "Task result saved.", false)
         val events = AgentTraceRuntime.store.events(sessionId)
-        val outcomeEvents = events.filter { it.kind in setOf("PAGE", "BRAIN", "REPLAY", "DECISION", "RESULT", "RECOVERY", "BOUNDARY", "VISION", "DONE", "STOPPED") }
-        val failed = outcomeEvents.filter { it.ok == false }
-        val passed = outcomeEvents.filter { it.ok == true }
+        val outcomeEvents = events.filter { it.kind in setOf("PAGE", "BRAIN", "REPLAY", "DECISION", "RESULT", "RECOVERY", "BOUNDARY", "VISION", "DONE", "STOPPED", "ACTION_REQUESTED", "ANDROID_EXECUTION", "AFTER_OBSERVATION", "VERIFICATION", "MODEL_CONTEXT") }
+        val failed = outcomeEvents.filter { it.kind in setOf("ANDROID_EXECUTION", "VERIFICATION") && it.ok == false }
+        val passed = outcomeEvents.filter { it.kind == "VERIFICATION" && it.ok == true }
 
         val key = OpenRouterSecretStore.read(context)
-        if (key.isBlank() || session.model.isBlank() || session.decisions <= 0) {
+        if (!context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).getBoolean("cloud_brain_refinement", false) ||
+            key.isBlank() || session.model.isBlank() || session.decisions <= 0) {
             val summary = buildString {
                 append("Saved ${passed.size} verified signal${if (passed.size == 1) "" else "s"}")
                 if (failed.isNotEmpty()) append(" and ${failed.size} failure/recovery signal${if (failed.size == 1) "" else "s"}")
@@ -119,7 +115,7 @@ Rules:
             .put("temperature", 0.02)
             .put("max_tokens", 950)
             .put("reasoning", JSONObject().put("effort", model.reasoningEffort).put("exclude", true))
-            .put("provider", JSONObject().put("sort", "latency").put("allow_fallbacks", true))
+            .put("provider", JSONObject().put("sort", "latency").put("allow_fallbacks", com.cyclone.mobile.ai.model.ModelRegistry.resolve(model.id)?.allowProviderFallbacks ?: false))
             .put("response_format", JSONObject().put("type", "json_object"))
             .put("stream", false)
         val request = Request.Builder()
@@ -130,15 +126,21 @@ Rules:
             .header("X-Title", "Cyclone Mobile V2.9.2 Mission Consolidator")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
+        AgentTraceRuntime.event(context, sessionId, "LEARNING", "Optional cloud refinement: one additional provider request",
+            code = "v398.compile.request", ok = null, detail = "Model: ${model.id}; task outcome is already final.")
         val parsed = http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@use null
             val envelope = runCatching { JSONObject(response.body?.string().orEmpty()) }.getOrNull() ?: return@use null
+            AgentTraceRuntime.event(context, sessionId, "LEARNING", "Cloud refinement usage",
+                code = "v398.compile.usage", ok = true, detail = envelope.optJSONObject("usage")?.let {
+                    "prompt_tokens=${it.optLong("prompt_tokens")}; completion_tokens=${it.optLong("completion_tokens")}; cost=${it.optDouble("cost", Double.NaN)}"
+                } ?: "Provider did not return usage; cost is unknown.")
             val raw = envelope.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
             runCatching { JSONObject(stripFence(raw)) }.getOrNull()
         } ?: run {
             val summary = "Task result saved; post-task model consolidation was unavailable, so no speculative lesson was added."
             AgentTraceRuntime.event(context, sessionId, "LEARNING", summary, code = "v292.compile.model_unavailable", ok = true)
-            return Result(0, summary, false)
+            return Result(0, summary, true)
         }
 
         val existing = AdaptiveBrainRuntime.store.listNotes(260).map { normalize(it.text) }.toMutableSet()

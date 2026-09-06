@@ -39,7 +39,7 @@ internal object ProviderFailure {
     ): SanitizedProviderFailure {
         val body = rawBody.orEmpty()
         val lower = body.lowercase()
-        val providerCode = extractJsonScalar(body, "code")?.take(120)
+        val providerCode = extractJsonScalar(body, "code")?.let(::sanitize)?.take(120)
         val providerMessage = extractJsonString(body, "message")
             ?.let(::sanitize)
             ?.take(600)

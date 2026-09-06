@@ -37,8 +37,8 @@ class CyclonePcParityBridge internal constructor(
     private val environment: CycloneAgentEnvironmentApi,
     private val recovery: AgenticRecoveryRuntimePort = DefaultAgenticRecoveryRuntimePort(),
 ) {
-    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT) :
-        this(CycloneAgentEnvironment(context.applicationContext, execution))
+    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
+        this(CycloneAgentEnvironment(context.applicationContext, execution, userTaskGoal))
 
     private var page: AgentPageCard? = null
     private var memory: RecoveryMemory = RecoveryMemory()
@@ -284,7 +284,11 @@ class CyclonePcParityBridge internal constructor(
         forceVision = false
     }
 
+    fun photoEffect() = environment.photoEffect()
+
     fun completionEvidence(goal: String): Boolean {
+        if (com.cyclone.mobile.agent.tools.PhotoEffectLedger.isSinglePhotoGoal(goal))
+            return photoEffect() == com.cyclone.mobile.agent.tools.PhotoEffectLedger.State.VERIFIED
         val contract = GoalContractCompiler.compile(goal)
         return GoalContractCompiler.evaluate(contract, page, environment.history()).satisfied
     }

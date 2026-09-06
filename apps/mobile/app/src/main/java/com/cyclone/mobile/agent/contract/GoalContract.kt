@@ -5,6 +5,7 @@ import org.json.JSONObject
 
 enum class GoalRequirementKind {
     WEB_HOST,
+    NAMED_WEB_SITE,
     VERIFIED_SCROLL,
     DISMISS_COOKIE_CONSENT,
     SITE_NOTIFICATION_PERMISSION,
@@ -71,10 +72,7 @@ data class GoalContractEvaluation(
  */
 object GoalContractCompiler {
     /** Only complete simple navigation locally; compound/content goals still need model decisions. */
-    fun isSimpleWebNavigation(goal: String): Boolean = Regex(
-        "(?i)^(?:please\\s+)?(?:open|go to|navigate to)\\s+(?:https?://)?(?:www\\.)?" +
-            "(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,63}/?\\s*$",
-    ).matches(goal.trim())
+    fun isSimpleWebNavigation(goal: String): Boolean = NavigationIntent.parse(goal) != null
 
     private val hostPattern = Regex(
         "(?i)(?:https?://)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63})(?=[:/?#\\s]|$)",
@@ -94,6 +92,10 @@ object GoalContractCompiler {
         val host = hostPattern.find(clean)?.groupValues?.getOrNull(1)
             ?.lowercase()
             ?.removePrefix("www.")
+        val navigation = NavigationIntent.parse(clean)
+        if (host.isNullOrBlank() && navigation != null) {
+            requirements += GoalRequirement(GoalRequirementKind.NAMED_WEB_SITE, navigation.target)
+        }
         if (!host.isNullOrBlank()) {
             requirements += GoalRequirement(GoalRequirementKind.WEB_HOST, host)
         }
@@ -166,9 +168,21 @@ object GoalContractCompiler {
     ): GoalRequirementResult {
         val successful = history.filter { it.androidExecutionOk && it.verification.passed }
         return when (requirement.kind) {
+            GoalRequirementKind.NAMED_WEB_SITE -> {
+                val intent = NavigationIntent.parse(contract.sourceGoal)
+                val loadedHost = currentPage?.controls?.firstOrNull {
+                    !it.evidence.optBoolean("focused") && listOf("url_bar", "urlbar", "location_bar", "address_bar")
+                        .any(it.evidence.optString("resourceId").lowercase()::contains)
+                }?.label
+                val matched = intent != null && loadedHost != null && intent.accepts(loadedHost) &&
+                    (!intent.chrome || currentPage.packageName == "com.android.chrome") &&
+                    pageShowsHost(currentPage, loadedHost.removePrefix("https://").removePrefix("www.").trimEnd('/'))
+                GoalRequirementResult(requirement, matched, if (matched) "requested site loaded in the requested browser" else "site host and browser have not been verified")
+            }
             GoalRequirementKind.WEB_HOST -> {
                 val host = requirement.value.orEmpty()
-                val pageMatch = currentPage?.let { pageShowsHost(it, host) } == true
+                val pageMatch = currentPage?.let { pageShowsHost(it, host) &&
+                    (NavigationIntent.parse(contract.sourceGoal)?.chrome != true || it.packageName == "com.android.chrome") } == true
                 GoalRequirementResult(
                     requirement,
                     pageMatch,
@@ -304,6 +318,7 @@ object GoalContractCompiler {
             val id = it.evidence.optString("resourceId").lowercase()
             listOf("url_bar", "urlbar", "location_bar", "address_bar").any(id::contains)
         }
+        if (addressControls.any { it.evidence.optBoolean("focused") }) return false
         val text = if (addressControls.isNotEmpty()) addressControls.joinToString(" ") {
             "${it.label} ${it.semanticName}"
         } else "${page.pageSummary} ${page.pageText}"

@@ -183,6 +183,22 @@ class CycloneAgentEnvironmentTest {
         assertEquals(AgentFailureClass.AFTER_OBSERVATION_FAILED, result.errorClass)
     }
 
+    @Test fun recentHistoryKeepsNewestEightOutcomesInChronologicalOrder() {
+        val first = observation("obs-0", "page-0", "fp-0")
+        val runtime = FakeRuntime(first, first)
+        val env = CycloneAgentEnvironment(runtime)
+        repeat(12) { i ->
+            val before = observation("obs-$i", "page-$i", "fp-$i")
+            runtime.captureQueue.addLast(before)
+            runtime.afterObservation = observation("after-$i", "next-$i", "next-fp-$i", "Next")
+            env.observe("Step $i")
+            val current = runtime.current()!!
+            env.act("phone.click", JSONObject().put("elementId", elementId(current)), "Step $i")
+        }
+        assertEquals((4..11).map { "Step $it" }, env.history().takeLast(8).map { it.goal })
+        assertEquals("Step 11", env.history().last().goal)
+    }
+
     private fun semantic(
         pageKey: String = "home",
         fingerprint: String = "fp-1",
