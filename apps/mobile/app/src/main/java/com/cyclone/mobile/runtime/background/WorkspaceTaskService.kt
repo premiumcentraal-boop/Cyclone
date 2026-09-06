@@ -72,8 +72,11 @@ class WorkspaceTaskService : Service() {
             "cancel" -> { agent?.cancelActiveTask(); scope.launch { sessionId?.let { WorkspaceRuntime.close(it) }; main.post { stopSelf() } }; return START_NOT_STICKY }
             "view" -> { expanded = true; render(); return START_NOT_STICKY }
             "handoff" -> {
+                val ownedSession = sessionId ?: return START_NOT_STICKY
+                paused = true; handoff = true
+                agent?.cancelActiveTask()
                 scope.launch {
-                    runCatching { sessionId?.let { WorkspaceRuntime.handoff(it) } }
+                    runCatching { WorkspaceRuntime.handoff(ownedSession) }
                         .onSuccess { update("Your app is ready for review. Cyclone has stopped."); main.post { stopSelf() } }
                         .onFailure { update("Open the app to continue. Cyclone has stopped.") }
                 }
@@ -250,6 +253,11 @@ class WorkspaceTaskService : Service() {
             if (handoff) control("Review in app", "handoff", true)
             else control(if (paused) "Resume" else "Pause", if (paused) "resume" else "pause", true)
             card.addView(actions)
+            if (expanded && !handoff && sessionId != null) card.addView(Button(this).apply {
+                text = "Take control in app"; isAllCaps = false; textSize = 13f
+                setTextColor(mint); background = rounded(Color.rgb(26, 38, 43), 24)
+                setOnClickListener { startService(Intent(this@WorkspaceTaskService, WorkspaceTaskService::class.java).setAction("handoff")) }
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)).apply { topMargin = dp(8) })
         }
         val width = minOf(dp(360), resources.displayMetrics.widthPixels - dp(24))
         val params = WindowManager.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT,

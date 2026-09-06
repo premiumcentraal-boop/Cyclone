@@ -1,0 +1,21 @@
+# Cyclone 3.9.8 live vision and background workspace development prerelease
+schema = 1
+product_version = "3.9.8"
+channel = "development"
+android_version_code = 62
+python_version = "3.8.4"
+
+[components]
+mobile = "3.9.8"
+pc_companion = "3.8.4"
+device_gateway = "3.8.4"
+mcp = "3.8.4"
+
+[release]
+publication_authorized = true
+physical_pixel8 = "UNVERIFIED"
+physical_pixel8_ui_acceptance = "UNVERIFIED"
+android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
+windows_signing = "CI_UNSIGNED"
+windows_installer = "CI_UNSIGNED"
+candidate_generation = "cyclone-3.9.8"

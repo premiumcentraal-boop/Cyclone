@@ -50,3 +50,7 @@ Charcoal floating sheet with restrained aurora edge, original orbit identity, sw
 ## Design checkpoint 3 — Workspace and notifications
 
 Matching background task setup, charcoal progress card, contextual pause/resume/review actions and private lock-screen notification content. Progress is indeterminate and follows real agent callbacks. Expanded progress reads only existing session-scoped live pixels at bounded resolution; hiding the preview leaves execution alone. Freshness failure clears the image. No synthetic progress, example task content or fabricated live frame is used. Preview is protected from screen capture. CI and physical validation pending.
+
+## Design checkpoint 4 — Active-screen cue and build identity
+
+A thin, static aurora border follows active foreground control and disappears on pause/exit. Its separate accessibility window cannot take focus or touch. Expanded workspace progress adds explicit Take control in app through existing ownership revocation/handoff. Version identity is now 3.9.8 / 62. Fixed the inherited MediaStore class-as-value compilation error found by CI. Earlier design checkpoints remain independently recoverable; final Android gate is in progress. No 3.9.8 release tag or signed publication is implied by these source checkpoints.
