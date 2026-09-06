@@ -163,6 +163,7 @@ object GatewayRuntime {
             .put("protocolVersion", GatewayProtocol.VERSION)
             .put("trustProtocolVersion", GatewayTrustProtocolV33.VERSION)
             .put("supportedProtocolVersions", JSONArray(listOf(GatewayTrustProtocolV33.VERSION)))
+            .put("cycloneOneSessionProtocol", "cyclone.one.session.v1")
             .put("appVersion", packageInfo?.versionName ?: BuildConfig.VERSION_NAME)
             .put("package", context.packageName)
             .put("gatewayState", state)
@@ -198,6 +199,7 @@ object GatewayRuntime {
                 .put("transport", if (pcSessionKnown || activeClients > 0) "adb-forwarded-localabstract" else JSONObject.NULL)
                 .put("lastAuthenticatedAtMs", PcSessionTracker.lastAuthenticatedAt() ?: JSONObject.NULL)
                 .put("pcIdentityDetectable", trust.optInt("trustedPcCount", 0) > 0))
+            .put("executionSessions", GatewaySessionAdapter.list(context).optJSONArray("sessions") ?: JSONArray())
             .put("capabilities", JSONObject()
                 .put("operations", JSONArray(GatewayProtocol.operations.toList()))
                 .put("phoneTools", JSONArray(GatewayV33ActionAdapter.allowedTools.toList()))
@@ -208,6 +210,9 @@ object GatewayRuntime {
                 .put("adaptiveBrainRecall", true)
                 .put("canonicalTeaching", true)
                 .put("oneShotScreenshot", true)
+                .put("cycloneOneExecutionSessions", true)
+                .put("exactSessionSnapshot", true)
+                .put("backgroundLiveVideo", false)
                 .put("liveVideoOwnedByAndroidBridge", false))
             .put("adbForward", "adb forward tcp:${GatewayProtocol.DEFAULT_FORWARD_PORT} localabstract:${GatewayProtocol.SOCKET_NAME}")
             .put("lastError", listenerError ?: JSONObject.NULL)
@@ -295,12 +300,17 @@ internal object GatewayDispatcher {
     }
 
     private fun dispatch(context: Context, request: GatewayRequest): Any {
-        // Trust-session IDs belong to authentication. Only execution operations use this scope.
-        if (request.op in setOf("manual.execute", "clipboard.get", "clipboard.set", "observe.semantic",
-                "observe.page_debug", "capture.screenshot", "ui.search", "ui.element", "action.execute",
-                "skill.run")) {
+        // These legacy adapters still intentionally target only the human display. Semantic
+        // observe/search/inspect/action have their own exact-session routing below.
+        if (request.op in setOf(
+                "manual.execute", "clipboard.get", "clipboard.set", "observe.page_debug",
+                "capture.screenshot", "skill.run",
+            )) {
             com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(
-                com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(request.args, request.args.optJSONObject("params") ?: JSONObject()),
+                com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(
+                    request.args,
+                    request.args.optJSONObject("params") ?: JSONObject(),
+                ),
             )
         }
         return when (request.op) {
@@ -321,13 +331,24 @@ internal object GatewayDispatcher {
         "clipboard.get" -> GatewayClipboardAdapter.capability(context)
         "clipboard.set" -> GatewayV33ClipboardAdapter.set(context, request.id, request.args)
         "bridge.status" -> GatewayRuntime.status(context)
+        "session.list" -> GatewaySessionAdapter.list(context)
+        "session.start" -> GatewaySessionAdapter.start(context, request.args)
+        "session.status" -> GatewaySessionAdapter.status(context, request.args)
+        "session.pause" -> GatewaySessionAdapter.pause(context, request.args)
+        "session.resume" -> GatewaySessionAdapter.resume(context, request.args)
+        "session.handoff" -> GatewaySessionAdapter.handoff(context, request.args)
+        "session.stop" -> GatewaySessionAdapter.stop(request.args)
+        "session.snapshot" -> GatewaySessionAdapter.snapshot(context, request.args)
         "observe.semantic" -> GatewayObservationAdapter.capture(context, request.args).payload
         "observe.page_debug" -> GatewayPageDebugAdapter.capture(context, request.args)
         "capture.screenshot" -> GatewayCaptureAdapter.capture(context, request.args)
         "ui.search" -> {
-            val observation = GatewayObservationStore.current() ?: GatewayObservationAdapter.capture(context, request.args)
+            val scope = readExecution(request.args)
+            val observation = scopedObservation(request.args, scope.sessionId, scope.displayId)
             JSONObject()
                 .put("observationId", observation.id)
+                .put("sessionId", observation.execution.sessionId)
+                .put("displayId", observation.execution.displayId)
                 .put("elementIdScope", "observation-local")
                 .put("query", request.args.optString("query"))
                 .put(
@@ -340,9 +361,15 @@ internal object GatewayDispatcher {
                 )
         }
         "ui.element" -> {
-            val observation = GatewayObservationStore.current()
-                ?: throw GatewayProtocolException("STALE_OBSERVATION", "Call observe.semantic before ui.element")
-            val requestedObservationId = request.args.optString("observationId").trim()
+            val scope = readExecution(request.args)
+            val observation = GatewayObservationStore.current(scope.sessionId)
+                ?: throw GatewayProtocolException("STALE_OBSERVATION", "Call observe.semantic for this session before ui.element")
+            if (observation.execution.displayId != scope.displayId) {
+                throw GatewayProtocolException("STALE_OBSERVATION", "Observation display does not match the requested execution session")
+            }
+            val requestedObservationId = request.args.optString("observationId").trim().ifBlank {
+                request.args.optJSONObject("executionContext")?.optString("observationId")?.trim().orEmpty()
+            }
             if (requestedObservationId.isNotBlank() && requestedObservationId != observation.id) {
                 throw GatewayProtocolException("STALE_OBSERVATION", "Element belongs to an older observation; observe again")
             }
@@ -352,7 +379,18 @@ internal object GatewayDispatcher {
         }
         "app_graph.get" -> GatewayAppGraphAdapter.query(context, request.args)
         "brain.recall" -> GatewayBrainAdapter.recall(context, request.args)
-        "action.execute" -> GatewayV33ActionAdapter.execute(context, request.id, request.args)
+        "action.execute" -> {
+            val merged = com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(
+                request.args,
+                request.args.optJSONObject("params") ?: JSONObject(),
+            )
+            val scope = readExecution(merged)
+            if (scope.sessionId == com.cyclone.mobile.runtime.session.ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) {
+                GatewayV33ActionAdapter.execute(context, request.id, request.args)
+            } else {
+                GatewaySessionActionAdapter.execute(context, request.id, request.args)
+            }
+        }
         "teach.start" -> GatewayTeachingAdapter.start(context)
         "teach.status" -> GatewayTeachingAdapter.status(context)
         "teach.stop" -> GatewayTeachingAdapter.stop(context)
@@ -365,6 +403,25 @@ internal object GatewayDispatcher {
         )
     }
 
+    private fun readExecution(args: JSONObject): com.cyclone.mobile.runtime.session.ExecutionContext = try {
+        com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(args)
+    } catch (error: IllegalArgumentException) {
+        throw GatewayProtocolException("PROTOCOL_MISMATCH", error.message ?: "Invalid execution context")
+    }
+
+    private fun scopedObservation(args: JSONObject, sessionId: String, displayId: Int): GatewayObservation {
+        val current = GatewayObservationStore.current(sessionId)
+        if (current != null) {
+            if (current.execution.displayId != displayId) {
+                throw GatewayProtocolException("STALE_OBSERVATION", "Observation display does not match the requested execution session")
+            }
+            return current
+        }
+        val captured = GatewayObservationAdapter.capture(args = args, context = GatewayRuntimeContextHolder.context())
+        if (captured.execution.sessionId != sessionId || captured.execution.displayId != displayId) {
+            throw GatewayProtocolException("STALE_OBSERVATION", "Captured observation does not match the requested execution session")
+        }
+        return captured
     }
 
     private fun dispatchSkill(context: Context, request: GatewayRequest): JSONObject {
@@ -422,6 +479,7 @@ internal object GatewayDispatcher {
         val latestPageDebug = PageDebugSandboxV293.latest(context)
         return JSONObject()
             .put("status", GatewayRuntime.status(context))
+            .put("executionSessions", GatewaySessionAdapter.list(context))
             .put("latestObservation", observation?.payload ?: JSONObject.NULL)
             .put(
                 "latestPageDebug",
@@ -448,4 +506,11 @@ internal object GatewayDispatcher {
                 "No session token, private key, pairing code, API key, password, OTP, clipboard content or typed phone.type value is included.",
             )
     }
+}
+
+/** Minimal process-local context holder used only by dispatcher helpers. */
+private object GatewayRuntimeContextHolder {
+    @Volatile private var current: Context? = null
+    fun set(context: Context) { current = context.applicationContext }
+    fun context(): Context = current ?: throw GatewayProtocolException("INTERNAL_ERROR", "Gateway context is unavailable")
 }
