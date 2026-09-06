@@ -44,6 +44,7 @@
 
         <activity android:name=".ui.overlay.OverlayAttachmentActivity" android:exported="false" />
         <activity android:name=".ui.overlay.CycloneAiSettingsActivity" android:exported="false" />
+        <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceActivity" android:exported="false" />
         <service
             android:name=".runtime.background.WorkspaceTaskService"

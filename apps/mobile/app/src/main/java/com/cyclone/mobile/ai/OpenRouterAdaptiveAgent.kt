@@ -565,6 +565,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             trace = traceSink,
             checkpoints = checkpointStore,
             externallyCancelled = { session.cancelled() },
+            externallyPaused = { background && !ownsInput() },
             taskId = traceId,
         )
         return ActiveLocalSession(session, localAgent)

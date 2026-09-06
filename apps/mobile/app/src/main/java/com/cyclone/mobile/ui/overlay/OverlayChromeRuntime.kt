@@ -216,6 +216,37 @@ object OverlayChromeRuntime {
     fun submitRequest(text: String) {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
+        val context = synchronized(lock) { service } ?: return
+        val backgroundTask = com.cyclone.mobile.runtime.background.WorkspaceTasks.state.value
+        if (backgroundTask != null && backgroundTask.phase !in setOf(
+                com.cyclone.mobile.runtime.background.TaskPhase.STOPPED,
+                com.cyclone.mobile.runtime.background.TaskPhase.FAILED)) {
+            com.cyclone.mobile.runtime.background.WorkspaceTasks.update(backgroundTask.taskId) { it.copy(queued = request) }
+            updateComposer("")
+            return
+        }
+        // A named installed app is a suitable isolated task. Ambiguity is resolved by the user,
+        // never by guessing a target or falling back after a workspace failure.
+        val apps = context.packageManager.queryIntentActivities(
+            android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
+            .filter { it.activityInfo.packageName != context.packageName }.distinctBy { it.activityInfo.packageName }
+        val matches = apps.filter { app ->
+            val label = app.loadLabel(context.packageManager).toString()
+            label.length >= 3 && Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(label) + "(?![\\p{L}\\p{N}])").containsMatchIn(request)
+        }
+        if (matches.isNotEmpty()) {
+            if (matches.size == 1) {
+                val app = matches.single()
+                runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.start(context, request,
+                    app.activityInfo.packageName, app.loadLabel(context.packageManager).toString()) }
+                    .onFailure { android.widget.Toast.makeText(context, "Couldn't start background work. Open Cyclone to check access.", android.widget.Toast.LENGTH_LONG).show() }
+                updateComposer("")
+            } else {
+                context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
+                    .putExtra("goal", request).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            return
+        }
         val accepted = synchronized(lock) {
             pendingGateChallenge = null
             approvedGateChallenge = null

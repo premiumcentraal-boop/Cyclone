@@ -90,9 +90,8 @@ class WorkspaceActivity : ComponentActivity() {
                             check(Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                                 "Enable background access before starting."
                             }
-                            startForegroundService(Intent(this@WorkspaceActivity, WorkspaceTaskService::class.java)
-                                .putExtra("package", app.activityInfo.packageName)
-                                .putExtra("label", app.loadLabel(packageManager).toString()).putExtra("goal", goal))
+                            WorkspaceTasks.start(this@WorkspaceActivity, goal, app.activityInfo.packageName,
+                                app.loadLabel(packageManager).toString())
                             finish()
                         }.onFailure { status = it.message ?: "Couldn't start this task. Please try again." }
                     }, enabled = apps.isNotEmpty() && goal.isNotBlank(),

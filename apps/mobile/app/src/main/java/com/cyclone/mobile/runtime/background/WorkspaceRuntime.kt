@@ -31,7 +31,7 @@ object WorkspaceRuntime {
     private var appContext: Context? = null
     @Volatile private var backend: IWorkspaceService? = null
     private data class Entry(val session: ExecutionSession, val lifecycle: WorkspaceLifecycle,
-        val reader: ImageReader, val thread: HandlerThread, var remoteGeneration: Long, var sourceRevision: Long)
+        val reader: ImageReader, val thread: HandlerThread, var remoteGeneration: Long, @Volatile var sourceRevision: Long)
     private val entries = mutableMapOf<String, Entry>()
 
     fun connect(context: Context) {
@@ -70,7 +70,8 @@ object WorkspaceRuntime {
             val session = LiveVisionRuntime.sessions.registerOwned(id, displayId, packageName)
             val revision = LiveVisionRuntime.startSource(id, displayId, FrameSourceType.VIRTUAL_DISPLAY_SURFACE)
             val lifecycle = WorkspaceLifecycle(id, displayId).apply { transition(WorkspaceState.BACKGROUND_OK) }
-            entries[id] = Entry(session, lifecycle, reader, thread, launched.getLong("generation"), revision)
+            val entry = Entry(session, lifecycle, reader, thread, launched.getLong("generation"), revision)
+            entries[id] = entry
             reader.setOnImageAvailableListener({ source ->
                 runCatching {
                     source.acquireLatestImage()?.use { image ->
@@ -81,7 +82,7 @@ object WorkspaceRuntime {
                             Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
                         } catch (error: Throwable) { padded.recycle(); throw error }
                         if (bitmap !== padded) padded.recycle()
-                        LiveVisionRuntime.publish(id, displayId, FrameSourceType.VIRTUAL_DISPLAY_SURFACE, entries[id]?.sourceRevision ?: revision,
+                        LiveVisionRuntime.publish(id, displayId, FrameSourceType.VIRTUAL_DISPLAY_SURFACE, entry.sourceRevision,
                             image.timestamp / 1_000_000, bitmap)
                     }
                 }
