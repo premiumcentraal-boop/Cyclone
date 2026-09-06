@@ -1,0 +1,67 @@
+package com.cyclone.mobile.runtime.session
+
+import org.json.JSONObject
+
+/** Transport identity is never inferred from the active Android window. */
+object ExecutionRequestScope {
+    fun read(params: JSONObject): ExecutionContext {
+        if (params.has("executionContext") && params.opt("executionContext") !is JSONObject) {
+            throw SessionIdentityException("Invalid executionContext")
+        }
+        val nested = params.optJSONObject("executionContext")
+        val session = string(params, "sessionId")
+        val display = integer(params, "displayId")
+        val nestedSession = nested?.let { string(it, "sessionId") }
+        val nestedDisplay = nested?.let { integer(it, "displayId") }
+        if (session != null && nestedSession != null && session != nestedSession) {
+            throw SessionIdentityException("Conflicting execution session identities")
+        }
+        if (display != null && nestedDisplay != null && display != nestedDisplay) {
+            throw SessionIdentityException("Conflicting execution display identities")
+        }
+        val id = session ?: nestedSession ?: ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID
+        val targetDisplay = display ?: nestedDisplay
+        if (id != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID && targetDisplay == null) {
+            throw SessionIdentityException("An explicit background session requires its displayId")
+        }
+        return ExecutionContext(id, targetDisplay ?: 0)
+    }
+
+    /** Used at legacy boundaries until a complete display-scoped implementation owns the call. */
+    fun requireForeground(params: JSONObject): ExecutionContext = read(params).also {
+        if (it.sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID || it.displayId != 0) {
+            throw SessionIdentityException("BACKGROUND_MODE_UNAVAILABLE: this operation cannot address the requested workspace")
+        }
+    }
+
+    /** Carry outer identity through adapters instead of dropping it while normalizing params. */
+    fun merge(envelope: JSONObject, params: JSONObject): JSONObject {
+        val out = JSONObject(params.toString())
+        for (key in listOf("sessionId", "displayId", "executionContext")) {
+            if (!envelope.has(key)) continue
+            if (out.has(key) && out.get(key).toString() != envelope.get(key).toString()) {
+                throw SessionIdentityException("Conflicting $key in request envelope and params")
+            }
+            out.put(key, envelope.get(key))
+        }
+        return out
+    }
+
+    private fun string(json: JSONObject, key: String): String? {
+        if (!json.has(key)) return null
+        val value = json.opt(key)
+        if (value !is String || value.isBlank() || value != value.trim()) {
+            throw SessionIdentityException("Invalid $key")
+        }
+        return value
+    }
+
+    private fun integer(json: JSONObject, key: String): Int? {
+        if (!json.has(key)) return null
+        val value = json.opt(key)
+        if (value !is Number || value.toDouble() != value.toInt().toDouble() || value.toInt() < 0) {
+            throw SessionIdentityException("Invalid $key")
+        }
+        return value.toInt()
+    }
+}
