@@ -73,6 +73,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="cyclone" android:host="pair" />
             </intent-filter>
+            <!-- The Android Assistant role can route the system-owned assistant gesture here.
+                 Cyclone never intercepts KEYCODE_POWER directly. -->
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -121,24 +123,5 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
-
-        <!-- Android owns the Assistant role and Power-button gesture. Cyclone never intercepts
-             KEYCODE_POWER; the system binds this service only after explicit user selection. -->
-        <service
-            android:name=".assistant.CycloneVoiceInteractionService"
-            android:exported="true"
-            android:permission="android.permission.BIND_VOICE_INTERACTION">
-            <intent-filter>
-                <action android:name="android.service.voice.VoiceInteractionService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.voice_interaction"
-                android:resource="@xml/voice_interaction_service" />
-        </service>
-
-        <service
-            android:name=".assistant.CycloneVoiceInteractionSessionService"
-            android:exported="true"
-            android:permission="android.permission.BIND_VOICE_INTERACTION" />
     </application>
 </manifest>
