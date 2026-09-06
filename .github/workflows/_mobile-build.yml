@@ -2,6 +2,12 @@ name: Reusable Cyclone Mobile Build
 
 on:
   workflow_call:
+    inputs:
+      allow_independent_pc_version:
+        description: Allow Cyclone One to version its desktop shell independently while preserving all mobile checks.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,7 +26,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/ci/release_versions.py --check
+          if [[ "${{ inputs.allow_independent_pc_version }}" != "true" ]]; then
+            python3 scripts/ci/release_versions.py --check
+          else
+            echo 'Cyclone One desktop version is intentionally independent; mobile identity is validated below.'
+          fi
           python3 scripts/ci/mobile_metadata.py --github-output "$GITHUB_OUTPUT" --json mobile-metadata.json
           python3 scripts/ci/mobile_product_guard.py
           python3 scripts/ci/repository_security_guard.py
