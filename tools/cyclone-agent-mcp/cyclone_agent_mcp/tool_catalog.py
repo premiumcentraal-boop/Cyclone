@@ -36,6 +36,20 @@ TOOL_CONTRACTS = (
     ToolContract("phone_routine_run", False, True),
     ToolContract("phone_routine_status", True, True),
     ToolContract("phone_routine_cancel", False, True),
+    # Cyclone One v0.1 execution sessions. display_id is intentionally not a model parameter.
+    ToolContract("phone_session_list", True, True),
+    ToolContract("phone_session_start", False, True),
+    ToolContract("phone_session_status", True, True),
+    ToolContract("phone_session_pause", False, True),
+    ToolContract("phone_session_resume", False, True),
+    ToolContract("phone_session_handoff", False, True),
+    ToolContract("phone_session_stop", False, True),
+    ToolContract("phone_session_observe", True, True),
+    ToolContract("phone_session_locate", True, True),
+    ToolContract("phone_session_search", True, True),
+    ToolContract("phone_session_inspect", True, True),
+    ToolContract("phone_session_screenshot", True, True),
+    ToolContract("phone_session_act", False, True),
 )
 
 TOOL_NAMES = tuple(contract.name for contract in TOOL_CONTRACTS)
