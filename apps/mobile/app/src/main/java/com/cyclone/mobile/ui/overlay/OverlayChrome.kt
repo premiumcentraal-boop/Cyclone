@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -65,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -169,8 +171,8 @@ fun OverlayChrome(
     onIdleSemanticActivate: () -> Unit = { onAction(OverlayUserAction.ASK_CYCLONE) },
     modifier: Modifier = Modifier,
 ) {
-    // aiSettings remains in the public composable contract so the runtime does not need a second
-    // settings channel, but model/provider controls intentionally no longer render in the overlay.
+    // Keep the data contract for runtime compatibility, but never render model/provider controls in
+    // the floating bar. Those now live in CycloneAiSettingsActivity.
     @Suppress("UNUSED_VARIABLE") val settingsContract = aiSettings to onAiSettingsChanged
     CycloneV32Theme {
         val showOrb = snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
@@ -257,7 +259,11 @@ internal fun OverlayIdleHalo(
 
     Canvas(
         modifier
-            .size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp),
+            .size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp)
+            .graphicsLayer {
+                scaleX = pulseScale.value
+                scaleY = pulseScale.value
+            },
     ) {
         val center = Offset(size.width / 2f, size.height / 2f)
         val response = pulseAlpha.value
@@ -338,16 +344,13 @@ private fun ComposerPanel(
         }
     }
 
-    // Insets are part of the overlay content instead of relying only on ADJUST_RESIZE. On gesture
-    // navigation this raises the resting composer above the gesture area; while the IME animates,
-    // imePadding consumes the live keyboard inset so the bar follows the keyboard instead of being
-    // covered by it.
     Column(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .imePadding()
             .padding(horizontal = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp)
+            .graphicsLayer { translationY = dragOffset }
             .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) },
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
