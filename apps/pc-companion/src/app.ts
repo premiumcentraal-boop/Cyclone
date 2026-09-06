@@ -44,8 +44,6 @@ export class CyclonePcCompanionApp {
   async start(): Promise<void> {
     this.renderShell();
     await this.refreshDevices(true);
-    // Normal updates are pushed from ADB's topology event stream. The 20 second list refresh is
-    // only a very cheap UI recovery net and does not itself execute ADB commands.
     this.fleetUnsubscribe = this.service.watchFleet(() => this.scheduleEventRefresh());
     this.pollTimer = window.setInterval(() => void this.refreshDevices(false), 20_000);
   }
@@ -76,14 +74,14 @@ export class CyclonePcCompanionApp {
     const shell = el("div", "app-shell");
     const topbar = el("header", "app-topbar");
     const brand = el("div", "brand");
-    brand.append(el("div", "cyclone-mark"), el("div", "brand-name", "Cyclone"));
+    brand.append(el("div", "cyclone-mark"), el("div", "brand-name", "Cyclone One"));
     const nav = el("nav", "primary-nav");
-    nav.setAttribute("aria-label", "Cyclone PC Companion");
+    nav.setAttribute("aria-label", "Cyclone One");
 
     const entries: Array<[Exclude<AppRoute, "focused">, string, string]> = [
       ["home", "⌂", "Home"],
       ["fleet", "▣", "Control"],
-      ["automations", "↻", "Automations"],
+      ["automations", "↻", "Tasks"],
       ["connections", "◇", "Connections"],
     ];
     for (const [route, symbol, label] of entries) {
@@ -99,7 +97,7 @@ export class CyclonePcCompanionApp {
     this.topbarStatus = el("div", "topbar-status");
     this.topbarStatus.append(
       el("span", `backend-dot ${this.service.mode}`),
-      el("span", "topbar-status-copy", this.service.mode === "mock" ? "Mock workspace" : "Local companion"),
+      el("span", "topbar-status-copy", this.service.mode === "mock" ? "Mock workspace" : "Cyclone One runtime"),
     );
 
     const notifications = el("details", "topbar-menu notification-menu") as HTMLDetailsElement;
@@ -114,8 +112,8 @@ export class CyclonePcCompanionApp {
     const profile = el("details", "topbar-menu profile-menu") as HTMLDetailsElement;
     this.profileMenu = profile;
     const profileButton = el("summary", "profile-button");
-    profileButton.setAttribute("aria-label", "Cyclone profile and settings");
-    profileButton.append(el("span", "profile-avatar", "C"), el("span", "profile-name", "Cyclone"), el("span", "profile-chevron", "⌄"));
+    profileButton.setAttribute("aria-label", "Cyclone One profile and settings");
+    profileButton.append(el("span", "profile-avatar", "1"), el("span", "profile-name", "Cyclone One"), el("span", "profile-chevron", "⌄"));
     const profilePanel = el("div", "topbar-popover profile-panel");
     const connectionItem = button("Connections", "profile-menu-item");
     connectionItem.addEventListener("click", () => this.navigate("connections"));
@@ -125,7 +123,7 @@ export class CyclonePcCompanionApp {
       el("div", "profile-panel-heading", "Workspace"),
       connectionItem,
       settingsItem,
-      el("div", "profile-version", `Cyclone PC Companion · v${__CYCLONE_PC_VERSION__}`),
+      el("div", "profile-version", `Cyclone One · v${__CYCLONE_PC_VERSION__}`),
     );
     profile.append(profileButton, profilePanel);
     actions.append(this.topbarStatus, notifications, profile);
@@ -145,8 +143,6 @@ export class CyclonePcCompanionApp {
     } catch (error) {
       this.gatewayError = friendlyGatewayError(error);
       this.updateTopbarStatus();
-      // Keep last known inventory and a mounted healthy focused stream. A discovery failure is
-      // evidence about the Gateway, not evidence that every phone vanished.
       if (forceRender && this.state.route !== "focused") this.renderPage();
     } finally {
       const nextForceRender = this.topologyRefresh.finish();
@@ -174,9 +170,6 @@ export class CyclonePcCompanionApp {
     this.deviceSignature = signature;
     this.state = reduceCompanionState(this.state, { type: "devices_updated", devices });
     this.updateTopbarStatus();
-    // Fleet heartbeat/topology updates must not tear down a healthy focused stream. The stream
-    // controller owns its own recovery and remains mounted until the device disappears or the
-    // user navigates away.
     if ((forceRender || changed) && !preserveFocusedPage) this.renderPage();
     if (changed && preserveFocusedPage && this.state.focusedDeviceId) {
       const focused = devices.find((device) => device.id === this.state.focusedDeviceId);
@@ -302,14 +295,14 @@ export class CyclonePcCompanionApp {
     if (this.gatewayError) {
       const gateway = el("button", "notification-item") as HTMLButtonElement;
       gateway.type = "button";
-      gateway.append(el("span", "notification-device", "Local Gateway"), el("span", "notification-copy", this.gatewayError));
+      gateway.append(el("span", "notification-device", "Cyclone One Runtime"), el("span", "notification-copy", this.gatewayError));
       gateway.addEventListener("click", () => this.navigate("settings"));
       this.notificationPanel.append(gateway);
     }
     if (attention.length === 0) {
       this.notificationPanel.append(
         el("div", "notification-item positive", "All connected phones look healthy."),
-        el("div", "notification-time", "Cyclone keeps watching connection health."),
+        el("div", "notification-time", "Cyclone One keeps watching connection health."),
       );
       return;
     }
@@ -345,7 +338,7 @@ function deviceSignature(device: DesktopDevice): string {
 
 function friendlyGatewayError(error: unknown): string {
   const message = error instanceof Error ? error.message.trim() : "";
-  if (/401|403|token|session/i.test(message)) return "Local session verification failed. Reopen PC Companion to start a fresh protected session.";
-  if (/fetch|network|offline|gateway|connect/i.test(message)) return "The local Gateway sidecar is not responding. Retry discovery, then reopen PC Companion if needed.";
-  return message ? message.slice(0, 180) : "Cyclone could not refresh local phone inventory.";
+  if (/401|403|token|session/i.test(message)) return "Local session verification failed. Reopen Cyclone One to start a fresh protected session.";
+  if (/fetch|network|offline|gateway|connect/i.test(message)) return "The local Cyclone One runtime is not responding. Retry discovery, then reopen the app if needed.";
+  return message ? message.slice(0, 180) : "Cyclone One could not refresh local phone inventory.";
 }
