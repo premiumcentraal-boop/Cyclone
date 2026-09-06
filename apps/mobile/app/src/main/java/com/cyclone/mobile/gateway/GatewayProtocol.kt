@@ -20,6 +20,9 @@ internal class GatewayProtocolException(
 ) : IllegalArgumentException(message)
 
 internal object GatewayProtocol {
+    // Session operations are an additive Cyclone One extension. Keep the V3.3 transport version so
+    // existing trusted PC companions remain wire-compatible and discover the new operations through
+    // bridge.status instead of negotiating a second trust protocol.
     const val VERSION = "3.3"
     const val SOCKET_NAME = "cyclone_gateway"
     const val DEFAULT_FORWARD_PORT = 8766
@@ -65,6 +68,14 @@ internal object GatewayProtocol {
         "trust.rotate",
         "trust.revoke",
         "bridge.status",
+        "session.list",
+        "session.start",
+        "session.status",
+        "session.pause",
+        "session.resume",
+        "session.handoff",
+        "session.stop",
+        "session.snapshot",
         "observe.semantic",
         "observe.page_debug",
         "capture.screenshot",
