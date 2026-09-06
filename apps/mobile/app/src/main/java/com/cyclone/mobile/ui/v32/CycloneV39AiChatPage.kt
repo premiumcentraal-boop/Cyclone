@@ -2,6 +2,20 @@ package com.cyclone.mobile.ui.v32
 
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -239,7 +253,12 @@ private fun attachPreflightSuccess(
 }
 
 @Composable
-internal fun V39AiChatPage(
+internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
+    CycloneIntelligenceTheme { V39AiChatContent(context, refreshTick, onSettings) }
+}
+
+@Composable
+private fun V39AiChatContent(
     context: Context,
     refreshTick: Int,
     onSettings: () -> Unit,
@@ -250,6 +269,15 @@ internal fun V39AiChatPage(
     val qualifier = remember { ModelQualificationRunner(context) }
     val session = V39AiChatSessionRuntime
     var composer by rememberSaveable { mutableStateOf("") }
+    var toolsMenuOpen by remember { mutableStateOf(false) }
+    var inputMessage by remember { mutableStateOf("") }
+    val dictation = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let {
+                composer = listOf(composer, it).filter(String::isNotBlank).joinToString(" ")
+            }
+        }
+    }
     var modelMenuOpen by remember { mutableStateOf(false) }
     var selectedModelId by rememberSaveable {
         mutableStateOf(
@@ -308,78 +336,50 @@ internal fun V39AiChatPage(
     }
 
     Column(
-        Modifier.fillMaxSize().imePadding().padding(horizontal = 18.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize().background(CycloneIntelligenceStyle.Ink).imePadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text("Cyclone AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("Ask for one outcome. Cyclone handles the verified phone steps.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Works on this phone with your API key. PC companion is optional.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row {
-                TextButton(onClick = {
-                    context.startActivity(android.content.Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
-                }, enabled = !session.busy) { Text("Enable live view") }
-                TextButton(onClick = {
-                    context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java))
-                }, enabled = !session.busy) { Text("Background task") }
-            }
-            if (session.busy) {
-                TextButton(onClick = {
-                    session.status = "Stopping…"
-                    agent.cancelActiveTask()
-                }) { Text("Stop task") }
-            }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            CycloneOrbitMark(Modifier.size(32.dp))
+            Spacer(Modifier.size(10.dp))
+            Text("Cyclone", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+            IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("Model", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Box {
-                OutlinedButton(
-                    onClick = { modelMenuOpen = true },
-                    enabled = !session.busy,
-                    modifier = Modifier.semantics { contentDescription = "AI model selector" },
-                ) {
-                    Text(selectedModel.label)
-                    Spacer(Modifier.size(4.dp))
-                    Icon(Icons.Rounded.ArrowDropDown, null)
-                }
-                DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
-                    V39AiChatContract.models().forEach { model ->
-                        DropdownMenuItem(
-                            text = { Text(model.label) },
-                            onClick = {
-                                selectedModelId = V39AiChatContract.storageId(model)
-                                prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()
-                                modelMenuOpen = false
-                            },
-                        )
-                    }
+        Box {
+            TextButton(onClick = { modelMenuOpen = true }, enabled = !session.busy,
+                modifier = Modifier.semantics { contentDescription = "AI model selector" }) {
+                Text(selectedModel.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Rounded.ArrowDropDown, null)
+            }
+            DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+                V39AiChatContract.models().forEach { model ->
+                    DropdownMenuItem(text = { Text(model.label) }, onClick = {
+                        selectedModelId = V39AiChatContract.storageId(model)
+                        prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()
+                        modelMenuOpen = false
+                    })
                 }
             }
-            if (selectedProfile?.isContributor == true) {
-                Text(
-                    "Data-contributing / lower-cost tier. Selection is explicit; Cyclone never uses Contributor as a fallback for standard Muse.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
-
+        if (selectedProfile?.isContributor == true) {
+            Text("Contributor · prompts and responses may be used for training.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (session.messages.isEmpty()) {
                 item {
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text("What should Cyclone do?", fontWeight = FontWeight.Bold)
-                            Text("Try “Go to ad.nl” or describe another phone task.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    Column(Modifier.fillMaxWidth().padding(top = 32.dp, bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        CycloneOrbitMark(Modifier.size(64.dp))
+                        Text("A little less doing.\nA little more done.", fontSize = 32.sp, lineHeight = 39.sp,
+                            fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurface)
+                        Text("What would you like me to do?", style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
@@ -433,38 +433,55 @@ internal fun V39AiChatPage(
             }
         }
 
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            shadowElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                Modifier.padding(start = 6.dp, top = 6.dp, end = 7.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                OutlinedTextField(
-                    value = composer,
-                    onValueChange = { composer = it },
-                    modifier = Modifier.weight(1f).semantics { contentDescription = "Ask Cyclone composer" },
-                    enabled = !session.busy,
-                    minLines = 1,
-                    maxLines = 5,
-                    placeholder = { Text(V39AiChatContract.PLACEHOLDER) },
-                    shape = RoundedCornerShape(22.dp),
+        if (session.busy) {
+            TextButton(onClick = { session.status = "Stopping…"; agent.cancelActiveTask() }) { Text("Stop task") }
+        }
+        if (inputMessage.isNotBlank()) Text(inputMessage, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall)
+        Surface(shape = RoundedCornerShape(30.dp), color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                BasicTextField(value = composer, onValueChange = { composer = it }, enabled = !session.busy,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), minLines = 2, maxLines = 5,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { submit() }),
-                )
-                FilledIconButton(
-                    onClick = { submit() },
-                    enabled = hasKey && composer.isNotBlank() && !session.busy,
-                    shape = CircleShape,
-                    modifier = Modifier.size(48.dp).semantics { contentDescription = "Send Ask Cyclone request" },
-                ) {
-                    if (session.busy) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                    else Icon(Icons.AutoMirrored.Rounded.Send, "Send")
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp)
+                        .semantics { contentDescription = "Ask Cyclone composer" },
+                    decorationBox = { field ->
+                        Box { if (composer.isEmpty()) Text("Ask Cyclone", color = MaterialTheme.colorScheme.onSurfaceVariant); field() }
+                    })
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box {
+                        IconButton(onClick = { toolsMenuOpen = true }, enabled = !session.busy) {
+                            Icon(Icons.Rounded.Add, "Add to your task")
+                        }
+                        DropdownMenu(expanded = toolsMenuOpen, onDismissRequest = { toolsMenuOpen = false }) {
+                            DropdownMenuItem(text = { Text("Share screen") }, onClick = {
+                                toolsMenuOpen = false
+                                context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
+                            })
+                            DropdownMenuItem(text = { Text("Background task") }, onClick = {
+                                toolsMenuOpen = false
+                                context.startActivity(Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
+                                    .putExtra("goal", composer))
+                            })
+                        }
+                    }
+                    Text("On your phone", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    IconButton(onClick = {
+                        runCatching { dictation.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask Cyclone")) }
+                            .onFailure { inputMessage = "Dictation isn't available. You can type your request." }
+                    }, enabled = !session.busy) { Icon(Icons.Rounded.Mic, "Dictate request") }
+                    FilledIconButton(onClick = { submit() }, enabled = hasKey && composer.isNotBlank() && !session.busy,
+                        shape = CircleShape, modifier = Modifier.size(48.dp)
+                            .semantics { contentDescription = "Send Ask Cyclone request" }) {
+                        if (session.busy) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.ArrowUpward, "Send")
+                    }
                 }
             }
         }

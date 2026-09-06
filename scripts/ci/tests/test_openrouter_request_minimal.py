@@ -7,7 +7,7 @@ SOURCE = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterA
 
 
 class OpenRouterMinimalRequestTest(unittest.TestCase):
-    def test_page_chat_sends_only_model_and_messages(self):
+    def test_page_chat_preserves_minimal_generation_and_profile_routing(self):
         source = SOURCE.read_text(encoding="utf-8")
         start = source.index("private fun pageChat(")
         body_start = source.index("val body = JSONObject()", start)
@@ -15,16 +15,17 @@ class OpenRouterMinimalRequestTest(unittest.TestCase):
         body = source[body_start:request_start]
 
         puts = re.findall(r'\.put\("([^"]+)"', body)
-        self.assertEqual(["model", "messages"], puts)
+        self.assertEqual(["model", "messages", "stream", "provider", "sort", "allow_fallbacks"], puts)
+        self.assertIn("profile?.allowProviderFallbacks ?: false", body)
+        self.assertIn('.put("model", model.id)', body)
+        self.assertNotIn("data_collection", body)
         for forbidden in (
             "max_tokens",
             "max_completion_tokens",
             "temperature",
             "reasoning",
             "response_format",
-            "provider",
             "require_parameters",
-            "stream",
         ):
             self.assertNotIn(forbidden, body)
 
