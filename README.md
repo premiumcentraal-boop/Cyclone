@@ -4,11 +4,12 @@
 
 This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-## Current baseline — Cyclone 3.9.5
+## Current baseline — Cyclone 3.9.9
 
-Cyclone 3.9.5 focuses on trustworthy standalone execution, cancellation safety, completion grounding and developer-grade failure evidence:
+Cyclone 3.9.9 focuses on trustworthy standalone execution, cancellation safety, completion grounding and developer-grade failure evidence:
 
-- **Ask Cyclone** — chat-style task composer with model selection and a single send action.
+- **Ask Cyclone** — compact floating composer with attachments/settings on the left, microphone/send on the right, and a sheet that follows downward dragging.
+- **Model compatibility** — shared portable requests, live endpoint capability filtering and an account-specific model access check. Reasoning uses provider defaults; Contributor identity and account privacy settings are preserved.
 - **Goal Contracts** — common goals compile into independently verifiable semantic effects, so model confidence alone cannot mark a task complete.
 - **Bounded completion recovery** — rejected `DONE` claims trigger stronger local verification/escalation instead of an expensive repeated-DONE spiral.
 - **Structured + Free Mode agent** — Cyclone starts with reliable semantic/learned routes, then changes strategy when verified progress stalls; GATE and policy boundaries remain mandatory.
@@ -27,15 +28,15 @@ Cyclone 3.9.5 focuses on trustworthy standalone execution, cancellation safety, 
 
 Android package: `com.cyclone.mobile`  
 Minimum Android: 14 (API 34)  
-Current mobile identity: `3.9.5` / versionCode `59`
+Current mobile identity: `3.9.9` / versionCode `63`
 
 The product has two deliverables: the Android APK and the optional Windows PC companion.
 Internal API models run from the phone with internet access and an API key; PC pairing is not
 required. Core/Hermes and the separate Teamwork Sniper app are retired integrations.
 
-Cyclone 3.9.5 is promoted only from the exact Mobile CI artifact after unit tests, lint, repository
+Cyclone 3.9.9 is promoted only from the exact Mobile CI artifact after unit tests, lint, repository
 and security guards pass. Physical Pixel 8 acceptance remains a separate evidence gate and must not
-be inferred from a green CI build. See the [3.9.5 release review](docs/RELEASE_3.9.5.md) and the
+be inferred from a green CI build. See the [3.9.9 release audit](docs/RELEASE_3.9.9.md) and the
 [broader reliability acceptance plan](docs/DUO_RELIABILITY_REVIEW.md).
 
 ## Repository

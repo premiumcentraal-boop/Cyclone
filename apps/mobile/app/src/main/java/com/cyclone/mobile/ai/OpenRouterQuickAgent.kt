@@ -141,13 +141,7 @@ class OpenRouterQuickAgent(private val context: Context) {
         providerSort: String,
         jsonMode: Boolean,
     ): JSONObject {
-        val profile = ModelRegistry.profileForPreset(model)
-        val maxTokens = when {
-            jsonMode && model.reasoningEffort == "max" -> 12_000
-            jsonMode -> 5_000
-            model.reasoningEffort == "max" -> 4_096
-            else -> 2_500
-        }
+        val maxTokens = 8192
         val body = com.cyclone.mobile.ai.model.PortableModelRequest.body(model.id, messages,
             com.cyclone.mobile.ai.model.ModelEndpointCatalog.verifiedTags(model.id, http), maxTokens)
         val request = Request.Builder()

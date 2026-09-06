@@ -1149,7 +1149,7 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
         AgentTraceRuntime.event(context, traceId, "BOUNDARY", failure.userMessage, code = code, ok = false,
             detail = "HTTP ${failure.httpStatus}; model=${failure.selectedModelId}; request=${failure.requestId}; " +
                 "providerCode=${failure.providerCode}; message=${failure.providerMessage}; retryable=${failure.retryable}")
-        return PageAgentDecision("blocked", "", ProviderFailure.message(code).orEmpty(), emptyList(), null, code)
+        return PageAgentDecision("blocked", "", "${failure.selectedModelId}: ${failure.userMessage}", emptyList(), null, code)
     }
 
     private fun pageChat(

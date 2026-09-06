@@ -8,6 +8,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderFailureTest {
+    @Test fun privacyRoutingAndMissingModelAreNotConflated() {
+        val blocked = ProviderFailure.classify(404, "{\"error\":{\"message\":\"No endpoints match your data policy\"}}", selectedModelId = "meta/muse-spark-1.3-contributor")
+        assertEquals(ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED, blocked.failureClass)
+        assertTrue(blocked.userMessage.contains("privacy settings"))
+        assertEquals(ProviderFailureClass.MODEL_NOT_FOUND, ProviderFailure.classify(404).failureClass)
+        assertEquals(ProviderFailureClass.MODEL_ACCESS_DENIED, ProviderFailure.classify(403).failureClass)
+    }
+
     @Test fun providerFailuresKeepDistinctActionableClasses() {
         assertEquals(ProviderFailureClass.PROVIDER_AUTH_FAILED, ProviderFailure.classify(401).failureClass)
         assertEquals(ProviderFailureClass.MODEL_ACCESS_DENIED, ProviderFailure.classify(403).failureClass)

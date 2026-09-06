@@ -78,7 +78,7 @@ class ModelQualificationRunner(
             )
         }
 
-        val response = request(profile, apiKey, StructuredOutputMode.PORTABLE_JSON)
+        val response = request(profile, apiKey)
 
         if (response is ModelQualificationOutcome.Passed) {
             ModelQualificationRuntime.cache.markQualified(profile)
@@ -89,7 +89,6 @@ class ModelQualificationRunner(
     private fun request(
         profile: ModelProfile,
         apiKey: String,
-        mode: StructuredOutputMode,
     ): ModelQualificationOutcome {
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", ModelQualificationContract.SYSTEM_PROMPT))

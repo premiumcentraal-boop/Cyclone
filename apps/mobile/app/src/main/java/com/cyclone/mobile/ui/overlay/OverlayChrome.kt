@@ -486,8 +486,11 @@ private fun QuickAiSettings(
     onChanged: (OverlayAiSettings) -> Unit,
 ) {
     var modelMenuOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var accessResult by remember(settings.modelId) { mutableStateOf<String?>(null) }
     val selectedModel = OpenRouterModelPresets.byId(settings.modelId)
-    val levelIndex = intelligenceLevels.indexOf(settings.reasoningEffort).coerceAtLeast(1)
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = Color.Black.copy(alpha = 0.38f),
@@ -516,6 +519,20 @@ private fun QuickAiSettings(
             }
             Text("Provider defaults · automatically compatible", color = Color.White.copy(alpha = .65f),
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
+            TextButton(enabled = !checking, onClick = {
+                checking = true
+                scope.launch {
+                    try {
+                        accessResult = when (val result = com.cyclone.mobile.ai.model.ModelQualificationRunner(context).qualify(selectedModel)) {
+                            is com.cyclone.mobile.ai.model.ModelQualificationOutcome.Passed -> "${selectedModel.label}: ${if (result.cached) "recently verified" else "verified"} for this account."
+                            is com.cyclone.mobile.ai.model.ModelQualificationOutcome.Failed -> "${selectedModel.label}: ${result.failure.userMessage} HTTP ${result.failure.httpStatus}. ${result.failure.providerMessage.orEmpty()}"
+                        }
+                    } catch (_: Exception) { accessResult = "Could not check model access. Try again." }
+                    finally { checking = false }
+                }
+            }) { Text(if (checking) "Checking model…" else "Check model access") }
+            accessResult?.let { Text(it, color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.bodySmall) }
+
         }
     }
 }
