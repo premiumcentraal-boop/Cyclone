@@ -14,8 +14,14 @@ data class NavigationIntent(val target: String, val chrome: Boolean) {
     }
     companion object {
         fun parse(goal: String): NavigationIntent? {
-            val match = Regex("(?i)^(?:please\\s+)?(?:open|go to|navigate to)\\s+(?:the\\s+)?([a-z0-9./:-]+)(?:\\s+(?:website|site))?(?:\\s+(?:in|using|with)\\s+(?:google\\s+)?(chrome))?[.!]?$").matchEntire(goal.trim()) ?: return null
-            return NavigationIntent(match.groupValues[1].lowercase().trimEnd('.'), match.groupValues[2].isNotBlank())
+            val match = Regex("(?i)^(?:please\\s+)?(?:open|go to|navigate to)\\s+(?:the\\s+)?([a-z0-9./:-]+)(?:\\s+(?:website|site))?(?:\\s+(?:in|on|using|with)\\s+(?:google\\s+)?(chrome))?[.!]?$").matchEntire(goal.trim()) ?: return null
+            val target = match.groupValues[1].lowercase().trimEnd('.')
+            val candidate = NavigationIntent(target, match.groupValues[2].isNotBlank())
+            // Only root hosts qualify for local completion; paths need their own goal evidence.
+            if ('.' in target) return candidate.takeIf { it.accepts(target) }
+            if (!Regex("[a-z][a-z0-9-]*").matches(target)) return null
+            if (target in setOf("camera", "chrome", "photos", "settings", "gmail", "youtube")) return null
+            return candidate
         }
     }
 }

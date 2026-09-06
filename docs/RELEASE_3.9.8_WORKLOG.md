@@ -54,3 +54,7 @@ Matching background task setup, charcoal progress card, contextual pause/resume/
 ## Design checkpoint 4 — Active-screen cue and build identity
 
 A thin, static aurora border follows active foreground control and disappears on pause/exit. Its separate accessibility window cannot take focus or touch. Expanded workspace progress adds explicit Take control in app through existing ownership revocation/handoff. Version identity is now 3.9.8 / 62. Fixed the inherited MediaStore class-as-value compilation error found by CI. Earlier design checkpoints remain independently recoverable; final Android gate is in progress. No 3.9.8 release tag or signed publication is implied by these source checkpoints.
+
+## Validation follow-up
+
+All new UI source compiled in CI. First complete-tree Android test run exposed a real inherited navigation matcher defect (article URLs treated as simple host navigation) and one stale composer source assertion (one minimum line versus two). Restricted automatic completion to root hosts, accepted the original "on Google Chrome" phrasing, excluded common app names from named-site interpretation, and added a browser-scope regression for the user's exact Telegraaf wording. Full Android gate rerun required. The upload correction commit restored omitted unchanged files without resetting the branch; final source trees are verified against the complete local tree before each ref update.

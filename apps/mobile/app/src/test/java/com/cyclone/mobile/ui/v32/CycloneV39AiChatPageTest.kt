@@ -75,7 +75,7 @@ class CycloneV39AiChatPageTest {
 
     @Test fun composerIsMultilineAndHasOneSendAction() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertTrue(page.contains("minLines = 1"))
+        assertTrue(page.contains("minLines = 2"))
         assertTrue(page.contains("maxLines = 5"))
         assertTrue(page.contains("ImeAction.Send"))
         assertEquals(1, Regex("FilledIconButton\\(").findAll(page).count())

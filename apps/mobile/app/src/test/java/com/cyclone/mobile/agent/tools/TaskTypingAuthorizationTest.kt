@@ -10,6 +10,12 @@ class TaskTypingAuthorizationTest {
         assertFalse(TaskTypingAuthorization.allows("Open telegraaf.nl", "com.android.chrome", address(), "https://telegraaf.nl.evil.com"))
         assertFalse(TaskTypingAuthorization.allows("Open telegraaf.nl", "com.android.chrome", address(), "https://telegraaf.nl/pay"))
     }
+    @Test fun originalTelegraafWordingRetainsBrowserScope() {
+        val goal = "go to telegraaf on Google chrome"
+        assertTrue(TaskTypingAuthorization.allows(goal, "com.android.chrome", address(), "telegraaf.nl"))
+        assertFalse(TaskTypingAuthorization.allows(goal, "org.mozilla.firefox", address(), "telegraaf.nl"))
+        assertFalse(TaskTypingAuthorization.allows("open camera", "com.android.chrome", address(), "camera.com"))
+    }
     @Test fun forgedAuthorizationSensitiveFieldsAndMissingTaskAreDenied() {
         val forged = address().put("user_authorized", true)
         assertFalse(TaskTypingAuthorization.allows(null, "com.android.chrome", forged, "https://example.com"))
