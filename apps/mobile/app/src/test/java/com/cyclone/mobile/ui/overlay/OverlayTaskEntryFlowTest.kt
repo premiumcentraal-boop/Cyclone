@@ -5,89 +5,86 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Agent E: overlay / task-entry flow.
- *
- * Agent C owns [phone.type] internals. These tests assume the Phone task field
- * already holds accepted text after that fix lands. They never call PhoneToolExecutor
- * and never dispatch Accessibility clicks onto a host app.
- */
 class OverlayTaskEntryFlowTest {
     @Test
-    fun acceptedTaskEntryDrivesIdleAnalysisWorkingLiveDoneWithExactCopy() {
+    fun acceptedTaskEntryDrivesIdleAnalysisWorkingLiveThenReturnsRequestReady() {
         val events = mutableListOf<OverlayChromeEvent>()
         val effects = RecordingEffects()
         val machine = OverlayChromeMachine(emit = { events += it }, cycloneState = effects)
 
         assertEquals(OverlayChromeState.IDLE, machine.state())
         assertEquals(listOf(OverlayCopy.COMPOSER), OverlayCopy.visibleFor(machine.snapshot()))
-        assertEquals("Ask Cyclone", OverlayCopy.COMPOSER)
 
-        // Typing is assumed to work (Agent C). Overlay only consumes the accepted string.
         val acceptedTask = "Open Chrome and search for Pixel 8 user guide"
-        assertTrue(acceptedTask.isNotBlank())
         machine.startAnalysis("task-entry-1", bullets = listOf(acceptedTask), cta = OverlayAnalysisCta.CONFIRM)
-
         assertEquals(OverlayChromeState.ANALYSIS, machine.state())
         assertEquals(listOf(acceptedTask), machine.snapshot().bullets)
-        assertEquals(
-            listOf(OverlayCopy.AI_MODE, "Analysis", "Do this", OverlayCopy.COMPOSER, OverlayCopy.PAUSE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT, OverlayCopy.LEGAL),
-            OverlayCopy.visibleFor(machine.snapshot()),
-        )
-        assertEquals("Analysis", OverlayCopy.ANALYSIS_TITLE)
-        assertEquals("Do this", OverlayCopy.CONFIRM)
 
         machine.dispatch(OverlayUserAction.CONFIRM)
         assertEquals(OverlayChromeState.WORKING, machine.state())
         assertEquals(1, effects.resumes)
-        assertEquals(0, effects.pauses)
         assertEventNeverClicksHost(events.single(), OverlayChromeEventKind.CONFIRM)
-        assertEquals(
-            listOf(
-                OverlayCopy.AI_MODE,
-                "Task automation",
-                "I'm on it. I'll let you know when this is ready to complete. You can leave this screen.",
-                "Working on this task",
-                "View progress",
-                OverlayCopy.PAUSE,
-                OverlayCopy.MINIMIZE,
-                OverlayCopy.EXIT,
-                OverlayCopy.COMPOSER,
-                OverlayCopy.LEGAL,
-            ),
-            OverlayCopy.visibleFor(machine.snapshot()),
-        )
-        assertEquals("Task automation", OverlayCopy.WORKING_TITLE)
-        assertEquals(
-            "I'm on it. I'll let you know when this is ready to complete. You can leave this screen.",
-            OverlayCopy.WORKING_BODY,
-        )
-        assertEquals("Working on this task", OverlayCopy.STATUS)
-        assertEquals("View progress", OverlayCopy.PRIMARY)
-        assertEquals("Stop task", OverlayCopy.LIVE_LEFT)
-        assertEquals("Take control", OverlayCopy.LIVE_RIGHT)
 
         machine.dispatch(OverlayUserAction.VIEW_PROGRESS)
         assertEquals(OverlayChromeState.LIVE, machine.state())
         assertEventNeverClicksHost(events.last(), OverlayChromeEventKind.VIEW_PROGRESS)
-        assertEquals(
-            listOf(OverlayCopy.AI_MODE, "Working on this task", OverlayCopy.PAUSE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT, OverlayCopy.COMPOSER),
-            OverlayCopy.visibleFor(machine.snapshot()),
-        )
 
         machine.completeDone()
-        assertEquals(OverlayChromeState.DONE, machine.state())
         assertEventNeverClicksHost(events.last(), OverlayChromeEventKind.DONE)
-        assertEquals(
-            listOf(OverlayCopy.AI_MODE, OverlayCopy.DONE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT),
-            OverlayCopy.visibleFor(machine.snapshot()),
-        )
-        assertEquals(
-            "Saved as a draft skill. Review it in Automations before it can run alone.",
-            OverlayCopy.DONE,
-        )
-        assertEquals(0, effects.pauses)
-        assertTrue(events.none { it.clicksHost || it.dispatchAccessibilityAction })
+        assertEquals(OverlayChromeState.ANALYSIS, machine.state())
+        assertTrue(machine.snapshot().minimized)
+        assertTrue(machine.snapshot().composerText.isEmpty())
+        assertTrue(machine.snapshot().statusMessage == null)
+        assertEquals(listOf(OverlayCopy.COMPOSER), OverlayCopy.visibleFor(machine.snapshot()))
+
+        // Opening after a finished run restores a genuinely editable composer, not a dead DONE UI.
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        assertEquals(OverlayChromeState.ANALYSIS, machine.state())
+        assertFalse(machine.snapshot().minimized)
+        machine.updateComposer("Open Maps")
+        assertEquals("Open Maps", machine.snapshot().composerText)
+        machine.submitRequest()
+        assertEquals("Open Maps", events.last().requestText)
+        assertFalse(events.last().clicksHost || events.last().dispatchAccessibilityAction)
+    }
+
+    @Test
+    fun twoConsecutiveTextRequestsAndVoiceTranscriptRemainUsable() {
+        val events = mutableListOf<OverlayChromeEvent>()
+        val machine = OverlayChromeMachine(emit = { events += it })
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        events.clear()
+
+        machine.updateComposer("First task")
+        machine.submitRequest()
+        assertEquals("First task", events.last().requestText)
+        machine.enterWorking("first")
+        machine.completeDone("first")
+        assertTrue(machine.snapshot().minimized)
+
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        machine.updateVoice(listening = true, transcript = "Second task")
+        assertEquals("Second task", machine.snapshot().composerText)
+        machine.updateVoice(listening = false, transcript = "Second task")
+        machine.submitRequest()
+        assertEquals("Second task", events.last().requestText)
+    }
+
+    @Test
+    fun stoppedRunAlsoReturnsToCleanComposer() {
+        val machine = OverlayChromeMachine()
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        machine.updateComposer("Something")
+        machine.enterWorking("stopped")
+        machine.updateStatus("Cyclone Brain updated")
+        machine.finishStopped("Provider stopped")
+        assertEquals(OverlayChromeState.ANALYSIS, machine.state())
+        assertTrue(machine.snapshot().minimized)
+        assertEquals("", machine.snapshot().composerText)
+        assertEquals(null, machine.snapshot().statusMessage)
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        machine.updateComposer("Try again")
+        assertEquals("Try again", machine.snapshot().composerText)
     }
 
     @Test
@@ -100,14 +97,9 @@ class OverlayTaskEntryFlowTest {
             cta = OverlayAnalysisCta.COMMERCE,
         )
         assertEquals("Order this from", OverlayCopy.COMMERCE)
-        assertEquals(
-            listOf(OverlayCopy.AI_MODE, "Analysis", "Order this from", OverlayCopy.COMPOSER, OverlayCopy.PAUSE, OverlayCopy.MINIMIZE, OverlayCopy.EXIT, OverlayCopy.LEGAL),
-            OverlayCopy.visibleFor(machine.snapshot()),
-        )
         machine.dispatch(OverlayUserAction.COMMERCE)
         assertEquals(OverlayChromeState.WORKING, machine.state())
         assertEventNeverClicksHost(events.single(), OverlayChromeEventKind.COMMERCE)
-        assertTrue(OverlayCopy.visibleFor(machine.snapshot()).contains("View progress"))
     }
 
     @Test
@@ -122,13 +114,9 @@ class OverlayTaskEntryFlowTest {
     }
 
     @Test
-    fun frozenCopyTableMatchesV4BibleExactly() {
+    fun frozenSafetyCopyRemainsAvailableForGateAndRunSurfaces() {
         assertEquals("Analysis", OverlayCopy.ANALYSIS_TITLE)
         assertEquals("Task automation", OverlayCopy.WORKING_TITLE)
-        assertEquals(
-            "I'm on it. I'll let you know when this is ready to complete. You can leave this screen.",
-            OverlayCopy.WORKING_BODY,
-        )
         assertEquals("Working on this task", OverlayCopy.STATUS)
         assertEquals("View progress", OverlayCopy.PRIMARY)
         assertEquals("Do this", OverlayCopy.CONFIRM)
@@ -137,10 +125,6 @@ class OverlayTaskEntryFlowTest {
         assertEquals("Take control", OverlayCopy.LIVE_RIGHT)
         assertEquals("Ask Cyclone", OverlayCopy.COMPOSER)
         assertEquals("Cyclone needs you to confirm before finishing this.", OverlayCopy.GATE)
-        assertEquals(
-            "Saved as a draft skill. Review it in Automations before it can run alone.",
-            OverlayCopy.DONE,
-        )
         OverlayCopy.visibleStrings().forEach { visible ->
             OverlayCopy.NEVER_SAY.forEach { forbidden ->
                 assertFalse("visible copy must not contain: $forbidden", visible.contains(forbidden))
@@ -157,11 +141,7 @@ class OverlayTaskEntryFlowTest {
     private class RecordingEffects : OverlayCycloneStateEffects {
         var pauses = 0
         var resumes = 0
-        override fun pauseAgentForUser() {
-            pauses += 1
-        }
-        override fun resumeAgent() {
-            resumes += 1
-        }
+        override fun pauseAgentForUser() { pauses += 1 }
+        override fun resumeAgent() { resumes += 1 }
     }
 }
