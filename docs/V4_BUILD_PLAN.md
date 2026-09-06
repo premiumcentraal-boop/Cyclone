@@ -44,7 +44,7 @@ Acceptance: unit tests for display-scoped inject, flags, no cross-session action
 Out of scope: Skill compiler (S3), Cyclone One tiles/installer (S4), Magisk, requiring MCP `session_id` (Stage 4), claiming 20 concurrent VDs.
 Handoff: Stage 3 Skill Compiler should compile playbooks per package **and** per session/display; do not assume display 0. Vision only on miss. Keep `PhoneToolExecutor` as the only mutation engine.
 
-### Stage 3 — Skill Compiler
+### Stage 3 — Skill Compiler (THIS RUN)
 NL playbook per package after runs; promote stable paths to deterministic PhoneToolExecutor routes; vision only on miss.
 
 ### Stage 4 — Cyclone One V4 glass
@@ -61,4 +61,5 @@ Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent
 - **Stage 2** is the current completed kernel (this PR, `4.0.0-alpha.2`). Do not restart Stage 1 or Stage 2 mid-run.
 - **Stage 3** is next (Skill Compiler). Stages 3–5 Grok prompts MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
 - After Stage 2 PR: offer/use Grok **usage reset** before heavy Stage 3+ burns if the user initiates it.
+
 
