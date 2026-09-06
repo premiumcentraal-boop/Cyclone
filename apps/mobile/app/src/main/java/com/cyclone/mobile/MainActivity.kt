@@ -26,8 +26,9 @@ import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.gateway.GatewayDesktopPairingManager
 import com.cyclone.mobile.infrastructure.v31.CycloneV31ProductIntegration
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
-import com.cyclone.mobile.ui.v32.CycloneMobileV32App
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import com.cyclone.mobile.ui.overlay.OverlayUserAction
+import com.cyclone.mobile.ui.v32.CycloneMobileV32App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +46,7 @@ class MainActivity : ComponentActivity() {
         }
         handlePairingIntent(intent)
         handleOverlayVoiceIntent(intent)
+        handleAssistantIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -52,6 +54,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handlePairingIntent(intent)
         handleOverlayVoiceIntent(intent)
+        handleAssistantIntent(intent)
     }
 
     override fun onResume() {
@@ -91,6 +94,30 @@ class MainActivity : ComponentActivity() {
             Toast.LENGTH_LONG,
         ).show()
         value.data = null
+    }
+
+    /**
+     * Android owns the assistant role and hardware gesture. Cyclone merely handles ACTION_ASSIST
+     * when the user has selected it as the system assistant. No raw Power-key interception exists.
+     */
+    private fun handleAssistantIntent(value: Intent?) {
+        if (value?.action != Intent.ACTION_ASSIST) return
+        value.action = Intent.ACTION_MAIN
+        if (!OverlayChromeRuntime.isAttached()) {
+            Toast.makeText(
+                this,
+                "Enable Cyclone phone control first, then the assistant gesture can open Ask Cyclone over other apps.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        OverlayChromeRuntime.dispatch(OverlayUserAction.ASK_CYCLONE)
+        moveTaskToBack(true)
+        // Start listening only when microphone permission already exists. Otherwise the overlay's
+        // mic button remains available and can drive the normal permission flow.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            OverlayChromeRuntime.beginVoiceInput()
+        }
     }
 
     private fun handleOverlayVoiceIntent(value: Intent?) {
