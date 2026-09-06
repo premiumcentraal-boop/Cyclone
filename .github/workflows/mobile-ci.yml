@@ -15,6 +15,7 @@ on:
       - '.github/workflows/mobile-ci.yml'
       - '.github/workflows/mobile-dev-publish-v395.yml'
       - '.github/workflows/mobile-dev-publish-v396.yml'
+      - '.github/workflows/mobile-dev-publish-v397.yml'
   pull_request:
     paths:
       - 'apps/mobile/**'
@@ -28,6 +29,7 @@ on:
       - '.github/workflows/mobile-ci.yml'
       - '.github/workflows/mobile-dev-publish-v395.yml'
       - '.github/workflows/mobile-dev-publish-v396.yml'
+      - '.github/workflows/mobile-dev-publish-v397.yml'
   workflow_dispatch:
 
 permissions:
