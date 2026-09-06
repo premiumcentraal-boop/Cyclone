@@ -1,5 +1,6 @@
 import "./styles.css";
 import "./scan.css";
+import "./tasks.css";
 import { CyclonePcCompanionApp } from "./app.js";
 import { createDesktopService } from "./services/serviceFactory.js";
 
@@ -12,7 +13,7 @@ async function bootstrap(): Promise<void> {
     await app.start();
     window.addEventListener("beforeunload", () => app.destroy(), { once: true });
   } catch {
-    root.innerHTML = `<main style="display:grid;place-items:center;min-height:100vh;background:#08090d;color:#f5f3ff;font-family:system-ui"><section style="max-width:520px;padding:32px;text-align:center"><h1>Cyclone couldn't start the local Gateway</h1><p style="color:#a7a4b5;line-height:1.6">Close and reopen Cyclone PC Companion. If the problem continues, open Settings after restarting and run diagnostics.</p></section></main>`;
+    root.innerHTML = `<main style="display:grid;place-items:center;min-height:100vh;background:#08090d;color:#f5f3ff;font-family:system-ui"><section style="max-width:520px;padding:32px;text-align:center"><h1>Cyclone One couldn't start the local Gateway</h1><p style="color:#a7a4b5;line-height:1.6">Close and reopen Cyclone One. If the problem continues, restart the phone connection and run diagnostics.</p></section></main>`;
   }
 }
 
