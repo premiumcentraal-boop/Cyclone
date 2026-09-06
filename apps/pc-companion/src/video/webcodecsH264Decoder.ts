@@ -9,10 +9,12 @@ const MAX_DECODE_QUEUE = 4;
 const MAX_PENDING_PACKETS = 4;
 
 export const MAX_STREAM_RECONNECT_ATTEMPTS = 6;
-export const STREAM_HANDSHAKE_TIMEOUT_MS = 8_000;
-export const STREAM_FIRST_FRAME_TIMEOUT_MS = 8_000;
+/** Physical JPEG/screencap warmup was observed around 6s; do not hard-fail the 8s H.264 handshake. */
+export const STREAM_HANDSHAKE_TIMEOUT_MS = 20_000;
+export const STREAM_FIRST_FRAME_TIMEOUT_MS = 20_000;
 export const STREAM_RECOVERY_TIMEOUT_MS = 20_000;
-export const STALE_FRAME_TIMEOUT_MS = 6_000;
+export const STALE_FRAME_TIMEOUT_MS = 15_000;
+export const MAX_SOFT_FRAME_FAILURES = 3;
 export const KEEPALIVE_TYPE = "stream.keepalive";
 
 export interface CycloneVideoPacket {
@@ -119,6 +121,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
   private imageDrawGeneration = 0;
   private width = 0;
   private height = 0;
+  private consecutiveFrameFailures = 0;
 
   constructor(private readonly input: VideoRendererFactoryInput) {}
 
@@ -399,7 +402,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
     this.report({ stage: "client.decoder.failed", code: "H264_DECODER_ERROR", retryable: true });
     this.resetDecoder();
     this.waitingForKeyframe = true;
-    this.fail(error);
+    this.fail(error, "H264_DECODER_ERROR");
     try { this.socket?.close(4001, "H264_DECODER_ERROR"); } catch { /* browser owns close */ }
   }
 
@@ -410,7 +413,13 @@ export class WebCodecsH264Renderer implements VideoRenderer {
     // TypeScript cannot widen its backing store to SharedArrayBuffer.
     const imageBytes = new Uint8Array(packet.payload.byteLength);
     imageBytes.set(packet.payload);
-    const bitmap = await createImageBitmap(new Blob([imageBytes.buffer], { type: this.codec }));
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(new Blob([imageBytes.buffer], { type: this.codec }));
+    } catch (error) {
+      this.onSoftFrameFailure(error, "FRAME_DECODE_FAILED");
+      return;
+    }
     try {
       if (this.stopped || generation !== this.imageDrawGeneration) return;
       const canvas = this.input.target.canvas;
@@ -425,14 +434,28 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       this.input.callbacks.onState("LIVE");
       this.live = true;
       this.reconnectAttempt = 0;
+      this.consecutiveFrameFailures = 0;
       this.armHealthTimeout(STALE_FRAME_TIMEOUT_MS, "FRAME_STALE");
       if (!this.frameReported) {
         this.frameReported = true;
-        this.report({ stage: "client.frame.rendered", code: "DEGRADED_FRAME_OK" });
+        this.report({ stage: "client.frame.rendered", code: "JPEG_FRAME_OK" });
       }
     } finally {
       bitmap.close();
     }
+  }
+
+  private onSoftFrameFailure(error: unknown, code: string): void {
+    this.consecutiveFrameFailures += 1;
+    this.report({
+      stage: "client.frame.soft_drop",
+      code,
+      attempt: this.consecutiveFrameFailures,
+      retryable: true,
+    });
+    if (this.live && this.consecutiveFrameFailures < MAX_SOFT_FRAME_FAILURES) return;
+    this.fail(error instanceof Error ? error : new Error(code));
+    try { this.socket?.close(4001, code.slice(0, 120)); } catch { /* browser owns socket shutdown */ }
   }
 
   private resetDecoder(): void {
@@ -483,8 +506,9 @@ export class WebCodecsH264Renderer implements VideoRenderer {
     this.reconnectTimer = null;
   }
 
-  private fail(error: unknown): void {
-    this.input.callbacks.onError(error);
+  private fail(error: unknown, code?: string): void {
+    const named = code ?? (error instanceof Error && /^[A-Z][A-Z0-9_.-]{2,80}$/.test(error.message) ? error.message : undefined);
+    this.input.callbacks.onError(named ? new Error(named) : error);
     this.input.callbacks.onState("STREAM_ERROR");
   }
 
@@ -496,7 +520,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       attempt: this.reconnectAttempt,
       retryable: true,
     });
-    this.fail(error);
+    this.fail(error, code);
     try { socket.close(4001, code.slice(0, 120)); } catch { /* browser owns socket shutdown */ }
   }
 

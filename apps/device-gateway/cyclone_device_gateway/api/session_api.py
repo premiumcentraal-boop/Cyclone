@@ -127,6 +127,7 @@ def _call(fn):
             RuntimeErrorCode.AUTH_REJECTED.value: 403,
             RuntimeErrorCode.PROTOCOL_MISMATCH.value: 426,
             RuntimeErrorCode.PHONE_LOCKED.value: 423,
+            RuntimeErrorCode.HUMAN_HAS_CONTROL.value: 409,
             RuntimeErrorCode.BACKGROUND_MODE_UNAVAILABLE.value: 409,
             RuntimeErrorCode.STALE_SESSION.value: 410,
             RuntimeErrorCode.FOREGROUND_REQUIRED.value: 409,

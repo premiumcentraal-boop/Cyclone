@@ -79,6 +79,11 @@ class Gateway:
 
     def device_status(self) -> dict:
         status = collect_device_status(self.adb, self.settings.device_serial)
+        # Isolated ADB forwards require a serial. After auto-picking a single USB device,
+        # share that serial with the bridge client so unscoped status cannot report a
+        # false "bridge down".
+        if self.adb.serial and getattr(self.bridge, "adb", None) is not None:
+            self.bridge.adb.serial = self.adb.serial
         try:
             self.adb.forward_bridge(self.settings.bridge_port)
             bridge_status = self.bridge.request("bridge.status", {})

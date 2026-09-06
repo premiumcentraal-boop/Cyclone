@@ -180,6 +180,11 @@ class ADBClient:
 
     def ensure_bridge_forward(self, local_port: int = 8766) -> bool:
         if not self.serial:
+            try:
+                self.select_device()
+            except ADBError as exc:
+                raise ADBError("A device serial is required to create an isolated forward") from exc
+        if not self.serial:
             raise ADBError("A device serial is required to create an isolated forward")
         device_serial = self.serial
         local = f"tcp:{local_port}"

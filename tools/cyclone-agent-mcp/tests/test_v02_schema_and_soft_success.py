@@ -59,6 +59,8 @@ def test_help_verify_and_copy_config_show_one_example_each(capsys, monkeypatch, 
     examples = format_phone_act_examples()
     assert "com.android.vending" in examples
     assert "elementId" in examples
+    assert examples.encode("cp1252")
+    assert help_text.encode("cp1252")
 
     import cyclone_agent_mcp.connector as connector
     monkeypatch.setattr(connector, "codex_config_path", lambda: tmp_path / "config.toml")
@@ -69,6 +71,19 @@ def test_help_verify_and_copy_config_show_one_example_each(capsys, monkeypatch, 
     assert "phone.open_app" in copied
     assert "phone.type" in copied
     assert "CYCLONE_DEVICE_GATEWAY_TOKEN" not in copied
+
+
+def test_phone_act_can_request_ai_ownership_without_echoing_it_as_android_param():
+    gateway = RecordingGateway()
+    tools = PhoneTools(gateway=gateway)
+    tools.call("phone_act", {
+        "device_id": "phone-a",
+        "tool": "phone.home",
+        "params": {},
+        "goal": "Go home",
+        "request_ai_control": True,
+    })
+    assert gateway.actions[0]["params"].get("request_ai_control") is True
 
 
 def test_apply_soft_success_helper_keeps_policy_denials():

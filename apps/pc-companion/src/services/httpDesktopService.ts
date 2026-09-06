@@ -304,6 +304,8 @@ export class HttpDesktopService implements DesktopService {
     else if (action.type === "key" && action.key === "BACK") body = { kind: "back" };
     else if (action.type === "key" && action.key === "HOME") body = { kind: "home" };
     else if (action.type === "key" && action.key === "ENTER") body = { kind: "text", text: "\n" };
+    else if (action.type === "yield_ai") body = { kind: "yield_ai" };
+    else if (action.type === "take_human") body = { kind: "take_human" };
     else return { ok: false, deviceId, verification: "KEY_UNAVAILABLE" };
 
     const result = await this.request<{ ok?: boolean; status?: string }>(`/v1/devices/${encodeURIComponent(deviceId)}/control`, {

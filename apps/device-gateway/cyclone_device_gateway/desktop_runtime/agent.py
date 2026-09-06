@@ -30,6 +30,11 @@ ALLOWED_PHONE_TOOLS = frozenset({
 PAGE_TRANSITION_TOOLS = frozenset({
     "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app", "phone.launch_intent",
 })
+HUMAN_HAS_CONTROL_HINT = (
+    "Companion currently owns input. Yield control in Cyclone One (Give control to AI) "
+    "or retry with request_ai_control=true. A locked phone is not stolen."
+)
+DEFAULT_FOREGROUND_SESSION_ID = "default-foreground"
 
 
 def _goal_label_present(after_raw: dict[str, Any], after: dict[str, Any], goal: str) -> bool:
@@ -75,10 +80,18 @@ class DesktopAgentService:
         session = self._paired(device_id)
         result = self._request(session, "bridge.status", {})
         self.fleet.record_bridge_status(session, result)
+        controller_owner = result.get("controllerOwner") if isinstance(result, dict) else None
         return {
             **self._operation_context(session, device_id, "status"),
             "status": result,
             "connection_health": self._connection_health(session),
+            "inputOwner": session.input_owner,
+            "controllerOwner": controller_owner,
+            "sessions": self._session_summaries(session, result),
+            "handoff": {
+                "companionOwner": session.input_owner,
+                "yieldHint": HUMAN_HAS_CONTROL_HINT if session.input_owner == "HUMAN" else None,
+            },
         }
 
     @staticmethod
@@ -188,7 +201,11 @@ class DesktopAgentService:
             )
         goal = str(payload.get("goal") or tool.replace("phone.", "").replace("_", " "))[:1000]
         expected = str(payload.get("expected_observation_id") or payload.get("currentObservationId") or "")
-        if tool not in {"phone.observe", "phone.find", "phone.wait_for"} and not expected:
+        mutating = tool not in {"phone.observe", "phone.find", "phone.wait_for"}
+        request_ai = bool(payload.get("request_ai_control") or params.pop("request_ai_control", False))
+        if mutating:
+            self._require_ai_ownership(session, request_ai)
+        if mutating and not expected:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A fresh observation is required before mutation.")
 
         before = self._latest_observation(device_id)
@@ -514,6 +531,57 @@ class DesktopAgentService:
             "accessibilityFingerprint": observation.get("accessibilityFingerprint"),
         }
 
+    def _require_ai_ownership(self, session: DeviceSession, request_ai_control: bool) -> None:
+        owner = getattr(session, "input_owner", "AI")
+        if owner != "HUMAN":
+            return
+        if request_ai_control:
+            if getattr(session, "screen_awake", True) is False:
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.PHONE_LOCKED,
+                    "Cannot take AI ownership while the phone is locked or asleep.",
+                )
+            session.input_owner = "AI"
+            return
+        raise DesktopRuntimeError(RuntimeErrorCode.HUMAN_HAS_CONTROL, HUMAN_HAS_CONTROL_HINT, retryable=True)
+
+    def _session_summaries(self, session: DeviceSession, bridge_status: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_items = bridge_status.get("executionSessions") if isinstance(bridge_status, dict) else None
+        if not isinstance(raw_items, list):
+            raw_items = None
+        summaries: list[dict[str, Any]] = []
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                session_id = str(item.get("sessionId") or "").strip()
+                if not session_id:
+                    continue
+                executable = item.get("executable") is not False
+                foreground = session_id == DEFAULT_FOREGROUND_SESSION_ID
+                summaries.append({
+                    "sessionId": session_id,
+                    "displayId": item.get("displayId"),
+                    "state": item.get("state"),
+                    "inputOwner": item.get("inputOwner"),
+                    "executable": executable,
+                    "kind": "FOREGROUND" if foreground else "BACKGROUND",
+                    "readOnly": not executable or str(item.get("state") or "").upper() in {"SHARE", "REFERENCE", "READ_ONLY"},
+                    "targetPackage": item.get("targetPackage") or item.get("package"),
+                })
+        if not any(item.get("sessionId") == DEFAULT_FOREGROUND_SESSION_ID for item in summaries):
+            summaries.insert(0, {
+                "sessionId": DEFAULT_FOREGROUND_SESSION_ID,
+                "displayId": 0,
+                "state": "FOREGROUND",
+                "inputOwner": session.input_owner,
+                "executable": True,
+                "kind": "FOREGROUND",
+                "readOnly": False,
+                "targetPackage": None,
+            })
+        return summaries
+
     def _paired(self, device_id: str) -> DeviceSession:
         session = self.fleet.get(device_id)
         if not session.credential:
@@ -532,6 +600,8 @@ class DesktopAgentService:
                 "POLICY_DENIED": RuntimeErrorCode.POLICY_DENIED,
                 "PROTOCOL_MISMATCH": RuntimeErrorCode.PROTOCOL_MISMATCH,
                 "AGENT_CONTEXT_TRUNCATION": RuntimeErrorCode.AGENT_CONTEXT_TRUNCATION,
+                "HUMAN_HAS_CONTROL": RuntimeErrorCode.HUMAN_HAS_CONTROL,
+                "PHONE_LOCKED": RuntimeErrorCode.PHONE_LOCKED,
             }
             raise DesktopRuntimeError(mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE), f"Android Gateway rejected {op}.") from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:

@@ -197,6 +197,59 @@ def settings(tmp_path):
     )
 
 
+def test_isolated_forward_auto_picks_single_usb_serial():
+    class AutoADB(ADBClient):
+        def __init__(self):
+            super().__init__(serial=None)
+            self.commands = []
+
+        def devices(self):
+            return [ADBDevice("PIXEL8", "device", "Pixel_8")]
+
+        def run(self, args, *, binary=False, timeout=15, use_serial=True):
+            self.commands.append(list(args))
+            return b"" if binary else ""
+
+        def forward_mappings(self):
+            return []
+
+    adb = AutoADB()
+    assert adb.ensure_bridge_forward(8766) is True
+    assert adb.serial == "PIXEL8"
+    assert ["forward", "tcp:8766", "localabstract:cyclone_gateway"] in adb.commands
+
+
+def test_unscoped_device_status_copies_serial_onto_bridge_adb(tmp_path):
+    gateway_adb = FakeADB()
+    bridge_adb = FakeADB()
+    assert gateway_adb.serial is None
+    assert bridge_adb.serial is None
+
+    class SerialBridge(FakeBridge):
+        def __init__(self, adb):
+            super().__init__()
+            self.adb = adb
+
+        def request(self, op, args=None, request_id=None):
+            if op == "bridge.status":
+                if not self.adb.serial:
+                    raise RuntimeError("A device serial is required to create an isolated forward")
+                return {"ok": True, "controllerOwner": "AGENT"}
+            return super().request(op, args, request_id)
+
+    gateway = Gateway(
+        settings(tmp_path),
+        adb=gateway_adb,
+        bridge=SerialBridge(bridge_adb),
+        uia=FakeUIA(),
+        root=RootProvider(FakeADB(), tmp_path / "traces"),
+    )
+    status = gateway.device_status()
+    assert status["cyclone_bridge_reachable"] is True
+    assert gateway_adb.serial == "PIXEL8"
+    assert bridge_adb.serial == "PIXEL8"
+
+
 def test_device_selection_is_deterministic():
     adb = FakeADB([ADBDevice("A", "device"), ADBDevice("B", "device")])
     with pytest.raises(ADBError):

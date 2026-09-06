@@ -139,6 +139,32 @@ class GatewayClient:
             ) from exc
 
     def status(self) -> Any:
+        """Unscoped readiness. Auto-picks a single USB-READY device; otherwise requires device_id."""
+        devices, _surface = self._fleet_devices()
+        if isinstance(devices, list) and devices:
+            ready = []
+            for item in devices:
+                if not isinstance(item, dict):
+                    continue
+                device_id = item.get("deviceId") or item.get("device_id") or item.get("id")
+                state = str(item.get("state") or "").upper()
+                if isinstance(device_id, str) and device_id.strip() and state in {"READY", "CONNECTED"}:
+                    ready.append(device_id.strip())
+            if len(ready) == 1:
+                return self.device_status(ready[0])
+            if len(ready) > 1:
+                raise GatewayError(
+                    "Multiple READY devices require explicit device_id",
+                    body={
+                        "error": {
+                            "code": "DEVICE_SELECTION_REQUIRED",
+                            "layer": "DEVICE",
+                            "retryable": True,
+                            "message": "Pass device_id from phone_list / phone_devices. Isolated ADB forwards need a serial.",
+                        },
+                        "available_devices": ready,
+                    },
+                )
         return self._request("GET", "/v1/device/status")
 
     def devices(self, *, scan: bool = False) -> dict[str, Any]:
@@ -153,7 +179,7 @@ class GatewayClient:
         devices, surface = self._fleet_devices()
         legacy: dict[str, Any] = {}
         try:
-            legacy = self.status()
+            legacy = self._request("GET", "/v1/device/status")
         except GatewayError:
             pass
         selected = _legacy_serial_suffix(legacy)
@@ -451,12 +477,16 @@ class GatewayClient:
                     },
                 },
             )
+        forwarded = dict(params)
+        request_ai_control = forwarded.pop("request_ai_control", False) is True
         payload = {
             "capability_id": tool,
-            "params": params,
+            "params": forwarded,
             "goal": goal,
             "expected_observation_id": observation_id,
         }
+        if request_ai_control:
+            payload["request_ai_control"] = True
         raw = self._request("POST", f"/v1/devices/{_quote(device_id)}/agent/action", payload)
         if tool not in NON_MUTATING_CAPABILITIES:
             self._device_observation_ids.pop(device_id, None)

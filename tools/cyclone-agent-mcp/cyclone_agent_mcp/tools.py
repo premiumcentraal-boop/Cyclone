@@ -178,10 +178,13 @@ class PhoneTools:
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError(
                 "phone.type requires user_authorized=true; Android policy remains authoritative. "
-                "Sequence: phone_locate → phone.click to focus → phone.type with the current elementId. "
+                "Sequence: phone_locate -> phone.click to focus -> phone.type with the current elementId. "
                 'Example: {"elementId": "<current id>", "text": "Cyclone"}'
             )
         params = _forward_type_authorization(tool, args, params)
+        if args.get("request_ai_control") is True:
+            params = dict(params)
+            params["request_ai_control"] = True
         result = self.gateway.action(tool, params, goal, self._device(args))
         result = apply_action_soft_success(tool, params, result)
         if tool == "phone.type":

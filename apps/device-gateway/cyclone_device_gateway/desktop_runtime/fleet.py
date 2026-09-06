@@ -67,6 +67,7 @@ class DeviceSession:
     source: str = "USB"
     provider: str | None = None
     provider_instance_id: str | None = None
+    input_owner: str = "AI"
 
     def public(self) -> dict[str, Any]:
         suffix = self.serial[-4:] if len(self.serial) >= 4 else self.serial
@@ -115,6 +116,7 @@ class DeviceSession:
                 "endpoint": "loopback" if self.source == "VIRTUAL" else ("lan" if self.source == "LAN" else "usb"),
             },
             "connectionLabel": connection_label,
+            "inputOwner": self.input_owner,
             "connectionHealth": {
                 "bridgeReachable": self.bridge_ok,
                 "gatewayEnabled": self.bridge_gateway_enabled,
