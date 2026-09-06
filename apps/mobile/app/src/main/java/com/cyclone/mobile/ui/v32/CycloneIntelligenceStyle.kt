@@ -1,6 +1,8 @@
 package com.cyclone.mobile.ui.v32
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -34,7 +36,7 @@ internal fun CycloneIntelligenceTheme(content: @Composable () -> Unit) {
         onBackground = CycloneIntelligenceStyle.Text, onSurface = CycloneIntelligenceStyle.Text,
         surfaceVariant = CycloneIntelligenceStyle.Raised, onSurfaceVariant = CycloneIntelligenceStyle.Muted,
         outlineVariant = Color(0xFF3B4652), error = Color(0xFFFFB4B0),
-    ), content = content)
+    )) { CompositionLocalProvider(LocalContentColor provides CycloneIntelligenceStyle.Text, content = content) }
 }
 
 /** Three open orbital strokes evoke a cyclone without borrowing another product's logo. */
