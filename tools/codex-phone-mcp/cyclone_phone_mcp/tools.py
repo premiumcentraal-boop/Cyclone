@@ -46,6 +46,7 @@ ANDROID_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)
 
 MUTATING_ACTIONS = ALLOWED_ACTIONS - {"phone.wait_for"}
 ELEMENT_ID_KEYS = {"elementId", "element_id"}
+ELEMENT_INDEX_KEYS = {"elementIndex", "element_index"}
 REF_KEYS = {"ref"}
 ROLE_NAME_KEYS = {"role", "name"}
 COORDINATE_KEYS = {
@@ -94,7 +95,7 @@ def _element_id_from_params(params: dict[str, Any]) -> str | None:
     nested = None
     if isinstance(selector, dict):
         nested = next((selector.get(key) for key in ELEMENT_ID_KEYS if selector.get(key)), None)
-        unsupported = set(selector) - ELEMENT_ID_KEYS - REF_KEYS - ROLE_NAME_KEYS - {"id"}
+        unsupported = set(selector) - ELEMENT_ID_KEYS - ELEMENT_INDEX_KEYS - REF_KEYS - ROLE_NAME_KEYS - {"id"}
         if unsupported:
             raise ValueError(
                 "MCP selector input must contain only a current observation-scoped elementId, ref, or role+name; "
@@ -140,10 +141,13 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
         ref = ref or str(params["selector"].get("ref") or "").strip()
         role = role or str(params["selector"].get("role") or "").strip()
         name = name or str(params["selector"].get("name") or "").strip()
-    if tool in {"phone.click", "phone.long_press", "phone.type"} and not (element_id or ref or (role and name)):
+    element_index = _element_index_from_params(params)
+    if tool in {"phone.click", "phone.long_press", "phone.type"} and not (
+        element_id or element_index or ref or (role and name)
+    ):
         raise ValueError(
-            f"{tool} requires a current observation-scoped elementId, ref, or role+name. Run phone_locate or "
-            "phone_observe, then use one returned candidate ID or snapshot ref."
+            f"{tool} requires a current observation-scoped elementId, elementIndex, ref, or role+name. Run "
+            "phone_locate or phone_observe, then use one returned candidate ID, index, or snapshot ref."
         )
     if tool == "phone.swipe":
         raise ValueError(
@@ -151,26 +155,26 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
             "Use phone.scroll with direction=forward/backward instead."
         )
     if tool == "phone.scroll":
-        allowed = {"direction", "selector", *ELEMENT_ID_KEYS}
+        allowed = {"direction", "selector", *ELEMENT_ID_KEYS, *ELEMENT_INDEX_KEYS}
         if set(params) - allowed:
-            raise ValueError("phone.scroll accepts only direction and an optional current elementId")
+            raise ValueError("phone.scroll accepts only direction and an optional current elementId or elementIndex")
         direction = str(params.get("direction") or "forward").lower()
         if direction not in {"forward", "backward"}:
             raise ValueError("phone.scroll direction must be forward or backward")
     elif tool == "phone.type":
-        allowed = {"value", "text", "selector", *ELEMENT_ID_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
+        allowed = {"value", "text", "selector", *ELEMENT_ID_KEYS, *ELEMENT_INDEX_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
         if set(params) - allowed or not isinstance(params.get("value", params.get("text")), str):
             raise ValueError("phone.type accepts one text/value and a current elementId")
         if "value" in params and "text" in params and params["value"] != params["text"]:
             raise ValueError("phone.type text and value disagree")
     elif tool == "phone.long_press":
-        allowed = {"durationMs", "selector", *ELEMENT_ID_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
+        allowed = {"durationMs", "selector", *ELEMENT_ID_KEYS, *ELEMENT_INDEX_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
         if set(params) - allowed:
-            raise ValueError("phone.long_press accepts only durationMs and a current elementId")
+            raise ValueError("phone.long_press accepts only durationMs and a current elementId or elementIndex")
     elif tool == "phone.click":
-        allowed = {"selector", *ELEMENT_ID_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
+        allowed = {"selector", *ELEMENT_ID_KEYS, *ELEMENT_INDEX_KEYS, *REF_KEYS, *ROLE_NAME_KEYS}
         if set(params) - allowed:
-            raise ValueError("phone.click accepts only a current observation-scoped elementId")
+            raise ValueError("phone.click accepts only a current observation-scoped elementId or elementIndex")
     elif tool in {"phone.back", "phone.home"}:
         if params:
             raise ValueError(f"{tool} accepts no parameters")
@@ -185,6 +189,22 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
         if condition is not None and not isinstance(condition, dict):
             raise ValueError("phone.wait_for condition must be an object")
     return element_id
+
+
+def _element_index_from_params(params: dict[str, Any]) -> int | None:
+    selector = params.get("selector") if isinstance(params.get("selector"), dict) else {}
+    raw = next((params.get(key) for key in ELEMENT_INDEX_KEYS if params.get(key) not in (None, "")), None)
+    if raw is None:
+        raw = next((selector.get(key) for key in ELEMENT_INDEX_KEYS if selector.get(key) not in (None, "")), None)
+    if raw in (None, ""):
+        return None
+    try:
+        index = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("elementIndex must be a positive integer from the current Page Card") from exc
+    if index < 1:
+        raise ValueError("elementIndex must be a positive integer from the current Page Card")
+    return index
 
 
 def _error_class(value: Any, fallback: str) -> str:
@@ -506,6 +526,23 @@ class PhoneTools:
                 return "STALE_OBSERVATION"
             resolved["elementId"] = host["elementId"]
             return resolved
+        try:
+            element_index = _element_index_from_params(params)
+        except ValueError:
+            return "STALE_OBSERVATION"
+        if element_index:
+            hosts = list(refs.values())
+            candidates = card.get("candidates") if isinstance(card.get("candidates"), dict) else {}
+            hosts.extend(list(candidates.get("current") or []) + list(candidates.get("goalRanked") or []))
+            hosts.extend(list(card.get("controls") or []))
+            for host in hosts:
+                if not isinstance(host, dict):
+                    continue
+                if host.get("elementIndex") == element_index or host.get("element_index") == element_index:
+                    if host.get("elementId"):
+                        resolved["elementId"] = host["elementId"]
+                        return resolved
+            return "STALE_OBSERVATION"
         if role and name:
             needle = name.lower()
             for host in refs.values():
@@ -546,6 +583,9 @@ class PhoneTools:
                 delta="The ref is not from the current snapshot. Locate again before acting.",
             )
         params = resolved
+        if isinstance(params, dict) and params.get("fastPath") is not False:
+            params = dict(params)
+            params["fastPath"] = True
         element_id = _element_id_from_params(params)
         if element_id and element_id not in self._current_element_ids.get(scope, set()):
             return _failed_action_envelope(

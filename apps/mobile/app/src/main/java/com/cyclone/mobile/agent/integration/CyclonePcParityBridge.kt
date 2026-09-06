@@ -21,6 +21,9 @@ import com.cyclone.mobile.agent.recovery.RecoveryRequest
 import com.cyclone.mobile.agent.tools.CycloneAgentEnvironment
 import com.cyclone.mobile.agent.tools.CycloneAgentEnvironmentApi
 import com.cyclone.mobile.ai.AgentTraceRuntime
+import com.cyclone.mobile.fastpath.FastPathLanding
+import com.cyclone.mobile.fastpath.FastPathSurface
+import com.cyclone.mobile.fastpath.FastPathTimings
 import com.cyclone.mobile.ai.PageAgentAction
 import com.cyclone.mobile.ai.PageAgentProtocol
 import com.cyclone.mobile.applearner.LearnedAction
@@ -96,9 +99,19 @@ class CyclonePcParityBridge internal constructor(
             .put("goal", goal)
             .put("goalContract", contract.toJson())
             .put("completionState", completion.toJson())
-            .put("staleIdRule", "elementId is valid only for the current observation; re-locate after every mutation")
-            .put("verificationRule", "executor acceptance is never semantic success; Android after-state verification is authoritative")
+            .put("staleIdRule", "elementId and elementIndex are valid only for the current observation; re-locate after every mutation")
+            .put("verificationRule", "executor acceptance is never semantic success; ordinary taps use local fingerprint settle (300ms then +500/+1000). Unchanged is not a second click.")
             .put("completionRule", "done means every goalContract requirement is independently satisfied; do not keep acting after the contract is satisfied")
+            .put(
+                "fastPath",
+                JSONObject()
+                    .put("settleMs", FastPathTimings.SETTLE_MS)
+                    .put("ladderMs", JSONArray(FastPathTimings.LADDER_MS.toList()))
+                    .put("navIsolation", "one screen-changing mutation per turn; form field batching allowed before navigation")
+                    .put("tapVerification", "local fingerprint after settle is authority for ordinary taps; do not extra-verify with the model")
+                    .put("vision", "escalate only when perceptionMode=vision_escalate or the a11y tree is useless")
+                    .put("surface", FastPathSurface.toJson()),
+            )
         if (card != null) {
             out.put("pageCard", pageCardJson(card))
             out.put(
@@ -110,7 +123,16 @@ class CyclonePcParityBridge internal constructor(
                     .put("taskSurfaceLooksCycloneOwned", card.packageName == "com.cyclone.mobile")
                     .put("pageSummary", JSONObject(card.pageSummary.toString()))
                     .put("visibleTextExcerpt", compactText(card))
-                    .put("interruptions", interruptionCandidates(card)),
+                    .put("interruptions", interruptionCandidates(card))
+                    .put("perceptionMode", card.perceptionMode)
+                    .put("treeUseful", card.treeUseful),
+            )
+        }
+        FastPathLanding.resolve(goal)?.let { landing ->
+            out.put("fastPathLanding", landing.toJson())
+            out.put(
+                "landingRule",
+                "Prefer this open_app/intent landing before hunting launcher icons. 3.9.12 Ask→workspace already routes a uniquely named installed app.",
             )
         }
         out.put("recentOutcomes", recentOutcomeJson(history))
@@ -397,6 +419,8 @@ class CyclonePcParityBridge internal constructor(
         .put("pageEvidence", JSONObject(card.pageEvidence.toString()))
         .put("controls", JSONArray().also { array -> card.controls.forEach { array.put(candidateJson(it)) } })
         .put("nextHopHints", JSONArray(card.nextHopHints.toString()))
+        .put("perceptionMode", card.perceptionMode)
+        .put("treeUseful", card.treeUseful)
 
     private fun compactText(card: AgentPageCard): String {
         val combined = buildString {
@@ -489,6 +513,7 @@ class CyclonePcParityBridge internal constructor(
     private fun candidateJson(candidate: AgentElementCandidate): JSONObject = JSONObject()
         .put("controlId", candidate.elementId)
         .put("elementId", candidate.elementId)
+        .put("elementIndex", candidate.elementIndex ?: JSONObject.NULL)
         .put("label", candidate.label)
         .put("semanticName", candidate.semanticName)
         .put("role", candidate.role)

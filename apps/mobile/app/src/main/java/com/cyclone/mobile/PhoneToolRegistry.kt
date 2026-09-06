@@ -18,10 +18,10 @@ data class PhoneToolDefinition(
 
 object PhoneToolRegistry {
     val definitions: List<PhoneToolDefinition> = listOf(
-        PhoneToolDefinition("phone.observe", false, "accessibility", "Return normalized current UI state and clear the post-takeover fresh-observation gate"),
+        PhoneToolDefinition("phone.observe", false, "accessibility", "A11y-first observation: Page Card with stable elementIndex. Vision/screenshot only when the tree is useless"),
         PhoneToolDefinition("phone.screenshot", false, "screenshot", "Capture the screen or a cropped region; base64 is opt-in"),
         PhoneToolDefinition("phone.find", false, "accessibility", "Resolve stable selectors against the current normalized UI snapshot"),
-        PhoneToolDefinition("phone.click", true, "accessibility", "Click a selector using accessibility action with gesture fallback"),
+        PhoneToolDefinition("phone.click", true, "accessibility", "Click a current observation-scoped element. Fast Path settles 300ms then fingerprints; Unchanged is verified=false and must not retry via a second click channel"),
         PhoneToolDefinition("phone.long_press", true, "accessibility", "Long-press the center of a selected element"),
         PhoneToolDefinition("phone.tap", true, "accessibility", "Tap screen coordinates"),
         PhoneToolDefinition("phone.type", true, "accessibility", "Set text on a selected or focused editable element"),
@@ -30,7 +30,7 @@ object PhoneToolRegistry {
         PhoneToolDefinition("phone.swipe", true, "accessibility", "Dispatch a coordinate swipe gesture"),
         PhoneToolDefinition("phone.back", true, "accessibility", "Perform Android Back"),
         PhoneToolDefinition("phone.home", true, "accessibility", "Perform Android Home"),
-        PhoneToolDefinition("phone.open_app", true, "app_launch", "Launch an installed package through its normal launcher intent"),
+        PhoneToolDefinition("phone.open_app", true, "app_launch", "Planner landing: launch an installed package through its launcher intent before hunting icons"),
         PhoneToolDefinition("phone.open_notification", true, "notification_listener", "Open a retained notification through its content PendingIntent"),
         PhoneToolDefinition("phone.wait_for", false, "accessibility", "Wait locally for a selector/package/text/fingerprint condition without LLM polling"),
         PhoneToolDefinition("phone.assert", false, "accessibility", "Assert a current UI condition once"),
@@ -39,7 +39,7 @@ object PhoneToolRegistry {
         PhoneToolDefinition("phone.get_clipboard", false, "clipboard", "Read clipboard text when Android permits it"),
         PhoneToolDefinition("phone.set_clipboard", true, "clipboard", "Write clipboard text"),
         PhoneToolDefinition("phone.share", true, "intent_launch", "Open Android ACTION_SEND for text, optionally scoped to a package"),
-        PhoneToolDefinition("phone.launch_intent", true, "intent_launch", "Open an allowlisted URI scheme with ACTION_VIEW"),
+        PhoneToolDefinition("phone.launch_intent", true, "intent_launch", "Planner landing: open an allowlisted URI with ACTION_VIEW before hunting a browser icon"),
         PhoneToolDefinition("phone.capabilities", false, null, "Return runtime capability availability and missing-permission states"),
     )
 

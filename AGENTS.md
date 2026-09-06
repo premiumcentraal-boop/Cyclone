@@ -1,6 +1,6 @@
 # Cyclone coding-agent guide
 
-Cyclone's active baseline is the 3.9 Android-first product. Do not reconstruct retired V2/V3 plans, the old Core/Desktop control plane, Teamwork Sniper experiments or version-specific handoff documents unless a task explicitly asks for historical research.
+Cyclone's active baseline is the 3.9 Android-first product with a V4 Stage 1 Fast Path alpha (`4.0.0-alpha.1`) on the 3.9.12 workspace. Do not reconstruct retired V2/V3 plans, the old Core/Desktop control plane, Teamwork Sniper experiments or version-specific handoff documents unless a task explicitly asks for historical research.
 
 ## Read first
 
@@ -15,9 +15,9 @@ Load more context only when the task needs it.
 - Android package: `com.cyclone.mobile`
 - Launcher: `.MainActivity`
 - `PhoneToolExecutor` is the canonical phone mutation engine.
-- Prefer learned routes and semantic selectors before coordinates or vision.
-- Re-observe after page-changing actions and verify outcomes.
-- Transport success is not task success.
+- Prefer learned routes, `phone.open_app` / intent landing, and semantic selectors before coordinates or vision.
+- Re-observe after page-changing actions. Ordinary taps use Fast Path fingerprint settle (300ms, then +500/+1000); Unchanged is not a second click.
+- Transport success is not task success. One screen-changing mutation per agent decision turn; form fills may batch.
 - Keep approval boundaries for pay/send/delete/permission/authentication-sensitive actions.
 - Never persist passwords, OTPs, API keys, payment data or raw typed secret values in Brain, learning stores or diagnostics.
 - Run diagnostics may contain model-visible context, decisions, tool calls/results, verification and recovery—not hidden provider chain-of-thought.

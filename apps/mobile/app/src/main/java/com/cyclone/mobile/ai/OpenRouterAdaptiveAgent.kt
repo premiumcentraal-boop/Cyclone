@@ -672,7 +672,12 @@ class OpenRouterAdaptiveAgent(private val context: Context,
     ): LocalExecution {
         var state = session.state
         var verifiedProgress = false
-        for (action in decision.actions.take(3)) {
+        val isolated = com.cyclone.mobile.fastpath.FastPathNavIsolation.keep(
+            decision.actions.take(3),
+            { it.tool },
+            { it.expectedPageChange },
+        ).allowed
+        for (action in isolated) {
             if (session.cancelled() || session.stopRequested) {
                 return LocalExecution(state, false, verifiedProgress, cycloneObservation(state).evidenceIdentity,
                     message = "Cyclone task cancelled.")

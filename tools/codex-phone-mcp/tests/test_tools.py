@@ -29,7 +29,7 @@ class FakeGateway:
             "selectedSerialSuffix": "061G",
             "legacy": {"available": True, "bridgeReachable": True, "selectedSerialSuffix": "061G"},
         }
-    def observe(self, **kwargs): return {"pageKey": "home", "controls": [{"id": "1", "label": "Apps"}], "screenshot": None}
+    def observe(self, **kwargs): return {"pageKey": "home", "controls": [{"id": "1", "label": "Apps", "clickable": True, "elementIndex": 1}], "screenshot": None}
     def ui_search(self, query): return {"candidates": [{"id": "1", "label": query}]}
     def ui_element(self, element_id): return {"id": element_id, "password": "should-not-leak"}
     def current_page(self): return {"pageKey": "home"}
@@ -125,7 +125,7 @@ class AtomicPageGateway(FakeGateway):
                 "witness": {"observation_id": f"obs-{self.observe_calls}"},
                 "observation": {
                     "pageKey": "home", "title": "Home", "pageText": "Home screen",
-                    "controls": [{"id": "apps", "label": "Apps", "clickable": True}],
+                    "controls": [{"id": "apps", "label": "Apps", "clickable": True, "elementIndex": 1}],
                 },
             }
         return {
@@ -189,6 +189,18 @@ class ToolTests(unittest.TestCase):
             "tool": "phone.click", "params": {"elementId": "apps"}, "goal": "Repeat",
         })[0]["text"])
         self.assertEqual("STALE_OBSERVATION", stale["errorClass"])
+
+    def test_click_by_element_index_resolves_current_page_card_id(self):
+        gateway = AtomicPageGateway()
+        tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
+        tools.call("phone_observe", {})
+        result = json.loads(tools.call("phone_act", {
+            "tool": "phone.click",
+            "params": {"elementIndex": 1},
+            "goal": "Open Apps",
+        })[0]["text"])
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["pageChanged"])
 
     def test_mcp_rejects_unscoped_selectors_and_coordinates(self):
         self.tools.call("phone_observe", {})

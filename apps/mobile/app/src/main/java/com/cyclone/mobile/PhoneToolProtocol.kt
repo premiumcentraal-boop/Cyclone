@@ -158,6 +158,16 @@ data class ElementSelector(
             val scoped = s("elementId") ?: s("ref")
             val mapped = scoped?.let { ObservationSelectorLookup.map(it) }
             if (mapped != null && !mapped.isEmpty()) return mapped
+            val index = when {
+                json.has("elementIndex") -> json.optInt("elementIndex")
+                json.has("element_index") -> json.optInt("element_index")
+                else -> -1
+            }
+            if (index > 0) {
+                ObservationSelectorLookup.mapIndex(index)?.let { indexed ->
+                    if (!indexed.isEmpty()) return indexed
+                }
+            }
             return ElementSelector(
                 resourceId = s("resourceId") ?: mapped?.resourceId,
                 text = s("text") ?: mapped?.text,

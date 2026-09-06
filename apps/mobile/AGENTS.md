@@ -8,8 +8,9 @@ This module is the Android product. Keep changes focused on the current runtime 
 - Launcher: `.MainActivity`
 - Android 14+ (`minSdk 34`)
 - `PhoneToolExecutor` is the canonical phone mutation path.
-- Re-observe and verify after page-changing actions.
-- Prefer semantic selectors and known routes before coordinates or vision.
+- Re-observe after page-changing actions. Ordinary taps use Fast Path fingerprint settle; Unchanged is not a second click.
+- Prefer `phone.open_app` / intent landing and semantic selectors before coordinates or vision.
+- One screen-changing mutation per agent decision turn; form fills may batch.
 - Keep approval boundaries for consequential actions.
 - Never persist credentials, OTPs, payment data or raw typed secrets in Brain/run logs.
 - Brain diagnostics may expose model-visible context, decisions, tool calls/results, verification and recovery events, but not hidden provider reasoning.

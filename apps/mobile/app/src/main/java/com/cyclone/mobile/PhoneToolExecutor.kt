@@ -7,6 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Base64
+import com.cyclone.mobile.fastpath.FastPathLoop
+import com.cyclone.mobile.fastpath.FastPathSettleResult
+import com.cyclone.mobile.fastpath.FastPathTimings
 import com.cyclone.mobile.gateway.GatewayObservationStore
 import com.cyclone.mobile.ui.overlay.GateBlockedException
 import org.json.JSONArray
@@ -149,10 +152,23 @@ object PhoneToolExecutor {
                 else -> error("UNSUPPORTED: this operation cannot safely target a workspace")
             }
             GatewayObservationStore.clear(scope.sessionId)
+            val settleGeneration = DeviceState.uiGeneration()
+            val settle = FastPathLoop.settle(
+                beforeFingerprint = snapshot.fingerprint,
+                sleepMs = { ms -> DeviceState.awaitUiEventAfter(settleGeneration, ms) },
+                observeFingerprint = { runtime.observe(scope).fingerprint },
+            )
             val after = runtime.observe(scope)
             PhoneToolResult(request.commandId, request.tool, true, started, System.currentTimeMillis(),
-                beforeFingerprint = snapshot.fingerprint, afterFingerprint = after.fingerprint,
-                payload = JSONObject().put("performed", true).put("verified", false).put("sessionId", scope.sessionId).put("displayId", scope.displayId))
+                beforeFingerprint = snapshot.fingerprint,
+                afterFingerprint = settle.afterFingerprint ?: after.fingerprint,
+                payload = JSONObject()
+                    .put("performed", true)
+                    .put("verified", settle.verified)
+                    .put("screenChanged", settle.changed ?: JSONObject.NULL)
+                    .put("fastPath", settle.toJson())
+                    .put("sessionId", scope.sessionId)
+                    .put("displayId", scope.displayId))
         } catch (error: Exception) {
             if (request.tool in mutatingTools) runCatching { GatewayObservationStore.clear(scope.sessionId) }
             PhoneToolResult(request.commandId, request.tool, false, started, System.currentTimeMillis(),
@@ -276,8 +292,9 @@ object PhoneToolExecutor {
                     intent.addCategory(Intent.CATEGORY_LAUNCHER)
                     intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 }
+                val eventGeneration = DeviceState.uiGeneration()
                 context.startActivity(intent)
-                Outcome(JSONObject().put("package", packageName).put("launched", true))
+                launchedOutcome(service, before, p, eventGeneration, JSONObject().put("package", packageName).put("launched", true))
             }
             "phone.get_notifications" -> Outcome(notificationJson())
             "phone.open_notification" -> openNotification(p.optString("key").takeIf { it.isNotBlank() })
@@ -313,8 +330,9 @@ object PhoneToolExecutor {
                 }
                 val intent = Intent(Intent.ACTION_VIEW, parsed).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 p.optString("package").takeIf { it.isNotBlank() }?.let(intent::setPackage)
+                val eventGeneration = DeviceState.uiGeneration()
                 context.startActivity(intent)
-                Outcome(JSONObject().put("uri", uri).put("started", true))
+                launchedOutcome(service, before, p, eventGeneration, JSONObject().put("uri", uri).put("started", true))
             }
             "phone.wait_for" -> waitFor(service, p, assertOnly = false)
             "phone.assert" -> waitFor(service, p, assertOnly = true)
@@ -361,6 +379,8 @@ object PhoneToolExecutor {
     ): Outcome {
         if (service == null) return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
         val epoch = DeviceState.controllerEpoch()
+        // Retries apply only when Android rejected the action. Unchanged UI after a performed
+        // click must never dispatch a second click channel (Fast Path / ClosePaw soft-success).
         val retries = request.params.optInt("retries", 1).coerceIn(0, 3)
         var attempts = 0
         repeat(retries + 1) {
@@ -370,15 +390,7 @@ object PhoneToolExecutor {
             }
             val eventGeneration = DeviceState.uiGeneration()
             if (action()) {
-                val waitForChangeMs = request.params.optLong("waitForChangeMs", 900L).coerceIn(0L, 5_000L)
-                if (waitForChangeMs > 0L) DeviceState.awaitUiEventAfter(eventGeneration, waitForChangeMs)
-
-                // Exactly one post-action observation is enough to verify both fingerprint change and
-                // explicit expectations. The old code rebuilt the full tree every ~90 ms while waiting.
-                val afterSnapshot = if (before != null || request.params.optJSONObject("expect") != null) {
-                    service.observe(markFresh = false)
-                } else null
-                val changed = if (before == null || afterSnapshot == null) null else afterSnapshot.fingerprint != before
+                val (afterSnapshot, settle) = settleAfterMutation(service, before, request.params, eventGeneration)
                 val expected = request.params.optJSONObject("expect")
                 if (expected != null && afterSnapshot != null) {
                     val verification = evaluateCondition(afterSnapshot, expected)
@@ -390,15 +402,77 @@ object PhoneToolExecutor {
                         )
                     }
                 }
+                val payload = JSONObject()
+                    .put("performed", true)
+                    .put("screenChanged", settle.changed ?: JSONObject.NULL)
+                    .put("verified", settle.verified)
+                    .put("fastPath", settle.toJson())
+                settle.warning?.let { payload.put("warning", it) }
                 return Outcome(
-                    payload = JSONObject().put("performed", true).put("screenChanged", changed ?: JSONObject.NULL),
+                    payload = payload,
                     attempts = attempts,
-                    afterFingerprint = afterSnapshot?.fingerprint,
+                    afterFingerprint = settle.afterFingerprint ?: afterSnapshot?.fingerprint,
                 )
             }
             if (attempts <= retries) DeviceState.awaitUiEventAfter(eventGeneration, 100L * attempts)
         }
         return errorResult(PhoneToolErrorCode.ACTION_FAILED, "Android rejected or could not perform the action", attempts)
+    }
+
+    private fun launchedOutcome(
+        service: CycloneAccessibilityService?,
+        before: String?,
+        params: JSONObject,
+        eventGeneration: Long,
+        base: JSONObject,
+    ): Outcome {
+        if (service == null) return Outcome(base.put("verified", false).put("performed", true))
+        val (_, settle) = settleAfterMutation(service, before, params, eventGeneration)
+        base.put("performed", true)
+            .put("verified", settle.verified)
+            .put("screenChanged", settle.changed ?: JSONObject.NULL)
+            .put("fastPath", settle.toJson())
+        settle.warning?.let { base.put("warning", it) }
+        return Outcome(payload = base, afterFingerprint = settle.afterFingerprint)
+    }
+
+    /**
+     * Default Fast Path: settle 300ms + fingerprint, then +500/+1000 if Unchanged.
+     * Explicit waitForChangeMs (including 0 for desktop live controls) keeps the legacy single wait.
+     * The settle ladder only re-observes; it never re-clicks.
+     */
+    private fun settleAfterMutation(
+        service: CycloneAccessibilityService,
+        before: String?,
+        params: JSONObject,
+        eventGeneration: Long,
+    ): Pair<UiSnapshot?, FastPathSettleResult> {
+        if (params.has("waitForChangeMs") && !params.optBoolean("fastPath", false)) {
+            val waitForChangeMs = params.optLong("waitForChangeMs", 900L).coerceIn(0L, 5_000L)
+            if (waitForChangeMs > 0L) DeviceState.awaitUiEventAfter(eventGeneration, waitForChangeMs)
+            val afterSnapshot = if (before != null || params.optJSONObject("expect") != null) {
+                service.observe(markFresh = false)
+            } else null
+            val changed = if (before == null || afterSnapshot == null) null else afterSnapshot.fingerprint != before
+            return afterSnapshot to FastPathSettleResult(
+                changed = changed,
+                verified = changed == true,
+                observations = if (afterSnapshot == null) 0 else 1,
+                elapsedMs = waitForChangeMs,
+                warning = if (changed == false) FastPathTimings.UNCHANGED_WARNING else null,
+                afterFingerprint = afterSnapshot?.fingerprint,
+            )
+        }
+        var lastSnapshot: UiSnapshot? = null
+        val settle = FastPathLoop.settle(
+            beforeFingerprint = before,
+            sleepMs = { ms -> DeviceState.awaitUiEventAfter(eventGeneration, ms) },
+            observeFingerprint = {
+                lastSnapshot = service.observe(markFresh = false)
+                lastSnapshot?.fingerprint
+            },
+        )
+        return lastSnapshot to settle
     }
 
     private fun screenshot(service: CycloneAccessibilityService?, params: JSONObject): Outcome {

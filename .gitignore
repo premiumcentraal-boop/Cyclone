@@ -35,6 +35,7 @@ node_modules/
 # Android / Gradle
 .gradle/
 apps/mobile/**/build/
+apps/mobile/local.properties
 apps/device-gateway/third_party/scrcpy/scrcpy-server-v4.0
 
 # PC Companion generated binaries

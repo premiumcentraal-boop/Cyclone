@@ -3,6 +3,7 @@
 This directory contains only documentation that describes the current Cyclone product and how to extend it.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current system shape and runtime boundaries
+- [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md) — V4 Stage 1 Fast Path harness (a11y-first loop, nav isolation, planner/UI split)
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — local development and validation workflow
 - [`RELEASES.md`](RELEASES.md) — versioning, artifacts and release expectations
 - [`DUO_RELIABILITY_REVIEW.md`](DUO_RELIABILITY_REVIEW.md) — versionCode 58 findings, fixes and ordered acceptance plan

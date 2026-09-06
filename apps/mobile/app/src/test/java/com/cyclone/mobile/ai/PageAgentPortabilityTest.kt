@@ -24,6 +24,8 @@ class PageAgentPortabilityTest {
             """{"status":"act","pageSummary":"app","displaySummary":"Two local steps","actions":[{"tool":"phone.click","controlId":"one","params":{},"expectedPageChange":false,"displaySummary":"First"},{"tool":"phone.click","controlId":"two","params":{},"expectedPageChange":true,"displaySummary":"Second"}],"answer":"","reason":""}""",
         )
         assertEquals(2, multi.actions.size)
+        assertEquals("phone.click", multi.actions[0].tool)
+        assertEquals("phone.click", multi.actions[1].tool)
     }
 
     @Test fun visionHumanAndRecoveryStatusesRemainPortable() {

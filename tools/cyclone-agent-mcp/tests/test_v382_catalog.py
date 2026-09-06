@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from cyclone_agent_mcp.safe import strip_typed_plaintext
-from cyclone_agent_mcp.tool_catalog import TOOL_NAMES
+from cyclone_agent_mcp.tool_catalog import TOOL_NAMES, surface_role
 from cyclone_agent_mcp.tools import PhoneTools
 
 
@@ -9,6 +9,10 @@ def test_catalog_includes_locate_and_skill_tools():
     assert "phone_locate" in TOOL_NAMES
     assert "phone_skill_save" in TOOL_NAMES
     assert "phone_skill_run" in TOOL_NAMES
+    assert surface_role("phone_observe") == "ui"
+    assert surface_role("phone_act") == "ui"
+    assert surface_role("phone_status") == "planner"
+    assert surface_role("phone_skill_run") == "planner"
 
 
 def test_frozen_connector_catalog_includes_locate_and_skill_tools(monkeypatch):

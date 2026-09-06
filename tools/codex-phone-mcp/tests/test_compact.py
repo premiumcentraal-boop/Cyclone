@@ -54,6 +54,23 @@ class CompactTests(unittest.TestCase):
         self.assertEqual("apps", result["candidates"]["goalRanked"][0]["elementId"])
         self.assertTrue(result["truncated"]["rawTreeExcluded"])
 
+    def test_page_card_preserves_element_index_and_perception_mode(self):
+        result = compact_observation({
+            "observation": {
+                "pageKey": "settings",
+                "perceptionMode": "a11y",
+                "treeUseful": True,
+                "controls": [
+                    {"id": "apps", "label": "Apps", "clickable": True, "elementIndex": 1},
+                    {"id": "network", "label": "Network", "clickable": True, "elementIndex": 2},
+                ],
+            },
+        })
+        self.assertEqual(1, result["candidates"]["current"][0]["elementIndex"])
+        self.assertEqual("a11y", result["perceptionMode"])
+        self.assertTrue(result["treeUseful"])
+        self.assertEqual(1, result["refs"]["e1"]["elementIndex"])
+
     def test_page_card_preserves_device_artifact_and_verified_route_hints(self):
         result = compact_observation({
             "screenshot": {"available": True, "artifact": {"kind": "LOCAL_FILE", "reference": "C:/safe.jpg"}},

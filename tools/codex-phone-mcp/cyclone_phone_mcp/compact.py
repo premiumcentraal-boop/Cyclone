@@ -64,6 +64,16 @@ def _bounded_scalar(value: Any, limit: int = 160) -> str | None:
     return _bounded_text(value, limit)
 
 
+def _bounded_index(value: Any) -> int | None:
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        index = int(value)
+    except (TypeError, ValueError):
+        return None
+    return index if index >= 1 else None
+
+
 def _tokens(value: str) -> list[str]:
     return [
         token for token in re.findall(r"[a-z0-9]+", value.lower())
@@ -76,6 +86,7 @@ def _candidate(item: Any) -> dict[str, Any] | None:
         return None
     candidate = {
         "elementId": _bounded_scalar(_first(item, "elementId", "element_id", "id"), 240),
+        "elementIndex": _bounded_index(_first(item, "elementIndex", "element_index")),
         "label": _bounded_scalar(_first(item, "label", "semanticName", "text", "contentDescription"), 180),
         "role": _bounded_scalar(_first(item, "role", "className", "class"), 80),
         "resourceId": _bounded_scalar(_first(item, "resourceId", "resource_id"), 180),
@@ -275,6 +286,7 @@ def build_snapshot(candidates: list[dict[str, Any]], limit: int = SNAPSHOT_HOST_
         lines.append(f'- {role} "{name}" [ref={ref}]{selected}')
         refs[ref] = {
             "elementId": host.get("elementId"),
+            "elementIndex": host.get("elementIndex"),
             "role": role,
             "name": name,
             "selected": host.get("selected") is True,
@@ -322,7 +334,7 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
         "observationScope": {
             "id": observation_id,
             "validUntil": "the next mutating action",
-            "elementIdRule": "Use only elementId values from this current Page Card or search result; re-observe after every mutation.",
+            "elementIdRule": "Use only elementId or elementIndex values from this current Page Card or search result; re-observe after every mutation.",
         },
         "location": {key: value for key, value in location.items() if value not in (None, "", {})},
         "pageText": page_text,
@@ -341,6 +353,8 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
             "currentCandidateLimit": PAGE_CARD_CANDIDATE_LIMIT,
             "snapshotHostLimit": SNAPSHOT_HOST_LIMIT,
         },
+        "perceptionMode": _bounded_scalar(_first(data, "perceptionMode", "perception_mode", default="a11y"), 40) or "a11y",
+        "treeUseful": bool(data.get("treeUseful", data.get("tree_useful", len(current) > 0))),
     }
     # Stable aliases retain compatibility for existing MCP clients while directing new callers to
     # Page Card fields above.

@@ -11,6 +11,7 @@ import com.cyclone.mobile.applearner.PageControl
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.capture.PhoneScreenCapture
 import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
+import com.cyclone.mobile.fastpath.FastPathTree
 import com.cyclone.mobile.observability.pagecontext.PageContextSummary
 import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
 import org.json.JSONArray
@@ -187,6 +188,10 @@ internal object GatewayObservationAdapter {
             )
         }
 
+        val indexedControlCount = FastPathTree.assignControlIndices(semanticControls)
+        val treeUseful = FastPathTree.treeUseful(rawNodes.length(), indexedControlCount)
+        val perceptionMode = FastPathTree.perceptionMode(rawNodes.length(), indexedControlCount)
+
         val pageText = PageTextExtractor.extract(safeRaw)
         val pageSummary = PageContextSummary.build(
             snapshot = safeRaw,
@@ -266,6 +271,9 @@ internal object GatewayObservationAdapter {
             .put("semanticControls", semanticControls)
             .put("controlCount", page.controls.size)
             .put("supplementalControlCount", supplementalCount)
+            .put("indexedControlCount", indexedControlCount)
+            .put("treeUseful", treeUseful)
+            .put("perceptionMode", perceptionMode)
             .put("pageText", pageText)
             .put("pageSummary", pageSummary)
             .put("pageEvidence", boundedPageEvidence)
@@ -305,6 +313,7 @@ internal object GatewayObservationAdapter {
                     .put("bounds", e.optJSONObject("bounds") ?: JSONObject.NULL)
                     .put("actions", e.optJSONArray("androidActions") ?: e.optJSONArray("actions") ?: JSONArray())
                     .put("source", element.source)
+                    .put("elementIndex", e.optInt("elementIndex", e.optInt("element_index", -1)).takeIf { it > 0 } ?: JSONObject.NULL)
                     .put("relevance", score))
             }
         }

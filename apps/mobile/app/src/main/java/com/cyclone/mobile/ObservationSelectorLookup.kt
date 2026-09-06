@@ -14,6 +14,15 @@ object ObservationSelectorLookup {
         return fromEvidence(evidence, elementIdOrRef)
     }
 
+    fun mapIndex(elementIndex: Int): ElementSelector? {
+        if (elementIndex < 1) return null
+        val observation = GatewayObservationStore.current() ?: return null
+        val match = observation.elements.values.firstOrNull { element ->
+            element.evidence.optInt("elementIndex", element.evidence.optInt("element_index", -1)) == elementIndex
+        } ?: return null
+        return fromEvidence(match.evidence, match.id)
+    }
+
     fun fromEvidence(evidence: JSONObject, elementId: String): ElementSelector {
         val nested = evidence.optJSONObject("selector") ?: JSONObject()
         fun pick(vararg keys: String): String? {

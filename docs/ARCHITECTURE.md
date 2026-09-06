@@ -29,17 +29,16 @@ Constrained MCP adapters for external coding/agent clients. They route through C
 The normal execution order is:
 
 ```text
-known route / learned routine
-→ semantic observation
-→ model decision
-→ phone tool call
-→ tool result
-→ re-observation / verification
+known route / learned routine / open_app|intent landing
+→ a11y Page Card (elementIndex)
+→ one screen-changing phone tool (or same-page form batch)
+→ settle 300ms + fingerprint (+500/+1000 if Unchanged)
+→ local tap verification (fingerprint is authority for ordinary taps)
 → recovery or next action
 → final result
 ```
 
-Vision is a fallback when structured Android evidence is insufficient. Consequential actions retain explicit approval boundaries.
+Vision is a fallback when the accessibility tree is empty or a custom canvas (`perceptionMode=vision_escalate`). Unchanged after settle is `verified=false` and must not dispatch a second click channel. Consequential actions retain explicit approval boundaries. See [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md).
 
 ## Observability
 

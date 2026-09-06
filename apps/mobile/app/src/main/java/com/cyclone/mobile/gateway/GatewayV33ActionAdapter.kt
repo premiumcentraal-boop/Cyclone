@@ -529,15 +529,23 @@ internal object GatewayV33ManualDesktopAdapter {
                 params.put("durationMs", args.optLong("durationMs", 350L).coerceIn(100L, 3000L))
                 params.put("waitForChangeMs", 0)
             }
-            "back" -> toolArgs.put("tool", "phone.back")
-            "home" -> toolArgs.put("tool", "phone.home")
+            "back" -> {
+                toolArgs.put("tool", "phone.back")
+                params.put("waitForChangeMs", 0)
+            }
+            "home" -> {
+                toolArgs.put("tool", "phone.home")
+                params.put("waitForChangeMs", 0)
+            }
             "scroll_up" -> {
                 toolArgs.put("tool", "phone.scroll")
                 params.put("direction", "backward")
+                params.put("waitForChangeMs", 0)
             }
             "scroll_down" -> {
                 toolArgs.put("tool", "phone.scroll")
                 params.put("direction", "forward")
+                params.put("waitForChangeMs", 0)
             }
             "text" -> {
                 val value = args.optString("text")

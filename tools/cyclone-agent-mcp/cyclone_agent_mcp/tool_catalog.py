@@ -40,6 +40,17 @@ TOOL_CONTRACTS = (
 
 TOOL_NAMES = tuple(contract.name for contract in TOOL_CONTRACTS)
 
+PLANNER_TOOLS = frozenset({"phone_status", "phone_skill_run", "phone_skill_save", "phone_capabilities"})
+UI_TOOLS = frozenset({"phone_observe", "phone_locate", "phone_ui_search", "phone_inspect_element", "phone_act"})
+
+
+def surface_role(name: str) -> str:
+    if name in PLANNER_TOOLS:
+        return "planner"
+    if name in UI_TOOLS:
+        return "ui"
+    return "shared"
+
 FORBIDDEN_TOOL_FRAGMENTS = (
     "shell",
     "powershell",

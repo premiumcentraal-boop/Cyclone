@@ -23,6 +23,8 @@ class McpProtocolTests(unittest.TestCase):
         response = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
         self.assertEqual(response["result"]["protocolVersion"], "2025-06-18")
         self.assertIn("semantic-first", response["result"]["instructions"])
+        self.assertIn("Fast Path", response["result"]["instructions"])
+        self.assertIn("elementIndex", response["result"]["instructions"])
 
     def test_tool_list_has_no_shell(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
@@ -46,6 +48,11 @@ class McpProtocolTests(unittest.TestCase):
         self.assertIn("device_ids", tools["phone_group_act"]["inputSchema"]["properties"])
         self.assertNotIn("phone.type", tools["phone_group_act"]["inputSchema"]["properties"]["tool"]["enum"])
         self.assertIn("current observation-scoped elementId", tools["phone_act"]["description"])
+        self.assertEqual("ui", tools["phone_act"]["annotations"]["cycloneSurface"])
+        self.assertEqual("planner", tools["phone_status"]["annotations"]["cycloneSurface"])
+        self.assertEqual("ui", tools["phone_observe"]["annotations"]["cycloneSurface"])
+        self.assertTrue(tools["phone_act"]["annotations"]["cycloneFastPath"])
+        self.assertIn("elementIndex", tools["phone_act"]["description"])
 
     def test_unknown_tool_rejected(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "root_shell", "arguments": {}}})

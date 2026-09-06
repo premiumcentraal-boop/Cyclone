@@ -50,6 +50,7 @@ data class AgentElementCandidate(
     val source: String,
     val relevance: Double,
     val evidence: JSONObject,
+    val elementIndex: Int? = null,
 )
 
 data class AgentPageCard(
@@ -68,6 +69,8 @@ data class AgentPageCard(
     val pageEvidence: JSONObject,
     val controls: List<AgentElementCandidate>,
     val nextHopHints: JSONArray,
+    val perceptionMode: String = "a11y",
+    val treeUseful: Boolean = true,
 )
 
 data class AgentObservationResult(

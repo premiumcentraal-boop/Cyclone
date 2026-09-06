@@ -131,11 +131,38 @@ class PageAgentProtocolTest {
     }
 
     @Test
+    fun parseDropsLaterScreenChangingActionsForNavIsolation() {
+        val decision = PageAgentProtocol.parse(
+            """{"status":"act","pageSummary":"Home","displaySummary":"Opening then going back","actions":[
+                {"tool":"phone.click","controlId":"battery-control","params":{},"expectedPageChange":true,"displaySummary":"Open"},
+                {"tool":"phone.back","controlId":"","params":{},"expectedPageChange":true,"displaySummary":"Back"}
+            ]}""",
+        )
+        assertEquals(1, decision.actions.size)
+        assertEquals("phone.click", decision.actions.single().tool)
+    }
+
+    @Test
+    fun parseKeepsFormBatchThenOneNav() {
+        val decision = PageAgentProtocol.parse(
+            """{"status":"act","pageSummary":"Form","displaySummary":"Fill then submit","actions":[
+                {"tool":"phone.type","controlId":"battery-control","params":{"value":"x"},"expectedPageChange":false,"displaySummary":"Type"},
+                {"tool":"phone.click","controlId":"battery-control","params":{},"expectedPageChange":true,"displaySummary":"Submit"}
+            ]}""",
+        )
+        assertEquals(2, decision.actions.size)
+        assertEquals("phone.type", decision.actions[0].tool)
+        assertEquals("phone.click", decision.actions[1].tool)
+    }
+
+    @Test
     fun freeModeInstructionsRemainBoundedByPolicyAndRequireDifferentStrategy() {
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("FREE mode"))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("materially different", ignoreCase = true))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("never bypasses policy", ignoreCase = true))
         assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("phone.launch_intent"))
+        assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("fastPathLanding") || PageAgentProtocol.SYSTEM_PROMPT.contains("open_app"))
+        assertTrue(PageAgentProtocol.SYSTEM_PROMPT.contains("fingerprint"))
 
         val context = PageAgentProtocol.context(
             goal = "open Chrome and visit ad.nl",

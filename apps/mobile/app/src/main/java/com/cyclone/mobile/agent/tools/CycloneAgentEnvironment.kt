@@ -7,6 +7,7 @@ import com.cyclone.mobile.PhoneToolErrorCode
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.PhoneToolResult
+import com.cyclone.mobile.fastpath.FastPathTree
 import com.cyclone.mobile.agent.contract.AgentActionEnvelope
 import com.cyclone.mobile.agent.contract.AgentElementCandidate
 import com.cyclone.mobile.agent.contract.AgentFailure
@@ -198,7 +199,7 @@ class CycloneAgentEnvironment internal constructor(
                 staleFailure("Fresh observe/locate/search is required before every mutation."),
             )
         val visibleGeneration = scope.generation
-        val rawElementId = elementId(params)
+        val rawElementId = elementId(params, before)
         if (tool in ELEMENT_ID_REQUIRED_TOOLS && rawElementId == null) {
             return@synchronized failureEnvelope(
                 tool,
@@ -241,6 +242,7 @@ class CycloneAgentEnvironment internal constructor(
 
         val normalizedParams = JSONObject(params.toString())
             .put("observationId", before.id)
+            .put("fastPath", true)
         if (before.execution.sessionId != "default-foreground") {
             normalizedParams.put("executionGeneration", before.payload.optLong("executionGeneration"))
         }
@@ -476,6 +478,7 @@ class CycloneAgentEnvironment internal constructor(
                 source = evidence.optString("source"),
                 relevance = 0.0,
                 evidence = JSONObject(evidence.toString()),
+                elementIndex = evidence.optInt("elementIndex", evidence.optInt("element_index", -1)).takeIf { it > 0 },
             )
         }
 
@@ -497,6 +500,8 @@ class CycloneAgentEnvironment internal constructor(
             pageEvidence = copyObject(observation.payload.optJSONObject("pageEvidence")),
             controls = byId.values.toList(),
             nextHopHints = copyArray(observation.payload.optJSONArray("nextHopHints")),
+            perceptionMode = observation.payload.optString("perceptionMode", "a11y").ifBlank { "a11y" },
+            treeUseful = observation.payload.optBoolean("treeUseful", true),
         )
     }
 
@@ -509,6 +514,7 @@ class CycloneAgentEnvironment internal constructor(
         source = item.optString("source"),
         relevance = item.optDouble("relevance", 0.0),
         evidence = JSONObject(evidence.toString()),
+        elementIndex = item.optInt("elementIndex", evidence.optInt("elementIndex", evidence.optInt("element_index", -1))).takeIf { it > 0 },
     )
 
     private fun stateDelta(
@@ -757,14 +763,24 @@ class CycloneAgentEnvironment internal constructor(
         params.optJSONObject("selector") != null ||
             SELECTOR_KEYS.any { params.has(it) }
 
-    private fun elementId(params: JSONObject): String? =
-        params.optString("elementId").takeIf(String::isNotBlank)
+    private fun elementId(params: JSONObject, observation: GatewayObservation? = null): String? {
+        val direct = params.optString("elementId").takeIf(String::isNotBlank)
             ?: params.optJSONObject("selector")
                 ?.optString("elementId")
                 ?.takeIf(String::isNotBlank)
             ?: params.optJSONObject("selector")
                 ?.optString("ref")
                 ?.takeIf(String::isNotBlank)
+        if (direct != null) return direct
+        val index = when {
+            params.has("elementIndex") -> params.optInt("elementIndex")
+            params.has("element_index") -> params.optInt("element_index")
+            else -> params.optJSONObject("selector")?.optInt("elementIndex", -1) ?: -1
+        }
+        if (index < 1 || observation == null) return null
+        val byEvidence = observation.elements.mapValues { it.value.evidence }
+        return FastPathTree.lookupElementId(byEvidence, index)
+    }
 
     private fun belongsToObservation(elementId: String, observationId: String): Boolean =
         elementId.split(':').getOrNull(1)?.let { it == observationId } ?: false

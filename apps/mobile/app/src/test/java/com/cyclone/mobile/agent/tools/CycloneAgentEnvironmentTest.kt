@@ -58,6 +58,18 @@ class CycloneAgentEnvironmentTest {
         assertEquals("SEMANTIC_PAGE_CHANGED", semanticTransition.basis)
     }
 
+    @Test fun elementIndexFromCurrentObservationResolvesToElementId() {
+        val before = observation("obs-idx", "home", "fp-idx")
+        val evidence = before.elements.values.first().evidence.put("elementIndex", 1).put("element_index", 1)
+        val runtime = FakeRuntime(before, observation("obs-idx-after", "settings", "fp-idx-2", "Settings"))
+        val env = CycloneAgentEnvironment(runtime)
+        env.observe("Continue")
+        val result = env.act("phone.click", JSONObject().put("elementIndex", 1), "Continue")
+        assertTrue(result.androidExecutionOk)
+        assertEquals(1, runtime.executionCalls)
+        assertEquals(1, evidence.optInt("elementIndex"))
+    }
+
     @Test fun staleElementIdExpiresImmediatelyAfterMutation() {
         val before = observation("obs-1", "home", "fp-1")
         val runtime = FakeRuntime(before, observation("obs-2", "settings", "fp-2"))
