@@ -4,7 +4,7 @@ ALLOWED_OPS = {
     "trust.negotiate", "trust.begin", "trust.complete", "trust.session.begin", "trust.session.complete",
     "trust.rotate", "trust.revoke",
     "bridge.status",
-    "session.list", "session.start", "session.status", "session.pause", "session.resume",
+    "session.list", "session.start", "session.status", "session.pause", "session.continue",
     "session.handoff", "session.stop", "session.snapshot",
     "observe.semantic", "observe.page_debug", "ui.search", "ui.element",
     "app_graph.get", "brain.recall", "action.execute", "teach.start", "teach.status",
