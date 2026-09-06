@@ -60,6 +60,9 @@ class OverlayChromeMachine(
             pcAutoApproveIgnored = pcAutoApprove,
             minimized = false,
             userPaused = true,
+            composerText = "",
+            voiceListening = false,
+            voiceMessage = null,
         )
         cycloneState.pauseAgentForUser()
         emit(
@@ -73,27 +76,50 @@ class OverlayChromeMachine(
         )
     }
 
+    /**
+     * A stopped run is terminal for the run, not for the composer. Keep the visible result in the
+     * notification/run log and return the overlay to a clean, minimized request-ready state.
+     */
     fun finishStopped(message: String) {
         cycloneState.pauseAgentForUser()
-        snapshot = snapshot.copy(state = OverlayChromeState.ANALYSIS, userPaused = false,
-            minimized = false, statusMessage = message, bullets = emptyList())
+        snapshot = snapshot.copy(
+            state = OverlayChromeState.ANALYSIS,
+            userPaused = false,
+            minimized = true,
+            idleChipVisible = true,
+            statusMessage = null,
+            bullets = emptyList(),
+            composerText = "",
+            voiceListening = false,
+            voiceMessage = null,
+        )
     }
 
+    /**
+     * Completion must never strand the composer in DONE. Emit DONE for observers, then park the
+     * overlay in a clean minimized ANALYSIS state so the next invocation can type, dictate and send.
+     */
     fun completeDone(sessionId: String = snapshot.sessionId) {
         if (snapshot.state != OverlayChromeState.WORKING && snapshot.state != OverlayChromeState.LIVE) return
+        val finishedSession = sessionId.ifBlank { snapshot.sessionId }
         snapshot = snapshot.copy(
-            state = OverlayChromeState.DONE,
-            sessionId = sessionId.ifBlank { snapshot.sessionId },
-            idleChipVisible = false,
-            minimized = false,
+            state = OverlayChromeState.ANALYSIS,
+            sessionId = finishedSession,
+            idleChipVisible = true,
+            minimized = true,
             userPaused = false,
+            composerText = "",
+            voiceListening = false,
+            voiceMessage = null,
+            statusMessage = null,
+            bullets = emptyList(),
+            gateClass = null,
         )
         emit(
             OverlayChromeEvent(
                 kind = OverlayChromeEventKind.DONE,
                 state = OverlayChromeState.DONE,
-                sessionId = snapshot.sessionId,
-                gateClass = snapshot.gateClass,
+                sessionId = finishedSession,
             ),
         )
     }
@@ -118,7 +144,21 @@ class OverlayChromeMachine(
 
     private fun askCyclone() {
         if (snapshot.minimized) {
-            snapshot = snapshot.copy(minimized = false, idleChipVisible = false)
+            snapshot = snapshot.copy(
+                minimized = false,
+                idleChipVisible = false,
+                statusMessage = null,
+                voiceMessage = null,
+            )
+            return
+        }
+        if (snapshot.state == OverlayChromeState.DONE) {
+            snapshot = OverlayChromeSnapshot(
+                state = OverlayChromeState.ANALYSIS,
+                idleChipVisible = false,
+                minimized = false,
+            )
+            emitChrome(OverlayChromeEventKind.ASK_CYCLONE)
             return
         }
         if (snapshot.state != OverlayChromeState.IDLE) return
@@ -127,6 +167,9 @@ class OverlayChromeMachine(
             idleChipVisible = false,
             minimized = false,
             userPaused = false,
+            statusMessage = null,
+            composerText = "",
+            voiceMessage = null,
         )
         emitChrome(OverlayChromeEventKind.ASK_CYCLONE)
     }
@@ -150,6 +193,7 @@ class OverlayChromeMachine(
             composerText = "",
             bullets = listOf(request),
             voiceMessage = null,
+            statusMessage = null,
         )
         emitChrome(OverlayChromeEventKind.ASK_CYCLONE, requestText = request)
     }
@@ -172,16 +216,14 @@ class OverlayChromeMachine(
     }
 
     private fun confirm() {
-        if (snapshot.state != OverlayChromeState.ANALYSIS) return
-        if (snapshot.analysisCta != OverlayAnalysisCta.CONFIRM) return
+        if (snapshot.state != OverlayChromeState.ANALYSIS || snapshot.analysisCta != OverlayAnalysisCta.CONFIRM) return
         snapshot = snapshot.copy(state = OverlayChromeState.WORKING, idleChipVisible = false, userPaused = false)
         cycloneState.resumeAgent()
         emitChrome(OverlayChromeEventKind.CONFIRM)
     }
 
     private fun commerce() {
-        if (snapshot.state != OverlayChromeState.ANALYSIS) return
-        if (snapshot.analysisCta != OverlayAnalysisCta.COMMERCE) return
+        if (snapshot.state != OverlayChromeState.ANALYSIS || snapshot.analysisCta != OverlayAnalysisCta.COMMERCE) return
         snapshot = snapshot.copy(state = OverlayChromeState.WORKING, idleChipVisible = false, userPaused = false)
         cycloneState.resumeAgent()
         emitChrome(OverlayChromeEventKind.COMMERCE)
@@ -196,13 +238,14 @@ class OverlayChromeMachine(
     private fun stopTask() {
         if (snapshot.state != OverlayChromeState.WORKING && snapshot.state != OverlayChromeState.LIVE) return
         val from = snapshot.state
+        val session = snapshot.sessionId
         cycloneState.pauseAgentForUser()
-        snapshot = OverlayChromeSnapshot(sessionId = snapshot.sessionId, idleChipVisible = true)
+        snapshot = OverlayChromeSnapshot(sessionId = session, idleChipVisible = true)
         emit(
             OverlayChromeEvent(
                 kind = OverlayChromeEventKind.STOP_TASK,
                 state = from,
-                sessionId = snapshot.sessionId,
+                sessionId = session,
             ),
         )
     }
@@ -219,7 +262,12 @@ class OverlayChromeMachine(
 
     private fun minimize() {
         if (snapshot.state == OverlayChromeState.IDLE) return
-        snapshot = snapshot.copy(minimized = true, idleChipVisible = true, voiceListening = false)
+        snapshot = snapshot.copy(
+            minimized = true,
+            idleChipVisible = true,
+            voiceListening = false,
+            voiceMessage = null,
+        )
     }
 
     private fun exitAiMode() {
