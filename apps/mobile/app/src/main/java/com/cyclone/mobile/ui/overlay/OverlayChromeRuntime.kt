@@ -79,6 +79,7 @@ object OverlayChromeRuntime {
     }
 
     fun detach() {
+        val context = synchronized(lock) { service }
         synchronized(lock) {
             controller?.dismiss()
             controller = null
@@ -95,6 +96,7 @@ object OverlayChromeRuntime {
                 cycloneState = cycloneState,
             )
         }
+        context?.let { AgentTaskNotificationRuntime.finish(it, false, "Task stopped.") }
     }
 
     fun startAnalysis(
@@ -186,14 +188,18 @@ object OverlayChromeRuntime {
         if (action == OverlayUserAction.GATE_CONFIRM) approvePendingGateChallenge(before)
         mutate { it.dispatch(action) }
         when (action) {
-            OverlayUserAction.EXIT, OverlayUserAction.STOP_TASK -> synchronized(lock) {
-                adaptiveAgent?.cancelActiveTask()
-                adaptiveAgent = null
-                suspendedTaskId = null
-                pendingGateChallenge = null
-                approvedGateChallenge = null
-                aiJob?.cancel()
-                aiJob = null
+            OverlayUserAction.EXIT, OverlayUserAction.STOP_TASK -> {
+                val context = synchronized(lock) { service }
+                synchronized(lock) {
+                    adaptiveAgent?.cancelActiveTask()
+                    adaptiveAgent = null
+                    suspendedTaskId = null
+                    pendingGateChallenge = null
+                    approvedGateChallenge = null
+                    aiJob?.cancel()
+                    aiJob = null
+                }
+                context?.let { AgentTaskNotificationRuntime.finish(it, false, "Task stopped.") }
             }
             OverlayUserAction.GATE_CONFIRM -> resumeSuspendedTask()
             OverlayUserAction.TAKE_CONTROL -> {
@@ -240,6 +246,7 @@ object OverlayChromeRuntime {
             aiJob?.cancel()
             adaptiveAgent?.cancelActiveTask()
         }
+        AgentTaskNotificationRuntime.start(context)
         val agent = OpenRouterAdaptiveAgent(context)
         synchronized(lock) {
             adaptiveAgent = agent
@@ -266,7 +273,10 @@ object OverlayChromeRuntime {
                     safeMode = accessProfile != CycloneAiAccessProfile.FULL,
                     accessProfile = accessProfile,
                 ),
-            ) { progress -> mutate { it.updateStatus(progress) } }
+            ) { progress ->
+                AgentTaskNotificationRuntime.progress(context, progress)
+                mutate { it.updateStatus(progress) }
+            }
             handleAgentResult(result)
         }
         synchronized(lock) { aiJob = job }
@@ -275,6 +285,7 @@ object OverlayChromeRuntime {
     private fun resumeSuspendedTask() {
         val agent = synchronized(lock) { adaptiveAgent } ?: return
         val taskId = synchronized(lock) { suspendedTaskId } ?: return
+        val context = synchronized(lock) { service } ?: return
         val job = aiScope.launch {
             mutate { machine ->
                 when (machine.state()) {
@@ -288,15 +299,21 @@ object OverlayChromeRuntime {
                 }
                 machine.updateStatus("Re-observing after handoff…")
             }
-            val result = agent.resume { progress -> mutate { it.updateStatus(progress) } }
+            AgentTaskNotificationRuntime.progress(context, "Re-observing after handoff…")
+            val result = agent.resume { progress ->
+                AgentTaskNotificationRuntime.progress(context, progress)
+                mutate { it.updateStatus(progress) }
+            }
             handleAgentResult(result)
         }
         synchronized(lock) { aiJob = job }
     }
 
     private fun handleAgentResult(result: QuickAgentResult) {
+        val context = synchronized(lock) { service }
         when (result.classification) {
             "HUMAN_OR_GATE" -> {
+                context?.let { AgentTaskNotificationRuntime.waiting(it, result.message) }
                 synchronized(lock) { suspendedTaskId = result.taskId }
                 val gate = result.gateClass?.let { raw ->
                     runCatching { OverlayGateClass.parse(raw) }.getOrNull()
@@ -312,6 +329,7 @@ object OverlayChromeRuntime {
                 }
             }
             "COMPLETE" -> {
+                context?.let { AgentTaskNotificationRuntime.finish(it, true, result.message) }
                 synchronized(lock) {
                     suspendedTaskId = null
                     adaptiveAgent = null
@@ -324,12 +342,14 @@ object OverlayChromeRuntime {
                 }
             }
             "CANCELLED" -> {
+                context?.let { AgentTaskNotificationRuntime.finish(it, false, result.message) }
                 synchronized(lock) {
                     suspendedTaskId = null
                     adaptiveAgent = null
                 }
             }
             else -> {
+                context?.let { AgentTaskNotificationRuntime.finish(it, false, result.message) }
                 synchronized(lock) { suspendedTaskId = null; adaptiveAgent = null }
                 mutate { it.finishStopped(result.message) }
             }
