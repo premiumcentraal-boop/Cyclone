@@ -4,7 +4,11 @@
 
 This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-## Current baseline — Cyclone 3.9.9
+## Current baseline — Cyclone 3.9.12
+
+Cyclone 3.9.12 connects Ask Cyclone to isolated background app workspaces, with a compact running card, live View Progress, exact-task Take Control / Continue, local confirmation cards and preserved completed pages. Android versionCode is 66. Background work requires Android 15+, Shizuku and a compatible app; the PC companion remains optional. See [the 3.9.12 release notes](docs/RELEASE_3.9.12.md) for behavior and device-testing limits.
+
+## Existing reliability foundation
 
 Cyclone 3.9.9 focuses on trustworthy standalone execution, cancellation safety, completion grounding and developer-grade failure evidence:
 
@@ -28,7 +32,7 @@ Cyclone 3.9.9 focuses on trustworthy standalone execution, cancellation safety, 
 
 Android package: `com.cyclone.mobile`  
 Minimum Android: 14 (API 34)  
-Current mobile identity: `3.9.9` / versionCode `63`
+Current mobile identity: `3.9.12` / versionCode `66`
 
 The product has two deliverables: the Android APK and the optional Windows PC companion.
 Internal API models run from the phone with internet access and an API key; PC pairing is not
