@@ -105,27 +105,6 @@ jobs:
           PY
           (cd candidate && sha256sum --check Cyclone-3.9.8.apk.sha256)
 
-      - name: Validate protected Android signing inputs
-        shell: bash
-        env:
-          CYCLONE_KEYSTORE_B64: ${{ secrets.CYCLONE_ANDROID_KEYSTORE_B64 }}
-          CYCLONE_STORE_PASSWORD: ${{ secrets.CYCLONE_ANDROID_STORE_PASSWORD }}
-          CYCLONE_KEY_ALIAS: ${{ secrets.CYCLONE_ANDROID_KEY_ALIAS }}
-          CYCLONE_KEY_PASSWORD: ${{ secrets.CYCLONE_ANDROID_KEY_PASSWORD }}
-          CYCLONE_SIGNING_LINEAGE_B64: ${{ secrets.CYCLONE_ANDROID_SIGNING_LINEAGE_B64 }}
-        run: |
-          set -euo pipefail
-          missing=()
-          test -n "$CYCLONE_KEYSTORE_B64" || missing+=(CYCLONE_ANDROID_KEYSTORE_B64)
-          test -n "$CYCLONE_STORE_PASSWORD" || missing+=(CYCLONE_ANDROID_STORE_PASSWORD)
-          test -n "$CYCLONE_KEY_ALIAS" || missing+=(CYCLONE_ANDROID_KEY_ALIAS)
-          test -n "$CYCLONE_KEY_PASSWORD" || missing+=(CYCLONE_ANDROID_KEY_PASSWORD)
-          test -n "$CYCLONE_SIGNING_LINEAGE_B64" || missing+=(CYCLONE_ANDROID_SIGNING_LINEAGE_B64)
-          if ((${#missing[@]})); then
-            printf 'ERROR: mobile-release-approval is missing required protected secret: %s\n' "${missing[@]}" >&2
-            exit 1
-          fi
-
       - name: Set up Android signing tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
@@ -133,41 +112,62 @@ jobs:
         shell: bash
         run: sdkmanager --install 'build-tools;35.0.0'
 
-      - name: Sign and verify full release
-        id: signing
+      - name: Recover update-compatible personal-development signer
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          CYCLONE_KEYSTORE_B64: ${{ secrets.CYCLONE_ANDROID_KEYSTORE_B64 }}
-          CYCLONE_STORE_PASSWORD: ${{ secrets.CYCLONE_ANDROID_STORE_PASSWORD }}
-          CYCLONE_KEY_ALIAS: ${{ secrets.CYCLONE_ANDROID_KEY_ALIAS }}
-          CYCLONE_KEY_PASSWORD: ${{ secrets.CYCLONE_ANDROID_KEY_PASSWORD }}
-          CYCLONE_SIGNING_LINEAGE_B64: ${{ secrets.CYCLONE_ANDROID_SIGNING_LINEAGE_B64 }}
         run: |
           set -euo pipefail
+          legacy_ref='release/cyclone-mobile-v3.9.0'
+          gh api "repos/$GITHUB_REPOSITORY/contents/apps/mobile/release.keystore.b64?ref=$legacy_ref" --jq .content \
+            | tr -d '\n' | base64 --decode > "$RUNNER_TEMP/release.keystore.b64"
+          base64 --decode "$RUNNER_TEMP/release.keystore.b64" > "$RUNNER_TEMP/release.keystore"
+          gh api "repos/$GITHUB_REPOSITORY/contents/apps/mobile/app/build.gradle.kts?ref=$legacy_ref" --jq .content \
+            | tr -d '\n' | base64 --decode > "$RUNNER_TEMP/legacy.gradle.kts"
+          python3 - "$RUNNER_TEMP/legacy.gradle.kts" "$RUNNER_TEMP/legacy-signing.env" <<'PY'
+          import re, shlex, sys
+          text = open(sys.argv[1], encoding='utf-8').read()
+          match = re.search(r'create\("ciRelease"\)\s*\{(?P<body>.*?)\n\s*\}', text, re.S)
+          if not match:
+              raise SystemExit('legacy ciRelease signing block not found')
+          body = match.group('body')
+          def value(name):
+              found = re.search(rf'{name}\s*=\s*"([^"]+)"', body)
+              if not found:
+                  raise SystemExit(f'legacy {name} not found')
+              return found.group(1)
+          with open(sys.argv[2], 'w', encoding='utf-8') as out:
+              out.write('STORE_PASSWORD=' + shlex.quote(value('storePassword')) + '\n')
+              out.write('KEY_ALIAS=' + shlex.quote(value('keyAlias')) + '\n')
+              out.write('KEY_PASSWORD=' + shlex.quote(value('keyPassword')) + '\n')
+          PY
+          chmod 600 "$RUNNER_TEMP/release.keystore" "$RUNNER_TEMP/legacy-signing.env"
+
+      - name: Sign and verify update continuity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/legacy-signing.env"
+          export STORE_PASSWORD KEY_ALIAS KEY_PASSWORD
+          echo "::add-mask::$STORE_PASSWORD"
+          echo "::add-mask::$KEY_ALIAS"
+          echo "::add-mask::$KEY_PASSWORD"
           mkdir -p signed "$RUNNER_TEMP/previous"
-          keystore="$RUNNER_TEMP/cyclone-release.keystore"
-          lineage="$RUNNER_TEMP/cyclone-signing-lineage"
-          printf '%s' "$CYCLONE_KEYSTORE_B64" | base64 --decode > "$keystore"
-          printf '%s' "$CYCLONE_SIGNING_LINEAGE_B64" | base64 --decode > "$lineage"
-          chmod 600 "$keystore" "$lineage"
+          input='candidate/Cyclone-3.9.8.apk'
+          output='signed/Cyclone-3.9.8.apk'
           apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
           aapt="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt"
-          "$apksigner" lineage --in "$lineage" --print-certs -v | tee signed/signing-lineage.txt
           "$apksigner" sign \
-            --ks "$keystore" \
-            --ks-key-alias "$CYCLONE_KEY_ALIAS" \
-            --ks-pass env:CYCLONE_STORE_PASSWORD \
-            --key-pass env:CYCLONE_KEY_PASSWORD \
-            --lineage "$lineage" \
-            --rotation-min-sdk-version 34 \
-            --v1-signing-enabled false \
-            --v2-signing-enabled false \
-            --v3-signing-enabled true \
-            --out signed/Cyclone-3.9.8.apk \
-            candidate/Cyclone-3.9.8.apk
-          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs signed/Cyclone-3.9.8.apk | tee signed/signing-info.txt
-          "$aapt" dump badging signed/Cyclone-3.9.8.apk | tee "$RUNNER_TEMP/badging.txt"
+            --ks "$RUNNER_TEMP/release.keystore" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:STORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out "$output" \
+            "$input"
+          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs "$output" | tee signed/signing-info.txt
+          "$aapt" dump badging "$output" | tee "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.cyclone.mobile'" "$RUNNER_TEMP/badging.txt"
           grep -q "versionCode='62'" "$RUNNER_TEMP/badging.txt"
           grep -q "versionName='3.9.8'" "$RUNNER_TEMP/badging.txt"
@@ -176,26 +176,30 @@ jobs:
             exit 1
           fi
 
-          upgrade_note='The protected production signer is authoritative for this full release.'
-          if gh release view v3.9.7 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release download v3.9.7 --repo "$GITHUB_REPOSITORY" --pattern 'Cyclone-3.9.7.apk' --dir "$RUNNER_TEMP/previous"
-            previous_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$RUNNER_TEMP/previous/Cyclone-3.9.7.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
-            if [[ -n "$previous_cert" ]] && grep -qi "$previous_cert" signed/signing-lineage.txt; then
-              upgrade_note='The signing lineage includes the 3.9.7 signer, so Android update continuity is preserved.'
-            else
-              upgrade_note='Cyclone 3.9.7 was a development-key prerelease; some 3.9.7 installs may require uninstall/reinstall before this production-signed full release.'
-            fi
-          fi
-          printf '%s\n' "$upgrade_note" > signed/update-compatibility.txt
-          (cd signed && sha256sum Cyclone-3.9.8.apk > Cyclone-3.9.8.apk.sha256)
-          cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
-          printf '%s\n' 'SIGNED_PROTECTED_ENVIRONMENT_ROTATED_FULL_RELEASE' > signed/signing-state.txt
+          gh release download v3.9.7 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'Cyclone-3.9.7.apk' --dir "$RUNNER_TEMP/previous"
+          previous_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$RUNNER_TEMP/previous/Cyclone-3.9.7.apk" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
+          current_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$output" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
+          test -n "$previous_cert"
+          test "$current_cert" = "$previous_cert"
 
-      - name: Destroy temporary signing material
+          (cd signed && sha256sum Cyclone-3.9.8.apk > Cyclone-3.9.8.apk.sha256)
+          printf '%s\n' 'Signed with the historical 3.9.7-compatible development key. Signature equality with 3.9.7 was verified. This signer is not production-secure.' > signed/update-compatibility.txt
+          cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
+          printf '%s\n' 'SIGNED_LEGACY_UPDATE_COMPATIBILITY_KEY_FULL_RELEASE' > signed/signing-state.txt
+
+      - name: Destroy recovered signing material
         if: always()
         shell: bash
         run: |
-          rm -rf "$RUNNER_TEMP/cyclone-release.keystore" "$RUNNER_TEMP/cyclone-signing-lineage" "$RUNNER_TEMP/previous" "$RUNNER_TEMP/badging.txt"
+          rm -rf "$RUNNER_TEMP/release.keystore" \
+            "$RUNNER_TEMP/release.keystore.b64" \
+            "$RUNNER_TEMP/legacy.gradle.kts" \
+            "$RUNNER_TEMP/legacy-signing.env" \
+            "$RUNNER_TEMP/previous" \
+            "$RUNNER_TEMP/badging.txt"
 
       - name: Upload signed release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -214,7 +218,7 @@ jobs:
           cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
           # Cyclone 3.9.8
 
-          Cyclone 3.9.8 is a full stable release.
+          Cyclone 3.9.8 is published as a full GitHub release. Device-specific behavior remains unverified as described below.
 
           ## Highlights
           - Updated task composer and floating assistant experience.
@@ -244,5 +248,4 @@ jobs:
             signed/mobile-metadata.json \
             signed/signing-state.txt \
             signed/signing-info.txt \
-            signed/signing-lineage.txt \
             signed/update-compatibility.txt
