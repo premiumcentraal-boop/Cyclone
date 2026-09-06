@@ -31,7 +31,7 @@ object WorkspaceRuntime {
     private var appContext: Context? = null
     @Volatile private var backend: IWorkspaceService? = null
     private data class Entry(val session: ExecutionSession, val lifecycle: WorkspaceLifecycle,
-        val reader: ImageReader, val thread: HandlerThread, var remoteGeneration: Long, @Volatile var sourceRevision: Long)
+        val reader: ImageReader, val thread: HandlerThread, var remoteGeneration: Long, @Volatile var sourceRevision: Long, val consent: WorkspaceConsent = WorkspaceConsent())
     private val entries = mutableMapOf<String, Entry>()
 
     fun connect(context: Context) {
@@ -113,6 +113,23 @@ object WorkspaceRuntime {
         snapshot
     }
 
+    fun requestConfirmation(sessionId: String, action: String, nodeId: String, fingerprint: String, kind: String) = synchronized(lock) {
+        val entry = entries.getValue(sessionId)
+        val confirmation = WorkspaceConfirmation(action = action, nodeId = nodeId, fingerprint = fingerprint, kind = kind)
+        entry.consent.request(confirmation)
+        WorkspaceTasks.state.value?.takeIf { it.sessionId == sessionId }?.let { task ->
+            WorkspaceTasks.update(task.taskId) { it.copy(confirmation = confirmation) }
+        }
+    }
+    fun approveConfirmation(sessionId: String, token: String) = synchronized(lock) {
+        val entry = entries.getValue(sessionId)
+        check(entry.lifecycle.owner == InputOwner.HUMAN)
+        check(entry.consent.approve(token, SystemClock.elapsedRealtime())) { "Confirmation expired" }
+    }
+    fun consumeConfirmation(sessionId: String, action: String, nodeId: String, fingerprint: String, kind: String): Boolean = synchronized(lock) {
+        entries.getValue(sessionId).consent.consume(action, nodeId, fingerprint, kind, SystemClock.elapsedRealtime())
+    }
+
     fun generation(sessionId: String): Long = synchronized(lock) { entries.getValue(sessionId).lifecycle.generation }
     fun ownsInput(sessionId: String): Boolean = synchronized(lock) {
         entries[sessionId]?.lifecycle?.let { it.owner == InputOwner.CYCLONE && it.state == WorkspaceState.BACKGROUND_OK } == true && backend != null
@@ -154,6 +171,7 @@ object WorkspaceRuntime {
     }
 
     fun handoff(sessionId: String) = synchronized(lock) {
+        entries.getValue(sessionId).consent.clear()
         pause(sessionId, WorkspaceState.WAITING_FOR_CONFIRMATION)
         checked(backend?.handoff(sessionId) ?: error("BACKEND_DISCONNECTED"))
         LiveVisionRuntime.stopSource(sessionId)

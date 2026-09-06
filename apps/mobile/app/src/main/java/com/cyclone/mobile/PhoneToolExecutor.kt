@@ -104,7 +104,8 @@ object PhoneToolExecutor {
                 }.minByOrNull { it.bounds.width * it.bounds.height } ?: error("UNSUPPORTED: a grounded control is required")
                 val gate = com.cyclone.mobile.policy.GateClassifier.classify(request.tool,
                     com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector))
-                if (gate != null) {
+                if (gate != null && !runtime.consumeConfirmation(scope.sessionId, request.tool, node.id, snapshot.fingerprint, gate.jsonKey)) {
+                    runtime.requestConfirmation(scope.sessionId, request.tool, node.id, snapshot.fingerprint, gate.jsonKey)
                     runtime.pause(scope.sessionId, com.cyclone.mobile.runtime.background.WorkspaceState.BACKGROUND_NEEDS_HANDOFF)
                     error("POLICY_DENIED: human review is required")
                 }

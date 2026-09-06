@@ -345,7 +345,7 @@ private fun ComposerPanel(
     var editorFocused by remember { mutableStateOf(false) }
     var restoreEditor by remember { mutableStateOf(false) }
     val workspace by WorkspaceTasks.state.collectAsState()
-    val task = workspace?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) }
+    val task = workspace?.takeIf { it.phase != TaskPhase.STOPPED }
     val compactRunning = task?.working == true && !editorFocused
     LaunchedEffect(task?.taskId, task?.working) {
         if (task?.working == true) { focusManager.clearFocus(); accessory = ComposerAccessory.NONE }

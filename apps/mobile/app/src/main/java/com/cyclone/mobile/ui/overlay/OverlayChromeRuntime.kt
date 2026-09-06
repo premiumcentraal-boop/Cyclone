@@ -234,7 +234,8 @@ object OverlayChromeRuntime {
             val label = app.loadLabel(context.packageManager).toString()
             label.length >= 3 && Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(label) + "(?![\\p{L}\\p{N}])").containsMatchIn(request)
         }
-        if (matches.isNotEmpty()) {
+        if (!com.cyclone.mobile.capture.LiveCaptureSessionManager.state.value.active) {
+            synchronized(lock) { adaptiveAgent?.cancelActiveTask(); aiJob?.cancel() }
             if (matches.size == 1) {
                 val app = matches.single()
                 runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.start(context, request,

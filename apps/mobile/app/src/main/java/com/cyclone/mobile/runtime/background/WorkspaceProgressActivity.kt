@@ -57,11 +57,29 @@ class WorkspaceProgressActivity : ComponentActivity() {
                                     Text("Task done", color = MaterialTheme.colorScheme.secondary)
                                 }
                                 if (task.phase == TaskPhase.REVIEW) {
-                                    Text("You make the final decision in ${task.app}.", style = MaterialTheme.typography.bodyMedium)
-                                    Button(onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff"); finish() },
+                                    val confirmation = task.confirmation
+                                    Text(confirmation?.explanation ?: "You make the final decision in ${task.app}.", style = MaterialTheme.typography.bodyMedium)
+                                    if (confirmation != null) {
+                                        Text(task.app, style = MaterialTheme.typography.titleMedium)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                            OutlinedButton(onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff"); finish() }) { Text("Modify") }
+                                            Button(onClick = {
+                                                startService(WorkspaceTasks.commandIntent(this@WorkspaceProgressActivity, task, "confirm")
+                                                    .putExtra("confirmation", confirmation.token))
+                                            }) { Text(confirmation.button) }
+                                        }
+                                    } else Button(onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff"); finish() },
                                         modifier = Modifier.fillMaxWidth()) { Text("Review in ${task.app}") }
                                 }
-                                task.queued?.let { Text("Follow-up saved: $it", style = MaterialTheme.typography.bodySmall) }
+                                task.queued?.let {
+                                    Text("Follow-up saved: $it", style = MaterialTheme.typography.bodySmall)
+                                    if (!task.working) TextButton(onClick = {
+                                        WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "cancel")
+                                        startActivity(android.content.Intent(this@WorkspaceProgressActivity, WorkspaceActivity::class.java)
+                                            .putExtra("goal", task.queued))
+                                        finish()
+                                    }) { Text("Start follow-up") }
+                                }
                             }
                         }
                     }

@@ -20,6 +20,7 @@ data class WorkspaceTaskUi(
     val steps: List<String> = emptyList(),
     val queued: String? = null,
     val resumable: Boolean = true,
+    val confirmation: WorkspaceConfirmation? = null,
 ) {
     val working get() = phase == TaskPhase.STARTING || phase == TaskPhase.WORKING
     val title get() = when (phase) {

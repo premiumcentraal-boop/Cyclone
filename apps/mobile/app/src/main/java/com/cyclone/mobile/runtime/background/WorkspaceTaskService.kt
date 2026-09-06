@@ -37,6 +37,13 @@ class WorkspaceTaskService : Service() {
                 "cancel" -> stopTask()
                 "handoff" -> transferToHuman()
                 "resume" -> continueTask()
+                "confirm" -> {
+                    val token = intent.getStringExtra("confirmation")
+                    if (token != null && token == current?.confirmation?.token && current?.phase == TaskPhase.REVIEW) {
+                        runCatching { sessionId?.let { WorkspaceRuntime.approveConfirmation(it, token) } }
+                            .onSuccess { update { it.copy(confirmation = null) }; continueTask() }
+                    }
+                }
                 "pause" -> pauseTask()
             }
             return START_NOT_STICKY
@@ -69,6 +76,7 @@ class WorkspaceTaskService : Service() {
                     model = settings.getString("openrouter_model", null)?.let(OpenRouterModelPresets::byId) ?: OpenRouterModelPresets.DEFAULT,
                     safeMode = profile != CycloneAiAccessProfile.FULL, accessProfile = profile,
                     attachment = PendingTaskAttachment.take())
+                awaitWorkspace(session.sessionId, ExecutionContext.from(session))
                 agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session))
                 finishTask(agent!!.execute(task.goal, config))
             } catch (error: CancellationException) { throw error }
@@ -125,7 +133,7 @@ class WorkspaceTaskService : Service() {
             try {
                 // Revoke before moving; the agent suspends at its next normal execution boundary.
                 withContext(Dispatchers.IO) { WorkspaceRuntime.handoff(id) }
-                update { it.copy(phase = TaskPhase.HUMAN, message = "Your prepared page is open in ${it.app}.") }
+                update { it.copy(phase = TaskPhase.HUMAN, confirmation = null, message = "Your prepared page is open in ${it.app}.") }
             } catch (_: Exception) {
                 update { it.copy(phase = TaskPhase.PAUSED, message = "Couldn't move this page. Your task is paused safely.") }
             } finally { switching = false }
@@ -143,6 +151,7 @@ class WorkspaceTaskService : Service() {
                 previousRun?.join()
                 if (stopped) return@launch
                 withContext(Dispatchers.IO) { WorkspaceRuntime.resume(id) }
+                awaitWorkspace(id, ExecutionContext(id, com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions.lookup(id).displayId))
                 update { it.copy(phase = TaskPhase.WORKING, message = "Continuing in ${it.app}…") }
                 switching = false
                 finishTask(agent?.resume() ?: error("Task unavailable"))
@@ -151,6 +160,14 @@ class WorkspaceTaskService : Service() {
                 withContext(Dispatchers.IO) { runCatching { WorkspaceRuntime.pause(id) } }
                 update { it.copy(phase = TaskPhase.PAUSED, message = "Couldn't continue this page. Take control to finish it.") }
             } finally { switching = false }
+        }
+    }
+    private suspend fun awaitWorkspace(id: String, execution: ExecutionContext) {
+        withTimeout(10_000) {
+            while (!withContext(Dispatchers.IO) {
+                runCatching { WorkspaceRuntime.observe(execution).nodes.isNotEmpty() &&
+                    com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.healthy(id) }.getOrDefault(false)
+            }) delay(200)
         }
     }
     private fun stopTask() {

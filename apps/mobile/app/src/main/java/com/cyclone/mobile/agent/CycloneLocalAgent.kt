@@ -116,6 +116,7 @@ class CycloneLocalAgent(
     private val externallyPaused: () -> Boolean = { false },
 ) {
     @Volatile private var cancelled = false
+    private var suspendedAt: Long? = null
     private var mutationsWithoutVerifiedProgress = 0
     private var repeatedUnverifiedDone = 0
     private var state = restoredState
@@ -138,7 +139,9 @@ class CycloneLocalAgent(
     fun cancel() { cancelled = true }
     fun resume(): Boolean {
         if (!state.gateSuspended || state.finalClassification != CycloneTaskClassification.HUMAN_OR_GATE) return false
-        state = state.copy(currentStage = CycloneAgentStage.OBSERVE, gateSuspended = false, requireFreshObservation = true, finalClassification = null, consecutiveRecoveryCyclesWithoutNewEvidence = 0, repeatedIdenticalActionWithoutProgress = 0)
+        val pausedDuration = suspendedAt?.let { (now() - it).coerceAtLeast(0) } ?: 0
+        suspendedAt = null
+        state = state.copy(taskStartTimeMs = state.taskStartTimeMs + pausedDuration, currentStage = CycloneAgentStage.OBSERVE, gateSuspended = false, requireFreshObservation = true, finalClassification = null, consecutiveRecoveryCyclesWithoutNewEvidence = 0, repeatedIdenticalActionWithoutProgress = 0)
         repeatedUnverifiedDone = 0
         emit(CycloneTraceEventType.GATE_RESUME); checkpoint(); return true
     }
@@ -340,6 +343,7 @@ class CycloneLocalAgent(
     private fun cancelResult(message: String?) = finish(CycloneTaskClassification.CANCELLED, CycloneTraceEventType.CANCELLED, message) { CycloneAgentRunResult.Cancelled(it, message) }
     private fun complete(message: String?) = finish(CycloneTaskClassification.COMPLETE, CycloneTraceEventType.COMPLETE, "task.complete") { CycloneAgentRunResult.Completed(it, message) }
     private fun suspendForGate(message: String?): CycloneAgentRunResult.Suspended {
+        if (suspendedAt == null) suspendedAt = now()
         state = state.copy(currentStage = CycloneAgentStage.SUSPENDED, gateSuspended = true, finalClassification = CycloneTaskClassification.HUMAN_OR_GATE)
         emit(CycloneTraceEventType.GATE_SUSPEND, message); checkpoint(); return CycloneAgentRunResult.Suspended(state, message)
     }
