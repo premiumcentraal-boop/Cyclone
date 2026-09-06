@@ -243,6 +243,7 @@ internal object GatewayDispatcher {
     private val trustSessionBootstrap = setOf("trust.session.begin", "trust.session.complete")
 
     fun handle(context: Context, line: String): String {
+        GatewayRuntimeContextHolder.set(context)
         var id = ""
         return try {
             val request = GatewayProtocol.parse(line)
@@ -417,7 +418,7 @@ internal object GatewayDispatcher {
             }
             return current
         }
-        val captured = GatewayObservationAdapter.capture(args = args, context = GatewayRuntimeContextHolder.context())
+        val captured = GatewayObservationAdapter.capture(GatewayRuntimeContextHolder.context(), args)
         if (captured.execution.sessionId != sessionId || captured.execution.displayId != displayId) {
             throw GatewayProtocolException("STALE_OBSERVATION", "Captured observation does not match the requested execution session")
         }
