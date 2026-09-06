@@ -17,7 +17,7 @@ Base line: **published mobile `v3.9.12`** (`c9ed77a`, versionCode 66) — Backgr
 
 ## Stages (strict order — do not skip)
 
-### Stage 1 — Fast Path harness (THIS RUN)
+### Stage 1 — Fast Path harness (DONE — PR #59)
 Branch: `grok/cyclone-v4-s1-fastpath` from `v3.9.12`.
 Goal: Make ordinary navigation feel like ClosePaw — mid-model capable.
 Deliverables:
@@ -30,7 +30,7 @@ Deliverables:
 Acceptance: unit/integration tests for settle/fingerprint/nav-isolation; honest UNVERIFIED for physical; PR open.
 Out of scope: multi-VD scale-out, skill compiler, One V4 packaging, Magisk.
 
-### Stage 2 — Session Kernel
+### Stage 2 — Session Kernel (THIS RUN)
 Base: Stage 1 merge. Harden 3.9.12 background workspace: displayId on all inject/launch, TRUSTED|OWN_DISPLAY_GROUP where applicable, N≥2 sessions design (may still gate product to 1 hot BG until stable), session_id in gateway/MCP.
 
 ### Stage 3 — Skill Compiler
@@ -50,3 +50,4 @@ Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent
 - **Stage 1** (current): single Grok session as launched — do not restart mid-run.
 - **Stages 2–5**: each Grok prompt MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
 - After Stage 1 PR: offer/use Grok **usage reset** before heavy Stage 2+ burns if the user initiates it.
+
