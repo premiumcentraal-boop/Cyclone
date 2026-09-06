@@ -14,8 +14,10 @@ Ordinary Share screen uses Android's app-or-screen choice. Its frames are read-o
 
 ## Validation and limits
 
-Repository guards and 40 Python CI tests passed locally. New JVM regressions cover lifecycle generations, service cleanup, stop/retry races, resize state, sampling and attachments. Local Android tests could not start because Gradle distribution access is unavailable; exact-source Mobile CI must pass unit tests, lint and assembly before publication.
+Repository guards and 40 Python CI tests passed locally. New JVM regressions cover lifecycle generations, service cleanup, stop/retry races, resize state, sampling and attachments. Exact-source Mobile CI remains the authority for Android unit tests, lint and APK assembly before publication.
 
-Physical-device acceptance: NOT RUN. Pixel keyboard/IME behavior, app-choice capture, secure-region rendering, rotation, picker/camera return, system revoke/lock and a 15-minute memory/thermal run remain unverified. The in-tree accessory changes do not assert a measured sub-100ms opening time. Cross-device/background observe-act-verify acceptance remains outstanding.
+Physical-device validation is **not a blocker for this ChatGPT/GitHub beta lane**. Agents working in this environment should not stop or hold a beta solely because no phone is physically attached. Hardware-only checks are user acceptance after install; they should be reported as unverified, not treated as a failed build gate.
 
-The existing full-release publisher now derives version identity from validated release metadata and reuses the exact successful Mobile CI artifact. It preserves the protected release environment, immutable tags and signer continuity checks. No published 3.9.10 artifact is modified.
+Still hardware-unverified: Pixel keyboard/IME behavior, app-choice capture, secure-region rendering, rotation, picker/camera return, system revoke/lock and a 15-minute memory/thermal run. The in-tree accessory changes do not assert a measured sub-100ms opening time. Cross-device/background observe-act-verify acceptance remains outstanding.
+
+The beta publisher uses the exact successful Mobile CI artifact, verifies package/version/provenance, signs with the update-compatible development signer, verifies certificate continuity against published v3.9.10, and publishes an immutable GitHub prerelease. No published 3.9.10 artifact is modified.

@@ -1,8 +1,8 @@
-name: Cyclone Mobile Full Release
+name: Cyclone Mobile 3.9.11 Beta Release
 
 on:
   push:
-    branches: ['release/cyclone-mobile-v*']
+    branches: ['release/cyclone-mobile-v3.9.11']
     paths:
       - 'apps/mobile/**'
       - 'apps/device-gateway/**'
@@ -11,6 +11,7 @@ on:
       - 'scripts/ci/**'
       - 'scripts/phone-gateway/**'
       - 'release/version.toml'
+      - 'docs/RELEASE_3.9.11.md'
       - '.github/workflows/_mobile-build.yml'
       - '.github/workflows/mobile-ci.yml'
       - '.github/workflows/mobile-publish-v3910.yml'
@@ -20,47 +21,48 @@ permissions:
   actions: read
 
 concurrency:
-  group: mobile-full-release-${{ github.ref }}
-  cancel-in-progress: false
+  group: mobile-3911-beta-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  publish:
+  publish-beta:
     environment: mobile-release-approval
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout exact source
+      - name: Checkout exact beta source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - name: Validate authorized release identity
+      - name: Validate 3.9.11 beta identity
         id: version
         shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PYCODE'
-          import os, re, tomllib
+          import os, tomllib
           from pathlib import Path
           meta = tomllib.loads(Path('release/version.toml').read_text())
           version = meta['components']['mobile']
           previous = meta['release']['previous_mobile_version']
-          assert re.fullmatch(r'\d+\.\d+\.\d+', version)
-          assert re.fullmatch(r'\d+\.\d+\.\d+', previous)
-          assert tuple(map(int, version.split('.'))) > tuple(map(int, previous.split('.')))
+          assert version == '3.9.11', version
+          assert previous == '3.9.10', previous
+          assert int(meta['android_version_code']) == 65
           assert meta['release']['publication_authorized'] is True
-          assert os.environ['GITHUB_REF_NAME'] == f'release/cyclone-mobile-v{version}'
-          assert Path(f'docs/RELEASE_{version}.md').is_file()
+          assert os.environ['GITHUB_REF_NAME'] == 'release/cyclone-mobile-v3.9.11'
+          assert Path('docs/RELEASE_3.9.11.md').is_file()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write(f"version={version}\nprevious={previous}\ncode={int(meta['android_version_code'])}\n")
+              out.write('version=3.9.11\nprevious=3.9.10\ncode=65\ntag=v3.9.11-beta.1\n')
           PYCODE
 
-      - name: Refuse replacement of an existing release
+      - name: Refuse replacement of existing beta
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v${{ steps.version.outputs.version }} --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'ERROR: v${{ steps.version.outputs.version }} already exists. Release bytes are immutable; increment the version instead.' >&2
+          if gh release view '${{ steps.version.outputs.tag }}' --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'ERROR: v3.9.11-beta.1 already exists. Beta bytes are immutable.' >&2
             exit 1
           fi
 
@@ -101,7 +103,7 @@ jobs:
           github-token: ${{ github.token }}
           path: candidate
 
-      - name: Verify checksum, identity and provenance
+      - name: Verify checksum identity and provenance
         id: candidate
         shell: bash
         env:
@@ -120,15 +122,15 @@ jobs:
           from pathlib import Path
           root = Path('candidate')
           metadata = json.loads((root / 'mobile-metadata.json').read_text())
-          assert metadata['artifact_name'] == 'Cyclone-Android-${{ steps.version.outputs.version }}'
+          assert metadata['artifact_name'] == 'Cyclone-Android-3.9.11'
           assert metadata['application_id'] == 'com.cyclone.mobile'
-          assert metadata['version_name'] == '${{ steps.version.outputs.version }}'
-          assert int(metadata['version_code']) == ${{ steps.version.outputs.code }}
-          assert metadata['apk_name'] == 'Cyclone-${{ steps.version.outputs.version }}.apk'
+          assert metadata['version_name'] == '3.9.11'
+          assert int(metadata['version_code']) == 65
+          assert metadata['apk_name'] == 'Cyclone-3.9.11.apk'
           assert (root / metadata['apk_name']).is_file()
           assert len(list(root.glob('*.apk'))) == 1
           PY
-          (cd candidate && sha256sum --check Cyclone-${{ steps.version.outputs.version }}.apk.sha256)
+          (cd candidate && sha256sum --check Cyclone-3.9.11.apk.sha256)
 
       - name: Set up Android signing tools
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
@@ -168,7 +170,7 @@ jobs:
           PY
           chmod 600 "$RUNNER_TEMP/release.keystore" "$RUNNER_TEMP/legacy-signing.env"
 
-      - name: Sign and verify update continuity
+      - name: Sign beta and verify update continuity
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -180,8 +182,8 @@ jobs:
           echo "::add-mask::$KEY_ALIAS"
           echo "::add-mask::$KEY_PASSWORD"
           mkdir -p signed "$RUNNER_TEMP/previous"
-          input='candidate/Cyclone-${{ steps.version.outputs.version }}.apk'
-          output='signed/Cyclone-${{ steps.version.outputs.version }}.apk'
+          input='candidate/Cyclone-3.9.11.apk'
+          output='signed/Cyclone-3.9.11.apk'
           apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
           aapt="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt"
           "$apksigner" sign \
@@ -194,26 +196,26 @@ jobs:
           "$apksigner" verify --min-sdk-version 34 --verbose --print-certs "$output" | tee signed/signing-info.txt
           "$aapt" dump badging "$output" | tee "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.cyclone.mobile'" "$RUNNER_TEMP/badging.txt"
-          grep -q "versionCode='${{ steps.version.outputs.code }}'" "$RUNNER_TEMP/badging.txt"
-          grep -q "versionName='${{ steps.version.outputs.version }}'" "$RUNNER_TEMP/badging.txt"
+          grep -q "versionCode='65'" "$RUNNER_TEMP/badging.txt"
+          grep -q "versionName='3.9.11'" "$RUNNER_TEMP/badging.txt"
           if grep -Eq 'testOnly[= ]true' "$RUNNER_TEMP/badging.txt"; then
-            echo 'ERROR: signed release APK is testOnly.' >&2
+            echo 'ERROR: signed beta APK is testOnly.' >&2
             exit 1
           fi
 
-          gh release download v${{ steps.version.outputs.previous }} --repo "$GITHUB_REPOSITORY" \
-            --pattern 'Cyclone-${{ steps.version.outputs.previous }}.apk' --dir "$RUNNER_TEMP/previous"
-          previous_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$RUNNER_TEMP/previous/Cyclone-${{ steps.version.outputs.previous }}.apk" \
+          gh release download v3.9.10 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'Cyclone-3.9.10.apk' --dir "$RUNNER_TEMP/previous"
+          previous_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$RUNNER_TEMP/previous/Cyclone-3.9.10.apk" \
             | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
           current_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$output" \
             | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
           test -n "$previous_cert"
           test "$current_cert" = "$previous_cert"
 
-          (cd signed && sha256sum Cyclone-${{ steps.version.outputs.version }}.apk > Cyclone-${{ steps.version.outputs.version }}.apk.sha256)
-          printf '%s\n' 'Signed with the historical ${{ steps.version.outputs.previous }}-compatible development key. Signature equality with ${{ steps.version.outputs.previous }} was verified. This signer is update-compatible but not production-secure.' > signed/update-compatibility.txt
+          (cd signed && sha256sum Cyclone-3.9.11.apk > Cyclone-3.9.11.apk.sha256)
+          printf '%s\n' 'Beta test build signed with the historical 3.9.10-compatible development key. Signature equality with 3.9.10 was verified. This signer is update-compatible but not production-secure.' > signed/update-compatibility.txt
           cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
-          printf '%s\n' 'SIGNED_LEGACY_UPDATE_COMPATIBILITY_KEY_FULL_RELEASE' > signed/signing-state.txt
+          printf '%s\n' 'SIGNED_LEGACY_UPDATE_COMPATIBILITY_KEY_BETA' > signed/signing-state.txt
 
       - name: Destroy recovered signing material
         if: always()
@@ -226,33 +228,39 @@ jobs:
             "$RUNNER_TEMP/previous" \
             "$RUNNER_TEMP/badging.txt"
 
-      - name: Upload signed release artifact
+      - name: Upload signed beta artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Cyclone-Android-${{ steps.version.outputs.version }}-signed
+          name: Cyclone-Android-3.9.11-beta.1-signed
           path: signed/
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish Cyclone ${{ steps.version.outputs.version }} full release
+      - name: Publish Cyclone 3.9.11 Beta 1 prerelease
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           current_head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)"
-          test "$current_head" = "$GITHUB_SHA" || { echo 'Refusing superseded release source' >&2; exit 1; }
-          cp 'docs/RELEASE_${{ steps.version.outputs.version }}.md' "$RUNNER_TEMP/release-notes.md"
-          cat signed/update-compatibility.txt >> "$RUNNER_TEMP/release-notes.md"
-          printf '\n\nSource SHA: `%s`\nMobile CI run: `%s`\n' "$(cat signed/source-sha.txt)" "$(cat signed/run-id.txt)" >> "$RUNNER_TEMP/release-notes.md"
-          gh release create v${{ steps.version.outputs.version }} \
+          test "$current_head" = "$GITHUB_SHA" || { echo 'Refusing superseded beta source' >&2; exit 1; }
+          notes="$RUNNER_TEMP/release-notes.md"
+          {
+            printf '%s\n\n' '# Cyclone 3.9.11 Beta 1'
+            printf '%s\n\n' 'This is a GitHub/ChatGPT test prerelease. Physical-device validation is intentionally treated as user acceptance after installation, not as a CI/release blocker for this beta.'
+            cat docs/RELEASE_3.9.11.md
+            printf '\n%s\n' 'Signing note:'
+            cat signed/update-compatibility.txt
+            printf '\nSource SHA: `%s`\nMobile CI run: `%s`\n' "$(cat signed/source-sha.txt)" "$(cat signed/run-id.txt)"
+          } > "$notes"
+          gh release create '${{ steps.version.outputs.tag }}' \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title 'Cyclone ${{ steps.version.outputs.version }}' \
-            --latest \
-            --notes-file "$RUNNER_TEMP/release-notes.md" \
-            signed/Cyclone-${{ steps.version.outputs.version }}.apk \
-            signed/Cyclone-${{ steps.version.outputs.version }}.apk.sha256 \
+            --title 'Cyclone 3.9.11 Beta 1' \
+            --prerelease \
+            --notes-file "$notes" \
+            signed/Cyclone-3.9.11.apk \
+            signed/Cyclone-3.9.11.apk.sha256 \
             signed/source-sha.txt \
             signed/run-id.txt \
             signed/mobile-metadata.json \
