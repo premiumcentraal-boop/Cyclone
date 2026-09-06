@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,7 +33,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,18 +52,13 @@ import com.cyclone.mobile.ai.model.ModelQualificationRunner
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
 import kotlinx.coroutines.launch
 
-/**
- * Full AI configuration intentionally lives in the Cyclone app, never in the floating composer.
- */
+/** Full AI configuration intentionally lives in the Cyclone app, never in the floating composer. */
 class CycloneAiSettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             CycloneV32Theme {
-                AiSettingsContent(
-                    context = this,
-                    onBack = { finish() },
-                )
+                AiSettingsContent(context = this, onBack = { finish() })
             }
         }
     }
@@ -92,8 +87,8 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
     var roleRefresh by remember { mutableStateOf(0) }
     val selectedModel = OpenRouterModelPresets.byId(selectedModelId)
     val roleManager = remember(roleRefresh) { context.getSystemService(RoleManager::class.java) }
-    val roleAvailable = roleManager?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true
-    val assistantHeld = roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+    val roleAvailable = roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)
+    val assistantHeld = roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)
     val requestAssistant = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         roleRefresh += 1
     }
@@ -174,8 +169,12 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                                         append(selectedModel.label)
                                         append(": ")
                                         append(result.failure.userMessage)
-                                        result.failure.httpStatus?.let { append(" (HTTP ").append(it).append(')') }
-                                        result.failure.providerMessage?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+                                        if (result.failure.httpStatus > 0) {
+                                            append(" (HTTP ").append(result.failure.httpStatus).append(')')
+                                        }
+                                        result.failure.providerMessage
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?.let { append(" · ").append(it) }
                                     }
                                 }
                             } catch (_: Exception) {
@@ -220,7 +219,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 if (roleAvailable && !assistantHeld) {
                     Button(
                         onClick = {
-                            requestAssistant.launch(roleManager!!.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
+                            requestAssistant.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Make Cyclone my assistant") }
@@ -230,7 +229,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                         context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Open Android gesture settings") }
+                ) { Text("Open Android settings") }
                 Text(
                     "Cyclone never intercepts the raw Power key. Android invokes the selected assistant through the system-owned assistant gesture.",
                     style = MaterialTheme.typography.labelSmall,
@@ -242,7 +241,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SettingsCard(content: @Composable Column.() -> Unit) {
+private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
