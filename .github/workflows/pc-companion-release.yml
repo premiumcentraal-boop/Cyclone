@@ -2,6 +2,12 @@ name: Cyclone PC Companion Release Candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Legacy compatibility flag; this workflow never publishes a GitHub Release.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
