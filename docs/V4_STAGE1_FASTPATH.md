@@ -91,10 +91,6 @@ Covered by JVM unit tests (no physical device):
 
 ## Stage 2 handoff
 
-Session Kernel should take this Fast Path loop as the per-turn act/settle contract and add:
+Stage 1 remains **DONE**. Session Kernel (`docs/V4_STAGE2_SESSION_KERNEL.md`, mobile `4.0.0-alpha.2` / versionCode 68) takes this Fast Path loop as the per-turn act/settle contract and adds display-scoped `sessionId` + `displayId`. Do not regress settle / fingerprint / nav isolation, Take control / Continue, or GATE.
 
-- `session_id` on gateway/MCP
-- `displayId` on all inject/launch
-- N≥2 display-scoped sessions on the 3.9.12 workspace (product may still gate to 1 hot background session)
-
-Do not start Stage 2 until this PR exists and CI is green.
+Do not start Stage 3 in the Session Kernel PR.

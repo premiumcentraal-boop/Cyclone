@@ -328,6 +328,15 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
     page_summary = _bounded_text(_first(page, "pageSummary", "page_summary", default=_first(data, "pageSummary", "page_summary")), PAGE_CARD_SUMMARY_LIMIT)
     observation_id = _observation_id(envelope, data, page)
 
+    session_id = _bounded_scalar(
+        _first(envelope, "sessionId", "session_id", default=_first(data, "sessionId", "session_id")),
+        120,
+    )
+    display_id = _first(envelope, "displayId", "display_id", default=_first(data, "displayId", "display_id"))
+    if isinstance(display_id, bool) or not isinstance(display_id, (int, float)) or float(display_id) != int(display_id):
+        display_id = None
+    elif display_id is not None:
+        display_id = int(display_id)
     card = {
         "kind": "page_card",
         "correlationId": _bounded_scalar(_first(envelope, "correlation_id", "correlationId"), 120),
@@ -356,6 +365,12 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
         "perceptionMode": _bounded_scalar(_first(data, "perceptionMode", "perception_mode", default="a11y"), 40) or "a11y",
         "treeUseful": bool(data.get("treeUseful", data.get("tree_useful", len(current) > 0))),
     }
+    if session_id:
+        card["sessionId"] = session_id
+        card["observationScope"]["sessionId"] = session_id
+    if display_id is not None:
+        card["displayId"] = display_id
+        card["observationScope"]["displayId"] = display_id
     # Stable aliases retain compatibility for existing MCP clients while directing new callers to
     # Page Card fields above.
     snapshot_text, ref_map = build_snapshot(candidates)

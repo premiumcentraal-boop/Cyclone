@@ -4,7 +4,9 @@ import org.json.JSONObject
 
 /** Transport identity is never inferred from the active Android window. */
 object ExecutionRequestScope {
-    fun read(params: JSONObject): ExecutionContext {
+    fun read(params: JSONObject): ExecutionContext = bind(params)
+
+    fun bind(params: JSONObject): ExecutionContext {
         if (params.has("executionContext") && params.opt("executionContext") !is JSONObject) {
             throw SessionIdentityException("Invalid executionContext")
         }
@@ -21,14 +23,23 @@ object ExecutionRequestScope {
         }
         val id = session ?: nestedSession ?: ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID
         val targetDisplay = display ?: nestedDisplay
-        if (id != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID && targetDisplay == null) {
+        if (id == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) {
+            if (targetDisplay != null && targetDisplay != ExecutionSession.DEFAULT_DISPLAY_ID) {
+                throw SessionIdentityException("default-foreground cannot target a nonzero display")
+            }
+            return ExecutionContext(id, ExecutionSession.DEFAULT_DISPLAY_ID)
+        }
+        if (targetDisplay == null) {
             throw SessionIdentityException("An explicit background session requires its displayId")
         }
-        return ExecutionContext(id, targetDisplay ?: 0)
+        if (targetDisplay <= 0) {
+            throw SessionIdentityException("Background session requires a nonzero displayId")
+        }
+        return ExecutionContext(id, targetDisplay)
     }
 
     /** Used at legacy boundaries until a complete display-scoped implementation owns the call. */
-    fun requireForeground(params: JSONObject): ExecutionContext = read(params).also {
+    fun requireForeground(params: JSONObject): ExecutionContext = bind(params).also {
         if (it.sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID || it.displayId != 0) {
             throw SessionIdentityException("BACKGROUND_MODE_UNAVAILABLE: this operation cannot address the requested workspace")
         }
@@ -45,6 +56,21 @@ object ExecutionRequestScope {
             out.put(key, envelope.get(key))
         }
         return out
+    }
+
+    /** Write sessionId+displayId onto params without dropping other keys. */
+    fun attach(params: JSONObject, context: ExecutionContext): JSONObject {
+        val out = JSONObject(params.toString())
+        putIdentity(out, "sessionId", context.sessionId)
+        putIdentity(out, "displayId", context.displayId)
+        return out
+    }
+
+    private fun putIdentity(out: JSONObject, key: String, value: Any) {
+        if (out.has(key) && out.get(key).toString() != value.toString()) {
+            throw SessionIdentityException("Conflicting $key in params and execution context")
+        }
+        out.put(key, value)
     }
 
     private fun string(json: JSONObject, key: String): String? {

@@ -86,7 +86,7 @@ class SkillGateway:
             "controls": [{"id": "settings", "label": "Settings", "clickable": True}],
         }
 
-    def ui_search(self, query):
+    def ui_search(self, query, **kwargs):
         return {"candidates": [{"id": "settings", "label": query}]}
 
     def skill_match(self, goal, page_key=""):

@@ -12,6 +12,12 @@ from .compact import compact_element, compact_observation, compact_search, page_
 from .gateway import GatewayClient, GatewayError
 from .reports import SessionRecorder
 from .protocol import Failure, classify_failure
+from .session import (
+    attach_execution_scope,
+    parse_tool_execution_scope,
+    scope_cache_key,
+    strip_execution_scope,
+)
 
 ALLOWED_ACTIONS = {
     "phone.click",
@@ -128,8 +134,10 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
 
     Gateway support for broader selectors remains unchanged for internal Cyclone routes. MCP is a
     deliberately narrower model-facing surface: it never accepts raw text, fuzzy or coordinate
-    selectors that can drift after context truncation.
+    selectors that can drift after context truncation. Session identity belongs on top-level MCP
+    args; leftover session keys in params are stripped before this validator.
     """
+    params = strip_execution_scope(params)
     _validate_typed_params(params)
     _reject_coordinate_params(params)
     element_id = _element_id_from_params(params)
@@ -262,16 +270,18 @@ class PhoneTools:
         mode = str(args.get("mode") or "compact")
         include_screenshot = bool(args.get("include_screenshot", False))
         goal = str(args.get("goal") or "").strip()
+        scope = parse_tool_execution_scope(args)
+        identity = _identity_kwargs(scope)
         if device_id:
-            raw = self.gateway.device_observe(device_id, include_screenshot=include_screenshot, mode=mode)
+            raw = self.gateway.device_observe(device_id, include_screenshot=include_screenshot, mode=mode, **identity)
         else:
-            raw = self.gateway.observe(include_screenshot=include_screenshot, mode=mode)
+            raw = self.gateway.observe(include_screenshot=include_screenshot, mode=mode, **identity)
         # Classify the complete typed response before compacting away protocol/error layers.
         if classify_failure(raw):
             return redact(raw)
         if mode == "full":
             return redact(raw)
-        return self._remember_page_card(device_id, raw, goal=goal)
+        return self._remember_page_card(device_id, raw, goal=goal, session_id=_session_id(scope))
 
     def phone_locate(self, args: dict[str, Any]) -> Any:
         """Fuse bounded readiness, Page Card context, and semantic search for one goal."""
@@ -282,22 +292,25 @@ class PhoneTools:
         query = str(args.get("query") or goal).strip()
         if len(query) > 240:
             raise ValueError("query exceeds the bounded length")
+        scope = parse_tool_execution_scope(args)
+        identity = _identity_kwargs(scope)
+        session_id = _session_id(scope)
         if device_id:
             status = self.gateway.device_status(device_id)
-            raw = self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
+            raw = self.gateway.device_observe(device_id, include_screenshot=False, mode="compact", **identity)
         else:
             status = self.gateway.status()
-            raw = self.gateway.observe(include_screenshot=False, mode="compact")
+            raw = self.gateway.observe(include_screenshot=False, mode="compact", **identity)
         if classify_failure(raw):
             return redact(raw)
-        page_card = self._remember_page_card(device_id, raw, goal=goal)
+        page_card = self._remember_page_card(device_id, raw, goal=goal, session_id=session_id)
         try:
             search_raw = (
-                self.gateway.device_ui_search(device_id, query)
-                if device_id else self.gateway.ui_search(query)
+                self.gateway.device_ui_search(device_id, query, **identity)
+                if device_id else self.gateway.ui_search(query, **identity)
             )
             semantic_search = compact_search(search_raw, query=query, goal=goal)
-            self._remember_search_ids(device_id, semantic_search)
+            self._remember_search_ids(device_id, semantic_search, session_id=session_id)
         except GatewayError as exc:
             semantic_search = {
                 "kind": "semantic_search",
@@ -323,11 +336,13 @@ class PhoneTools:
             raise ValueError("query is required")
         goal = str(args.get("goal") or "").strip()
         device_id = _device_id(args)
+        scope = parse_tool_execution_scope(args)
+        identity = _identity_kwargs(scope)
         if device_id:
-            search = compact_search(self.gateway.device_ui_search(device_id, query), query=query, goal=goal)
+            search = compact_search(self.gateway.device_ui_search(device_id, query, **identity), query=query, goal=goal)
         else:
-            search = compact_search(self.gateway.ui_search(query), query=query, goal=goal)
-        self._remember_search_ids(device_id, search)
+            search = compact_search(self.gateway.ui_search(query, **identity), query=query, goal=goal)
+        self._remember_search_ids(device_id, search, session_id=_session_id(scope))
         return search
 
     def phone_inspect_element(self, args: dict[str, Any]) -> Any:
@@ -335,14 +350,16 @@ class PhoneTools:
         if not element_id:
             raise ValueError("element_id is required")
         device_id = _device_id(args)
+        identity = _identity_kwargs(parse_tool_execution_scope(args))
         if device_id:
-            return compact_element(self.gateway.device_ui_element(device_id, element_id), element_id=element_id)
-        return compact_element(self.gateway.ui_element(element_id), element_id=element_id)
+            return compact_element(self.gateway.device_ui_element(device_id, element_id, **identity), element_id=element_id)
+        return compact_element(self.gateway.ui_element(element_id, **identity), element_id=element_id)
 
     def phone_screenshot(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
+        identity = _identity_kwargs(parse_tool_execution_scope(args))
         if device_id:
-            observed = self.gateway.device_observe(device_id, include_screenshot=True, mode="compact")
+            observed = self.gateway.device_observe(device_id, include_screenshot=True, mode="compact", **identity)
             compact = compact_observation(observed)
             screenshot = observed.get("screenshot") if isinstance(observed, dict) else None
             available = isinstance(screenshot, dict) and screenshot.get("available") is not False
@@ -358,7 +375,7 @@ class PhoneTools:
                     "live video; a debug bundle remains available for diagnostics."
                 )
             return result
-        observed = self.gateway.observe(include_screenshot=True, mode="compact")
+        observed = self.gateway.observe(include_screenshot=True, mode="compact", **identity)
         compact = compact_observation(observed)
         screenshot = compact.get("screenshot")
         path = _extract_screenshot_path(screenshot)
@@ -392,7 +409,9 @@ class PhoneTools:
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
-        _validate_mcp_action_params(tool, params)
+        scope = parse_tool_execution_scope(args)
+        action_params = strip_execution_scope(params)
+        _validate_mcp_action_params(tool, action_params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
@@ -400,11 +419,12 @@ class PhoneTools:
             # This is only an MCP-side intent/UX guard. It is never Android policy authority;
             # the V3 GatewayActionAuthority must still authorize the actual handoff.
             raise ValueError("phone.type requires user_authorized=true as an explicit MCP intent acknowledgement")
-        params = _forward_type_authorization(tool, args, params)
+        action_params = _forward_type_authorization(tool, args, action_params)
+        action_params = attach_execution_scope(action_params, scope)
         device_id = _device_id(args)
         if tool not in MUTATING_ACTIONS:
-            return self._run_non_mutating_action(device_id, tool, params, goal)
-        return self._run_verified_mutation(device_id, tool, params, goal)
+            return self._run_non_mutating_action(device_id, tool, action_params, goal, scope=scope)
+        return self._run_verified_mutation(device_id, tool, action_params, goal, scope=scope)
 
     def phone_group_act(self, args: dict[str, Any]) -> Any:
         raw_ids = args.get("device_ids")
@@ -448,28 +468,50 @@ class PhoneTools:
             "results": results,
         }
 
-    def _scope_key(self, device_id: str) -> str:
-        return device_id or "__gateway_selected__"
+    def _scope_key(self, device_id: str, session_id: str | None = None) -> str:
+        return scope_cache_key(device_id, session_id)
 
-    def _remember_page_card(self, device_id: str, raw: Any, *, goal: str = "") -> dict[str, Any]:
+    def _remember_page_card(
+        self,
+        device_id: str,
+        raw: Any,
+        *,
+        goal: str = "",
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         card = compact_observation(raw, goal=goal)
-        scope = self._scope_key(device_id)
+        scope = self._scope_key(device_id, session_id)
         self._page_cards[scope] = (raw, card)
         self._current_element_ids[scope] = _card_element_ids(card)
         return card
 
-    def _remember_search_ids(self, device_id: str, search: dict[str, Any]) -> None:
-        scope = self._scope_key(device_id)
+    def _remember_search_ids(
+        self,
+        device_id: str,
+        search: dict[str, Any],
+        *,
+        session_id: str | None = None,
+    ) -> None:
+        scope = self._scope_key(device_id, session_id)
         if scope not in self._page_cards:
             return
         current = self._current_element_ids.setdefault(scope, set())
         current.update(_search_element_ids(search))
 
-    def _run_non_mutating_action(self, device_id: str, tool: str, params: dict[str, Any], goal: str) -> Any:
+    def _run_non_mutating_action(
+        self,
+        device_id: str,
+        tool: str,
+        params: dict[str, Any],
+        goal: str,
+        *,
+        scope: dict[str, Any] | None = None,
+    ) -> Any:
+        identity = _identity_kwargs(scope)
         try:
             action = (
-                self.gateway.device_action(device_id, tool, params, goal)
-                if device_id else self.gateway.action(tool, params, goal)
+                self.gateway.device_action(device_id, tool, params, goal, **identity)
+                if device_id else self.gateway.action(tool, params, goal, **identity)
             )
         except GatewayError as exc:
             return _failed_action_envelope(
@@ -498,17 +540,18 @@ class PhoneTools:
             "error": None if failure is None else {"code": failure.code, "layer": failure.layer},
         }
 
-    def _auto_observe(self, device_id: str, goal: str):
+    def _auto_observe(self, device_id: str, goal: str, scope: dict[str, Any] | None = None):
+        identity = _identity_kwargs(scope)
         try:
             raw = (
-                self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
-                if device_id else self.gateway.observe(include_screenshot=False, mode="compact")
+                self.gateway.device_observe(device_id, include_screenshot=False, mode="compact", **identity)
+                if device_id else self.gateway.observe(include_screenshot=False, mode="compact", **identity)
             )
         except GatewayError:
             return None
         if classify_failure(raw) is not None:
             return None
-        card = self._remember_page_card(device_id, raw, goal=goal)
+        card = self._remember_page_card(device_id, raw, goal=goal, session_id=_session_id(scope))
         return raw, card
 
     def _resolve_snapshot_target(self, scope: str, params: dict[str, Any]):
@@ -554,11 +597,20 @@ class PhoneTools:
             return "STALE_OBSERVATION"
         return resolved
 
-    def _run_verified_mutation(self, device_id: str, tool: str, params: dict[str, Any], goal: str) -> dict[str, Any]:
-        scope = self._scope_key(device_id)
-        cached = self._page_cards.get(scope)
+    def _run_verified_mutation(
+        self,
+        device_id: str,
+        tool: str,
+        params: dict[str, Any],
+        goal: str,
+        *,
+        scope: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cache_key = self._scope_key(device_id, _session_id(scope))
+        identity = _identity_kwargs(scope)
+        cached = self._page_cards.get(cache_key)
         if cached is None:
-            cached = self._auto_observe(device_id, goal)
+            cached = self._auto_observe(device_id, goal, scope)
         if cached is None:
             return _failed_action_envelope(
                 tool=tool,
@@ -570,7 +622,7 @@ class PhoneTools:
                 failure_layer="protocol",
                 delta="No current Page Card is available. Run phone_locate or phone_observe before acting.",
             )
-        resolved = self._resolve_snapshot_target(scope, params)
+        resolved = self._resolve_snapshot_target(cache_key, params)
         if resolved == "STALE_OBSERVATION":
             return _failed_action_envelope(
                 tool=tool,
@@ -586,8 +638,9 @@ class PhoneTools:
         if isinstance(params, dict) and params.get("fastPath") is not False:
             params = dict(params)
             params["fastPath"] = True
+        params = attach_execution_scope(params, scope)
         element_id = _element_id_from_params(params)
-        if element_id and element_id not in self._current_element_ids.get(scope, set()):
+        if element_id and element_id not in self._current_element_ids.get(cache_key, set()):
             return _failed_action_envelope(
                 tool=tool,
                 goal=goal,
@@ -602,15 +655,15 @@ class PhoneTools:
         before = compact_observation(before_raw, goal=goal)
         # The gateway clears its observation authority after an action. Clear our model-facing
         # cache at the same boundary so an ID can never be accidentally reused.
-        self._page_cards.pop(scope, None)
-        self._current_element_ids.pop(scope, None)
+        self._page_cards.pop(cache_key, None)
+        self._current_element_ids.pop(cache_key, None)
         action: Any = None
         failure = None
         action_error: GatewayError | None = None
         try:
             action = (
-                self.gateway.device_action(device_id, tool, params, goal)
-                if device_id else self.gateway.action(tool, params, goal)
+                self.gateway.device_action(device_id, tool, params, goal, **identity)
+                if device_id else self.gateway.action(tool, params, goal, **identity)
             )
             failure = classify_failure(action)
         except GatewayError as exc:
@@ -627,12 +680,14 @@ class PhoneTools:
         if can_observe_after:
             try:
                 after_raw = (
-                    self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
-                    if device_id else self.gateway.observe(include_screenshot=False, mode="compact")
+                    self.gateway.device_observe(device_id, include_screenshot=False, mode="compact", **identity)
+                    if device_id else self.gateway.observe(include_screenshot=False, mode="compact", **identity)
                 )
                 after_failure = classify_failure(after_raw)
                 if after_failure is None:
-                    after = self._remember_page_card(device_id, after_raw, goal=goal)
+                    after = self._remember_page_card(
+                        device_id, after_raw, goal=goal, session_id=_session_id(scope),
+                    )
             except GatewayError as exc:
                 after_failure = classify_failure(exc.body)
                 if after_failure is None:
@@ -753,6 +808,18 @@ class PhoneTools:
         device_id = _required_id(args, "device_id", TARGET_ID)
         run_id = _required_id(args, "run_id", RUN_ID)
         return redact(self.gateway.routine_cancel(device_id, run_id))
+
+
+def _identity_kwargs(scope: dict[str, Any] | None) -> dict[str, Any]:
+    if not scope:
+        return {}
+    return {"session_id": scope["sessionId"], "display_id": scope["displayId"]}
+
+
+def _session_id(scope: dict[str, Any] | None) -> str | None:
+    if not scope:
+        return None
+    return str(scope.get("sessionId") or "") or None
 
 
 def _compact_status(status: Any) -> dict[str, Any]:

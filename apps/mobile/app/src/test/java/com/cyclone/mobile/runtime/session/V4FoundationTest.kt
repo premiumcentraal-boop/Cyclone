@@ -4,6 +4,7 @@ import com.cyclone.mobile.ai.vision.live.AccessibilityScreenshotFrameSource
 import com.cyclone.mobile.ai.vision.live.FrameSourceType
 import com.cyclone.mobile.ai.vision.live.InMemoryLiveFrameBroker
 import com.cyclone.mobile.ai.vision.live.LiveFrame
+import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -58,6 +59,9 @@ class V4FoundationTest {
         assertFalse(two.executable)
         assertEquals(one, store.lookup("hidden-a"))
         assertEquals(3, store.snapshot().size)
+        assertTrue(SessionKernel.API_SESSION_CAPACITY >= 2)
+        assertEquals(1, SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT)
+        assertEquals(1, WorkspaceTasks.PRODUCT_HOT_BACKGROUND_LIMIT)
         assertEquals(12, store.requireSessionDisplay("hidden-a", 12).displayId)
 
         try {
@@ -69,6 +73,16 @@ class V4FoundationTest {
         try {
             store.registerSynthetic("hidden-a", 14, ExecutionBackendKind.ROOT)
             fail("duplicate identity must be rejected")
+        } catch (_: SessionIdentityException) {
+        }
+
+        val owned = ExecutionSessionStore()
+        owned.registerOwned("workspace-a", 8, "com.a")
+        owned.registerOwned("workspace-b", 9, "com.b")
+        assertEquals(3, owned.snapshot().size)
+        try {
+            owned.registerOwned("workspace-c", 0, "com.c")
+            fail("owned sessions must not silently map to display 0")
         } catch (_: SessionIdentityException) {
         }
     }

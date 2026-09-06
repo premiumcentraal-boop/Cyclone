@@ -12,6 +12,7 @@ from .phone_mcp import (
     compact_observation,
     draft_run_denied,
     matched_verified_skill,
+    parse_execution_scope,
     skill_run_normalize,
     skill_save_payload,
     skill_save_success,
@@ -24,6 +25,13 @@ INSTANCE_ID = re.compile(r"^vdev_[a-f0-9]{16}$")
 ROUTINE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+
+
+def _identity_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+    scope = parse_execution_scope(args)
+    if not scope:
+        return {}
+    return {"session_id": scope["sessionId"], "display_id": scope["displayId"]}
 
 
 def _forward_type_authorization(tool: str, args: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -100,6 +108,7 @@ class PhoneTools:
             self._device(args),
             include_screenshot=bool(args.get("include_screenshot", False)),
             mode=mode,
+            **_identity_kwargs(args),
         )
 
     def phone_locate(self, args: dict[str, Any]) -> Any:
@@ -109,10 +118,10 @@ class PhoneTools:
         query = str(args.get("query") or goal).strip()
         device_id = self._device(args)
         status = self.gateway.status(device_id)
-        raw = self.gateway.observe(device_id, include_screenshot=False, mode="compact")
+        raw = self.gateway.observe(device_id, include_screenshot=False, mode="compact", **_identity_kwargs(args))
         page_card = compact_observation(raw, goal=goal)
         try:
-            search_raw = self.gateway.ui_search(query, device_id)
+            search_raw = self.gateway.ui_search(query, device_id, **_identity_kwargs(args))
         except GatewayError as exc:
             search_raw = {"available": False, "error": redact(exc.body)}
         matched = None
@@ -143,16 +152,16 @@ class PhoneTools:
         query = str(args.get("query") or "").strip()
         if not query:
             raise ValueError("query is required")
-        return self.gateway.ui_search(query, self._device(args))
+        return self.gateway.ui_search(query, self._device(args), **_identity_kwargs(args))
 
     def phone_inspect_element(self, args: dict[str, Any]) -> Any:
         element_id = str(args.get("element_id") or "").strip()
         if not element_id:
             raise ValueError("element_id is required")
-        return self.gateway.ui_element(element_id, self._device(args))
+        return self.gateway.ui_element(element_id, self._device(args), **_identity_kwargs(args))
 
     def phone_screenshot(self, args: dict[str, Any]) -> Any:
-        return self.gateway.observe(self._device(args), include_screenshot=True, mode="compact")
+        return self.gateway.observe(self._device(args), include_screenshot=True, mode="compact", **_identity_kwargs(args))
 
     def phone_current_page(self, args: dict[str, Any]) -> Any:
         return self.gateway.current_page(self._device(args))
@@ -174,7 +183,7 @@ class PhoneTools:
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true; Android policy remains authoritative")
         params = _forward_type_authorization(tool, args, params)
-        result = self.gateway.action(tool, params, goal, self._device(args))
+        result = self.gateway.action(tool, params, goal, self._device(args), **_identity_kwargs(args))
         if tool == "phone.type":
             typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")
             result = strip_typed_plaintext(result, typed if isinstance(typed, str) else None)

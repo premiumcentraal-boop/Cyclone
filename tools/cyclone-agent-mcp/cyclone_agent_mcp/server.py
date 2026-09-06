@@ -42,29 +42,68 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         return tools.call("phone_capabilities", {"device_id": device_id, "refresh": refresh})
 
     @mcp.tool(annotations=READ)
-    def phone_observe(device_id: str | None = None, mode: Literal["compact", "full"] = "compact", include_screenshot: bool = False) -> dict[str, Any]:
+    def phone_observe(
+        device_id: str | None = None,
+        mode: Literal["compact", "full"] = "compact",
+        include_screenshot: bool = False,
+        session_id: str | None = None,
+        display_id: int | None = None,
+    ) -> dict[str, Any]:
         """Observe one phone. Compact semantic state is the default."""
-        return tools.call("phone_observe", {"device_id": device_id, "mode": mode, "include_screenshot": include_screenshot})
+        return tools.call("phone_observe", {
+            "device_id": device_id, "mode": mode, "include_screenshot": include_screenshot,
+            "session_id": session_id, "display_id": display_id,
+        })
 
     @mcp.tool(annotations=READ)
-    def phone_locate(goal: str, device_id: str | None = None, query: str | None = None) -> dict[str, Any]:
+    def phone_locate(
+        goal: str,
+        device_id: str | None = None,
+        query: str | None = None,
+        session_id: str | None = None,
+        display_id: int | None = None,
+    ) -> dict[str, Any]:
         """Fuse readiness, a bounded Page Card (pageText + pageSummary), and goal-ranked candidates."""
-        return tools.call("phone_locate", {"device_id": device_id, "goal": goal, "query": query})
+        return tools.call("phone_locate", {
+            "device_id": device_id, "goal": goal, "query": query,
+            "session_id": session_id, "display_id": display_id,
+        })
 
     @mcp.tool(annotations=READ)
-    def phone_ui_search(query: str, device_id: str | None = None) -> dict[str, Any]:
+    def phone_ui_search(
+        query: str,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        display_id: int | None = None,
+    ) -> dict[str, Any]:
         """Search the semantic/raw UI index for one phone."""
-        return tools.call("phone_ui_search", {"device_id": device_id, "query": query})
+        return tools.call("phone_ui_search", {
+            "device_id": device_id, "query": query, "session_id": session_id, "display_id": display_id,
+        })
 
     @mcp.tool(annotations=READ)
-    def phone_inspect_element(element_id: str, device_id: str | None = None) -> dict[str, Any]:
+    def phone_inspect_element(
+        element_id: str,
+        device_id: str | None = None,
+        session_id: str | None = None,
+        display_id: int | None = None,
+    ) -> dict[str, Any]:
         """Inspect one observation-scoped UI element candidate."""
-        return tools.call("phone_inspect_element", {"device_id": device_id, "element_id": element_id})
+        return tools.call("phone_inspect_element", {
+            "device_id": device_id, "element_id": element_id,
+            "session_id": session_id, "display_id": display_id,
+        })
 
     @mcp.tool(annotations=READ)
-    def phone_screenshot(device_id: str | None = None) -> dict[str, Any]:
+    def phone_screenshot(
+        device_id: str | None = None,
+        session_id: str | None = None,
+        display_id: int | None = None,
+    ) -> dict[str, Any]:
         """Capture screenshot evidence for one phone; use only after structured evidence is insufficient."""
-        return tools.call("phone_screenshot", {"device_id": device_id})
+        return tools.call("phone_screenshot", {
+            "device_id": device_id, "session_id": session_id, "display_id": display_id,
+        })
 
     @mcp.tool(annotations=READ)
     def phone_current_page(device_id: str | None = None) -> dict[str, Any]:
@@ -83,9 +122,14 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         goal: str,
         device_id: str | None = None,
         user_authorized: bool = False,
+        session_id: str | None = None,
+        display_id: int | None = None,
     ) -> dict[str, Any]:
         """Forward one typed action to Cyclone. There is no generic command/shell/ADB escape hatch."""
-        return tools.call("phone_act", {"device_id": device_id, "tool": tool, "params": params, "goal": goal, "user_authorized": user_authorized})
+        return tools.call("phone_act", {
+            "device_id": device_id, "tool": tool, "params": params, "goal": goal,
+            "user_authorized": user_authorized, "session_id": session_id, "display_id": display_id,
+        })
 
     @mcp.tool(annotations=WRITE)
     def phone_skill_save(

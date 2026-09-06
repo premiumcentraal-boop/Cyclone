@@ -13,6 +13,7 @@ from ..actions.envelope import (
     safe_android_execution,
 )
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
+from ..execution_scope import attach_execution_identity, history_key, parse_execution_identity
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
 from .page_text import _compact_observation
@@ -106,9 +107,20 @@ class DesktopAgentService:
             "gateway_health": {"state": "READY" if allowed else "UNAVAILABLE"},
         }
 
-    def observe(self, device_id: str, *, mode: str = "compact", include_screenshot: bool = False) -> dict[str, Any]:
-        session = self._paired(device_id)
-        raw_observation = self._request(session, "observe.semantic", {})
+    def observe(
+        self,
+        device_id: str,
+        *,
+        mode: str = "compact",
+        include_screenshot: bool = False,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        session = self._paired(device_id)  # USB/trust pairing, not execution sessionId.
+        identity = self._execution_identity(payload)
+        raw_observation = self._request(session, "observe.semantic", dict(identity or {}))
+        if identity:
+            raw_observation.setdefault("sessionId", identity["sessionId"])
+            raw_observation.setdefault("displayId", identity["displayId"])
         selected_mode = mode if mode in {"compact", "full"} else "compact"
         observation = raw_observation if selected_mode == "full" else _compact_observation(raw_observation)
         observation_id = str(raw_observation.get("observationId") or "")
@@ -119,7 +131,7 @@ class DesktopAgentService:
             "pageKey": raw_observation.get("pageKey"),
             "package": raw_observation.get("package"),
         }
-        self._append(device_id, record)
+        self._append(device_id, record, identity)
         response = {
             **self._operation_context(session, device_id, "observe"),
             "mode": selected_mode,
@@ -138,32 +150,38 @@ class DesktopAgentService:
             response["screenshot"] = self.screenshot(device_id, profile="thumbnail")["screenshot"]
         return response
 
-    def ui_search(self, device_id: str, query: str) -> dict[str, Any]:
+    def ui_search(self, device_id: str, query: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         session = self._paired(device_id)
-        result = self._request(session, "ui.search", {"query": query[:300], "limit": 50})
+        args = attach_execution_identity({"query": query[:300], "limit": 50}, self._execution_identity(payload))
+        result = self._request(session, "ui.search", args)
         return {**result, **self._operation_context(session, device_id, "search"), "query": query[:300]}
 
-    def ui_element(self, device_id: str, element_id: str) -> dict[str, Any]:
+    def ui_element(self, device_id: str, element_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         session = self._paired(device_id)
-        result = self._request(session, "ui.element", {"elementId": element_id[:500]})
+        args = attach_execution_identity({"elementId": element_id[:500]}, self._execution_identity(payload))
+        result = self._request(session, "ui.element", args)
         return {
             **result,
             **self._operation_context(session, device_id, "inspect"),
             "elementId": str(result.get("elementId") or element_id[:500]),
         }
 
-    def current_page(self, device_id: str) -> dict[str, Any]:
+    def current_page(self, device_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        identity = self._execution_identity(payload)
+        key = history_key(device_id, identity)
         with self._lock:
-            latest = next((item for item in reversed(self._history[device_id]) if item.get("kind") == "observation"), None)
+            latest = next((item for item in reversed(self._history[key]) if item.get("kind") == "observation"), None)
         if latest is None:
-            return self.observe(device_id)
+            return self.observe(device_id, payload=payload)
         session = self._paired(device_id)
         return {**self._operation_context(session, device_id, "current_page"), "page": latest}
 
-    def page_history(self, device_id: str) -> dict[str, Any]:
+    def page_history(self, device_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         session = self._paired(device_id)
+        identity = self._execution_identity(payload)
+        key = history_key(device_id, identity)
         with self._lock:
-            items = list(self._history[device_id])
+            items = list(self._history[key])
         return {**self._operation_context(session, device_id, "page_history"), "history": items}
 
     def action(self, device_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -174,12 +192,15 @@ class DesktopAgentService:
         params = payload.get("params") or {}
         if not isinstance(params, dict):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object.")
+        identity = self._execution_identity(payload)
+        if identity:
+            params = attach_execution_identity(params, identity)
         goal = str(payload.get("goal") or tool.replace("phone.", "").replace("_", " "))[:1000]
         expected = str(payload.get("expected_observation_id") or payload.get("currentObservationId") or "")
         if tool not in {"phone.observe", "phone.find", "phone.wait_for"} and not expected:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A fresh observation is required before mutation.")
 
-        before = self._latest_observation(device_id)
+        before = self._latest_observation(device_id, identity)
         args: dict[str, Any] = {
             "tool": tool,
             "params": params,
@@ -187,10 +208,16 @@ class DesktopAgentService:
             # Android owns this source constant and the authority decision.
             "source": "PC_CODEX",
         }
+        if identity:
+            args["sessionId"] = identity["sessionId"]
+            args["displayId"] = identity["displayId"]
         if expected:
             args["currentObservationId"] = expected
         execution = self._request(session, "action.execute", args)
-        after_raw = self._observe_after_action(session, before, tool, execution)
+        after_raw = self._observe_after_action(session, before, tool, execution, identity)
+        if identity:
+            after_raw.setdefault("sessionId", identity["sessionId"])
+            after_raw.setdefault("displayId", identity["displayId"])
         after = _compact_observation(after_raw)
         after_id = str(after_raw.get("observationId") or "")
         self._append(device_id, {
@@ -199,14 +226,14 @@ class DesktopAgentService:
             "tool": tool,
             "beforeObservationId": expected or (before or {}).get("observationId"),
             "afterObservationId": after_id,
-        })
+        }, identity)
         self._append(device_id, {
             "kind": "observation",
             "at": now_ms(),
             "observationId": after_id,
             "pageKey": after_raw.get("pageKey"),
             "package": after_raw.get("package"),
-        })
+        }, identity)
         parsed_execution = extract_android_execution(execution)
         if parsed_execution is None:
             execution_ok = False
@@ -352,8 +379,10 @@ class DesktopAgentService:
         before: dict[str, Any] | None,
         tool: str,
         execution: dict[str, Any],
+        identity: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        after = self._request(session, "observe.semantic", {})
+        observe_args = dict(identity or {})
+        after = self._request(session, "observe.semantic", observe_args)
         if tool not in PAGE_TRANSITION_TOOLS or before is None:
             return after
         verification = execution.get("verification")
@@ -367,7 +396,7 @@ class DesktopAgentService:
         deadline = time.monotonic() + self._after_action_timeout_seconds
         while self._same_page(before, after) and time.monotonic() < deadline:
             time.sleep(self._after_action_poll_seconds)
-            after = self._request(session, "observe.semantic", {})
+            after = self._request(session, "observe.semantic", observe_args)
         return after
 
     @staticmethod
@@ -500,13 +529,30 @@ class DesktopAgentService:
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Phone disconnected from Cyclone Gateway.", retryable=True) from exc
 
-    def _latest_observation(self, device_id: str) -> dict[str, Any] | None:
+    def _execution_identity(self, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+        try:
+            return parse_execution_identity(payload)
+        except ValueError as exc:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, str(exc)) from exc
+
+    def _latest_observation(
+        self,
+        device_id: str,
+        identity: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        key = history_key(device_id, identity)
         with self._lock:
-            for item in reversed(self._history[device_id]):
+            for item in reversed(self._history[key]):
                 if item.get("kind") == "observation":
                     return item
         return None
 
-    def _append(self, device_id: str, value: dict[str, Any]) -> None:
+    def _append(
+        self,
+        device_id: str,
+        value: dict[str, Any],
+        identity: dict[str, Any] | None = None,
+    ) -> None:
+        key = history_key(device_id, identity)
         with self._lock:
-            self._history[device_id].append(value)
+            self._history[key].append(value)

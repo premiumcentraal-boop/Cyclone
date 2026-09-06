@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..actions.router import ActionValidationError
+from ..execution_scope import attach_execution_identity, parse_execution_identity
 from .models import (
     CAPABILITY_PROTOCOL_VERSION,
     CapabilityActionRequest,
@@ -57,10 +58,25 @@ class CapabilityService:
                 error=error,
             )
         try:
+            try:
+                identity = parse_execution_identity(request.model_dump(exclude_none=True))
+            except ValueError as exc:
+                error = _error(
+                    GatewayErrorCode.PROTOCOL_MISMATCH,
+                    FailureLayer.PROTOCOL,
+                    str(exc)[:240],
+                )
+                return CapabilityObservationResponse(
+                    correlation_id=request.correlation_id,
+                    ok=False,
+                    transport=LayerOutcome(ok=True, status="not_attempted"),
+                    error=error,
+                )
             observe(
                 screenshot=request.include_screenshot,
                 uiautomator=True,
                 diagnostics=request.mode == "full",
+                execution_scope=identity,
             )
             observation = retrieval.get_page_context(request.mode, request.goal)
             if observation is None:
@@ -149,9 +165,17 @@ class CapabilityService:
                 )
 
         try:
+            identity = parse_execution_identity(request.model_dump(exclude_none=True))
+        except ValueError as exc:
+            return self._rejected(
+                request, safety, GatewayErrorCode.PROTOCOL_MISMATCH,
+                FailureLayer.PROTOCOL, str(exc)[:240],
+            )
+        try:
+            params = attach_execution_identity(request.params, identity)
             raw = self.action_router.execute(
                 tool=request.capability_id,
-                params=request.params,
+                params=params,
                 goal=request.goal,
                 source=request.source,
                 request_id=request.correlation_id,

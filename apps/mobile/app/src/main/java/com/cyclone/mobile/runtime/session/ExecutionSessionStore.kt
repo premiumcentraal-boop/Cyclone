@@ -63,7 +63,9 @@ class ExecutionSessionStore {
     }
 
     internal fun registerOwned(sessionId: String, displayId: Int, targetPackage: String): ExecutionSession = synchronized(lock) {
-        require(displayId > 0 && sessionId !in sessions && sessions.values.none { it.displayId == displayId })
+        if (displayId <= 0 || sessionId in sessions || sessions.values.any { it.displayId == displayId }) {
+            throw SessionIdentityException("owned session requires a unique nonzero displayId")
+        }
         ExecutionSession(sessionId, displayId, targetPackage, ExecutionBackendKind.SHIZUKU,
             InputOwner.CYCLONE, true, System.currentTimeMillis()).also { sessions[sessionId] = it }
     }

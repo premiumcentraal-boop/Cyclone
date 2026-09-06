@@ -22,13 +22,10 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
         require(width in 320..2160 && height in 320..3840 && density in 120..640 && surface.isValid)
         // OWN_CONTENT_ONLY prevents mirroring the human display if no app is present.
         check(android.os.Build.VERSION.SDK_INT >= 35) { "BACKGROUND_MODE_UNAVAILABLE: isolated focus requires Android 15 or later" }
-        fun flag(name: String): Int = DisplayManager::class.java.getField(name).getInt(null)
-        val isolation = flag("VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL") or
-            flag("VIRTUAL_DISPLAY_FLAG_TRUSTED") or flag("VIRTUAL_DISPLAY_FLAG_OWN_FOCUS") or
-            flag("VIRTUAL_DISPLAY_FLAG_STEAL_TOP_FOCUS_DISABLED")
-        val display = displays.createVirtualDisplay("Cyclone workspace", width, height, density, surface,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or isolation)
+        val flags = WorkspaceDisplayPolicy.resolveFlags { name ->
+            runCatching { DisplayManager::class.java.getField(name).getInt(null) }.getOrNull()
+        }
+        val display = displays.createVirtualDisplay("Cyclone workspace", width, height, density, surface, flags)
             ?: error("BACKGROUND_MODE_UNAVAILABLE: virtual display creation rejected")
         if (display.display.displayId <= 0) { display.release(); error("Nonzero display required") }
         workspaces[sessionId] = Owned(display, width, height)
@@ -38,13 +35,12 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
     @Synchronized override fun launch(sessionId: String, component: String): Bundle = result {
         val owned = valid(sessionId)
         require(owned.agent)
-        require(component.matches(Regex("[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+")))
         val packageName = component.substringBefore('/')
         val tasks = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list")))
         require(tasks.none { it.packageName == packageName && it.displayId == 0 }) {
             "FOREGROUND_REQUIRED: close this app on your main screen before opening its workspace"
         }
-        command(listOf("/system/bin/am", "start", "-W", "--display", owned.display.display.displayId.toString(), "-n", component))
+        command(WorkspaceDisplayPolicy.launchCommand(owned.display.display.displayId, component))
         owned.packageName = packageName
         requireTask(owned)
         describe(sessionId, owned)

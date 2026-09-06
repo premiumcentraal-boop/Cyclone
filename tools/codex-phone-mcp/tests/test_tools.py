@@ -30,11 +30,11 @@ class FakeGateway:
             "legacy": {"available": True, "bridgeReachable": True, "selectedSerialSuffix": "061G"},
         }
     def observe(self, **kwargs): return {"pageKey": "home", "controls": [{"id": "1", "label": "Apps", "clickable": True, "elementIndex": 1}], "screenshot": None}
-    def ui_search(self, query): return {"candidates": [{"id": "1", "label": query}]}
-    def ui_element(self, element_id): return {"id": element_id, "password": "should-not-leak"}
+    def ui_search(self, query, **kwargs): return {"candidates": [{"id": "1", "label": query}]}
+    def ui_element(self, element_id, **kwargs): return {"id": element_id, "password": "should-not-leak"}
     def current_page(self): return {"pageKey": "home"}
     def page_history(self): return []
-    def action(self, tool, params, goal):
+    def action(self, tool, params, goal, **kwargs):
         return {
             "protocol_version": "cyclone.gateway.capability.v1",
             "capability_id": tool,
@@ -56,7 +56,7 @@ class FakeGateway:
             "capabilities": [{"capability_id": "phone.click"}, {"capability_id": "phone.observe"}],
             "gateway_health": {"state": "READY"},
         }
-    def device_observe(self, device_id, *, include_screenshot=False, mode="compact"):
+    def device_observe(self, device_id, *, include_screenshot=False, mode="compact", **kwargs):
         return {
             "device_id": device_id,
             "mode": mode,
@@ -64,11 +64,11 @@ class FakeGateway:
             "witness": {"observation_id": "obs-dev", "page_key": "home"},
             "screenshot": {"available": False, "reason": "USE_DESKTOP_VIDEO_OR_DEBUG_BUNDLE"} if include_screenshot else None,
         }
-    def device_ui_search(self, device_id, query): return {"device_id": device_id, "results": [{"id": "1", "label": query}]}
-    def device_ui_element(self, device_id, element_id): return {"device_id": device_id, "id": element_id}
+    def device_ui_search(self, device_id, query, **kwargs): return {"device_id": device_id, "results": [{"id": "1", "label": query}]}
+    def device_ui_element(self, device_id, element_id, **kwargs): return {"device_id": device_id, "id": element_id}
     def device_current_page(self, device_id): return {"device_id": device_id, "page": {"pageKey": "home"}}
     def device_page_history(self, device_id): return {"device_id": device_id, "history": []}
-    def device_action(self, device_id, tool, params, goal):
+    def device_action(self, device_id, tool, params, goal, **kwargs):
         return {
             "protocol_version": "cyclone.gateway.capability.v1",
             "capability_id": tool,
@@ -87,7 +87,7 @@ class FakeGateway:
 
 
 class FailedActionGateway(FakeGateway):
-    def action(self, tool, params, goal):
+    def action(self, tool, params, goal, **kwargs):
         return {
             "protocol_version": "cyclone.gateway.capability.v1",
             "capability_id": tool,
@@ -100,7 +100,7 @@ class FailedActionGateway(FakeGateway):
 
 
 class FailedDeviceActionGateway(FakeGateway):
-    def device_action(self, device_id, tool, params, goal):
+    def device_action(self, device_id, tool, params, goal, **kwargs):
         return {
             "protocol_version": "cyclone.gateway.capability.v1",
             "capability_id": tool,
@@ -136,9 +136,9 @@ class AtomicPageGateway(FakeGateway):
             },
         }
 
-    def action(self, tool, params, goal):
+    def action(self, tool, params, goal, **kwargs):
         self.current = "apps"
-        return super().action(tool, params, goal)
+        return super().action(tool, params, goal, **kwargs)
 
 
 class ToolTests(unittest.TestCase):
@@ -439,7 +439,7 @@ class ToolTests(unittest.TestCase):
                     },
                 }
 
-            def action(self, tool, params, goal):
+            def action(self, tool, params, goal, **kwargs):
                 return {
                     "protocol_version": "cyclone.gateway.capability.v1",
                     "capability_id": tool,

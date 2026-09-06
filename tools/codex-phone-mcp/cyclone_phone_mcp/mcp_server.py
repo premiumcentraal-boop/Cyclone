@@ -83,19 +83,62 @@ def _with_device(schema: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _with_session(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = dict(schema.get("properties") or {})
+    properties["session_id"] = {
+        "type": "string",
+        "description": (
+            "Optional execution session id (not USB, media, teach, or MCP-report sessionId). "
+            "Omit for default-foreground. Named workspace sessions require display_id > 0."
+        ),
+    }
+    properties["display_id"] = {
+        "type": "integer",
+        "description": (
+            "Virtual display id for the execution session. Required and must be > 0 when "
+            "session_id is not default-foreground. Never send display 0 for a named workspace."
+        ),
+    }
+    properties["sessionId"] = {
+        "type": "string",
+        "description": "Alias of session_id.",
+    }
+    properties["displayId"] = {
+        "type": "integer",
+        "description": "Alias of display_id.",
+    }
+    properties["executionContext"] = {
+        "type": "object",
+        "description": "Optional nested {sessionId, displayId}. Must agree with top-level aliases.",
+        "properties": {
+            "sessionId": {"type": "string"},
+            "session_id": {"type": "string"},
+            "displayId": {"type": "integer"},
+            "display_id": {"type": "integer"},
+        },
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": schema.get("required", []),
+        "additionalProperties": False,
+    }
+
+
 TOOLS = [
     _tool("phone_status", "Read Cyclone gateway, ADB, bridge and Accessibility readiness for one phone.", _with_device({"type": "object", "properties": {}}), read_only=True),
-    _tool("phone_locate", "Primary locate-first tool: fuse device status, a bounded Page Card (pageText + pageSummary), and goal-aware semantic search. If a verified skill matches goal + pageKey, skip the model and call phone_skill_run.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "query": {"type": "string"}}, "required": ["goal"]}), read_only=True),
-    _tool("phone_act", "Execute one typed Cyclone phone action through the V3 Android authority seam and canonical PhoneToolExecutor. Planner: phone.open_app / phone.wait_for. UI: click/type/scroll by current elementId or elementIndex. Locate first. click/long_press/type require a current observation-scoped elementId, elementIndex, snapshot ref, or role+name; free-form selectors and coordinates are rejected. One screen-changing act per turn. Fast Path settles 300ms then fingerprints; UNCHANGED is verified=false — do not double-click. phone.scroll accepts direction=forward/backward; phone.swipe has no safe MCP route. Every mutation returns action status plus before/after Page Cards, pageChanged, delta, errorClass, and generation. phone.type requires user_authorized=true but Android policy remains authoritative.", _with_device({"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object", "description": "Typed safe parameters only. Use current elementId or elementIndex for element actions; raw selector text/fuzzy/bounds/coordinates are rejected."}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}}, "required": ["tool", "params", "goal"]}), read_only=False, destructive=True),
+    _tool("phone_locate", "Primary locate-first tool: fuse device status, a bounded Page Card (pageText + pageSummary), and goal-aware semantic search. If a verified skill matches goal + pageKey, skip the model and call phone_skill_run.", _with_session(_with_device({"type": "object", "properties": {"goal": {"type": "string"}, "query": {"type": "string"}}, "required": ["goal"]})), read_only=True),
+    _tool("phone_act", "Execute one typed Cyclone phone action through the V3 Android authority seam and canonical PhoneToolExecutor. Planner: phone.open_app / phone.wait_for. UI: click/type/scroll by current elementId or elementIndex. Locate first. click/long_press/type require a current observation-scoped elementId, elementIndex, snapshot ref, or role+name; free-form selectors and coordinates are rejected. One screen-changing act per turn. Fast Path settles 300ms then fingerprints; UNCHANGED is verified=false — do not double-click. phone.scroll accepts direction=forward/backward; phone.swipe has no safe MCP route. Every mutation returns action status plus before/after Page Cards, pageChanged, delta, errorClass, and generation. phone.type requires user_authorized=true but Android policy remains authoritative.", _with_session(_with_device({"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object", "description": "Typed safe parameters only. Use current elementId or elementIndex for element actions; raw selector text/fuzzy/bounds/coordinates are rejected."}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}}, "required": ["tool", "params", "goal"]})), read_only=False, destructive=True),
     _tool("phone_skill_save", "Compile verified 2+ phone_act steps into a disabled draft skill in the existing AutomationStore (SkillCompiler.compile). Unverified steps do not write. Secret slots are stripped. Workers cannot mark verified.", _with_device({"type": "object", "properties": {"goal": {"type": "string"}, "pageKey": {"type": "string"}, "app": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "minItems": 2}, "params": {"type": "object", "description": "Slot values only. Secret slots are stripped and never persisted."}}, "required": ["goal", "steps"]}), read_only=False),
     _tool("phone_skill_run", "Run one skill from AutomationStore through PhoneToolExecutor via the gateway. Only status=verified runs live; drafts require dryRun=true. Returns per-step act envelopes.", _with_device({"type": "object", "properties": {"skill_id": {"type": "string"}, "dryRun": {"type": "boolean", "default": False}, "params": {"type": "object"}}, "required": ["skill_id"]}), read_only=False, destructive=True),
     _tool("phone_capabilities", "Discover the typed V3 phone capability inventory and health. Discovery is metadata, not action authority.", _with_device({"type": "object", "properties": {"refresh": {"type": "boolean", "default": False}}}), read_only=True),
     _tool("phone_devices", "Auto-detect connected phones through the PC gateway fleet. Returns device ids, states, pairing and display info; scan=true forces a fresh ADB scan.", {"type": "object", "properties": {"scan": {"type": "boolean", "default": False}}, "additionalProperties": False}, read_only=True),
     _tool("phone_list", "Alias of phone_devices. Auto-detect connected phones through the PC gateway fleet.", {"type": "object", "properties": {"scan": {"type": "boolean", "default": False}}, "additionalProperties": False}, read_only=True),
-    _tool("phone_observe", "UI get_tree: read a bounded a11y-first Page Card with stable elementIndex. Compact mode is the normal path; provide goal to rank current candidates. Screenshot only when perceptionMode=vision_escalate. Element IDs/indices expire after mutation.", _with_device({"type": "object", "properties": {"mode": {"type": "string", "enum": ["compact", "full"], "default": "compact"}, "include_screenshot": {"type": "boolean", "default": False}, "goal": {"type": "string"}}}), read_only=True),
-    _tool("phone_ui_search", "Run bounded semantic search when Page Card context is insufficient. Results retain only safe candidates and current observation-scoped IDs; no raw UI tree is returned.", _with_device({"type": "object", "properties": {"query": {"type": "string"}, "goal": {"type": "string"}}, "required": ["query"]}), read_only=True),
-    _tool("phone_inspect_element", "Inspect one current candidate. Its elementId is observation-scoped: act now or re-observe after any mutation.", _with_device({"type": "object", "properties": {"element_id": {"type": "string"}}, "required": ["element_id"]}), read_only=True),
-    _tool("phone_screenshot", "Vision escalate: capture/return the current screenshot plus its PageKey-correlated compact observation. Use only when perceptionMode=vision_escalate or the a11y tree is empty/custom canvas.", _with_device({"type": "object", "properties": {}}), read_only=True),
+    _tool("phone_observe", "UI get_tree: read a bounded a11y-first Page Card with stable elementIndex. Compact mode is the normal path; provide goal to rank current candidates. Screenshot only when perceptionMode=vision_escalate. Element IDs/indices expire after mutation.", _with_session(_with_device({"type": "object", "properties": {"mode": {"type": "string", "enum": ["compact", "full"], "default": "compact"}, "include_screenshot": {"type": "boolean", "default": False}, "goal": {"type": "string"}}})), read_only=True),
+    _tool("phone_ui_search", "Run bounded semantic search when Page Card context is insufficient. Results retain only safe candidates and current observation-scoped IDs; no raw UI tree is returned.", _with_session(_with_device({"type": "object", "properties": {"query": {"type": "string"}, "goal": {"type": "string"}}, "required": ["query"]})), read_only=True),
+    _tool("phone_inspect_element", "Inspect one current candidate. Its elementId is observation-scoped: act now or re-observe after any mutation.", _with_session(_with_device({"type": "object", "properties": {"element_id": {"type": "string"}}, "required": ["element_id"]})), read_only=True),
+    _tool("phone_screenshot", "Vision escalate: capture/return the current screenshot plus its PageKey-correlated compact observation. Use only when perceptionMode=vision_escalate or the a11y tree is empty/custom canvas.", _with_session(_with_device({"type": "object", "properties": {}})), read_only=True),
     _tool("phone_current_page", "Read the gateway's current page record for one phone.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_page_history", "Read recent page/action transition history for verification and recovery.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_group_act", "Run one typed non-secret phone action on 1..32 explicitly selected devices. Cyclone observes each target first and returns independent per-device outcomes.", {"type": "object", "properties": {"device_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 32, "uniqueItems": True}, "tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object"}, "goal": {"type": "string"}}, "required": ["device_ids", "tool", "params", "goal"], "additionalProperties": False}, read_only=False, destructive=True),

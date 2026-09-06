@@ -158,6 +158,24 @@ class GatewayTests(unittest.TestCase):
         with self.assertRaises(GatewayError):
             GatewayClient(self.url, "").status()
 
+    def test_observation_authority_is_scoped_per_session(self):
+        client = GatewayClient(self.url, "test-token")
+        client.observe(session_id="workspace-a", display_id=7)
+        path, observe_payload = Handler.posts[-1]
+        self.assertEqual("/v1/capabilities/observe", path)
+        self.assertEqual("workspace-a", observe_payload["sessionId"])
+        self.assertEqual(7, observe_payload["displayId"])
+        with self.assertRaises(GatewayError) as raised:
+            client.action("phone.click", {"elementId": "1"}, "Open Apps")
+        self.assertEqual("STALE_OBSERVATION", raised.exception.body["error"]["code"])
+        client.action("phone.click", {"elementId": "1"}, "Open Apps", session_id="workspace-a", display_id=7)
+        path, action_payload = Handler.posts[-1]
+        self.assertEqual("/v1/capabilities/action", path)
+        self.assertEqual("workspace-a", action_payload["sessionId"])
+        self.assertEqual(7, action_payload["displayId"])
+        self.assertEqual("workspace-a", action_payload["params"]["sessionId"])
+        self.assertEqual(7, action_payload["params"]["displayId"])
+
     def test_typed_action_uses_last_observation_and_never_forwards_authorization(self):
         client = GatewayClient(self.url, "test-token")
         client.observe()

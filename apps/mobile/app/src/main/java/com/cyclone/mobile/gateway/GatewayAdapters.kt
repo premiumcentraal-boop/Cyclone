@@ -14,6 +14,8 @@ import com.cyclone.mobile.debug.PageDebugSandboxV293
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.guided.RoutineTeachingSession
 import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
+import com.cyclone.mobile.runtime.session.ExecutionRequestScope
+import com.cyclone.mobile.runtime.session.SessionIdentityException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
@@ -161,10 +163,15 @@ internal object GatewayActionAdapter {
         val source = args.optString("source", "PC_CODEX")
         if (source != "PC_CODEX") throw GatewayProtocolException("PROTOCOL_MISMATCH", "Gateway action source must be PC_CODEX", requestId)
         val params = args.optJSONObject("params") ?: JSONObject()
+        val bound = try {
+            ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, params))
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch", requestId)
+        }
         val goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') }
         val currentObservationId = args.optString("currentObservationId")
             .takeIf(String::isNotBlank)
-            ?: GatewayObservationStore.current()?.id
+            ?: try { GatewayObservationStore.current(bound)?.id } catch (_: SessionIdentityException) { null }
         val missionMetadata = args.optJSONObject("missionMetadata") ?: JSONObject()
         val authorityRequest = GatewayActionAuthorityRequest(
             requestId = requestId,
@@ -178,7 +185,10 @@ internal object GatewayActionAdapter {
         val authorityDecision = GatewayActionAuthorityRegistry.authorize(context, authorityRequest)
         authorityDecision.requireAuthorized(requestId)
 
-        val executableParams = JSONObject(params.toString()).apply { remove("_gatewayRisk") }
+        val executableParams = ExecutionRequestScope.attach(
+            JSONObject(params.toString()).apply { remove("_gatewayRisk") },
+            bound,
+        )
         val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, executableParams))
         // V3.3 owns post-action observation. Learning here would confuse executor/transport
         // success with a verified page result, so GatewayV33ActionAdapter records only a passed

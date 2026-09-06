@@ -64,6 +64,11 @@ class AgentObserveBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["compact", "full"] = "compact"
     include_screenshot: bool = False
+    session_id: str | None = None
+    sessionId: str | None = None
+    display_id: int | None = Field(default=None, ge=0)
+    displayId: int | None = Field(default=None, ge=0)
+    executionContext: dict[str, Any] | None = None
 
 
 class AgentActionBody(BaseModel):
@@ -72,6 +77,11 @@ class AgentActionBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     goal: str = ""
     expected_observation_id: str | None = None
+    session_id: str | None = None
+    sessionId: str | None = None
+    display_id: int | None = Field(default=None, ge=0)
+    displayId: int | None = Field(default=None, ge=0)
+    executionContext: dict[str, Any] | None = None
 
 
 class AgentDebugBody(BaseModel):
@@ -556,19 +566,59 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
 
     @router.post("/v1/devices/{device_id}/agent/observe", dependencies=[Depends(auth)])
     def agent_observe(device_id: str, body: AgentObserveBody):
-        return _call(lambda: runtime.agent.observe(device_id, mode=body.mode, include_screenshot=body.include_screenshot))
+        payload = body.model_dump(exclude_none=True)
+        return _call(lambda: runtime.agent.observe(
+            device_id,
+            mode=body.mode,
+            include_screenshot=body.include_screenshot,
+            payload=payload,
+        ))
 
     @router.get("/v1/devices/{device_id}/agent/screenshot", dependencies=[Depends(auth)])
     def agent_screenshot(device_id: str, profile: Literal["thumbnail", "focus"] = Query(default="thumbnail")):
         return _call(lambda: runtime.agent.screenshot(device_id, profile=profile))
 
     @router.get("/v1/devices/{device_id}/agent/ui/search", dependencies=[Depends(auth)])
-    def agent_ui_search(device_id: str, q: str = Query(min_length=1, max_length=300)):
-        return _call(lambda: runtime.agent.ui_search(device_id, q))
+    def agent_ui_search(
+        device_id: str,
+        q: str = Query(min_length=1, max_length=300),
+        session_id: str | None = Query(default=None),
+        sessionId: str | None = Query(default=None),
+        display_id: int | None = Query(default=None, ge=0),
+        displayId: int | None = Query(default=None, ge=0),
+    ):
+        payload = {
+            key: value
+            for key, value in {
+                "session_id": session_id,
+                "sessionId": sessionId,
+                "display_id": display_id,
+                "displayId": displayId,
+            }.items()
+            if value is not None
+        }
+        return _call(lambda: runtime.agent.ui_search(device_id, q, payload=payload or None))
 
     @router.get("/v1/devices/{device_id}/agent/ui/element/{element_id}", dependencies=[Depends(auth)])
-    def agent_ui_element(device_id: str, element_id: str):
-        return _call(lambda: runtime.agent.ui_element(device_id, element_id))
+    def agent_ui_element(
+        device_id: str,
+        element_id: str,
+        session_id: str | None = Query(default=None),
+        sessionId: str | None = Query(default=None),
+        display_id: int | None = Query(default=None, ge=0),
+        displayId: int | None = Query(default=None, ge=0),
+    ):
+        payload = {
+            key: value
+            for key, value in {
+                "session_id": session_id,
+                "sessionId": sessionId,
+                "display_id": display_id,
+                "displayId": displayId,
+            }.items()
+            if value is not None
+        }
+        return _call(lambda: runtime.agent.ui_element(device_id, element_id, payload=payload or None))
 
     @router.get("/v1/devices/{device_id}/agent/page/current", dependencies=[Depends(auth)])
     def agent_current_page(device_id: str):

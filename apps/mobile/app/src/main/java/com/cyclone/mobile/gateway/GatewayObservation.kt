@@ -14,6 +14,10 @@ import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
 import com.cyclone.mobile.fastpath.FastPathTree
 import com.cyclone.mobile.observability.pagecontext.PageContextSummary
 import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
+import com.cyclone.mobile.runtime.session.ExecutionContext
+import com.cyclone.mobile.runtime.session.ExecutionRequestScope
+import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionIdentityException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -36,13 +40,15 @@ internal data class GatewayObservation(
     val page: PageContext,
     val payload: JSONObject,
     val elements: Map<String, GatewayElement>,
-    val execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT,
+    val execution: ExecutionContext = ExecutionContext.DEFAULT,
 )
 
 internal object GatewayObservationStore {
     private val scoped = com.cyclone.mobile.runtime.session.SessionObservationStore(
         com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions)
     fun current(sessionId: String? = null): GatewayObservation? = scoped.current(sessionId)?.payload as? GatewayObservation
+    fun current(execution: ExecutionContext): GatewayObservation? =
+        scoped.current(execution.sessionId, execution.displayId)?.payload as? GatewayObservation
     fun replace(observation: GatewayObservation) {
         scoped.publish(observation.execution.sessionId, observation.execution.displayId, observation.id,
             observation, observation.capturedAt)
@@ -56,10 +62,13 @@ internal object GatewayObservationAdapter {
     private val editableStateSalt = UUID.randomUUID().toString()
 
     fun capture(context: Context, args: JSONObject = JSONObject()): GatewayObservation {
-        val execution = com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(args)
-        val background = execution.sessionId != "default-foreground"
+        val execution = try {
+            ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()))
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch")
+        }
+        val background = execution.sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID
         if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.requireScope(execution)
-        else com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(args)
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         PageAwarenessRuntime.initialize(context)

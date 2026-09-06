@@ -34,7 +34,7 @@ class SkillGateway:
     def observe(self, **kwargs):
         return self.device_observe("dev_pixel8", **kwargs)
 
-    def device_observe(self, device_id, *, include_screenshot=False, mode="compact"):
+    def device_observe(self, device_id, *, include_screenshot=False, mode="compact", **kwargs):
         return {
             "device_id": device_id,
             "observation": {
@@ -49,16 +49,16 @@ class SkillGateway:
             "witness": {"observation_id": "obs-1", "page_key": "home"},
         }
 
-    def ui_search(self, query):
+    def ui_search(self, query, **kwargs):
         return {"candidates": [{"id": "settings", "label": query}]}
 
     def device_ui_search(self, device_id, query):
         return {"results": [{"id": "settings", "label": query}, {"id": "task-input", "label": "Phone task input"}]}
 
-    def action(self, tool, params, goal):
+    def action(self, tool, params, goal, **kwargs):
         return self.device_action("dev_pixel8", tool, params, goal)
 
-    def device_action(self, device_id, tool, params, goal):
+    def device_action(self, device_id, tool, params, goal, **kwargs):
         from cyclone_phone_mcp.desktop_envelope import normalize_desktop_action
         self.actions.append({"tool": tool, "params": params})
         android = {"ok": True, "error": None}
