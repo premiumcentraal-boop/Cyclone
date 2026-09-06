@@ -73,6 +73,12 @@ class OverlayChromeMachine(
         )
     }
 
+    fun finishStopped(message: String) {
+        cycloneState.pauseAgentForUser()
+        snapshot = snapshot.copy(state = OverlayChromeState.ANALYSIS, userPaused = false,
+            minimized = false, statusMessage = message, bullets = emptyList())
+    }
+
     fun completeDone(sessionId: String = snapshot.sessionId) {
         if (snapshot.state != OverlayChromeState.WORKING && snapshot.state != OverlayChromeState.LIVE) return
         snapshot = snapshot.copy(

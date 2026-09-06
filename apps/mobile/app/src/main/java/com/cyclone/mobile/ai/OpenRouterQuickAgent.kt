@@ -59,6 +59,7 @@ data class QuickAgentConfig(
     val safeMode: Boolean = true,
     val accessProfile: CycloneAiAccessProfile = if (safeMode) CycloneAiAccessProfile.BALANCED else CycloneAiAccessProfile.FULL,
     val providerSort: String = "latency",
+    val attachment: com.cyclone.mobile.ui.overlay.TaskAttachment? = null,
 )
 
 data class QuickAgentResult(
@@ -147,22 +148,8 @@ class OpenRouterQuickAgent(private val context: Context) {
             model.reasoningEffort == "max" -> 4_096
             else -> 2_500
         }
-        val provider = JSONObject()
-            .put("sort", providerSort)
-            .put("allow_fallbacks", profile?.allowProviderFallbacks ?: true)
-            .put("require_parameters", jsonMode && profile?.structuredOutputMode == StructuredOutputMode.SCHEMA_CONSTRAINED)
-        val body = JSONObject()
-            .put("model", model.id)
-            .put("messages", messages)
-            .put("temperature", 0.05)
-            .put("max_tokens", maxTokens)
-            .put("reasoning", JSONObject().put("effort", model.reasoningEffort).put("exclude", true))
-            .put("session_id", "cyclone-workflow-${UUID.randomUUID()}")
-            .put("provider", provider)
-            .put("stream", false)
-        if (jsonMode && profile?.structuredOutputMode == StructuredOutputMode.SCHEMA_CONSTRAINED) {
-            body.put("response_format", JSONObject().put("type", "json_object"))
-        }
+        val body = com.cyclone.mobile.ai.model.PortableModelRequest.body(model.id, messages,
+            com.cyclone.mobile.ai.model.ModelEndpointCatalog.verifiedTags(model.id, http), maxTokens)
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $apiKey")

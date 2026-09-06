@@ -19,6 +19,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animate
 import androidx.compose.ui.graphics.SolidColor
 import com.cyclone.mobile.ui.v32.CycloneOrbitMark
 import androidx.compose.foundation.BorderStroke
@@ -352,57 +361,55 @@ private fun AuroraPanel(
     modifier: Modifier,
 ) {
     var showAiSettings by remember { mutableStateOf(false) }
-    LaunchedEffect(snapshot.state, snapshot.minimized) {
-        if (snapshot.state == OverlayChromeState.DONE && !snapshot.minimized) {
-            delay(5_500)
-            onAction(OverlayUserAction.EXIT)
+    var dragOffset by remember { mutableStateOf(0f) }
+    var sheetHeight by remember { mutableStateOf(300f) }
+    val scope = rememberCoroutineScope()
+    var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun settle(dismiss: Boolean) {
+        settleJob?.cancel()
+        settleJob = scope.launch {
+            animate(dragOffset, if (dismiss) sheetHeight else 0f, animationSpec = tween(220)) { value, _ -> dragOffset = value }
+            if (dismiss) onAction(OverlayUserAction.MINIMIZE)
+            dragOffset = 0f
         }
     }
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 224.dp, max = 360.dp)
-            .clip(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)),
-    ) {
-        MovingAurora(Modifier.matchParentSize())
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(Modifier.fillMaxWidth().height(24.dp)
-                .semantics { contentDescription = "Minimize Cyclone. Swipe down or double tap." }
-                .clickable { onAction(OverlayUserAction.MINIMIZE) }
-                .pointerInput(Unit) {
-                    var travel = 0f
-                    detectVerticalDragGestures(onDragStart = { travel = 0f },
-                        onVerticalDrag = { change, amount -> change.consume(); travel += amount },
-                        onDragEnd = { if (travel > 36.dp.toPx()) onAction(OverlayUserAction.MINIMIZE) })
-                }, contentAlignment = Alignment.Center) {
-                Box(Modifier.size(36.dp, 4.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.32f)))
+    Column(modifier.fillMaxWidth().onSizeChanged { sheetHeight = it.height.toFloat() }
+        .graphicsLayer { translationY = dragOffset }
+        .clip(RoundedCornerShape(30.dp)).background(Color(0xFF191A20))
+        .padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(Modifier.fillMaxWidth().height(24.dp)
+            .semantics { contentDescription = "Drag down to dismiss Cyclone"; onClick("Dismiss") { settle(true); true } }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(onDragStart = { settleJob?.cancel() },
+                    onVerticalDrag = { change, amount -> change.consume(); dragOffset = (dragOffset + amount).coerceAtLeast(0f) },
+                    onDragCancel = { settle(false) },
+                    onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) })
+            }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(34.dp, 4.dp).clip(CircleShape).background(Color.White.copy(alpha = .35f)))
+        }
+        AnimatedVisibility(showAiSettings) {
+            Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                QuickAiSettings(aiSettings, onAiSettingsChanged)
             }
-            AuroraControls(snapshot, onAction, onToggleSettings = { showAiSettings = !showAiSettings })
-            AnimatedVisibility(showAiSettings) {
-                Column {
-                    QuickAiSettings(aiSettings, onAiSettingsChanged)
-                    TextButton(onClick = { onAction(OverlayUserAction.EXIT) }) {
-                        Text(OverlayCopy.EXIT, color = Color.White.copy(alpha = 0.72f))
+        }
+        if (snapshot.state == OverlayChromeState.ANALYSIS && !snapshot.statusMessage.isNullOrBlank()) {
+            Text(snapshot.statusMessage, color = Color.White.copy(alpha = .75f),
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.heightIn(max = 110.dp)
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 12.dp))
+        }
+        if (snapshot.state !in setOf(OverlayChromeState.IDLE, OverlayChromeState.ANALYSIS)) {
+            Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+                AuroraStateContent(snapshot, onAction)
+                if (snapshot.state in setOf(OverlayChromeState.WORKING, OverlayChromeState.LIVE)) {
+                    Row {
+                        TextButton(onClick = { onAction(OverlayUserAction.TAKE_CONTROL) }) { Text(if (snapshot.userPaused) "Resume" else "Take control") }
+                        TextButton(onClick = { onAction(OverlayUserAction.STOP_TASK) }) { Text("Stop task") }
                     }
                 }
             }
-            AuroraStateContent(snapshot, onAction, Modifier.weight(1f, fill = false))
-            if (snapshot.state != OverlayChromeState.GATE && snapshot.state != OverlayChromeState.DONE) {
-                AuroraComposer(snapshot, onComposerChanged, onRequestSubmitted, onVoiceInput)
-            }
-            if (snapshot.state == OverlayChromeState.GATE || snapshot.state == OverlayChromeState.ANALYSIS) {
-                Text(
-                    OverlayCopy.LEGAL,
-                    color = Color.White.copy(alpha = 0.58f),
-                    fontSize = 10.sp,
-                    lineHeight = 13.sp,
-                    maxLines = 2,
-                )
-            }
+        }
+        if (snapshot.state != OverlayChromeState.GATE) {
+            AuroraComposer(snapshot, onComposerChanged, onRequestSubmitted, onVoiceInput, { showAiSettings = !showAiSettings })
         }
     }
 }
@@ -507,23 +514,8 @@ private fun QuickAiSettings(
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Fast", color = Color.White.copy(alpha = 0.58f), style = MaterialTheme.typography.labelSmall)
-                Slider(
-                    value = levelIndex.toFloat(),
-                    onValueChange = { value ->
-                        onChanged(settings.copy(reasoningEffort = intelligenceLevels[value.roundToInt().coerceIn(0, 3)]))
-                    },
-                    valueRange = 0f..3f,
-                    steps = 2,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                )
-                Text(
-                    settings.reasoningEffort.replaceFirstChar { it.uppercase() },
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
+            Text("Provider defaults · automatically compatible", color = Color.White.copy(alpha = .65f),
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
         }
     }
 }
@@ -615,7 +607,7 @@ private fun AuroraStateContent(
                     ) { Text(OverlayCopy.CONFIRM) }
                 }
                 OverlayChromeState.DONE -> Text(
-                    OverlayCopy.DONE,
+                    snapshot.statusMessage ?: "Task completed",
                     color = Color.White,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
@@ -631,7 +623,10 @@ private fun AuroraComposer(
     onComposerChanged: (String) -> Unit,
     onRequestSubmitted: (String) -> Unit,
     onVoiceInput: () -> Unit,
+    onSettings: () -> Unit,
 ) {
+    val context = LocalContext.current
+    var additions by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val submit = {
         if (snapshot.composerText.isNotBlank()) {
@@ -640,32 +635,45 @@ private fun AuroraComposer(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 58.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                IconButton(onClick = { additions = true }, modifier = Modifier.size(44.dp)) { Icon(Icons.Rounded.Add, "Add files or photo", tint = Color.White) }
+                DropdownMenu(expanded = additions, onDismissRequest = { additions = false }) {
+                    fun openAttachment(camera: Boolean) {
+                        additions = false
+                        context.startActivity(android.content.Intent(context, OverlayAttachmentActivity::class.java)
+                            .putExtra("camera", camera).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                    DropdownMenuItem(text = { Text("Add file or image") }, onClick = { openAttachment(false) })
+                    DropdownMenuItem(text = { Text("Take a picture") }, onClick = { openAttachment(true) })
+                    DropdownMenuItem(text = { Text("Share screen with Cyclone") }, onClick = {
+                        additions = false
+                        context.startActivity(android.content.Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    })
+                    DropdownMenuItem(text = { Text("Background task") }, onClick = {
+                        additions = false
+                        context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    })
+                }
+            }
+            IconButton(onClick = onSettings, modifier = Modifier.size(44.dp)) { Icon(Icons.Rounded.Tune, "Settings", tint = Color.White) }
             BasicTextField(value = snapshot.composerText, onValueChange = onComposerChanged,
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.White),
                 cursorBrush = SolidColor(AuroraCyan),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { submit() }),
-                modifier = Modifier.weight(1f).heightIn(min = 52.dp).clip(RoundedCornerShape(24.dp))
-                    .background(Color.White.copy(alpha = 0.06f)).padding(horizontal = 16.dp, vertical = 15.dp)
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(horizontal = 6.dp, vertical = 13.dp)
                     .semantics { contentDescription = OverlayCopy.COMPOSER },
                 decorationBox = { field -> Box {
                     if (snapshot.composerText.isEmpty()) Text(OverlayCopy.COMPOSER, color = Color.White.copy(alpha = 0.6f))
                     field()
                 } })
-            AuroraIconButton(
-                label = if (snapshot.voiceListening) OverlayCopy.LISTENING else OverlayCopy.VOICE,
-                onClick = onVoiceInput,
-            ) {
-                Icon(Icons.Rounded.Mic, contentDescription = null, modifier = Modifier.size(21.dp))
+            IconButton(onClick = onVoiceInput, modifier = Modifier.size(44.dp)) {
+                Icon(Icons.Rounded.Mic, contentDescription = "Dictate request", tint = Color.White, modifier = Modifier.size(24.dp))
             }
-            AuroraIconButton(
-                label = OverlayCopy.SEND_REQUEST,
-                onClick = submit,
-                enabled = snapshot.composerText.isNotBlank(),
-            ) {
-                Icon(Icons.Rounded.ArrowUpward, contentDescription = null, modifier = Modifier.size(20.dp))
+            IconButton(onClick = submit, enabled = snapshot.composerText.isNotBlank(), modifier = Modifier.size(44.dp)) {
+                Icon(Icons.Rounded.ArrowUpward, contentDescription = "Send request", tint = if (snapshot.composerText.isNotBlank()) AuroraCyan else Color.Gray, modifier = Modifier.size(24.dp))
             }
         }
         snapshot.voiceMessage?.let { message ->

@@ -59,11 +59,12 @@ class ModelQualificationRunner(
             structuredOutputMode = StructuredOutputMode.PORTABLE_JSON,
             reasoningEffort = model.reasoningEffort,
         )
-        if (ModelQualificationRuntime.cache.isQualified(profile)) {
+        val apiKey = OpenRouterSecretStore.read(context)
+        ModelQualificationRuntime.cache.bindAccount(apiKey)
+        if (apiKey.isNotBlank() && ModelQualificationRuntime.cache.isQualified(profile)) {
             return@withContext ModelQualificationOutcome.Passed(profile, cached = true)
         }
 
-        val apiKey = OpenRouterSecretStore.read(context)
         if (apiKey.isBlank()) {
             return@withContext ModelQualificationOutcome.Failed(
                 profile,
@@ -71,21 +72,13 @@ class ModelQualificationRunner(
                     failureClass = ProviderFailureClass.PROVIDER_AUTH_FAILED,
                     httpStatus = 0,
                     providerMessage = "OpenRouter API key is missing.",
-                    selectedModelId = profile.cycloneId,
+                    selectedModelId = profile.openRouterSlug,
                     retryable = false,
                 ),
             )
         }
 
-        val first = request(profile, apiKey, profile.structuredOutputMode)
-        val response = if (
-            first is ModelQualificationOutcome.Failed &&
-            first.failure.failureClass == ProviderFailureClass.PARAMETER_UNSUPPORTED &&
-            profile.structuredOutputMode == StructuredOutputMode.SCHEMA_CONSTRAINED
-        ) {
-            // One bounded capability fallback for the SAME model. This never substitutes models.
-            request(profile, apiKey, StructuredOutputMode.PORTABLE_JSON)
-        } else first
+        val response = request(profile, apiKey, StructuredOutputMode.PORTABLE_JSON)
 
         if (response is ModelQualificationOutcome.Passed) {
             ModelQualificationRuntime.cache.markQualified(profile)
@@ -101,19 +94,13 @@ class ModelQualificationRunner(
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", ModelQualificationContract.SYSTEM_PROMPT))
             .put(JSONObject().put("role", "user").put("content", ModelQualificationContract.USER_PROMPT))
-        val provider = JSONObject()
-            .put("sort", "latency")
-            .put("allow_fallbacks", profile.allowProviderFallbacks)
-            .put("require_parameters", mode == StructuredOutputMode.SCHEMA_CONSTRAINED)
-        val body = JSONObject()
-            .put("model", profile.openRouterSlug)
-            .put("messages", messages)
-            .put("provider", provider)
-            .put("temperature", 0.0)
-            .put("max_tokens", 300)
-            .put("stream", false)
-        if (mode == StructuredOutputMode.SCHEMA_CONSTRAINED) {
-            body.put("response_format", JSONObject().put("type", "json_object"))
+        val body = try {
+            PortableModelRequest.body(profile.openRouterSlug, messages,
+                ModelEndpointCatalog.verifiedTags(profile.openRouterSlug, http))
+        } catch (_: IOException) {
+            return ModelQualificationOutcome.Failed(profile, SanitizedProviderFailure(
+                ProviderFailureClass.NO_PROVIDER_AVAILABLE, 0, selectedModelId = profile.openRouterSlug,
+                providerMessage = "Could not verify an available endpoint. Retry when connected.", retryable = true))
         }
 
         val request = Request.Builder()
@@ -138,7 +125,7 @@ class ModelQualificationRunner(
                         ProviderFailure.classify(
                             httpStatus = response.code,
                             rawBody = text,
-                            selectedModelId = profile.cycloneId,
+                            selectedModelId = profile.openRouterSlug,
                             providerName = providerName,
                             requestId = requestId,
                         ),
@@ -155,7 +142,7 @@ class ModelQualificationRunner(
                     failureClass = ProviderFailureClass.NETWORK_FAILURE,
                     httpStatus = 0,
                     providerMessage = ProviderFailure.sanitize(io.message.orEmpty()).takeIf { it.isNotBlank() },
-                    selectedModelId = profile.cycloneId,
+                    selectedModelId = profile.openRouterSlug,
                     retryable = true,
                 ),
             )
@@ -197,7 +184,7 @@ class ModelQualificationRunner(
         SanitizedProviderFailure(
             failureClass = ProviderFailureClass.MALFORMED_MODEL_OUTPUT,
             httpStatus = 200,
-            selectedModelId = profile.cycloneId,
+            selectedModelId = profile.openRouterSlug,
             providerName = providerName,
             requestId = requestId,
             retryable = false,

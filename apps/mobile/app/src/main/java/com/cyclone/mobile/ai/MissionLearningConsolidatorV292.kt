@@ -107,17 +107,10 @@ Rules:
             .put("brain", brain)
 
         val model = OpenRouterModelPresets.byId(session.model)
-        val body = JSONObject()
-            .put("model", model.id)
-            .put("messages", JSONArray()
-                .put(JSONObject().put("role", "system").put("content", system))
-                .put(JSONObject().put("role", "user").put("content", user.toString())))
-            .put("temperature", 0.02)
-            .put("max_tokens", 950)
-            .put("reasoning", JSONObject().put("effort", model.reasoningEffort).put("exclude", true))
-            .put("provider", JSONObject().put("sort", "latency").put("allow_fallbacks", com.cyclone.mobile.ai.model.ModelRegistry.resolve(model.id)?.allowProviderFallbacks ?: false))
-            .put("response_format", JSONObject().put("type", "json_object"))
-            .put("stream", false)
+        val body = com.cyclone.mobile.ai.model.PortableModelRequest.body(model.id,
+            JSONArray().put(JSONObject().put("role", "system").put("content", system))
+                .put(JSONObject().put("role", "user").put("content", user.toString())),
+            com.cyclone.mobile.ai.model.ModelEndpointCatalog.verifiedTags(model.id, http))
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $key")

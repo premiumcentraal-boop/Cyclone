@@ -24,3 +24,6 @@ Branch: agent/399-composer-and-model-compat. Preserve the published APK.
 Both new screenshots were inspected. OpenRouter's public Contributor endpoint listing confirms the exact slug and a Meta endpoint with text/image support, reasoning and response_format capabilities. Public availability is not proof of this user's account entitlement. No API key or physical Android device is available here; do not claim an end-to-end Muse success without a live authorized probe.
 
 Implementation and validation in progress. Intermediate checkpoints are not release acceptance.
+
+## Implementation checkpoint
+Compact composer and continuous drag implemented; attachments use an OS picker/camera thumbnail and remain separate from trusted task text. Failed runs leave active styling. Shared portable requests now avoid reasoning/sampling/schema assumptions, use available endpoints advertising max_tokens, and retain Contributor routing/privacy identity. Qualification receives sufficient output budget and is invalidated on account change. Public endpoint metadata was fetched for all eight registry models; none proves account authorization. CI validation pending.

@@ -14,6 +14,11 @@ class InMemoryModelQualificationCache(
     private val nowEpochMs: () -> Long = System::currentTimeMillis,
 ) {
     private val successful = ConcurrentHashMap<String, Long>()
+    private var accountFingerprint: String? = null
+    @Synchronized fun bindAccount(key: String) {
+        val fingerprint = java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }
+        if (fingerprint != accountFingerprint) { successful.clear(); accountFingerprint = fingerprint }
+    }
 
     fun isQualified(profile: ModelProfile): Boolean {
         val at = successful[profile.cycloneId] ?: return false

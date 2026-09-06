@@ -259,6 +259,7 @@ object OverlayChromeRuntime {
             val result = agent.execute(
                 request,
                 QuickAgentConfig(
+                    attachment = PendingTaskAttachment.take(),
                     model = OpenRouterModelPresets.byId(settings.modelId).copy(
                         reasoningEffort = settings.reasoningEffort,
                     ),
@@ -329,19 +330,8 @@ object OverlayChromeRuntime {
                 }
             }
             else -> {
-                synchronized(lock) {
-                    suspendedTaskId = null
-                    adaptiveAgent = null
-                }
-                when (snapshot().state) {
-                    OverlayChromeState.GATE, OverlayChromeState.IDLE -> Unit
-                    OverlayChromeState.WORKING -> mutate {
-                        it.enterLive()
-                        it.updateStatus(result.message)
-                    }
-                    OverlayChromeState.LIVE -> mutate { it.updateStatus(result.message) }
-                    else -> Unit
-                }
+                synchronized(lock) { suspendedTaskId = null; adaptiveAgent = null }
+                mutate { it.finishStopped(result.message) }
             }
         }
     }

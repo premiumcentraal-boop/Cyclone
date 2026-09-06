@@ -25,7 +25,12 @@ data class SanitizedProviderFailure(
     val retryable: Boolean = false,
 ) {
     val code: String get() = failureClass.name
-    val userMessage: String get() = ProviderFailure.message(code) ?: "The model provider could not serve this request."
+    val userMessage: String get() {
+        val base = ProviderFailure.message(code) ?: "The model provider could not serve this request."
+        return if (selectedModelId?.contains("contributor") == true && failureClass in setOf(ProviderFailureClass.MODEL_ACCESS_DENIED, ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED))
+            "$base Muse Contributor requires eligible account access and compatible OpenRouter data-policy settings. Prompts and outputs may be used for training; Cyclone has not changed your privacy settings."
+        else base
+    }
 }
 
 /** Provider failures are task blockers, never Android-navigation evidence. */
@@ -45,6 +50,8 @@ internal object ProviderFailure {
             ?.take(600)
         val failureClass = when {
             httpStatus == 401 -> ProviderFailureClass.PROVIDER_AUTH_FAILED
+            httpStatus in setOf(403, 404) && listOf("data policy", "data collection", "privacy", "training", "zdr").any(lower::contains) -> ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
+            httpStatus == 404 && ("no endpoints" in lower || "no provider" in lower) -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
             httpStatus == 403 -> ProviderFailureClass.MODEL_ACCESS_DENIED
             httpStatus == 404 -> ProviderFailureClass.MODEL_NOT_FOUND
             httpStatus == 402 -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
