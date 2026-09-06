@@ -59,6 +59,8 @@ object LiveVisionRuntime {
     }
 
     fun mutationFinished(sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) = synchronized(lock) {
+        if (sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID)
+            com.cyclone.mobile.capture.LiveCaptureService.sampler.requestBurst(SystemClock.uptimeMillis())
         val session = sessions.lookup(sessionId)
         boundaries[sessionId] = ActionFrameBoundary(sessionId, session.displayId,
             broker.latest(sessionId)?.frameId ?: 0, SystemClock.uptimeMillis())

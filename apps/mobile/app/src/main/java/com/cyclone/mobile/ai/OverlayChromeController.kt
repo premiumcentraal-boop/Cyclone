@@ -15,6 +15,15 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.compose.runtime.LaunchedEffect
+import com.cyclone.mobile.ui.overlay.OverlayExternalInteraction
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.capture.LiveCaptureSessionManager
+import com.cyclone.mobile.capture.LiveCaptureService
+import com.cyclone.mobile.ui.overlay.ScreenSharePill
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -94,7 +103,8 @@ internal object OverlayChromeWindowPolicy {
     )
 
     fun flags(spec: OverlayWindowContract): Int {
-        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        // Keep assistant drafts and approval chrome out of all capture paths, including consent startup.
+        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_SECURE
         if (spec.notTouchModal) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
         if (spec.notFocusable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         if (spec.notTouchable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -129,6 +139,7 @@ class OverlayChromeController(
     private var root: ComposeView? = null
     private var params: WindowManager.LayoutParams? = null
     private var activeBorder: View? = null
+    private var shareRoot: ComposeView? = null
     private var haloRoot: ComposeView? = null
     private var haloParams: WindowManager.LayoutParams? = null
     private var latest by mutableStateOf(OverlayChromeSnapshot())
@@ -162,6 +173,11 @@ class OverlayChromeController(
                 setViewTreeViewModelStoreOwner(lifecycle)
                 setViewTreeSavedStateRegistryOwner(lifecycle)
                 setContent {
+                    val externalActive by OverlayExternalInteraction.active.collectAsState()
+                    LaunchedEffect(externalActive) {
+                        aiSettings = getAiSettings()
+                        applyLayout(latest)
+                    }
                     OverlayChrome(
                         snapshot = latest,
                         onAction = onAction,
@@ -189,6 +205,30 @@ class OverlayChromeController(
             // Add decoration first so the small semantic/touch hotspot stays above it.
             wm.addView(halo, haloLayout)
             wm.addView(view, layout)
+            val shareView = ComposeView(service).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                setViewTreeLifecycleOwner(lifecycle)
+                setViewTreeViewModelStoreOwner(lifecycle)
+                setViewTreeSavedStateRegistryOwner(lifecycle)
+                setContent {
+                    val sharing by LiveCaptureSessionManager.state.collectAsState()
+                    if (isCompact(latest) && sharing.active) {
+                        com.cyclone.mobile.ui.v32.CycloneV32Theme {
+                            androidx.compose.foundation.layout.Box(Modifier.padding(8.dp)) {
+                                ScreenSharePill(sharing) { LiveCaptureService.stop(service) }
+                            }
+                        }
+                    }
+                }
+            }
+            val shareLayout = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_SECURE, PixelFormat.TRANSLUCENT,
+            ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
+            shareRoot = shareView
+            wm.addView(shareView, shareLayout)
         }
     }
 
@@ -202,6 +242,8 @@ class OverlayChromeController(
 
     fun dismiss() {
         onMain {
+            shareRoot?.let { runCatching { wm.removeView(it) } }
+            shareRoot = null
             root?.let { runCatching { wm.removeView(it) } }
             haloRoot?.let { runCatching { wm.removeView(it) } }
             activeBorder?.let { runCatching { wm.removeView(it) } }
@@ -331,7 +373,9 @@ class OverlayChromeController(
 
     private fun gravityFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.gravity(spec)
 
-    private fun flagsFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.flags(spec)
+    private fun flagsFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.flags(spec).let {
+        if (OverlayExternalInteraction.active.value) it or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE else it
+    }
 
     private fun recordIdleTap() {
         applyIdleTapResult(idleActivation.onTap(SystemClock.elapsedRealtime()))

@@ -21,7 +21,7 @@ object OverlayChromeContract {
     // Navigation/IME insets are consumed by Compose; this is breathing room above the safe edge.
     const val COMPOSER_HEIGHT_DP = 64
     const val COMPOSER_TOUCH_TARGET_DP = 48
-    const val COMPOSER_BOTTOM_GAP_DP = 14
+    const val COMPOSER_BOTTOM_GAP_DP = 18
 
     // Three deliberate taps. Provider/runtime state is not involved in activation.
     const val IDLE_TAP_MAX_GAP_MS = 700L

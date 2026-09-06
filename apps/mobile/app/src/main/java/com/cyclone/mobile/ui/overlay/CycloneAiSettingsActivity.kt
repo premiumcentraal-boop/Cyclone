@@ -55,6 +55,10 @@ import kotlinx.coroutines.launch
 
 /** Full AI configuration intentionally lives in the Cyclone app, never in the floating composer. */
 class CycloneAiSettingsActivity : ComponentActivity() {
+    override fun onDestroy() {
+        if (!isChangingConfigurations) com.cyclone.mobile.ui.overlay.OverlayExternalInteraction.active.value = false
+        super.onDestroy()
+    }
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {

@@ -9,10 +9,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 data class TaskAttachment(val text: String? = null, val imageDataUrl: String? = null)
 object PendingTaskAttachment {
     private var value: TaskAttachment? = null
-    @Synchronized fun set(attachment: TaskAttachment) { value = attachment }
-    @Synchronized fun take(): TaskAttachment? = value.also { value = null }
+    private val mutablePresent = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val present: kotlinx.coroutines.flow.StateFlow<Boolean> = mutablePresent
+    @Synchronized fun set(attachment: TaskAttachment) { value = attachment; mutablePresent.value = true }
+    @Synchronized fun take(): TaskAttachment? = value.also { value = null; mutablePresent.value = false }
+}
+/** Temporarily yields the overlay's window focus to a real Android picker/consent activity. */
+object OverlayExternalInteraction {
+    val active = kotlinx.coroutines.flow.MutableStateFlow(false)
 }
 class OverlayAttachmentActivity : ComponentActivity() {
+    override fun onDestroy() {
+        if (!isChangingConfigurations) OverlayExternalInteraction.active.value = false
+        super.onDestroy()
+    }
     private val filePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) runCatching {
             val type = contentResolver.getType(uri).orEmpty()

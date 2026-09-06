@@ -39,8 +39,6 @@ import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +47,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.cyclone.mobile.capture.LiveCaptureSessionManager
+import com.cyclone.mobile.capture.LiveCaptureService
+import com.cyclone.mobile.capture.LiveCaptureConsentActivity
+import com.cyclone.mobile.capture.ScreenSharePhase
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -170,9 +181,6 @@ fun OverlayChrome(
     onIdleSemanticActivate: () -> Unit = { onAction(OverlayUserAction.ASK_CYCLONE) },
     modifier: Modifier = Modifier,
 ) {
-    // Keep the data contract for runtime compatibility, but never render model/provider controls in
-    // the floating bar. Those now live in CycloneAiSettingsActivity.
-    @Suppress("UNUSED_VARIABLE") val settingsContract = aiSettings to onAiSettingsChanged
     CycloneV32Theme {
         val showOrb = snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
         AnimatedContent(
@@ -202,6 +210,8 @@ fun OverlayChrome(
                     onComposerChanged = onComposerChanged,
                     onRequestSubmitted = onRequestSubmitted,
                     onVoiceInput = onVoiceInput,
+                    aiSettings = aiSettings,
+                    onAiSettingsChanged = onAiSettingsChanged,
                     modifier = modifier,
                 )
             }
@@ -315,12 +325,48 @@ private fun ComposerPanel(
     onComposerChanged: (String) -> Unit,
     onRequestSubmitted: (String) -> Unit,
     onVoiceInput: () -> Unit,
+    aiSettings: OverlayAiSettings,
+    onAiSettingsChanged: (OverlayAiSettings) -> Unit,
     modifier: Modifier,
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    var additionsOpen by remember { mutableStateOf(false) }
+    var accessory by remember { mutableStateOf<ComposerAccessory>(ComposerAccessory.NONE) }
+    var modelsExpanded by remember { mutableStateOf(false) }
+    val sharing by LiveCaptureSessionManager.state.collectAsState()
+    val attached by PendingTaskAttachment.present.collectAsState()
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val view = LocalView.current
+    var editorFocused by remember { mutableStateOf(false) }
+    var restoreEditor by remember { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            if (focused && restoreEditor) {
+                view.post {
+                    if (view.isAttachedToWindow && restoreEditor) {
+                        restoreEditor = false
+                        focusRequester.requestFocus()
+                        keyboard?.show()
+                    }
+                }
+            }
+        }
+        view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose { view.viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
+    }
+    fun launchExternal(intent: Intent) {
+        OverlayExternalInteraction.active.value = true
+        restoreEditor = editorFocused
+        accessory = ComposerAccessory.NONE
+        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure {
+                restoreEditor = false
+                OverlayExternalInteraction.active.value = false
+                android.widget.Toast.makeText(context, "This action is unavailable.", android.widget.Toast.LENGTH_SHORT).show()
+            }
+    }
     var dragOffset by remember { mutableStateOf(0f) }
     var sheetHeight by remember { mutableStateOf(220f) }
     var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -355,7 +401,7 @@ private fun ComposerPanel(
             )
             .graphicsLayer { translationY = dragOffset }
             .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) },
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Box(
             Modifier
@@ -377,6 +423,45 @@ private fun ComposerPanel(
             Box(Modifier.size(34.dp, 4.dp).clip(CircleShape).background(Color.White.copy(alpha = .36f)))
         }
 
+        if (sharing.phase != ScreenSharePhase.OFF) {
+            ScreenSharePill(sharing) { LiveCaptureService.stop(context) }
+        }
+        if (accessory != ComposerAccessory.NONE) {
+            Surface(shape = RoundedCornerShape(26.dp), color = ComposerInk, shadowElevation = 6.dp) {
+                when (accessory) {
+                    ComposerAccessory.ATTACHMENTS -> Row(Modifier.heightIn(min = 52.dp).padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java)) }) { Text("File") }
+                        TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("camera", true)) }) { Text("Photo") }
+                        TextButton(enabled = !sharing.active, onClick = {
+                            launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
+                        }) { Text("Share screen") }
+                    }
+                    ComposerAccessory.MODEL -> Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+                        TextButton(onClick = { modelsExpanded = !modelsExpanded }) {
+                            Text(OpenRouterModelPresets.byId(aiSettings.modelId).label + if (modelsExpanded) " ▴" else " ▾")
+                        }
+                        if (modelsExpanded) OpenRouterModelPresets.all.forEach { model ->
+                            TextButton(onClick = {
+                                onAiSettingsChanged(aiSettings.copy(modelId = model.id))
+                                modelsExpanded = false
+                            }) { Text((if (model.id == aiSettings.modelId) "✓ " else "") + model.label) }
+                        }
+                        TextButton(onClick = { launchExternal(Intent(context, CycloneAiSettingsActivity::class.java)) }) { Text("More AI settings") }
+                        TextButton(enabled = !sharing.active, onClick = {
+                            launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
+                        }) { Text("Share for cross-app control") }
+                    }
+                    ComposerAccessory.NONE -> Unit
+                }
+            }
+        }
+        if (attached) {
+            Surface(shape = RoundedCornerShape(24.dp), color = ComposerInk) {
+                TextButton(onClick = { PendingTaskAttachment.take() }) { Text("Reference attached · Remove") }
+            }
+        }
+
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(34.dp),
@@ -390,50 +475,17 @@ private fun ComposerPanel(
                     .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box {
-                    IconButton(
-                        onClick = { additionsOpen = true },
-                        modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                    ) {
-                        Icon(Icons.Rounded.Add, "Add attachment", tint = Color.White, modifier = Modifier.size(27.dp))
-                    }
-                    DropdownMenu(expanded = additionsOpen, onDismissRequest = { additionsOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Attach file or image") },
-                            leadingIcon = { Icon(Icons.Rounded.AttachFile, null) },
-                            onClick = {
-                                additionsOpen = false
-                                context.startActivity(
-                                    Intent(context, OverlayAttachmentActivity::class.java)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Take reference photo") },
-                            leadingIcon = { Icon(Icons.Rounded.CameraAlt, null) },
-                            onClick = {
-                                additionsOpen = false
-                                context.startActivity(
-                                    Intent(context, OverlayAttachmentActivity::class.java)
-                                        .putExtra("camera", true)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            },
-                        )
-                    }
-                }
-
                 IconButton(
-                    onClick = {
-                        context.startActivity(
-                            Intent(context, CycloneAiSettingsActivity::class.java)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    },
+                    onClick = { accessory = accessory.toggle(ComposerAccessory.ATTACHMENTS) },
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                 ) {
-                    Icon(Icons.Rounded.Tune, "Cyclone settings", tint = Color.White, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Rounded.Add, "Add attachment", tint = Color.White, modifier = Modifier.size(27.dp))
+                }
+                IconButton(
+                    onClick = { accessory = accessory.toggle(ComposerAccessory.MODEL) },
+                    modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
+                ) {
+                    Icon(Icons.Rounded.Tune, "Choose model", tint = Color.White, modifier = Modifier.size(24.dp))
                 }
 
                 BasicTextField(
@@ -446,6 +498,8 @@ private fun ComposerPanel(
                     keyboardActions = KeyboardActions(onSend = { submit() }),
                     modifier = Modifier
                         .weight(1f)
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { editorFocused = it.isFocused }
                         .heightIn(min = 48.dp)
                         .padding(horizontal = 8.dp, vertical = 13.dp)
                         .semantics { contentDescription = OverlayCopy.COMPOSER },
@@ -533,6 +587,29 @@ private fun GatePanel(
                     )
                 }
             }
+        }
+    }
+}
+
+internal enum class ComposerAccessory {
+    NONE, ATTACHMENTS, MODEL;
+    fun toggle(next: ComposerAccessory): ComposerAccessory = if (this == next) NONE else next
+}
+
+@Composable
+internal fun ScreenSharePill(state: com.cyclone.mobile.capture.ScreenShareState, onStop: () -> Unit) {
+    Surface(shape = RoundedCornerShape(26.dp), color = ComposerInk, shadowElevation = 6.dp) {
+        Row(Modifier.heightIn(min = 52.dp).padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(when (state.phase) {
+                ScreenSharePhase.LIVE -> "Sharing screen"
+                ScreenSharePhase.REQUESTING_PERMISSION -> "Waiting for permission"
+                ScreenSharePhase.STARTING -> "Starting screen share"
+                ScreenSharePhase.STOPPING -> "Stopping screen share"
+                ScreenSharePhase.ERROR -> state.message ?: "Screen sharing failed"
+                ScreenSharePhase.REVOKED -> "Screen sharing ended"
+                ScreenSharePhase.OFF -> "Screen sharing off"
+            }, color = Color.White, modifier = Modifier.weight(1f, fill = false))
+            if (state.active) TextButton(onClick = onStop, enabled = state.phase != ScreenSharePhase.STOPPING) { Text("Stop") }
         }
     }
 }
