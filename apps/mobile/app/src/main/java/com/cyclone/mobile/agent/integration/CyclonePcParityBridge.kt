@@ -24,6 +24,7 @@ import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.fastpath.FastPathLanding
 import com.cyclone.mobile.fastpath.FastPathSurface
 import com.cyclone.mobile.fastpath.FastPathTimings
+import com.cyclone.mobile.skills.SkillRuntime
 import com.cyclone.mobile.ai.PageAgentAction
 import com.cyclone.mobile.ai.PageAgentProtocol
 import com.cyclone.mobile.applearner.LearnedAction
@@ -39,9 +40,10 @@ import org.json.JSONObject
 class CyclonePcParityBridge internal constructor(
     private val environment: CycloneAgentEnvironmentApi,
     private val recovery: AgenticRecoveryRuntimePort = DefaultAgenticRecoveryRuntimePort(),
+    private val execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT,
 ) {
     constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
-        this(CycloneAgentEnvironment(context.applicationContext, execution, userTaskGoal))
+        this(CycloneAgentEnvironment(context.applicationContext, execution, userTaskGoal), execution = execution)
 
     private var page: AgentPageCard? = null
     private var memory: RecoveryMemory = RecoveryMemory()
@@ -134,6 +136,21 @@ class CyclonePcParityBridge internal constructor(
                 "landingRule",
                 "Prefer this open_app/intent landing before hunting launcher icons. 3.9.12 Ask→workspace already routes a uniquely named installed app.",
             )
+        }
+        card?.let { current ->
+            SkillRuntime.match(
+                packageName = current.packageName,
+                goal = goal,
+                startPageKey = current.pageKey,
+                sessionId = environmentSessionId(),
+                displayId = environmentDisplayId(),
+            )?.let { route ->
+                out.put("compiledSkill", route.toJson())
+                out.put(
+                    "compiledSkillRule",
+                    "A compiled PhoneToolExecutor skill matches this package/goal/page/session. Replay it before a Fast Path LLM turn. Vision only on miss.",
+                )
+            }
         }
         out.put("recentOutcomes", recentOutcomeJson(history))
         val recoveryJson = JSONObject()
@@ -356,6 +373,10 @@ class CyclonePcParityBridge internal constructor(
         searchEvidence = result.candidates
         return result.candidates
     }
+
+    private fun environmentSessionId(): String = execution.sessionId
+
+    private fun environmentDisplayId(): Int = execution.displayId
 
     private fun knownKnowledgeAvailable(goal: String): Boolean {
         val route = environment.knownRoutes(goal)

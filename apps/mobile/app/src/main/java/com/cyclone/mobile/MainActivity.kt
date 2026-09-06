@@ -24,6 +24,7 @@ import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.gateway.GatewayDesktopPairingManager
+import com.cyclone.mobile.skills.SkillRuntime
 import com.cyclone.mobile.infrastructure.v31.CycloneV31ProductIntegration
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
@@ -71,6 +72,7 @@ class MainActivity : ComponentActivity() {
     private fun initializeCyclone() {
         AutomationRuntime.initialize(this)
         AppLearnerRuntime.initialize(this)
+        SkillRuntime.initialize(this)
         PageAwarenessRuntime.initialize(this)
         AgentTraceRuntime.initialize(this)
         CycloneBrainRuntime.initialize(this)

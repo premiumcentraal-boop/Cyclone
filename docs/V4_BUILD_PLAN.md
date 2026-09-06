@@ -30,7 +30,7 @@ Deliverables:
 Acceptance: unit/integration tests for settle/fingerprint/nav-isolation; honest UNVERIFIED for physical; PR open.
 Out of scope: multi-VD scale-out, skill compiler, One V4 packaging, Magisk.
 
-### Stage 2 — Session Kernel (DONE — THIS PR)
+### Stage 2 — Session Kernel (DONE)
 Branch: `grok/cyclone-v4-s2-session` from Stage 1.
 Goal: Display-scoped session identity so Fast Path never crosses displays; MCP/Cyclone One can bind `session_id` later (Stage 4).
 Deliverables:
@@ -42,10 +42,21 @@ Deliverables:
 6. Tests + `docs/V4_STAGE2_SESSION_KERNEL.md` + version identity **4.0.0-alpha.2** / versionCode 68. Physical Pixel 8 = UNVERIFIED.
 Acceptance: unit tests for display-scoped inject, flags, no cross-session action, gateway/MCP forwarding, N≥2 types, `ExecutionRequestScope` no display-0 rewrite; honest UNVERIFIED for physical; PR open.
 Out of scope: Skill compiler (S3), Cyclone One tiles/installer (S4), Magisk, requiring MCP `session_id` (Stage 4), claiming 20 concurrent VDs.
-Handoff: Stage 3 Skill Compiler should compile playbooks per package **and** per session/display; do not assume display 0. Vision only on miss. Keep `PhoneToolExecutor` as the only mutation engine.
+Handoff: Stage 3 Skill Compiler is DONE in the follow-on PR; compile playbooks per package **and** per session/display. Do not restart Stage 2.
 
-### Stage 3 — Skill Compiler (THIS RUN)
-NL playbook per package after runs; promote stable paths to deterministic PhoneToolExecutor routes; vision only on miss.
+### Stage 3 — Skill Compiler (DONE — THIS PR)
+Branch: `grok/cyclone-v4-s3-skills` from Stage 2.
+Goal: Learn NL playbooks per package like Sanna, then compile stable Fast Path paths into deterministic PhoneToolExecutor routes so ordinary UI runs skip the LLM. Vision / Fast Path LLM only on miss.
+Deliverables:
+1. Per-package NL playbook / hint store (`PlaybookHintStore`): persist, merge after successful Fast Path runs, user-override merge. Secrets and coordinate-only steps never write. Named workspace playbooks cannot bind display 0.
+2. Compiler (`SkillRouteCompiler`): promote stable sequences (2+ successes, or a user override) with semantic selectors and SAFE tools into deterministic routes bound to `sessionId` + `displayId`.
+3. Replay (`CompiledSkillReplay`): try compiled skill first; miss → Fast Path LLM/UI sub-agent. Vision only on miss (empty tree / `perceptionMode=vision_escalate`). Unchanged is not a second click.
+4. Existing `automation.skill.SkillCompiler` (MCP draft capsules / `phone_skill_save`) is unchanged. Stage 3 is `com.cyclone.mobile.skills` runtime learn→compile→replay.
+5. Fast Path settle/fingerprint/nav isolation and Session Kernel + 3.9.12 Take control/GATE preserved. `PhoneToolExecutor` remains the only mutation engine.
+6. Tests (`PlaybookHintStoreTest`, `SkillRouteCompilerTest`, `CompiledSkillReplayTest`, `SkillRuntimeTest`) + `docs/V4_STAGE3_SKILL_COMPILER.md` + version identity **4.0.0-alpha.3** / versionCode 69. Physical Pixel 8 = UNVERIFIED.
+Acceptance: unit tests for store/compile/replay/miss-escalate; honest UNVERIFIED for physical; PR open.
+Out of scope: Cyclone One tiles/installer (S4), Magisk, 20 hot LLM agents, requiring MCP `session_id` (Stage 4).
+Handoff: Stage 4 Cyclone One glass. MCP may require `session_id`; compiled skills already carry session/display. Do not start Stage 4 in this PR.
 
 ### Stage 4 — Cyclone One V4 glass
 Merge One 0.2.1 JPEG/handoff; session.added/removed; tiles; MCP requires session_id; no second navigator on PC.
@@ -58,8 +69,8 @@ Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent
 
 ## Orchestrator coordination (user 2026-09-07)
 - Check progress about **every 30 minutes**; advance **one stage at a time** through to a **V4 release**.
-- **Stage 2** is the current completed kernel (this PR, `4.0.0-alpha.2`). Do not restart Stage 1 or Stage 2 mid-run.
-- **Stage 3** is next (Skill Compiler). Stages 3–5 Grok prompts MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
-- After Stage 2 PR: offer/use Grok **usage reset** before heavy Stage 3+ burns if the user initiates it.
+- **Stage 3** is the current completed compiler (this PR, `4.0.0-alpha.3`). Do not restart Stage 1, Stage 2, or Stage 3 mid-run.
+- **Stage 4** is next (Cyclone One V4 glass). Stages 4–5 Grok prompts MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
+- After Stage 3 PR: offer/use Grok **usage reset** before heavy Stage 4+ burns if the user initiates it.
 
 

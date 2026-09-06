@@ -39,6 +39,14 @@ import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.ui.overlay.GateBlockedException
 import com.cyclone.mobile.ui.overlay.OverlayGateClass
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import com.cyclone.mobile.skills.CompiledSkillReplay
+import com.cyclone.mobile.skills.CompiledSkillRoute
+import com.cyclone.mobile.skills.PlaybookHintStep
+import com.cyclone.mobile.skills.PlaybookSafety
+import com.cyclone.mobile.skills.SemanticSelector
+import com.cyclone.mobile.skills.SkillEscalateTo
+import com.cyclone.mobile.skills.SkillReplayResult
+import com.cyclone.mobile.skills.SkillRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.job
@@ -114,6 +122,9 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         var consecutiveNoProgressFailures: Int = 0,
         var cancelled: () -> Boolean = { false },
         @Volatile var stopRequested: Boolean = false,
+        val playbookSteps: MutableList<PlaybookHintStep> = mutableListOf(),
+        val compiledAttempts: MutableSet<String> = mutableSetOf(),
+        var playbookPackage: String? = null,
     )
 
     private data class ActiveLocalSession(
@@ -135,6 +146,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         CycloneBrainRuntime.initialize(context)
         AdaptiveBrainRuntime.initialize(context)
         AppLearnerRuntime.initialize(context)
+        SkillRuntime.initialize(context)
         PageAwarenessRuntime.initialize(context)
 
         var state = observeState(goal)
@@ -294,6 +306,32 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                     ))
                 }
 
+                val compiled = if (session.adaptiveMode == "FREE") null
+                else SkillRuntime.match(
+                    packageName = session.state.page.packageName,
+                    goal = goal,
+                    startPageKey = session.state.page.pageKey,
+                    sessionId = execution.sessionId,
+                    displayId = execution.displayId,
+                )?.takeIf { it.id !in session.compiledAttempts }
+                if (compiled != null) {
+                    session.compiledAttempts += compiled.id
+                    onProgress("Replaying compiled skill · ${compiled.nlPlaybook.take(80)}")
+                    AgentTraceRuntime.event(
+                        context, traceId, "COMPILED_SKILL",
+                        "Trying compiled PhoneToolExecutor route before Fast Path LLM",
+                        code = "skill.replay", ok = true,
+                        detail = compiled.id,
+                    )
+                    return CyclonePlanResult.Valid(
+                        CycloneModelTurn(
+                            directive = CycloneModelDirective.ACT,
+                            actionSignature = "compiled-skill:${compiled.id}",
+                            payload = compiled,
+                        ),
+                    )
+                }
+
                 val graphAction = if (session.adaptiveMode == "FREE") null
                 else knownAppGraphAction(session.state.page, goal, session.graphAttempts)
                 if (graphAction != null) {
@@ -408,6 +446,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                     )
                 }
                 val execution = when (val payload = turn.payload) {
+                    is CompiledSkillRoute -> executeCompiledSkill(session, payload, onProgress)
                     is LearnedAction -> executeGraphAction(session, payload, onProgress)
                     is PageAgentDecision -> {
                         val decision = if (turn.directive == CycloneModelDirective.NEED_VISION) {
@@ -577,6 +616,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
     ): QuickAgentResult {
         return when (val run = session.agent.runUntilBoundary()) {
             is CycloneAgentRunResult.Completed -> {
+                rememberPlaybook(session.context)
                 activeLocalSession = null
                 completeTrace(
                     session.context.traceId,
@@ -762,6 +802,10 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                 session.successfulActions += "${action.tool}:${action.controlId.orEmpty()}@${state.page.pageKey.takeLast(10)}"
                 session.consecutiveNoProgressFailures = 0
                 session.adaptiveMode = "STRUCTURED"
+                playbookStepFrom(action, state.page, envelope.after?.pageKey, envelope.after?.packageName)?.let { step ->
+                    if (session.playbookSteps.isEmpty()) session.playbookPackage = state.page.packageName
+                    session.playbookSteps += step
+                }
             } else {
                 val failureCode = if (verified) "NO_VERIFIED_PROGRESS" else envelope.errorClass.name
                 session.failedActions += "${action.tool}:${action.controlId.orEmpty()}:$failureCode"
@@ -844,6 +888,126 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             ok = verifiedProgress,
             progress = verifiedProgress,
             evidenceIdentity = session.bridge.observation()?.evidenceIdentity ?: cycloneObservation(state).evidenceIdentity,
+        )
+    }
+
+    private fun executeCompiledSkill(
+        session: LocalSessionContext,
+        route: CompiledSkillRoute,
+        onProgress: (String) -> Unit,
+    ): LocalExecution {
+        val before = session.state
+        onProgress("Replaying compiled skill")
+        val page = SkillRuntime.pageFrom(before.page, session.bridge.currentPage())
+        val port = SkillRuntime.executorPort() ?: return LocalExecution(
+            before, false, false, cycloneObservation(before).evidenceIdentity,
+            message = "Compiled skill replay needs PhoneToolExecutor.",
+        )
+        val result = CompiledSkillReplay.replay(
+            route = route,
+            page = page,
+            sessionId = execution.sessionId,
+            displayId = execution.displayId,
+            act = port,
+            observe = { _, _ ->
+                session.bridge.observe(session.goal)
+                SkillRuntime.pageFrom(observeState(session.goal)?.page ?: session.state.page, session.bridge.currentPage())
+            },
+        )
+        val after = observeState(session.goal) ?: before
+        session.state = after
+        session.bridge.observe(session.goal)
+        val evidenceIdentity = session.bridge.observation()?.evidenceIdentity ?: cycloneObservation(after).evidenceIdentity
+        return when (result) {
+            is SkillReplayResult.Hit -> {
+                session.bridge.markVerifiedProgress()
+                session.successfulActions += "compiled-skill:${route.id}"
+                session.consecutiveNoProgressFailures = 0
+                session.adaptiveMode = "STRUCTURED"
+                session.skillSignatures += route.id
+                AgentTraceRuntime.event(
+                    context, session.traceId, "COMPILED_SKILL",
+                    "Compiled skill hit · ${result.stepsRun} PhoneToolExecutor steps",
+                    code = "skill.hit", ok = true, detail = route.id,
+                )
+                LocalExecution(after, true, true, evidenceIdentity, message = "Replayed compiled skill without an LLM turn.")
+            }
+            is SkillReplayResult.Miss -> {
+                session.failedActions += "compiled-skill:${route.id}:${result.reason.name}"
+                session.consecutiveNoProgressFailures += 1
+                if (result.escalateTo == SkillEscalateTo.VISION) {
+                    session.bridge.recover(RecoverableCause.AMBIGUOUS_SEMANTICS, session.goal)
+                } else {
+                    session.bridge.recover(RecoverableCause.VERIFICATION_FAILED, session.goal)
+                }
+                AgentTraceRuntime.event(
+                    context, session.traceId, "COMPILED_SKILL",
+                    "Compiled skill missed · ${result.reason.name} → ${result.escalateTo.name}",
+                    code = "skill.miss", ok = true, detail = result.detail,
+                )
+                LocalExecution(
+                    after, false, false, evidenceIdentity,
+                    message = "Compiled skill missed; Fast Path LLM will continue. ${result.detail}",
+                )
+            }
+        }
+    }
+
+    private fun playbookStepFrom(
+        action: com.cyclone.mobile.ai.PageAgentAction,
+        before: PageContext,
+        afterPageKey: String?,
+        @Suppress("UNUSED_PARAMETER") afterPackage: String?,
+    ): PlaybookHintStep? {
+        if (!PlaybookSafety.toolAllowed(action.tool)) return null
+        val selector = semanticSelectorForPlaybook(action, before) ?: return null
+        val after = afterPageKey?.takeIf { it.isNotBlank() } ?: return null
+        val params = buildMap {
+            action.params.optString("package").takeIf { it.isNotBlank() }?.let { put("package", it) }
+            action.params.optString("uri").takeIf { it.isNotBlank() }?.let { put("uri", it) }
+        }
+        if (!PlaybookSafety.paramsSafe(params)) return null
+        return runCatching {
+            PlaybookHintStep(
+                nl = action.displaySummary.ifBlank { "Then ${action.tool.removePrefix("phone.").replace('_', ' ')}" },
+                tool = action.tool,
+                selector = selector,
+                beforePageKey = before.pageKey,
+                afterPageKey = after,
+                expectedPageChange = action.expectedPageChange || after != before.pageKey,
+                params = params,
+            )
+        }.getOrNull()
+    }
+
+    private fun semanticSelectorForPlaybook(action: com.cyclone.mobile.ai.PageAgentAction, page: PageContext): SemanticSelector? {
+        action.params.optJSONObject("selector")?.let { SemanticSelector.fromJson(it) }?.let { return it }
+        val control = action.controlId?.let { id -> page.controls.firstOrNull { it.key == id } }
+            ?: page.controls.firstOrNull { control ->
+                val label = action.displaySummary
+                label.isNotBlank() && (control.label.equals(label, ignoreCase = true) || control.semanticName.equals(label, ignoreCase = true))
+            }
+        control?.let { SemanticSelector.fromJson(it.selector) }?.let { return it }
+        val pkg = action.params.optString("package").ifBlank { null }
+        val uri = action.params.optString("uri").ifBlank { null }
+        if (pkg != null || uri != null) {
+            return SemanticSelector(packageName = pkg ?: page.packageName, uri = uri)
+        }
+        return null
+    }
+
+    private fun rememberPlaybook(session: LocalSessionContext) {
+        val steps = session.playbookSteps.toList()
+        if (steps.size < 2) return
+        val packageName = session.playbookPackage ?: session.state.page.packageName
+        if (packageName.isBlank()) return
+        SkillRuntime.recordSuccessfulRun(
+            packageName = packageName,
+            goal = session.goal,
+            startPageKey = steps.first().beforePageKey,
+            sessionId = execution.sessionId,
+            displayId = execution.displayId,
+            steps = steps,
         )
     }
 

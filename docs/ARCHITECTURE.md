@@ -29,7 +29,8 @@ Constrained MCP adapters for external coding/agent clients. They route through C
 The normal execution order is:
 
 ```text
-known route / learned routine / open_app|intent landing
+compiled skill replay (goal + pageKey + sessionId + displayId)
+→ known route / learned routine / open_app|intent landing / Fast Path LLM
 → a11y Page Card (elementIndex)
 → one screen-changing phone tool (or same-page form batch)
 → settle 300ms + fingerprint (+500/+1000 if Unchanged)
@@ -38,9 +39,9 @@ known route / learned routine / open_app|intent landing
 → final result
 ```
 
-Vision is a fallback when the accessibility tree is empty or a custom canvas (`perceptionMode=vision_escalate`). Unchanged after settle is `verified=false` and must not dispatch a second click channel. Consequential actions retain explicit approval boundaries. See [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md).
+A matching compiled skill hits without an LLM turn. Miss falls back to known route / Fast Path LLM / UI sub-agent. Vision is only on miss: empty accessibility tree or `perceptionMode=vision_escalate`. Unchanged after settle is `verified=false` and must not dispatch a second click channel. Consequential actions retain explicit approval boundaries. See [`V4_STAGE3_SKILL_COMPILER.md`](V4_STAGE3_SKILL_COMPILER.md) and [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md).
 
-Observe/act that can run in a workspace carry `sessionId` + `displayId`. Default-foreground is display 0 (`default-foreground`). Named workspace sessions never fall back to display 0; unknown session, display mismatch, and cross-session observation are rejected before mutation. See [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md).
+Observe/act that can run in a workspace carry `sessionId` + `displayId`. Default-foreground is display 0 (`default-foreground`). Named workspace sessions never fall back to display 0; unknown session, display mismatch, and cross-session observation are rejected before mutation. Compiled skills carry the same session/display binding. See [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md).
 
 ## Observability
 
