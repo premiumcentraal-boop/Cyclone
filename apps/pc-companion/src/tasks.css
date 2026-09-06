@@ -1,0 +1,130 @@
+.cyclone-one-tasks {
+  display: grid;
+  gap: 18px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.task-kicker {
+  margin-bottom: 8px;
+  color: #aaa5c8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.task-safety-card,
+.task-composer-card,
+.task-session-card {
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(21, 22, 31, .96), rgba(12, 13, 19, .96));
+  box-shadow: 0 18px 46px rgba(0, 0, 0, .2);
+}
+
+.task-safety-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 18px 20px;
+}
+
+.task-safety-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(132, 105, 255, .17);
+  color: #d8d0ff;
+  font-weight: 800;
+}
+
+.task-safety-copy { min-width: 0; }
+.task-section-title { margin: 0; font-size: 16px; font-weight: 720; color: #f7f5ff; }
+.task-muted { margin: 5px 0 0; color: #a5a1b5; font-size: 13px; line-height: 1.55; }
+
+.task-composer-card { padding: 20px; }
+.task-start-form {
+  display: grid;
+  grid-template-columns: minmax(220px, .8fr) minmax(260px, 1.3fr) auto;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.task-input {
+  min-width: 0;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 11px;
+  outline: none;
+  padding: 0 12px;
+  background: #0d0e14;
+  color: #f4f2fb;
+  font: inherit;
+}
+.task-input:focus { border-color: rgba(144, 118, 255, .8); box-shadow: 0 0 0 3px rgba(118, 89, 255, .12); }
+.task-input:disabled { opacity: .55; }
+.task-form-status { min-height: 20px; margin-top: 10px; color: #aaa5ba; font-size: 12px; }
+
+.task-list-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 6px;
+}
+.task-list-heading-wrap { min-width: 0; }
+.task-session-list { display: grid; gap: 12px; }
+.task-empty {
+  padding: 38px 22px;
+  border: 1px dashed rgba(255, 255, 255, .13);
+  border-radius: 16px;
+  color: #aaa6b8;
+  text-align: center;
+}
+
+.task-session-card { padding: 18px; }
+.task-session-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.task-session-title-wrap { min-width: 0; }
+.task-session-package { color: #f8f6ff; font-size: 15px; font-weight: 720; overflow-wrap: anywhere; }
+.task-session-device { margin-top: 4px; color: #9692a6; font-size: 12px; }
+.task-state {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  color: #c4c0ce;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.task-state-running { background: rgba(75, 220, 155, .12); color: #86e9bb; }
+.task-state-paused { background: rgba(255, 195, 86, .12); color: #f0c974; }
+.task-state-waiting-for-confirmation,
+.task-state-attention { background: rgba(255, 126, 126, .12); color: #ffa4a4; }
+
+.task-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+.task-fact { padding: 10px 11px; border-radius: 10px; background: rgba(255,255,255,.035); min-width: 0; }
+.task-fact-label { display: block; color: #777384; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.task-fact-value { display: block; margin-top: 4px; overflow: hidden; color: #d8d5df; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.task-session-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.task-preview-host { margin-top: 14px; }
+.task-preview-image { display: block; max-width: min(360px, 100%); max-height: 430px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: #05060a; object-fit: contain; }
+.task-preview-meta { margin-top: 7px; color: #777484; font-size: 11px; }
+.task-inline-error { padding: 10px 12px; border-radius: 10px; background: rgba(255, 91, 91, .09); color: #ffb0b0; font-size: 12px; }
+.task-page-footer { display: flex; align-items: center; gap: 12px; padding: 4px 0 16px; }
+.button.danger { border-color: rgba(255, 107, 107, .25); color: #ffb0b0; }
+
+@media (max-width: 880px) {
+  .task-start-form { grid-template-columns: 1fr; }
+  .task-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .task-list-toolbar, .task-page-footer { align-items: stretch; flex-direction: column; }
+}
