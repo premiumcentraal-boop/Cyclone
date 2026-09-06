@@ -41,9 +41,17 @@ class LiveCaptureService : Service() {
     private val watchdog = object : Runnable {
         override fun run() {
             if (closing) return
-            if (SystemClock.uptimeMillis() - maxOf(startedAt, lastFrameAt) > 3_000) {
-                fail("Screen sharing stopped receiving frames. Please share again.")
-            } else handler.postDelayed(this, 1_000)
+            val now = SystemClock.uptimeMillis()
+            if (lastFrameAt == 0L && now - startedAt > 10_000) {
+                fail("Screen sharing did not receive a frame. Please share again.")
+                return
+            }
+            // Android may deliver no buffers while content is static. Do not revoke consent for
+            // an undamaged screen, and do not manufacture freshness by re-timestamping old pixels.
+            if (lastFrameAt > 0 && now - lastFrameAt > 750) {
+                LiveCaptureSessionManager.transition(generation, ScreenSharePhase.STARTING, "Waiting for screen update")
+            }
+            handler.postDelayed(this, 500)
         }
     }
     private fun fail(message: String) {
@@ -172,10 +180,10 @@ class LiveCaptureService : Service() {
         handler.removeCallbacks(watchdog)
         // Serialize resource disposal after the last image callback.
         handler.post {
-            projection?.unregisterCallback(callback)
-            display?.release()
-            reader?.close()
-            projection?.stop()
+            runCatching { projection?.unregisterCallback(callback) }
+            runCatching { display?.release() }
+            runCatching { reader?.close() }
+            runCatching { projection?.stop() }
             if (ownsSession) {
                 if (sessionId == CONTEXT_SESSION) LiveVisionRuntime.sessions.remove(sessionId)
                 LiveCaptureSessionManager.transition(generation, ScreenSharePhase.OFF)

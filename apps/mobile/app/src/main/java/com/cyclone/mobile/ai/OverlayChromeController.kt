@@ -374,7 +374,8 @@ class OverlayChromeController(
     private fun gravityFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.gravity(spec)
 
     private fun flagsFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.flags(spec).let {
-        if (OverlayExternalInteraction.active.value) it or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE else it
+        if (OverlayExternalInteraction.active.value) it or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else it
     }
 
     private fun recordIdleTap() {

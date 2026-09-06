@@ -39,7 +39,7 @@ object LiveCaptureSessionManager {
         val old = mutable.value
         if (generation != old.generation) return false
         val allowed = when (phase) {
-            ScreenSharePhase.STARTING -> old.phase == ScreenSharePhase.REQUESTING_PERMISSION || old.phase == ScreenSharePhase.LIVE
+            ScreenSharePhase.STARTING -> old.phase == ScreenSharePhase.REQUESTING_PERMISSION || old.phase == ScreenSharePhase.LIVE || old.phase == ScreenSharePhase.STARTING
             ScreenSharePhase.LIVE -> old.phase == ScreenSharePhase.STARTING || old.phase == ScreenSharePhase.LIVE
             ScreenSharePhase.STOPPING -> old.active && old.phase != ScreenSharePhase.STOPPING
             ScreenSharePhase.OFF -> old.active

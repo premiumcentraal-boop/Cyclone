@@ -6,7 +6,7 @@ Built on published v3.9.10 (`553688ca8d1180adb4f8cbc3b19764923404612a`). Android
 
 The floating composer keeps attachment and model selection inside its existing Compose window. Plus opens File, Photo and Share screen above the bar; Tune opens the existing model preference, with advanced settings explicitly available. The draft survives Android pickers; editor focus is restored when the external window returns. An attachment chip shows when a reference is queued.
 
-Screen sharing has a separate observable lifecycle: permission, starting, live, stopping, error and revocation. Live requires an accepted frame. Stop is available in the composer, a compact status pill while minimized, and the Android notification. Capture stalls invalidate the stream; resizing clears old frames before accepting new dimensions. The assistant composer and confirmation windows are secure to exclude their contents from capture.
+Screen sharing has a separate observable lifecycle: permission, starting, live, stopping, error and revocation. Live requires an accepted frame. Stop is available in the composer, a compact status pill while minimized, and the Android notification. Missing initial frames fail clearly; unchanged screens wait for a new buffer without making old frames fresh; resizing clears old frames before accepting new dimensions. The assistant composer and confirmation windows are secure to exclude their contents from capture.
 
 Frames are sampled before expensive bitmap copies: about 3 fps normally, 2 fps on stable screens and up to 10 fps briefly after a foreground action. Freshness limits remain unchanged. Original capture resolution is retained for small text; this is a sampled screenshot stream, not continuous provider video.
 

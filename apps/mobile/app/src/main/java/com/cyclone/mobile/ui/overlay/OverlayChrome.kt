@@ -603,7 +603,7 @@ internal fun ScreenSharePill(state: com.cyclone.mobile.capture.ScreenShareState,
             Text(when (state.phase) {
                 ScreenSharePhase.LIVE -> "Sharing screen"
                 ScreenSharePhase.REQUESTING_PERMISSION -> "Waiting for permission"
-                ScreenSharePhase.STARTING -> "Starting screen share"
+                ScreenSharePhase.STARTING -> state.message ?: "Starting screen share"
                 ScreenSharePhase.STOPPING -> "Stopping screen share"
                 ScreenSharePhase.ERROR -> state.message ?: "Screen sharing failed"
                 ScreenSharePhase.REVOKED -> "Screen sharing ended"
