@@ -74,3 +74,4 @@ Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent
 - After Stage 3 PR: offer/use Grok **usage reset** before heavy Stage 4+ burns if the user initiates it.
 
 
+
