@@ -149,7 +149,6 @@ object OverlayChromeRuntime {
         }
     }
 
-    /** Checks the exact approval without consuming it; final Accessibility interception consumes it. */
     fun hasGateApproval(gateClass: OverlayGateClass, action: String, labels: List<String>): Boolean =
         synchronized(lock) {
             val grant = approvedGateChallenge ?: return@synchronized false
@@ -165,7 +164,6 @@ object OverlayChromeRuntime {
                 (grant.sessionId.isBlank() || grant.sessionId == currentSession)
         }
 
-    /** Consumes one explicit user confirmation for the exact previously blocked action. */
     fun consumeGateApproval(gateClass: OverlayGateClass, action: String, labels: List<String>): Boolean =
         synchronized(lock) {
             val grant = approvedGateChallenge ?: return@synchronized false
@@ -256,8 +254,7 @@ object OverlayChromeRuntime {
             mutate {
                 it.enterWorking()
                 // Once execution begins, collapse Cyclone's own accessibility overlay mechanically.
-                // The model should reason about the host app, not spend a provider turn discovering
-                // and clicking Cyclone's "Minimize" chrome. GATE later expands itself when needed.
+                // Progress belongs in the task notification/run log, not the request composer.
                 it.dispatch(OverlayUserAction.MINIMIZE)
                 it.updateStatus("Starting…")
             }
@@ -274,8 +271,13 @@ object OverlayChromeRuntime {
                     accessProfile = accessProfile,
                 ),
             ) { progress ->
-                AgentTaskNotificationRuntime.progress(context, progress)
-                mutate { it.updateStatus(progress) }
+                val clean = progress.trim()
+                // Brain consolidation is internal bookkeeping. Do not surface it as a task/composer
+                // state; the trace already records the successful local Brain write.
+                if (!clean.equals(INTERNAL_BRAIN_UPDATED, ignoreCase = true)) {
+                    AgentTaskNotificationRuntime.progress(context, clean)
+                    mutate { it.updateStatus(clean) }
+                }
             }
             handleAgentResult(result)
         }
@@ -301,8 +303,11 @@ object OverlayChromeRuntime {
             }
             AgentTaskNotificationRuntime.progress(context, "Re-observing after handoff…")
             val result = agent.resume { progress ->
-                AgentTaskNotificationRuntime.progress(context, progress)
-                mutate { it.updateStatus(progress) }
+                val clean = progress.trim()
+                if (!clean.equals(INTERNAL_BRAIN_UPDATED, ignoreCase = true)) {
+                    AgentTaskNotificationRuntime.progress(context, clean)
+                    mutate { it.updateStatus(clean) }
+                }
             }
             handleAgentResult(result)
         }
@@ -347,6 +352,7 @@ object OverlayChromeRuntime {
                     suspendedTaskId = null
                     adaptiveAgent = null
                 }
+                mutate { it.finishStopped(result.message) }
             }
             else -> {
                 context?.let { AgentTaskNotificationRuntime.finish(it, false, result.message) }
@@ -394,6 +400,7 @@ object OverlayChromeRuntime {
 
     private const val GATE_CHALLENGE_TTL_MS = 60_000L
     private const val GATE_APPROVAL_TTL_MS = 30_000L
+    private const val INTERNAL_BRAIN_UPDATED = "Cyclone Brain updated"
 
     private fun readAiSettings(context: Context): OverlayAiSettings {
         val prefs = context.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE)
