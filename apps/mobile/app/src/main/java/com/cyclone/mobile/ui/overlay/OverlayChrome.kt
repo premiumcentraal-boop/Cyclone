@@ -441,7 +441,8 @@ private fun ComposerPanel(
                         TextButton(onClick = { modelsExpanded = !modelsExpanded }) {
                             Text(OpenRouterModelPresets.byId(aiSettings.modelId).label + if (modelsExpanded) " ▴" else " ▾")
                         }
-                        if (modelsExpanded) OpenRouterModelPresets.all.forEach { model ->
+                        if (modelsExpanded) {
+                        OpenRouterModelPresets.all.forEach { model ->
                             TextButton(onClick = {
                                 onAiSettingsChanged(aiSettings.copy(modelId = model.id))
                                 modelsExpanded = false
@@ -451,6 +452,7 @@ private fun ComposerPanel(
                         TextButton(enabled = !sharing.active, onClick = {
                             launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
                         }) { Text("Share for cross-app control") }
+                        }
                     }
                     ComposerAccessory.NONE -> Unit
                 }
