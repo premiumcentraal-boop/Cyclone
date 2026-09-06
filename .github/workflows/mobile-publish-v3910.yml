@@ -240,6 +240,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          current_head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq .object.sha)"
+          test "$current_head" = "$GITHUB_SHA" || { echo 'Refusing superseded release source' >&2; exit 1; }
           cp 'docs/RELEASE_${{ steps.version.outputs.version }}.md' "$RUNNER_TEMP/release-notes.md"
           cat signed/update-compatibility.txt >> "$RUNNER_TEMP/release-notes.md"
           printf '\n\nSource SHA: `%s`\nMobile CI run: `%s`\n' "$(cat signed/source-sha.txt)" "$(cat signed/run-id.txt)" >> "$RUNNER_TEMP/release-notes.md"

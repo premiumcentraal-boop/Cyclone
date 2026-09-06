@@ -11,6 +11,7 @@ import android.os.Bundle
 class LiveCaptureConsentActivity : Activity() {
     private var generation = 0L
     private var wholeDisplay = false
+    private var consentLaunched = false
     override fun onDestroy() {
         if (!isChangingConfigurations) com.cyclone.mobile.ui.overlay.OverlayExternalInteraction.active.value = false
         super.onDestroy()
@@ -20,7 +21,8 @@ class LiveCaptureConsentActivity : Activity() {
         wholeDisplay = intent.getBooleanExtra("wholeDisplay", false)
         generation = savedInstanceState?.getLong("generation") ?: (LiveCaptureSessionManager.request(
             if (wholeDisplay) CaptureScope.WHOLE_DISPLAY else CaptureScope.USER_CHOICE) ?: run { finish(); return })
-        if (savedInstanceState != null) return
+        consentLaunched = savedInstanceState?.getBoolean("consentLaunched", false) ?: false
+        if (consentLaunched) return
         if (wholeDisplay) AlertDialog.Builder(this)
             .setTitle("Share the entire screen?")
             .setMessage("Cyclone needs the entire display to see and control a task across apps. You can stop sharing at any time.")
@@ -32,6 +34,7 @@ class LiveCaptureConsentActivity : Activity() {
     private fun launchConsent() {
         runCatching {
             val manager = getSystemService(MediaProjectionManager::class.java)
+            consentLaunched = true
             startActivityForResult(if (wholeDisplay) manager.createScreenCaptureIntent(
                 MediaProjectionConfig.createConfigForDefaultDisplay()) else manager.createScreenCaptureIntent(), CONSENT)
         }.onFailure {
@@ -45,6 +48,7 @@ class LiveCaptureConsentActivity : Activity() {
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putLong("generation", generation)
+        outState.putBoolean("consentLaunched", consentLaunched)
         super.onSaveInstanceState(outState)
     }
     @Deprecated("Activity result retained for this isolated consent-only activity")

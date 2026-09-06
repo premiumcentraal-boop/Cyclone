@@ -48,13 +48,13 @@ class LiveCaptureService : Service() {
     }
     private fun fail(message: String) {
         LiveCaptureSessionManager.transition(generation, ScreenSharePhase.ERROR, message)
-        LiveVisionRuntime.stopSource(sessionId)
+        invalidateSource(sessionId)
         stopSelf()
     }
     private val callback = object : MediaProjection.Callback() {
         override fun onStop() {
             if (closing) return
-            LiveVisionRuntime.stopSource(sessionId)
+            invalidateSource(sessionId)
             LiveCaptureSessionManager.transition(generation, ScreenSharePhase.REVOKED, "Screen sharing ended by Android.")
             stopSelf()
         }
@@ -83,7 +83,7 @@ class LiveCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) {
             LiveCaptureSessionManager.transition(generation, ScreenSharePhase.STOPPING)
-            LiveVisionRuntime.stopSource(sessionId)
+            invalidateSource(sessionId)
             stopSelf(); return START_NOT_STICKY
         }
         if (projection != null) return START_NOT_STICKY
@@ -132,6 +132,7 @@ class LiveCaptureService : Service() {
         reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2).also { images ->
             images.setOnImageAvailableListener({ source ->
                 runCatching {
+                    if (source !== reader || closing) return@runCatching
                     source.acquireLatestImage()?.use { image ->
                         if (closing || LiveCaptureSessionManager.state.value.generation != generation ||
                             LiveCaptureSessionManager.state.value.phase !in setOf(ScreenSharePhase.STARTING, ScreenSharePhase.LIVE) || !sampler.admit(SystemClock.uptimeMillis())) return@use
@@ -167,7 +168,7 @@ class LiveCaptureService : Service() {
 
     override fun onDestroy() {
         closing = true
-        if (ownsSession) LiveVisionRuntime.stopSource(sessionId)
+        if (ownsSession) invalidateSource(sessionId)
         handler.removeCallbacks(watchdog)
         // Serialize resource disposal after the last image callback.
         handler.post {
@@ -188,12 +189,16 @@ class LiveCaptureService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
     companion object {
+        private fun invalidateSource(sessionId: String) {
+            if (LiveVisionRuntime.sessions.snapshot().any { it.sessionId == sessionId })
+                LiveVisionRuntime.stopSource(sessionId)
+        }
         val sampler = CaptureFrameSampler()
         const val CONTEXT_SESSION = "shared-context"
         fun stop(context: android.content.Context) {
             val state = LiveCaptureSessionManager.state.value
             LiveCaptureSessionManager.transition(state.generation, ScreenSharePhase.STOPPING)
-            LiveVisionRuntime.stopSource(if (state.scope == CaptureScope.WHOLE_DISPLAY) SESSION else CONTEXT_SESSION)
+            invalidateSource(if (state.scope == CaptureScope.WHOLE_DISPLAY) SESSION else CONTEXT_SESSION)
             if (!context.stopService(Intent(context, LiveCaptureService::class.java))) {
                 LiveCaptureSessionManager.transition(state.generation, ScreenSharePhase.OFF)
             }
