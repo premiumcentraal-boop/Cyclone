@@ -4,7 +4,7 @@ Base: published v3.9.11, 5a145c806b4db7a1b7c42b7e7e8e01a8631c7493. Android versi
 
 ## Implemented
 
-Ask Cyclone routes named installed apps to the existing isolated workspace service. Ambiguous targets open the existing app picker. Explicit active screen sharing retains the foreground flow; background failure never starts a foreground agent. One background task is retained at a time; follow-ups are saved and can be started explicitly after releasing the previous workspace.
+Ask Cyclone routes named installed apps to the existing isolated workspace service. Ambiguous targets open the existing app picker. Explicit live whole-display control sharing retains the foreground flow; ordinary read-only screen sharing does not grant foreground execution; background failure never starts a foreground agent. One background task is retained at a time; follow-ups are saved and can be started explicitly after releasing the previous workspace.
 
 The existing composer shows a rounded running card and View progress, with a square Stop action. Mic/model controls hide until the editor is focused. Drag-to-dismiss keeps its existing continuous animation and leaves the service running. Internal agent progress is mapped to short fixed user-facing phrases.
 

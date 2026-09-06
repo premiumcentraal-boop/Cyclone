@@ -33,6 +33,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
         setContent { CycloneIntelligenceTheme {
             val current by WorkspaceTasks.state.collectAsState()
             val task = current?.takeIf { WorkspaceTasks.matches(it, intent.getStringExtra("task"), intent.getStringExtra("session")) }
+            var liveAvailable by remember(task?.sessionId) { mutableStateOf(false) }
             Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).systemBarsPadding().padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -47,7 +48,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
                         Text(if (task.phase == TaskPhase.HUMAN) "You have control · ${task.app}" else "Cyclone's workspace · ${task.app}",
                             style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                         if (task.sessionId != null && task.phase != TaskPhase.HUMAN) {
-                            WorkspacePreview(task.sessionId, Modifier.widthIn(max = 300.dp).fillMaxWidth(.80f).aspectRatio(720f / 1280f))
+                            WorkspacePreview(task.sessionId, Modifier.widthIn(max = 300.dp).fillMaxWidth(.80f).aspectRatio(720f / 1280f)) { liveAvailable = it }
                         }
                         Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -63,7 +64,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
                                         Text(task.app, style = MaterialTheme.typography.titleMedium)
                                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                             OutlinedButton(onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff"); finish() }) { Text("Modify") }
-                                            Button(onClick = {
+                                            Button(enabled = liveAvailable, onClick = {
                                                 startService(WorkspaceTasks.commandIntent(this@WorkspaceProgressActivity, task, "confirm")
                                                     .putExtra("confirmation", confirmation.token))
                                             }) { Text(confirmation.button) }
@@ -102,9 +103,10 @@ class WorkspaceProgressActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun WorkspacePreview(sessionId: String, modifier: Modifier) {
+    private fun WorkspacePreview(sessionId: String, modifier: Modifier, onAvailability: (Boolean) -> Unit) {
         var view by remember(sessionId) { mutableStateOf<ImageView?>(null) }
         var available by remember(sessionId) { mutableStateOf(false) }
+        val reportAvailability by rememberUpdatedState(onAvailability)
         DisposableEffect(sessionId) { onDispose { view?.setImageDrawable(null) } }
         LaunchedEffect(sessionId, view) {
             while (true) {
@@ -114,6 +116,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
                     // ImageView releases its old bitmap; avoid recycling while RenderThread uses it.
                     view?.setImageBitmap(frame)
                 } else { view?.setImageDrawable(null); available = false }
+                reportAvailability(available)
                 delay(750)
             }
         }

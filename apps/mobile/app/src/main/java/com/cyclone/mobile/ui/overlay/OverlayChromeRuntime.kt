@@ -234,7 +234,10 @@ object OverlayChromeRuntime {
             val label = app.loadLabel(context.packageManager).toString()
             label.length >= 3 && Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(label) + "(?![\\p{L}\\p{N}])").containsMatchIn(request)
         }
-        if (!com.cyclone.mobile.capture.LiveCaptureSessionManager.state.value.active) {
+        val share = com.cyclone.mobile.capture.LiveCaptureSessionManager.state.value
+        val explicitForeground = share.phase == com.cyclone.mobile.capture.ScreenSharePhase.LIVE &&
+            share.scope == com.cyclone.mobile.capture.CaptureScope.WHOLE_DISPLAY
+        if (!explicitForeground) {
             synchronized(lock) { adaptiveAgent?.cancelActiveTask(); aiJob?.cancel() }
             if (matches.size == 1) {
                 val app = matches.single()
