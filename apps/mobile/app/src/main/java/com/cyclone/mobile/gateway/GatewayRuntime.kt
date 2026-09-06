@@ -1,4 +1,4 @@
-package com.cyclone.mobile.gateway
+﻿package com.cyclone.mobile.gateway
 
 import android.content.Context
 import android.os.Build
@@ -402,6 +402,7 @@ internal object GatewayDispatcher {
             "Unsupported gateway operation: ${request.op}",
             request.id,
         )
+    }
     }
 
     private fun readExecution(args: JSONObject): com.cyclone.mobile.runtime.session.ExecutionContext = try {
