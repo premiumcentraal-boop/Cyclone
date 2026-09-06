@@ -14,7 +14,7 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
     private val displays = shellContext.getSystemService(DisplayManager::class.java)
     private val readers = Executors.newCachedThreadPool()
     private data class Owned(val display: VirtualDisplay, val width: Int, val height: Int,
-        var generation: Long = 1, var agent: Boolean = true, var packageName: String? = null)
+        var generation: Long = 1, var agent: Boolean = true, var packageName: String? = null, var handedOffTask: Int? = null)
     private val workspaces = mutableMapOf<String, Owned>()
 
     @Synchronized override fun create(sessionId: String, surface: Surface, width: Int, height: Int, density: Int): Bundle = result {
@@ -77,6 +77,18 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
 
     @Synchronized override fun resume(sessionId: String): Bundle = result {
         val owned = valid(sessionId)
+        owned.handedOffTask?.let { taskId ->
+            check(!owned.agent)
+            val task = WorkspaceCommands.exactTask(
+                WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list"))),
+                taskId, 0, owned.packageName.orEmpty())
+            command(listOf("/system/bin/am", "display", "move-stack", task.rootTaskId.toString(),
+                owned.display.display.displayId.toString()))
+            WorkspaceCommands.exactTask(
+                WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list"))),
+                taskId, owned.display.display.displayId, owned.packageName.orEmpty())
+            owned.handedOffTask = null
+        }
         requireTask(owned)
         owned.generation++; owned.agent = true
         describe(sessionId, owned)
@@ -91,6 +103,7 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
             .any { it.taskId == task.taskId && it.displayId == 0 && it.packageName == task.packageName }) {
             "FOREGROUND_REQUIRED: Android did not preserve and surface the task"
         }
+        owned.handedOffTask = task.taskId
         describe(sessionId, owned).apply { putBoolean("handedOff", true) }
     }
 

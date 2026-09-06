@@ -26,6 +26,10 @@ object WorkspaceCommands {
     }
 
     data class Task(val rootTaskId: Int, val taskId: Int, val displayId: Int, val packageName: String)
+    fun exactTask(tasks: List<Task>, taskId: Int, displayId: Int, packageName: String): Task =
+        tasks.singleOrNull { it.taskId == taskId && it.displayId == displayId && it.packageName == packageName }
+            ?: error("The original app page is no longer available")
+
     /** Fail closed when an OEM changes the shell output instead of guessing task ownership. */
     fun tasks(output: String): List<Task> {
         val tasks = mutableListOf<Task>()

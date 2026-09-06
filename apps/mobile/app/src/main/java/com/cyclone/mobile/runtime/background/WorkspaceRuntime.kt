@@ -31,7 +31,7 @@ object WorkspaceRuntime {
     private var appContext: Context? = null
     @Volatile private var backend: IWorkspaceService? = null
     private data class Entry(val session: ExecutionSession, val lifecycle: WorkspaceLifecycle,
-        val reader: ImageReader, val thread: HandlerThread, var remoteGeneration: Long, val sourceRevision: Long)
+        val reader: ImageReader, val thread: HandlerThread, var remoteGeneration: Long, var sourceRevision: Long)
     private val entries = mutableMapOf<String, Entry>()
 
     fun connect(context: Context) {
@@ -81,7 +81,7 @@ object WorkspaceRuntime {
                             Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
                         } catch (error: Throwable) { padded.recycle(); throw error }
                         if (bitmap !== padded) padded.recycle()
-                        LiveVisionRuntime.publish(id, displayId, FrameSourceType.VIRTUAL_DISPLAY_SURFACE, revision,
+                        LiveVisionRuntime.publish(id, displayId, FrameSourceType.VIRTUAL_DISPLAY_SURFACE, entries[id]?.sourceRevision ?: revision,
                             image.timestamp / 1_000_000, bitmap)
                     }
                 }
@@ -142,8 +142,11 @@ object WorkspaceRuntime {
 
     fun resume(sessionId: String) = synchronized(lock) {
         val entry = entries.getValue(sessionId)
-        check(entry.lifecycle.state == WorkspaceState.PAUSED)
+        check(entry.lifecycle.state in setOf(WorkspaceState.PAUSED, WorkspaceState.WAITING_FOR_CONFIRMATION,
+            WorkspaceState.BACKGROUND_NEEDS_HANDOFF))
         entry.remoteGeneration = checked(backend?.resume(sessionId) ?: error("BACKEND_DISCONNECTED")).getLong("generation")
+        entry.sourceRevision = LiveVisionRuntime.startSource(sessionId, entry.session.displayId,
+            FrameSourceType.VIRTUAL_DISPLAY_SURFACE)
         entry.lifecycle.transition(WorkspaceState.BACKGROUND_OK)
         LiveVisionRuntime.sessions.setOwner(sessionId, InputOwner.CYCLONE)
         com.cyclone.mobile.gateway.GatewayObservationStore.clear(sessionId)
