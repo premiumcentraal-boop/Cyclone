@@ -1,0 +1,106 @@
+package com.cyclone.mobile.runtime.background
+
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.cyclone.mobile.ui.v32.CycloneIntelligenceStyle
+import com.cyclone.mobile.ui.v32.CycloneIntelligenceTheme
+import com.cyclone.mobile.ui.v32.CycloneOrbitMark
+import rikka.shizuku.Shizuku
+
+/** Target choice remains explicit. Visual presentation never grants execution authority. */
+class WorkspaceActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val apps = packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+            .filter { it.activityInfo.packageName != packageName }.distinctBy { it.activityInfo.packageName }
+            .sortedBy { it.loadLabel(packageManager).toString() }
+        setContent {
+            CycloneIntelligenceTheme {
+                var selected by rememberSaveable { mutableIntStateOf(0) }
+                var menu by remember { mutableStateOf(false) }
+                var goal by rememberSaveable { mutableStateOf(intent.getStringExtra("goal").orEmpty()) }
+                var status by remember { mutableStateOf("") }
+                Column(Modifier.fillMaxSize().background(CycloneIntelligenceStyle.Ink)
+                    .systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { finish() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                        Text("Background task", style = MaterialTheme.typography.titleMedium)
+                    }
+                    CycloneOrbitMark(Modifier.size(56.dp))
+                    Text("Your task.\nA little more space.", color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 32.sp, lineHeight = 39.sp)
+                    Text("Keep using your phone while Cyclone works in a separate app workspace.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
+                    Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface) {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text("WORK IN", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                            Box {
+                                OutlinedButton(onClick = { menu = true }, enabled = apps.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                                    Text(apps.getOrNull(selected)?.loadLabel(packageManager)?.toString() ?: "No apps available",
+                                        modifier = Modifier.weight(1f))
+                                    Icon(Icons.Rounded.ArrowDropDown, null)
+                                }
+                                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                    apps.forEachIndexed { index, app ->
+                                        DropdownMenuItem(text = { Text(app.loadLabel(packageManager).toString()) },
+                                            onClick = { selected = index; menu = false })
+                                    }
+                                }
+                            }
+                            OutlinedTextField(goal, { goal = it }, modifier = Modifier.fillMaxWidth(), minLines = 3,
+                                label = { Text("What would you like done?") }, shape = RoundedCornerShape(20.dp))
+                        }
+                    }
+                    Text("You're in control", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Pause or stop at any time. Cyclone hands the app back for payment and other sensitive steps. Background work requires Android 15+ and Shizuku.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(onClick = {
+                        runCatching {
+                            check(Shizuku.pingBinder()) { "Start Shizuku on this phone, then try again." }
+                            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) Shizuku.requestPermission(902)
+                            else status = "Background access is enabled."
+                        }.onFailure { status = it.message ?: "Background access is unavailable." }
+                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Enable background access") }
+                    Button(onClick = {
+                        val app = apps.getOrNull(selected)
+                        if (goal.isBlank() || app == null) { status = "Choose an app and describe your task." }
+                        else if (android.os.Build.VERSION.SDK_INT < 35) { status = "Background work needs Android 15 or later." }
+                        else runCatching {
+                            check(Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                                "Enable background access before starting."
+                            }
+                            WorkspaceTasks.start(this@WorkspaceActivity, goal, app.activityInfo.packageName,
+                                app.loadLabel(packageManager).toString())
+                            finish()
+                        }.onFailure { status = it.message ?: "Couldn't start this task. Please try again." }
+                    }, enabled = apps.isNotEmpty() && goal.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary)) { Text("Start task") }
+                    if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}

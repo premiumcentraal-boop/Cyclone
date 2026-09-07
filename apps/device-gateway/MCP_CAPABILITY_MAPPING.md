@@ -1,6 +1,6 @@
-# Device Gateway capability mapping — Cyclone V3.1 Beta
+# Device Gateway capability mapping — Cyclone V3.5
 
-This is the V3.1 contract between `tools/codex-phone-mcp` and the PC Device Gateway. Capability discovery is metadata only; neither MCP nor the PC gateway becomes Android action authority.
+This is the V3.5 contract between `tools/codex-phone-mcp` and the PC Device Gateway. Capability discovery is metadata only; neither MCP nor the PC gateway becomes Android action authority.
 
 ## Protocol
 
@@ -28,10 +28,11 @@ cyclone.gateway.capability.v1
 | `phone_devices` | auto-detect | Fleet discovery; degrades to the legacy single-device status row when the gateway only exposes the legacy surface. `scan=true` forces a fresh ADB scan. |
 | `phone_status` | status | Device/Gateway/Accessibility readiness. |
 | `phone_capabilities` | status/discovery | Cached `GET /v1/capabilities`; `refresh=true` forces rediscovery. |
-| `phone_observe` | observe | Compact by default. Full only for targeted debugging. |
+| `phone_observe` | observe | Returns a bounded Page Card by default: location, text/summary, counts, current candidates, verified route hints, and an optional local screenshot artifact. |
+| `phone_locate` | locate | Default PC-agent entry point: readiness + Page Card + semantic search ranked for one stated goal. |
 | `phone_ui_search` | search | Use before screenshots when target missing from compact context. |
 | `phone_inspect_element` | inspect | Element IDs remain observation-scoped. |
-| `phone_act` | act | Typed allowlist only; requires fresh observation for mutations. |
+| `phone_act` | act | Typed allowlist only. Requires a current observation-scoped element ID and returns before/after Page Cards, delta, action status, and verification result. |
 | `phone_teach_start/status/stop` | teach | Existing canonical teaching store only. |
 | `phone_debug_bundle` | debug | Transport/execution/verification disagreements. |
 | `phone_screenshot` | vision fallback | Use only when structured evidence is insufficient/conflicting. |
@@ -40,19 +41,21 @@ No MCP tool exposes shell, root, PowerShell, arbitrary ADB or a generic command 
 
 ## Per-device routing
 
-Every operation accepts an optional `device_id` returned by `phone_devices`. When provided, the
-client calls the Desktop fleet agent surface (`/v1/devices/{device_id}/agent/*`); when omitted it
-uses the legacy single-device surface selected by `CYCLONE_DEVICE_SERIAL`.
+Every operation accepts an optional `device_id` returned by `phone_devices`. In multi-phone work,
+agents must provide it on every call; it selects the Desktop fleet surface
+(`/v1/devices/{device_id}/agent/*`). Omitting it only selects the configured legacy single-device
+surface and must never be used as a screenshot or targeting workaround.
 
 The Desktop agent returns its own envelope for actions. The MCP client normalizes it to the
 canonical `cyclone.gateway.capability.v1` shape (transport -> execution -> verification) so the
 shared fail-closed classifier and fresh-observation rule apply unchanged. The normalization is
 client-side only; the gateway and Android authority are untouched.
 
-The Desktop agent semantic observe endpoint does not return image bytes (`USE_DESKTOP_VIDEO_OR_DEBUG_BUNDLE`).
-`phone_screenshot` therefore reports `screenshotAvailable=false` for a device-scoped call and points
-the agent at the legacy screenshot path or the PC Companion live video. Debug bundles remain the
-diagnostic fallback for both surfaces.
+The Desktop agent never returns image bytes in its semantic response. When requested,
+`phone_screenshot` and `phone_observe(include_screenshot=true)` return a bounded per-device local
+artifact reference (`LOCAL_FILE`) or an explicit unavailable reason. The PC Companion remains the
+live-video surface; debug bundles remain the diagnostic fallback. No call silently targets another
+phone to obtain an image.
 
 ## Action authority
 
@@ -62,23 +65,25 @@ Android action authority is:
 
 ```text
 GatewayActionAuthority
-  -> final V3.1 Policy Governor/action composition
+  -> final V3.5 Policy Governor/action composition
   -> AUTHORIZED_HANDOFF only
   -> PhoneToolExecutor
 ```
 
-Agent 3's Android compatibility authority is fail-closed for mutations until the final Agent 1 adapter is bound.
+Observation is the PC-agent authority boundary: element IDs are valid only for the current
+observation and are invalidated after every mutation. App Graph/Brain hints are advisory and may
+only be learned from Android-verified semantic transitions.
 
 ## Correlation and witnesses
 
 Every typed request carries a bounded correlation ID. For actions, the same correlation ID is inherited by the Android NDJSON request envelope.
 
-Mutating action responses preserve:
+Mutating action responses preserve a single atomic envelope:
 
-1. before witness;
+1. before Page Card/witness;
 2. transport outcome;
 3. Android execution outcome (`android_execution`, bounded/safe fields only);
-4. after witness;
+4. after Page Card/witness plus page delta;
 5. verification outcome.
 
 After any mutation, MCP clears its cached observation ID and requires a new observation before another mutation. This prevents accidental reuse of observation-scoped element IDs.

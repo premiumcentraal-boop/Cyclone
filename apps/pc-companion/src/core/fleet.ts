@@ -1,6 +1,6 @@
 import type { DesktopDevice } from "../services/types.js";
 
-export type AppRoute = "fleet" | "focused" | "connections" | "settings";
+export type AppRoute = "home" | "fleet" | "focused" | "automations" | "connections" | "settings";
 
 export interface CompanionState {
   route: AppRoute;
@@ -15,7 +15,7 @@ export type CompanionAction =
   | { type: "navigate"; route: Exclude<AppRoute, "focused"> };
 
 export function initialCompanionState(devices: DesktopDevice[] = []): CompanionState {
-  return { route: "fleet", devices, focusedDeviceId: null };
+  return { route: "home", devices, focusedDeviceId: null };
 }
 
 export function reduceCompanionState(state: CompanionState, action: CompanionAction): CompanionState {

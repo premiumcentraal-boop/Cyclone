@@ -1,21 +1,22 @@
+# Cyclone 4.0.0-alpha.1 V4 Stage 1 Fast Path; DEVICE TESTING: UNVERIFIED
 schema = 1
-product_version = "3.5.1"
-channel = "stable"
-android_version_code = 37
-python_version = "3.5.1"
+product_version = "4.0.0-alpha.1"
+channel = "development"
+android_version_code = 67
+python_version = "3.8.4"
 
 [components]
-mobile = "3.5.1"
-pc_companion = "3.5.1"
-device_gateway = "3.5.1"
-mcp = "3.5.1"
+mobile = "4.0.0-alpha.1"
+pc_companion = "3.8.4"
+device_gateway = "3.8.4"
+mcp = "3.8.4"
 
 [release]
-publication_authorized = true
-physical_pixel8 = "PASS_PIXEL_8_ANDROID_16_3B171FDJH0061G"
-physical_pixel8_ui_acceptance = "PASS_LIVE_MEDIA_TAP_SWIPE_BACK_HOME"
-second_android_device = "NOT_REQUIRED_PC_CONTROL_PATCH"
-virtual_provider = "UNCHANGED_FROM_3.5.0"
-android_signing = "DEBUG_UNVERIFIED"
-windows_signing = "UNVERIFIED"
-windows_installer = "PENDING_3.5.1_CI_BUILD"
+previous_mobile_version = "3.9.12"
+publication_authorized = false
+physical_pixel8 = "UNVERIFIED"
+physical_pixel8_ui_acceptance = "UNVERIFIED"
+android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
+windows_signing = "CI_UNSIGNED"
+windows_installer = "CI_UNSIGNED"
+candidate_generation = "cyclone-4.0.0-alpha.1"

@@ -67,6 +67,9 @@ export interface TrustStatusResult {
   completed?: boolean;
   rotated?: boolean;
   revoked?: boolean;
+  localTrustCleared?: boolean;
+  phoneRevocationConfirmed?: boolean;
+  phoneRevocationError?: string | null;
 }
 
 export type StreamUiState =
@@ -120,6 +123,21 @@ export interface DeviceConnectionHealth {
   errorClass: string | null;
 }
 
+/** Optional richer per-plane health emitted by newer Gateways. Legacy Gateways omit it safely. */
+export interface DeviceOperatorHealthSignal {
+  state?: "READY" | "RECOVERING" | "ACTION_REQUIRED" | "OFFLINE" | "UNKNOWN";
+  message?: string;
+}
+
+export interface DeviceOperatorHealth {
+  usb?: DeviceOperatorHealthSignal;
+  bridge?: DeviceOperatorHealthSignal;
+  accessibility?: DeviceOperatorHealthSignal;
+  session?: DeviceOperatorHealthSignal;
+  semantic?: DeviceOperatorHealthSignal;
+  media?: DeviceOperatorHealthSignal;
+}
+
 export interface PairingPreflight {
   appRunning: boolean | null;
   accessibilityEnabled: boolean | null;
@@ -138,6 +156,7 @@ export interface DesktopDevice {
   video: DeviceVideoDescriptor;
   capabilities: DeviceCapabilities;
   connectionHealth?: DeviceConnectionHealth;
+  operatorHealth?: DeviceOperatorHealth;
   planes?: DevicePlanes;
   readiness?: DeviceReadiness;
   videoDiagnostics?: {

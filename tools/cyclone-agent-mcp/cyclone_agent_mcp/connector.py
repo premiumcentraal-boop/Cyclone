@@ -142,12 +142,12 @@ def verify_tools_list(executable: str | None = None) -> dict[str, Any]:
     command = resolve_server_command(executable)
     definitions = asyncio.run(_verify_async(command))
     discovered = sorted(definitions)
-    expected = sorted(TOOL_NAMES)
+    expected = sorted(_expected_tool_names())
     schema_errors: list[str] = []
     for name, schema in sorted(definitions.items()):
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
         if name in {
-            "phone_list", "phone_group_act", "phone_virtual_list", "phone_virtual_create",
+            "phone_list", "phone_devices", "phone_group_act", "phone_virtual_list", "phone_virtual_create",
             "phone_virtual_start", "phone_virtual_stop",
         }:
             if "device_id" in properties:
@@ -162,6 +162,15 @@ def verify_tools_list(executable: str | None = None) -> dict[str, Any]:
         "expected": expected,
         "schema_errors": schema_errors,
     }
+
+
+def _expected_tool_names() -> tuple[str, ...]:
+    """Use the canonical phone surface when this connector is inside the Companion binary."""
+    if getattr(sys, "frozen", False):
+        from cyclone_phone_mcp.mcp_server import TOOLS
+
+        return tuple(str(tool["name"]) for tool in TOOLS)
+    return TOOL_NAMES
 
 
 def _codex_candidate(path: Path, snippet: str) -> str:

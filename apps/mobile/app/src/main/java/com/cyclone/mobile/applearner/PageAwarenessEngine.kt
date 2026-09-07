@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.cyclone.mobile.AccessibilityRoles
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -339,19 +340,49 @@ object PageSignatureEngine {
         val contentParts = mutableListOf<String>()
         val controls = mutableListOf<PageControl>()
         val titleCandidates = mutableListOf<String>()
+        var selectedTab = ""
+        var paneTitle = ""
+        var firstHeading = ""
+
+        for (i in 0 until nodes.length()) {
+            val probe = nodes.optJSONObject(i) ?: continue
+            if (!probe.optBoolean("visibleToUser", true)) continue
+            val probeRole = probe.optString("role").lowercase(Locale.US)
+            val probeText = probe.optString("text").trim().ifBlank { probe.optString("contentDescription").trim() }
+            val probeResource = probe.optString("resourceId").substringAfterLast('/').lowercase(Locale.US)
+            if (selectedTab.isBlank() && probeRole == "tab" && (probe.optBoolean("selected") || probe.optBoolean("checked"))) {
+                selectedTab = probeText
+            }
+            if (paneTitle.isBlank() && probeResource in setOf("action_bar_title", "toolbar_title", "panetitle", "pane_title", "title")) {
+                paneTitle = probeText
+            }
+            if (firstHeading.isBlank() && probeText.length in 2..80 && probe.optInt("depth", 99) <= 4 &&
+                probeRole in setOf("text", "generic", "") && !probe.optBoolean("clickable")
+            ) {
+                firstHeading = probeText
+            }
+        }
 
         for (i in 0 until minOf(nodes.length(), 450)) {
             val node = nodes.optJSONObject(i) ?: continue
-            if (!node.optBoolean("visibleToUser", true)) continue
             val resource = node.optString("resourceId").substringAfterLast('/').trim()
             val role = node.optString("role").ifBlank { node.optString("class").substringAfterLast('.') }.lowercase(Locale.US)
             val text = node.optString("text").trim()
             val description = node.optString("contentDescription").trim()
-            val label = text.ifBlank { description }.ifBlank { resource.replace('_', ' ') }.trim()
-            val stableLabel = normalizeLabel(label)
-            val path = node.optString("path").split('/').take(5).joinToString("/")
+            val path = node.optString("path")
             val interactive = node.optBoolean("clickable") || node.optBoolean("editable") || node.optBoolean("scrollable") ||
                 node.optBoolean("longClickable") || node.optBoolean("checkable") || role in setOf("button", "tab", "switch", "checkbox", "edit_text", "textbox")
+            val bounds = node.optJSONObject("bounds")
+            val boundsWidth = if (bounds == null) 0 else bounds.optInt("right") - bounds.optInt("left")
+            val boundsHeight = if (bounds == null) 0 else bounds.optInt("bottom") - bounds.optInt("top")
+            if (!AccessibilityRoles.isPublishedInteractive(
+                    node.optBoolean("visibleToUser", true), interactive, boundsWidth, boundsHeight,
+                )
+            ) continue
+            val ownLabel = text.ifBlank { description }.ifBlank { resource.replace('_', ' ') }.trim()
+            val inheritedLabel = if (interactive && ownLabel.isBlank()) descendantLabel(node, nodes) else ""
+            val label = ownLabel.ifBlank { inheritedLabel }
+            val stableLabel = normalizeLabel(label)
 
             // Structure favours IDs/roles/path. Dynamic visible values only contribute normalized tokens.
             if (resource.isNotBlank() || interactive) {
@@ -365,6 +396,7 @@ object PageSignatureEngine {
                     node.optString("resourceId").takeIf { it.isNotBlank() }?.let { put("resourceId", it) }
                     text.takeIf { it.isNotBlank() && !ActionSafetyPolicy.looksSensitiveField(node) }?.let { put("text", it.take(160)) }
                     description.takeIf { it.isNotBlank() && !ActionSafetyPolicy.looksSensitiveField(node) }?.let { put("contentDescription", it.take(160)) }
+                    inheritedLabel.takeIf { it.isNotBlank() }?.let { put("descendantText", it.take(160)) }
                     role.takeIf { it.isNotBlank() }?.let { put("role", it) }
                     if (node.optBoolean("clickable")) put("clickable", true)
                     if (node.optBoolean("editable")) put("editable", true)
@@ -372,7 +404,7 @@ object PageSignatureEngine {
                 }
                 val actions = node.optJSONArray("actions")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter(String::isNotBlank) }.orEmpty()
                 val semantic = semanticName(label, role)
-                val key = sha256("$resource|$role|$stableLabel|$path").take(18)
+                val key = sha256("$resource|$role|$stableLabel|$path|${node.optString("id")}").take(18)
                 controls += PageControl(
                     key = key,
                     label = label.take(140),
@@ -387,10 +419,14 @@ object PageSignatureEngine {
         }
 
         val compactStructure = structuralParts.distinct().take(180).joinToString("\n")
-        val structuralKey = sha256("$packageName|${className.orEmpty()}|$compactStructure").take(28)
+        val identityMix = listOf(selectedTab, paneTitle, firstHeading).filter { it.isNotBlank() }.joinToString("|")
+        val structuralKey = sha256("$packageName|${className.orEmpty()}|$identityMix|$compactStructure").take(28)
         val contentKey = sha256(contentParts.distinct().take(120).joinToString("|")).take(20)
         val pageKey = "$packageName:${className?.substringAfterLast('.') ?: "page"}:$structuralKey"
-        val title = titleCandidates.firstOrNull { normalizeLabel(it).isNotBlank() }
+        val title = paneTitle.takeIf { it.isNotBlank() }
+            ?: selectedTab.takeIf { it.isNotBlank() }
+            ?: firstHeading.takeIf { it.isNotBlank() }
+            ?: titleCandidates.firstOrNull { normalizeLabel(it).isNotBlank() }
             ?.take(80)
             ?: controls.firstOrNull()?.label?.take(80)
             ?: className?.substringAfterLast('.')
@@ -422,6 +458,24 @@ object PageSignatureEngine {
             .replace(whitespace, " ")
             .trim()
         return lower.take(140)
+    }
+
+    /** Promote the visible label inside an unlabeled actionable container (common in Settings). */
+    private fun descendantLabel(parent: JSONObject, nodes: JSONArray): String {
+        val parentPath = parent.optString("path").trimEnd('/')
+        if (parentPath.isBlank()) return ""
+        val prefix = "$parentPath/"
+        for (index in 0 until nodes.length()) {
+            val candidate = nodes.optJSONObject(index) ?: continue
+            if (!candidate.optBoolean("visibleToUser", true)) continue
+            val candidatePath = candidate.optString("path")
+            if (!candidatePath.startsWith(prefix)) continue
+            val label = candidate.optString("text").trim()
+                .ifBlank { candidate.optString("contentDescription").trim() }
+                .ifBlank { candidate.optString("resourceId").substringAfterLast('/').replace('_', ' ').trim() }
+            if (label.isNotBlank() && label != "<redacted>") return label.take(160)
+        }
+        return ""
     }
 
     fun semanticName(label: String, role: String): String {

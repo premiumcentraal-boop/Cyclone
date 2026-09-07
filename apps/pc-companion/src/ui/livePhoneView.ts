@@ -1,6 +1,7 @@
 import { mapPointerGesture } from "../core/coordinates.js";
 import type { DesktopDevice, DesktopService, StreamProfile, StreamUiState } from "../services/types.js";
 import { LivePhoneController } from "../video/livePhoneController.js";
+import { createDeviceHealthPanel } from "./deviceHealthPanel.js";
 import { button, el } from "./dom.js";
 
 export interface LivePhoneViewOptions {
@@ -9,6 +10,7 @@ export interface LivePhoneViewOptions {
   profile: StreamProfile;
   interactive?: boolean;
   showLabel?: boolean;
+  showHealth?: boolean;
   autoStart?: boolean;
   onOpen?: (device: DesktopDevice) => void;
   onPair?: (device: DesktopDevice) => void;
@@ -39,6 +41,8 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
   frame.append(canvas, image, status, overlay);
   stage.append(frame);
   card.append(stage);
+
+  if (options.showHealth !== false) card.append(createDeviceHealthPanel(device, options.profile === "thumbnail"));
 
   if (options.showLabel !== false) {
     const footer = el("footer", "phone-card-footer");

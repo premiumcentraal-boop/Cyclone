@@ -1,1 +1,0 @@
-"""Cyclone Core application package."""

@@ -1,2 +1,0 @@
-Cyclone Mobile 2.9.5 fast APK build trigger.
-No runtime behavior is defined by this file.

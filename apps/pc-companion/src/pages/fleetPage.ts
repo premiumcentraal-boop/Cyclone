@@ -1,11 +1,17 @@
 import { computeVirtualRange, fleetColumnCount } from "../core/grid.js";
 import type { DesktopDevice, DesktopService, FleetBatchOperation } from "../services/types.js";
 import { createLivePhoneView, type LivePhoneViewHandle } from "../ui/livePhoneView.js";
+import { operatorRecovery } from "../core/operatorHealth.js";
 import { button, el } from "../ui/dom.js";
 
 export interface FleetPageHandle {
   element: HTMLElement;
   destroy(): void;
+}
+
+export interface FleetGatewayStatus {
+  offline: boolean;
+  message?: string;
 }
 
 export function createFleetPage(
@@ -14,6 +20,8 @@ export function createFleetPage(
   onFocus: (device: DesktopDevice) => void,
   onPair: (device: DesktopDevice) => void,
   onScan: () => Promise<number>,
+  onDiagnostics: () => void,
+  gatewayStatus: FleetGatewayStatus,
 ): FleetPageHandle {
   const page = el("section", "page fleet-page");
   const header = el("header", "page-header fleet-header");
@@ -64,14 +72,43 @@ export function createFleetPage(
   header.append(titleGroup, scanArea);
   page.append(header);
 
+  if (gatewayStatus.offline) {
+    const banner = el("section", "fleet-gateway-warning");
+    const copy = el("div");
+    copy.append(
+      el("div", "fleet-gateway-warning-title", "Local Gateway needs attention"),
+      el("p", "fleet-gateway-warning-copy", gatewayStatus.message || "Cyclone kept the last known fleet visible. Retry discovery or inspect local diagnostics before reopening the Companion."),
+    );
+    const actions = el("div", "fleet-gateway-warning-actions");
+    const retry = button("Retry discovery", "button secondary compact");
+    retry.addEventListener("click", () => { void onScan(); });
+    const diagnostics = button("Open diagnostics", "button secondary compact");
+    diagnostics.addEventListener("click", onDiagnostics);
+    actions.append(retry, diagnostics);
+    banner.append(copy, actions);
+    page.append(banner);
+  }
+
   if (devices.length === 0) {
     const empty = el("div", "empty-state");
+    const title = el("h2", "empty-title", gatewayStatus.offline ? "Local Gateway is offline" : "Looking for Cyclone phones");
+    const copy = el("p", "empty-copy", gatewayStatus.offline
+      ? "Cyclone cannot read USB inventory right now. Reopen PC Companion if retry and diagnostics do not restore the local Gateway."
+      : "Plug in a phone with USB debugging enabled. Cyclone reacts to USB changes automatically, or use Scan for phones.");
+    const actionRow = el("div", "empty-state-actions");
+    const retry = button("Retry discovery", "button secondary compact");
+    retry.addEventListener("click", () => { void onScan(); });
+    const diagnostics = button("Open diagnostics", "button ghost compact");
+    diagnostics.addEventListener("click", onDiagnostics);
+    actionRow.append(retry, diagnostics);
     empty.append(
       el("div", "empty-orbit"),
-      el("h2", "empty-title", "Looking for Cyclone phones"),
-      el("p", "empty-copy", "Plug in a phone with USB debugging enabled. Cyclone reacts to USB changes automatically, or use Scan for phones."),
+      title,
+      copy,
+      actionRow,
     );
     page.append(empty);
+    if (!gatewayStatus.offline) void enrichEmptyState(service, title, copy);
     return { element: page, destroy: () => undefined };
   }
 
@@ -170,7 +207,7 @@ export function createFleetPage(
       chooser.append(checkbox, el("span", "fleet-device-source", device.source === "VIRTUAL" ? `Virtual · ${device.provider ?? "provider"}` : (device.source ?? "USB")));
       handle.element.prepend(chooser);
       grid.append(handle.element);
-      attachConnectionRecovery(handle.element, service, device, () => onScan());
+      attachConnectionRecovery(handle.element, service, device, () => onScan(), onPair, onDiagnostics);
     }
   };
 
@@ -249,17 +286,18 @@ function attachConnectionRecovery(
   service: DesktopService,
   device: DesktopDevice,
   onScan: () => Promise<unknown>,
+  onPair: (device: DesktopDevice) => void,
+  onDiagnostics: () => void,
 ): void {
-  if (device.state !== "DISCONNECTED" && !(device.state === "ATTENTION" && device.paired)) return;
+  const recovery = operatorRecovery(device);
+  if (!recovery && device.state !== "ATTENTION") return;
   const kicker = card.querySelector<HTMLElement>(".state-kicker");
   const title = card.querySelector<HTMLElement>(".state-title");
   const copy = card.querySelector<HTMLElement>(".state-copy");
-  if (kicker) kicker.textContent = device.state === "DISCONNECTED" ? "Reconnecting" : "Needs attention";
-  if (title) title.textContent = device.state === "DISCONNECTED" ? "Reconnecting" : "Needs attention";
+  if (kicker) kicker.textContent = recovery?.label ?? "Needs attention";
+  if (title) title.textContent = recovery?.label ?? "Needs attention";
   if (copy) {
-    copy.textContent = device.state === "DISCONNECTED"
-      ? "The USB bridge dropped. Cyclone retries automatically with bounded backoff, or retry now."
-      : (device.lastSafeError ?? "The phone needs attention before the live view can start.");
+    copy.textContent = recovery?.detail ?? device.lastSafeError ?? "The phone needs attention before the live view can start.";
   }
 
   const banner = el("div", "connection-recovery");
@@ -279,10 +317,14 @@ function attachConnectionRecovery(
   }
 
   const actions = el("div", "connection-recovery-actions");
-  const retry = button("Retry connection", "button secondary compact");
-  retry.addEventListener("click", () => { void onScan(); });
+  const retry = button(recovery?.needsPairing ? "Restore access" : "Retry discovery", "button secondary compact");
+  retry.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (recovery?.needsPairing) onPair(device); else void onScan();
+  });
   const bundle = button("Save debug bundle", "button secondary compact");
-  bundle.addEventListener("click", () => {
+  bundle.addEventListener("click", (event) => {
+    event.stopPropagation();
     bundle.disabled = true;
     bundle.textContent = "Collecting…";
     void service.createConnectionDiagnosticBundle(device.id)
@@ -292,7 +334,33 @@ function attachConnectionRecovery(
       .catch(() => { bundle.textContent = "Bundle failed"; })
       .finally(() => { bundle.disabled = false; });
   });
-  actions.append(retry, bundle);
+  const diagnostics = button("Diagnostics", "button ghost compact");
+  diagnostics.addEventListener("click", (event) => { event.stopPropagation(); onDiagnostics(); });
+  actions.append(retry, bundle, diagnostics);
   banner.append(status, actions);
   card.append(banner);
+}
+
+async function enrichEmptyState(service: DesktopService, title: HTMLElement, copy: HTMLElement): Promise<void> {
+  try {
+    const status = await service.getRuntimeStatus();
+    const discovery = status.discovery;
+    if (!status.backendReachable) {
+      title.textContent = "Local Gateway is offline";
+      copy.textContent = "Cyclone could not contact its local sidecar. Reopen PC Companion if the issue continues.";
+    } else if (!discovery) {
+      copy.textContent = "This Gateway does not report USB discovery details yet. Connect a phone and use Scan for phones.";
+    } else if (!discovery.adbAvailable) {
+      title.textContent = "ADB needs attention";
+      copy.textContent = "Cyclone cannot reach Android Platform Tools. Open diagnostics for the exact local error.";
+    } else if (discovery.rawAdbDeviceCount > 0 && discovery.authorizedAdbDeviceCount === 0) {
+      title.textContent = "Phone detected · approval needed";
+      copy.textContent = "Your phone is physically connected. Unlock it and approve the USB debugging prompt, then retry discovery.";
+    } else if (discovery.rawAdbDeviceCount > 0) {
+      title.textContent = "Phone detected · preparing connection";
+      copy.textContent = "ADB can see the phone, but it is not in Cyclone's inventory yet. Retry discovery; if it remains here, open diagnostics.";
+    }
+  } catch {
+    // The initial no-phone guidance is still useful when a legacy status route is unavailable.
+  }
 }

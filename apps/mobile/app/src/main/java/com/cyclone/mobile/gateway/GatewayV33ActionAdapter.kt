@@ -5,6 +5,13 @@ import android.os.PowerManager
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
+import com.cyclone.mobile.agent.contract.AgentSemanticVerification
+import com.cyclone.mobile.agent.contract.AgentSemanticVerifier
+import com.cyclone.mobile.agent.contract.SemanticElementState
+import com.cyclone.mobile.agent.contract.SemanticObservationState
+import com.cyclone.mobile.applearner.AppLearnerRuntime
+import com.cyclone.mobile.applearner.PcRouteOutcomeEvidence
+import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import org.json.JSONObject
 
 /**
@@ -31,7 +38,14 @@ internal object GatewayV33ActionAdapter {
         "phone.set_clipboard",
     )
 
+    private val pageTransitionTools = setOf(
+        "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app",
+    )
+
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
+        com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(
+            com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()),
+        )
         val tool = args.optString("tool").trim()
         if (tool !in allowedTools) {
             throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Tool is not enabled for the current PC gateway", requestId)
@@ -107,9 +121,23 @@ internal object GatewayV33ActionAdapter {
         val verificationFailedInExecutor = errorCode == "ASSERTION_FAILED"
         val androidExecutionOk = executorReportedOk || verificationFailedInExecutor
         val afterObservation = if (tool in mutatingTools && androidExecutionOk) {
-            runCatching { GatewayObservationAdapter.capture(context, JSONObject()) }.getOrNull()
+            captureAfterAction(context, tool, normalizedParams, beforeObservation)
         } else null
         val expect = normalizedParams.optJSONObject("expect")
+        val goalLabel = args.optString("goal")
+        val clickedLabel = clickedNodeLabel(normalizedParams, beforeObservation)
+        val afterHaystack = observationHaystack(afterObservation)
+        val sharedVerification = verifyAfterState(
+            tool = tool,
+            expectedPackage = normalizedParams.optString("package"),
+            goalLabel = goalLabel,
+            beforeObservation = beforeObservation,
+            afterObservation = afterObservation,
+            androidExecutionOk = androidExecutionOk,
+            executorAssertionFailed = verificationFailedInExecutor,
+            explicitExpectation = expect != null,
+        )
+        val afterStateVerified = sharedVerification.passed
         val verification = when {
             verificationFailedInExecutor -> JSONObject()
                 .put("ok", false)
@@ -129,16 +157,35 @@ internal object GatewayV33ActionAdapter {
                 .put("status", "DEGRADED")
                 .put("code", "VERIFICATION_FAILED")
                 .put("message", "Action executed but a fresh after-observation could not be captured.")
-            expect != null -> JSONObject()
+            expect != null && sharedVerification.basis == "EXPLICIT_EXPECTATION" -> JSONObject()
                 .put("ok", true)
                 .put("status", "PASSED")
                 .put("code", JSONObject.NULL)
+                .put("semanticSuccessClaimed", true)
+            afterStateVerified -> JSONObject()
+                .put("ok", true)
+                .put("status", "PASSED")
+                .put("code", JSONObject.NULL)
+                .put("semanticSuccessClaimed", true)
+                .put("basis", sharedVerification.basis ?: "FRESH_AFTER_STATE_CHANGED")
             else -> JSONObject()
                 .put("ok", true)
                 .put("status", "OBSERVED")
                 .put("code", JSONObject.NULL)
                 .put("semanticSuccessClaimed", false)
         }
+
+        val routeLearning = recordVerifiedRouteOutcome(
+            context = context,
+            goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') },
+            tool = tool,
+            params = normalizedParams,
+            before = beforeObservation,
+            after = afterObservation,
+            transportOk = true,
+            androidExecutionOk = androidExecutionOk,
+            verification = verification,
+        )
 
         return baseResult
             .put("transport", JSONObject().put("ok", true).put("protocol", GatewayProtocol.VERSION))
@@ -148,8 +195,174 @@ internal object GatewayV33ActionAdapter {
                 .put("errorCode", errorCode.takeIf(String::isNotBlank) ?: JSONObject.NULL))
             .put("afterState", afterObservation?.let(::compactAfterState) ?: JSONObject.NULL)
             .put("verification", verification)
+            .put("routeLearning", routeLearning)
             .put("requiresReobserveBeforeNextMutation", tool in mutatingTools)
             .put("publicCapability", publicCapability)
+    }
+
+    internal fun captureAfterAction(
+        context: Context,
+        tool: String,
+        params: JSONObject,
+        before: GatewayObservation?,
+    ): GatewayObservation? {
+        val deadline = System.currentTimeMillis() + if (tool in pageTransitionTools) 1_800L else 0L
+        var after = runCatching { GatewayObservationAdapter.capture(context, com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(params, JSONObject())) }.getOrNull()
+        while (
+            after != null &&
+            tool in pageTransitionTools &&
+            !verifiedByAfterState(
+                tool,
+                params.optString("package"),
+                before?.page?.pageKey.orEmpty(),
+                before?.payload?.optString("accessibilityFingerprint").orEmpty(),
+                after.page.packageName,
+                after.page.pageKey,
+                after.payload.optString("accessibilityFingerprint"),
+            ) &&
+            System.currentTimeMillis() < deadline
+        ) {
+            Thread.sleep(120L)
+            after = runCatching { GatewayObservationAdapter.capture(context, com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(params, JSONObject())) }.getOrNull()
+        }
+        return after
+    }
+
+    internal fun verifyAfterState(
+        tool: String,
+        expectedPackage: String,
+        goalLabel: String,
+        beforeObservation: GatewayObservation?,
+        afterObservation: GatewayObservation?,
+        androidExecutionOk: Boolean,
+        executorAssertionFailed: Boolean = false,
+        explicitExpectation: Boolean = false,
+    ): AgentSemanticVerification = AgentSemanticVerifier.verify(
+        tool = tool,
+        androidExecutionOk = androidExecutionOk,
+        executorAssertionFailed = executorAssertionFailed,
+        explicitExpectation = explicitExpectation,
+        expectedPackage = expectedPackage,
+        goalLabel = goalLabel,
+        before = beforeObservation?.let(::semanticState),
+        after = afterObservation?.let(::semanticState),
+    )
+
+    internal fun verifiedByAfterState(
+        tool: String,
+        expectedPackage: String,
+        beforePageKey: String,
+        beforeFingerprint: String,
+        afterPackage: String,
+        afterPageKey: String,
+        afterFingerprint: String,
+        goalLabel: String = "",
+        clickedLabel: String = "",
+        afterHaystack: String = "",
+        beforeObservation: GatewayObservation? = null,
+        afterObservation: GatewayObservation? = null,
+    ): Boolean {
+        val beforeState = beforeObservation?.let(::semanticState) ?: SemanticObservationState(
+            packageName = "",
+            pageKey = beforePageKey,
+            accessibilityFingerprint = beforeFingerprint,
+            haystack = "",
+            elements = emptyList(),
+        )
+        val afterState = afterObservation?.let(::semanticState) ?: SemanticObservationState(
+            packageName = afterPackage,
+            pageKey = afterPageKey,
+            accessibilityFingerprint = afterFingerprint,
+            haystack = afterHaystack,
+            elements = emptyList(),
+        )
+        return AgentSemanticVerifier.verify(
+            tool = tool,
+            androidExecutionOk = true,
+            executorAssertionFailed = false,
+            explicitExpectation = false,
+            expectedPackage = expectedPackage,
+            goalLabel = goalLabel,
+            before = beforeState,
+            after = afterState,
+        ).passed
+    }
+
+    internal fun samePageProgress(
+        before: GatewayObservation?,
+        after: GatewayObservation?,
+        goalLabel: String = "",
+    ): Boolean {
+        if (before == null || after == null) return false
+        val beforeState = semanticState(before)
+        val afterState = semanticState(after)
+        return AgentSemanticVerifier.samePageSemanticProgress(beforeState, afterState) != null ||
+            AgentSemanticVerifier.goalLabelAppeared(beforeState.haystack, afterState.haystack, goalLabel)
+    }
+
+    private fun semanticState(observation: GatewayObservation): SemanticObservationState = SemanticObservationState(
+        packageName = observation.page.packageName,
+        pageKey = observation.page.pageKey,
+        accessibilityFingerprint = observation.payload.optString("accessibilityFingerprint"),
+        haystack = observationHaystack(observation),
+        elements = observation.elements.values.map { element ->
+            val evidence = element.evidence
+            val stableKey = evidence.optString("controlKey").ifBlank {
+                listOf(
+                    element.semanticName,
+                    element.role,
+                    evidence.optString("resourceId"),
+                ).joinToString("|")
+            }
+            SemanticElementState(
+                stableKey = stableKey,
+                label = element.label,
+                role = element.role,
+                selected = evidence.optBoolean("selected"),
+                checked = evidence.optBoolean("checked"),
+                focused = evidence.optBoolean("focused"),
+                editableTextState = evidence.optString("textStateDigest")
+                    .takeIf { it.isNotBlank() && it != "null" && it != "<redacted>" },
+            )
+        },
+    )
+
+    internal fun labelStillPresent(goalLabel: String, clickedLabel: String, haystack: String): Boolean {
+        if (haystack.isBlank()) return false
+        return listOf(clickedLabel, goalLabel).any { needle ->
+            needle.trim().isNotEmpty() && haystack.contains(needle.trim(), ignoreCase = true)
+        }
+    }
+
+    internal fun clickedNodeLabel(params: JSONObject, before: GatewayObservation?): String {
+        val elementId = params.optString("elementId").ifBlank {
+            params.optJSONObject("selector")?.optString("elementId").orEmpty()
+                .ifBlank { params.optJSONObject("selector")?.optString("id").orEmpty() }
+        }
+        if (elementId.isBlank() || before == null) return ""
+        return before.elements[elementId]?.label.orEmpty()
+    }
+
+    internal fun observationHaystack(observation: GatewayObservation?): String {
+        observation ?: return ""
+        val parts = mutableListOf<String>()
+        parts += observation.page.title
+        parts += observation.page.pageKey
+        observation.elements.values.forEach { parts += it.label }
+        when (val pageText = observation.payload.opt("pageText")) {
+            is String -> parts += pageText
+            is JSONObject -> {
+                parts += pageText.optString("text")
+                val lines = pageText.optJSONArray("lines")
+                if (lines != null) {
+                    for (index in 0 until lines.length()) {
+                        val line = lines.optJSONObject(index)
+                        parts += line?.optString("text").orEmpty()
+                    }
+                }
+            }
+        }
+        return parts.joinToString(" ")
     }
 
     private fun executeDirect(
@@ -210,6 +423,67 @@ internal object GatewayV33ActionAdapter {
         .put("contentKey", observation.page.contentKey)
         .put("accessibilityFingerprint", observation.payload.optString("accessibilityFingerprint"))
         .put("capturedAtMs", observation.capturedAt)
+
+    internal fun recordVerifiedRouteOutcome(
+        context: Context,
+        goal: String,
+        tool: String,
+        params: JSONObject,
+        before: GatewayObservation?,
+        after: GatewayObservation?,
+        transportOk: Boolean,
+        androidExecutionOk: Boolean,
+        verification: JSONObject,
+        brainSource: String = "PC_CODEX_VERIFIED_ROUTE",
+    ): JSONObject {
+        val outcome = PcRouteOutcomeEvidence(
+            transportOk = transportOk,
+            androidExecutionOk = androidExecutionOk,
+            verificationStatus = verification.optString("status"),
+            before = before?.page,
+            after = after?.page,
+        )
+        if (!outcome.isVerifiedPageOutcome) {
+            return JSONObject()
+                .put("recorded", false)
+                .put("reason", "Transport/executor success is not a verified semantic route outcome")
+        }
+        val appGraph = runCatching {
+            AppLearnerRuntime.recordVerifiedPcRoute(context, tool, params, outcome)
+        }.getOrElse { error ->
+            return JSONObject().put("recorded", false).put("reason", "App Graph persistence failed safely: ${error.javaClass.simpleName}")
+        }
+        if (!appGraph.recorded) {
+            return JSONObject().put("recorded", false).put("reason", appGraph.reason)
+        }
+        val brainSignature = runCatching {
+            AdaptiveBrainRuntime.recordToolOutcome(
+                context = context,
+                goal = goal,
+                tool = tool,
+                params = params,
+                before = brainState(before),
+                after = brainState(after),
+                ok = true,
+                source = brainSource,
+            ).also { signature ->
+                AdaptiveBrainRuntime.recordRunPath(context, goal, listOf(signature), success = true)
+            }
+        }.getOrNull()
+        return JSONObject()
+            .put("recorded", true)
+            .put("reason", appGraph.reason)
+            .put("appGraph", JSONObject()
+                .put("fromPageKey", appGraph.fromPageKey ?: JSONObject.NULL)
+                .put("toPageKey", appGraph.toPageKey ?: JSONObject.NULL)
+                .put("transitionState", appGraph.transitionState?.name ?: JSONObject.NULL))
+            .put("brainSignature", brainSignature ?: JSONObject.NULL)
+            .put("verifiedOutcome", true)
+    }
+
+    private fun brainState(observation: GatewayObservation?): JSONObject = JSONObject()
+        .put("currentPackage", observation?.page?.packageName.orEmpty())
+        .put("fingerprint", observation?.payload?.optString("accessibilityFingerprint").orEmpty())
 }
 
 internal object GatewayV33ManualDesktopAdapter {
@@ -255,15 +529,23 @@ internal object GatewayV33ManualDesktopAdapter {
                 params.put("durationMs", args.optLong("durationMs", 350L).coerceIn(100L, 3000L))
                 params.put("waitForChangeMs", 0)
             }
-            "back" -> toolArgs.put("tool", "phone.back")
-            "home" -> toolArgs.put("tool", "phone.home")
+            "back" -> {
+                toolArgs.put("tool", "phone.back")
+                params.put("waitForChangeMs", 0)
+            }
+            "home" -> {
+                toolArgs.put("tool", "phone.home")
+                params.put("waitForChangeMs", 0)
+            }
             "scroll_up" -> {
                 toolArgs.put("tool", "phone.scroll")
                 params.put("direction", "backward")
+                params.put("waitForChangeMs", 0)
             }
             "scroll_down" -> {
                 toolArgs.put("tool", "phone.scroll")
                 params.put("direction", "forward")
+                params.put("waitForChangeMs", 0)
             }
             "text" -> {
                 val value = args.optString("text")

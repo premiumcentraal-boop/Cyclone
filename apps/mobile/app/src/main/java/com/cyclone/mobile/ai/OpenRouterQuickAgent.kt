@@ -3,6 +3,9 @@ package com.cyclone.mobile.ai
 import android.content.Context
 import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
+import com.cyclone.mobile.ai.model.BoundedJsonRepair
+import com.cyclone.mobile.ai.model.ModelRegistry
+import com.cyclone.mobile.ai.model.StructuredOutputMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -21,70 +24,42 @@ data class OpenRouterModelPreset(
     val reasoningEffort: String = "medium",
 )
 
-/**
- * Built-in V2.8 provider presets. Custom OpenRouter model slugs still work through byId().
- *
- * The requested "Gemini 3.7 Flash" is not an official Google model as of August 2026. Google's
- * current stable Flash model is Gemini 3.6 Flash, so Cyclone exposes that real supported endpoint
- * at High reasoning instead of silently inventing an unsupported 3.7 slug.
- */
+/** Typed Cyclone registry projected into the legacy OpenRouter preset surface. */
 object OpenRouterModelPresets {
-    val GPT_5_6_LUNA = OpenRouterModelPreset(
-        id = "openai/gpt-5.6-luna",
-        label = "GPT-5.6 Luna · Max",
-        vision = true,
-        reasoningEffort = "max",
-    )
-    val GEMINI_3_6_FLASH = OpenRouterModelPreset(
-        id = "google/gemini-3.6-flash",
-        label = "Gemini 3.6 Flash · High",
-        vision = true,
-        reasoningEffort = "high",
-    )
-    val QWEN_3_8_27B = OpenRouterModelPreset(
-        id = "qwen/qwen3.8-27b",
-        label = "Qwen3.8 27B",
-        vision = false,
-        reasoningEffort = "medium",
-    )
-    val DEEPSEEK_V4_FLASH = OpenRouterModelPreset(
-        "deepseek/deepseek-v4-flash-0731",
-        "DeepSeek V4 Flash 0731",
-        false,
-        "medium",
-    )
-    val GEMMA_4_26B = OpenRouterModelPreset(
-        "google/gemma-4-26b-a4b-it",
-        "Gemma 4 26B A4B",
-        true,
-        "medium",
-    )
-    val GEMMA_4_31B = OpenRouterModelPreset(
-        "google/gemma-4-31b-it",
-        "Gemma 4 31B",
-        true,
-        "medium",
-    )
+    val GPT_5_6_LUNA = ModelRegistry.preset(ModelRegistry.GPT_5_6_LUNA)
+    val GEMINI_3_8_FLASH = ModelRegistry.preset(ModelRegistry.GEMINI_3_8_FLASH)
+    val GLM_5_3_FLASH = ModelRegistry.preset(ModelRegistry.GLM_5_3_FLASH)
+    val MUSE_SPARK_1_3 = ModelRegistry.preset(ModelRegistry.MUSE_SPARK_1_3)
+    val GPT_5_6_SOL = ModelRegistry.preset(ModelRegistry.GPT_5_6_SOL)
+    val GPT_6_ASTRA = ModelRegistry.preset(ModelRegistry.GPT_6_ASTRA)
+    val CLAUDE_FABLE_5_1 = ModelRegistry.preset(ModelRegistry.CLAUDE_FABLE_5_1)
+    val MUSE_SPARK_1_3_CONTRIBUTOR = ModelRegistry.preset(ModelRegistry.MUSE_SPARK_1_3_CONTRIBUTOR)
 
-    /** Luna Max is the clean-install V2.8 default requested for Cyclone phone control. */
+    /** Luna is the inexpensive balanced clean-install default. */
     val DEFAULT = GPT_5_6_LUNA
-    val all = listOf(GPT_5_6_LUNA, GEMINI_3_6_FLASH, QWEN_3_8_27B, DEEPSEEK_V4_FLASH, GEMMA_4_26B, GEMMA_4_31B)
+    val all = ModelRegistry.all.map(ModelRegistry::preset)
 
-    // Unknown custom slugs are accepted, but vision support is not assumed until the user picks a
-    // known vision preset. This preserves existing behavior and prevents accidental image requests
-    // to text-only custom providers.
-    fun byId(id: String): OpenRouterModelPreset = all.firstOrNull { it.id == id }
+    // Compatibility names used by older screens; both resolve to current curated endpoints.
+    val GEMINI_3_6_FLASH = GEMINI_3_8_FLASH
+    val DEEPSEEK_V4_FLASH = GLM_5_3_FLASH
+
+    // Unknown custom slugs remain accepted, but vision support is not assumed.
+    fun byId(id: String): OpenRouterModelPreset = ModelRegistry.resolve(id)?.let(ModelRegistry::preset)
         ?: OpenRouterModelPreset(id, id, false, reasoningEffort = "medium")
 }
 
 data class QuickAgentConfig(
     val model: OpenRouterModelPreset = OpenRouterModelPresets.DEFAULT,
-    val visionModel: OpenRouterModelPreset = OpenRouterModelPresets.GEMINI_3_6_FLASH,
-    /** V2.8 counts provider calls on unknown semantic pages, not raw phone actions/events. */
+    val visionModel: OpenRouterModelPreset = OpenRouterModelPresets.GEMINI_3_8_FLASH,
+    /**
+     * Legacy compatibility knob for older workflow/tests. Foreground CycloneLocalAgent execution
+     * no longer uses provider-call count as a task termination budget.
+     */
     val maxDecisions: Int = 6,
     val safeMode: Boolean = true,
     val accessProfile: CycloneAiAccessProfile = if (safeMode) CycloneAiAccessProfile.BALANCED else CycloneAiAccessProfile.FULL,
     val providerSort: String = "latency",
+    val attachment: com.cyclone.mobile.ui.overlay.TaskAttachment? = null,
 )
 
 data class QuickAgentResult(
@@ -93,6 +68,12 @@ data class QuickAgentResult(
     val decisions: Int,
     val model: String,
     val workflowId: String? = null,
+    /** Persistent local task id; present for foreground task sessions and GATE resume. */
+    val taskId: String? = null,
+    /** CycloneTaskClassification name. Null for legacy one-shot workflow compilation. */
+    val classification: String? = null,
+    /** Overlay GATE wire value when a deterministic Android boundary can name one. */
+    val gateClass: String? = null,
 )
 
 /**
@@ -127,7 +108,8 @@ class OpenRouterQuickAgent(private val context: Context) {
             val result = QuickAgentResult(false, apiError(response), 1, config.model.id)
             return@withContext completeTrace(traceId, result)
         }
-        val proposal = runCatching { JSONObject(stripCodeFence(raw)) }.getOrElse {
+        val repaired = BoundedJsonRepair.extractSingleObject(raw) ?: stripCodeFence(raw)
+        val proposal = runCatching { JSONObject(repaired) }.getOrElse {
             return@withContext completeTrace(traceId, QuickAgentResult(false, "The model returned invalid workflow JSON: ${it.message}", 1, config.model.id))
         }
         val result = AutomationRuntime.importAiProposal(context, proposal).fold(
@@ -159,22 +141,9 @@ class OpenRouterQuickAgent(private val context: Context) {
         providerSort: String,
         jsonMode: Boolean,
     ): JSONObject {
-        val maxTokens = when {
-            jsonMode && model.reasoningEffort == "max" -> 12_000
-            jsonMode -> 5_000
-            model.reasoningEffort == "max" -> 4_096
-            else -> 2_500
-        }
-        val body = JSONObject()
-            .put("model", model.id)
-            .put("messages", messages)
-            .put("temperature", 0.05)
-            .put("max_tokens", maxTokens)
-            .put("reasoning", JSONObject().put("effort", model.reasoningEffort).put("exclude", true))
-            .put("session_id", "cyclone-workflow-${UUID.randomUUID()}")
-            .put("provider", JSONObject().put("sort", providerSort).put("allow_fallbacks", true).put("require_parameters", true))
-            .put("response_format", JSONObject().put("type", "json_object"))
-            .put("stream", false)
+        val maxTokens = 8192
+        val body = com.cyclone.mobile.ai.model.PortableModelRequest.body(model.id, messages,
+            com.cyclone.mobile.ai.model.ModelEndpointCatalog.verifiedTags(model.id, http), maxTokens)
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $apiKey")
@@ -188,7 +157,15 @@ class OpenRouterQuickAgent(private val context: Context) {
             val json = runCatching { JSONObject(text) }.getOrElse {
                 JSONObject().put("error", JSONObject().put("message", text.ifBlank { "HTTP ${response.code}" }))
             }
-            if (!response.isSuccessful && !json.has("error")) json.put("error", JSONObject().put("message", "HTTP ${response.code}"))
+            if (!response.isSuccessful) {
+                val error = json.optJSONObject("error") ?: JSONObject().put("message", "HTTP ${response.code}")
+                if (!error.has("code")) error.put("code", response.code)
+                json.put("error", error)
+            }
+            json.put("_cycloneMeta", JSONObject()
+                .put("httpStatus", response.code)
+                .put("requestId", response.header("x-request-id").orEmpty())
+                .put("provider", json.optString("provider")))
             json
         }
     }
@@ -215,8 +192,17 @@ Consequential actions require confirmation. If context is insufficient, create a
         internal fun stripCodeFence(raw: String): String = raw.trim()
             .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
 
-        private fun apiError(response: JSONObject): String =
-            response.optJSONObject("error")?.optString("message").orEmpty().ifBlank { "OpenRouter request failed." }
+        private fun apiError(response: JSONObject): String {
+            val error = response.optJSONObject("error") ?: return "OpenRouter request failed."
+            val meta = response.optJSONObject("_cycloneMeta")
+            val status = meta?.optInt("httpStatus", error.optInt("code", 500)) ?: error.optInt("code", 500)
+            return ProviderFailure.classify(
+                httpStatus = status,
+                rawBody = error.toString(),
+                providerName = meta?.optString("provider"),
+                requestId = meta?.optString("requestId"),
+            ).userMessage
+        }
     }
 }
 

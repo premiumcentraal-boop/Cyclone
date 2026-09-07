@@ -1,53 +1,31 @@
 # Cyclone Mobile
 
-The current product interface follows the Cyclone V3.2 calm mobile redesign. Read
-[`../../docs/design/mobile-v32/README.md`](../../docs/design/mobile-v32/README.md) before changing
-navigation, routine creation, visual tokens or user-facing automation language.
+Cyclone Mobile is the Android app at the center of Cyclone. It combines an on-device agent runtime with Android Accessibility tooling, verification/recovery, learned routines, Brain diagnostics and the persistent Aurora entry point.
 
-Cyclone Mobile is the first non-root Android device node for Cyclone. It targets Android 14+ (`minSdk 34`) and deliberately separates **implemented** from **verified on a real device**.
+## Current baseline
 
-## Beta 3.1.0-beta.10 PC session status
-
-Mobile now recognizes a recent authenticated PC heartbeat as an active USB session instead of requiring a short-lived request socket to be open at the exact instant the screen redraws. **USB / PC session** and **PC Gateway health** therefore remain accurate while the paired Companion is healthy. The PC may wake the display for an explicitly opened live view, but Android's lock screen remains authoritative and must be unlocked by the user.
-
-## Implemented in v0
-
-- AccessibilityService UI-tree observation
-- semantic click and text entry
-- tap/swipe/scroll/back/home
-- Accessibility screenshot capture
-- NotificationListenerService events
-- Calendar conflict checks
-- configurable work-app shift routine scaffold
-- dry-run by default; explicit opt-in is required before any real claim click
-- WebSocket bridge to Cyclone Core
-- human-vs-agent controller lock
-- in-app build and verification checklist
-
-## Not yet claimed as verified
-
-The APK must still be built by CI, installed on an Android 14+ phone, and tested against the real Teamwork/Picnic app. The current shift parser only understands same-day `HH:MM-HH:MM` text and must be replaced/refined using real notification/UI evidence.
+- Product line: Cyclone 3.9
+- Package: `com.cyclone.mobile`
+- Launcher: `.MainActivity`
+- Minimum Android: 14 / API 34
+- Compile/target SDK: 35
+- UI: Home, Teach, Ask Cyclone, Routines, Brain and Settings
+- Ask Cyclone: chat-style task composer with model selection
+- Brain: recent run history with sanitized downloadable diagnostics
+- Aurora: bottom-center compact activation overlay
 
 ## Build
 
-From `apps/mobile` with Java 17 and Android SDK 35 installed:
+Requirements: JDK 17 and Android SDK 35.
 
 ```bash
-gradle :app:assembleDebug
+cd apps/mobile
+./gradlew :app:testDebugUnitTest
+./gradlew :app:assembleDebug
 ```
 
-The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
+Release artifacts are produced by GitHub Actions so the source SHA, metadata and checksum stay tied together.
 
-GitHub Actions also uploads `cyclone-mobile-debug-apk` on the feature branch and pull requests.
+## Architecture
 
-## First device acceptance sequence
-
-1. Install the debug APK on Android 14 or newer.
-2. Open Cyclone Mobile.
-3. Enable Cyclone Accessibility Service.
-4. Grant Notification access.
-5. Grant Calendar permission.
-6. Verify observe, screenshot, semantic click, scroll, back and home.
-7. Configure the Cyclone Core WebSocket endpoint and token once Core exposes the mobile endpoint.
-8. Capture one real work-app notification and UI tree before enabling auto-claim.
-9. Keep auto-claim disabled until the actual app state machine has been verified end-to-end.
+See [`../../docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). Repository-wide development rules live in [`../../AGENTS.md`](../../AGENTS.md).

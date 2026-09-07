@@ -10,11 +10,17 @@ import android.os.Bundle
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
+import com.cyclone.mobile.ui.overlay.ClickGateIntercept
+import com.cyclone.mobile.ui.overlay.GateBlockedException
+import com.cyclone.mobile.ui.overlay.OverlayChromeObservation
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONObject
 import java.io.File
@@ -29,6 +35,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         val height: Int,
         val crop: UiBounds?,
         val timestampMs: Long,
+        val liveFrame: com.cyclone.mobile.ai.vision.live.LiveFrame? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("filePath", file.absolutePath)
@@ -37,6 +44,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             .put("height", height)
             .put("timestampMs", timestampMs)
             .put("crop", crop?.toJson() ?: JSONObject.NULL)
+            .put("sessionId", liveFrame?.sessionId ?: "default-foreground")
+            .put("displayId", liveFrame?.displayId ?: 0)
+            .put("frameId", liveFrame?.frameId ?: JSONObject.NULL)
+            .put("capturedAtMonotonicMs", liveFrame?.capturedAtMonotonicMs ?: JSONObject.NULL)
+            .put("source", liveFrame?.source?.name ?: "ACCESSIBILITY_SCREENSHOT")
     }
 
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
@@ -58,6 +70,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         instance = this
         DeviceState.accessibilityConnected = true
         DeviceState.addLog("Accessibility connected")
+
+        runCatching { OverlayChromeRuntime.attach(this) }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.overlay.attach", it) }
 
         // Android owns this callback boundary. Optional Cyclone runtimes are deliberately initialized
         // away from it so a corrupt DB, migration issue, legacy bridge config, or app-learning bug can
@@ -82,13 +97,6 @@ class CycloneAccessibilityService : AccessibilityService() {
                     DeviceState.addLog("App Learner disabled after safe initialization failure")
                 }.getOrDefault(false)
 
-                runCatching {
-                    CycloneProcessDiagnostics.markStage(applicationContext, "primary.runtime.legacy_bridge.init")
-                    BridgeClient.start(applicationContext)
-                }.onFailure {
-                    CycloneProcessDiagnostics.recordNonFatal(applicationContext, "primary.runtime.legacy_bridge.init", it)
-                    DeviceState.addLog("Legacy Core bridge disabled after safe initialization failure")
-                }
                 CycloneProcessDiagnostics.markStage(
                     applicationContext,
                     "primary.runtime.ready.a${if (automationRuntimeReady) 1 else 0}.l${if (appLearnerRuntimeReady) 1 else 0}",
@@ -101,6 +109,8 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        // Background windows must not update the global foreground package, learning or UI state.
+        if (event.windowId != -1 && windowsOnAllDisplays.get(0).orEmpty().none { it.id == event.windowId }) return
         try {
             val packageName = event.packageName?.toString()?.takeIf { it.isNotBlank() }
             packageName?.let { DeviceState.currentPackage = it }
@@ -141,20 +151,22 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onInterrupt() = Unit
+    override fun onInterrupt() { com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll() }
 
     override fun onDestroy() {
+        com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll()
         CycloneProcessDiagnostics.markStage(this, "primary.accessibility.onDestroy")
         runCatching { guidedOverlay?.dismiss() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.guided", it) }
         guidedOverlay = null
+        runCatching { OverlayChromeRuntime.detach() }
+            .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.overlay", it) }
         runCatching { RoutineTeachingOverlayRuntime.dismiss() }
             .onFailure { CycloneProcessDiagnostics.recordNonFatal(this, "primary.accessibility.destroy.teaching", it) }
         instance = null
         automationRuntimeReady = false
         appLearnerRuntimeReady = false
         DeviceState.accessibilityConnected = false
-        runCatching { BridgeClient.stop() }
         runCatching { runtimeInitExecutor.shutdownNow() }
         runCatching { screenshotExecutor.shutdownNow() }
         super.onDestroy()
@@ -173,10 +185,18 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     fun observe(markFresh: Boolean = true): UiSnapshot {
         if (markFresh) waitForUiQuiet()
-        val root = rootInActiveWindow
+        val root = preferredForegroundRoot() ?: rootInActiveWindow
         val metrics = resources.displayMetrics
         val nodes = mutableListOf<UiNodeSnapshot>()
-        if (root != null) collectNode(root, "0", null, 0, nodes)
+        val consumedWindows = mutableSetOf<Int>()
+        if (root != null) {
+            collectNode(root, "0", null, 0, nodes)
+            consumedWindows += root.windowId
+        }
+        includeSiblingApplicationWindows(nodes, consumedWindows)
+        val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
+        nodes.clear()
+        nodes.addAll(folded)
         val windowsSnapshot = windows.orEmpty().map { window ->
             val rect = Rect().also { window.getBoundsInScreen(it) }
             UiWindowSnapshot(
@@ -188,7 +208,14 @@ class CycloneAccessibilityService : AccessibilityService() {
                 focused = window.isFocused,
                 bounds = UiBounds(rect.left, rect.top, rect.right, rect.bottom),
             )
-        }
+        }.toMutableList()
+        OverlayChromeObservation.appendChrome(
+            nodes,
+            windowsSnapshot,
+            OverlayChromeRuntime.snapshot(),
+            metrics.widthPixels,
+            metrics.heightPixels,
+        )
         val packageName = root?.packageName?.toString()?.takeIf { it.isNotBlank() } ?: DeviceState.currentPackage
         val fingerprint = screenFingerprint(packageName, nodes)
         val snapshot = UiSnapshot(
@@ -206,25 +233,158 @@ class CycloneAccessibilityService : AccessibilityService() {
         return snapshot
     }
 
+    /** Reads only windows returned for this display; never uses rootInActiveWindow. */
+    fun observeDisplay(displayId: Int, targetPackage: String): UiSnapshot {
+        require(displayId > 0)
+        val display = getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(displayId)
+            ?: error("DISPLAY_GONE")
+        val listed = windowsOnAllDisplays.get(displayId).orEmpty()
+        val root = listed.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .sortedByDescending { it.layer }.mapNotNull { it.root }
+            .firstOrNull { it.packageName?.toString() == targetPackage }
+            ?: error("BACKGROUND_MODE_UNAVAILABLE: no target Accessibility window on this display")
+        val nodes = mutableListOf<UiNodeSnapshot>()
+        val ownedWindows = listed.filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
+        ownedWindows.forEach { window ->
+            window.root?.takeIf { it.packageName?.toString() != packageName }?.let {
+                collectNode(it, "w${window.id}/0", null, 0, nodes)
+            }
+        }
+        val metrics = createDisplayContext(display).resources.displayMetrics
+        val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
+        return UiSnapshot(targetPackage, root.className?.toString(), metrics.widthPixels, metrics.heightPixels,
+            System.currentTimeMillis(), screenFingerprint(targetPackage, folded), "agent",
+            ownedWindows.map { window ->
+                val rect = Rect().also { window.getBoundsInScreen(it) }
+                UiWindowSnapshot(window.id, window.title?.toString().orEmpty(), window.type, window.layer,
+                    window.isActive, window.isFocused, UiBounds(rect.left, rect.top, rect.right, rect.bottom))
+            }, folded)
+    }
+
     fun find(selector: ElementSelector, limit: Int = 20): List<SelectorMatch> =
         SelectorEngine.resolve(observe(markFresh = false), selector, limit)
 
     fun click(selector: ElementSelector): Boolean {
         if (!agentCanAct()) return false
         repeat(2) {
-            val target = resolveLiveTarget(selector) ?: return@repeat
-            val (snapshotNode, node) = target
+            val snapshot = observe(markFresh = false)
+            val match = SelectorEngine.resolve(snapshot, selector, 1).firstOrNull() ?: return@repeat
+            val snapshotNode = match.node
+            val node = liveNodeAtSnapshotPath(snapshotNode) ?: return@repeat
             if (!sameNode(snapshotNode, node)) return@repeat
-            if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-            var parent = node.parent
-            repeat(4) {
-                if (parent == null) return@repeat
-                if (parent!!.isClickable && parent!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-                parent = parent!!.parent
+            val activation = AccessibilityRoles.resolveActivationTarget(snapshot.nodes, snapshotNode)
+            val labels = ClickGateIntercept.labelsFor(snapshotNode, activation, selector)
+            val decision = ClickGateIntercept.decide("phone.click", labels, OverlayChromeRuntime.snapshot().state)
+            if (!decision.performClick) {
+                if (decision.enterGate && decision.gateClass != null) {
+                    OverlayChromeRuntime.enterGate(decision.gateClass)
+                }
+                throw GateBlockedException(decision.gateClass)
             }
-            return tap(snapshotNode.bounds.centerX, snapshotNode.bounds.centerY)
+            val targetLive = if (activation.path == snapshotNode.path) {
+                node
+            } else {
+                liveNodeAtSnapshotPath(activation)?.takeIf { sameNode(activation, it) } ?: node
+            }
+            if (AccessibilityRoles.shouldPreferActivatableRelative(snapshotNode) &&
+                clickActivatableRelative(node)
+            ) {
+                return true
+            }
+            if (targetLive !== node && activateNode(targetLive, activation.role)) return true
+            val liveActions = accessibilityActionNames(targetLive)
+            val preferHost = AccessibilityRoles.preferClickableAncestor(
+                activation.role, targetLive.isClickable, liveActions,
+            )
+            if (preferHost && clickActivatableAncestor(targetLive)) return true
+            if (activateNode(targetLive, activation.role)) return true
+            if (!preferHost && clickActivatableAncestor(targetLive)) return true
+            return tap(activation.bounds.centerX, activation.bounds.centerY)
         }
         return false
+    }
+
+    private fun activateNode(node: AccessibilityNodeInfo, role: String): Boolean {
+        if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        if (role.equals("tab", ignoreCase = true) && node.performAction(AccessibilityNodeInfo.ACTION_SELECT)) return true
+        return false
+    }
+
+    private fun clickActivatableRelative(node: AccessibilityNodeInfo): Boolean {
+        fun tryClick(candidate: AccessibilityNodeInfo): Boolean {
+            val actions = accessibilityActionNames(candidate)
+            if (!AccessibilityRoles.isStrongActivatable(candidate.isClickable, actions)) return false
+            if (candidate.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            if (candidate.performAction(AccessibilityNodeInfo.ACTION_SELECT)) return true
+            return false
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (tryClick(child)) return true
+            for (j in 0 until child.childCount) {
+                val grand = child.getChild(j) ?: continue
+                if (tryClick(grand)) return true
+            }
+        }
+        val parent = node.parent ?: return false
+        for (i in 0 until parent.childCount) {
+            val sib = parent.getChild(i) ?: continue
+            if (sib === node) continue
+            if (tryClick(sib)) return true
+        }
+        return false
+    }
+
+    private fun clickActivatableAncestor(node: AccessibilityNodeInfo): Boolean {
+        var parent = node.parent
+        repeat(6) {
+            if (parent == null) return false
+            val actions = accessibilityActionNames(parent!!)
+            if (AccessibilityRoles.isActivatable(parent!!.isClickable, actions)) {
+                if (parent!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+                if (parent!!.performAction(AccessibilityNodeInfo.ACTION_SELECT)) return true
+            }
+            parent = parent!!.parent
+        }
+        return false
+    }
+
+    private fun includeSiblingApplicationWindows(nodes: MutableList<UiNodeSnapshot>, consumedWindows: MutableSet<Int>) {
+        val overlay = OverlayChromeRuntime.snapshot()
+        val includeOverlay = overlay.state == OverlayChromeState.GATE && !overlay.minimized
+        for (window in windows.orEmpty()) {
+            val wroot = window.root ?: continue
+            if (wroot.windowId in consumedWindows) continue
+            val pkg = wroot.packageName?.toString().orEmpty()
+            val isWeb = isWebishWindow(window, wroot)
+            if (!OverlayChromeObservation.shouldCollectSiblingWindow(window.type, pkg, isWeb, includeOverlay)) continue
+            collectNode(wroot, "w${window.id}/0", null, 0, nodes)
+            consumedWindows += wroot.windowId
+        }
+    }
+
+    private fun isWebishWindow(window: AccessibilityWindowInfo, root: AccessibilityNodeInfo): Boolean {
+        val pkg = root.packageName?.toString().orEmpty().lowercase()
+        val title = window.title?.toString().orEmpty().lowercase()
+        val cls = root.className?.toString().orEmpty().lowercase()
+        return "chrome" in pkg || "webview" in pkg || "browser" in pkg ||
+            "chrome" in title || "webview" in cls || "web_view" in cls
+    }
+
+    private fun preferredForegroundRoot(): AccessibilityNodeInfo? {
+        val active = rootInActiveWindow
+        val activePkg = active?.packageName?.toString().orEmpty()
+        if (activePkg.isNotBlank() && activePkg != "com.android.systemui") return active
+        val listed = windows.orEmpty()
+        val app = listed.firstOrNull { window ->
+            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                (window.isActive || window.isFocused) &&
+                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
+        } ?: listed.firstOrNull { window ->
+            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+                window.root?.packageName?.toString().orEmpty().let { it.isNotBlank() && it != "com.android.systemui" }
+        }
+        return app?.root ?: active
     }
 
     /**
@@ -248,15 +408,76 @@ class CycloneAccessibilityService : AccessibilityService() {
         return false
     }
 
-    fun setText(selector: ElementSelector?, value: String): Boolean {
-        if (!agentCanAct()) return false
-        val node = if (selector == null) rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        else resolveLiveTarget(selector)?.second
-        node ?: return false
-        if (!node.isEditable && !node.isFocusable) return false
-        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    fun typeEditable(plan: PhoneTypeEngine.ExecutePlan, value: String): PhoneTypeEngine.LiveResult {
+        if (!agentCanAct()) {
+            return PhoneTypeEngine.LiveResult(
+                ok = false,
+                error = PhoneToolError(PhoneToolErrorCode.ACTION_FAILED, "Agent cannot act"),
+                elementId = plan.elementId,
+                rawNodeId = plan.rawNodeId,
+            )
+        }
+        return PhoneTypeEngine.perform(plan, value, AccessibilityTypeLive())
+    }
+
+    private inner class AccessibilityTypeLive : PhoneTypeEngine.LiveHost {
+
+        override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
+            val roots = ArrayList<AccessibilityNodeInfo>()
+            rootInActiveWindow?.let(roots::add)
+            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
+            for (root in roots) {
+                val node = nodeAtPath(root, plan.path) ?: continue
+                if (node.isEditable) return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId)
+            }
+            return null
+        }
+
+        override fun view(handle: Any): PhoneTypeEngine.LiveView? {
+            val target = handle as? AccessibilityTypeHandle ?: return null
+            val node = target.node
+            val text = node.text?.toString().orEmpty()
+            return PhoneTypeEngine.LiveView(
+                rawNodeId = target.rawNodeId,
+                path = target.path,
+                editable = node.isEditable,
+                focused = node.isFocused,
+                enabled = node.isEnabled,
+                textLength = text.length,
+                textDigest = PhoneTypeEngine.digest(text),
+                actions = accessibilityActionNames(node),
+            )
+        }
+
+        override fun focus(handle: Any): Boolean {
+            val target = handle as? AccessibilityTypeHandle ?: return false
+            return target.node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        }
+
+        override fun click(handle: Any): Boolean {
+            val target = handle as? AccessibilityTypeHandle ?: return false
+            return target.node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
+
+        override fun setText(handle: Any, value: String): Boolean {
+            val target = handle as? AccessibilityTypeHandle ?: return false
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+            }
+            return target.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        }
+
+        override fun refresh(handle: Any): Any? {
+            val target = handle as? AccessibilityTypeHandle ?: return null
+            val roots = ArrayList<AccessibilityNodeInfo>()
+            rootInActiveWindow?.let(roots::add)
+            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
+            for (root in roots) {
+                val node = nodeAtPath(root, target.path) ?: continue
+                if (node.isEditable) return AccessibilityTypeHandle(target.path, node, target.rawNodeId)
+            }
+            return null
+        }
     }
 
     fun scroll(selector: ElementSelector?, forward: Boolean = true): Boolean {
@@ -347,15 +568,40 @@ class CycloneAccessibilityService : AccessibilityService() {
     private fun resolveLiveTarget(selector: ElementSelector): Pair<UiNodeSnapshot, AccessibilityNodeInfo>? {
         val snapshot = observe(markFresh = false)
         val match = SelectorEngine.resolve(snapshot, selector, 1).firstOrNull() ?: return null
-        val root = rootInActiveWindow ?: return null
-        val live = nodeAtPath(root, match.node.path) ?: return null
+        val live = liveNodeAtSnapshotPath(match.node) ?: return null
         return match.node to live
+    }
+
+    private fun liveNodeAtSnapshotPath(snapshotNode: UiNodeSnapshot): AccessibilityNodeInfo? {
+        val path = snapshotNode.path
+        val candidates = ArrayList<AccessibilityNodeInfo>()
+        preferredForegroundRoot()?.let(candidates::add)
+        rootInActiveWindow?.let { root ->
+            if (candidates.none { it.windowId == root.windowId }) candidates.add(root)
+        }
+        windows.orEmpty().forEach { window ->
+            val wroot = window.root ?: return@forEach
+            if (candidates.none { it.windowId == wroot.windowId }) candidates.add(wroot)
+        }
+        for (root in candidates) {
+            val live = nodeAtPath(root, path) ?: continue
+            if (sameNode(snapshotNode, live)) return live
+        }
+        return null
     }
 
     private fun nodeAtPath(root: AccessibilityNodeInfo, path: String): AccessibilityNodeInfo? {
         val pieces = path.split('/').filter { it.isNotBlank() }
-        if (pieces.isEmpty() || pieces.first() != "0") return null
-        var node = root
+        if (pieces.isEmpty()) return null
+        val start = pieces.first()
+        val walkRoot = if (start.startsWith("w")) {
+            val windowId = start.removePrefix("w").toIntOrNull() ?: return null
+            windows.orEmpty().firstOrNull { it.id == windowId }?.root ?: return null
+        } else {
+            if (start != "0") return null
+            root
+        }
+        var node = walkRoot
         for (index in pieces.drop(1)) node = node.getChild(index.toIntOrNull() ?: return null) ?: return null
         return node
     }
@@ -367,7 +613,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             snapshot.bounds == UiBounds(rect.left, rect.top, rect.right, rect.bottom)
     }
 
-    private fun collectNode(node: AccessibilityNodeInfo, path: String, parentId: String?, depth: Int, out: MutableList<UiNodeSnapshot>) {
+    private fun collectNode(node: AccessibilityNodeInfo, path: String, parentId: String?, depth: Int, out: MutableList<UiNodeSnapshot>, parentClassName: String = "") {
         if (depth > 40 || out.size >= 2500) return
         val rect = Rect().also { node.getBoundsInScreen(it) }
         val bounds = UiBounds(rect.left, rect.top, rect.right, rect.bottom)
@@ -380,14 +626,15 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
         out += UiNodeSnapshot(
             id = id, path = path, parentId = parentId, childIds = childIds, depth = depth, windowId = node.windowId,
-            className = node.className?.toString().orEmpty(), role = inferRole(node), text = node.text?.toString().orEmpty(),
+            className = node.className?.toString().orEmpty(), role = inferRole(node, parentClassName), text = node.text?.toString().orEmpty(),
             contentDescription = node.contentDescription?.toString().orEmpty(), resourceId = node.viewIdResourceName.orEmpty(), bounds = bounds,
             clickable = node.isClickable, longClickable = node.isLongClickable, editable = node.isEditable, scrollable = node.isScrollable,
             enabled = node.isEnabled, selected = node.isSelected, checked = node.isChecked, checkable = node.isCheckable,
             focused = node.isFocused, focusable = node.isFocusable, visibleToUser = node.isVisibleToUser,
             actions = accessibilityActionNames(node),
         )
-        for (i in 0 until node.childCount) node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out) }
+        val selfClass = node.className?.toString().orEmpty()
+        for (i in 0 until node.childCount) node.getChild(i)?.let { collectNode(it, "$path/$i", id, depth + 1, out, selfClass) }
     }
 
     private fun accessibilityActionNames(node: AccessibilityNodeInfo): List<String> = node.actionList.orEmpty().map { action ->
@@ -410,7 +657,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         resourceId = node.viewIdResourceName?.takeIf { it.isNotBlank() },
         text = node.text?.toString()?.takeIf { it.isNotBlank() },
         contentDescription = node.contentDescription?.toString()?.takeIf { it.isNotBlank() },
-        role = inferRole(node),
+        role = inferRole(node, ""),
         className = node.className?.toString()?.takeIf { it.isNotBlank() },
         requireClickable = node.isClickable.takeIf { it },
         requireEditable = node.isEditable.takeIf { it },
@@ -423,18 +670,20 @@ class CycloneAccessibilityService : AccessibilityService() {
         return sha256(raw).take(16)
     }
 
-    private fun inferRole(node: AccessibilityNodeInfo): String {
-        val cls = node.className?.toString().orEmpty().lowercase()
-        return when {
-            node.isEditable || "edittext" in cls -> "textbox"
-            "button" in cls || node.isClickable && (node.text?.isNotBlank() == true || node.contentDescription?.isNotBlank() == true) -> "button"
-            "checkbox" in cls || node.isCheckable -> "checkbox"
-            "switch" in cls -> "switch"
-            "image" in cls -> "image"
-            node.isScrollable -> "scroll_container"
-            "textview" in cls -> "text"
-            else -> "generic"
-        }
+    private fun inferRole(node: AccessibilityNodeInfo, parentClassName: String): String {
+        return AccessibilityRoles.inferRole(
+            className = node.className?.toString().orEmpty(),
+            clickable = node.isClickable,
+            editable = node.isEditable,
+            checkable = node.isCheckable,
+            scrollable = node.isScrollable,
+            selected = node.isSelected,
+            text = node.text?.toString().orEmpty(),
+            contentDescription = node.contentDescription?.toString().orEmpty(),
+            resourceId = node.viewIdResourceName.orEmpty(),
+            parentClassName = parentClassName,
+            actions = accessibilityActionNames(node),
+        )
     }
 
     private fun screenFingerprint(packageName: String?, nodes: List<UiNodeSnapshot>): String {
@@ -468,3 +717,8 @@ class CycloneAccessibilityService : AccessibilityService() {
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
 }
+private data class AccessibilityTypeHandle(
+    val path: String,
+    val node: AccessibilityNodeInfo,
+    val rawNodeId: String,
+)

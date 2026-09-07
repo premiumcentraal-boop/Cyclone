@@ -4,10 +4,14 @@ repo = Path(SPECPATH).resolve().parents[2]
 entrypoints = repo / "scripts" / "pc-companion" / "entrypoints"
 a = Analysis(
     [str(entrypoints / "agent_mcp.py")],
-    pathex=[str(repo / "tools" / "cyclone-agent-mcp"), str(entrypoints)],
+    pathex=[
+        str(repo / "tools" / "cyclone-agent-mcp"),
+        str(repo / "tools" / "codex-phone-mcp"),
+        str(entrypoints),
+    ],
     binaries=[],
     datas=[],
-    hiddenimports=["mcp", "secure_gateway_token"],
+    hiddenimports=["mcp", "cyclone_phone_mcp", "secure_gateway_token"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

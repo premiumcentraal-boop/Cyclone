@@ -1,6 +1,8 @@
 package com.cyclone.mobile
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -9,6 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.Modifier
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.TaskResultNotifierV292
@@ -22,6 +26,8 @@ import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.gateway.GatewayDesktopPairingManager
 import com.cyclone.mobile.infrastructure.v31.CycloneV31ProductIntegration
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import com.cyclone.mobile.ui.overlay.OverlayUserAction
 import com.cyclone.mobile.ui.v32.CycloneMobileV32App
 
 class MainActivity : ComponentActivity() {
@@ -39,12 +45,16 @@ class MainActivity : ComponentActivity() {
             }
         }
         handlePairingIntent(intent)
+        handleOverlayVoiceIntent(intent)
+        handleAssistantIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handlePairingIntent(intent)
+        handleOverlayVoiceIntent(intent)
+        handleAssistantIntent(intent)
     }
 
     override fun onResume() {
@@ -67,7 +77,6 @@ class MainActivity : ComponentActivity() {
         AdaptiveBrainRuntime.initialize(this)
         BrainChatRuntime.initialize(this)
         RoutineTeachingRuntime.initialize(this)
-        BridgeClient.start(this)
 
         val v31 = CycloneV31Runtime.initialize(this)
         CycloneV31ProductIntegration.install(this, v31)
@@ -87,6 +96,52 @@ class MainActivity : ComponentActivity() {
         value.data = null
     }
 
+    /**
+     * Android owns the assistant role and hardware gesture. Cyclone merely handles ACTION_ASSIST
+     * when the user has selected it as the system assistant. No raw Power-key interception exists.
+     */
+    private fun handleAssistantIntent(value: Intent?) {
+        if (value?.action != Intent.ACTION_ASSIST) return
+        value.action = Intent.ACTION_MAIN
+        if (!OverlayChromeRuntime.isAttached()) {
+            Toast.makeText(
+                this,
+                "Enable Cyclone phone control first, then the assistant gesture can open Ask Cyclone over other apps.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        OverlayChromeRuntime.dispatch(OverlayUserAction.ASK_CYCLONE)
+        moveTaskToBack(true)
+        // Start listening only when microphone permission already exists. Otherwise the overlay's
+        // mic button remains available and can drive the normal permission flow.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            OverlayChromeRuntime.beginVoiceInput()
+        }
+    }
+
+    private fun handleOverlayVoiceIntent(value: Intent?) {
+        if (value?.action != ACTION_REQUEST_OVERLAY_VOICE) return
+        value.action = Intent.ACTION_MAIN
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            moveTaskToBack(true)
+            OverlayChromeRuntime.beginVoiceInput()
+        } else {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_OVERLAY_VOICE_PERMISSION)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_OVERLAY_VOICE_PERMISSION) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            moveTaskToBack(true)
+            OverlayChromeRuntime.beginVoiceInput()
+        } else {
+            Toast.makeText(this, "Voice requests stay off until microphone access is allowed.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun migrateModelDefault() {
         val prefs = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
         if (prefs.getBoolean("model_default_migrated", false)) return
@@ -103,5 +158,10 @@ class MainActivity : ComponentActivity() {
             .putBoolean("cloud_brain_refinement", false)
             .putBoolean("v292_learning_migrated", true)
             .apply()
+    }
+
+    companion object {
+        const val ACTION_REQUEST_OVERLAY_VOICE = "com.cyclone.mobile.action.REQUEST_OVERLAY_VOICE"
+        private const val REQUEST_OVERLAY_VOICE_PERMISSION = 385
     }
 }

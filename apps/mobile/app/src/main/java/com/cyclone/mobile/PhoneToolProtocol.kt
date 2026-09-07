@@ -140,30 +140,56 @@ data class ElementSelector(
     val requireClickable: Boolean? = null,
     val requireEditable: Boolean? = null,
     val requireScrollable: Boolean? = null,
+    val elementId: String? = null,
+    val ref: String? = null,
+    val path: String? = null,
 ) {
+    fun isEmpty(): Boolean = resourceId == null && text == null && textContains == null &&
+        contentDescription == null && contentDescriptionContains == null && className == null &&
+        role == null && ancestorText == null && descendantText == null && x == null && y == null &&
+        relativeToText == null && relativeDirection == null && fuzzyText == null &&
+        requireClickable == null && requireEditable == null && requireScrollable == null &&
+        elementId == null && ref == null && path == null
+
     companion object {
         fun fromJson(json: JSONObject?): ElementSelector {
             if (json == null) return ElementSelector()
             fun s(key: String): String? = json.optString(key).takeIf { it.isNotBlank() }
+            val scoped = s("elementId") ?: s("ref")
+            val mapped = scoped?.let { ObservationSelectorLookup.map(it) }
+            if (mapped != null && !mapped.isEmpty()) return mapped
+            val index = when {
+                json.has("elementIndex") -> json.optInt("elementIndex")
+                json.has("element_index") -> json.optInt("element_index")
+                else -> -1
+            }
+            if (index > 0) {
+                ObservationSelectorLookup.mapIndex(index)?.let { indexed ->
+                    if (!indexed.isEmpty()) return indexed
+                }
+            }
             return ElementSelector(
-                resourceId = s("resourceId"),
-                text = s("text"),
+                resourceId = s("resourceId") ?: mapped?.resourceId,
+                text = s("text") ?: mapped?.text,
                 textContains = s("textContains"),
-                contentDescription = s("contentDescription"),
+                contentDescription = s("contentDescription") ?: mapped?.contentDescription,
                 contentDescriptionContains = s("contentDescriptionContains"),
-                className = s("class"),
-                role = s("role"),
+                className = s("class") ?: mapped?.className,
+                role = s("role") ?: mapped?.role,
                 ancestorText = s("ancestorText"),
-                descendantText = s("descendantText"),
-                x = if (json.has("x")) json.optInt("x") else null,
-                y = if (json.has("y")) json.optInt("y") else null,
+                descendantText = s("descendantText") ?: mapped?.descendantText,
+                x = if (json.has("x")) json.optInt("x") else mapped?.x,
+                y = if (json.has("y")) json.optInt("y") else mapped?.y,
                 relativeToText = s("relativeToText"),
                 relativeDirection = s("relativeDirection")?.uppercase()?.let { runCatching { RelativeDirection.valueOf(it) }.getOrNull() },
                 fuzzyText = s("fuzzyText"),
                 minFuzzyScore = json.optDouble("minFuzzyScore", 0.72).coerceIn(0.0, 1.0),
-                requireClickable = if (json.has("clickable")) json.optBoolean("clickable") else null,
-                requireEditable = if (json.has("editable")) json.optBoolean("editable") else null,
-                requireScrollable = if (json.has("scrollable")) json.optBoolean("scrollable") else null,
+                requireClickable = if (json.has("clickable")) json.optBoolean("clickable") else mapped?.requireClickable,
+                requireEditable = if (json.has("editable")) json.optBoolean("editable") else mapped?.requireEditable,
+                requireScrollable = if (json.has("scrollable")) json.optBoolean("scrollable") else mapped?.requireScrollable,
+                elementId = scoped ?: mapped?.elementId,
+                ref = s("ref"),
+                path = s("path") ?: mapped?.path,
             )
         }
     }
@@ -187,6 +213,9 @@ data class ElementSelector(
         requireClickable?.let { put("clickable", it) }
         requireEditable?.let { put("editable", it) }
         requireScrollable?.let { put("scrollable", it) }
+        elementId?.let { put("elementId", it) }
+        ref?.let { put("ref", it) }
+        path?.let { put("path", it) }
     }
 }
 
@@ -222,6 +251,7 @@ enum class PhoneToolErrorCode {
     APP_NOT_FOUND,
     NOTIFICATION_NOT_FOUND,
     SECURITY_RESTRICTION,
+    POLICY_DENIED,
     INTERNAL_ERROR,
 }
 
@@ -238,7 +268,7 @@ data class PhoneToolRequest(
         fun fromJson(json: JSONObject): PhoneToolRequest = PhoneToolRequest(
             commandId = json.optString("id").ifBlank { "cmd-${System.nanoTime()}" },
             tool = json.optString("tool", json.optString("action")),
-            params = json.optJSONObject("params") ?: JSONObject(),
+            params = com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(json, json.optJSONObject("params") ?: JSONObject()),
         )
     }
 }

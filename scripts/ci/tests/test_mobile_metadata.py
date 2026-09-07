@@ -37,7 +37,8 @@ class MobileMetadataTest(unittest.TestCase):
 
     def test_plain_semver_is_canonical(self):
         metadata = self.read('applicationId = "com.cyclone.mobile"\nversionCode = 17\nversionName = "2.9.5"\n')
-        self.assertEqual("Cyclone-Mobile-2.9.5.apk", metadata["apk_name"])
+        self.assertEqual("Cyclone-2.9.5.apk", metadata["apk_name"])
+        self.assertEqual("Cyclone-Android-2.9.5", metadata["artifact_name"])
 
     def test_decorated_semver_is_supported(self):
         metadata = self.read('applicationId = "com.cyclone.mobile"\nversionCode = 18\nversionName = "3.0.0-beta.1"\n')

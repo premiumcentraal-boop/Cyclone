@@ -1,53 +1,38 @@
 package com.cyclone.mobile
 
 import android.content.Context
-import android.content.Intent
-import androidx.core.content.ContextCompat
-import com.mobilerun.portal.service.MobilerunAccessibilityService
-import com.mobilerun.portal.service.PortalService
-import com.mobilerun.portal.ui.MainActivity as MobilerunMainActivity
-import com.mobilerun.portal.ui.settings.SettingsActivity as MobilerunSettingsActivity
-import com.mobilerun.portal.ui.taskprompt.TaskHistoryActivity
-import com.mobilerun.portal.ui.triggers.TriggerRulesActivity
 
 /**
- * Thin host-side facade around the upstream Mobilerun Portal runtime that is
- * compiled into the Cyclone APK from the pinned git submodule.
+ * Compatibility shim for older Cyclone UI/runtime call sites.
  *
- * Cyclone keeps its own phone.* contract and safety layer. This facade only
- * exposes lifecycle/status/navigation for the embedded upstream runtime.
+ * Cyclone 3.9.1 no longer embeds or starts the Mobilerun Portal application runtime. Native Cyclone
+ * Accessibility, notification, overlay, automation, typing, screenshot and gateway code are the
+ * only active control plane. Keep these methods temporarily so an old screen cannot crash while the
+ * remaining version-suffixed UI is retired; none of them can start a second service stack.
  */
+@Deprecated("Mobilerun runtime retired in Cyclone 3.9.1; use native Cyclone services")
 object MobilerunEmbedded {
-    fun accessibilityConnected(): Boolean = MobilerunAccessibilityService.getInstance() != null
+    fun accessibilityConnected(): Boolean = CycloneAccessibilityService.instance != null
 
-    fun portalServiceRunning(): Boolean = PortalService.getInstance() != null
+    fun portalServiceRunning(): Boolean = false
 
     fun startPortalService(context: Context) {
-        ContextCompat.startForegroundService(
-            context,
-            Intent(context, PortalService::class.java),
-        )
-        DeviceState.addLog("Embedded Mobilerun Portal service start requested")
+        DeviceState.addLog("Ignored legacy Mobilerun Portal start request; native Cyclone runtime is authoritative")
     }
 
     fun stopPortalService(context: Context) {
-        context.stopService(Intent(context, PortalService::class.java))
-        DeviceState.addLog("Embedded Mobilerun Portal service stop requested")
+        DeviceState.addLog("Ignored legacy Mobilerun Portal stop request; no embedded Portal service exists")
     }
 
-    fun openPortalDashboard(context: Context) {
-        context.startActivity(Intent(context, MobilerunMainActivity::class.java))
-    }
+    fun openPortalDashboard(context: Context) = openCyclone(context, "dashboard")
+    fun openPortalSettings(context: Context) = openCyclone(context, "settings")
+    fun openTriggers(context: Context) = openCyclone(context, "triggers")
+    fun openTaskHistory(context: Context) = openCyclone(context, "task history")
 
-    fun openPortalSettings(context: Context) {
-        context.startActivity(Intent(context, MobilerunSettingsActivity::class.java))
-    }
-
-    fun openTriggers(context: Context) {
-        context.startActivity(Intent(context, TriggerRulesActivity::class.java))
-    }
-
-    fun openTaskHistory(context: Context) {
-        context.startActivity(Intent(context, TaskHistoryActivity::class.java))
+    private fun openCyclone(context: Context, legacySurface: String) {
+        DeviceState.addLog("Legacy Mobilerun $legacySurface request redirected to Cyclone")
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        context.startActivity(intent)
     }
 }

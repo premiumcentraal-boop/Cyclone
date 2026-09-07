@@ -83,6 +83,17 @@ object AppLearnerRuntime {
     fun retrieval(packageName: String, goal: String, currentScreenId: String? = null): JSONObject? =
         store.graph(packageName)?.let { AppGraphRetriever.retrieve(it, goal, currentScreenId) }
 
+    /** Records only a Gateway action whose semantic after-state verification has already passed. */
+    fun recordVerifiedPcRoute(
+        context: Context,
+        tool: String,
+        params: JSONObject,
+        outcome: PcRouteOutcomeEvidence,
+    ): PcRouteLearningResult {
+        initialize(context)
+        return PcVerifiedRouteLearning.record(appContext, store, tool, params, outcome)
+    }
+
     fun proposeAutomation(packageName: String, goal: String): AutomationDefinition? {
         val graph = store.graph(packageName) ?: return null
         val path = AppGraphRetriever.findBestPath(graph, goal) ?: return null

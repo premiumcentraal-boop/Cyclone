@@ -1,109 +1,102 @@
 # Cyclone
 
-> 📱 **Android APKs:** use [`MOBILE_DOWNLOADS.md`](MOBILE_DOWNLOADS.md) for the current Cyclone Mobile build, direct APK links, checksums, and the permanent release shelf.
+**Cyclone is an Android agent that can observe a phone, decide what to do, act through constrained native tools, verify the result, recover from failures and learn reusable app knowledge.**
 
-Cyclone is a Windows-first agent operating environment: a native desktop experience over a persistent Docker-based agent computer. It combines:
+This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-- **Cyclone Desktop** — a Tauri + React desktop application for conversations, agent rosters, clusters, tasks, approvals, routines, and diagnostics.
-- **Cyclone Core** — the control plane and API that owns structured application state, orchestration, memory pipeline, audit history, n8n integration, and the Hermes adapter.
-- **Hermes Agent** — the agent runtime for provider-agnostic model execution, tools, skills, sessions, delegation, gateway messaging, schedules, and Telegram.
-- **Obsidian vault** — normal Markdown files on Windows, mounted into the stack as the durable human-readable knowledge layer.
-- **n8n** — deterministic event and automation processing, integrated only through Cyclone Core.
-- **Cyclone Host Bridge** — a localhost-only, authenticated Windows service with narrow, auditable host capabilities and approval enforcement.
+## Current baseline — Cyclone 4.0.0-alpha.1 (V4 Stage 1 Fast Path)
 
-> **Status: foundation implementation in progress.** The repository is being built vertically and verified at each stage. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/STATUS.md`](docs/STATUS.md) for the evidence-backed design and live verification status.
+Mobile identity is `4.0.0-alpha.1` / versionCode `67` on the published **3.9.12** Background Intelligence foundation (one Shizuku workspace, Take control / Continue, GATE confirm). Stage 1 adds ClosePaw-shaped Fast Path: a11y-first Page Cards with stable `elementIndex`, 300ms settle + fingerprint ladder, one screen-changing act per turn, and planner `open_app`/intent landing before icon hunting. Physical Pixel 8 remains **UNVERIFIED**. See [V4 Stage 1 Fast Path](docs/V4_STAGE1_FASTPATH.md).
 
-## Design principles
+Cyclone 3.9.12 connected Ask Cyclone to isolated background app workspaces, with a compact running card, live View Progress, exact-task Take Control / Continue, local confirmation cards and preserved completed pages. Background work requires Android 15+, Shizuku and a compatible app; the PC companion remains optional. See [the 3.9.12 release notes](docs/RELEASE_3.9.12.md) for that behavior and device-testing limits.
 
-Cyclone is intentionally not a generic AI dashboard. The default experience is a conversation with a team of persistent agents:
+## Existing reliability foundation
 
-- named agents instead of anonymous model sessions;
-- work, handoffs, decisions, approvals, and results rendered naturally in chat;
-- one persistent shared workspace for project artifacts, while agent identities and runtime state remain distinguishable;
-- real structured task state beneath the conversational surface;
-- least privilege and approval boundaries for consequential work;
-- Docker is the agent computer; Windows control goes only through an explicit Host Bridge.
+Cyclone 3.9.9 focuses on trustworthy standalone execution, cancellation safety, completion grounding and developer-grade failure evidence:
 
-## Repository layout
+- **Ask Cyclone** — compact floating composer with attachments/settings on the left, microphone/send on the right, and a sheet that follows downward dragging.
+- **Model compatibility** — shared portable requests, live endpoint capability filtering and an account-specific model access check. Reasoning uses provider defaults; Contributor identity and account privacy settings are preserved.
+- **Goal Contracts** — common goals compile into independently verifiable semantic effects, so model confidence alone cannot mark a task complete.
+- **Bounded completion recovery** — rejected `DONE` claims trigger stronger local verification/escalation instead of an expensive repeated-DONE spiral.
+- **Structured + Free Mode agent** — Cyclone starts with reliable semantic/learned routes, then changes strategy when verified progress stalls; GATE and policy boundaries remain mandatory.
+- **Authoritative target perception** — active execution minimizes Cyclone's own overlay and keeps target-app state separate from Cyclone chrome so the model does not plan against its own UI.
+- **Standalone provider execution** — internal API models run directly from the Android app; PC pairing is optional and provider/auth/network failures terminate with clear user-facing reasons instead of malformed-plan loops.
+- **Cancellation and deadline boundaries** — Stop and task timeout are rechecked after blocking observation/provider calls and before mutations, so late model plans cannot act after cancellation.
+- **Grounded website completion** — simple verified host navigation can finish locally without another provider turn, while intent dispatch or Cyclone's own echoed goal text never counts as proof that a website loaded.
+- **Richer model context** — compact scene, route, semantic-control, action-history and runtime-recovery evidence gives capable models a clearer picture of what Android actually shows.
+- **Progress-bounded recovery** — changing Android fingerprints do not count as task progress, repeated failures are bounded, and only verified semantic progress resets no-progress budgets.
+- **Strict phone-tool contracts** — app launches require resolvable packages and browser navigation can use the allowlisted Android HTTPS intent path as a deterministic route.
+- **Brain → Recent runs** — durable run history with sanitized `.txt` diagnostics, split tool/verification failure metrics, completion/recovery telemetry and up to 1 MiB of useful trace evidence.
+- **Privacy-first interruption handling** — cookie/consent surfaces are treated semantically without persisting raw secret input, screenshot pixels/Base64 or full accessibility trees in diagnostics.
+- **Aurora** — unobtrusive bottom-center persistent activation overlay with a small touch target.
+- **Teach + Routines** — reusable app knowledge and repeatable phone workflows.
+- **PC integration** — optional Device Gateway, Windows Companion and constrained MCP adapters without creating a second phone-control engine.
+
+Android package: `com.cyclone.mobile`  
+Minimum Android: 14 (API 34)  
+Current mobile identity: `4.0.0-alpha.1` / versionCode `67` (V4 Stage 1 Fast Path alpha; 3.9.12 workspace retained)
+
+The product has two deliverables: the Android APK and the optional Windows PC companion.
+Internal API models run from the phone with internet access and an API key; PC pairing is not
+required. Core/Hermes and the separate Teamwork Sniper app are retired integrations.
+
+Cyclone 3.9.9 is promoted only from the exact Mobile CI artifact after unit tests, lint, repository
+and security guards pass. Physical Pixel 8 acceptance remains a separate evidence gate and must not
+be inferred from a green CI build. See the [3.9.9 release audit](docs/RELEASE_3.9.9.md) and the
+[broader reliability acceptance plan](docs/DUO_RELIABILITY_REVIEW.md).
+
+## Repository
 
 ```text
 apps/
-  cyclone-core/       FastAPI control-plane service
-  desktop/            Tauri + React desktop client
-  host-bridge/        Windows-native restricted host capability service
-services/
-  hermes/             Hermes profiles, templates, and container configuration
-  n8n/                n8n bootstrap assets and routine templates
-packages/
-  protocol/           Shared API/event contracts
-  ui/                 Shared visual primitives
-  shared/             Cross-service utilities
+  mobile/              Android product
+  device-gateway/      PC ↔ phone gateway
+  pc-companion/        Windows companion
 
-docker/
-  docker-compose.yml  Local private Docker stack
-vault/
-  templates/          Obsidian vault templates
-scripts/              Development, verification, and packaging helpers
-docs/                 Architecture, security, operations, and acceptance evidence
+tools/
+  codex-phone-mcp/     constrained PC agent tools
+  cyclone-agent-mcp/   generic Cyclone MCP adapter
+
+scripts/
+  ci/                  product/version guards
+  phone-gateway/       gateway setup and acceptance helpers
+  pc-companion/        companion tooling
+
+docs/                  current architecture/development/release docs
+release/version.toml    product/component version source
+.github/workflows/      current CI and candidate verification
 ```
 
-## Prerequisites
+## Build the Android app
 
-- Windows 10/11
-- Docker Desktop with Linux containers and Docker Compose v2
-- Node.js 22+
-- Rust stable (required only to build the Windows Tauri executable)
-- A model provider configured in Hermes (for example `DEEPSEEK_API_KEY`)
+Requirements: JDK 17 and Android SDK 35.
 
-Cyclone detects Docker Desktop at runtime. It does **not** silently install Docker Desktop, model credentials, or Telegram credentials.
+```bash
+cd apps/mobile
+./gradlew :app:testDebugUnitTest
+./gradlew :app:assembleDebug
+```
 
-## Quick start (development)
+Use GitHub Actions for release candidates so APK provenance, checksum and source SHA stay connected.
 
-1. Copy `.env.example` to `.env` and set strong local secrets. Do **not** commit `.env`.
-   Compose reads the `.env` file next to the compose file (`docker/.env`); when keeping
-   it at the repository root, pass it explicitly (all examples below do).
-2. Create the real Obsidian vault at `C:\Users\<you>\Documents\CycloneVault` using the documented structure, or override `CYCLONE_VAULT_HOST_PATH` in `.env`.
-3. Start the environment:
+## Development rules
 
-   ```bash
-   docker compose -f docker/docker-compose.yml --env-file .env up --build
-   ```
+Read [`AGENTS.md`](AGENTS.md) before substantial work and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing runtime boundaries.
 
-   The `hermes-config` one-shot aligns the Hermes gateway's default provider with
-   your credentials automatically: a `DEEPSEEK_API_KEY` selects the DeepSeek native
-   API with `deepseek-v4-flash` as default; otherwise an `OPENROUTER_API_KEY`
-   selects OpenRouter. Neither key present leaves image defaults untouched.
+Core invariants:
 
-4. Open the Cyclone Core health endpoint at `http://127.0.0.1:8787/health`.
-5. Open n8n locally at `http://127.0.0.1:5678` if you enabled its UI port.
+- one Android package and launcher;
+- one canonical phone mutation engine (`PhoneToolExecutor`);
+- semantic evidence before coordinate/vision fallback;
+- re-observe and verify after page-changing actions;
+- explicit approval boundaries for consequential actions;
+- no credentials or raw typed secrets in Brain/run diagnostics;
+- CI evidence and physical-device evidence are reported separately.
 
-Hermes is an internal service. Cyclone Core is its sole application-facing adapter and uses authenticated, private Docker-network traffic.
+## History
 
-## One-click Windows launch
-
-For a fresh ZIP download or clone, install Docker Desktop (Linux containers) and Node.js 22+, then double-click [`Launch-Cyclone.bat`](Launch-Cyclone.bat). It creates a local `.env` with generated secrets, creates an isolated `.runtime` workspace/vault, installs the desktop dependencies, starts the Docker stack, waits for Core health, and opens the browser client at `http://127.0.0.1:1420`. If Rust/Cargo is installed, the launcher starts the native Tauri window instead. See [`docs/WINDOWS_QUICKSTART.md`](docs/WINDOWS_QUICKSTART.md) for Telegram, provider, stop, and native installer instructions.
-
-## Security posture
-
-- Host ports are bound to `127.0.0.1` by default.
-- No Docker socket is mounted into agent containers.
-- Hermes API access is bearer-authenticated and not called directly by the UI.
-- Cyclone Host Bridge is localhost-only, token-authenticated, allowlisted, time-bounded, and audit logged.
-- Consequential actions require a policy decision/approval; Telegram follows the same policy path.
-- Secrets live in local `.env` / Docker secrets-compatible deployment config, never source control.
-
-## Current scope and honest limits
-
-Cyclone will not claim a configured LLM, Telegram delivery, an installed `.exe`, or a complete acceptance scenario until those components have actually run with local credentials and environment prerequisites. The project records implemented, verified, and blocked items separately in [`docs/STATUS.md`](docs/STATUS.md).
-
-## Sources
-
-The product and architecture research was based on official sources, recorded with precise citations in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md):
-
-- xAI Grok Bot documentation
-- NousResearch Hermes Agent documentation and current upstream source
-- n8n Docker deployment documentation
+Old Cyclone versions, experiments and retired architecture remain available through Git history, tags, branches and GitHub Releases. They are deliberately not duplicated in the current working tree.
 
 ## License
 
-Proprietary — Northstar Labs. Third-party components remain subject to their own licenses.
+Proprietary. Third-party components remain under their respective licenses; see [`docs/OPEN_SOURCE_COMPONENTS.md`](docs/OPEN_SOURCE_COMPONENTS.md).

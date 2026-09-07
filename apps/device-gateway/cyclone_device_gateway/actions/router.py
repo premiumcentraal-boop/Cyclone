@@ -10,6 +10,7 @@ from ..auth import AuditLog, redact_params
 from ..cyclone_bridge.client import BridgeOperationError, BridgeProtocolError
 from ..retrieval.service import RetrievalService
 from ..state.store import StateStore
+from .envelope import android_execution_error_class, extract_android_execution
 
 
 ALLOWED_TOOLS = {
@@ -65,7 +66,9 @@ ERROR_CODE_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
 
 class ActionValidationError(ValueError):
-    pass
+    def __init__(self, message: str, *, code: str = "PROTOCOL_MISMATCH"):
+        super().__init__(message)
+        self.code = code
 
 
 def _safe_error_code(value: Any, fallback: str) -> str:
@@ -120,10 +123,7 @@ def validate_action(tool: str, params: dict[str, Any]) -> None:
 
 
 def _android_execution(result: Any) -> dict[str, Any] | None:
-    if not isinstance(result, dict):
-        return None
-    execution = result.get("execution")
-    return execution if isinstance(execution, dict) else None
+    return extract_android_execution(result)
 
 
 def _witness(observation: dict[str, Any]) -> dict[str, Any]:
@@ -282,7 +282,8 @@ class ActionRouter:
         element = self.resolve_element(str(element_id))
         if element is None:
             raise ActionValidationError(
-                "Unknown or stale elementId; observe/search the current page again"
+                "Unknown or stale elementId; observe/search the current page again",
+                code="STALE_OBSERVATION",
             )
 
         stable_selector = _selector_from_element(element)
@@ -331,16 +332,10 @@ class ActionRouter:
                 },
             )
             execution = _android_execution(result)
-            if execution is not None and isinstance(execution.get("ok"), bool):
+            if execution is not None:
                 success = bool(execution.get("ok"))
-                error = execution.get("error")
-                if not success and isinstance(error, dict):
-                    error_class = _safe_error_code(
-                        error.get("code"),
-                        "ANDROID_ACTION_FAILED",
-                    )
-                elif not success:
-                    error_class = "ANDROID_ACTION_FAILED"
+                if not success:
+                    error_class = android_execution_error_class(execution)
             else:
                 success = False
                 error_class = "PROTOCOL_MISMATCH"

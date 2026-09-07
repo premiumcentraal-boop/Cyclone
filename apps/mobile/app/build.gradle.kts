@@ -7,43 +7,45 @@ plugins {
 android {
     namespace = "com.cyclone.mobile"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "com.cyclone.mobile"
         minSdk = 34
         targetSdk = 35
-        versionCode = 37
-        // Cyclone 3.3 gateway overhaul release identity. Shared Android runtime/manifest
-        // integration remains owned by the integration lane.
-        versionName = "3.5.1"
+        versionCode = 67
+        versionName = "4.0.0-alpha.1"
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
-
     buildTypes {
         release {
+            // Ordinary CI intentionally produces an unsigned release candidate. Personal-development
+            // publishing signs the verified CI artifact separately with the update-compatible dev key.
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
-
     buildFeatures {
+        aidl = true
         compose = true
         buildConfig = true
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
     implementation(project(":mobilerun-embedded"))
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.10.1")
+    // ActivityResult lint requires Fragment 1.3.0+ when a Fragment dependency is present.
+    // Pin the current stable release so transitive dependencies cannot drag the app below that floor.
+    implementation("androidx.fragment:fragment:1.9.0")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

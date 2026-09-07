@@ -68,8 +68,8 @@ def read_metadata() -> dict[str, str | int]:
         "version_name": version_name,
         "version_code": version_code,
         "application_id": application_id,
-        "apk_name": f"Cyclone-Mobile-{safe_version}.apk",
-        "artifact_name": f"Cyclone-Mobile-{safe_version}",
+        "apk_name": f"Cyclone-{safe_version}.apk",
+        "artifact_name": f"Cyclone-Android-{safe_version}",
     }
 
 

@@ -2,32 +2,38 @@ name: Cyclone Mobile CI
 
 on:
   push:
-    branches: [main, 'release/cyclone-mobile-v*']
+    branches: [main, 'release/cyclone-mobile-v*', 'agent/397-v4-live-background-completion', 'agent/398-runtime-and-task-ui', 'agent/399-composer-and-model-compat', 'agent/3912-background-intelligence']
     paths:
       - 'apps/mobile/**'
-      - '!apps/mobile/AGENTS.md'
-      - '!apps/mobile/**/*.md'
-      - 'third_party/mobilerun-portal'
-      - 'third_party/mobilerun-portal/**'
-      - '.gitmodules'
-      - 'scripts/ci/mobile_metadata.py'
-      - 'scripts/ci/tests/**'
-      - 'scripts/agent/team/**'
+      - 'apps/device-gateway/**'
+      - 'tools/codex-phone-mcp/**'
+      - 'tools/cyclone-agent-mcp/**'
+      - 'scripts/ci/**'
+      - 'scripts/phone-gateway/**'
+      - 'release/version.toml'
       - '.github/workflows/_mobile-build.yml'
       - '.github/workflows/mobile-ci.yml'
+      - '.github/workflows/mobile-dev-publish-v395.yml'
+      - '.github/workflows/mobile-dev-publish-v396.yml'
+      - '.github/workflows/mobile-dev-publish-v397.yml'
+      - '.github/workflows/mobile-publish-v398.yml'
+      - '.github/workflows/mobile-publish-v3910.yml'
   pull_request:
     paths:
       - 'apps/mobile/**'
-      - '!apps/mobile/AGENTS.md'
-      - '!apps/mobile/**/*.md'
-      - 'third_party/mobilerun-portal'
-      - 'third_party/mobilerun-portal/**'
-      - '.gitmodules'
-      - 'scripts/ci/mobile_metadata.py'
-      - 'scripts/ci/tests/**'
-      - 'scripts/agent/team/**'
+      - 'apps/device-gateway/**'
+      - 'tools/codex-phone-mcp/**'
+      - 'tools/cyclone-agent-mcp/**'
+      - 'scripts/ci/**'
+      - 'scripts/phone-gateway/**'
+      - 'release/version.toml'
       - '.github/workflows/_mobile-build.yml'
       - '.github/workflows/mobile-ci.yml'
+      - '.github/workflows/mobile-dev-publish-v395.yml'
+      - '.github/workflows/mobile-dev-publish-v396.yml'
+      - '.github/workflows/mobile-dev-publish-v397.yml'
+      - '.github/workflows/mobile-publish-v398.yml'
+      - '.github/workflows/mobile-publish-v3910.yml'
   workflow_dispatch:
 
 permissions:

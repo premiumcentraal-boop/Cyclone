@@ -13,7 +13,7 @@ if (-not (Test-Path $BuildPython)) {
 
 & $BuildPython (Join-Path $Repo 'scripts\pc-companion\prepare-scrcpy-server.py') --repo $Repo
 & $BuildPython -m pip install --disable-pip-version-check "pyinstaller==$($Lock.pyinstaller)"
-& $BuildPython -m pip install --disable-pip-version-check (Join-Path $Repo 'apps\device-gateway') (Join-Path $Repo 'tools\cyclone-agent-mcp')
+& $BuildPython -m pip install --disable-pip-version-check (Join-Path $Repo 'apps\device-gateway') (Join-Path $Repo 'tools\cyclone-agent-mcp') (Join-Path $Repo 'tools\codex-phone-mcp')
 $Dist = Join-Path $Repo 'dist\pc-companion'
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 & $BuildPython -m PyInstaller --clean --noconfirm --distpath $Dist --workpath (Join-Path $Repo 'build\pyinstaller\agent') (Join-Path $Repo 'packaging\pc-companion\pyinstaller\CycloneAgentMCP.spec')

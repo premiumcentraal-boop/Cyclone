@@ -2,16 +2,21 @@ package com.cyclone.mobile.gateway
 
 import android.content.Context
 import android.content.res.Configuration
+import com.cyclone.mobile.AccessibilityRoles
 import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.PageAwarenessRuntime
 import com.cyclone.mobile.applearner.PageContext
 import com.cyclone.mobile.applearner.PageControl
+import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.capture.PhoneScreenCapture
 import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
+import com.cyclone.mobile.fastpath.FastPathTree
 import com.cyclone.mobile.observability.pagecontext.PageContextSummary
 import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.max
@@ -31,26 +36,40 @@ internal data class GatewayObservation(
     val page: PageContext,
     val payload: JSONObject,
     val elements: Map<String, GatewayElement>,
+    val execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT,
 )
 
 internal object GatewayObservationStore {
-    @Volatile private var current: GatewayObservation? = null
-    fun current(): GatewayObservation? = current
-    fun replace(observation: GatewayObservation) { current = observation }
-    fun clear() { current = null }
+    private val scoped = com.cyclone.mobile.runtime.session.SessionObservationStore(
+        com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions)
+    fun current(sessionId: String? = null): GatewayObservation? = scoped.current(sessionId)?.payload as? GatewayObservation
+    fun replace(observation: GatewayObservation) {
+        scoped.publish(observation.execution.sessionId, observation.execution.displayId, observation.id,
+            observation, observation.capturedAt)
+    }
+    fun clear(sessionId: String? = null) { scoped.clear(sessionId) }
 }
 
 internal object GatewayObservationAdapter {
+    // Process-local salt lets verification compare editable state without exposing or persisting
+    // user-entered text (including passwords/OTPs) or a stable brute-forceable digest.
+    private val editableStateSalt = UUID.randomUUID().toString()
+
     fun capture(context: Context, args: JSONObject = JSONObject()): GatewayObservation {
+        val execution = com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(args)
+        val background = execution.sessionId != "default-foreground"
+        if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.requireScope(execution)
+        else com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(args)
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         PageAwarenessRuntime.initialize(context)
-        val snapshot = service.observe(markFresh = true)
+        val snapshot = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = true)
         val raw = snapshot.toJson()
         val page = PageAwarenessRuntime.capture(context, raw)
         val safeRaw = GatewayPrivacy.sanitizeAccessibilitySnapshot(raw)
         val observationId = UUID.randomUUID().toString()
         val rawNodes = safeRaw.optJSONArray("nodes") ?: JSONArray()
+        val rawTextById = snapshot.nodes.associate { it.id to it.text }
         val elements = linkedMapOf<String, GatewayElement>()
         val semanticControls = JSONArray()
         val controlSignatures = linkedSetOf<String>()
@@ -83,6 +102,8 @@ internal object GatewayObservationAdapter {
                 .put("selected", matchingNode?.optBoolean("selected") ?: false)
                 .put("checked", matchingNode?.optBoolean("checked") ?: false)
                 .put("checkable", matchingNode?.optBoolean("checkable") ?: false)
+                .put("focused", matchingNode?.optBoolean("focused") ?: false)
+                .put("textStateDigest", editableTextState(matchingNode, rawTextById) ?: JSONObject.NULL)
                 .put("rawNodeId", matchingNode?.optString("id")?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
             semanticControls.put(evidence)
             elements[elementId] = GatewayElement(elementId, "semantic", control.label, control.semanticName, control.role, evidence)
@@ -94,15 +115,23 @@ internal object GatewayObservationAdapter {
         var supplementalCount = 0
         for (index in 0 until rawNodes.length()) {
             val node = rawNodes.optJSONObject(index) ?: continue
-            if (!node.optBoolean("visibleToUser", true)) continue
             val interactive = node.optBoolean("clickable") || node.optBoolean("longClickable") ||
                 node.optBoolean("editable") || node.optBoolean("scrollable") || node.optBoolean("checkable") ||
                 node.optString("role") in setOf("button", "tab", "switch", "checkbox", "edit_text", "textbox")
+            val bounds = node.optJSONObject("bounds")
+            val boundsWidth = if (bounds == null) 0 else bounds.optInt("right") - bounds.optInt("left")
+            val boundsHeight = if (bounds == null) 0 else bounds.optInt("bottom") - bounds.optInt("top")
+            if (!AccessibilityRoles.isPublishedInteractive(
+                    node.optBoolean("visibleToUser", true), interactive, boundsWidth, boundsHeight,
+                )
+            ) continue
             if (!interactive) continue
             if (signature(node) in controlSignatures) continue
-            val label = node.optString("text").takeUnless { it.isBlank() || it == "<redacted>" }
+            val ownLabel = node.optString("text").takeUnless { it.isBlank() || it == "<redacted>" }
                 ?: node.optString("contentDescription").takeUnless { it.isBlank() || it == "<redacted>" }
                 ?: node.optString("resourceId").substringAfterLast('/').replace('_', ' ').takeIf { it.isNotBlank() }
+            val inheritedLabel = if (ownLabel == null) descendantLabel(node, rawNodes) else ""
+            val label = ownLabel ?: inheritedLabel.takeIf { it.isNotBlank() }
                 ?: continue
             if (label.isBlank()) continue
             supplementalCount++
@@ -115,7 +144,7 @@ internal object GatewayObservationAdapter {
                 .put("label", label.take(140))
                 .put("semanticName", semanticize(label))
                 .put("role", node.optString("role"))
-                .put("selector", GatewayPrivacy.sanitizeDeep(supplementSelector(node)))
+                .put("selector", GatewayPrivacy.sanitizeDeep(supplementSelector(node, inheritedLabel)))
                 .put("androidActions", node.optJSONArray("actions") ?: JSONArray())
                 .put("risk", "SAFE")
                 .put("expectedEffect", JSONObject.NULL)
@@ -131,6 +160,8 @@ internal object GatewayObservationAdapter {
                 .put("selected", node.optBoolean("selected"))
                 .put("checked", node.optBoolean("checked"))
                 .put("checkable", node.optBoolean("checkable"))
+                .put("focused", node.optBoolean("focused"))
+                .put("textStateDigest", editableTextState(node, rawTextById) ?: JSONObject.NULL)
                 .put("rawNodeId", node.optString("id").takeIf(String::isNotBlank) ?: JSONObject.NULL)
             semanticControls.put(evidence)
             elements[elementId] = GatewayElement(elementId, "semantic_supplement", label.take(140), semanticize(label), node.optString("role"), evidence)
@@ -157,6 +188,10 @@ internal object GatewayObservationAdapter {
             )
         }
 
+        val indexedControlCount = FastPathTree.assignControlIndices(semanticControls)
+        val treeUseful = FastPathTree.treeUseful(rawNodes.length(), indexedControlCount)
+        val perceptionMode = FastPathTree.perceptionMode(rawNodes.length(), indexedControlCount)
+
         val pageText = PageTextExtractor.extract(safeRaw)
         val pageSummary = PageContextSummary.build(
             snapshot = safeRaw,
@@ -165,7 +200,29 @@ internal object GatewayObservationAdapter {
             controlCount = page.controls.size + supplementalCount,
             textLineCount = pageText.optInt("lineCount"),
         )
-        val includeScreenshot = args.optBoolean("includeScreenshot", false)
+        // Page context is the canonical PC-agent source of truth. Graph/Brain knowledge can
+        // contribute only advisory, repeatedly-verified next hops; it cannot authorize an action.
+        AppLearnerRuntime.initialize(context)
+        val nextHopHints = GatewayRouteEvidence.nextHops(
+            page = page,
+            accessibilityFingerprint = snapshot.fingerprint,
+            graph = AppLearnerRuntime.graph(page.packageName),
+            brainSkills = AdaptiveBrainRuntime.reusableMicroSkills(context),
+        )
+        val windows = safeRaw.optJSONArray("windows") ?: JSONArray()
+        val boundedPageEvidence = GatewayRouteEvidence.pageEvidence(
+            page = page,
+            packageName = snapshot.packageName,
+            activity = snapshot.className,
+            pageText = pageText,
+            pageSummary = pageSummary,
+            semanticControls = page.controls.size,
+            supplementalControls = supplementalCount,
+            rawNodes = rawNodes.length(),
+            windows = windows.length(),
+            nextHopHints = nextHopHints,
+        )
+        val includeScreenshot = args.optBoolean("includeScreenshot", false) && !background
         val screenshot = if (includeScreenshot) {
             runCatching {
                 PhoneScreenCapture.capture(
@@ -214,14 +271,22 @@ internal object GatewayObservationAdapter {
             .put("semanticControls", semanticControls)
             .put("controlCount", page.controls.size)
             .put("supplementalControlCount", supplementalCount)
+            .put("indexedControlCount", indexedControlCount)
+            .put("treeUseful", treeUseful)
+            .put("perceptionMode", perceptionMode)
             .put("pageText", pageText)
             .put("pageSummary", pageSummary)
+            .put("pageEvidence", boundedPageEvidence)
+            .put("nextHopHints", nextHopHints)
             .put("screenshot", screenshot ?: JSONObject.NULL)
-            .put("windows", safeRaw.optJSONArray("windows") ?: JSONArray())
+            .put("windows", windows)
             .put("rawAccessibility", safeRaw)
             .put("rawNodeCount", rawNodes.length())
 
-        return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements).also(GatewayObservationStore::replace)
+        payload.put("sessionId", execution.sessionId).put("displayId", execution.displayId)
+        if (background) payload.put("executionGeneration", com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId))
+        elements.values.forEach { it.evidence.put("sessionId", execution.sessionId).put("displayId", execution.displayId) }
+        return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements, execution).also { GatewayObservationStore.replace(it) }
     }
 
     fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray {
@@ -248,6 +313,7 @@ internal object GatewayObservationAdapter {
                     .put("bounds", e.optJSONObject("bounds") ?: JSONObject.NULL)
                     .put("actions", e.optJSONArray("androidActions") ?: e.optJSONArray("actions") ?: JSONArray())
                     .put("source", element.source)
+                    .put("elementIndex", e.optInt("elementIndex", e.optInt("element_index", -1)).takeIf { it > 0 } ?: JSONObject.NULL)
                     .put("relevance", score))
             }
         }
@@ -262,6 +328,14 @@ internal object GatewayObservationAdapter {
             ?: throw GatewayProtocolException("ELEMENT_NOT_FOUND", "Element ID is not present in the current observation")
     }
 
+    private fun editableTextState(node: JSONObject?, rawTextById: Map<String, String>): String? {
+        if (node == null || !node.optBoolean("editable")) return null
+        val rawText = rawTextById[node.optString("id")].orEmpty()
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$editableStateSalt|$rawText".toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
     private fun bestNode(control: PageControl, nodes: JSONArray): JSONObject? {
         val selector = control.selector
         var best: JSONObject? = null
@@ -274,9 +348,25 @@ internal object GatewayObservationAdapter {
             val description = selector.optString("contentDescription")
             val role = selector.optString("role")
             if (resource.isNotBlank()) score += if (resource == node.optString("resourceId")) 8 else -5
-            if (text.isNotBlank()) score += if (normalize(text) == normalize(node.optString("text"))) 5 else 0
+            if (text.isNotBlank()) {
+                val nodeText = normalize(node.optString("text"))
+                val descText = normalize(node.optString("contentDescription"))
+                val wanted = normalize(text)
+                if (wanted == nodeText || wanted == descText) score += 5
+            }
             if (description.isNotBlank()) score += if (normalize(description) == normalize(node.optString("contentDescription"))) 5 else 0
             if (role.isNotBlank() && role.equals(node.optString("role"), ignoreCase = true)) score += 2
+            val clickable = node.optBoolean("clickable")
+            val actions = node.optJSONArray("actions")
+            var hasClick = clickable
+            if (actions != null) {
+                for (i in 0 until actions.length()) {
+                    if (actions.optString(i) == "ACTION_CLICK") hasClick = true
+                }
+            }
+            val nodeRole = node.optString("role").lowercase(Locale.US)
+            if (hasClick || nodeRole in setOf("button", "tab", "row", "textbox", "switch", "checkbox")) score += 6
+            if (!hasClick && nodeRole in setOf("text", "generic")) score -= 4
             if (score > bestScore) { bestScore = score; best = node }
         }
         return best?.takeIf { bestScore > 0 }
@@ -290,11 +380,12 @@ internal object GatewayObservationAdapter {
         val corpus = "$label $semantic $resource $description ${normalize(element.role)}"
         if (label == query || semantic == query || resource == query || description == query) return 1.0
         if (label.contains(query) || semantic.contains(query) || resource.contains(query) || description.contains(query)) return 0.92
-        val tokens = query.split(' ').filter { it.length >= 2 }.distinct()
-        if (tokens.isEmpty()) return 0.0
-        val matched = tokens.count(corpus::contains)
+        val tokens = query.split(' ').filter { it.isNotBlank() }.distinct()
+        val usable = tokens.filter { it.length >= 2 || (it.length == 1 && it[0].isLetterOrDigit()) }
+        if (usable.isEmpty()) return 0.0
+        val matched = usable.count(corpus::contains)
         if (matched == 0) return 0.0
-        val ratio = matched.toDouble() / tokens.size
+        val ratio = matched.toDouble() / usable.size
         return (0.50 + ratio * 0.35 + if (element.source == "semantic") 0.05 else 0.0).coerceAtMost(0.89)
     }
 
@@ -322,13 +413,29 @@ internal object GatewayObservationAdapter {
         node.optString("role").takeIf(String::isNotBlank)?.let { add("role:${it.lowercase(Locale.US)}") }
     }.joinToString("|")
 
-    private fun supplementSelector(node: JSONObject): JSONObject = JSONObject().apply {
+    private fun supplementSelector(node: JSONObject, inheritedLabel: String = ""): JSONObject = JSONObject().apply {
         node.optString("resourceId").takeIf { it.isNotBlank() }?.let { put("resourceId", it) }
         node.optString("text").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { put("text", it.take(160)) }
         node.optString("contentDescription").takeIf { it.isNotBlank() && it != "<redacted>" }?.let { put("contentDescription", it.take(160)) }
+        inheritedLabel.takeIf { it.isNotBlank() }?.let { put("descendantText", it.take(160)) }
         node.optString("role").takeIf { it.isNotBlank() }?.let { put("role", it) }
         if (node.optBoolean("clickable")) put("clickable", true)
         if (node.optBoolean("editable")) put("editable", true)
         if (node.optBoolean("scrollable")) put("scrollable", true)
+    }
+
+    private fun descendantLabel(parent: JSONObject, nodes: JSONArray): String {
+        val parentPath = parent.optString("path").trimEnd('/')
+        if (parentPath.isBlank()) return ""
+        val prefix = "$parentPath/"
+        for (index in 0 until nodes.length()) {
+            val candidate = nodes.optJSONObject(index) ?: continue
+            if (!candidate.optBoolean("visibleToUser", true) || !candidate.optString("path").startsWith(prefix)) continue
+            val label = candidate.optString("text").trim()
+                .ifBlank { candidate.optString("contentDescription").trim() }
+                .ifBlank { candidate.optString("resourceId").substringAfterLast('/').replace('_', ' ').trim() }
+            if (label.isNotBlank() && label != "<redacted>") return label.take(160)
+        }
+        return ""
     }
 }

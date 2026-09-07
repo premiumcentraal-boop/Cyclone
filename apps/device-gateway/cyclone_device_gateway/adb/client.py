@@ -169,6 +169,15 @@ class ADBClient:
             raise ADBError("A device serial is required to remove an isolated forward")
         self.run(["forward", "--remove", f"tcp:{local_port}"])
 
+    def remove_stale_forward(self, local_port: int) -> None:
+        """Remove a known-stale *local* forward without selecting a device.
+
+        This is intentionally separate from :meth:`remove_forward`: fleet recovery may call it
+        only after it has proved that the forward owner is no longer present in the canonical ADB
+        inventory.  It is never a public API and never accepts caller supplied ADB arguments.
+        """
+        self.run(["forward", "--remove", f"tcp:{local_port}"], use_serial=False)
+
     def ensure_bridge_forward(self, local_port: int = 8766) -> bool:
         if not self.serial:
             raise ADBError("A device serial is required to create an isolated forward")

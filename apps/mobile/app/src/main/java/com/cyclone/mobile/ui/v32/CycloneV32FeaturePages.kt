@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -70,12 +72,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
-import com.cyclone.mobile.BridgeClient
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.DeviceState
@@ -101,6 +104,7 @@ import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
 import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.ui.GatewayAiCard
 import kotlinx.coroutines.launch
+
 
 @Composable
 internal fun V32TeachPage(context: Context, refreshTick: Int) {
@@ -213,7 +217,16 @@ internal fun V32AiPage(context: Context, refreshTick: Int, onSettings: () -> Uni
         if (mode == V32AiMode.PHONE) {
             item {
                 CycloneHeroCard("What should happen?", "Describe the outcome. Cyclone handles the phone one verified step at a time.", Icons.Rounded.AutoAwesome, tone = CyclonePastel.LILAC) {
-                    OutlinedTextField(phoneRequest, { phoneRequest = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 6, enabled = !busy, label = { Text("Phone task") }, placeholder = { Text("Open my podcast app and find saved episodes") })
+                    OutlinedTextField(
+                        phoneRequest,
+                        { phoneRequest = it },
+                        Modifier.fillMaxWidth().semantics { contentDescription = "Phone task input" },
+                        minLines = 3,
+                        maxLines = 6,
+                        enabled = !busy,
+                        label = { Text("Phone task") },
+                        placeholder = { Text("Open my podcast app and find saved episodes") },
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             busy = true; status = "Starting…"; result = ""
@@ -314,16 +327,11 @@ internal fun V32BrainPage(context: Context, refreshTick: Int) {
 
 @Composable
 internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> Unit) {
-    val prefs = context.getSharedPreferences("cyclone", Context.MODE_PRIVATE)
     val aiPrefs = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
-    val defaultName = listOf(Build.MANUFACTURER, Build.MODEL).filter(String::isNotBlank).joinToString(" ")
     var keyDraft by rememberSaveable { mutableStateOf("") }
     var hasKey by remember(refreshTick) { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
     var selectedModel by rememberSaveable { mutableStateOf(aiPrefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }) }
     var accessProfile by rememberSaveable { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
-    var url by rememberSaveable { mutableStateOf(prefs.getString("coreWsUrl", "").orEmpty()) }
-    var token by rememberSaveable { mutableStateOf(prefs.getString("coreToken", "").orEmpty()) }
-    var name by rememberSaveable { mutableStateOf(prefs.getString("deviceName", defaultName).orEmpty()) }
     val primaryControl = CyclonePermissionSetup.primaryControlEnabled(context)
     val notificationAccess = CyclonePermissionSetup.notificationAccessEnabled(context)
     val resultNotifications = CyclonePermissionSetup.resultNotificationsEnabled(context)
@@ -372,6 +380,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 val overlay = CyclonePermissionSetup.overlayEnabled(context)
                 val exactTiming = CyclonePermissionSetup.exactTimingEnabled(context)
                 val calendar = CyclonePermissionSetup.calendarEnabled(context)
+                val microphone = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
                 CyclonePermissionRow(Icons.Rounded.Layers, "Enhanced control engine", "Optional second Accessibility backend for difficult apps and richer takeover tools.", enhancedControl, if (enhancedControl) "Manage" else "Enable") {
                     open(CyclonePermissionSetup.accessibilitySettings())
                 }
@@ -387,6 +396,13 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 CyclonePermissionRow(Icons.Rounded.CalendarMonth, "Calendar context", "Optional read-only matching for calendar-aware routines.", calendar, if (calendar) "Manage" else "Allow") {
                     if (!calendar) {
                         (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_CALENDAR), 321) }
+                    } else {
+                        open(CyclonePermissionSetup.appDetails(context))
+                    }
+                }
+                CyclonePermissionRow(Icons.Rounded.Mic, "Voice requests", "Speak a request into the Cyclone AI-mode composer.", microphone, if (microphone) "Manage" else "Allow") {
+                    if (!microphone) {
+                        (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.RECORD_AUDIO), 322) }
                     } else {
                         open(CyclonePermissionSetup.appDetails(context))
                     }
@@ -432,15 +448,13 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
         }
         item {
             CycloneSimpleCard {
-                CycloneSectionTitle("Connections")
-                Button(onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Smartphone, null); Spacer(Modifier.size(6.dp)); Text("PC Gateway & QR pairing") }
-                OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text("Optional Cyclone Core URL") })
-                OutlinedTextField(token, { token = it }, Modifier.fillMaxWidth(), label = { Text("Core pairing token") }, visualTransformation = PasswordVisualTransformation())
-                OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Device name") })
-                FilledTonalButton(onClick = {
-                    prefs.edit().putString("coreWsUrl", url.trim()).putString("coreToken", token.trim()).putString("deviceName", name.trim().ifBlank { defaultName }).apply()
-                    BridgeClient.stop(); BridgeClient.start(context); refresh()
-                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Link, null); Spacer(Modifier.size(6.dp)); Text(if (DeviceState.bridgeConnected) "Reconnect Core" else "Save Core connection") }
+                CycloneSectionTitle("Optional PC companion")
+                Text("Ask Cyclone, Teach, Routines and Brain run on this phone. Internal API models need an internet connection and your API key, with no PC pairing required.")
+                Button(onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Smartphone, null)
+                    Spacer(Modifier.size(6.dp))
+                    Text("PC Gateway & QR pairing")
+                }
             }
         }
         item {

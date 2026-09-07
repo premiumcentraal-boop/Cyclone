@@ -16,6 +16,7 @@ import java.util.Locale
  */
 object PageTextExtractor {
     const val DEFAULT_MAX_LINES = 160
+    const val DEFAULT_PLAIN_LIMIT = 900
     private const val REDACTED = "<redacted>"
     private val whitespace = Regex("\\s+")
 
@@ -23,8 +24,13 @@ object PageTextExtractor {
         val cap = maxLines.coerceAtLeast(1)
         val nodes = snapshot.optJSONArray("nodes") ?: JSONArray()
         val screen = snapshot.optJSONObject("screen")
-        val screenWidth = screen?.optInt("width") ?: Int.MAX_VALUE
-        val screenHeight = screen?.optInt("height") ?: Int.MAX_VALUE
+        val display = snapshot.optJSONObject("display")
+        val screenWidth = positiveDimension(screen?.optInt("width") ?: 0)
+            ?: positiveDimension(display?.optInt("width") ?: 0)
+            ?: Int.MAX_VALUE
+        val screenHeight = positiveDimension(screen?.optInt("height") ?: 0)
+            ?: positiveDimension(display?.optInt("height") ?: 0)
+            ?: Int.MAX_VALUE
 
         data class Line(val text: String, val role: String, val y: Int, val x: Int)
 
@@ -75,13 +81,29 @@ object PageTextExtractor {
                 .put("y", line.y)
                 .put("x", line.x))
         }
+        val joined = lines.take(cap).joinToString(" ") { it.text }
         return JSONObject()
             .put("protocol", "cyclone-page-text-v1")
             .put("lineCount", out.length())
             .put("truncated", out.length() < lines.size)
             .put("order", "top-to-bottom reading order by bounds; duplicate overlay text removed")
+            .put("text", joined.take(DEFAULT_PLAIN_LIMIT))
             .put("lines", out)
     }
+
+    fun flattened(pageText: JSONObject, limit: Int = DEFAULT_PLAIN_LIMIT): String {
+        val direct = pageText.optString("text").trim()
+        if (direct.isNotBlank() && direct != REDACTED) return direct.take(limit)
+        val lines = pageText.optJSONArray("lines") ?: JSONArray()
+        val parts = ArrayList<String>(lines.length())
+        for (index in 0 until lines.length()) {
+            val text = lines.optJSONObject(index)?.optString("text")?.trim().orEmpty()
+            if (text.isNotBlank() && text != REDACTED) parts += text
+        }
+        return parts.joinToString(" ").take(limit)
+    }
+
+    private fun positiveDimension(value: Int): Int? = value.takeIf { it > 0 }
 
     internal fun normalize(value: String): String =
         value.lowercase(Locale.US).replace(whitespace, " ").trim()

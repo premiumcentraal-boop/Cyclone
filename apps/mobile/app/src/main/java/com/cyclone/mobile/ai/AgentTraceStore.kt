@@ -51,8 +51,6 @@ object AgentTraceRuntime {
     fun start(context: Context, goal: String, model: String): String {
         initialize(context)
         val id = store.startSession(goal, model)
-        // V2.9.2 makes the transparent decision HUD a core part of phone-task execution rather than
-        // a buried toggle. If Accessibility is connected it appears automatically for every trace.
         CycloneAccessibilityService.instance?.let { AiTraceOverlayV27Runtime.startTask(it, id) }
         return id
     }
@@ -68,18 +66,24 @@ object AgentTraceRuntime {
     ) {
         initialize(context)
         store.append(sessionId, kind, displayText, code, ok, detail)
+        when (kind) {
+            "GATE_SUSPEND" -> store.setLiveStatus(sessionId, "SUSPENDED", displayText)
+            "GATE_RESUME" -> store.setLiveStatus(sessionId, "RUNNING", null)
+        }
     }
 
     fun finish(context: Context, sessionId: String, status: String, result: String, decisions: Int) {
         initialize(context)
         val ok = status == "COMPLETED"
         store.finishSession(sessionId, status, result, decisions)
+        runCatching { AgentRunDiagnosticV39.ensureCanonical(context.applicationContext, sessionId) }
         AiTraceOverlayV27Runtime.finishTask(sessionId, ok, result)
 
-        // One post-mission consolidation pass. This runs after the task result is durable and cannot
-        // drive the phone. It only adds evidence-based semantic notes to the existing Brain.
+        // Consolidation may append useful learning events. Refresh the same canonical file afterward;
+        // the stable session-id filename guarantees one diagnostic artifact per run.
         MissionLearningConsolidatorV292.enqueue(context, sessionId) { compiled ->
             AiTraceOverlayV27Runtime.compilationComplete(sessionId, compiled.summary)
+            runCatching { AgentRunDiagnosticV39.ensureCanonical(context.applicationContext, sessionId) }
             TaskResultNotifierV292.notify(context, sessionId, ok, result, compiled.summary)
         }
     }
@@ -191,6 +195,20 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
         return event
     }
 
+    /** Update a non-terminal task state without closing the run. */
+    fun setLiveStatus(id: String, status: String, result: String?) {
+        writableDatabase.update(
+            "sessions",
+            ContentValues().apply {
+                put("status", status.take(40))
+                putNull("ended_at")
+                if (result == null) putNull("result") else put("result", TracePrivacy.clean(result).take(1500))
+            },
+            "id=?",
+            arrayOf(id),
+        )
+    }
+
     fun finishSession(id: String, status: String, result: String, decisions: Int) {
         writableDatabase.update(
             "sessions",
@@ -211,6 +229,26 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
             ok = status == "COMPLETED",
             detail = result,
         )
+    }
+
+    fun session(id: String): AiTraceSession? {
+        readableDatabase.query(
+            "sessions",
+            arrayOf("id", "goal", "model", "status", "started_at", "ended_at", "result", "decisions"),
+            "id=?",
+            arrayOf(id),
+            null,
+            null,
+            null,
+            "1",
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return AiTraceSession(
+                id = c.getString(0), goal = c.getString(1), model = c.getString(2), status = c.getString(3),
+                startedAt = c.getLong(4), endedAt = if (c.isNull(5)) null else c.getLong(5),
+                result = if (c.isNull(6)) null else c.getString(6), decisions = c.getInt(7),
+            )
+        }
     }
 
     fun listSessions(limit: Int = 40): List<AiTraceSession> {
@@ -272,6 +310,7 @@ object TraceHumanizer {
             "phone.scroll" -> "Scrolling to find the next relevant control"
             "phone.swipe" -> "Using a learned directional gesture on this page"
             "phone.open_app" -> "Opening the app needed for this task"
+            "phone.launch_intent" -> "Opening the requested Android destination"
             "phone.open_notification" -> "Opening the relevant notification"
             "phone.wait_for" -> "Waiting for the expected screen state"
             "phone.assert" -> "Verifying the expected result before continuing"

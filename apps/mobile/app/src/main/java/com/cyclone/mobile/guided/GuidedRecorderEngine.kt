@@ -141,7 +141,7 @@ class GuidedRecorderEngine(
 
     fun undo(): Boolean = synchronized(lock) {
         if (evidence.isEmpty()) false else {
-            evidence.removeLast()
+            evidence.removeAt(evidence.lastIndex)
             persistManifest()
             true
         }
