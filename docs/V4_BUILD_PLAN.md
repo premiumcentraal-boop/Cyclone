@@ -80,9 +80,8 @@ Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent
 
 ## Orchestrator coordination (user 2026-09-07)
 - Check progress about **every 30 minutes**; advance **one stage at a time** through to a **V4 release**.
-- **Stage 4** is the current completed One glass (this PR, `4.0.0-alpha.4`). Do not restart Stage 1, Stage 2, Stage 3, or Stage 4 mid-run.
-- **Stage 5** is next (V4 release lane: `v4.0.0` / One 1.0 pairing). Stage 5 Grok prompts MUST tell the agent to **use subagents** to parallelize independent work (CI tags, release notes, physical checklist) while keeping one coherent PR.
-- After Stage 4 PR: offer/use Grok **usage reset** before heavy Stage 5 burns if the user initiates it.
+- **Stage 5** is the current run (V4 release lane). Do not restart Stages 1-4. Stage 5 Grok MUST use **subagents**. After this PR + 4.0.0 cut, orchestrator can retire the 30m V4 push routine.
+
 
 
 
