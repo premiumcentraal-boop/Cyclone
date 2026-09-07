@@ -15,6 +15,10 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
+/** Setup compatibility: never guess a secondary profile ID when Android does not expose it publicly. */
+val UserHandle.identifier: Int
+    get() = if (this == Process.myUserHandle()) Layer2Workspaces.currentAndroidUserId() else -1
+
 /** Narrow root probes only. There is no model-supplied shell command or auto-root path. */
 object RootProbe {
     @Volatile var status = RootStatus.UNKNOWN
