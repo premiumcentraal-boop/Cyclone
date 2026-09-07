@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import com.cyclone.mobile.permissions.CyclonePermissionSetup
+import com.cyclone.mobile.runtime.workspace.RootFeaturesSetupCard
 import com.cyclone.mobile.ui.v32.CycloneIntelligenceTheme
 import kotlinx.coroutines.delay
 import rikka.shizuku.Shizuku
@@ -40,6 +41,7 @@ class BackgroundSetupActivity : ComponentActivity() {
                 TextButton(onClick = { finish() }) { Text("Back") }
                 Text("Background tasks", style = MaterialTheme.typography.headlineMedium)
                 Text("Keep using your phone while Cyclone works in a separate app screen.")
+                RootFeaturesSetupCard()
                 SetupCard("Android 15+", status.android) {
                     Text(if (status.android) "This Android version supports separate task screens." else "This phone needs an Android update before background tasks can run.")
                     TextButton(onClick = { web("https://developer.android.com/reference/android/hardware/display/DisplayManager#VIRTUAL_DISPLAY_FLAG_OWN_FOCUS") }) { Text("Why Android 15?") }
