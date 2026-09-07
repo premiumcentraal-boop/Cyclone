@@ -4,6 +4,9 @@ This directory contains only documentation that describes the current Cyclone pr
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current system shape and runtime boundaries
 - [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md) — V4 Stage 1 Fast Path harness (a11y-first loop, nav isolation, planner/UI split)
+- [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md) — V4 Stage 2 display-scoped session identity
+- [`V4_STAGE3_SKILL_COMPILER.md`](V4_STAGE3_SKILL_COMPILER.md) — V4 Stage 3 learn→compile→replay
+- [`V4_STAGE4_ONE_GLASS.md`](V4_STAGE4_ONE_GLASS.md) — V4 Stage 4 Cyclone One glass (JPEG live, session tiles, MCP session_id)
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — local development and validation workflow
 - [`RELEASES.md`](RELEASES.md) — versioning, artifacts and release expectations
 - [`DUO_RELIABILITY_REVIEW.md`](DUO_RELIABILITY_REVIEW.md) — versionCode 58 findings, fixes and ordered acceptance plan

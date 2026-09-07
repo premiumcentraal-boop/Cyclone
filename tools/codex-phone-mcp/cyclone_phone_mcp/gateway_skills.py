@@ -3,7 +3,7 @@ from __future__ import annotations
 import urllib.parse
 from typing import Any
 
-from .gateway import GatewayClient as CoreGatewayClient
+from .gateway import GatewayClient as CoreGatewayClient, _execution_identity
 
 
 class GatewayClient(CoreGatewayClient):
@@ -19,12 +19,17 @@ class GatewayClient(CoreGatewayClient):
             payload,
         )
 
-    def skill_run(self, skill_id: str, *, dry_run: bool = False, params: dict[str, Any] | None = None) -> Any:
-        return self._bounded_route(
-            "POST",
-            f"/v1/skills/{_quote(skill_id)}/runs",
-            {"dryRun": bool(dry_run), "params": params or {}},
-        )
+    def skill_run(
+        self,
+        skill_id: str,
+        *,
+        dry_run: bool = False,
+        params: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        display_id: int | None = None,
+    ) -> Any:
+        payload = _skill_run_payload(dry_run=dry_run, params=params, session_id=session_id, display_id=display_id)
+        return self._bounded_route("POST", f"/v1/skills/{_quote(skill_id)}/runs", payload)
 
     def device_skill_run(
         self,
@@ -33,11 +38,14 @@ class GatewayClient(CoreGatewayClient):
         *,
         dry_run: bool = False,
         params: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        display_id: int | None = None,
     ) -> Any:
+        payload = _skill_run_payload(dry_run=dry_run, params=params, session_id=session_id, display_id=display_id)
         return self._bounded_route(
             "POST",
             f"/v1/devices/{_quote(device_id)}/agent/skills/{_quote(skill_id)}/runs",
-            {"dryRun": bool(dry_run), "params": params or {}},
+            payload,
         )
 
     def skill_match(self, goal: str, page_key: str = "") -> Any:
@@ -50,6 +58,23 @@ class GatewayClient(CoreGatewayClient):
             "GET",
             f"/v1/devices/{_quote(device_id)}/agent/skills?{query}",
         )
+
+
+def _skill_run_payload(
+    *,
+    dry_run: bool,
+    params: dict[str, Any] | None,
+    session_id: str | None,
+    display_id: int | None,
+) -> dict[str, Any]:
+    forwarded = dict(params or {})
+    identity = _execution_identity(
+        session_id=session_id,
+        display_id=display_id,
+        sessionId=forwarded.get("sessionId"),
+        displayId=forwarded.get("displayId"),
+    )
+    return {"dryRun": bool(dry_run), "params": forwarded, **identity}
 
 
 def _quote(value: str) -> str:

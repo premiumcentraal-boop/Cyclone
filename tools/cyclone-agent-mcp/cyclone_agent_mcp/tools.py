@@ -11,8 +11,11 @@ from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
 from .phone_mcp import (
     compact_observation,
     draft_run_denied,
+    is_session_scope_error,
     matched_verified_skill,
     parse_execution_scope,
+    require_tool_execution_scope,
+    session_scope_error_result,
     skill_run_normalize,
     skill_save_payload,
     skill_save_success,
@@ -31,6 +34,11 @@ def _identity_kwargs(args: dict[str, Any]) -> dict[str, Any]:
     scope = parse_execution_scope(args)
     if not scope:
         return {}
+    return {"session_id": scope["sessionId"], "display_id": scope["displayId"]}
+
+
+def _required_identity_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+    scope = require_tool_execution_scope(args)
     return {"session_id": scope["sessionId"], "display_id": scope["displayId"]}
 
 
@@ -78,6 +86,10 @@ class PhoneTools:
             error_code = _error_code(body) or "GATEWAY_ERROR"
             return body
         except (ValueError, OSError) as exc:
+            if is_session_scope_error(exc):
+                body = session_scope_error_result(exc)
+                error_code = str(body.get("errorClass") or "SESSION_REQUIRED")
+                return redact(body)
             error_code = "INVALID_REQUEST"
             return {"error": {"code": error_code, "message": str(exc)[:300]}}
         finally:
@@ -95,7 +107,7 @@ class PhoneTools:
         return {"devices": [device.safe_dict() for device in self.gateway.list_devices()]}
 
     def phone_status(self, args: dict[str, Any]) -> Any:
-        return self.gateway.status(self._device(args))
+        return _with_sessions_inventory(self.gateway.status(self._device(args)))
 
     def phone_capabilities(self, args: dict[str, Any]) -> Any:
         return self.gateway.capabilities(self._device(args), refresh=bool(args.get("refresh", False)))
@@ -108,7 +120,7 @@ class PhoneTools:
             self._device(args),
             include_screenshot=bool(args.get("include_screenshot", False)),
             mode=mode,
-            **_identity_kwargs(args),
+            **_required_identity_kwargs(args),
         )
 
     def phone_locate(self, args: dict[str, Any]) -> Any:
@@ -117,11 +129,12 @@ class PhoneTools:
             raise ValueError("goal is required")
         query = str(args.get("query") or goal).strip()
         device_id = self._device(args)
+        identity = _required_identity_kwargs(args)
         status = self.gateway.status(device_id)
-        raw = self.gateway.observe(device_id, include_screenshot=False, mode="compact", **_identity_kwargs(args))
+        raw = self.gateway.observe(device_id, include_screenshot=False, mode="compact", **identity)
         page_card = compact_observation(raw, goal=goal)
         try:
-            search_raw = self.gateway.ui_search(query, device_id, **_identity_kwargs(args))
+            search_raw = self.gateway.ui_search(query, device_id, **identity)
         except GatewayError as exc:
             search_raw = {"available": False, "error": redact(exc.body)}
         matched = None
@@ -152,16 +165,16 @@ class PhoneTools:
         query = str(args.get("query") or "").strip()
         if not query:
             raise ValueError("query is required")
-        return self.gateway.ui_search(query, self._device(args), **_identity_kwargs(args))
+        return self.gateway.ui_search(query, self._device(args), **_required_identity_kwargs(args))
 
     def phone_inspect_element(self, args: dict[str, Any]) -> Any:
         element_id = str(args.get("element_id") or "").strip()
         if not element_id:
             raise ValueError("element_id is required")
-        return self.gateway.ui_element(element_id, self._device(args), **_identity_kwargs(args))
+        return self.gateway.ui_element(element_id, self._device(args), **_required_identity_kwargs(args))
 
     def phone_screenshot(self, args: dict[str, Any]) -> Any:
-        return self.gateway.observe(self._device(args), include_screenshot=True, mode="compact", **_identity_kwargs(args))
+        return self.gateway.observe(self._device(args), include_screenshot=True, mode="compact", **_required_identity_kwargs(args))
 
     def phone_current_page(self, args: dict[str, Any]) -> Any:
         return self.gateway.current_page(self._device(args))
@@ -183,7 +196,10 @@ class PhoneTools:
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true; Android policy remains authoritative")
         params = _forward_type_authorization(tool, args, params)
-        result = self.gateway.action(tool, params, goal, self._device(args), **_identity_kwargs(args))
+        if args.get("request_ai_control") is True:
+            params = dict(params)
+            params["request_ai_control"] = True
+        result = self.gateway.action(tool, params, goal, self._device(args), **_required_identity_kwargs(args))
         if tool == "phone.type":
             typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")
             result = strip_typed_plaintext(result, typed if isinstance(typed, str) else None)
@@ -196,6 +212,11 @@ class PhoneTools:
         payload = built.get("_compile")
         if not isinstance(payload, dict):
             raise ValueError("skill compile payload is invalid")
+        identity = _identity_kwargs(args)
+        if identity:
+            payload = dict(payload)
+            payload["sessionId"] = identity["session_id"]
+            payload["displayId"] = identity["display_id"]
         result = self.gateway.skill_save(payload, self._device(args))
         return skill_save_success(result, payload)
 
@@ -213,9 +234,14 @@ class PhoneTools:
                     return draft_run_denied(skill_id, "draft")
             except (GatewayError, AttributeError, TypeError, ValueError, KeyError):
                 pass
+        params = args.get("params") if isinstance(args.get("params"), dict) else {}
+        identity = _required_identity_kwargs(args)
+        params = dict(params)
+        params["sessionId"] = identity["session_id"]
+        params["displayId"] = identity["display_id"]
         result = self.gateway.skill_run(
             skill_id, dry_run=dry_run,
-            params=args.get("params") if isinstance(args.get("params"), dict) else {},
+            params=params,
             device_id=device_id,
         )
         return skill_run_normalize(result, skill_id=skill_id, dry_run=dry_run)
@@ -239,11 +265,12 @@ class PhoneTools:
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
+        identity = _required_identity_kwargs(args)
         results: list[dict[str, Any]] = []
         for device_id in device_ids:
             try:
-                before = self.gateway.observe(device_id, include_screenshot=False, mode="compact")
-                outcome = self.gateway.action(tool, params, goal, device_id)
+                before = self.gateway.observe(device_id, include_screenshot=False, mode="compact", **identity)
+                outcome = self.gateway.action(tool, params, goal, device_id, **identity)
                 results.append({"device_id": device_id, "ok": _error_code(outcome) is None, "before": before, "outcome": outcome})
             except GatewayError as exc:
                 results.append({"device_id": device_id, "ok": False, "error": exc.body or {"code": "GATEWAY_ERROR"}})
@@ -306,6 +333,19 @@ class PhoneTools:
         device_id = _required_id(args, "device_id", TARGET_ID)
         run_id = _required_id(args, "run_id", RUN_ID)
         return self.gateway.routine_cancel(device_id, run_id)
+
+
+def _with_sessions_inventory(result: Any) -> Any:
+    """Pass through gateway sessions when present; never invent default-foreground."""
+    if not isinstance(result, dict) or result.get("sessions") is not None:
+        return result
+    for key in ("status", "device", "runtime"):
+        nested = result.get(key)
+        if isinstance(nested, dict) and nested.get("sessions") is not None:
+            out = dict(result)
+            out["sessions"] = nested["sessions"]
+            return out
+    return result
 
 
 def _error_code(value: Any) -> str | None:

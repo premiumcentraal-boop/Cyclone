@@ -11,6 +11,8 @@ from cyclone_phone_mcp.reports import SessionRecorder
 from cyclone_phone_mcp.skills import matched_verified_skill
 from cyclone_phone_mcp.surface import PhoneTools
 
+FG = {"session_id": "default-foreground"}
+
 
 class SkillGateway:
     def __init__(self):
@@ -52,7 +54,7 @@ class SkillGateway:
     def ui_search(self, query, **kwargs):
         return {"candidates": [{"id": "settings", "label": query}]}
 
-    def device_ui_search(self, device_id, query):
+    def device_ui_search(self, device_id, query, **kwargs):
         return {"results": [{"id": "settings", "label": query}, {"id": "task-input", "label": "Phone task input"}]}
 
     def action(self, tool, params, goal, **kwargs):
@@ -148,7 +150,7 @@ class TypeSkillTests(unittest.TestCase):
             self.assertEqual(list(DEFAULT_SURFACE)[:3], listed["result"]["defaultSurface"][:3])
             located = server.handle({
                 "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": {"name": "phone_locate", "arguments": {"device_id": "dev_pixel8", "goal": "Open Settings"}},
+                "params": {"name": "phone_locate", "arguments": {"device_id": "dev_pixel8", "goal": "Open Settings", "session_id": "default-foreground"}},
             })
         payload = json.loads(located["result"]["content"][0]["text"])
         self.assertIn("Home", payload["pageCard"]["pageText"])
@@ -159,21 +161,21 @@ class TypeSkillTests(unittest.TestCase):
         gateway = SkillGateway()
         with tempfile.TemporaryDirectory() as report_dir:
             tools = PhoneTools(gateway, SessionRecorder(report_dir))
-            located = json.loads(tools.call("phone_locate", {"device_id": "dev_pixel8", "goal": "Phone task input"})[0]["text"])
+            located = json.loads(tools.call("phone_locate", {"device_id": "dev_pixel8", "goal": "Phone task input", **FG})[0]["text"])
             element_id = next(
                 item["elementId"] for item in located["pageCard"]["candidates"]["current"]
                 if item.get("editable") or "task" in str(item.get("label") or "").lower()
             )
             denied = tools.call("phone_act", {
                 "device_id": "dev_pixel8", "tool": "phone.type",
-                "params": {"elementId": element_id, "value": secret}, "goal": "Type a harmless task",
+                "params": {"elementId": element_id, "value": secret}, "goal": "Type a harmless task", **FG,
             })[0]["text"]
             self.assertIn("user_authorized", denied)
             self.assertNotIn(secret, denied)
             allowed = json.loads(tools.call("phone_act", {
                 "device_id": "dev_pixel8", "tool": "phone.type",
                 "params": {"elementId": element_id, "value": secret},
-                "goal": "Type a harmless task", "user_authorized": True,
+                "goal": "Type a harmless task", "user_authorized": True, **FG,
             })[0]["text"])
             dumped = json.dumps(allowed)
             report = json.dumps(json.loads(next(P(report_dir).glob("*.json")).read_text()))
@@ -215,12 +217,12 @@ class TypeSkillTests(unittest.TestCase):
     def test_skill_run_denies_live_draft_permits_dry_run_without_mutation(self):
         gateway = SkillGateway()
         tools = PhoneTools(gateway)
-        live = json.loads(tools.call("phone_skill_run", {"skill_id": "skill.draft.wifi"})[0]["text"])
+        live = json.loads(tools.call("phone_skill_run", {"skill_id": "skill.draft.wifi", **FG})[0]["text"])
         self.assertFalse(live["ok"])
         self.assertEqual("DRAFT_RUN_DENIED", live["errorClass"])
         self.assertEqual([], gateway.runs)
         self.assertEqual([], gateway.mutations)
-        dry = json.loads(tools.call("phone_skill_run", {"skill_id": "skill.draft.wifi", "dryRun": True})[0]["text"])
+        dry = json.loads(tools.call("phone_skill_run", {"skill_id": "skill.draft.wifi", "dryRun": True, **FG})[0]["text"])
         self.assertTrue(dry["ok"])
         self.assertTrue(dry["dryRun"])
         self.assertEqual(1, len(gateway.runs))
@@ -232,7 +234,7 @@ class TypeSkillTests(unittest.TestCase):
             {"skill": {"id": "skill.draft.wifi", "status": "draft", "goal": "Open Wi-Fi", "pageKey": "home"}},
             "Open Wi-Fi", "home",
         ))
-        located = json.loads(PhoneTools(SkillGateway()).call("phone_locate", {"goal": "Open Wi-Fi"})[0]["text"])
+        located = json.loads(PhoneTools(SkillGateway()).call("phone_locate", {"goal": "Open Wi-Fi", **FG})[0]["text"])
         self.assertIsNone(located["matchedSkill"])
         self.assertFalse(located["skipModel"])
 

@@ -10,8 +10,8 @@ def _install() -> None:
 
     original = GatewayClient.action
 
-    def action(self, tool: str, params: dict[str, Any], goal: str, device_id: str | None = None) -> Any:
-        response = original(self, tool, params, goal, device_id)
+    def action(self, tool: str, params: dict[str, Any], goal: str, device_id: str | None = None, **kwargs: Any) -> Any:
+        response = original(self, tool, params, goal, device_id, **kwargs)
         if isinstance(response, dict) and (
             "execution" in response or "transport" in response or response.get("protocol_version")
         ):
@@ -30,7 +30,12 @@ def _install() -> None:
 
         def skill_run(self, skill_id: str, *, dry_run: bool = False, params: dict[str, Any] | None = None, device_id: str | None = None) -> Any:
             selected = self.select_device(device_id)
-            body = {"dryRun": bool(dry_run), "params": params or {}}
+            forwarded = dict(params or {})
+            body = {"dryRun": bool(dry_run), "params": forwarded}
+            if forwarded.get("sessionId"):
+                body["sessionId"] = forwarded["sessionId"]
+            if forwarded.get("displayId") is not None:
+                body["displayId"] = forwarded["displayId"]
             quoted = urllib.parse.quote(skill_id, safe="")
             if selected.legacy_unscoped:
                 return self._bounded_route("POST", f"/v1/skills/{quoted}/runs", body)

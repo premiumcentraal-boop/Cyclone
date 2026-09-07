@@ -11,7 +11,9 @@ The historical `cyclone_phone_mcp` Python package remains in the repository for 
 The generic server talks only to the authenticated loopback Cyclone PC Device Gateway. It exposes no generic ADB, shell, PowerShell, root, subprocess, or arbitrary command capability. Gateway tokens are inherited at runtime and are never written to Codex project TOML.
 
 `phone_devices` auto-detects connected phones through the gateway fleet surface, and every tool
-accepts a `device_id` when multiple phones are connected. For setup, registration, tool order and
+accepts a `device_id` when multiple phones are connected. Observe/act/locate/search/inspect/screenshot/skill_run
+require `session_id`. Pass `default-foreground` for the live human display; named workspaces need `display_id > 0`.
+For setup, registration, tool order and
 troubleshooting, read `docs/agent-system/CODEX_PHONE_CONNECTION.md`.
 
 See `docs/desktop/agents/README.md` for Codex, OpenCode + DeepSeek, Copilot CLI BYOK, generic MCP and multi-device behavior.

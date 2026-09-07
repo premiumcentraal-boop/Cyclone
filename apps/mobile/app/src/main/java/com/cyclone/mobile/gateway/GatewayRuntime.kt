@@ -166,6 +166,7 @@ object GatewayRuntime {
             .put("protocolVersion", GatewayProtocol.VERSION)
             .put("trustProtocolVersion", GatewayTrustProtocolV33.VERSION)
             .put("supportedProtocolVersions", JSONArray(listOf(GatewayTrustProtocolV33.VERSION)))
+            .put("cycloneOneSessionProtocol", "cyclone.one.session.v1")
             .put("appVersion", packageInfo?.versionName ?: BuildConfig.VERSION_NAME)
             .put("package", context.packageName)
             .put("gatewayState", state)
@@ -201,6 +202,7 @@ object GatewayRuntime {
                 .put("transport", if (pcSessionKnown || activeClients > 0) "adb-forwarded-localabstract" else JSONObject.NULL)
                 .put("lastAuthenticatedAtMs", PcSessionTracker.lastAuthenticatedAt() ?: JSONObject.NULL)
                 .put("pcIdentityDetectable", trust.optInt("trustedPcCount", 0) > 0))
+            .put("executionSessions", GatewaySessionAdapter.list(context).optJSONArray("sessions") ?: JSONArray())
             .put("capabilities", JSONObject()
                 .put("operations", JSONArray(GatewayProtocol.operations.toList()))
                 .put("phoneTools", JSONArray(GatewayV33ActionAdapter.allowedTools.toList()))
@@ -211,6 +213,9 @@ object GatewayRuntime {
                 .put("adaptiveBrainRecall", true)
                 .put("canonicalTeaching", true)
                 .put("oneShotScreenshot", true)
+                .put("cycloneOneExecutionSessions", true)
+                .put("exactSessionSnapshot", true)
+                .put("backgroundLiveVideo", false)
                 .put("liveVideoOwnedByAndroidBridge", false))
             .put("adbForward", "adb forward tcp:${GatewayProtocol.DEFAULT_FORWARD_PORT} localabstract:${GatewayProtocol.SOCKET_NAME}")
             .put("lastError", listenerError ?: JSONObject.NULL)
@@ -301,6 +306,7 @@ internal object GatewayDispatcher {
     private val sessionBindOps = setOf(
         "observe.semantic", "observe.page_debug", "capture.screenshot",
         "ui.search", "ui.element", "action.execute", "skill.run",
+        "session.snapshot",
     )
 
     private fun dispatch(context: Context, request: GatewayRequest): Any {
@@ -324,6 +330,15 @@ internal object GatewayDispatcher {
         "clipboard.get" -> GatewayClipboardAdapter.capability(context)
         "clipboard.set" -> GatewayV33ClipboardAdapter.set(context, request.id, request.args)
         "bridge.status" -> GatewayRuntime.status(context)
+        "session.list" -> GatewaySessionAdapter.list(context)
+        "session.start" -> GatewaySessionAdapter.start(context, request.args)
+        "session.status" -> GatewaySessionAdapter.status(context, request.args)
+        "session.pause" -> GatewaySessionAdapter.pause(context, request.args)
+        "session.continue" -> GatewaySessionAdapter.resume(context, request.args)
+        "session.resume" -> GatewaySessionAdapter.resume(context, request.args)
+        "session.handoff" -> GatewaySessionAdapter.handoff(context, request.args)
+        "session.stop" -> GatewaySessionAdapter.stop(request.args)
+        "session.snapshot" -> GatewaySessionAdapter.snapshot(context, request.args)
         "observe.semantic" -> GatewayObservationAdapter.capture(context, request.args).payload
         "observe.page_debug" -> GatewayPageDebugAdapter.capture(context, request.args)
         "capture.screenshot" -> GatewayCaptureAdapter.capture(context, request.args)
@@ -451,6 +466,7 @@ internal object GatewayDispatcher {
         val latestPageDebug = PageDebugSandboxV293.latest(context)
         return JSONObject()
             .put("status", GatewayRuntime.status(context))
+            .put("executionSessions", GatewaySessionAdapter.list(context))
             .put("latestObservation", observation?.payload ?: JSONObject.NULL)
             .put(
                 "latestPageDebug",

@@ -102,6 +102,6 @@ Physical Pixel 8 remains **UNVERIFIED**.
 
 ## Stage 4 handoff
 
-Stage 3 remains **DONE**. Cyclone One glass (`docs/V4_BUILD_PLAN.md` Stage 4) is next: merge One 0.2.1 JPEG/handoff, session.added/removed, tiles, and MCP may require `session_id`. Compiled skills already carry session/display; do not assume display 0. Vision only on miss. Keep `PhoneToolExecutor` as the only mutation engine.
+Stage 3 remains **DONE**. Cyclone One glass (`docs/V4_STAGE4_ONE_GLASS.md`, mobile `4.0.0-alpha.4` / versionCode 70) is DONE in the follow-on PR: One 0.2.1 JPEG/handoff, session.added/removed tiles, MCP requires `session_id`. Compiled skills already carry session/display; do not assume display 0. Vision only on miss. Keep `PhoneToolExecutor` as the only mutation engine.
 
-Do not start Stage 4 in this PR. Do not restart Stage 2.
+Do not restart Stage 3.

@@ -13,9 +13,11 @@ from .gateway import GatewayClient, GatewayError
 from .reports import SessionRecorder
 from .protocol import Failure, classify_failure
 from .session import (
+    SessionScopeError,
     attach_execution_scope,
-    parse_tool_execution_scope,
+    require_tool_execution_scope,
     scope_cache_key,
+    session_scope_error_result,
     strip_execution_scope,
 )
 
@@ -238,6 +240,10 @@ class PhoneTools:
             ok = not _result_failed(result)
             self.last_call_failed = not ok
             return _to_mcp_content(result)
+        except SessionScopeError as exc:
+            result = session_scope_error_result(exc)
+            self.last_call_failed = True
+            return _to_mcp_content(result)
         except (AttributeError, GatewayError, ValueError, OSError) as exc:
             gateway_body = exc.body if isinstance(exc, GatewayError) else None
             result = {"error": str(exc), "gateway": gateway_body}
@@ -249,8 +255,8 @@ class PhoneTools:
     def phone_status(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
         if device_id:
-            return redact(self.gateway.device_status(device_id))
-        return redact(self.gateway.status())
+            return _with_sessions_inventory(redact(self.gateway.device_status(device_id)))
+        return _with_sessions_inventory(redact(self.gateway.status()))
 
     def phone_capabilities(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
@@ -270,7 +276,7 @@ class PhoneTools:
         mode = str(args.get("mode") or "compact")
         include_screenshot = bool(args.get("include_screenshot", False))
         goal = str(args.get("goal") or "").strip()
-        scope = parse_tool_execution_scope(args)
+        scope = require_tool_execution_scope(args)
         identity = _identity_kwargs(scope)
         if device_id:
             raw = self.gateway.device_observe(device_id, include_screenshot=include_screenshot, mode=mode, **identity)
@@ -292,7 +298,7 @@ class PhoneTools:
         query = str(args.get("query") or goal).strip()
         if len(query) > 240:
             raise ValueError("query exceeds the bounded length")
-        scope = parse_tool_execution_scope(args)
+        scope = require_tool_execution_scope(args)
         identity = _identity_kwargs(scope)
         session_id = _session_id(scope)
         if device_id:
@@ -336,7 +342,7 @@ class PhoneTools:
             raise ValueError("query is required")
         goal = str(args.get("goal") or "").strip()
         device_id = _device_id(args)
-        scope = parse_tool_execution_scope(args)
+        scope = require_tool_execution_scope(args)
         identity = _identity_kwargs(scope)
         if device_id:
             search = compact_search(self.gateway.device_ui_search(device_id, query, **identity), query=query, goal=goal)
@@ -350,14 +356,14 @@ class PhoneTools:
         if not element_id:
             raise ValueError("element_id is required")
         device_id = _device_id(args)
-        identity = _identity_kwargs(parse_tool_execution_scope(args))
+        identity = _identity_kwargs(require_tool_execution_scope(args))
         if device_id:
             return compact_element(self.gateway.device_ui_element(device_id, element_id, **identity), element_id=element_id)
         return compact_element(self.gateway.ui_element(element_id, **identity), element_id=element_id)
 
     def phone_screenshot(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
-        identity = _identity_kwargs(parse_tool_execution_scope(args))
+        identity = _identity_kwargs(require_tool_execution_scope(args))
         if device_id:
             observed = self.gateway.device_observe(device_id, include_screenshot=True, mode="compact", **identity)
             compact = compact_observation(observed)
@@ -409,7 +415,7 @@ class PhoneTools:
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
-        scope = parse_tool_execution_scope(args)
+        scope = require_tool_execution_scope(args)
         action_params = strip_execution_scope(params)
         _validate_mcp_action_params(tool, action_params)
         goal = str(args.get("goal") or "").strip()
@@ -420,6 +426,7 @@ class PhoneTools:
             # the V3 GatewayActionAuthority must still authorize the actual handoff.
             raise ValueError("phone.type requires user_authorized=true as an explicit MCP intent acknowledgement")
         action_params = _forward_type_authorization(tool, args, action_params)
+        action_params = _forward_ai_control(args, action_params)
         action_params = attach_execution_scope(action_params, scope)
         device_id = _device_id(args)
         if tool not in MUTATING_ACTIONS:
@@ -441,15 +448,19 @@ class PhoneTools:
         params = args.get("params") or {}
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
-        _validate_mcp_action_params(tool, params)
+        scope = require_tool_execution_scope(args)
+        identity = _identity_kwargs(scope)
+        action_params = strip_execution_scope(params)
+        _validate_mcp_action_params(tool, action_params)
+        action_params = attach_execution_scope(action_params, scope)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
         results: list[dict[str, Any]] = []
         for device_id in device_ids:
             try:
-                before = self.gateway.device_observe(device_id, include_screenshot=False, mode="compact")
-                outcome = redact(self.gateway.device_action(device_id, tool, params, goal))
+                before = self.gateway.device_observe(device_id, include_screenshot=False, mode="compact", **identity)
+                outcome = redact(self.gateway.device_action(device_id, tool, action_params, goal, **identity))
                 failure = classify_failure(outcome)
                 results.append({
                     "device_id": device_id,
@@ -873,6 +884,28 @@ def _forward_type_authorization(tool: str, args: dict[str, Any], params: dict[st
     forwarded["user_authorized"] = True
     forwarded["userAuthorized"] = True
     return forwarded
+
+
+def _forward_ai_control(args: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    """Boolean-only Companion yield request. Never steals a locked phone or bypasses Android policy."""
+    if args.get("request_ai_control") is not True:
+        return params
+    forwarded = dict(params)
+    forwarded["request_ai_control"] = True
+    return forwarded
+
+
+def _with_sessions_inventory(result: Any) -> Any:
+    """Pass through gateway sessions when present; never invent default-foreground."""
+    if not isinstance(result, dict) or result.get("sessions") is not None:
+        return result
+    for key in ("status", "device", "runtime"):
+        nested = result.get(key)
+        if isinstance(nested, dict) and nested.get("sessions") is not None:
+            out = dict(result)
+            out["sessions"] = nested["sessions"]
+            return out
+    return result
 
 
 def _android_execution_ok(action: Any) -> bool:

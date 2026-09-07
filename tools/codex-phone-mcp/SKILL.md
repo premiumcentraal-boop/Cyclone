@@ -8,7 +8,7 @@ phone_status → phone_locate(goal) → phone_act → phone_skill_save | phone_s
 
 Everything else on this server is advanced. Do not invent a fifth default tool.
 
-1. `phone_status` — gateway, ADB, bridge, Accessibility readiness.
+1. `phone_status` — gateway, ADB, bridge, Accessibility readiness. Use its sessions inventory when present.
 2. `phone_locate(goal)` — bounded Page Card (`pageText` + `pageSummary` must survive) plus goal-ranked hits.
    If a **verified** skill matches `goal` + `pageKey`, `matchedSkill.skipModel` is true: call `phone_skill_run` instead of debating the screen. A draft match never sets skipModel. The Page Card is always returned.
 3. `phone_act` — one typed mutation. HTTP 200 is not success. Read `ok`, `pageChanged`, `before`, `after.pageCard`, `delta`, `errorClass`, `generation`. Ordinary taps use Fast Path fingerprint settle (300ms, then +500/+1000). UNCHANGED is `verified=false` — do not click again.
@@ -25,6 +25,15 @@ Planner vs UI split on the existing tools (no second executor):
 | index click / type / swipe | `phone_act` with current `elementId` or `elementIndex`; swipe → `phone.scroll` |
 
 Prefer `phone.open_app` or an allowlisted intent before hunting a launcher icon. 3.9.12 Ask→workspace already routes a uniquely named installed app. One screen-changing mutation per decision turn; form fills may batch. Screenshot only when `perceptionMode=vision_escalate`.
+
+## Session identity (required)
+
+`session_id` is required on `phone_observe`, `phone_locate`, `phone_act`, `phone_ui_search`, `phone_inspect_element`, `phone_screenshot`, `phone_skill_run`, and `phone_group_act`. Do not omit it and do not invent `default-foreground` silently.
+
+- `session_id=default-foreground` is the live human display (`display_id` 0, or omit display).
+- Named workspace sessions require `session_id` **and** `display_id > 0`. Display 0 or a missing display fails closed.
+- `sessionId` / `executionContext.sessionId` aliases are accepted. Conflicting aliases fail closed.
+- `phone_status` / `phone_devices` / `phone_skill_save` do not require `session_id`.
 
 ## Locate, then act
 

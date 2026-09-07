@@ -11,6 +11,7 @@ from cyclone_device_gateway.adb.client import ADBDevice, ADBError
 from cyclone_device_gateway.config import Settings
 from cyclone_device_gateway.cyclone_bridge.client import BridgeDisconnectedError
 from cyclone_device_gateway.desktop_runtime.api import DesktopRuntime, create_desktop_app
+from cyclone_device_gateway.desktop_runtime.agent import DesktopAgentService
 from cyclone_device_gateway.desktop_runtime.controls import MANUAL_KINDS, ClipboardService, ManualControlService, clipboard_looks_sensitive
 from cyclone_device_gateway.desktop_runtime.fleet import DeviceFleetManager
 from cyclone_device_gateway.desktop_runtime.models import DesktopRuntimeError, DeviceFleetState, VIDEO_PROFILES, deterministic_device_id
@@ -496,7 +497,7 @@ def test_focus_stream_uses_bounded_image_fallback_when_scrcpy_is_unavailable():
 
     assert init.kind == "text"
     assert '"codec":"image/' in init.data
-    assert '"backend":"adb-screenshot-degraded"' in init.data
+    assert '"backend":"adb-screenshot"' in init.data
     assert frame.kind == "binary"
     assert session.adb.process_calls == []
     controller.unsubscribe("focus", q)
@@ -529,9 +530,105 @@ def test_video_reports_bounded_capture_failure_instead_of_silent_infinite_wait()
     controller.stop_all()
 
 
+def test_companion_input_ownership_blocks_mcp_until_yield_and_never_steals_locked_phone():
+    fleet, session, _bridge = paired_session_for_services()
+    controls = ManualControlService(fleet)
+    agent = DesktopAgentService(fleet)
+    assert session.input_owner == "HUMAN"
+    with pytest.raises(DesktopRuntimeError) as blocked:
+        agent._require_ai_ownership(session, False)
+    assert blocked.value.code == "HUMAN_HAS_CONTROL"
+    session.screen_awake = False
+    with pytest.raises(DesktopRuntimeError) as locked:
+        agent._require_ai_ownership(session, True)
+    assert locked.value.code == "PHONE_LOCKED"
+    session.screen_awake = True
+    agent._require_ai_ownership(session, True)
+    assert session.input_owner == "AI"
+    yielded = controls.execute(session.device_id, {"kind": "yield_ai"})
+    assert yielded["ok"] is True
+    assert yielded["inputOwner"] == "AI"
+    taken = controls.execute(session.device_id, {"kind": "take_human"})
+    assert taken["inputOwner"] == "HUMAN"
+    controls.execute(session.device_id, {"kind": "tap", "x": .2, "y": .3})
+    assert session.input_owner == "HUMAN"
+    status = agent.status(session.device_id)
+    assert status["inputOwner"] == "HUMAN"
+    assert status["sessions"][0]["sessionId"] == "default-foreground"
+    assert status["sessions"][0]["kind"] == "FOREGROUND"
+    assert status["sessions"][0]["executable"] is True
+
+
+def test_http_agent_action_blocked_while_human_owns_input_and_request_ai_control_yields(tmp_path):
+    fleet, session, bridge = paired_session_for_services()
+    settings = Settings("pc-secret", None, "adb", tmp_path)
+    runtime = DesktopRuntime(settings, fleet=fleet)
+    app = create_desktop_app(settings, runtime)
+    headers = {"Authorization": "Bearer pc-secret"}
+    with TestClient(app) as client:
+        blocked = client.post(
+            f"/v1/devices/{session.device_id}/agent/action",
+            headers=headers,
+            json={"capability_id": "phone.home", "expected_observation_id": "obs-1"},
+        )
+        assert blocked.status_code == 409
+        assert blocked.json()["detail"]["code"] == "HUMAN_HAS_CONTROL"
+        session.screen_awake = False
+        locked = client.post(
+            f"/v1/devices/{session.device_id}/agent/action",
+            headers=headers,
+            json={
+                "capability_id": "phone.home",
+                "expected_observation_id": "obs-1",
+                "request_ai_control": True,
+            },
+        )
+        assert locked.status_code == 423
+        assert locked.json()["detail"]["code"] == "PHONE_LOCKED"
+        session.screen_awake = True
+
+        def action_execute(op, args=None, request_id=None):
+            bridge.calls.append((op, args or {}))
+            if op == "bridge.status":
+                return {"gatewayEnabled": True, "socketListening": True, "accessibilityConnected": True}
+            if op == "observe.semantic":
+                return {
+                    "observationId": "obs-after",
+                    "pageKey": "HOME",
+                    "package": "com.android.launcher3",
+                    "activity": "Home",
+                    "accessibilityFingerprint": "fp",
+                    "pageText": {"protocol": "cyclone-page-text-v1", "lines": [{"text": "Home"}]},
+                    "pageSummary": {"protocol": "cyclone-page-summary-v1", "title": "Home"},
+                }
+            if op == "action.execute":
+                return {
+                    "execution": {"ok": True},
+                    "androidExecution": {"ok": True},
+                    "verification": {"ok": True, "status": "PASSED", "semanticSuccessClaimed": True},
+                }
+            raise AssertionError(op)
+
+        bridge.request = action_execute
+        yielded = client.post(
+            f"/v1/devices/{session.device_id}/agent/action",
+            headers=headers,
+            json={
+                "capability_id": "phone.home",
+                "expected_observation_id": "obs-1",
+                "request_ai_control": True,
+            },
+        )
+        assert yielded.status_code == 200
+        assert session.input_owner == "AI"
+
+
 def test_no_generic_shell_or_arbitrary_adb_surface():
     forbidden = ("shell", "powershell", "root", "su", "command", "script", "adb")
-    assert MANUAL_KINDS == {"tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"}
+    assert MANUAL_KINDS == {
+        "tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake",
+        "yield_ai", "take_human",
+    }
     assert all(not any(word in op.lower() for word in forbidden) for op in ALLOWED_OPS)
 
 

@@ -2,6 +2,7 @@ import { keyboardCommandForEvent } from "../core/keyboard.js";
 import { KeyboardCapture } from "../core/keyboardCapture.js";
 import { needsTrustRepair, trustRepairMessage } from "../core/trustRecovery.js";
 import type { DesktopDevice, DesktopService, DeviceControlAction } from "../services/types.js";
+import { CycloneOneSessionClient } from "../services/sessionClient.js";
 import { button, el, icon } from "../ui/dom.js";
 import { createLivePhoneView } from "../ui/livePhoneView.js";
 import { createDeviceHealthPanel } from "../ui/deviceHealthPanel.js";
@@ -48,14 +49,23 @@ export function createFocusedPhonePage(
   const healthSlot = el("div", "focus-health-slot");
   healthSlot.append(createDeviceHealthPanel(device));
   const humanInput = el("div", "context-card");
+  const humanCopy = el("p", "context-card-copy", "Click anywhere on the screen to tap. Hold and drag naturally to swipe. Mouse control stays available while JPEG live view warms up.");
   humanInput.append(
     el("div", "context-card-title", "Human control"),
-    el("p", "context-card-copy", "Click anywhere on the screen to tap. Hold and drag naturally to swipe."),
+    humanCopy,
   );
   const aiInput = el("div", "context-card accent");
+  const ownerLabel = el("p", "context-card-copy", ownerCopy(device));
+  const sessionList = el("p", "context-card-copy", "Foreground session: default-foreground");
+  const yieldAi = button("Give control to AI", "button primary compact");
+  const takeHuman = button("Take control", "button secondary compact");
   aiInput.append(
-    el("div", "context-card-title", "AI-ready"),
-    el("p", "context-card-copy", "The same phone stays explicitly targeted for governed AI and MCP actions."),
+    el("div", "context-card-title", "Human ↔ AI handoff"),
+    ownerLabel,
+    sessionList,
+    el("p", "context-card-copy", "MCP mutations fail with HUMAN_HAS_CONTROL while Companion owns input. Yield here, or pass request_ai_control=true. A locked phone is never stolen."),
+    yieldAi,
+    takeHuman,
   );
   contextPanel.append(health, healthSlot, humanInput, aiInput);
 
@@ -117,13 +127,37 @@ export function createFocusedPhonePage(
     controlStatus.classList.remove("error");
     try {
       const result = await service.sendControl(device.id, action);
-      controlStatus.textContent = result.ok ? `${label} sent` : `${label} unavailable`;
+      controlStatus.textContent = result.ok ? `${label} sent` : ownershipFailureCopy(label, result.verification);
       controlStatus.classList.toggle("error", !result.ok);
-    } catch {
-      controlStatus.textContent = `${label} failed safely`;
+    } catch (error) {
+      controlStatus.textContent = ownershipFailureCopy(label, error instanceof Error ? error.message : undefined);
       controlStatus.classList.add("error");
     }
   };
+  const runOwnership = async (kind: "yield_ai" | "take_human", label: string) => {
+    controlStatus.textContent = `${label}…`;
+    controlStatus.classList.remove("error");
+    try {
+      const result = await service.sendControl(device.id, { type: kind });
+      if (result.ok) {
+        device.inputOwner = result.inputOwner ?? (kind === "yield_ai" ? "AI" : "HUMAN");
+        ownerLabel.textContent = ownerCopy(device);
+        controlStatus.textContent = kind === "yield_ai"
+          ? "AI has control · MCP can mutate after observe"
+          : "You have control · yield before MCP mutations";
+      } else {
+        controlStatus.textContent = ownershipFailureCopy(label, result.verification);
+        controlStatus.classList.add("error");
+      }
+    } catch (error) {
+      controlStatus.textContent = ownershipFailureCopy(label, error instanceof Error ? error.message : undefined);
+      controlStatus.classList.add("error");
+    }
+  };
+  yieldAi.addEventListener("click", () => void runOwnership("yield_ai", "Give control to AI"));
+  takeHuman.addEventListener("click", () => void runOwnership("take_human", "Take control"));
+  void runOwnership("take_human", "Take control");
+  void loadSessionSummary(service, device.id, sessionList);
   const primary = el("div", "control-rail");
   const controlDefs: Array<[string, string, DeviceControlAction]> = [
     ["←", "Back", { type: "key", key: "BACK" }],
@@ -268,6 +302,40 @@ export function createFocusedPhonePage(
       healthCopy.textContent = next.connectionLabel;
       healthSlot.replaceChildren(createDeviceHealthPanel(next));
       trustRepairBanner.hidden = !needsTrustRepair(next);
+      ownerLabel.textContent = ownerCopy(next);
     },
   };
+}
+
+function ownerCopy(device: DesktopDevice): string {
+  const owner = device.inputOwner === "AI" ? "AI" : "HUMAN";
+  return owner === "AI"
+    ? "Input owner: AI. Agents can phone.open_app / phone.click after observe."
+    : "Input owner: HUMAN. Yield to AI before MCP mutations, or they return HUMAN_HAS_CONTROL.";
+}
+
+function ownershipFailureCopy(label: string, detail?: string): string {
+  const code = String(detail || "").toUpperCase();
+  if (code.includes("PHONE_LOCKED")) return "Phone is locked — unlock it first. A locked phone is never stolen.";
+  if (code.includes("HUMAN_HAS_CONTROL")) return "Companion still owns input. Click Give control to AI, then retry.";
+  return detail ? `${label} unavailable (${String(detail).slice(0, 80)})` : `${label} unavailable`;
+}
+
+async function loadSessionSummary(service: DesktopService, deviceId: string, target: HTMLElement): Promise<void> {
+  try {
+    const listed = service.listDeviceSessions
+      ? await service.listDeviceSessions(deviceId)
+      : await (await CycloneOneSessionClient.connect()).list(deviceId);
+    const ids = listed.sessions.map((item) => {
+      const kind = item.sessionId === "default-foreground"
+        ? "execution"
+        : item.executable === false ? "read-only share/reference" : "background execution";
+      return `${item.sessionId} (${kind})`;
+    });
+    target.textContent = ids.length
+      ? `Sessions: ${ids.join(" · ")}`
+      : "Sessions: default-foreground (execution)";
+  } catch {
+    target.textContent = "Sessions: default-foreground (execution)";
+  }
 }

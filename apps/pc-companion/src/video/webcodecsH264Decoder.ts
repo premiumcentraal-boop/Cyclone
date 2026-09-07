@@ -9,10 +9,12 @@ const MAX_DECODE_QUEUE = 4;
 const MAX_PENDING_PACKETS = 4;
 
 export const MAX_STREAM_RECONNECT_ATTEMPTS = 6;
-export const STREAM_HANDSHAKE_TIMEOUT_MS = 8_000;
-export const STREAM_FIRST_FRAME_TIMEOUT_MS = 8_000;
+/** Physical JPEG/screencap warmup was observed around 6s; do not hard-fail the 8s H.264 handshake. */
+export const STREAM_HANDSHAKE_TIMEOUT_MS = 20_000;
+export const STREAM_FIRST_FRAME_TIMEOUT_MS = 20_000;
 export const STREAM_RECOVERY_TIMEOUT_MS = 20_000;
-export const STALE_FRAME_TIMEOUT_MS = 6_000;
+export const STALE_FRAME_TIMEOUT_MS = 15_000;
+export const MAX_SOFT_FRAME_FAILURES = 3;
 export const KEEPALIVE_TYPE = "stream.keepalive";
 
 export interface CycloneVideoPacket {
@@ -119,6 +121,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
   private imageDrawGeneration = 0;
   private width = 0;
   private height = 0;
+  private consecutiveFrameFailures = 0;
 
   constructor(private readonly input: VideoRendererFactoryInput) {}
 
@@ -210,7 +213,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       const newSessionId = typeof message.sessionId === "string" ? message.sessionId : null;
       const sessionChanged = newSessionId !== this.streamSessionId;
       this.streamSessionId = newSessionId;
-      this.codec = message.codec;
+      this.codec = normalizeStreamCodec(message.codec);
       this.width = numberOrZero(message.width);
       this.height = numberOrZero(message.height);
       this.live = false;
@@ -273,7 +276,9 @@ export class WebCodecsH264Renderer implements VideoRenderer {
 
   private async handlePacket(buffer: ArrayBuffer, socket: WebSocket): Promise<void> {
     if (this.stopped || this.socket !== socket) return;
-    if (this.codec.startsWith("image/")) {
+    const imageCodec = resolveImageCodec(this.codec, buffer);
+    if (imageCodec) {
+      this.codec = imageCodec;
       await this.drawImagePacket(buffer);
       return;
     }
@@ -399,18 +404,24 @@ export class WebCodecsH264Renderer implements VideoRenderer {
     this.report({ stage: "client.decoder.failed", code: "H264_DECODER_ERROR", retryable: true });
     this.resetDecoder();
     this.waitingForKeyframe = true;
-    this.fail(error);
+    this.fail(error, "H264_DECODER_ERROR");
     try { this.socket?.close(4001, "H264_DECODER_ERROR"); } catch { /* browser owns close */ }
   }
 
   private async drawImagePacket(buffer: ArrayBuffer): Promise<void> {
-    const packet = parseCyclonePacket(buffer);
+    const payload = imageBytesFromPacket(buffer);
     const generation = ++this.imageDrawGeneration;
-    // BlobPart requires an ArrayBuffer-backed view. Copy the bounded fallback payload so
+    // BlobPart requires an ArrayBuffer-backed view. Copy the bounded JPEG payload so
     // TypeScript cannot widen its backing store to SharedArrayBuffer.
-    const imageBytes = new Uint8Array(packet.payload.byteLength);
-    imageBytes.set(packet.payload);
-    const bitmap = await createImageBitmap(new Blob([imageBytes.buffer], { type: this.codec }));
+    const imageBytes = new Uint8Array(payload.byteLength);
+    imageBytes.set(payload);
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(new Blob([imageBytes.buffer as ArrayBuffer], { type: this.codec || "image/jpeg" }));
+    } catch (error) {
+      this.onSoftFrameFailure(error, "FRAME_DECODE_FAILED");
+      return;
+    }
     try {
       if (this.stopped || generation !== this.imageDrawGeneration) return;
       const canvas = this.input.target.canvas;
@@ -425,14 +436,28 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       this.input.callbacks.onState("LIVE");
       this.live = true;
       this.reconnectAttempt = 0;
+      this.consecutiveFrameFailures = 0;
       this.armHealthTimeout(STALE_FRAME_TIMEOUT_MS, "FRAME_STALE");
       if (!this.frameReported) {
         this.frameReported = true;
-        this.report({ stage: "client.frame.rendered", code: "DEGRADED_FRAME_OK" });
+        this.report({ stage: "client.frame.rendered", code: "JPEG_FRAME_OK" });
       }
     } finally {
       bitmap.close();
     }
+  }
+
+  private onSoftFrameFailure(error: unknown, code: string): void {
+    this.consecutiveFrameFailures += 1;
+    this.report({
+      stage: "client.frame.soft_drop",
+      code,
+      attempt: this.consecutiveFrameFailures,
+      retryable: true,
+    });
+    if (this.live && this.consecutiveFrameFailures < MAX_SOFT_FRAME_FAILURES) return;
+    this.fail(error instanceof Error ? error : new Error(code), code);
+    try { this.socket?.close(4001, code.slice(0, 120)); } catch { /* browser owns socket shutdown */ }
   }
 
   private resetDecoder(): void {
@@ -483,8 +508,9 @@ export class WebCodecsH264Renderer implements VideoRenderer {
     this.reconnectTimer = null;
   }
 
-  private fail(error: unknown): void {
-    this.input.callbacks.onError(error);
+  private fail(error: unknown, code?: string): void {
+    const named = code ?? (error instanceof Error && /^[A-Z][A-Z0-9_.-]{2,80}$/.test(error.message) ? error.message : undefined);
+    this.input.callbacks.onError(named ? new Error(named) : error);
     this.input.callbacks.onState("STREAM_ERROR");
   }
 
@@ -496,7 +522,7 @@ export class WebCodecsH264Renderer implements VideoRenderer {
       attempt: this.reconnectAttempt,
       retryable: true,
     });
-    this.fail(error);
+    this.fail(error, code);
     try { socket.close(4001, code.slice(0, 120)); } catch { /* browser owns socket shutdown */ }
   }
 
@@ -549,4 +575,47 @@ function safeCode(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.toUpperCase().replace(/[^A-Z0-9_.-]+/g, "_").slice(0, 80);
   return normalized || undefined;
+}
+
+function normalizeStreamCodec(codec: string): string {
+  const named = normalizeImageCodec(codec);
+  return named ?? codec;
+}
+
+function normalizeImageCodec(codec: string): string | null {
+  const value = codec.trim().toLowerCase();
+  if (!value) return null;
+  if (value === "img" || value === "jpeg" || value === "jpg" || value === "screenshot" || value === "image/jpg") return "image/jpeg";
+  if (value.startsWith("image/")) return value;
+  return null;
+}
+
+export function resolveImageCodec(codec: string, buffer: ArrayBuffer): string | null {
+  const named = normalizeImageCodec(codec);
+  if (named) return named;
+  if (codec && codec !== "img") return null;
+  if (looksLikeJpeg(new Uint8Array(buffer))) return "image/jpeg";
+  try {
+    if (looksLikeJpeg(parseCyclonePacket(buffer).payload)) return "image/jpeg";
+  } catch {
+    // Binary may be a raw JPEG without a Cyclone envelope.
+  }
+  return null;
+}
+
+function looksLikeJpeg(bytes: Uint8Array): boolean {
+  return bytes.length >= 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
+}
+
+function imageBytesFromPacket(buffer: ArrayBuffer): Uint8Array {
+  try {
+    const packet = parseCyclonePacket(buffer);
+    const imageBytes = new Uint8Array(packet.payload.byteLength);
+    imageBytes.set(packet.payload);
+    return imageBytes;
+  } catch {
+    const imageBytes = new Uint8Array(buffer.byteLength);
+    imageBytes.set(new Uint8Array(buffer));
+    return imageBytes;
+  }
 }

@@ -19,7 +19,7 @@ The Android app (`com.cyclone.mobile`). It contains:
 The PC-side device bridge. It handles device discovery/ADB forwarding and exposes a constrained local interface to Cyclone on the phone.
 
 ### `apps/pc-companion`
-The Windows companion and live-view experience.
+Cyclone One — the Windows glass: JPEG live view, human/AI handoff, and session tiles bound to `session_id`. It does not run a second phone-control engine.
 
 ### `tools/codex-phone-mcp` and `tools/cyclone-agent-mcp`
 Constrained MCP adapters for external coding/agent clients. They route through Cyclone's gateway contract rather than exposing a generic shell.

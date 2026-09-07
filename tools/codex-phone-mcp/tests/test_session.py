@@ -212,11 +212,18 @@ class SessionToolTests(unittest.TestCase):
 
     def test_schema_includes_session_fields_and_keeps_fast_path_annotations(self):
         tools = {tool["name"]: tool for tool in TOOLS}
-        for name in ("phone_observe", "phone_act", "phone_locate", "phone_ui_search", "phone_inspect_element", "phone_screenshot"):
+        required_names = (
+            "phone_observe", "phone_act", "phone_locate", "phone_ui_search",
+            "phone_inspect_element", "phone_screenshot", "phone_skill_run", "phone_group_act",
+        )
+        for name in required_names:
             properties = tools[name]["inputSchema"]["properties"]
             self.assertIn("session_id", properties)
             self.assertIn("display_id", properties)
+            self.assertIn("session_id", tools[name]["inputSchema"]["required"])
             self.assertFalse(tools[name]["inputSchema"]["additionalProperties"])
+        self.assertNotIn("session_id", tools["phone_status"]["inputSchema"].get("required") or [])
+        self.assertNotIn("session_id", tools["phone_skill_save"]["inputSchema"].get("required") or [])
         self.assertEqual("ui", tools["phone_observe"]["annotations"]["cycloneSurface"])
         self.assertEqual("ui", tools["phone_act"]["annotations"]["cycloneSurface"])
         self.assertTrue(tools["phone_act"]["annotations"]["cycloneFastPath"])
@@ -225,6 +232,104 @@ class SessionToolTests(unittest.TestCase):
         listed_tools = {tool["name"]: tool for tool in listed["result"]["tools"]}
         self.assertEqual("planner", listed_tools["phone_status"]["annotations"]["cycloneSurface"])
         self.assertTrue(listed_tools["phone_act"]["annotations"]["cycloneFastPath"])
+        initialized = McpServer().handle({"jsonrpc": "2.0", "id": 2, "method": "initialize"})
+        self.assertIn("session_id is required", initialized["result"]["instructions"])
+
+    def _payload(self, tools, name, arguments):
+        return json.loads(tools.call(name, arguments)[0]["text"])
+
+    def test_phone_observe_without_session_id_fails_closed(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            payload = self._payload(tools, "phone_observe", {"goal": "Open Apps"})
+        self.assertEqual("SESSION_REQUIRED", payload["errorClass"])
+        self.assertEqual("SESSION_REQUIRED", payload["error"]["code"])
+        self.assertEqual([], gateway.observe_calls)
+
+    def test_phone_act_without_session_id_fails_closed(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            payload = self._payload(tools, "phone_act", {
+                "tool": "phone.home", "params": {}, "goal": "Go home",
+            })
+        self.assertEqual("SESSION_REQUIRED", payload["errorClass"])
+        self.assertEqual([], gateway.action_calls)
+        self.assertEqual([], gateway.observe_calls)
+
+    def test_phone_locate_without_session_id_fails_closed(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            payload = self._payload(tools, "phone_locate", {"goal": "Open Apps"})
+        self.assertEqual("SESSION_REQUIRED", payload["errorClass"])
+        self.assertEqual([], gateway.observe_calls)
+
+    def test_default_foreground_session_forwards_display_zero(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            card = self._payload(tools, "phone_observe", {
+                "session_id": "default-foreground", "goal": "Open Apps",
+            })
+            acted = self._payload(tools, "phone_act", {
+                "session_id": "default-foreground",
+                "tool": "phone.click",
+                "params": {"elementId": card["candidates"]["current"][0]["elementId"]},
+                "goal": "Open Apps",
+            })
+        self.assertEqual("default-foreground", gateway.observe_calls[-1]["session_id"])
+        self.assertEqual(0, gateway.observe_calls[-1]["display_id"])
+        self.assertTrue(acted["ok"])
+        self.assertEqual("default-foreground", gateway.action_calls[-1]["session_id"])
+        self.assertEqual(0, gateway.action_calls[-1]["display_id"])
+
+    def test_sessionId_alias_satisfies_requirement(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            self._payload(tools, "phone_observe", {"sessionId": "default-foreground", "goal": "Open Apps"})
+        self.assertEqual("default-foreground", gateway.observe_calls[-1]["session_id"])
+        self.assertEqual(0, gateway.observe_calls[-1]["display_id"])
+
+    def test_workspace_session_without_display_id_fails_closed(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            payload = self._payload(tools, "phone_observe", {"session_id": "workspace-a", "goal": "Open Apps"})
+        self.assertEqual("SESSION_DISPLAY_MISMATCH", payload["errorClass"])
+        self.assertEqual([], gateway.observe_calls)
+
+    def test_workspace_display_zero_fails_closed(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            payload = self._payload(tools, "phone_observe", {
+                "session_id": "workspace-a", "display_id": 0, "goal": "Open Apps",
+            })
+        self.assertEqual("SESSION_DISPLAY_MISMATCH", payload["errorClass"])
+        self.assertEqual([], gateway.observe_calls)
+
+    def test_workspace_display_seven_forwards_both(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            self._payload(tools, "phone_observe", {
+                "session_id": "workspace-a", "display_id": 7, "goal": "Open Apps",
+            })
+        self.assertEqual("workspace-a", gateway.observe_calls[-1]["session_id"])
+        self.assertEqual(7, gateway.observe_calls[-1]["display_id"])
+
+    def test_conflicting_aliases_fail_closed_at_tool_surface(self):
+        gateway = RecordingGateway()
+        with tempfile.TemporaryDirectory() as report_dir:
+            tools = PhoneTools(gateway, SessionRecorder(report_dir))
+            payload = self._payload(tools, "phone_observe", {
+                "session_id": "A", "sessionId": "B", "display_id": 2, "goal": "Open Apps",
+            })
+        self.assertEqual("SESSION_REQUIRED", payload["errorClass"])
+        self.assertEqual([], gateway.observe_calls)
 
 
 if __name__ == "__main__":

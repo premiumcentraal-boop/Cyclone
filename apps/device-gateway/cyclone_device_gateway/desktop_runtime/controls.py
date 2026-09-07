@@ -9,7 +9,15 @@ from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationErro
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import DesktopRuntimeError, RuntimeErrorCode
 
-MANUAL_KINDS = frozenset({"tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"})
+MANUAL_KINDS = frozenset({
+    "tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake",
+    "yield_ai", "take_human",
+})
+HUMAN_INPUT_KINDS = frozenset({"tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text"})
+YIELD_HINT = (
+    "Companion currently owns input. Click Give control to AI, "
+    "or retry the MCP action with request_ai_control=true. A locked phone is not stolen."
+)
 _SENSITIVE_HINT = re.compile(r"(?i)(password|passcode|otp|one.?time|verification.?code|api.?key|bearer|token|secret|cvv|pin)\s*[:=]?")
 _JWT = re.compile(r"^[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}$")
 _LONG_SECRET = re.compile(r"^[A-Za-z0-9_+\-/=]{32,}$")
@@ -32,6 +40,12 @@ class ManualControlService:
         kind = str(payload.get("kind") or "")
         if kind not in MANUAL_KINDS:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unsupported manual control kind.")
+        if kind == "yield_ai":
+            return self.set_owner(device_id, "AI")
+        if kind == "take_human":
+            return self.set_owner(device_id, "HUMAN")
+        if kind in HUMAN_INPUT_KINDS:
+            session.input_owner = "HUMAN"
         args: dict[str, Any] = {"kind": kind, "source": "HUMAN_DESKTOP"}
         if kind == "tap":
             x, y = payload.get("x"), payload.get("y")
@@ -90,6 +104,24 @@ class ManualControlService:
                 ) from exc
             return {"deviceId": device_id, "kind": kind, "ok": True, "status": "DISPLAY_WAKE_REQUESTED"}
         return self._call(session, "manual.execute", args, result_shape={"deviceId": device_id, "kind": kind})
+
+    def set_owner(self, device_id: str, owner: str) -> dict[str, Any]:
+        session = self._paired(device_id)
+        if owner == "AI" and not session.screen_awake:
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.PHONE_LOCKED,
+                "Cannot give AI control while the phone is locked or asleep.",
+            )
+        session.input_owner = "AI" if owner == "AI" else "HUMAN"
+        status = "AI_HAS_CONTROL" if session.input_owner == "AI" else "HUMAN_HAS_CONTROL"
+        kind = "yield_ai" if session.input_owner == "AI" else "take_human"
+        return {
+            "deviceId": device_id,
+            "kind": kind,
+            "ok": True,
+            "inputOwner": session.input_owner,
+            "status": status,
+        }
 
     def _paired(self, device_id: str) -> DeviceSession:
         session = self.fleet.get(device_id)

@@ -192,6 +192,7 @@ def make_runtime(tmp_path, bridge=None):
     session.bridge_gateway_enabled = True
     session.bridge_socket_listening = True
     session.accessibility_connected = True
+    session.input_owner = "AI"
     session.video = FakeVideo()
     bridge = bridge or SemanticBridge()
     session.bridge = lambda token=None, auto_forward=False: bridge

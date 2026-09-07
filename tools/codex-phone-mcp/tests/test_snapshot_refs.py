@@ -6,6 +6,8 @@ from cyclone_phone_mcp.compact import compact_observation, build_snapshot
 from cyclone_phone_mcp.reports import SessionRecorder
 from cyclone_phone_mcp.tools import PhoneTools
 
+FG = {"session_id": "default-foreground"}
+
 
 class SnapshotCompactTests(unittest.TestCase):
     def test_snapshot_yaml_and_refs_for_settings_clock_calculator(self):
@@ -73,24 +75,26 @@ class SnapshotActTests(unittest.TestCase):
             "tool": "phone.click",
             "params": {"ref": "e1"},
             "goal": "Apps",
+            **FG,
         })[0]["text"])
         self.assertNotEqual("STALE_OBSERVATION", payload.get("errorClass"))
         self.assertTrue(payload.get("ok") or payload.get("afterPageCard"))
         self.assertGreaterEqual(self.gateway.observe_calls, 1)
 
     def test_stale_ref_does_not_mutate(self):
-        self.tools.call("phone_observe", {})
+        self.tools.call("phone_observe", dict(FG))
         before = self.gateway.action_calls
         payload = json.loads(self.tools.call("phone_act", {
             "tool": "phone.click",
             "params": {"ref": "e99"},
             "goal": "missing",
+            **FG,
         })[0]["text"])
         self.assertEqual("STALE_OBSERVATION", payload["errorClass"])
         self.assertEqual(before, self.gateway.action_calls)
 
     def test_ref_and_role_name_resolve_against_current_snapshot(self):
-        located = json.loads(self.tools.call("phone_locate", {"goal": "Apps"})[0]["text"])
+        located = json.loads(self.tools.call("phone_locate", {"goal": "Apps", **FG})[0]["text"])
         ref = None
         for key, host in located["pageCard"]["refs"].items():
             if host.get("name") == "Apps":
@@ -101,6 +105,7 @@ class SnapshotActTests(unittest.TestCase):
             "tool": "phone.click",
             "params": {"ref": ref},
             "goal": "Apps",
+            **FG,
         })[0]["text"])
         self.assertTrue(clicked["ok"])
         self.assertIn("snapshot", clicked["afterPageCard"])
@@ -108,6 +113,7 @@ class SnapshotActTests(unittest.TestCase):
             "tool": "phone.click",
             "params": {"role": "button", "name": "Apps"},
             "goal": "Apps",
+            **FG,
         })[0]["text"])
         self.assertTrue(named["ok"])
 
