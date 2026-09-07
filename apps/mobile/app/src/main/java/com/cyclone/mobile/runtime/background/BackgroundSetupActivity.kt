@@ -2,6 +2,7 @@ package com.cyclone.mobile.runtime.background
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -43,15 +44,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.ui.v32.CycloneIntelligenceTheme
 import kotlinx.coroutines.delay
 import rikka.shizuku.Shizuku
 
-class BackgroundSetupActivity : ComponentActivity() {
-    private enum class InstallPhase { READY, CONFIRM, INSTALLING, INSTALLED, BLOCKED }
-    private enum class InstallStep { INSTALL_SHIZUKU, START_SHIZUKU, AUTHORIZE_SHIZUKU, ACCESSIBILITY, NOTIFICATIONS }
+private enum class InstallPhase { READY, CONFIRM, INSTALLING, INSTALLED, BLOCKED }
+private enum class InstallStep { INSTALL_SHIZUKU, START_SHIZUKU, AUTHORIZE_SHIZUKU, ACCESSIBILITY, NOTIFICATIONS }
 
+class BackgroundSetupActivity : ComponentActivity() {
     private fun open(intent: Intent) {
         runCatching { startActivity(intent) }.onFailure {
             Toast.makeText(this, "Android could not open that approval screen. Tap Continue installation to retry.", Toast.LENGTH_LONG).show()
@@ -79,7 +81,8 @@ class BackgroundSetupActivity : ComponentActivity() {
             }
             InstallStep.ACCESSIBILITY -> open(CyclonePermissionSetup.accessibilitySettings())
             InstallStep.NOTIFICATIONS -> {
-                if (shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+                val permissionGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                if (permissionGranted || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
                     open(
                         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                             .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
@@ -156,12 +159,12 @@ class BackgroundSetupActivity : ComponentActivity() {
     }
 }
 
-private fun nextInstallStep(status: BackgroundReadiness): BackgroundSetupActivity.InstallStep? = when {
-    !status.installed -> BackgroundSetupActivity.InstallStep.INSTALL_SHIZUKU
-    !status.running -> BackgroundSetupActivity.InstallStep.START_SHIZUKU
-    !status.authorized -> BackgroundSetupActivity.InstallStep.AUTHORIZE_SHIZUKU
-    !status.accessibility -> BackgroundSetupActivity.InstallStep.ACCESSIBILITY
-    !status.notifications -> BackgroundSetupActivity.InstallStep.NOTIFICATIONS
+private fun nextInstallStep(status: BackgroundReadiness): InstallStep? = when {
+    !status.installed -> InstallStep.INSTALL_SHIZUKU
+    !status.running -> InstallStep.START_SHIZUKU
+    !status.authorized -> InstallStep.AUTHORIZE_SHIZUKU
+    !status.accessibility -> InstallStep.ACCESSIBILITY
+    !status.notifications -> InstallStep.NOTIFICATIONS
     else -> null
 }
 
@@ -173,29 +176,29 @@ private fun completedSetupSteps(status: BackgroundReadiness): Int = listOf(
     status.notifications,
 ).count { it }
 
-private fun installStepTitle(step: BackgroundSetupActivity.InstallStep?): String = when (step) {
-    BackgroundSetupActivity.InstallStep.INSTALL_SHIZUKU -> "Installing secure workspace"
-    BackgroundSetupActivity.InstallStep.START_SHIZUKU -> "Starting secure workspace"
-    BackgroundSetupActivity.InstallStep.AUTHORIZE_SHIZUKU -> "Connecting Cyclone"
-    BackgroundSetupActivity.InstallStep.ACCESSIBILITY -> "Enabling phone control"
-    BackgroundSetupActivity.InstallStep.NOTIFICATIONS -> "Enabling task notifications"
+private fun installStepTitle(step: InstallStep?): String = when (step) {
+    InstallStep.INSTALL_SHIZUKU -> "Installing secure workspace"
+    InstallStep.START_SHIZUKU -> "Starting secure workspace"
+    InstallStep.AUTHORIZE_SHIZUKU -> "Connecting Cyclone"
+    InstallStep.ACCESSIBILITY -> "Enabling phone control"
+    InstallStep.NOTIFICATIONS -> "Enabling task notifications"
     null -> "Finishing installation"
 }
 
-private fun installStepHint(step: BackgroundSetupActivity.InstallStep?): String = when (step) {
-    BackgroundSetupActivity.InstallStep.INSTALL_SHIZUKU -> "Google Play may open once. Install Shizuku, then return to Cyclone."
-    BackgroundSetupActivity.InstallStep.START_SHIZUKU -> "Shizuku may open once for Android's required start or pairing approval. Return when it is running."
-    BackgroundSetupActivity.InstallStep.AUTHORIZE_SHIZUKU -> "Approve Cyclone when the Shizuku permission prompt appears."
-    BackgroundSetupActivity.InstallStep.ACCESSIBILITY -> "Android will open Accessibility. Turn on Cyclone, then return."
-    BackgroundSetupActivity.InstallStep.NOTIFICATIONS -> "Allow Cyclone task notifications when Android asks."
+private fun installStepHint(step: InstallStep?): String = when (step) {
+    InstallStep.INSTALL_SHIZUKU -> "Google Play may open once. Install Shizuku, then return to Cyclone."
+    InstallStep.START_SHIZUKU -> "Shizuku may open once for Android's required start or pairing approval. Return when it is running."
+    InstallStep.AUTHORIZE_SHIZUKU -> "Approve Cyclone when the Shizuku permission prompt appears."
+    InstallStep.ACCESSIBILITY -> "Android will open Accessibility. Turn on Cyclone, then return."
+    InstallStep.NOTIFICATIONS -> "Allow Cyclone task notifications when Android asks."
     null -> "Cyclone is checking the installation."
 }
 
 @Composable
 private fun InstallerScreen(
-    phase: BackgroundSetupActivity.InstallPhase,
+    phase: InstallPhase,
     status: BackgroundReadiness,
-    step: BackgroundSetupActivity.InstallStep?,
+    step: InstallStep?,
     onBack: () -> Unit,
     onInstall: () -> Unit,
     onCancelConfirmation: () -> Unit,
@@ -209,7 +212,7 @@ private fun InstallerScreen(
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 22.dp, vertical = 18.dp),
     ) {
-        if (phase == BackgroundSetupActivity.InstallPhase.READY || phase == BackgroundSetupActivity.InstallPhase.INSTALLED) {
+        if (phase == InstallPhase.READY || phase == InstallPhase.INSTALLED) {
             TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) { Text("Back") }
         }
 
@@ -224,7 +227,7 @@ private fun InstallerScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 when (phase) {
-                    BackgroundSetupActivity.InstallPhase.READY -> {
+                    InstallPhase.READY -> {
                         StatusOrb("↓")
                         Text("Background tasks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                         Text(
@@ -242,7 +245,7 @@ private fun InstallerScreen(
                         )
                     }
 
-                    BackgroundSetupActivity.InstallPhase.CONFIRM -> {
+                    InstallPhase.CONFIRM -> {
                         StatusOrb("?")
                         Text("Install background tasks?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(
@@ -256,7 +259,7 @@ private fun InstallerScreen(
                         }
                     }
 
-                    BackgroundSetupActivity.InstallPhase.INSTALLING -> {
+                    InstallPhase.INSTALLING -> {
                         CircularProgressIndicator(modifier = Modifier.size(54.dp))
                         Text("Installing…", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(
@@ -282,7 +285,7 @@ private fun InstallerScreen(
                         OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Continue installation") }
                     }
 
-                    BackgroundSetupActivity.InstallPhase.INSTALLED -> {
+                    InstallPhase.INSTALLED -> {
                         StatusOrb("✓")
                         Text("Installed", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                         Text(
@@ -299,7 +302,7 @@ private fun InstallerScreen(
                         )
                     }
 
-                    BackgroundSetupActivity.InstallPhase.BLOCKED -> {
+                    InstallPhase.BLOCKED -> {
                         StatusOrb("!")
                         Text("Android update required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(
@@ -319,7 +322,12 @@ private fun InstallerScreen(
 private fun StatusOrb(label: String) {
     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
         Box(Modifier.size(70.dp), contentAlignment = Alignment.Center) {
-            Text(label, style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text(
+                label,
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
