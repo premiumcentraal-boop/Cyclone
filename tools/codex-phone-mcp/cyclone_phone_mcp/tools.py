@@ -13,8 +13,14 @@ from .gateway import GatewayClient, GatewayError
 from .reports import SessionRecorder
 from .protocol import Failure, classify_failure
 from .session import (
+    PLANES_SUMMARY,
+    PLANE_MISMATCH,
     SessionScopeError,
     attach_execution_scope,
+    attach_plane,
+    classify_session_plane,
+    inventory_session_plane,
+    plane_from_workspace_result,
     require_tool_execution_scope,
     scope_cache_key,
     session_scope_error_result,
@@ -285,6 +291,7 @@ class PhoneTools:
         include_screenshot = bool(args.get("include_screenshot", False))
         goal = str(args.get("goal") or "").strip()
         scope = require_tool_execution_scope(args)
+        plane = classify_session_plane(args)
         identity = _identity_kwargs(scope)
         if device_id:
             raw = self.gateway.device_observe(device_id, include_screenshot=include_screenshot, mode=mode, **identity)
@@ -292,10 +299,13 @@ class PhoneTools:
             raw = self.gateway.observe(include_screenshot=include_screenshot, mode=mode, **identity)
         # Classify the complete typed response before compacting away protocol/error layers.
         if classify_failure(raw):
-            return redact(raw)
+            return attach_plane(redact(raw), plane)
         if mode == "full":
-            return redact(raw)
-        return self._remember_page_card(device_id, raw, goal=goal, session_id=_session_id(scope))
+            return attach_plane(redact(raw), plane)
+        return attach_plane(
+            self._remember_page_card(device_id, raw, goal=goal, session_id=_session_id(scope)),
+            plane,
+        )
 
     def phone_locate(self, args: dict[str, Any]) -> Any:
         """Fuse bounded readiness, Page Card context, and semantic search for one goal."""
@@ -307,6 +317,7 @@ class PhoneTools:
         if len(query) > 240:
             raise ValueError("query exceeds the bounded length")
         scope = require_tool_execution_scope(args)
+        plane = classify_session_plane(args)
         identity = _identity_kwargs(scope)
         session_id = _session_id(scope)
         if device_id:
@@ -316,7 +327,7 @@ class PhoneTools:
             status = self.gateway.status()
             raw = self.gateway.observe(include_screenshot=False, mode="compact", **identity)
         if classify_failure(raw):
-            return redact(raw)
+            return attach_plane(redact(raw), plane)
         page_card = self._remember_page_card(device_id, raw, goal=goal, session_id=session_id)
         try:
             search_raw = (
@@ -332,7 +343,7 @@ class PhoneTools:
                 "available": False,
                 "errorClass": _error_class(exc.body, "SEARCH_UNAVAILABLE"),
             }
-        return {
+        return attach_plane({
             "kind": "phone_locate",
             "goal": goal,
             "status": _compact_status(status),
@@ -342,7 +353,7 @@ class PhoneTools:
                 "Use a goal-ranked/current elementId immediately, then call phone_act. "
                 "After any mutation, use phone_locate again; IDs are not reusable."
             ),
-        }
+        }, plane)
 
     def phone_ui_search(self, args: dict[str, Any]) -> Any:
         query = str(args.get("query") or "").strip()
@@ -351,13 +362,14 @@ class PhoneTools:
         goal = str(args.get("goal") or "").strip()
         device_id = _device_id(args)
         scope = require_tool_execution_scope(args)
+        plane = classify_session_plane(args)
         identity = _identity_kwargs(scope)
         if device_id:
             search = compact_search(self.gateway.device_ui_search(device_id, query, **identity), query=query, goal=goal)
         else:
             search = compact_search(self.gateway.ui_search(query, **identity), query=query, goal=goal)
         self._remember_search_ids(device_id, search, session_id=_session_id(scope))
-        return search
+        return attach_plane(search, plane)
 
     def phone_inspect_element(self, args: dict[str, Any]) -> Any:
         element_id = str(args.get("element_id") or "").strip()
@@ -365,13 +377,21 @@ class PhoneTools:
             raise ValueError("element_id is required")
         device_id = _device_id(args)
         identity = _identity_kwargs(require_tool_execution_scope(args))
+        plane = classify_session_plane(args)
         if device_id:
-            return compact_element(self.gateway.device_ui_element(device_id, element_id, **identity), element_id=element_id)
-        return compact_element(self.gateway.ui_element(element_id, **identity), element_id=element_id)
+            return attach_plane(
+                compact_element(self.gateway.device_ui_element(device_id, element_id, **identity), element_id=element_id),
+                plane,
+            )
+        return attach_plane(
+            compact_element(self.gateway.ui_element(element_id, **identity), element_id=element_id),
+            plane,
+        )
 
     def phone_screenshot(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
         identity = _identity_kwargs(require_tool_execution_scope(args))
+        plane = classify_session_plane(args)
         if device_id:
             observed = self.gateway.device_observe(device_id, include_screenshot=True, mode="compact", **identity)
             compact = compact_observation(observed)
@@ -388,7 +408,7 @@ class PhoneTools:
                     "single-device surface (omit device_id) for image bytes, or the PC Companion "
                     "live video; a debug bundle remains available for diagnostics."
                 )
-            return result
+            return attach_plane(result, plane)
         observed = self.gateway.observe(include_screenshot=True, mode="compact", **identity)
         compact = compact_observation(observed)
         screenshot = compact.get("screenshot")
@@ -402,7 +422,7 @@ class PhoneTools:
                 result["_mcp_image"] = {"mimeType": mime, "data": base64.b64encode(data).decode("ascii")}
             else:
                 result["imageNote"] = f"Screenshot exists but exceeds MCP image limit ({len(data)} > {max_bytes})"
-        return result
+        return attach_plane(result, plane)
 
     def phone_current_page(self, args: dict[str, Any]) -> Any:
         device_id = _device_id(args)
@@ -422,8 +442,12 @@ class PhoneTools:
         if operation not in {"list", "register", "switch", "pause", "release", "arm", "next"}:
             raise ValueError("Unknown workspace operation")
         scope = require_tool_execution_scope(args)
+        plane = classify_session_plane(args)
         if scope["sessionId"] != "default-foreground" or scope["displayId"] != 0:
-            raise ValueError("Layer 2 workspaces require default-foreground / display 0")
+            raise SessionScopeError(
+                "Layer 2 workspaces require default-foreground / display 0",
+                PLANE_MISMATCH,
+            )
         params = args.get("params", {})
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
@@ -437,9 +461,11 @@ class PhoneTools:
         forwarded = attach_execution_scope(params, scope)
         if device_id:
             self.gateway.device_observe(device_id, include_screenshot=False, mode="compact", **identity)
-            return redact(self.gateway.device_action(device_id, "workspace." + operation, forwarded, goal, **identity))
-        self.gateway.observe(include_screenshot=False, mode="compact", **identity)
-        return redact(self.gateway.action("workspace." + operation, forwarded, goal, **identity))
+            result = redact(self.gateway.device_action(device_id, "workspace." + operation, forwarded, goal, **identity))
+        else:
+            self.gateway.observe(include_screenshot=False, mode="compact", **identity)
+            result = redact(self.gateway.action("workspace." + operation, forwarded, goal, **identity))
+        return attach_plane(result, plane_from_workspace_result(result, plane))
 
     def phone_act(self, args: dict[str, Any]) -> Any:
         tool = str(args.get("tool") or "")
@@ -449,6 +475,7 @@ class PhoneTools:
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
         scope = require_tool_execution_scope(args)
+        plane = classify_session_plane(args)
         action_params = strip_execution_scope(params)
         _validate_mcp_action_params(tool, action_params)
         goal = str(args.get("goal") or "").strip()
@@ -463,8 +490,14 @@ class PhoneTools:
         action_params = attach_execution_scope(action_params, scope)
         device_id = _device_id(args)
         if tool not in MUTATING_ACTIONS:
-            return self._run_non_mutating_action(device_id, tool, action_params, goal, scope=scope)
-        return self._run_verified_mutation(device_id, tool, action_params, goal, scope=scope)
+            return attach_plane(
+                self._run_non_mutating_action(device_id, tool, action_params, goal, scope=scope),
+                plane,
+            )
+        return attach_plane(
+            self._run_verified_mutation(device_id, tool, action_params, goal, scope=scope),
+            plane,
+        )
 
     def phone_group_act(self, args: dict[str, Any]) -> Any:
         raw_ids = args.get("device_ids")
@@ -482,6 +515,7 @@ class PhoneTools:
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
         scope = require_tool_execution_scope(args)
+        plane = classify_session_plane(args)
         identity = _identity_kwargs(scope)
         action_params = strip_execution_scope(params)
         _validate_mcp_action_params(tool, action_params)
@@ -504,13 +538,13 @@ class PhoneTools:
                 })
             except GatewayError as exc:
                 results.append({"device_id": device_id, "ok": False, "error": redact(exc.body)})
-        return {
+        return attach_plane({
             "operation": "typed_group_action",
             "tool": tool,
             "selected_device_ids": device_ids,
             "ok": all(item["ok"] for item in results),
             "results": results,
-        }
+        }, plane)
 
     def _scope_key(self, device_id: str, session_id: str | None = None) -> str:
         return scope_cache_key(device_id, session_id)
@@ -930,15 +964,26 @@ def _forward_ai_control(args: dict[str, Any], params: dict[str, Any]) -> dict[st
 
 def _with_sessions_inventory(result: Any) -> Any:
     """Pass through gateway sessions when present; never invent default-foreground."""
-    if not isinstance(result, dict) or result.get("sessions") is not None:
+    if not isinstance(result, dict):
         return result
-    for key in ("status", "device", "runtime"):
-        nested = result.get(key)
-        if isinstance(nested, dict) and nested.get("sessions") is not None:
-            out = dict(result)
-            out["sessions"] = nested["sessions"]
-            return out
-    return result
+    out = dict(result)
+    if out.get("sessions") is None:
+        for key in ("status", "device", "runtime"):
+            nested = out.get(key)
+            if isinstance(nested, dict) and nested.get("sessions") is not None:
+                out["sessions"] = nested["sessions"]
+                break
+    sessions = out.get("sessions")
+    if isinstance(sessions, list):
+        attached: list[Any] = []
+        for item in sessions:
+            if isinstance(item, dict):
+                attached.append(attach_plane(dict(item), inventory_session_plane(item)))
+            else:
+                attached.append(item)
+        out["sessions"] = attached
+    out["planes"] = dict(PLANES_SUMMARY)
+    return out
 
 
 def _android_execution_ok(action: Any) -> bool:

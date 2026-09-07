@@ -1,4 +1,4 @@
-# Cyclone version matrix — snapshot 2026-09-07 (Europe/Amsterdam)
+# Cyclone version matrix — snapshot 2026-09-08 (Europe/Amsterdam)
 
 ## What is installed / published
 
@@ -12,17 +12,17 @@
 
 ## This worktree / sprint identity (not published)
 
-Worktree `Cyclone-mobile-4.1-s1-sticky`, branch `grok/mobile-4.1-s1-sticky`, base **`v4.0.4`** (`38f7628`, versionCode 75).
+Worktree `Cyclone-mobile-4.1-s2-contract`, branch `grok/mobile-4.1-s2-contract`, base B1 **`178c820`** (`4.1.0-alpha.1` / 76) on **`v4.0.4`** (`38f7628`, versionCode 75).
 
 | Surface | This alpha | Notes |
 |---|---|---|
-| Mobile | **4.1.0-alpha.1** / versionCode **76** | `publication_authorized=false`. Not a published 4.1.0. |
+| Mobile | **4.1.0-alpha.2** / versionCode **77** | `publication_authorized=false`. Not a published 4.1.0. B2 dual-plane contract. |
 | Cyclone One / pc_companion | **1.0.0** (unchanged) | USB / default-foreground pairing still the 4.0.4 contract |
 | Device gateway | **4.0.0** (unchanged) | — |
 | Agent MCP | **4.0.0** (unchanged) | — |
 | python_version | **4.0.0** (unchanged) | — |
 
-Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75. This alpha was not assembled or sideloaded in the B1 docs session. Physical Pixel 8 = **UNVERIFIED**.
+Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75. This alpha was not assembled or sideloaded in the B2 docs session. Physical Pixel 8 = **UNVERIFIED**.
 
 ## Repo divergence (critical)
 
@@ -55,3 +55,5 @@ plus `workspaceId` + `workspaceGeneration` inside `phone_act.params` after switc
 3. **Layer 2 workspaces** (mobile 4.0.3) — N registered display-0 app/profile workspaces; **time-sliced** global mutate lock; NOT parallel phone input; switch verifies package/user/generation
 
 One glass must label these distinctly. Mobile must fail closed when a call mixes planes incorrectly.
+
+B2 (`4.1.0-alpha.2` / 77) freezes those mix rules and requires `plane: {kind, label, sessionId, displayId, workspaceId, workspaceGeneration}` on responses so One glass does not guess. Product hot-gate for named VD Ask remains 1.

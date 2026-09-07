@@ -17,7 +17,13 @@ from .skills import (
     save_success,
     strip_secret_slots,
 )
-from .session import attach_execution_scope, parse_tool_execution_scope, require_tool_execution_scope
+from .session import (
+    attach_execution_scope,
+    attach_plane,
+    classify_session_plane,
+    parse_tool_execution_scope,
+    require_tool_execution_scope,
+)
 from .tools import PhoneTools as CorePhoneTools, _identity_kwargs
 
 SKILL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -91,13 +97,14 @@ class PhoneTools(CorePhoneTools):
         params = args.get("params") if isinstance(args.get("params"), dict) else {}
         params = strip_secret_slots(params)
         scope = require_tool_execution_scope(args)
+        plane = classify_session_plane(args)
         params = attach_execution_scope(params, scope)
         identity = _identity_kwargs(scope)
         device_id = str(args.get("device_id") or "").strip()
         if not dry_run:
             meta = _skill_meta(self.gateway, device_id, skill_id)
             if isinstance(meta, dict) and str(meta.get("status") or "").lower() == "draft":
-                return draft_run_denied(skill_id, "draft")
+                return attach_plane(draft_run_denied(skill_id, "draft"), plane)
         try:
             if device_id:
                 result = _call_skill_run(
@@ -109,12 +116,15 @@ class PhoneTools(CorePhoneTools):
                 )
         except GatewayError as exc:
             if android_skill_ops_missing(exc):
-                return missing_android_skill_ops(
-                    "phone_skill_run",
-                    {"skillId": skill_id, "dryRun": dry_run, "steps": []},
+                return attach_plane(
+                    missing_android_skill_ops(
+                        "phone_skill_run",
+                        {"skillId": skill_id, "dryRun": dry_run, "steps": []},
+                    ),
+                    plane,
                 )
             raise
-        return normalize_run(result, skill_id=skill_id, dry_run=dry_run)
+        return attach_plane(normalize_run(result, skill_id=skill_id, dry_run=dry_run), plane)
 
 
 def _call_skill_run(method: Any, *positional: Any, dry_run: bool, params: dict[str, Any], identity: dict[str, Any]) -> Any:

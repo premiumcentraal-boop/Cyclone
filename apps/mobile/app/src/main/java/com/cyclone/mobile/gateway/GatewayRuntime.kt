@@ -19,6 +19,7 @@ import com.cyclone.mobile.policy.PrincipalKind
 import com.cyclone.mobile.policy.PrincipalRef
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONArray
@@ -415,23 +416,32 @@ internal object GatewayDispatcher {
     private fun bindDispatchIdentity(request: GatewayRequest): ExecutionContext {
         if (request.op !in humanDisplayOps && request.op !in sessionBindOps) return ExecutionContext.DEFAULT
         val merged = ExecutionRequestScope.merge(request.args, request.args.optJSONObject("params") ?: JSONObject())
-        return try {
-            if (request.op in humanDisplayOps) ExecutionRequestScope.requireForeground(merged)
-            else ExecutionRequestScope.bind(merged)
+        if (request.args.has("workspaceId") && !merged.has("workspaceId")) {
+            merged.put("workspaceId", request.args.get("workspaceId"))
+        }
+        if (request.args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+            merged.put("workspaceGeneration", request.args.get("workspaceGeneration"))
+        }
+        val plane = try {
+            if (request.op in humanDisplayOps) {
+                ExecutionRequestScope.requireForeground(merged)
+                SessionContract.classify(merged)
+            } else SessionContract.classify(merged)
         } catch (error: SessionIdentityException) {
             throw GatewayProtocolException(
-                "SESSION_DISPLAY_MISMATCH",
+                error.errorClass,
                 error.message ?: "session/display mismatch",
                 request.id,
             )
         }
+        return ExecutionContext(plane.sessionId, plane.displayId)
     }
 
     private fun currentObservation(bound: ExecutionContext, requestId: String): GatewayObservation? = try {
         GatewayObservationStore.current(bound)
     } catch (error: SessionIdentityException) {
         throw GatewayProtocolException(
-            "SESSION_DISPLAY_MISMATCH",
+            error.errorClass,
             error.message ?: "session/display mismatch",
             requestId,
         )

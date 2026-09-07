@@ -371,6 +371,19 @@ def compact_observation(payload: Any, control_limit: int = PAGE_CARD_CANDIDATE_L
     if display_id is not None:
         card["displayId"] = display_id
         card["observationScope"]["displayId"] = display_id
+    plane = envelope.get("plane") if isinstance(envelope.get("plane"), dict) else None
+    if plane is None and isinstance(data.get("plane"), dict):
+        plane = data["plane"]
+    if isinstance(plane, dict):
+        card["plane"] = dict(plane)
+    workspace_id = _first(envelope, "workspaceId", default=_first(data, "workspaceId"))
+    workspace_generation = _first(
+        envelope, "workspaceGeneration", default=_first(data, "workspaceGeneration"),
+    )
+    if isinstance(workspace_id, str) and workspace_id:
+        card["workspaceId"] = workspace_id[:80]
+    if type(workspace_generation) is int and workspace_generation >= 0:
+        card["workspaceGeneration"] = workspace_generation
     # Stable aliases retain compatibility for existing MCP clients while directing new callers to
     # Page Card fields above.
     snapshot_text, ref_map = build_snapshot(candidates)

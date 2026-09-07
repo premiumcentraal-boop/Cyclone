@@ -9,11 +9,15 @@ from .gateway import GatewayClient, GatewayError
 from .safe import redact, strip_typed_plaintext, validate_typed_params
 from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
 from .phone_mcp import (
+    attach_plane,
+    classify_session_plane,
     compact_observation,
     draft_run_denied,
+    inventory_session_plane,
     is_session_scope_error,
     matched_verified_skill,
     parse_execution_scope,
+    planes_summary,
     require_tool_execution_scope,
     session_scope_error_result,
     skill_run_normalize,
@@ -116,11 +120,15 @@ class PhoneTools:
         mode = str(args.get("mode") or "compact")
         if mode not in {"compact", "full"}:
             raise ValueError("mode must be compact or full")
-        return self.gateway.observe(
-            self._device(args),
-            include_screenshot=bool(args.get("include_screenshot", False)),
-            mode=mode,
-            **_required_identity_kwargs(args),
+        plane = classify_session_plane(args)
+        return attach_plane(
+            self.gateway.observe(
+                self._device(args),
+                include_screenshot=bool(args.get("include_screenshot", False)),
+                mode=mode,
+                **_required_identity_kwargs(args),
+            ),
+            plane,
         )
 
     def phone_locate(self, args: dict[str, Any]) -> Any:
@@ -130,6 +138,7 @@ class PhoneTools:
         query = str(args.get("query") or goal).strip()
         device_id = self._device(args)
         identity = _required_identity_kwargs(args)
+        plane = classify_session_plane(args)
         status = self.gateway.status(device_id)
         raw = self.gateway.observe(device_id, include_screenshot=False, mode="compact", **identity)
         page_card = compact_observation(raw, goal=goal)
@@ -146,7 +155,7 @@ class PhoneTools:
         except (GatewayError, AttributeError, TypeError, ValueError, ImportError):
             matched = None
             skip_model = False
-        return {
+        return attach_plane({
             "kind": "phone_locate",
             "goal": goal,
             "status": status if isinstance(status, dict) else {"available": False},
@@ -159,7 +168,7 @@ class PhoneTools:
                 "Use a goal-ranked/current elementId immediately, then call phone_act. "
                 "After any mutation, use phone_locate again; IDs are not reusable."
             ),
-        }
+        }, plane)
 
     def phone_ui_search(self, args: dict[str, Any]) -> Any:
         query = str(args.get("query") or "").strip()
@@ -199,11 +208,12 @@ class PhoneTools:
         if args.get("request_ai_control") is True:
             params = dict(params)
             params["request_ai_control"] = True
+        plane = classify_session_plane(args)
         result = self.gateway.action(tool, params, goal, self._device(args), **_required_identity_kwargs(args))
         if tool == "phone.type":
             typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")
             result = strip_typed_plaintext(result, typed if isinstance(typed, str) else None)
-        return result
+        return attach_plane(result, plane)
 
     def phone_skill_save(self, args: dict[str, Any]) -> Any:
         built = skill_save_payload(args)
@@ -337,15 +347,26 @@ class PhoneTools:
 
 def _with_sessions_inventory(result: Any) -> Any:
     """Pass through gateway sessions when present; never invent default-foreground."""
-    if not isinstance(result, dict) or result.get("sessions") is not None:
+    if not isinstance(result, dict):
         return result
-    for key in ("status", "device", "runtime"):
-        nested = result.get(key)
-        if isinstance(nested, dict) and nested.get("sessions") is not None:
-            out = dict(result)
-            out["sessions"] = nested["sessions"]
-            return out
-    return result
+    out = dict(result)
+    if out.get("sessions") is None:
+        for key in ("status", "device", "runtime"):
+            nested = out.get(key)
+            if isinstance(nested, dict) and nested.get("sessions") is not None:
+                out["sessions"] = nested["sessions"]
+                break
+    sessions = out.get("sessions")
+    if isinstance(sessions, list):
+        attached: list[Any] = []
+        for item in sessions:
+            if isinstance(item, dict):
+                attached.append(attach_plane(dict(item), inventory_session_plane(item)))
+            else:
+                attached.append(item)
+        out["sessions"] = attached
+    out["planes"] = planes_summary()
+    return out
 
 
 def _error_code(value: Any) -> str | None:

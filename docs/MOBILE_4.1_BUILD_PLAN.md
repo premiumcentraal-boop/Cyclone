@@ -1,9 +1,9 @@
 # Cyclone Mobile 4.1 — Session Contract Mobile (phone sprint)
 
-**Status:** B1 DONE (source/CI; Pixel **UNVERIFIED**). B2 not started.  
+**Status:** B1 DONE, B2 DONE (source/CI; Pixel **UNVERIFIED**). B3 not started.  
 **Codename:** Session Contract Mobile  
 **Base:** published **`v4.0.4`** (`38f7628`, versionCode **75**) — NOT stale `main` (4.0.1)  
-**Device today:** Pixel may still be on **4.0.3** / 74. No B1 adb/assemble smoke was run.  
+**Device today:** Pixel may still be on **4.0.3** / 74. No B1/B2 adb/assemble smoke was run.  
 **Out:** Mobile **4.1.0** / next versionCode (76+) signed with update-compatible dev key (or documented migration)  
 **Grok:** each stage on Agent PC with **subagents required**
 
@@ -38,16 +38,17 @@ Acceptance: force-stop → reopen → one-tap or auto repair to READY; 4.0.4 set
 Out of scope: new workspace types; One installer.
 
 ### B2 — Dual-plane Session Contract
-Branch: `grok/mobile-4.1-s2-contract` from B1.  
+**Status:** DONE in source/CI. Pixel acceptance **UNVERIFIED**.  
+Branch: `grok/mobile-4.1-s2-contract` from B1 (`178c820`).  
 Goal: freeze rules shared with One A2/A3.
 Deliverables:
-1. Canonical `docs/SESSION_CONTRACT.md`: Foreground vs Session Kernel VD vs Layer 2.
-2. Fail closed when `session_id` / `display_id` / `workspaceId`+`generation` are mixed illegally.
-3. MCP/gateway mobile-side responses include plane metadata for One glass.
-4. Optional: raise hot-gate from 1→**2** named VD sessions only if tests prove isolation (not 20).
-5. Tests + docs + alpha.2 / versionCode 77.
-Acceptance: unit tests for mismatch matrix; no silent display-0 rewrite; Layer 2 still single mutate lock.  
-Out of scope: true parallel input; Magisk.
+1. Canonical `docs/SESSION_CONTRACT.md`: Foreground vs Session Kernel VD vs Layer 2. — **DONE in source**. Pixel **UNVERIFIED**.
+2. Fail closed when `session_id` / `display_id` / `workspaceId`+`generation` are mixed illegally. — **DONE in source**. Pixel **UNVERIFIED**.
+3. MCP/gateway mobile-side responses include plane metadata for One glass. — **DONE in source**. Pixel **UNVERIFIED**.
+4. Optional: raise hot-gate from 1→**2** named VD sessions only if tests prove isolation (not 20). — **DONE as skipped** (stays 1; types/APIs already hold N≥2; isolation proofs remain `V4FoundationTest` / `GatewaySessionBindingTest` / `WorkspaceDisplayPolicyTest`). Pixel **UNVERIFIED**.
+5. Tests + docs + alpha.2 / versionCode 77. — **DONE in source**. Pixel **UNVERIFIED**.
+Acceptance: unit tests for mismatch matrix; no silent display-0 rewrite; Layer 2 still single mutate lock. Pixel still **UNVERIFIED**.  
+Out of scope: true parallel input; Magisk; B3 glass.
 
 ### B3 — Task glass + queue observability
 Branch: `grok/mobile-4.1-s3-glass` from B2.  

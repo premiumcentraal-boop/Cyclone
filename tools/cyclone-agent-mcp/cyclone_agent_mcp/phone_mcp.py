@@ -31,6 +31,30 @@ def require_tool_execution_scope(args: dict[str, Any] | None):
     return _require(args)
 
 
+def classify_session_plane(args: dict[str, Any] | None):
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import classify_session_plane as _classify
+    return _classify(args)
+
+
+def attach_plane(result: Any, plane: dict[str, Any] | None):
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import attach_plane as _attach
+    return _attach(result, plane)
+
+
+def inventory_session_plane(session: dict[str, Any]):
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import inventory_session_plane as _inventory
+    return _inventory(session)
+
+
+def planes_summary() -> dict[str, Any]:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import PLANES_SUMMARY
+    return dict(PLANES_SUMMARY)
+
+
 def session_scope_error_result(exc: Exception) -> dict[str, Any]:
     _ensure_phone_mcp()
     from cyclone_phone_mcp.session import session_scope_error_result as _result

@@ -5,8 +5,13 @@ import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.ai.vision.live.LiveVisionRuntime
 import com.cyclone.mobile.runtime.background.WorkspaceRuntime
+import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
 import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionContract
+import com.cyclone.mobile.runtime.session.SessionIdentityException
+import com.cyclone.mobile.runtime.session.SessionPlane
+import com.cyclone.mobile.runtime.session.SessionPlaneKind
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -110,11 +115,19 @@ internal object GatewaySessionAdapter {
 
     /** One exact-session frame. Background frames come only from that workspace's live source. */
     fun snapshot(context: Context, args: JSONObject): JSONObject {
-        val execution = try {
-            ExecutionRequestScope.read(args)
+        val plane = try {
+            val merged = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+            if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+            if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+                merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+            }
+            SessionContract.classify(merged)
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException(error.errorClass, error.message ?: "Invalid execution context")
         } catch (error: IllegalArgumentException) {
             throw GatewayProtocolException("PROTOCOL_MISMATCH", error.message ?: "Invalid execution context")
         }
+        val execution = ExecutionContext(plane.sessionId, plane.displayId)
         if (execution.sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) {
             if (execution.displayId != 0) {
                 throw GatewayProtocolException("PROTOCOL_MISMATCH", "Foreground session must use display 0")
@@ -142,10 +155,14 @@ internal object GatewaySessionAdapter {
         }
         val payload = result.payload as? JSONObject
             ?: throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Exact-session frame returned no image payload")
-        return JSONObject(payload.toString())
+        val snapshot = JSONObject(payload.toString())
             .put("sessionId", execution.sessionId)
             .put("displayId", execution.displayId)
             .put("foregroundSubstitution", false)
+        return SessionContract.attach(
+            snapshot,
+            SessionPlane(SessionPlaneKind.SESSION_KERNEL_VD, execution.sessionId, execution.displayId),
+        )
     }
 
     private fun sessionJson(context: Context, session: ExecutionSession): JSONObject {
@@ -172,6 +189,10 @@ internal object GatewaySessionAdapter {
             .put("executionGeneration", generation ?: JSONObject.NULL)
             .put("frameHealthy", if (foreground) JSONObject.NULL else LiveVisionRuntime.healthy(session.sessionId))
             .put("appPackage", context.packageName)
+            .put("plane", SessionPlane(
+                if (foreground) SessionPlaneKind.FOREGROUND else SessionPlaneKind.SESSION_KERNEL_VD,
+                session.sessionId, session.displayId
+            ).toJson())
     }
 
     private fun requiredSessionId(args: JSONObject): String {

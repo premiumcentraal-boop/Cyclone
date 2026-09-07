@@ -17,7 +17,10 @@ import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
 import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
+import com.cyclone.mobile.runtime.session.SessionPlane
+import com.cyclone.mobile.runtime.workspaces.Layer2Workspaces
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -62,10 +65,16 @@ internal object GatewayObservationAdapter {
     private val editableStateSalt = UUID.randomUUID().toString()
 
     fun capture(context: Context, args: JSONObject = JSONObject()): GatewayObservation {
+        val merged = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+        if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+        if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+            merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+        }
         val execution = try {
-            ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()))
+            SessionContract.classify(merged)
+            ExecutionRequestScope.bind(merged)
         } catch (error: SessionIdentityException) {
-            throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch")
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch")
         }
         val background = execution.sessionId != ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID
         if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.requireScope(execution)
@@ -262,7 +271,7 @@ internal object GatewayObservationAdapter {
             Configuration.ORIENTATION_PORTRAIT -> "portrait"
             else -> "undefined"
         }
-        val payload = JSONObject()
+        var payload = JSONObject()
             .put("observationId", observationId)
             .put("elementIdScope", "observation-local; IDs are valid only while this observation is current")
             .put("timestamp", snapshot.timestampMs)
@@ -294,6 +303,12 @@ internal object GatewayObservationAdapter {
 
         payload.put("sessionId", execution.sessionId).put("displayId", execution.displayId)
         if (background) payload.put("executionGeneration", com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId))
+        val plane = try {
+            observationPlane(args, execution)
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch")
+        }
+        payload = SessionContract.attach(payload, plane)
         elements.values.forEach { it.evidence.put("sessionId", execution.sessionId).put("displayId", execution.displayId) }
         return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements, execution).also { GatewayObservationStore.replace(it) }
     }
@@ -335,6 +350,28 @@ internal object GatewayObservationAdapter {
         }
         return observation.elements[elementId]?.evidence
             ?: throw GatewayProtocolException("ELEMENT_NOT_FOUND", "Element ID is not present in the current observation")
+    }
+
+    private fun observationPlane(args: JSONObject, execution: ExecutionContext): SessionPlane {
+        val identity = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+        if (args.has("workspaceId") && !identity.has("workspaceId")) identity.put("workspaceId", args.get("workspaceId"))
+        if (args.has("workspaceGeneration") && !identity.has("workspaceGeneration")) {
+            identity.put("workspaceGeneration", args.get("workspaceGeneration"))
+        }
+        if (!identity.has("sessionId")) identity.put("sessionId", execution.sessionId)
+        if (!identity.has("displayId")) identity.put("displayId", execution.displayId)
+        val requestedWorkspace = identity.has("workspaceId") && !identity.isNull("workspaceId") &&
+            identity.optString("workspaceId").isNotBlank() && identity.optString("workspaceId") != "null"
+        val holder = Layer2Workspaces.engine.holder()
+        if (!requestedWorkspace &&
+            holder != null &&
+            execution.sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID &&
+            execution.displayId == ExecutionSession.DEFAULT_DISPLAY_ID
+        ) {
+            identity.put("workspaceId", holder.workspaceId)
+            identity.put("workspaceGeneration", holder.generation)
+        }
+        return SessionContract.classify(identity)
     }
 
     private fun editableTextState(node: JSONObject?, rawTextById: Map<String, String>): String? {
