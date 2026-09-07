@@ -120,22 +120,25 @@ class WorkspaceSwitchEngine(
     fun switch(id: String): WorkspaceSwitchResult {
         val target = registry.get(id)
             ?: return WorkspaceSwitchResult(false, "WORKSPACE_NOT_FOUND", "Unknown workspace $id")
-        val previousHolder = mutateLock.holder()
-        val previous = previousHolder?.let(registry::get)
-
-        if (previous?.state == WorkspaceState.GATED || target.state == WorkspaceState.GATED) {
-            return WorkspaceSwitchResult(false, "GATE_ACTIVE", "A human-confirmation gate is active; switching cannot bypass it.", target)
+        val gated = registry.list().firstOrNull { it.state == WorkspaceState.GATED }
+        if (gated != null) {
+            return WorkspaceSwitchResult(
+                false,
+                "GATE_ACTIVE",
+                "Human confirmation is still required in ${gated.label}; workspace switching cannot bypass it.",
+                target,
+            )
         }
         if (target.displayId != 0) {
             return WorkspaceSwitchResult(false, "DISPLAY_MISMATCH", "Layer 2 switching remains fail-closed on display 0.", target)
         }
 
+        val previousHolder = mutateLock.holder()
+        val previous = previousHolder?.let(registry::get)
         // Release before changing foreground ownership. A failed switch intentionally leaves no holder.
         if (previousHolder != null) {
             mutateLock.release(previousHolder)
-            if (previous != null && previous.state != WorkspaceState.GATED) {
-                registry.setState(previous.id, WorkspaceState.PAUSED)
-            }
+            if (previous != null) registry.setState(previous.id, WorkspaceState.PAUSED)
         }
 
         if (!platform.launch(target)) {
