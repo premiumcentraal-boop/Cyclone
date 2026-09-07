@@ -75,16 +75,14 @@ private class AndroidWorkspaceSwitchPlatform(private val context: Context) : Wor
     override fun rebindObservation(workspace: CycloneWorkspace): Boolean {
         if (workspace.androidUserId != 0 || workspace.displayId != 0) return false
         val service = CycloneAccessibilityService.instance ?: return false
-        val observed = runCatching { service.observe(markFresh = true) }.getOrNull() ?: return false
-        val packageName = observed.packageName.ifBlank { BackgroundSetup.foregroundPackage().orEmpty() }
-        return packageName == workspace.appPackage
+        runCatching { service.observe(markFresh = true) }.getOrNull() ?: return false
+        return (BackgroundSetup.foregroundPackage() ?: DeviceState.currentPackage) == workspace.appPackage
     }
 }
 
 object WorkspaceRuntime {
     private val monitor = Any()
     private val mutateLock = WorkspaceMutateLock()
-    @Volatile private var appContext: Context? = null
     @Volatile private var registryRef: WorkspaceRegistry? = null
     @Volatile private var engineRef: WorkspaceSwitchEngine? = null
 
@@ -94,7 +92,6 @@ object WorkspaceRuntime {
             if (registryRef != null) return
             val app = context.applicationContext
             val registry = WorkspaceRegistry(AndroidWorkspacePersistence(app))
-            appContext = app
             registryRef = registry
             engineRef = WorkspaceSwitchEngine(registry, mutateLock, AndroidWorkspaceSwitchPlatform(app))
         }
