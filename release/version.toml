@@ -1,4 +1,4 @@
-# Cyclone Mobile 4.0.1 background glass candidate; DEVICE TESTING: UNVERIFIED
+﻿# Cyclone Mobile 4.0.1 background glass candidate; DEVICE TESTING: UNVERIFIED; signed-release-lane
 schema = 1
 product_version = "4.0.1"
 channel = "development"
@@ -20,3 +20,4 @@ android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
 candidate_generation = "cyclone-4.0.1"
+
