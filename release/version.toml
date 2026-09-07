@@ -1,15 +1,15 @@
-# Cyclone Mobile 4.1.0-alpha.3 task glass + queue observability; DEVICE TESTING: UNVERIFIED
+# Cyclone Mobile 4.1.0-alpha.4 Fast Path named VD; DEVICE TESTING: UNVERIFIED
 # Alpha identity only; publication_authorized=false. Not a published 4.1.0.
 # Publishing would reuse the authoritative Mobile CI artifact; no second Android assembly.
-# B3 finishes Gemini-style glass on 4.0.1 glass + 4.0.3 queue: real subtitle, exact-plane View progress, ghost teardown.
+# B4 closes ClosePaw-quality Fast Path / skills on a named workspace, not only default-foreground.
 schema = 1
-product_version = "4.1.0-alpha.3"
+product_version = "4.1.0-alpha.4"
 channel = "development"
-android_version_code = 78
+android_version_code = 79
 python_version = "4.0.0"
 
 [components]
-mobile = "4.1.0-alpha.3"
+mobile = "4.1.0-alpha.4"
 pc_companion = "1.0.0"
 device_gateway = "4.0.0"
 mcp = "4.0.0"
@@ -22,4 +22,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.1.0-alpha.3-glass"
+candidate_generation = "cyclone-4.1.0-alpha.4-fastpath-bg"

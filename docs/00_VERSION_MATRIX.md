@@ -12,17 +12,17 @@
 
 ## This worktree / sprint identity (not published)
 
-Worktree `Cyclone-mobile-4.1-s3-glass`, branch `grok/mobile-4.1-s3-glass`, base B2 **`0eaef0f`** (`4.1.0-alpha.2` / 77) on B1 **`178c820`** (`4.1.0-alpha.1` / 76) on **`v4.0.4`** (`38f7628`, versionCode 75).
+Worktree `Cyclone-mobile-4.1-s4-fastpath-bg`, branch `grok/mobile-4.1-s4-fastpath-bg`, base B3 **`ee077b3`** (`4.1.0-alpha.3` / 78) on B2 **`0eaef0f`** (`4.1.0-alpha.2` / 77) on B1 **`178c820`** (`4.1.0-alpha.1` / 76) on **`v4.0.4`** (`38f7628`, versionCode 75).
 
 | Surface | This alpha | Notes |
 |---|---|---|
-| Mobile | **4.1.0-alpha.3** / versionCode **78** | `publication_authorized=false`. Not a published 4.1.0. B3 glass/queue observability. |
+| Mobile | **4.1.0-alpha.4** / versionCode **79** | `publication_authorized=false`. Not a published 4.1.0. B4 named-VD Fast Path + skills; hot-gate stays 1. |
 | Cyclone One / pc_companion | **1.0.0** (unchanged) | USB / default-foreground pairing still the 4.0.4 contract |
 | Device gateway | **4.0.0** (unchanged) | — |
 | Agent MCP | **4.0.0** (unchanged) | — |
 | python_version | **4.0.0** (unchanged) | — |
 
-Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75. This alpha was not assembled or sideloaded in the B3 docs session. Physical Pixel 8 = **UNVERIFIED**.
+Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75. This alpha was not assembled or sideloaded in the B4 docs session. Physical Pixel 8 = **UNVERIFIED**.
 
 ## Repo divergence (critical)
 
@@ -59,3 +59,5 @@ One glass must label these distinctly. Mobile must fail closed when a call mixes
 B2 (`4.1.0-alpha.2` / 77) freezes those mix rules and requires `plane: {kind, label, sessionId, displayId, workspaceId, workspaceGeneration}` on responses so One glass does not guess. Product hot-gate for named VD Ask remains 1.
 
 B3 (`4.1.0-alpha.3` / 78) adds glass/queue observability on that frozen contract (real Fast Path / skill / Layer 2 subtitle, exact-plane View progress). It does not invent a fourth plane. Hot-gate stays 1.
+
+B4 (`4.1.0-alpha.4` / 79) closes named-VD Fast Path + skills (`session_id≠default-foreground`, `displayId>0`). Hot-gate stays 1. Pixel **UNVERIFIED**.
