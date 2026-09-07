@@ -134,7 +134,29 @@ class OverlayChromeController(
 ) {
     private val wm = service.getSystemService(WindowManager::class.java)
     private val main = Handler(Looper.getMainLooper())
-    private val lifecycle = OverlayComposeLifecycle()
+    private var lifecycle = OverlayComposeLifecycle()
+    private var generation = 0L
+    private var backgroundTask by mutableStateOf<com.cyclone.mobile.runtime.background.WorkspaceTaskUi?>(null)
+    private val windows = com.cyclone.mobile.ui.overlay.OverlayWindowRegistry<View> { view ->
+        try { wm.removeViewImmediate(view) } catch (_: IllegalArgumentException) { /* Already removed by Android. */ }
+        if (view is ComposeView) view.disposeComposition()
+    }
+    /** Instrumentation hook: failed start / cancel must report zero owned overlay windows. */
+    fun attachedWindowCount(): Int = windows.size
+    private fun addWindow(view: View, layout: WindowManager.LayoutParams) {
+        wm.addView(view, layout)
+        windows.attached(view)
+    }
+    fun background(task: com.cyclone.mobile.runtime.background.WorkspaceTaskUi?) {
+        onMain {
+            backgroundTask = task
+            if (com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy.tearDown(task)) dismiss()
+            else if (com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy.visible(task)) {
+                if (root == null) show(latest) else applyLayout(latest)
+            }
+        }
+    }
+    private fun glass() = isCompact(latest) && com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy.visible(backgroundTask)
     private val idleActivation = OverlayIdleActivationTracker()
     private var root: ComposeView? = null
     private var params: WindowManager.LayoutParams? = null
@@ -155,6 +177,7 @@ class OverlayChromeController(
                 applyLayout(snapshot)
                 return@onMain
             }
+            lifecycle = OverlayComposeLifecycle()
             lifecycle.start()
             val halo = ComposeView(service).apply {
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -178,7 +201,11 @@ class OverlayChromeController(
                         aiSettings = getAiSettings()
                         applyLayout(latest)
                     }
-                    OverlayChrome(
+                    if (glass()) {
+                        com.cyclone.mobile.ui.v32.CycloneV32Theme {
+                            com.cyclone.mobile.ui.overlay.BackgroundTaskGlass(backgroundTask!!) { onAction(OverlayUserAction.ASK_CYCLONE) }
+                        }
+                    } else OverlayChrome(
                         snapshot = latest,
                         onAction = onAction,
                         onComposerChanged = onComposerChanged,
@@ -203,8 +230,10 @@ class OverlayChromeController(
             root = view
             applyLayout(snapshot)
             // Add decoration first so the small semantic/touch hotspot stays above it.
-            wm.addView(halo, haloLayout)
-            wm.addView(view, layout)
+            try {
+                addWindow(halo, haloLayout)
+                addWindow(view, layout)
+            } catch (_: Exception) { dismiss(); return@onMain }
             val shareView = ComposeView(service).apply {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
                 setViewTreeLifecycleOwner(lifecycle)
@@ -228,13 +257,17 @@ class OverlayChromeController(
                     WindowManager.LayoutParams.FLAG_SECURE, PixelFormat.TRANSLUCENT,
             ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
             shareRoot = shareView
-            wm.addView(shareView, shareLayout)
+            try { addWindow(shareView, shareLayout) } catch (_: Exception) { dismiss() }
         }
     }
 
     fun render(snapshot: OverlayChromeSnapshot) {
         onMain {
             latest = snapshot
+            if (root == null) {
+                if (snapshot.state != OverlayChromeState.IDLE || glass()) show(snapshot)
+                return@onMain
+            }
             if (!isCompact(snapshot)) resetIdleActivation()
             applyLayout(snapshot)
         }
@@ -242,11 +275,10 @@ class OverlayChromeController(
 
     fun dismiss() {
         onMain {
-            shareRoot?.let { runCatching { wm.removeView(it) } }
+            generation++
+            main.removeCallbacksAndMessages(null)
+            windows.clear()
             shareRoot = null
-            root?.let { runCatching { wm.removeView(it) } }
-            haloRoot?.let { runCatching { wm.removeView(it) } }
-            activeBorder?.let { runCatching { wm.removeView(it) } }
             activeBorder = null
             root = null
             params = null
@@ -264,20 +296,20 @@ class OverlayChromeController(
         val view = root ?: return
         val layout = params ?: return
         val compact = isCompact(snapshot)
-        val visible = !compact || snapshot.idleChipVisible
+        val visible = (!compact || snapshot.idleChipVisible || glass()) && !OverlayExternalInteraction.active.value
 
         view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         view.contentDescription =
             if (snapshot.state == OverlayChromeState.GATE && !snapshot.minimized) OverlayCopy.GATE else null
         view.visibility = if (visible) View.VISIBLE else View.GONE
 
-        val spec = OverlayChromeWindowPolicy.main(compact)
+        val spec = OverlayChromeWindowPolicy.main(compact && !glass()).let { if (glass()) it.copy(notFocusable = true) else it }
         var changed = applyWindowContract(layout, spec)
         if (changed) runCatching { wm.updateViewLayout(view, layout) }
 
         haloRoot?.let { halo ->
             halo.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            halo.visibility = if (compact && snapshot.idleChipVisible) View.VISIBLE else View.GONE
+            halo.visibility = if (visible && compact && !glass() && snapshot.idleChipVisible) View.VISIBLE else View.GONE
         }
         haloParams?.let { hp ->
             val haloChanged = applyWindowContract(hp, OverlayChromeWindowPolicy.halo)
@@ -289,7 +321,7 @@ class OverlayChromeController(
     private fun renderActiveBorder(snapshot: OverlayChromeSnapshot) {
         val active = !snapshot.userPaused && snapshot.state in setOf(OverlayChromeState.WORKING, OverlayChromeState.LIVE)
         if (!active) {
-            activeBorder?.let { runCatching { wm.removeView(it) } }
+            activeBorder?.let { windows.remove(it) }
             activeBorder = null
             return
         }
@@ -313,7 +345,7 @@ class OverlayChromeController(
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT)
-        runCatching { wm.addView(border, layout); activeBorder = border }
+        runCatching { addWindow(border, layout); activeBorder = border }
     }
 
     private fun overlayParams(snapshot: OverlayChromeSnapshot): WindowManager.LayoutParams =
@@ -474,7 +506,9 @@ class OverlayChromeController(
     }
 
     private fun onMain(block: () -> Unit) {
-        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
+        val expectedGeneration = generation
+        if (Looper.myLooper() == Looper.getMainLooper()) block()
+        else main.post { if (generation == expectedGeneration) block() }
     }
 
     private fun dp(value: Int): Int = (value * service.resources.displayMetrics.density).toInt()
