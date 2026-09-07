@@ -30,4 +30,40 @@ class ProfileSetupPlanTest {
         assertTrue(runCatching { ProfileSetupPlan.install(10, "com.example.app;reboot") }.isFailure)
         assertTrue(runCatching { ProfileSetupPlan.shell(listOf("/system/bin/pm", "$(reboot)")) }.isFailure)
     }
+    @Test fun createUserIsManagedProfileOfParentAndNeverDeletesUsers() {
+        val command = ProfileSetupPlan.create(0, name)
+        assertEquals("/system/bin/pm", command.first())
+        assertEquals("create-user", command[1])
+        assertTrue("--profileOf" in command)
+        assertEquals("0", command[command.indexOf("--profileOf") + 1])
+        assertTrue("--managed" in command)
+        assertFalse("remove-user" in command)
+        assertFalse("delete-user" in command)
+        assertTrue(command.none { "delete" in it.lowercase() || "remove" in it.lowercase() })
+        assertEquals(
+            listOf("/system/bin/pm", "create-user", "--profileOf", "11", "--managed", name),
+            ProfileSetupPlan.create(11, name),
+        )
+    }
+    @Test fun installExistingCopiesAppsNotAccounts() {
+        val command = ProfileSetupPlan.install(10, "com.example.app")
+        assertTrue("install-existing" in command)
+        assertFalse(command.any { "account" in it.lowercase() })
+        assertEquals("com.example.app", command.last())
+        assertEquals(setOf("com.example.app"), ProfileSetupPlan.packages("package:com.example.app\n"))
+        assertEquals(emptySet<String>(), ProfileSetupPlan.packages("Account {name=user@example.com}\n"))
+    }
+    @Test fun shellTokensStayAllowlisted() {
+        val create = ProfileSetupPlan.create(0, name)
+        val install = ProfileSetupPlan.install(10, "com.example.app")
+        assertEquals(create.joinToString(" "), ProfileSetupPlan.shell(create))
+        assertEquals(install.joinToString(" "), ProfileSetupPlan.shell(install))
+        assertTrue(runCatching { ProfileSetupPlan.shell(emptyList()) }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.shell(listOf("/system/bin/pm", "create-user;reboot")) }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.shell(listOf("/system/bin/pm", "a|b")) }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.shell(listOf("echo hello")) }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.shell(listOf("/system/bin/pm", "\$HOME")) }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.shell(listOf("sh", "`reboot`")) }.isFailure)
+        assertTrue(runCatching { ProfileSetupPlan.shell(listOf("cmd", "&&reboot")) }.isFailure)
+    }
 }

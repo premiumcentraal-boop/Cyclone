@@ -12,6 +12,7 @@ import com.cyclone.mobile.automation.skill.SkillCompiler
 import com.cyclone.mobile.automation.skill.SkillDraftSink
 import com.cyclone.mobile.debug.PageDebugSandboxV293
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
+import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.policy.GatePolicy
 import com.cyclone.mobile.policy.PolicyPrincipal
 import com.cyclone.mobile.policy.PrincipalKind
@@ -143,25 +144,41 @@ object GatewayRuntime {
         val pcSessionKnown = trustedSessionCount > 0 || recentlyAuthenticated
         val bootstrapListening = socket?.isRunning() == true
         val listening = enabled && bootstrapListening
+        val phoneControlSnapshot = CyclonePermissionSetup.phoneControlSnapshot(context)
+        val phoneControlReady = phoneControlSnapshot.ready
+        val phoneControlNeedsRepair = phoneControlSnapshot.needsRepair
         val semanticState = when {
-            !DeviceState.accessibilityConnected -> "UNAVAILABLE"
+            !phoneControlReady -> "UNAVAILABLE"
             current == null -> "DEGRADED"
             else -> "READY"
         }
         val authorityState = when {
             !enabled -> "DENIED"
             !GatewayActionAuthorityRegistry.isProductionAuthorityBound() -> "DEGRADED"
-            !DeviceState.accessibilityConnected -> "DEGRADED"
+            !phoneControlReady -> "DEGRADED"
             else -> "READY"
         }
         val state = when {
             !enabled -> "OFF"
             !listening || listenerError != null -> "ATTENTION_NEEDED"
             trust.optString("trustState") == "CONFIRMATION_REQUIRED" -> "WAITING_FOR_PC"
-            !DeviceState.accessibilityConnected -> "ATTENTION_NEEDED"
+            !phoneControlReady -> "ATTENTION_NEEDED"
             pcSessionKnown -> "CONNECTED"
             else -> "WAITING_FOR_PC"
         }
+        val pendingTrust = trust.optString("trustState") == "CONFIRMATION_REQUIRED" ||
+            trust.optBoolean("confirmationRequired")
+        val trustedPcCount = trust.optInt("trustedPcCount", 0)
+        val nextAction = GatewayReadyDoctor.nextAction(
+            gatewayEnabled = enabled,
+            socketListening = listening,
+            hasListenerError = listenerError != null,
+            phoneControlReady = phoneControlReady,
+            phoneControlNeedsRepair = phoneControlNeedsRepair,
+            pendingTrust = pendingTrust,
+            trustedPcCount = trustedPcCount,
+            pcSessionKnown = pcSessionKnown,
+        )
         return JSONObject()
             .put("protocolVersion", GatewayProtocol.VERSION)
             .put("trustProtocolVersion", GatewayTrustProtocolV33.VERSION)
@@ -182,6 +199,15 @@ object GatewayRuntime {
             .put("socketName", GatewayProtocol.SOCKET_NAME)
             .put("networkListener", false)
             .put("accessibilityConnected", DeviceState.accessibilityConnected)
+            .put("phoneControlReady", phoneControlReady)
+            .put("phoneControlNeedsRepair", phoneControlNeedsRepair)
+            .put("nextAction", nextAction?.let { action ->
+                JSONObject()
+                    .put("code", action.code)
+                    .put("title", action.title)
+                    .put("body", action.body)
+                    .put("actionLabel", action.actionLabel)
+            } ?: JSONObject.NULL)
             .put("semanticObservationState", semanticState)
             .put("actionAuthorityState", authorityState)
             .put("controllerOwner", DeviceState.controller.name)
