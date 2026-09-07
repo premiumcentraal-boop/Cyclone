@@ -1,193 +1,165 @@
 package com.cyclone.mobile.ui
 
-import android.content.Context
 import android.content.Intent
-import android.content.pm.LauncherApps
-import android.net.Uri
-import android.os.UserManager
 import android.provider.Settings
+import android.widget.ImageView
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
-import com.cyclone.mobile.PhoneToolExecutor
-import com.cyclone.mobile.PhoneToolRequest
+import androidx.compose.ui.window.DialogProperties
+import com.cyclone.mobile.runtime.session.SessionKernel
 import com.cyclone.mobile.runtime.workspaces.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.util.UUID
 
 @Composable
 fun RootFeaturesCard() {
     var show by rememberSaveable { mutableStateOf(false) }
-    var root by remember { mutableStateOf(RootProbe.status) }
-    LaunchedEffect(Unit) { while (true) { root = RootProbe.status; delay(800) } }
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(
-        containerColor = if (root == RootStatus.ROOTED) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Rounded.Security, null)
-                Text("Root features", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                SuggestionChip(onClick = { show = true }, label = { Text(root.label) })
-            }
-            Text("Run multiple app profiles on one phone, then switch Cyclone between them")
-            if (root != RootStatus.ROOTED) Text("Root unlocks verified cross-profile switching. Non-root dual apps with distinct packages can also work.", style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { show = true }, modifier = Modifier.fillMaxWidth()) { Text("Set up workspaces") }
+    val context = LocalContext.current
+    val user = ProfileSetupRuntime.existingUser(context)
+    Card(shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Rounded.Person, null, modifier = Modifier.size(28.dp))
+            Text("Your app profiles", style = MaterialTheme.typography.headlineSmall)
+            Text(if (user == null) "A fresh space for another account. Keep your everyday apps just as they are." else "Your everyday apps and your second profile, together on one phone.")
+            Button(onClick = { show = true }, modifier = Modifier.fillMaxWidth()) { Text(if (user == null) "Add a second profile" else "Open profiles") }
         }
     }
-    if (show) RootWizardDialog { show = false }
+    if (show) ProfileSetupPage { show = false }
 }
 
 @Composable
-private fun RootWizardDialog(onClose: () -> Unit) {
+private fun ProfileSetupPage(onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var step by rememberSaveable { mutableIntStateOf(0) }
-    var busy by remember { mutableStateOf(false) }
+    val progress by ProfileSetupRuntime.state.collectAsState()
+    var page by rememberSaveable { mutableIntStateOf(if (ProfileSetupRuntime.existingUser(context) != null) 3 else 0) }
+    var checking by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
-    var root by remember { mutableStateOf(RootProbe.status) }
-    var label by rememberSaveable { mutableStateOf("") }
-    var packageName by rememberSaveable { mutableStateOf("") }
-    var userId by rememberSaveable { mutableStateOf("0") }
-    var selected by rememberSaveable { mutableStateOf("") }
-    var profiles by rememberSaveable { mutableIntStateOf(0) }
-    var inventory by remember { mutableStateOf(emptyList<Workspace>()) }
-    var holder by remember { mutableStateOf("None — input paused") }
-    var picker by remember { mutableStateOf(false) }
-    var apps by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
-    var search by remember { mutableStateOf("") }
-    val current = RootWizardStep.entries[step]
-    fun command(tool: String, params: JSONObject = JSONObject(), done: (() -> Unit)? = null) {
-        busy = true; message = "Working…"
+    var apps by remember { mutableStateOf(emptyList<ProfileApp>()) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var registered by remember { mutableStateOf(emptyList<Workspace>()) }
+    fun refresh() { scope.launch {
+        withContext(Dispatchers.IO) { runCatching { Layer2Workspaces.initialize(context); Layer2Workspaces.engine.snapshot() }.getOrDefault(emptyList()) }
+            .also { registered = it }
+    } }
+    fun chooseApps() {
+        checking = true; message = "Checking your phone…"
         scope.launch {
-            val result = withContext(Dispatchers.IO) { PhoneToolExecutor.execute(context, PhoneToolRequest("setup-${UUID.randomUUID()}", tool, params)) }
-            busy = false
-            message = if (result.ok) "Done" else result.error?.message ?: "Could not complete this step"
-            if (result.ok) done?.invoke()
+            val root = withContext(Dispatchers.IO) { RootProbe.check() }
+            if (root == RootStatus.ROOTED) {
+                apps = withContext(Dispatchers.IO) { ProfileSetupRuntime.apps(context) }
+                page = 1; message = ""
+            } else {
+                message = "Your phone hasn’t allowed extra profiles. You can keep using Profile A. If your phone already has root access, allow Cyclone when it asks, then try again."
+            }
+            checking = false
         }
     }
-    fun open(intent: Intent) {
-        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            .onFailure { message = "Android could not open this screen. Try Settings on your phone." }
-    }
-    LaunchedEffect(Unit) {
-        while (true) {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    Layer2Workspaces.initialize(context)
-                    Layer2Workspaces.engine.snapshot() to Layer2Workspaces.engine.holder()
+    LaunchedEffect(progress.ready) { if (progress.ready) { page = 3; refresh() } }
+    LaunchedEffect(Unit) { refresh() }
+    Dialog(onDismissRequest = { if (progress.busy) ProfileSetupRuntime.stop(); onClose() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().systemBarsPadding()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { if (progress.busy) ProfileSetupRuntime.stop(); if (page == 1 || page == 2) { page--; message = "" } else onClose() }) { Text("Back") }
+                    Text("Your profiles", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    IconButton(onClick = { if (progress.busy) ProfileSetupRuntime.stop(); onClose() }) { Icon(Icons.Rounded.Close, "Close profiles") }
                 }
-            }.onSuccess { (list, lease) -> inventory = list; holder = lease?.workspaceId ?: "None — input paused" }
-                .onFailure { message = it.message.orEmpty() }
-            delay(800)
-        }
-    }
-    Dialog(onDismissRequest = onClose) {
-        Surface(shape = RoundedCornerShape(28.dp)) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 680.dp).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Root features", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "Close Root features") }
-                }
-                LinearProgressIndicator(progress = { (step + 1) / 5f }, modifier = Modifier.fillMaxWidth())
-                Text("${step + 1} of 5 · ${current.title}", style = MaterialTheme.typography.titleMedium)
-                when (current) {
-                    RootWizardStep.ROOT -> {
-                        Text(root.label, style = MaterialTheme.typography.headlineSmall)
-                        Text("Cyclone checks existing root access. Android may ask you to allow the check. This never installs root or changes your boot image.")
-                        if (root != RootStatus.ROOTED) Text("You can still prepare profiles and register ordinary apps. Cross-profile control stays locked until the phone can verify the correct profile.")
-                    }
-                    RootWizardStep.PROFILES -> {
-                        Text("Choose one isolation provider. Create the profile there, install your app, and return. Availability and the number of profiles depend on Android and your phone.")
-                        OutlinedButton(onClick = { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/en/packages/net.typeblog.shelter/"))) }) { Text("Open Shelter") }
-                        OutlinedButton(onClick = { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.oasisfeng.island"))) }) { Text("Open Island") }
-                        OutlinedButton(onClick = { open(Intent(Settings.ACTION_SETTINGS)) }) { Text("OEM Dual Apps / clones") }
-                        Text("In your phone's Settings, search for Dual Apps, App Clone or Dual Messenger. Clones need a distinct package or a verifiable Android profile.", style = MaterialTheme.typography.bodySmall)
-                        listOf("Profile A · main app", "Profile B · isolated app", "Profile C · optional extra clone").forEachIndexed { index, title ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = profiles and (1 shl index) != 0, onCheckedChange = { profiles = profiles xor (1 shl index) })
-                                Text(title)
+                LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(22.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    item {
+                        Surface(shape = RoundedCornerShape(30.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                            Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface))).padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(if (page == 0) "YOUR EVERYDAY SPACE" else "A FRESH START", style = MaterialTheme.typography.labelMedium)
+                                Text(when { progress.busy -> "Making room for you"; page == 1 -> "Which apps?"; page == 2 -> "Ready to create?"; page == 3 -> "Two spaces. One phone."; else -> "You’re in Profile A" }, style = MaterialTheme.typography.headlineLarge)
+                                Text(when { progress.busy -> "We’ll take care of the setup."; page == 1 -> "Pick the apps you want in Profile B."; page == 2 -> "Your selected apps will start fresh in Profile B. You’ll sign in there separately."; page == 3 -> "Choose an app from your second profile below."; else -> "Want a second space for different accounts? Your current apps and photos stay right here." })
                             }
                         }
                     }
-                    RootWizardStep.REGISTER -> {
-                        OutlinedTextField(label, { label = it }, label = { Text("Workspace label") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(packageName, { packageName = it }, label = { Text("App package") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(userId, { userId = it }, label = { Text("Android user ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        OutlinedButton(onClick = {
-                            picker = !picker
-                            scope.launch {
-                                apps = withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        val user = context.getSystemService(UserManager::class.java).userProfiles.firstOrNull { it.identifier == userId.toIntOrNull() }
-                                            ?: error("Profile is not accessible")
-                                        context.getSystemService(LauncherApps::class.java).getActivityList(null, user)
-                                            .map { it.label.toString() to it.componentName.packageName }.distinctBy { it.second }.sortedBy { it.first.lowercase() }
-                                    }.getOrDefault(emptyList())
+                    if (progress.busy) {
+                        item {
+                            Text(progress.message, style = MaterialTheme.typography.titleMedium)
+                            LinearProgressIndicator(progress = { progress.completed.toFloat() / progress.total }, modifier = Modifier.fillMaxWidth())
+                            TextButton(onClick = { ProfileSetupRuntime.stop() }) { Text("Pause setup") }
+                        }
+                    } else when (page) {
+                        0 -> item {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(onClick = { chooseApps() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) { Text("Yes, create Profile B") }
+                                OutlinedButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Keep one profile") }
+                            }
+                        }
+                        1 -> {
+                            item { OutlinedTextField(query, { query = it }, label = { Text("Find an app") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) }
+                            if (apps.isEmpty()) item { Text("No apps found yet. Install the apps you want on this phone first.") }
+                            items(apps.filter { it.label.contains(query, true) }, key = { it.packageName }) { app ->
+                                Surface(onClick = { selected = if (app.packageName in selected) selected - app.packageName else selected + app.packageName }, shape = RoundedCornerShape(20.dp), tonalElevation = 1.dp) {
+                                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        val icon = remember(app.packageName) { runCatching { context.packageManager.getApplicationIcon(app.packageName) }.getOrNull() }
+                                        AndroidView(factory = { ImageView(it) }, update = { it.setImageDrawable(icon); it.contentDescription = null }, modifier = Modifier.size(40.dp))
+                                        Text(app.label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                                        Checkbox(app.packageName in selected, onCheckedChange = { selected = if (it) selected + app.packageName else selected - app.packageName })
+                                    }
                                 }
                             }
-                        }) { Text("Choose installed app") }
-                        if (picker) {
-                            OutlinedTextField(search, { search = it }, label = { Text("Search apps") }, modifier = Modifier.fillMaxWidth())
-                            if (apps.isEmpty()) Text("No apps visible for this profile. You can enter its package manually.")
-                            apps.filter { it.first.contains(search, true) || it.second.contains(search, true) }.take(12).forEach { (name, pkg) ->
-                                TextButton(onClick = { packageName = pkg; if (label.isBlank()) label = name; picker = false }) { Text("$name · $pkg") }
+                        }
+                        2 -> item {
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Text("${selected.size} apps · separate accounts · fresh app data", style = MaterialTheme.typography.titleMedium)
+                                Text("Your existing apps and their data stay in Profile A. Creating another profile uses extra storage. Android may limit how many profiles this phone can have.")
+                                Button(onClick = { message = ""; ProfileSetupRuntime.create(context, apps.filter { it.packageName in selected }) }, modifier = Modifier.fillMaxWidth()) { Text("Create Profile B") }
+                                TextButton(onClick = { page = 1 }) { Text("Change apps") }
                             }
                         }
-                        Text("Registered: ${inventory.size}. Use one entry for each app/profile pair.", style = MaterialTheme.typography.bodySmall)
-                    }
-                    RootWizardStep.SWITCH -> {
-                        Text("Choose a workspace. Cyclone releases input, opens the app, and checks its package and profile before granting the lock. Return to Setup to see the result.")
-                        if (inventory.isEmpty()) Text("Register a workspace first.")
-                        inventory.forEach { w ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected == w.id, { selected = w.id })
-                                Column { Text(w.label); Text("${w.appPackage} · user ${w.androidUserId}", style = MaterialTheme.typography.bodySmall) }
+                        3 -> {
+                            val profileId = ProfileSetupRuntime.existingUser(context)
+                            val second = registered.filter { it.androidUserId == profileId }
+                            item { Text("PROFILE B", style = MaterialTheme.typography.labelLarge) }
+                            if (second.isEmpty()) item { Text("Finish choosing apps to prepare your second profile.") }
+                            items(second, key = { it.id }) { workspace ->
+                                FilledTonalButton(onClick = {
+                                    if (com.cyclone.mobile.CycloneAccessibilityService.instance == null) {
+                                        message = "Allow phone control so Cyclone can open the right profile."
+                                        context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                    } else scope.launch {
+                                        message = "Opening ${workspace.label}…"
+                                        val result = withContext(Dispatchers.IO) { SessionKernel.switchWorkspace(context, workspace.id) }
+                                        message = if (result.ok) "Opened ${workspace.label} in Profile B" else "Couldn’t safely open that app. Make sure Profile B is on and unlocked, then try again."
+                                    }
+                                }, modifier = Modifier.fillMaxWidth()) { Text("Open ${workspace.label}") }
+                            }
+                            item {
+                                OutlinedButton(onClick = { chooseApps() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) { Text("Add apps / finish setup") }
+                                TextButton(onClick = onClose) { Text("Done") }
                             }
                         }
                     }
-                    RootWizardStep.LOCK -> {
-                        Text("Input owner", style = MaterialTheme.typography.labelLarge)
-                        Text(holder, style = MaterialTheme.typography.titleMedium)
-                        Text("Only one workspace can act at a time. Pausing invalidates its lease; switching back requires a fresh screen check.")
-                        OutlinedButton(onClick = { command("workspace.pause") }, enabled = !busy) { Text("Pause / release lock") }
-                        OutlinedButton(onClick = { command("workspace.release") }, enabled = !busy) { Text("Stop queue and use main screen") }
+                    if (checking) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                    if (message.isNotBlank()) item { Text(message, style = MaterialTheme.typography.bodyMedium) }
+                    if (!progress.busy && !progress.ready && progress.message.isNotBlank()) item {
+                        Text(progress.message, color = MaterialTheme.colorScheme.error)
                     }
                 }
-                if (message.isNotEmpty()) Text(message, style = MaterialTheme.typography.bodySmall)
-                if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                Button(enabled = !busy && (current != RootWizardStep.SWITCH || selected.isNotBlank()), modifier = Modifier.fillMaxWidth(), onClick = {
-                    when (current) {
-                        RootWizardStep.ROOT -> { busy = true; scope.launch { root = withContext(Dispatchers.IO) { RootProbe.check() }; busy = false; message = "Check complete: ${root.label}" } }
-                        RootWizardStep.PROFILES -> { step++; message = "" }
-                        RootWizardStep.REGISTER -> {
-                            val id = "profile-${UUID.randomUUID()}"
-                            val user = userId.toIntOrNull()
-                            if (user == null || user < 0) message = "Enter a valid Android user ID"
-                            else command("workspace.register", JSONObject().put("id", id).put("label", label.trim()).put("appPackage", packageName.trim()).put("androidUserId", user)) { selected = id; message = "Workspace saved. Add another, or continue to Test switch." }
-                        }
-                        RootWizardStep.SWITCH -> command("workspace.switch", JSONObject().put("id", selected)) { step = RootWizardStep.LOCK.ordinal; message = "Switch verified. Return to the target app before agent input." }
-                        RootWizardStep.LOCK -> onClose()
-                    }
-                }) { Text(current.action) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    if (step > 0) TextButton(onClick = { step--; message = "" }, enabled = !busy) { Text("Back") }
-                    if (step < 4 && current != RootWizardStep.PROFILES) TextButton(onClick = { step++; message = "" }, enabled = !busy) { Text("Continue") }
-                }
+                if (page == 1 && !progress.busy) Button(onClick = { page = 2 }, enabled = selected.isNotEmpty() && selected.size <= 50,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 16.dp)) { Text("Continue with ${selected.size} apps") }
             }
         }
     }

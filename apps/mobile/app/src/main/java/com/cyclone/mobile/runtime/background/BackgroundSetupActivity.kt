@@ -9,6 +9,11 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,18 +60,39 @@ private enum class InstallPhase { READY, CONFIRM, INSTALLING, INSTALLED, BLOCKED
 private enum class InstallStep { INSTALL_SHIZUKU, START_SHIZUKU, AUTHORIZE_SHIZUKU, ACCESSIBILITY, NOTIFICATIONS }
 
 class BackgroundSetupActivity : ComponentActivity() {
+    private var installMessage by mutableStateOf<String?>(null)
+    private val installer = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        installMessage = if (BackgroundSetup.read(this).installed) null else "Installation paused. Tap Continue when you’re ready, or go back."
+    }
+    private val allowDownloads = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (packageManager.canRequestPackageInstalls()) openDownloadedInstaller()
+        else installMessage = "Installation paused. Android needs your permission to install the helper."
+    }
+    private fun openDownloadedInstaller() {
+        runCatching {
+            if (!packageManager.canRequestPackageInstalls()) {
+                allowDownloads.launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            } else {
+                val uri = FileProvider.getUriForFile(this, "$packageName.setup-helper", OfficialHelperDownload.file(this))
+                installer.launch(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            }
+        }.onFailure { installMessage = "Android couldn’t open the installer. You can retry or go back." }
+    }
     private fun open(intent: Intent) {
         runCatching { startActivity(intent) }.onFailure {
             Toast.makeText(this, "Android could not open that approval screen. Tap Continue installation to retry.", Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun openShizukuInstall() {
-        open(Intent(Intent.ACTION_VIEW, Uri.parse(
-            "https://github.com/RikkaApps/Shizuku/releases/download/v13.6.0/shizuku-v13.6.0.r1086.2650830c-release.apk")))
+    private suspend fun openShizukuInstall() {
+        installMessage = "Downloading the verified helper…"
+        withContext(Dispatchers.IO) { OfficialHelperDownload.download(this@BackgroundSetupActivity) }
+        installMessage = "Tap Install on Android’s next screen. Your setup continues when you return."
+        openDownloadedInstaller()
     }
 
-    private fun launchInstallStep(step: InstallStep) {
+    private suspend fun launchInstallStep(step: InstallStep) {
         when (step) {
             InstallStep.INSTALL_SHIZUKU -> openShizukuInstall()
             InstallStep.START_SHIZUKU -> {
@@ -129,11 +155,15 @@ class BackgroundSetupActivity : ComponentActivity() {
                     val launchKey = nextStep to retryNonce
                     if (lastLaunchKey != launchKey) {
                         lastLaunchKey = launchKey
-                        launchInstallStep(nextStep)
+                        try { launchInstallStep(nextStep) }
+                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (error: Exception) { installMessage = error.message ?: "Setup paused. Please retry." }
                     }
                 }
 
+                BackHandler { phase = InstallPhase.READY; finish() }
                 InstallerScreen(
+                    installMessage = installMessage,
                     phase = phase,
                     status = status,
                     step = nextStep,
@@ -145,7 +175,7 @@ class BackgroundSetupActivity : ComponentActivity() {
                         retryNonce = 0
                         phase = InstallPhase.INSTALLING
                     },
-                    onRetry = { retryNonce++ },
+                    onRetry = { installMessage = null; retryNonce++ },
                     onDone = { finish() },
                 )
             }
@@ -195,6 +225,7 @@ private fun installStepHint(step: InstallStep?): String = when (step) {
 
 @Composable
 private fun InstallerScreen(
+    installMessage: String?,
     phase: InstallPhase,
     status: BackgroundReadiness,
     step: InstallStep?,
@@ -212,9 +243,7 @@ private fun InstallerScreen(
             .systemBarsPadding()
             .padding(horizontal = 22.dp, vertical = 18.dp),
     ) {
-        if (true) {
-            TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) { Text("Back") }
-        }
+        TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) { Text("Back") }
 
         Surface(
             modifier = Modifier.fillMaxWidth().align(Alignment.Center),
@@ -231,7 +260,7 @@ private fun InstallerScreen(
                         StatusOrb("↓")
                         Text("Background tasks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            "One install gives Cyclone a separate app screen so it can work while you keep using your phone.",
+                            "Want Cyclone to work while you keep using your phone? We’ll prepare a separate screen for its tasks.",
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -272,7 +301,7 @@ private fun InstallerScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Text(
-                            installStepHint(step),
+                            installMessage ?: installStepHint(step),
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -304,9 +333,9 @@ private fun InstallerScreen(
 
                     InstallPhase.BLOCKED -> {
                         StatusOrb("!")
-                        Text("Android update required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("Use Cyclone on this screen", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(
-                            "Background tasks need Android 15 or later on this phone.",
+                            "Cyclone works on this Android version. Working on a separate screen needs Android 15 or later. You can still use app profiles and ask Cyclone to work on the screen in front of you.",
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

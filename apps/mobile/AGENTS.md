@@ -6,7 +6,7 @@ This module is the Android product. Keep changes focused on the current runtime 
 
 - Package: `com.cyclone.mobile`
 - Launcher: `.MainActivity`
-- Android 14+ (`minSdk 34`)
+- Android 13+ (`minSdk 33`); isolated background displays require Android 15+
 - `PhoneToolExecutor` is the canonical phone mutation path.
 - Re-observe after page-changing actions. Ordinary taps use Fast Path fingerprint settle; Unchanged is not a second click.
 - Prefer `phone.open_app` / intent landing and semantic selectors before coordinates or vision.

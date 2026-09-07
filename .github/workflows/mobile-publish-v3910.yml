@@ -191,7 +191,7 @@ jobs:
             --key-pass env:KEY_PASSWORD \
             --out "$output" \
             "$input"
-          "$apksigner" verify --min-sdk-version 34 --verbose --print-certs "$output" | tee signed/signing-info.txt
+          "$apksigner" verify --min-sdk-version 33 --verbose --print-certs "$output" | tee signed/signing-info.txt
           "$aapt" dump badging "$output" | tee "$RUNNER_TEMP/badging.txt"
           grep -q "package: name='com.cyclone.mobile'" "$RUNNER_TEMP/badging.txt"
           grep -q "versionCode='${{ steps.version.outputs.code }}'" "$RUNNER_TEMP/badging.txt"

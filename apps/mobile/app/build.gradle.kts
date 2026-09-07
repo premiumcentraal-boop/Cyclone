@@ -9,7 +9,7 @@ android {
     compileSdk = 35
     defaultConfig {
         applicationId = "com.cyclone.mobile"
-        minSdk = 34
+        minSdk = 33
         targetSdk = 35
         versionCode = 75
         versionName = "4.0.4"

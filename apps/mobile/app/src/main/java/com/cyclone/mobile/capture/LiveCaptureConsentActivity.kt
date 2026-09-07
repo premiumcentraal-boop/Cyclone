@@ -35,7 +35,7 @@ class LiveCaptureConsentActivity : Activity() {
         runCatching {
             val manager = getSystemService(MediaProjectionManager::class.java)
             consentLaunched = true
-            startActivityForResult(if (wholeDisplay) manager.createScreenCaptureIntent(
+            startActivityForResult(if (wholeDisplay && android.os.Build.VERSION.SDK_INT >= 34) manager.createScreenCaptureIntent(
                 MediaProjectionConfig.createConfigForDefaultDisplay()) else manager.createScreenCaptureIntent(), CONSENT)
         }.onFailure {
             LiveCaptureSessionManager.transition(generation, ScreenSharePhase.ERROR, "Screen sharing is unavailable. Try again.")
