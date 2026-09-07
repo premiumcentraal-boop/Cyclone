@@ -1,6 +1,6 @@
 # Cyclone coding-agent guide
 
-Cyclone's active baseline is the V4 **4.0.0** Session OS + Cyclone One **1.0.0** on the 3.9.12 workspace plus Stage 1 Fast Path, Stage 2 Session Kernel, Stage 3 Skill Compiler and Stage 4 One glass. Do not reconstruct retired V2/V3 plans, the old Core/Desktop control plane, Teamwork Sniper experiments or version-specific handoff documents unless a task explicitly asks for historical research.
+Cyclone's active baseline is Mobile **4.1.0** Session Contract on published **4.0.4** / V4 **4.0.0** Session OS + Cyclone One **1.0.0** (foreground). Full Layer 2 MCP needs One ≥ 1.1.0 (A5). Do not reconstruct retired V2/V3 plans, the old Core/Desktop control plane, Teamwork Sniper experiments or version-specific handoff documents unless a task explicitly asks for historical research.
 
 ## Read first
 

@@ -4,9 +4,9 @@
 
 This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-## Current baseline — Cyclone 4.0.0 (V4 Session OS) + Cyclone One 1.0.0
+## Current baseline — Cyclone Mobile 4.1.0 (Session Contract) on V4 + 4.0.4
 
-Mobile identity is `4.0.0` / versionCode `71` on the published **3.9.12** Background Intelligence foundation plus Stage 1 Fast Path, Stage 2 Session Kernel, Stage 3 Skill Compiler and Stage 4 Cyclone One glass (one Shizuku workspace, Take control / Continue, GATE confirm; a11y-first Page Cards, 300ms settle + fingerprint ladder; display-scoped `sessionId` + `displayId`; learn→compile→replay; JPEG-first live view, human/AI handoff, session tiles bound to `session_id`, MCP observe/act require `session_id`). Phone remains the mutation engine. Cyclone One **1.0.0** is the paired glass/MCP companion. Physical Pixel 8 remains **UNVERIFIED**. See [V4 Stage 5 release lane](docs/V4_STAGE5_RELEASE.md), [V4 4.0.0 release notes](docs/RELEASE_V4.md), [V4 Stage 4 One glass](docs/V4_STAGE4_ONE_GLASS.md), [V4 Stage 3 Skill Compiler](docs/V4_STAGE3_SKILL_COMPILER.md), [V4 Stage 2 Session Kernel](docs/V4_STAGE2_SESSION_KERNEL.md) and [V4 Stage 1 Fast Path](docs/V4_STAGE1_FASTPATH.md).
+Mobile identity is `4.1.0` / versionCode `80` on published **4.0.4** (`v4.0.4`, versionCode 75) plus B1 sticky control, B2 dual-plane Session Contract, B3 task glass, and B4 Fast Path / skills on a named virtual display. V4 Session OS remains: a11y-first Page Cards, 300ms settle + fingerprint ladder, display-scoped `sessionId` + `displayId`, learn→compile→replay, GATE, Take control / Continue. Phone remains the mutation engine. Cyclone One **1.0.0** stays the paired glass for USB / default-foreground. Full Layer 2 MCP needs One ≥ **1.1.0** (separate A5 cut). Physical Pixel 8 remains **UNVERIFIED**. Tag `v4.1.0` is operator-after-CI and is not claimed here. See [Mobile 4.1.0 release lane](docs/MOBILE_4.1_STAGE5_RELEASE.md), [4.1.0 release notes](docs/RELEASE_4.1.md), [V4 Stage 5](docs/V4_STAGE5_RELEASE.md) and [V4 4.0.0 notes](docs/RELEASE_V4.md).
 
 Cyclone 3.9.12 connected Ask Cyclone to isolated background app workspaces, with a compact running card, live View Progress, exact-task Take Control / Continue, local confirmation cards and preserved completed pages. Background work requires Android 15+, Shizuku and a compatible app; the PC companion remains optional. See [the 3.9.12 release notes](docs/RELEASE_3.9.12.md) for that behavior and device-testing limits.
 
@@ -34,7 +34,7 @@ Cyclone 3.9.9 focuses on trustworthy standalone execution, cancellation safety, 
 
 Android package: `com.cyclone.mobile`  
 Minimum Android: 13 (API 33); isolated background displays require Android 15+
-Current mobile identity: `4.0.0` / versionCode `71` (V4 Session OS + Cyclone One 1.0.0 pairing; 3.9.12 workspace + Fast Path + Session Kernel + Skill Compiler + One glass retained)
+Current mobile identity: `4.1.0` / versionCode `80` (Session Contract Mobile on 4.0.4; Cyclone One 1.0.0 remains foreground-capable; Pixel UNVERIFIED; tag `v4.1.0` is operator-after-CI)
 
 The product has two deliverables: the Android APK and the optional Windows PC companion.
 Internal API models run from the phone with internet access and an API key; PC pairing is not
