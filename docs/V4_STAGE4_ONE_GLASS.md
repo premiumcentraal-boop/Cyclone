@@ -87,4 +87,4 @@ Physical Pixel 8 remains **UNVERIFIED**.
 
 ## Stage 5 handoff
 
-Stage 4 remains **DONE**. Do not restart Stage 4. Stage 5 is the V4 release lane (`docs/V4_BUILD_PLAN.md`): `v4.0.0` / Cyclone One 1.0 pairing, CI tags, release notes, physical checklist. Do not cut `v4.0.0` in this PR. Do not claim physical evidence from CI.
+Stage 4 remains **DONE**. Do not restart Stage 4. Stage 5 is DONE in the follow-on PR (this one): mobile `4.0.0` / versionCode 71 paired with Cyclone One `1.0.0`, CI tags, release notes, physical checklist (`docs/V4_STAGE5_RELEASE.md`). Do not claim physical evidence from CI. Do not claim the GitHub tag already exists.

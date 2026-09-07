@@ -30,7 +30,7 @@ Deliverables:
 Acceptance: unit/integration tests for settle/fingerprint/nav-isolation; honest UNVERIFIED for physical; PR open.
 Out of scope: multi-VD scale-out, skill compiler, One V4 packaging, Magisk.
 
-### Stage 2 — Session Kernel (DONE)
+### Stage 2 — Session Kernel (DONE — PR #60)
 Branch: `grok/cyclone-v4-s2-session` from Stage 1.
 Goal: Display-scoped session identity so Fast Path never crosses displays; MCP/Cyclone One can bind `session_id` later (Stage 4).
 Deliverables:
@@ -44,7 +44,7 @@ Acceptance: unit tests for display-scoped inject, flags, no cross-session action
 Out of scope: Skill compiler (S3), Cyclone One tiles/installer (S4), Magisk, requiring MCP `session_id` (Stage 4), claiming 20 concurrent VDs.
 Handoff: Stage 3 Skill Compiler is DONE in the follow-on PR; compile playbooks per package **and** per session/display. Do not restart Stage 2.
 
-### Stage 3 — Skill Compiler (DONE — THIS PR)
+### Stage 3 — Skill Compiler (DONE — PR #61)
 Branch: `grok/cyclone-v4-s3-skills` from Stage 2.
 Goal: Learn NL playbooks per package like Sanna, then compile stable Fast Path paths into deterministic PhoneToolExecutor routes so ordinary UI runs skip the LLM. Vision / Fast Path LLM only on miss.
 Deliverables:
@@ -58,7 +58,7 @@ Acceptance: unit tests for store/compile/replay/miss-escalate; honest UNVERIFIED
 Out of scope: Cyclone One tiles/installer (S4), Magisk, 20 hot LLM agents, requiring MCP `session_id` (Stage 4).
 Handoff: Stage 4 Cyclone One glass. MCP may require `session_id`; compiled skills already carry session/display. Do not start Stage 4 in this PR.
 
-### Stage 4 — Cyclone One V4 glass (DONE — THIS PR)
+### Stage 4 — Cyclone One V4 glass (DONE — PR #62)
 Branch: `grok/cyclone-v4-s4-one` from Stage 3.
 Goal: Cyclone One is glass/MCP, not a second brain. Phone owns Fast Path / Session Kernel / Skill Compiler.
 Deliverables:
@@ -72,16 +72,21 @@ Acceptance: unit/contract tests for JPEG-first, handoff, session tiles/events, M
 Out of scope: `v4.0.0` / One 1.0 (Stage 5), Magisk, 20 concurrent VLMs, rewriting Stage 1–3.
 Handoff: Stage 5 V4 release lane. Do not start Stage 5 in this PR.
 
-### Stage 5 — V4 release lane
-`v4.0.0` / Cyclone One 1.0 pairing, CI tags, release notes, physical checklist. Do not start until Stage 4 PR exists.
+### Stage 5 — V4 release lane (DONE — THIS PR)
+Branch: `grok/cyclone-v4-s5-release` from Stage 4 tip `4ad2667`.
+Goal: Cut the V4 Session OS packaging identity — mobile **4.0.0** / versionCode **71** paired with Cyclone One **1.0.0** — without rewriting Stages 1–4.
+Deliverables:
+1. Identity: mobile **4.0.0** / versionCode **71**; Cyclone One **1.0.0**; gateway/MCP **4.0.0**. Drop `-alpha.N`.
+2. Release notes `docs/RELEASE_V4.md` (Session OS story, upgrade notes, physical checklist). Handoff `docs/V4_STAGE5_RELEASE.md` (merge order + operator cut path). Do not duplicate the notes in this plan.
+3. Physical Pixel 8 checklist remains **UNVERIFIED** (USB / Shizuku / JPEG live / take-control / skill replay). CI green is not device evidence.
+4. CI/tag path: after stack merge, push `release/cyclone-mobile-v4.0.0` so Mobile CI fires; wait for `.github/workflows/mobile-ci.yml` success; dispatch `.github/workflows/mobile-release.yml` with that run id + artifact name; dispatch `.github/workflows/pc-companion-release.yml` for One 1.0.0 NSIS; dry-run `python scripts/ci/cut_v4_release.py`; create GitHub Release `v4.0.0` only when CI is green. Never force-push; never replace an existing `v4.0.0`. Do not claim the GitHub tag already exists.
+5. `publication_authorized` stays **false** until a signed artifact and physical evidence exist.
+Acceptance: identity coherent; notes + handoff present; physical UNVERIFIED stated honestly; operator cut path documented; tag not claimed in this PR.
+Out of scope: Magisk, 20 concurrent VLMs, inventing a physical pass, rewriting Stages 1–4, merging other PRs.
 
 ## Coordination rule
 Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent orchestrator only starts next stage after PR exists.
 
 ## Orchestrator coordination (user 2026-09-07)
 - Check progress about **every 30 minutes**; advance **one stage at a time** through to a **V4 release**.
-- **Stage 5** is the current run (V4 release lane). Do not restart Stages 1-4. Stage 5 Grok MUST use **subagents**. After this PR + 4.0.0 cut, orchestrator can retire the 30m V4 push routine.
-
-
-
-
+- **Stage 5** is this PR (V4 release lane). Do not restart Stages 1-4. Stage 5 Grok MUST use **subagents**. After merge + `v4.0.0` cut, the 30m V4 push routine can retire. Do not claim the GitHub tag already exists.
