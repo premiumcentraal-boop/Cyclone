@@ -4,6 +4,7 @@ from dataclasses import asdict
 import importlib.util
 import json
 import os
+from pathlib import Path
 import urllib.error
 import urllib.request
 from typing import Any
@@ -15,6 +16,15 @@ from .cyclone_bridge.client import (
     BridgeOperationError,
     BridgeProtocolError,
     CycloneBridgeClient,
+)
+from .tooling_seam import (
+    CURSOR_SERVER_KEY,
+    PRODUCT_LEGACY_COMPANION,
+    PRODUCT_ONE,
+    apply_gateway_env,
+    cursor_mcp_path,
+    detect_legacy_companion,
+    session_secret_persisted,
 )
 
 
@@ -39,6 +49,7 @@ class BridgeDoctor:
         self.bridge_factory = bridge_factory or CycloneBridgeClient
 
     def run(self) -> dict[str, Any]:
+        apply_gateway_env(self.env)
         checks: dict[str, dict[str, Any]] = {}
         selected: ADBDevice | None = None
         bridge_status: dict[str, Any] | None = None
@@ -136,17 +147,26 @@ class BridgeDoctor:
 
         pc_gateway_status, pc_gateway_detail = self._pc_gateway_check()
         checks["PC Gateway"] = self._check(pc_gateway_status, pc_gateway_detail)
+        pc_bearer_status, pc_bearer_detail = self._pc_bearer_check()
+        checks["PC Bearer"] = self._check(pc_bearer_status, pc_bearer_detail)
+        install_status, install_detail = self._install_path_check()
+        checks["Install Path"] = self._check(install_status, install_detail)
+        cursor_status, cursor_detail = self._cursor_mcp_check()
+        checks["Cursor MCP"] = self._check(cursor_status, cursor_detail)
 
         mcp_ready = importlib.util.find_spec("cyclone_phone_mcp") is not None
         checks["MCP"] = self._check(READY if mcp_ready else ERROR, "cyclone_phone_mcp is installed" if mcp_ready else "Install tools/codex-phone-mcp into the bridge virtual environment")
 
         bad = {MISSING, UNAUTHORIZED, OFF, BROKEN, ERROR, TOKEN_MISMATCH}
         overall = READY if all(item["status"] not in bad for item in checks.values()) else DEGRADED
+        persisted = self._session_secret_persisted()
         return {
             "schema": "cyclone.bridge.doctor.v1",
+            "product": PRODUCT_ONE,
             "overall": overall,
             "checks": checks,
             "device": asdict(selected) if selected is not None else None,
+            "sessionSecretPersisted": persisted,
             "security": {
                 "pc_http_loopback_only": True,
                 "android_transport": "adb-forwarded-localabstract",
@@ -157,6 +177,7 @@ class BridgeDoctor:
         }
 
     def _pc_gateway_check(self) -> tuple[str, str]:
+        apply_gateway_env(self.env)
         token = (self.env.get("CYCLONE_DEVICE_GATEWAY_TOKEN") or "").strip()
         if not token:
             return ERROR, "PC Gateway token is not configured for this process"
@@ -175,6 +196,61 @@ class BridgeDoctor:
         except Exception:
             return ERROR, "PC Gateway is not running on the configured loopback URL"
 
+    def _pc_bearer_check(self) -> tuple[str, str]:
+        persisted = self._session_secret_persisted()
+        env_token = bool((self.env.get("CYCLONE_DEVICE_GATEWAY_TOKEN") or "").strip())
+        if persisted:
+            return READY, "PC gateway bearer is persisted; sessionSecretPersisted=true"
+        if env_token:
+            return READY, "PC gateway bearer is present in this process; start Cyclone One to persist it"
+        return ERROR, "PC gateway bearer is not persisted; start Cyclone One once"
+
+    @staticmethod
+    def _install_path_check() -> tuple[str, str]:
+        try:
+            legacy = detect_legacy_companion()
+        except Exception:
+            return DEGRADED, "Could not inspect Cyclone One install path"
+        detail = str(legacy.get("detail") or "")
+        if legacy.get("warn"):
+            return DEGRADED, detail
+        return READY, detail
+
+    def _cursor_mcp_check(self) -> tuple[str, str]:
+        path = self._cursor_mcp_file()
+        if not path.is_file():
+            return DEGRADED, "Cursor mcp.json not written yet; start Cyclone One"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return DEGRADED, "Cursor mcp.json is unreadable; start Cyclone One"
+        servers = payload.get("mcpServers") if isinstance(payload, dict) else None
+        if not isinstance(servers, dict) or CURSOR_SERVER_KEY not in servers:
+            return DEGRADED, "Cursor mcp.json is missing mcpServers.cyclone-phone; start Cyclone One"
+        server = servers.get(CURSOR_SERVER_KEY)
+        if isinstance(server, str):
+            command = server
+        elif isinstance(server, dict):
+            command = str(server.get("command") or "")
+        else:
+            command = ""
+        if PRODUCT_LEGACY_COMPANION.lower() in command.replace("/", "\\").lower():
+            return ERROR, "Cursor mcp.json still points at Cyclone PC Companion"
+        return READY, "Cursor mcp.json points at Cyclone One"
+
+    def _cursor_mcp_file(self) -> Path:
+        override = (self.env.get("CYCLONE_CURSOR_MCP_PATH") or "").strip()
+        if override:
+            return Path(override).expanduser()
+        return cursor_mcp_path()
+
+    @staticmethod
+    def _session_secret_persisted() -> bool:
+        try:
+            return bool(session_secret_persisted())
+        except Exception:
+            return False
+
     @staticmethod
     def _device_label(device: ADBDevice) -> str:
         model = f" ({device.model})" if device.model else ""
@@ -189,7 +265,7 @@ def format_human(report: dict[str, Any]) -> str:
     lines = [f"Cyclone Bridge Doctor: {report['overall']}", ""]
     for name in (
         "ADB", "Phone", "Cyclone APK", "Android Gateway", "Accessibility", "ADB Forward",
-        "PC Gateway", "Authentication", "Capabilities", "MCP",
+        "PC Gateway", "PC Bearer", "Install Path", "Cursor MCP", "Authentication", "Capabilities", "MCP",
     ):
         item = report["checks"][name]
         lines.append(f"{name:<20} {item['status']}")

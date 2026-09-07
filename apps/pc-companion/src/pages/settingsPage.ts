@@ -21,6 +21,11 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     service.mode === "mock" ? "Development mode" : "Starting…",
     service.mode === "mock" ? "Using mock phones for UI development." : "Checking the local Cyclone Gateway.",
   );
+  const installPath = statusCard(
+    "Install path",
+    "Cyclone One",
+    "Installs to %LOCALAPPDATA%\\Cyclone One. Uninstall Cyclone PC Companion 3.8.x if it remains beside One; doctor reports this.",
+  );
   const phones = statusCard(
     "Phones",
     `${devices.length} detected`,
@@ -73,7 +78,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   crashDiagnostics.append(diagnosticsPath, diagnosticsDetail, openDiagnostics);
 
   const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI or live crash monitor.");
-  cards.append(companion, phones, adb, autoDetect, bridgeRecovery, crashDiagnostics, connectionDiagnostics, privacy);
+  cards.append(companion, installPath, phones, adb, autoDetect, bridgeRecovery, crashDiagnostics, connectionDiagnostics, privacy);
   page.append(header, cards);
 
   if (service.mode === "real") {
@@ -83,6 +88,9 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     }).catch(() => {
       diagnosticsPath.textContent = "Diagnostics folder is unavailable.";
     });
+    void invoke<string | null>("legacy_companion_warning").then((warning) => {
+      if (warning) setCard(installPath, "Needs attention", warning);
+    }).catch(() => { /* doctor still reports a leftover companion */ });
   } else {
     diagnosticsPath.textContent = "Available in the packaged PC Companion.";
     openDiagnostics.disabled = true;

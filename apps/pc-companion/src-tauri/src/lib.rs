@@ -82,6 +82,27 @@ async fn connector_status(app: tauri::AppHandle) -> Result<serde_json::Value, St
 }
 
 #[tauri::command]
+fn legacy_companion_warning() -> Option<String> {
+    #[cfg(windows)]
+    {
+        let local = std::env::var_os("LOCALAPPDATA")?;
+        let path = std::path::PathBuf::from(local).join("Cyclone PC Companion");
+        if path.is_dir() {
+            Some(
+                "Cyclone PC Companion 3.8.x is installed beside Cyclone One. Prefer Cyclone One; uninstall the legacy companion so MCP points at the right runtime."
+                    .into(),
+            )
+        } else {
+            None
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[tauri::command]
 async fn connector_action(
     app: tauri::AppHandle,
     connector_id: String,
@@ -231,7 +252,8 @@ pub fn run() {
             diagnostics_folder,
             open_diagnostics_folder,
             connector_status,
-            connector_action
+            connector_action,
+            legacy_companion_warning
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyclone PC Companion");

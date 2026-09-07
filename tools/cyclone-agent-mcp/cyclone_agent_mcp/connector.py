@@ -17,6 +17,8 @@ from .profiles import (
     codex_toml,
     copilot_config_path,
     copilot_profile,
+    cursor_mcp_path,
+    cursor_profile,
     generic_profile,
     opencode_config_path,
     opencode_profile,
@@ -33,16 +35,56 @@ class ServerCommand:
     args: list[str]
 
 
+def _local_app_data() -> Path:
+    raw = os.getenv("LOCALAPPDATA", "").strip()
+    if raw:
+        return Path(raw)
+    return Path.home() / "AppData" / "Local"
+
+
+def _looks_like_legacy_companion(command: str) -> bool:
+    lowered = command.replace("/", "\\").lower()
+    return "cyclone pc companion" in lowered or "cyclone-pc-companion" in lowered
+
+
+def _one_mcp_executable() -> Path | None:
+    env_exe = os.getenv("CYCLONE_AGENT_MCP_EXE", "").strip()
+    if env_exe:
+        path = Path(env_exe).expanduser()
+        if not _looks_like_legacy_companion(str(path)):
+            return path
+    installed = _local_app_data() / "Cyclone One" / "CycloneAgentMCP.exe"
+    if installed.is_file():
+        return installed
+    return None
+
+
+def _prefer_one_command(command: str, args: list[str]) -> ServerCommand:
+    if not _looks_like_legacy_companion(command):
+        return ServerCommand(command, args)
+    one = _one_mcp_executable()
+    if one is not None:
+        return ServerCommand(str(one.resolve() if one.exists() else one), ["serve"])
+    return ServerCommand(sys.executable, ["-m", "cyclone_agent_mcp", "serve"])
+
+
 def resolve_server_command(explicit: str | None = None) -> ServerCommand:
     if explicit:
-        return ServerCommand(str(Path(explicit).expanduser().resolve()), ["serve"])
+        return _prefer_one_command(str(Path(explicit).expanduser().resolve()), ["serve"])
     env_exe = os.getenv("CYCLONE_AGENT_MCP_EXE")
     if env_exe:
-        return ServerCommand(str(Path(env_exe).expanduser().resolve()), ["serve"])
+        command = str(Path(env_exe).expanduser().resolve())
+        if not _looks_like_legacy_companion(command):
+            return ServerCommand(command, ["serve"])
     if getattr(sys, "frozen", False):
-        return ServerCommand(str(Path(sys.executable).resolve()), ["serve"])
+        command = str(Path(sys.executable).resolve())
+        if not _looks_like_legacy_companion(command):
+            return ServerCommand(command, ["serve"])
+    one = _one_mcp_executable()
+    if one is not None and one.is_file():
+        return ServerCommand(str(one.resolve()), ["serve"])
     sibling = Path(sys.executable).with_name("CycloneAgentMCP.exe")
-    if os.name == "nt" and sibling.exists():
+    if os.name == "nt" and sibling.exists() and not _looks_like_legacy_companion(str(sibling)):
         return ServerCommand(str(sibling.resolve()), ["serve"])
     return ServerCommand(sys.executable, ["-m", "cyclone_agent_mcp", "serve"])
 
@@ -76,6 +118,19 @@ def connect(host: str, *, dry_run: bool = False, executable: str | None = None) 
         if not dry_run:
             _merge_json(path, profile)
         return {"host": host, "installed": host_installed(host), "path": str(path), "dry_run": dry_run, "configuration": profile}
+    if host == "cursor":
+        path = cursor_mcp_path()
+        server = _prefer_one_command(server.command, server.args)
+        profile = cursor_profile(server.command, server.args, env=_cursor_gateway_env())
+        if not dry_run:
+            _merge_cursor_profile(path, profile)
+        return {
+            "host": host,
+            "installed": host_installed(host),
+            "path": str(path),
+            "dry_run": dry_run,
+            "configuration": profile,
+        }
     if host == "generic":
         return {"host": host, "path": None, "dry_run": True, "configuration": generic_profile(server.command, server.args)}
     raise ValueError(f"Unsupported connector host: {host}")
@@ -97,12 +152,18 @@ def disconnect(host: str, *, dry_run: bool = False) -> dict[str, Any]:
         return _disconnect_json(host, opencode_config_path(), ("mcp", "servers", SERVER_KEY), dry_run)
     if host == "copilot":
         return _disconnect_json(host, copilot_config_path(), ("mcpServers", SERVER_KEY), dry_run)
+    if host == "cursor":
+        return _disconnect_json(host, cursor_mcp_path(), ("mcpServers", SERVER_KEY), dry_run)
     if host == "generic":
         return {"host": host, "path": None, "dry_run": True, "changed": False}
     raise ValueError(f"Unsupported connector host: {host}")
 
 
 def host_installed(host: str) -> bool:
+    if host == "cursor":
+        if (Path.home() / ".cursor").exists():
+            return True
+        return shutil.which("cursor") is not None or shutil.which("cursor.exe") is not None
     executable = {"codex": "codex", "opencode": "opencode", "copilot": "copilot"}.get(host)
     if host == "codex":
         if shutil.which("codex") is not None or codex_config_path().parent.exists():
@@ -218,6 +279,45 @@ def _write_text_atomic(path: Path, text: str) -> None:
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _cursor_gateway_env() -> dict[str, str]:
+    sourced: dict[str, str] = {}
+    public: dict[str, str] = {}
+    try:
+        from cyclone_phone_mcp.tooling import apply_gateway_env
+
+        public = apply_gateway_env(sourced)
+    except Exception:
+        sourced = {}
+        public = {}
+    env: dict[str, str] = {}
+    for key in ("CYCLONE_DEVICE_GATEWAY_URL", "CYCLONE_DEVICE_GATEWAY_PORT", "CYCLONE_DEVICE_GATEWAY_RUNTIME"):
+        value = (os.getenv(key) or sourced.get(key) or public.get(key) or "").strip()
+        if value:
+            env[key] = value
+    env.pop("CYCLONE_DEVICE_GATEWAY_TOKEN", None)
+    return env
+
+
+def _merge_cursor_profile(path: Path, overlay: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    current: dict[str, Any] = {}
+    if path.exists():
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Configuration root is not an object: {path}")
+        current = loaded
+    servers = current.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+        current["mcpServers"] = servers
+    server = dict((overlay.get("mcpServers") or {}).get(SERVER_KEY) or {})
+    env = dict(server.get("env") or {})
+    env.pop("CYCLONE_DEVICE_GATEWAY_TOKEN", None)
+    server["env"] = env
+    servers[SERVER_KEY] = server
+    path.write_text(json.dumps(current, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _merge_json(path: Path, overlay: dict[str, Any]) -> None:

@@ -5,9 +5,11 @@ import json
 
 from .gateway import GatewayClient, GatewayError
 from .mcp_server import McpServer
+from .tooling import apply_gateway_env
 
 
 def main(argv: list[str] | None = None) -> int:
+    apply_gateway_env()
     parser = argparse.ArgumentParser(description="Cyclone Phone MCP server")
     parser.add_argument(
         "--self-test",

@@ -7,11 +7,12 @@ a = Analysis(
     pathex=[
         str(repo / "tools" / "cyclone-agent-mcp"),
         str(repo / "tools" / "codex-phone-mcp"),
+        str(repo / "apps" / "device-gateway"),
         str(entrypoints),
     ],
     binaries=[],
     datas=[],
-    hiddenimports=["mcp", "cyclone_phone_mcp", "secure_gateway_token"],
+    hiddenimports=["mcp", "cyclone_phone_mcp", "secure_gateway_token", "cyclone_device_gateway.tooling_seam"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

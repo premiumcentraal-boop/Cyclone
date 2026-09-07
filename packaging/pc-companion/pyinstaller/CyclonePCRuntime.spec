@@ -13,7 +13,7 @@ a = Analysis(
         (str(scrcpy / "LICENSE"), "third_party/scrcpy"),
         (str(scrcpy / "NOTICE.md"), "third_party/scrcpy"),
     ],
-    hiddenimports=["secure_gateway_token"],
+    hiddenimports=["secure_gateway_token", "cyclone_device_gateway.tooling_seam"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

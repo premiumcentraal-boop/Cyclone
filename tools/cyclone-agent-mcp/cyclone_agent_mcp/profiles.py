@@ -104,3 +104,29 @@ def opencode_config_path() -> Path:
 def copilot_config_path() -> Path:
     home = Path(os.getenv("COPILOT_HOME", str(Path.home() / ".copilot"))).expanduser()
     return home / "mcp-config.json"
+
+
+def cursor_mcp_path() -> Path:
+    override = os.getenv("CYCLONE_CURSOR_MCP_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".cursor" / "mcp.json"
+
+
+def cursor_profile(command: str, args: list[str], env: dict[str, str] | None = None) -> dict[str, Any]:
+    safe_env: dict[str, str] = {}
+    for key, value in dict(env or {}).items():
+        if key == "CYCLONE_DEVICE_GATEWAY_TOKEN":
+            continue
+        if value is None:
+            continue
+        safe_env[str(key)] = str(value)
+    return {
+        "mcpServers": {
+            SERVER_KEY: {
+                "command": command,
+                "args": list(args),
+                "env": safe_env,
+            }
+        }
+    }

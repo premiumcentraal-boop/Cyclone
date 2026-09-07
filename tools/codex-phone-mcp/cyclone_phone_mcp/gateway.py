@@ -33,8 +33,25 @@ class GatewayClient:
     """Authenticated V3 capability client for Cyclone's loopback-only PC gateway."""
 
     def __init__(self, base_url: str | None = None, token: str | None = None, timeout: float = 30.0):
-        self.base_url = (base_url or os.getenv("CYCLONE_DEVICE_GATEWAY_URL") or DEFAULT_BASE_URL).rstrip("/")
-        self.token = token if token is not None else os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "")
+        provided_token = token is not None
+        provided_url = base_url is not None
+        resolved_token = token if provided_token else os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "")
+        resolved_url = base_url if provided_url else os.getenv("CYCLONE_DEVICE_GATEWAY_URL")
+        if (not provided_token and not str(resolved_token or "").strip()) or (
+            not provided_url and not str(resolved_url or "").strip()
+        ):
+            try:
+                from .tooling import apply_gateway_env
+
+                apply_gateway_env()
+            except Exception:
+                pass
+            if not provided_token and not str(resolved_token or "").strip():
+                resolved_token = os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "")
+            if not provided_url and not str(resolved_url or "").strip():
+                resolved_url = os.getenv("CYCLONE_DEVICE_GATEWAY_URL")
+        self.base_url = (resolved_url or DEFAULT_BASE_URL).rstrip("/")
+        self.token = str(resolved_token or "")
         self.timeout = timeout
         parsed = urllib.parse.urlparse(self.base_url)
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
@@ -48,7 +65,7 @@ class GatewayClient:
     def _request(self, method: str, path: str, payload: Any | None = None) -> Any:
         if not self.token:
             raise GatewayError(
-                "CYCLONE_DEVICE_GATEWAY_TOKEN is not set",
+                "Gateway bearer is not persisted. Start Cyclone One so the local MCP can attach.",
                 body={"error": {"code": "AUTH_REJECTED", "layer": "PROTOCOL"}},
             )
         url = f"{self.base_url}{path}"

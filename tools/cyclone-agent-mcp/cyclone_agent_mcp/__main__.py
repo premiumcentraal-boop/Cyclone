@@ -19,14 +19,14 @@ def _parser() -> argparse.ArgumentParser:
 
     for action in ("connect", "disconnect"):
         cmd = sub.add_parser(action)
-        cmd.add_argument("host", choices=["codex", "opencode", "copilot", "generic"])
+        cmd.add_argument("host", choices=["codex", "opencode", "copilot", "cursor", "generic"])
         cmd.add_argument("--dry-run", action="store_true")
         if action == "connect":
             cmd.add_argument("--executable")
             cmd.add_argument("--verify", action="store_true")
 
     copy = sub.add_parser("copy-config")
-    copy.add_argument("host", choices=["codex", "opencode", "copilot", "generic"])
+    copy.add_argument("host", choices=["codex", "opencode", "copilot", "cursor", "generic"])
     copy.add_argument("--executable")
 
     sub.add_parser("status")

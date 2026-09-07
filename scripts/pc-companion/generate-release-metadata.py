@@ -30,7 +30,7 @@ def main() -> int:
     third_party = json.loads(args.third_party_lock.read_text(encoding="utf-8"))
     provenance = {
         "schema_version": 1,
-        "product": "Cyclone PC Companion",
+        "product": "Cyclone One",
         "version": args.version,
         "source_sha": args.source_sha.lower(),
         "artifacts": hashes,

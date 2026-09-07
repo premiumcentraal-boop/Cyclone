@@ -97,6 +97,11 @@ class Settings:
     def from_env(cls) -> "Settings":
         token = os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "").strip()
         if not token:
+            from cyclone_device_gateway.tooling_seam import apply_gateway_env
+
+            apply_gateway_env()
+            token = os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "").strip()
+        if not token:
             raise RuntimeError("CYCLONE_DEVICE_GATEWAY_TOKEN is required")
 
         bridge_token = os.getenv("CYCLONE_ANDROID_BRIDGE_TOKEN", "").strip()

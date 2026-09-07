@@ -3,6 +3,8 @@
 This directory contains only documentation that describes the current Cyclone product and how to extend it.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current system shape and runtime boundaries
+- [`ONE_1.1_BUILD_PLAN.md`](ONE_1.1_BUILD_PLAN.md) — Cyclone One 1.1 Session Contract Glass (A1 tooling seam done; A2+ not started)
+- [`ONE_1.1_STAGE1_TOOLING.md`](ONE_1.1_STAGE1_TOOLING.md) — One 1.1 Stage A1 persisted PC bearer / Cursor MCP / doctor attach
 - [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md) — V4 Stage 1 Fast Path harness (a11y-first loop, nav isolation, planner/UI split)
 - [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md) — V4 Stage 2 display-scoped session identity
 - [`V4_STAGE3_SKILL_COMPILER.md`](V4_STAGE3_SKILL_COMPILER.md) — V4 Stage 3 learn→compile→replay

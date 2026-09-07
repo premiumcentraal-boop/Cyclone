@@ -7,8 +7,11 @@ import subprocess
 import threading
 import time
 
+from pathlib import Path
+import sys
+
 from cyclone_device_gateway.cli import main
-from secure_gateway_token import save_connection
+from cyclone_device_gateway.tooling_seam import apply_gateway_env, persist_runtime_bearer
 
 _STILL_ACTIVE = 259
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -90,6 +93,13 @@ if __name__ == "__main__":
     token = os.getenv("CYCLONE_DEVICE_GATEWAY_TOKEN", "").strip()
     url = os.getenv("CYCLONE_DEVICE_GATEWAY_URL", "http://127.0.0.1:8765").strip()
     if token:
-        save_connection(token, url)
+        mcp_executable = None
+        if getattr(sys, "frozen", False):
+            sibling = Path(sys.executable).with_name("CycloneAgentMCP.exe")
+            if sibling.is_file():
+                mcp_executable = sibling
+        persist_runtime_bearer(token, url, write_cursor=True, mcp_executable=mcp_executable)
+    else:
+        apply_gateway_env()
     _start_parent_watch()
     raise SystemExit(main())
