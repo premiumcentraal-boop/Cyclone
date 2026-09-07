@@ -27,6 +27,14 @@ import kotlinx.coroutines.delay
 
 /** View-only exact-session surface. Opening this page never acquires input authority. */
 class WorkspaceProgressActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        com.cyclone.mobile.ui.overlay.OverlayExternalInteraction.active.value = true
+    }
+    override fun onStop() {
+        com.cyclone.mobile.ui.overlay.OverlayExternalInteraction.active.value = false
+        super.onStop()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)

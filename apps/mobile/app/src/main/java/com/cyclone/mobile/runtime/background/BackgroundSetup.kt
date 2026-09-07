@@ -45,7 +45,7 @@ object BackgroundSetup {
             running,
             running && runCatching { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false),
             service != null && CyclonePermissionSetup.primaryControlEnabled(context),
-            CyclonePermissionSetup.resultNotificationsEnabled(context) && NotificationManagerCompat.from(context).areNotificationsEnabled(),
+            CyclonePermissionSetup.resultNotificationsEnabled(context) && runCatching { NotificationManagerCompat.from(context).areNotificationsEnabled() }.getOrDefault(false),
             !humanPackage.isNullOrBlank() && humanPackage != context.packageName && humanPackage != target,
         )
     }

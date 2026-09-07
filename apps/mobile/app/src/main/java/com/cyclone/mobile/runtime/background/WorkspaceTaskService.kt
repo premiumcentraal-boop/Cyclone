@@ -60,6 +60,17 @@ class WorkspaceTaskService : Service() {
         observer = scope.launch { WorkspaceTasks.state.collect { state ->
             if (state != null && state.taskId == taskId) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification(state))
         } }
+        scope.launch {
+            while (!stopped) {
+                delay(1_000)
+                val missing = BackgroundSetup.read(applicationContext).setupFailure
+                if (missing != null) {
+                    stopTask()
+                    update { it.copy(phase = TaskPhase.FAILED, message = missing, resumable = false) }
+                    return@launch
+                }
+            }
+        }
         running = scope.launch {
             try {
                 withTimeout(5_000) {

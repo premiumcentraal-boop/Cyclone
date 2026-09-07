@@ -9,6 +9,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OverlayChromeWindowPolicyTest {
+    @Test fun backgroundGlassIsTouchableButDoesNotTakeAppFocus() {
+        val glass = OverlayChromeWindowPolicy.glass()
+        assertTrue(glass.matchParentWidth)
+        assertEquals(null, glass.heightDp)
+        assertTrue(glass.notFocusable)
+        assertTrue(glass.notTouchModal)
+        assertFalse(glass.notTouchable)
+    }
+
     @Test
     fun compactGravityIsBottomCenterAndWindowIsNarrow() {
         val compact = OverlayChromeWindowPolicy.main(compact = true)

@@ -91,6 +91,8 @@ internal object OverlayChromeWindowPolicy {
         )
     }
 
+    fun glass(): OverlayWindowContract = main(compact = false).copy(notFocusable = true)
+
     val halo: OverlayWindowContract = OverlayWindowContract(
         matchParentWidth = false,
         widthDp = OverlayChromeContract.IDLE_VISUAL_WIDTH_DP,
@@ -135,7 +137,7 @@ class OverlayChromeController(
     private val wm = service.getSystemService(WindowManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private var lifecycle = OverlayComposeLifecycle()
-    private var generation = 0L
+    @Volatile private var generation = 0L
     private var backgroundTask by mutableStateOf<com.cyclone.mobile.runtime.background.WorkspaceTaskUi?>(null)
     private val windows = com.cyclone.mobile.ui.overlay.OverlayWindowRegistry<View> { view ->
         try { wm.removeViewImmediate(view) } catch (_: IllegalArgumentException) { /* Already removed by Android. */ }
@@ -277,6 +279,8 @@ class OverlayChromeController(
         onMain {
             generation++
             main.removeCallbacksAndMessages(null)
+            latest = OverlayChromeSnapshot(idleChipVisible = false)
+            backgroundTask = null
             windows.clear()
             listOfNotNull(root, haloRoot, shareRoot).forEach { it.disposeComposition() }
             shareRoot = null
@@ -304,7 +308,7 @@ class OverlayChromeController(
             if (snapshot.state == OverlayChromeState.GATE && !snapshot.minimized) OverlayCopy.GATE else null
         view.visibility = if (visible) View.VISIBLE else View.GONE
 
-        val spec = OverlayChromeWindowPolicy.main(compact && !glass()).let { if (glass()) it.copy(notFocusable = true) else it }
+        val spec = if (glass()) OverlayChromeWindowPolicy.glass() else OverlayChromeWindowPolicy.main(compact)
         var changed = applyWindowContract(layout, spec)
         if (changed) runCatching { wm.updateViewLayout(view, layout) }
 
