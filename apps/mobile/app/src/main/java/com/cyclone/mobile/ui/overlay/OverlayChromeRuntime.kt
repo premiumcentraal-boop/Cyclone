@@ -40,6 +40,7 @@ object OverlayChromeRuntime {
     private var controller: OverlayChromeController? = null
     private var service: CycloneAccessibilityService? = null
     private var aiJob: Job? = null
+    private var workspaceJob: Job? = null
     private var adaptiveAgent: OpenRouterAdaptiveAgent? = null
     private var suspendedTaskId: String? = null
 
@@ -75,12 +76,24 @@ object OverlayChromeRuntime {
             )
             controller = next
             next.show(machine.snapshot())
+            workspaceJob = aiScope.launch {
+                var previousTask: String? = null
+                com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collect { task ->
+                    if (BackgroundGlassPolicy.tearDown(task)) clearBackgroundChrome()
+                    else if (BackgroundGlassPolicy.visible(task)) {
+                        if (previousTask != task?.taskId) mutate { it.resetIdle() }
+                        controller?.background(task)
+                    }
+                    previousTask = task?.taskId
+                }
+            }
         }
     }
 
     fun detach() {
         val context = synchronized(lock) { service }
         synchronized(lock) {
+            workspaceJob?.cancel(); workspaceJob = null
             controller?.dismiss()
             controller = null
             service = null
@@ -98,6 +111,16 @@ object OverlayChromeRuntime {
         }
         context?.let { AgentTaskNotificationRuntime.finish(it, false, "Task stopped.") }
     }
+
+    fun clearBackgroundChrome() {
+        synchronized(lock) {
+            OverlayExternalInteraction.active.value = false
+            machine.resetIdle(idleChipVisible = false)
+            controller?.background(null)
+            controller?.dismiss()
+        }
+    }
+    fun overlayWindowCount(): Int = synchronized(lock) { controller?.attachedWindowCount() ?: 0 }
 
     fun startAnalysis(
         sessionId: String,
@@ -243,7 +266,7 @@ object OverlayChromeRuntime {
                 val app = matches.single()
                 runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.start(context, request,
                     app.activityInfo.packageName, app.loadLabel(context.packageManager).toString()) }
-                    .onFailure { android.widget.Toast.makeText(context, "Couldn't start background work. Open Cyclone to check access.", android.widget.Toast.LENGTH_LONG).show() }
+                    .onFailure { error -> clearBackgroundChrome(); android.widget.Toast.makeText(context, error.message ?: "Open Background tasks setup to recheck access.", android.widget.Toast.LENGTH_LONG).show() }
                 updateComposer("")
             } else {
                 context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)

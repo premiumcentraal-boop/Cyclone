@@ -39,6 +39,8 @@ class WorkspaceActivity : ComponentActivity() {
                 var menu by remember { mutableStateOf(false) }
                 var goal by rememberSaveable { mutableStateOf(intent.getStringExtra("goal").orEmpty()) }
                 var status by remember { mutableStateOf("") }
+                var readiness by remember { mutableStateOf(BackgroundSetup.read(this@WorkspaceActivity)) }
+                LaunchedEffect(Unit) { while (true) { readiness = BackgroundSetup.read(this@WorkspaceActivity); kotlinx.coroutines.delay(800) } }
                 Column(Modifier.fillMaxSize().background(CycloneIntelligenceStyle.Ink)
                     .systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -75,13 +77,9 @@ class WorkspaceActivity : ComponentActivity() {
                     Text("You're in control", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     Text("Pause or stop at any time. Cyclone hands the app back for payment and other sensitive steps. Background work requires Android 15+ and Shizuku.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                    OutlinedButton(onClick = {
-                        runCatching {
-                            check(Shizuku.pingBinder()) { "Start Shizuku on this phone, then try again." }
-                            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) Shizuku.requestPermission(902)
-                            else status = "Background access is enabled."
-                        }.onFailure { status = it.message ?: "Background access is unavailable." }
-                    }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Enable background access") }
+                    OutlinedButton(onClick = { startActivity(Intent(this@WorkspaceActivity, BackgroundSetupActivity::class.java)) },
+                        modifier = Modifier.fillMaxWidth()) { Text("Guided background setup") }
+                    readiness.setupFailure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     Button(onClick = {
                         val app = apps.getOrNull(selected)
                         if (goal.isBlank() || app == null) { status = "Choose an app and describe your task." }
@@ -90,14 +88,15 @@ class WorkspaceActivity : ComponentActivity() {
                             check(Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                                 "Enable background access before starting."
                             }
+                            startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
                             WorkspaceTasks.start(this@WorkspaceActivity, goal, app.activityInfo.packageName,
                                 app.loadLabel(packageManager).toString())
                             finish()
                         }.onFailure { status = it.message ?: "Couldn't start this task. Please try again." }
-                    }, enabled = apps.isNotEmpty() && goal.isNotBlank(),
+                    }, enabled = apps.isNotEmpty() && goal.isNotBlank() && readiness.setupFailure == null,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary,
-                            contentColor = MaterialTheme.colorScheme.onSecondary)) { Text("Start task") }
+                            contentColor = MaterialTheme.colorScheme.onSecondary)) { Text("Go Home & start task") }
                     if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

@@ -48,6 +48,13 @@ object WorkspaceTasks {
         check(liveCount < PRODUCT_HOT_BACKGROUND_LIMIT) {
             "Finish or stop your current task first."
         }
+        BackgroundSetup.read(context, packageName).setupFailure?.let { reason ->
+            com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.clearBackgroundChrome()
+            error(reason)
+        }
+        if (BackgroundSetup.foregroundPackage() == context.packageName) {
+            context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
         val task = WorkspaceTaskUi(UUID.randomUUID().toString(), app = label, packageName = packageName, goal = goal)
         mutable.value = task
         try { context.startForegroundService(Intent(context, WorkspaceTaskService::class.java)

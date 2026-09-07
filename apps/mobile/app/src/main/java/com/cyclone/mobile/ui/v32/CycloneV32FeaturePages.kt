@@ -342,6 +342,13 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { CyclonePageIntro("Keep control", "Settings", "Phone access, AI, connections and safety in one quiet place.") }
         item {
+            CycloneSimpleCard {
+                CycloneSectionTitle("Background tasks")
+                Text("Set up Shizuku, phone control and task notifications, with live checks.")
+                Button(onClick = { open(Intent(context, com.cyclone.mobile.runtime.background.BackgroundSetupActivity::class.java)) }) { Text("Guided background setup") }
+            }
+        }
+        item {
             CycloneHeroCard(
                 title = if (essentialReady == 4) "Phone setup complete" else "$essentialReady of 4 essentials ready",
                 body = "Every permission is optional, Android-owned and reversible. Cyclone asks only after you tap a setup row.",
