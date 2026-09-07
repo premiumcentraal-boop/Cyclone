@@ -18,3 +18,9 @@ internal class OverlayWindowRegistry<T>(private val remove: (T) -> Unit) {
     fun remove(window: T) { if (window in windows) { remove.invoke(window); windows -= window } }
     fun clear() { windows.toList().forEach(::remove) }
 }
+
+internal object OverlayTeardownContract {
+    const val WINDOWS_AFTER_CANCEL = 0
+    fun overlayWindowCount(registry: OverlayWindowRegistry<*>): Int = registry.size
+    fun cancel(registry: OverlayWindowRegistry<*>) { registry.clear() }
+}
