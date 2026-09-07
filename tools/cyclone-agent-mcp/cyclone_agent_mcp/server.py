@@ -17,6 +17,8 @@ INSTRUCTIONS = (
     "Read session_id from phone_status (sessions inventory when present). "
     "Pass session_id=default-foreground for the live human display (display 0). Named workspace sessions require display_id > 0 and must never be rewritten onto display 0. "
     "Use phone_workspace on default-foreground display 0, then pass workspaceId+workspaceGeneration on mutating phone_act. Layer 2 is not a VD session. "
+    "phone.open_app uses params.package only (Android package id, e.g. com.android.chrome). Do not send an app display name or packageName. "
+    "Browse/open Chrome is phone_act tool=phone.open_app params.package=com.android.chrome. It does not use OpenRouter. "
     "Do not invent default-foreground when session_id is missing. "
     "Observe before mutations, re-observe afterward, verify meaningful changes, and use screenshots only when structured evidence is insufficient. "
     "If Companion owns input, yield in Cyclone or retry with request_ai_control=true; a locked phone is never stolen. "
@@ -146,7 +148,7 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         display_id: int | None = None,
         request_ai_control: bool = False,
     ) -> dict[str, Any]:
-        """Forward one typed action to Cyclone. session_id is required. After a Layer 2 switch, mutating params MUST include workspaceId+workspaceGeneration. request_ai_control yields Companion input and never steals a locked phone. There is no generic command/shell/ADB escape hatch."""
+        """Forward one typed action to Cyclone. session_id is required. phone.open_app requires params.package (Android package id, e.g. com.android.chrome), not an app display name or packageName. Browse/open Chrome does not use OpenRouter. After a Layer 2 switch, mutating params MUST include workspaceId+workspaceGeneration. request_ai_control yields Companion input and never steals a locked phone. There is no generic command/shell/ADB escape hatch."""
         return tools.call("phone_act", {
             "device_id": device_id, "tool": tool, "params": params, "goal": goal,
             "user_authorized": user_authorized, "session_id": session_id, "display_id": display_id,

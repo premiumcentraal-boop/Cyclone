@@ -5,12 +5,14 @@ import {
   bindSessionTile,
   DEFAULT_FOREGROUND_SESSION_ID,
   FOREGROUND_KIND,
+  FOREGROUND_PLANE_COPY,
   FOREGROUND_PLANE_LABEL,
   isSessionFabricEvent,
   isSessionKernelVd,
   jpegFocusTarget,
   markSessionInventory,
   MAX_HOT_BACKGROUND_ASK,
+  MCP_FOREGROUND_SESSION_COPY,
   normalizeInputOwner,
   parseFleetWsEvent,
   readExactSessionSnapshotHeaders,
@@ -311,6 +313,16 @@ test("session tile copy names Session Kernel VD and not Layer 2", () => {
   assert.match(SESSION_TILES_COPY, /HUMAN\/AI/);
   assert.match(SESSION_TILES_COPY, /not Layer 2/i);
   assert.match(SESSION_TILES_COPY, /display-0/);
+  assert.doesNotMatch(SESSION_TILES_COPY, new RegExp(DEFAULT_FOREGROUND_SESSION_ID));
+  assert.equal(FOREGROUND_PLANE_LABEL, "Foreground");
+  assert.notEqual(FOREGROUND_PLANE_LABEL, VD_PLANE_LABEL);
+  assert.match(FOREGROUND_PLANE_COPY, new RegExp(`session_id=${DEFAULT_FOREGROUND_SESSION_ID}`));
+  assert.match(FOREGROUND_PLANE_COPY, /display 0/);
+  assert.doesNotMatch(FOREGROUND_PLANE_COPY, /Layer 2/);
+  assert.equal(
+    MCP_FOREGROUND_SESSION_COPY,
+    `MCP observe/act/locate require session_id=${DEFAULT_FOREGROUND_SESSION_ID} for the live human display (display 0).`,
+  );
   assert.equal(normalizeInputOwner("human"), "HUMAN");
   assert.equal(normalizeInputOwner("AI"), "AI");
   assert.equal(normalizeInputOwner("other"), undefined);

@@ -75,6 +75,29 @@ def _goal_label_present(after_raw: dict[str, Any], after: dict[str, Any], goal: 
     return needle.lower() in " ".join(parts).lower()
 
 
+_HOME_PAGE_KEYS = frozenset({"home", "launcher"})
+
+
+def _home_launcher_surface(after_raw: dict[str, Any], after: dict[str, Any] | None = None) -> bool:
+    """True when the after-state is a home/launcher surface (case-insensitive)."""
+    raw = after_raw or {}
+    compact = after or {}
+    page_key = str(raw.get("pageKey") or compact.get("pageKey") or "").strip().lower()
+    if page_key in _HOME_PAGE_KEYS:
+        return True
+    title = str(
+        raw.get("pageTitle")
+        or raw.get("title")
+        or compact.get("title")
+        or compact.get("pageTitle")
+        or ""
+    ).strip()
+    if title.lower() == "home":
+        return True
+    package = str(raw.get("package") or compact.get("package") or "").lower()
+    return "launcher" in package
+
+
 class DesktopAgentService:
     """Device-scoped adapter to the Android Gateway.
 
@@ -329,11 +352,18 @@ class DesktopAgentService:
             )
             and _goal_label_present(after_raw, after, goal)
         )
+        already_on_home = (
+            execution_ok
+            and bool(after_id)
+            and tool == "phone.home"
+            and _home_launcher_surface(after_raw, after)
+        )
         verification_passed = (
             execution_ok
             and bool(after_id)
             and (
                 already_on_page
+                or already_on_home
                 or (
                     isinstance(android_verification, dict)
                     and android_verification.get("ok") is True
@@ -411,7 +441,11 @@ class DesktopAgentService:
             "after_observation_id": after_id,
             "after_page_key": after_raw.get("pageKey"),
         }
-        if already_on_page:
+        if already_on_home:
+            verification_layer["basis"] = str(
+                (android_verification or {}).get("basis") or "ALREADY_ON_HOME"
+            )
+        elif already_on_page:
             verification_layer["basis"] = str(
                 (android_verification or {}).get("basis") or "ALREADY_ON_PAGE"
             )
@@ -560,6 +594,8 @@ class DesktopAgentService:
         observe_args = dict(identity or {})
         after = self._request(session, "observe.semantic", observe_args)
         if tool not in PAGE_TRANSITION_TOOLS or before is None:
+            return after
+        if tool == "phone.home" and _home_launcher_surface(after):
             return after
         verification = execution.get("verification")
         if (

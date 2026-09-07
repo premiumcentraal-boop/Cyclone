@@ -1,17 +1,17 @@
-# Cyclone Mobile 4.0.4 + One 1.1.0-alpha.3 / gateway-mcp 4.1.0-alpha.3 Session Kernel glass; DEVICE TESTING: UNVERIFIED
+# Cyclone Mobile 4.0.4 + One 1.1.0-alpha.4 / gateway-mcp 4.1.0-alpha.4 operator MCP pack; DEVICE TESTING: UNVERIFIED
 # Mobile publishing reuses the authoritative Mobile CI artifact; no second Android assembly.
 # One/gateway/MCP alphas are branch identity, not a GitHub release cut.
 schema = 1
 product_version = "4.0.4"
 channel = "development"
 android_version_code = 75
-python_version = "4.1.0-alpha.3"
+python_version = "4.1.0-alpha.4"
 
 [components]
 mobile = "4.0.4"
-pc_companion = "1.1.0-alpha.3"
-device_gateway = "4.1.0-alpha.3"
-mcp = "4.1.0-alpha.3"
+pc_companion = "1.1.0-alpha.4"
+device_gateway = "4.1.0-alpha.4"
+mcp = "4.1.0-alpha.4"
 
 [release]
 previous_mobile_version = "4.0.3"

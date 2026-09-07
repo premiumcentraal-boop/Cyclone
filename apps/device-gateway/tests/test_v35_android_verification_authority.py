@@ -58,8 +58,9 @@ def test_desktop_never_promotes_android_failure_or_observation_to_verified(
     result = service.action(
         "dev_test",
         {
-            "capability_id": "phone.home",
+            "capability_id": "phone.click",
             "expected_observation_id": "obs-before",
+            "params": {"elementId": "apps"},
         },
     )
 
@@ -142,3 +143,71 @@ def test_observed_execution_ok_same_page_is_not_verification_failed():
     assert result["verification"]["passed"] is True
     assert result["ok"] is True
     assert result["verification"]["basis"] == "ALREADY_ON_PAGE"
+
+
+class FailingHomeExecutionBridge(AndroidBridge):
+    def request(self, op, args=None, request_id=None):
+        if op == "action.execute":
+            return {
+                "execution": {
+                    "ok": False,
+                    "error": {"code": "EXECUTION_FAILED", "message": "home failed"},
+                },
+                "androidExecution": {
+                    "ok": False,
+                    "error": {"code": "EXECUTION_FAILED", "message": "home failed"},
+                },
+                "verification": {"ok": False, "status": "FAILED"},
+            }
+        return super().request(op, args, request_id)
+
+
+def test_phone_home_already_on_home_is_not_verification_failed():
+    service = DesktopAgentService(
+        OneDeviceFleet(
+            AndroidBridge(
+                {
+                    "ok": False,
+                    "status": "OBSERVED",
+                    "code": "VERIFICATION_FAILED",
+                    "semanticSuccessClaimed": False,
+                }
+            )
+        )
+    )
+    result = service.action(
+        "dev_test",
+        {
+            "capability_id": "phone.home",
+            "expected_observation_id": "obs-before",
+            "goal": "Go home",
+        },
+    )
+    assert result["execution"]["androidExecution"]["ok"] is True
+    assert result["verification"]["passed"] is True
+    assert result["ok"] is True
+    assert result["verification"]["basis"] == "ALREADY_ON_HOME"
+    assert result["error"] is None
+    assert result["verification"].get("error") is None
+    assert result["verification"]["status"] != "VERIFICATION_FAILED"
+    assert (result.get("error") or {}).get("code") != "VERIFICATION_FAILED"
+
+
+def test_phone_home_execution_failure_stays_failed():
+    service = DesktopAgentService(
+        OneDeviceFleet(FailingHomeExecutionBridge({"ok": False, "status": "FAILED"}))
+    )
+    result = service.action(
+        "dev_test",
+        {
+            "capability_id": "phone.home",
+            "expected_observation_id": "obs-before",
+            "goal": "Go home",
+        },
+    )
+    assert result["execution"]["ok"] is False
+    assert result["execution"]["androidExecution"]["ok"] is False
+    assert result["ok"] is False
+    assert result["verification"]["passed"] is False
+    assert result["error"]["code"] == "EXECUTION_FAILED"
+    assert result["verification"].get("basis") != "ALREADY_ON_HOME"

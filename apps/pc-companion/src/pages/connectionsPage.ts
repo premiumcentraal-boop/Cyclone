@@ -1,3 +1,4 @@
+import { CODEX_MCP_PROMPT, MCP_FOREGROUND_SESSION_COPY } from "../core/sessionTiles.js";
 import type { ConnectorActionResult, ConnectorCard, DesktopService } from "../services/types.js";
 import { button, el } from "../ui/dom.js";
 
@@ -6,7 +7,7 @@ export interface ConnectionsPageHandle {
   destroy(): void;
 }
 
-const CODEX_PROMPT = "Use Cyclone to list my connected phones, observe the one I choose, and tell me what is currently on screen.";
+export const CODEX_PROMPT = CODEX_MCP_PROMPT;
 
 export function createConnectionsPage(service: DesktopService): ConnectionsPageHandle {
   const page = el("section", "page content-page connections-page");
@@ -15,6 +16,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   heading.append(
     el("h1", "page-title", "AI connections"),
     el("p", "page-subtitle", "Let Codex see and control paired phones through Cyclone's secure local Gateway."),
+    el("p", "page-subtitle", MCP_FOREGROUND_SESSION_COPY),
   );
   const refreshButton = button("Refresh", "button ghost compact");
   header.append(heading, refreshButton);
@@ -115,7 +117,11 @@ function renderCodexConnector(
 
   const handoff = el("div", "codex-handoff");
   const handoffText = el("div");
-  handoffText.append(el("div", "codex-handoff-label", "Try this in a new Codex task"), el("div", "codex-prompt", CODEX_PROMPT));
+  handoffText.append(
+    el("div", "codex-handoff-label", "Try this in a new Codex task"),
+    el("p", "codex-connect-copy", MCP_FOREGROUND_SESSION_COPY),
+    el("div", "codex-prompt", CODEX_PROMPT),
+  );
   const copy = button("Copy prompt", "button secondary compact");
   copy.addEventListener("click", async () => {
     try {

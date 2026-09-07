@@ -40,7 +40,7 @@ Physical Pixel remain **UNVERIFIED**. USB / a11y / `phone_status` on hardware is
 
 ## Out of scope
 
-- **A4** operator MCP pack (not started; do not implement here)
+- **A4** operator MCP pack (landed on `grok/one-1.1-s4-operator`; see [`ONE_1.1_STAGE4_OPERATOR.md`](ONE_1.1_STAGE4_OPERATOR.md))
 - **A5** One 1.1.0 release cut
 - Mobile APK (`4.0.4` / versionCode `75` stays)
 - Magisk
@@ -50,4 +50,4 @@ Physical Pixel remain **UNVERIFIED**. USB / a11y / `phone_status` on hardware is
 
 ## Handoff to A4
 
-Next stage: `docs/ONE_1.1_BUILD_PLAN.md` Stage **A4** on `grok/one-1.1-s4-operator` from this A3 tip. Goal: operator MCP pack (schema clarity, dead HTTP `/v1/observe`, `phone.home` already-on-home, browse without OpenRouter, `session_id=default-foreground` in UI + doctor). Do not start A4 in this change.
+A4 is DONE (code + docs; physical UNVERIFIED) on `grok/one-1.1-s4-operator` from this A3 tip. See [`ONE_1.1_STAGE4_OPERATOR.md`](ONE_1.1_STAGE4_OPERATOR.md). Next stage is **A5** on `grok/one-1.1-s5-release`. Do not start A5 here.

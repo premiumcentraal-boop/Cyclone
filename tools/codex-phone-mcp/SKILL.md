@@ -20,11 +20,11 @@ Planner vs UI split on the existing tools (no second executor):
 
 | ClosePaw name | Cyclone surface |
 | --- | --- |
-| open_app / intent / wait / finish | `phone_act(phone.open_app\|phone.launch_intent\|phone.wait_for)` / model `done` |
+| open_app / intent / wait / finish | `phone_act(tool=phone.open_app, params.package=com.android.chrome)` / `phone.wait_for` / model `done` |
 | get_tree | `phone_observe` / `phone_locate` Page Card (`elementIndex`) |
 | index click / type / swipe | `phone_act` with current `elementId` or `elementIndex`; swipe → `phone.scroll` |
 
-Prefer `phone.open_app` or an allowlisted intent before hunting a launcher icon. 3.9.12 Ask→workspace already routes a uniquely named installed app. One screen-changing mutation per decision turn; form fills may batch. Screenshot only when `perceptionMode=vision_escalate`.
+Prefer `phone.open_app` with `params.package` only (Android package id, e.g. `com.android.chrome`) or an allowlisted intent before hunting a launcher icon. Do not send an app display name or `packageName`. Browse/open Chrome is `phone_act` `tool=phone.open_app` `params.package=com.android.chrome`; it does not use OpenRouter. 3.9.12 Ask→workspace already routes a uniquely named installed app. One screen-changing mutation per decision turn; form fills may batch. Screenshot only when `perceptionMode=vision_escalate`.
 
 ## Session identity (required)
 

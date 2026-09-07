@@ -8,6 +8,10 @@ Physical Pixel 8 = **UNVERIFIED**.
 
 One draws named Session Kernel VD tiles (`session.added` / `session.removed`) with `session_id`, `displayId`, owner HUMAN/AI, and per-session JPEG focus. Named VD is never rewritten to display 0. Pause / Take control / Give to AI stay per tile; `PHONE_LOCKED` / `HUMAN_HAS_CONTROL` remain fail-closed. Foreground vs Session Kernel VD vs Layer 2 workspace copy stays distinct; the A2 Layer 2 strip is not a VD tile. Physical Pixel 8 = **UNVERIFIED**.
 
+## A4 operator pack
+
+Operator browse is typed MCP `phone_status` → `phone_observe` → `phone_locate` → `phone.home` → `phone.open_app` (`params.package`, Chrome = `com.android.chrome`) on `session_id=default-foreground` / display 0. One UI and doctor name that session id. This is not a fourth plane. Physical Pixel 8 = **UNVERIFIED**.
+
 ## Planes
 
 | Plane | Identity | Display | Mutation model | Typical MCP | `plane.kind` / `label` |

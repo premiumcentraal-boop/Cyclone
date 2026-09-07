@@ -205,6 +205,44 @@ def test_group_action_requires_explicit_unique_targets_and_observes_each_first()
     assert duplicate["error"]["code"] == "INVALID_REQUEST"
 
 
+def test_open_app_requires_params_package_not_aliases():
+    from cyclone_phone_mcp.tools import (
+        OPEN_APP_DISPLAY_NAME,
+        OPEN_APP_INVALID_PACKAGE,
+        OPEN_APP_MISSING_PACKAGE,
+        OPEN_APP_PACKAGE_NAME,
+    )
+
+    gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY")])
+    tools = PhoneTools(gateway=gateway)
+    accepted = tools.phone_act({
+        "device_id": "phone-a",
+        "tool": "phone.open_app",
+        "params": {"package": "com.android.chrome"},
+        "goal": "Open Chrome",
+        "session_id": "default-foreground",
+    })
+    assert accepted["ok"] is True
+    assert accepted["params"]["package"] == "com.android.chrome"
+    cases = (
+        ({"packageName": "com.android.chrome"}, OPEN_APP_PACKAGE_NAME),
+        ({"name": "Chrome"}, OPEN_APP_DISPLAY_NAME),
+        ({"appName": "Chrome"}, OPEN_APP_DISPLAY_NAME),
+        ({}, OPEN_APP_MISSING_PACKAGE),
+        ({"package": "Chrome"}, OPEN_APP_INVALID_PACKAGE),
+    )
+    for params, message in cases:
+        result = tools.call("phone_act", {
+            "device_id": "phone-a",
+            "tool": "phone.open_app",
+            "params": params,
+            "goal": "Open Chrome",
+            "session_id": "default-foreground",
+        })
+        assert result["error"]["code"] == "INVALID_REQUEST"
+        assert result["error"]["message"] == message
+
+
 def test_command_shaped_params_and_batch_typing_are_rejected():
     gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY")])
     tools = PhoneTools(gateway=gateway)

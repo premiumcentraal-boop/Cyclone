@@ -17,6 +17,7 @@ cyclone.gateway.capability.v1
 | `POST /v1/devices/{device_id}/workspaces` | Layer 2 `register/switch/pause/release/arm/next` via Android `action.execute` |
 | `GET /v1/fleet/workspace` | Fleet device groups / wall selection — **not** Layer 2 |
 | `GET /v1/capabilities` | typed capability discovery/health |
+| `POST /v1/observe` | **Legacy** compact observe. Empty or missing JSON body is allowed and uses defaults (`include_screenshot=false`, `mode=compact`). MCP uses `POST /v1/capabilities/observe`. |
 | `POST /v1/capabilities/observe` | compact/full structured observation with correlation + witness |
 | `GET /v1/ui/search` | deterministic semantic/raw/UiAutomator search |
 | `GET /v1/ui/element/{id}` | inspect one observation-scoped candidate |

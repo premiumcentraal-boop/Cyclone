@@ -147,6 +147,8 @@ def test_doctor_uses_persisted_bearer_without_env_scrape(monkeypatch, tmp_path):
     assert "PC Bearer" in human
     assert "Install Path" in human
     assert "Cursor MCP" in human
+    assert "MCP Session" in human
+    assert "session_id=default-foreground" in human
     assert human.index("PC Gateway") < human.index("PC Bearer") < human.index("Install Path") < human.index("Cursor MCP")
 
 
@@ -209,7 +211,7 @@ def test_doctor_new_checks_exist_with_bare_env(monkeypatch):
     serialized = json.dumps(report)
     human = format_human(report)
 
-    for name in ("PC Bearer", "Install Path", "Cursor MCP"):
+    for name in ("PC Bearer", "Install Path", "Cursor MCP", "MCP Session"):
         assert name in report["checks"]
         assert "status" in report["checks"][name]
         assert "detail" in report["checks"][name]
@@ -223,3 +225,33 @@ def test_doctor_new_checks_exist_with_bare_env(monkeypatch):
     assert pc_secret not in serialized
     assert secret not in human
     assert pc_secret not in human
+    assert "session_id=default-foreground" in human
+    assert report["checks"]["MCP Session"]["status"] == READY
+
+
+def test_doctor_mcp_session_documents_default_foreground(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    doctor = BridgeDoctor({}, adb=QuietADB())
+    report = doctor.run()
+    serialized = json.dumps(report)
+    human = format_human(report)
+    session = report["checks"]["MCP Session"]
+    assert session["status"] == READY
+    assert "session_id=default-foreground" in session["detail"]
+    assert "session_id=default-foreground" in human
+    assert "MCP Session" in human
+    assert "observe/act/locate/search/inspect/screenshot/skill_run/group_act" in session["detail"]
+    assert "display 0" in session["detail"]
+    assert "Layer 2" in session["detail"]
+    assert "VD" in session["detail"]
+    assert "PC Bearer" in human
+    assert "Install Path" in human
+    assert "Cursor MCP" in human
+    assert report["security"]["tokens_in_output"] is False
+    assert "Tokens are never printed by doctor." in human
+    assert "Bearer" not in session["detail"]
+    token_like = ("CYCLONE_DEVICE_GATEWAY_TOKEN", "CYCLONE_ANDROID_BRIDGE_TOKEN")
+    for marker in token_like:
+        assert marker not in human
+        assert marker not in serialized
+

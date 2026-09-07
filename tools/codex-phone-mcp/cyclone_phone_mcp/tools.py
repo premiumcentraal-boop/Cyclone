@@ -203,8 +203,7 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
         if params:
             raise ValueError(f"{tool} accepts no parameters")
     elif tool == "phone.open_app":
-        if set(params) != {"package"} or not ANDROID_PACKAGE.fullmatch(str(params.get("package") or "")):
-            raise ValueError("phone.open_app requires one valid Android package name")
+        _validate_open_app_params(params)
     elif tool == "phone.wait_for":
         allowed = {"condition", "timeoutMs", "pollMs", "selector", *ELEMENT_ID_KEYS}
         if set(params) - allowed:
@@ -213,6 +212,41 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
         if condition is not None and not isinstance(condition, dict):
             raise ValueError("phone.wait_for condition must be an object")
     return element_id
+
+
+_OPEN_APP_PACKAGE_NAME_KEYS = frozenset({"packageName", "package_name"})
+_OPEN_APP_DISPLAY_NAME_KEYS = frozenset({"app", "name", "appName", "app_name"})
+OPEN_APP_MISSING_PACKAGE = (
+    "phone.open_app requires params.package (Android package id). Example: com.android.chrome. "
+    "Do not send an app display name or packageName."
+)
+OPEN_APP_PACKAGE_NAME = (
+    "phone.open_app requires params.package, not packageName. Example: com.android.chrome."
+)
+OPEN_APP_DISPLAY_NAME = (
+    "phone.open_app requires params.package (Android package id), not an app display name. "
+    "Chrome is com.android.chrome."
+)
+OPEN_APP_INVALID_PACKAGE = (
+    "params.package must be a valid Android package id (e.g. com.android.chrome), not an app name."
+)
+OPEN_APP_EXTRA_KEYS = "phone.open_app accepts only params.package"
+
+
+def _validate_open_app_params(params: dict[str, Any]) -> None:
+    """Reject app names and packageName aliases; require a real Android package id."""
+    keys = set(params)
+    if keys & _OPEN_APP_PACKAGE_NAME_KEYS:
+        raise ValueError(OPEN_APP_PACKAGE_NAME)
+    if keys & _OPEN_APP_DISPLAY_NAME_KEYS:
+        raise ValueError(OPEN_APP_DISPLAY_NAME)
+    package = params.get("package")
+    if "package" not in params or not str(package or "").strip():
+        raise ValueError(OPEN_APP_MISSING_PACKAGE)
+    if keys - {"package"}:
+        raise ValueError(OPEN_APP_EXTRA_KEYS)
+    if not ANDROID_PACKAGE.fullmatch(str(package)):
+        raise ValueError(OPEN_APP_INVALID_PACKAGE)
 
 
 def _require_workspace_identity(workspace_id: Any, workspace_generation: Any) -> tuple[str, int]:
@@ -935,6 +969,14 @@ class PhoneTools:
             and changed is False
             and _page_has_goal_label(after, goal)
         )
+        already_on_home = (
+            tool == "phone.home"
+            and _android_execution_ok(action)
+            and after is not None
+            and _page_is_home_launcher(after)
+        )
+        if already_on_home:
+            already_on_page = True
         if failure is not None and failure.code == "VERIFICATION_FAILED" and already_on_page:
             failure = None
         if not typed_verification and already_on_page:
@@ -1141,6 +1183,23 @@ def _android_execution_ok(action: Any) -> bool:
         return True
     android = action.get("android_execution") if isinstance(action.get("android_execution"), dict) else {}
     return android.get("ok") is True
+
+
+_HOME_LAUNCHER_PAGE_KEYS = frozenset({"home", "launcher"})
+
+
+def _page_is_home_launcher(card: dict[str, Any] | None) -> bool:
+    if not isinstance(card, dict):
+        return False
+    location = card.get("location") if isinstance(card.get("location"), dict) else {}
+    page_key = str(card.get("pageKey") or location.get("pageKey") or "").strip().lower()
+    if page_key in _HOME_LAUNCHER_PAGE_KEYS:
+        return True
+    title = str(card.get("title") or location.get("title") or "").strip()
+    if title == "Home":
+        return True
+    package = str(card.get("package") or location.get("package") or "")
+    return "launcher" in package.lower()
 
 
 def _page_has_goal_label(card: dict[str, Any] | None, goal: str) -> bool:

@@ -83,3 +83,9 @@ def matched_verified_skill(match_raw: Any, goal: str, page_key: str) -> dict[str
     _ensure_phone_mcp()
     from cyclone_phone_mcp.skills import matched_verified_skill as _match
     return _match(match_raw, goal, page_key)
+
+
+def validate_open_app_params(params: dict[str, Any]) -> None:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.tools import _validate_open_app_params as _validate
+    _validate(params)
