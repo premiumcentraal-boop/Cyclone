@@ -7,6 +7,8 @@ This directory contains only documentation that describes the current Cyclone pr
 - [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md) — V4 Stage 2 display-scoped session identity
 - [`V4_STAGE3_SKILL_COMPILER.md`](V4_STAGE3_SKILL_COMPILER.md) — V4 Stage 3 learn→compile→replay
 - [`V4_STAGE4_ONE_GLASS.md`](V4_STAGE4_ONE_GLASS.md) — V4 Stage 4 Cyclone One glass (JPEG live, session tiles, MCP session_id)
+- [`V4_STAGE5_RELEASE.md`](V4_STAGE5_RELEASE.md) — V4 Stage 5 release lane (4.0.0 / One 1.0.0 pairing, merge order, operator cut path)
+- [`RELEASE_V4.md`](RELEASE_V4.md) — Cyclone 4.0.0 + One 1.0.0 release notes
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — local development and validation workflow
 - [`RELEASES.md`](RELEASES.md) — versioning, artifacts and release expectations
 - [`DUO_RELIABILITY_REVIEW.md`](DUO_RELIABILITY_REVIEW.md) — versionCode 58 findings, fixes and ordered acceptance plan
