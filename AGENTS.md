@@ -1,6 +1,6 @@
 # Cyclone coding-agent guide
 
-Cyclone's active baseline is the 3.9 Android-first product with a V4 Stage 2 Session Kernel alpha (`4.0.0-alpha.2`) on the 3.9.12 workspace plus Stage 1 Fast Path. Do not reconstruct retired V2/V3 plans, the old Core/Desktop control plane, Teamwork Sniper experiments or version-specific handoff documents unless a task explicitly asks for historical research.
+Cyclone's active baseline is the 3.9 Android-first product with a V4 Stage 3 Skill Compiler alpha (`4.0.0-alpha.3`) on the 3.9.12 workspace plus Stage 1 Fast Path and Stage 2 Session Kernel. Do not reconstruct retired V2/V3 plans, the old Core/Desktop control plane, Teamwork Sniper experiments or version-specific handoff documents unless a task explicitly asks for historical research.
 
 ## Read first
 

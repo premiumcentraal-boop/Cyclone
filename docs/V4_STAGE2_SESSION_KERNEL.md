@@ -94,6 +94,6 @@ Physical Pixel 8 remains **UNVERIFIED**.
 
 ## Stage 3 handoff
 
-Skill compiler should compile playbooks per package **and** per session/display. Do not assume display 0. Vision only on miss. Keep `PhoneToolExecutor` as the only mutation engine.
+Stage 2 remains **DONE**. Do not restart Stage 2. Skill Compiler (`docs/V4_STAGE3_SKILL_COMPILER.md`, mobile `4.0.0-alpha.3` / versionCode 69) is DONE in the follow-on PR: playbooks compile per package **and** per session/display. Do not assume display 0. Vision only on miss. Keep `PhoneToolExecutor` as the only mutation engine.
 
-Do not start Stage 3 in this PR. Stage 4 may require MCP `session_id`; Stage 2 only accepts/forwards it.
+Stage 4 may require MCP `session_id`; Stage 2 only accepts/forwards it. Compiled skills already carry session/display.
