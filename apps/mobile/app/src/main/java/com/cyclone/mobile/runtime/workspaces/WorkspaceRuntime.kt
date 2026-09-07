@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.LauncherApps
 import android.os.Process
+import android.os.UserHandle
 import android.os.UserManager
 import com.cyclone.mobile.*
 import com.cyclone.mobile.gateway.GatewayObservationStore
@@ -46,6 +47,7 @@ object RootProbe {
 }
 
 object Layer2Workspaces {
+    private const val ANDROID_UIDS_PER_USER = 100_000
     private var context: Context? = null
     private var loadFailure: String? = null
     val engine = WorkspaceEngine { entries ->
@@ -53,6 +55,26 @@ object Layer2Workspaces {
         check(prefs.edit().putString("registry", JSONArray(entries.map(::json)).toString()).commit()) { "Workspace registry could not be saved" }
     }
     private val goals = mutableMapOf<String, String>() // Jobs are ephemeral; no model input is persisted.
+
+    /**
+     * Android application UIDs encode the owning user in groups of 100000. This avoids linking to
+     * hidden UserHandle.identifier APIs. For secondary profiles we derive the same value from a
+     * launcher-visible application's uid; profiles with no visible app remain unknown/fail-closed.
+     */
+    fun currentAndroidUserId(): Int = Process.myUid() / ANDROID_UIDS_PER_USER
+
+    fun profileUserId(ctx: Context, user: UserHandle): Int? {
+        if (user == Process.myUserHandle()) return currentAndroidUserId()
+        val launcher = ctx.getSystemService(LauncherApps::class.java)
+        return runCatching {
+            launcher.getActivityList(null, user).firstOrNull()?.applicationInfo?.uid
+                ?.let { it / ANDROID_UIDS_PER_USER }
+        }.getOrNull()
+    }
+
+    fun visibleProfile(ctx: Context, androidUserId: Int): UserHandle? =
+        ctx.getSystemService(UserManager::class.java).userProfiles.singleOrNull { profileUserId(ctx, it) == androidUserId }
+
     fun initialize(ctx: Context) = synchronized(engine.mutationLock) {
         if (context == null) {
             context = ctx.applicationContext
@@ -83,12 +105,12 @@ object Layer2Workspaces {
         val ctx = checkNotNull(context)
         check(w.appPackage != ctx.packageName) { "Choose a target app, not Cyclone" }
         GatewayObservationStore.clear("default-foreground")
-        if (w.androidUserId == Process.myUserHandle().identifier) {
+        if (w.androidUserId == currentAndroidUserId()) {
             val intent = ctx.packageManager.getLaunchIntentForPackage(w.appPackage) ?: error("APP_NOT_FOUND: no launcher activity")
             ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } else {
             check(RootProbe.status == RootStatus.ROOTED) { "USER_UNVERIFIED: check root before a cross-profile switch" }
-            val user = ctx.getSystemService(UserManager::class.java).userProfiles.singleOrNull { it.identifier == w.androidUserId }
+            val user = visibleProfile(ctx, w.androidUserId)
                 ?: error("PROFILE_UNAVAILABLE: this profile is not visible to Cyclone")
             val launcher = ctx.getSystemService(LauncherApps::class.java)
             val activity = launcher.getActivityList(w.appPackage, user).firstOrNull()
@@ -99,7 +121,7 @@ object Layer2Workspaces {
     fun observe(w: Workspace): WorkspaceTarget {
         val service = CycloneAccessibilityService.instance ?: error("ACCESSIBILITY_NOT_CONNECTED")
         val packageName = service.observe().packageName ?: error("TARGET_UNVERIFIED: no foreground package")
-        val ownUser = Process.myUserHandle().identifier
+        val ownUser = currentAndroidUserId()
         if (w.androidUserId != ownUser) {
             val target = RootProbe.resumedTarget() ?: error("USER_UNVERIFIED: Android profile identity unavailable")
             check(target.appPackage == packageName) { "TARGET_MISMATCH: observation and activity disagree" }
@@ -111,11 +133,13 @@ object Layer2Workspaces {
             check(target.appPackage == packageName) { "TARGET_MISMATCH: observation and activity disagree" }
             return target
         }
-        val profiles = checkNotNull(context).getSystemService(UserManager::class.java).userProfiles
-        val launcher = checkNotNull(context).getSystemService(LauncherApps::class.java)
-        check(profiles.none { it.identifier != ownUser && launcher.getActivityList(w.appPackage, it).isNotEmpty() }) {
-            "USER_UNVERIFIED: the same package exists in multiple profiles; check root first"
-        }
+        val ctx = checkNotNull(context)
+        val profiles = ctx.getSystemService(UserManager::class.java).userProfiles
+        val launcher = ctx.getSystemService(LauncherApps::class.java)
+        check(profiles.none { user ->
+            val profileId = profileUserId(ctx, user)
+            profileId != ownUser && launcher.getActivityList(w.appPackage, user).isNotEmpty()
+        }) { "USER_UNVERIFIED: the same package exists in multiple profiles; check root first" }
         return WorkspaceTarget(packageName, ownUser)
     }
     fun switch(ctx: Context, id: String): JSONObject = synchronized(engine.mutationLock) {
