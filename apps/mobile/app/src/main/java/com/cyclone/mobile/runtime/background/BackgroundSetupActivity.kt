@@ -62,10 +62,8 @@ class BackgroundSetupActivity : ComponentActivity() {
     }
 
     private fun openShizukuInstall() {
-        val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${BackgroundSetup.SHIZUKU_PACKAGE}"))
-        runCatching { startActivity(market) }.onFailure {
-            open(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${BackgroundSetup.SHIZUKU_PACKAGE}")))
-        }
+        open(Intent(Intent.ACTION_VIEW, Uri.parse(
+            "https://github.com/RikkaApps/Shizuku/releases/download/v13.6.0/shizuku-v13.6.0.r1086.2650830c-release.apk")))
     }
 
     private fun launchInstallStep(step: InstallStep) {
@@ -139,7 +137,7 @@ class BackgroundSetupActivity : ComponentActivity() {
                     phase = phase,
                     status = status,
                     step = nextStep,
-                    onBack = { finish() },
+                    onBack = { phase = InstallPhase.READY; finish() },
                     onInstall = { phase = InstallPhase.CONFIRM },
                     onCancelConfirmation = { phase = InstallPhase.READY },
                     onConfirm = {
@@ -187,7 +185,7 @@ private fun installStepTitle(step: InstallStep?): String = when (step) {
 }
 
 private fun installStepHint(step: InstallStep?): String = when (step) {
-    InstallStep.INSTALL_SHIZUKU -> "Google Play may open once. Install Shizuku, then return to Cyclone."
+    InstallStep.INSTALL_SHIZUKU -> "Download the official helper, accept Android’s installation prompt, then return to Cyclone."
     InstallStep.START_SHIZUKU -> "Shizuku may open once for Android's required start or pairing approval. Return when it is running."
     InstallStep.AUTHORIZE_SHIZUKU -> "Approve Cyclone when the Shizuku permission prompt appears."
     InstallStep.ACCESSIBILITY -> "Android will open Accessibility. Turn on Cyclone, then return."
@@ -214,7 +212,7 @@ private fun InstallerScreen(
             .systemBarsPadding()
             .padding(horizontal = 22.dp, vertical = 18.dp),
     ) {
-        if (phase == InstallPhase.READY || phase == InstallPhase.INSTALLED) {
+        if (true) {
             TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) { Text("Back") }
         }
 
