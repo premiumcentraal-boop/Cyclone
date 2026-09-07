@@ -265,7 +265,7 @@ class OverlayChromeController(
         onMain {
             latest = snapshot
             if (root == null) {
-                if (snapshot.state != OverlayChromeState.IDLE || glass()) show(snapshot)
+                if (snapshot.state != OverlayChromeState.IDLE || snapshot.idleChipVisible || glass()) show(snapshot)
                 return@onMain
             }
             if (!isCompact(snapshot)) resetIdleActivation()
@@ -278,6 +278,7 @@ class OverlayChromeController(
             generation++
             main.removeCallbacksAndMessages(null)
             windows.clear()
+            listOfNotNull(root, haloRoot, shareRoot).forEach { it.disposeComposition() }
             shareRoot = null
             activeBorder = null
             root = null

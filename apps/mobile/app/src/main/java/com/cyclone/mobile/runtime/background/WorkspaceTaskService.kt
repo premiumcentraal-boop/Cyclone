@@ -62,6 +62,12 @@ class WorkspaceTaskService : Service() {
         } }
         running = scope.launch {
             try {
+                withTimeout(5_000) {
+                    while (!BackgroundSetup.read(applicationContext, task.packageName).ready) {
+                        BackgroundSetup.read(applicationContext, task.packageName).setupFailure?.let { error(it) }
+                        delay(200)
+                    }
+                }
                 val session = withContext(Dispatchers.IO + NonCancellable) {
                     WorkspaceRuntime.create(applicationContext, task.packageName).also {
                         sessionId = it.sessionId
@@ -81,12 +87,12 @@ class WorkspaceTaskService : Service() {
                 awaitWorkspace(session.sessionId, ExecutionContext.from(session))
                 agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session))
                 finishTask(agent!!.execute(task.goal, config) { text -> progress(text) })
-            } catch (error: CancellationException) { throw error }
-            catch (_: Exception) {
+            } catch (error: Exception) {
+                if (error is CancellationException && error !is TimeoutCancellationException) throw error
                 sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it, WorkspaceState.FAILED) } }
                 sessionId = null
                 update { it.copy(phase = TaskPhase.FAILED, resumable = false,
-                    message = "Background work couldn't start. Check Android 15+, Shizuku and Accessibility. The app must be closed on your main screen.") }
+                    message = BackgroundSetup.failure(applicationContext, task.packageName, error)) }
                 stopForeground(STOP_FOREGROUND_DETACH); stopSelf()
             }
         }

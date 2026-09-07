@@ -266,7 +266,7 @@ object OverlayChromeRuntime {
                 val app = matches.single()
                 runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.start(context, request,
                     app.activityInfo.packageName, app.loadLabel(context.packageManager).toString()) }
-                    .onFailure { android.widget.Toast.makeText(context, "Couldn't start background work. Open Cyclone to check access.", android.widget.Toast.LENGTH_LONG).show() }
+                    .onFailure { error -> clearBackgroundChrome(); android.widget.Toast.makeText(context, error.message ?: "Open Background tasks setup to recheck access.", android.widget.Toast.LENGTH_LONG).show() }
                 updateComposer("")
             } else {
                 context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)

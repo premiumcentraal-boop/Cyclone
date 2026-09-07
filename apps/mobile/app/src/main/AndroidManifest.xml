@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <queries>
+        <package android:name="moe.shizuku.privileged.api" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -45,6 +46,7 @@
         <activity android:name=".ui.overlay.OverlayAttachmentActivity" android:exported="false" />
         <activity android:name=".ui.overlay.CycloneAiSettingsActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
+        <activity android:name=".runtime.background.BackgroundSetupActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceActivity" android:exported="false" />
         <service
             android:name=".runtime.background.WorkspaceTaskService"
