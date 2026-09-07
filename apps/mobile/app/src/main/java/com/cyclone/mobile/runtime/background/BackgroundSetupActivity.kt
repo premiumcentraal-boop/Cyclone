@@ -77,7 +77,7 @@ class BackgroundSetupActivity : ComponentActivity() {
                     }) { Text("Allow notifications") }
                     TextButton(onClick = { open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)) }) { Text("Notification settings") }
                 }
-                SetupCard("Notification triggers · optional", CyclonePermissionSetup.notificationAccessEnabled(this)) {
+                SetupCard("Notification triggers · optional", CyclonePermissionSetup.notificationAccessEnabled(this@BackgroundSetupActivity)) {
                     Text("Only needed for notification-triggered routines, not background Ask tasks.")
                     TextButton(onClick = { open(CyclonePermissionSetup.notificationAccessSettings()) }) { Text("Manage notification access") }
                 }
