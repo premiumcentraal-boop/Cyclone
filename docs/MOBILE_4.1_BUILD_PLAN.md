@@ -1,10 +1,10 @@
 # Cyclone Mobile 4.1 — Session Contract Mobile (phone sprint)
 
-**Status:** B1 DONE, B2 DONE, B3 DONE, B4 DONE (source/CI; Pixel **UNVERIFIED**). B5 not started.  
+**Status:** B1 DONE, B2 DONE, B3 DONE, B4 DONE (source/CI; Pixel **UNVERIFIED**). B5 DONE (source/docs; Pixel **UNVERIFIED**).  
 **Codename:** Session Contract Mobile  
 **Base:** published **`v4.0.4`** (`38f7628`, versionCode **75**) — NOT stale `main` (4.0.1)  
 **Device today:** Pixel may still be on **4.0.3** / 74. No B1/B2/B3/B4 adb/assemble smoke was run.  
-**Out:** Mobile **4.1.0** / next versionCode (76+) signed with update-compatible dev key (or documented migration)  
+**Out:** Mobile **4.1.0** / versionCode **80** signed with update-compatible dev key (or documented wipe)  
 **Grok:** each stage on Agent PC with **subagents required**
 
 ## Why this sprint exists
@@ -76,14 +76,16 @@ Acceptance: recorded timing artifact on Pixel or honest UNVERIFIED with CI harne
 Out of scope: vision-first primary loop. Do not start B5.
 
 ### B5 — Mobile 4.1.0 release
-Branch: `grok/mobile-4.1-s5-release` from B4.  
+**Status:** DONE in source/docs. Pixel acceptance **UNVERIFIED**. Tag `v4.1.0` is operator-after-CI — this session does not create it.  
+Branch: `grok/mobile-4.1-s5-release` from B4 (`f1e0239` / PR #71).  
 Goal: signed **4.1.0** that installs over 4.0.4.
 Deliverables:
-1. Identity 4.1.0 / final versionCode; notes `docs/RELEASE_4.1.md`.
-2. Reuse green Mobile CI APK + update-compatible signer (continuity vs 4.0.4).
-3. Pairing note: requires One ≥ **1.1.0** for full Layer 2 MCP (4.0.4 phone + One 1.0.0 remains foreground-only).
-4. Physical checklist.
-Acceptance: GitHub release; install over 4.0.4 verified or documented wipe.
+1. Identity 4.1.0 / versionCode **80**; notes `docs/RELEASE_4.1.md`. — **DONE in source/docs**. Pixel **UNVERIFIED**. Tag not cut.
+2. Reuse green Mobile CI APK + update-compatible signer (continuity vs 4.0.4). — **DONE in source/docs**. Pixel **UNVERIFIED**. Tag not cut.
+3. Pairing note: requires One ≥ **1.1.0** for full Layer 2 MCP (4.0.4/4.1.0 phone + One 1.0.0 remains foreground-capable). — **DONE in source/docs**. Pixel **UNVERIFIED**.
+4. Physical checklist. — **DONE as UNVERIFIED** (no assemble/adb this session). Tag not cut.
+Acceptance: GitHub release is operator-after-CI; install over 4.0.4 documented (signer continuity vs wipe). Pixel still **UNVERIFIED**.  
+Out of scope: rewrite B1–B4; Magisk; merge other PRs; invent device results; claim tag `v4.1.0` exists; flip `publication_authorized`; cut One/PC A5.
 
 ## Coordination
 

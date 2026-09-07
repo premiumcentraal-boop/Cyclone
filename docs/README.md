@@ -9,6 +9,7 @@ This directory contains only documentation that describes the current Cyclone pr
 - [`V4_STAGE4_ONE_GLASS.md`](V4_STAGE4_ONE_GLASS.md) — V4 Stage 4 Cyclone One glass (JPEG live, session tiles, MCP session_id)
 - [`V4_STAGE5_RELEASE.md`](V4_STAGE5_RELEASE.md) — V4 Stage 5 release lane (4.0.0 / One 1.0.0 pairing, merge order, operator cut path)
 - [`RELEASE_V4.md`](RELEASE_V4.md) — Cyclone 4.0.0 + One 1.0.0 release notes
+- [`MOBILE_4.1_STAGE5_RELEASE.md`](MOBILE_4.1_STAGE5_RELEASE.md) — Mobile 4.1.0 release lane (merge order, operator cut path); notes [`RELEASE_4.1.md`](RELEASE_4.1.md)
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — local development and validation workflow
 - [`RELEASES.md`](RELEASES.md) — versioning, artifacts and release expectations
 - [`DUO_RELIABILITY_REVIEW.md`](DUO_RELIABILITY_REVIEW.md) — versionCode 58 findings, fixes and ordered acceptance plan

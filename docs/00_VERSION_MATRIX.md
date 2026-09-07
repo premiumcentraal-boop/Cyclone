@@ -12,17 +12,19 @@
 
 ## This worktree / sprint identity (not published)
 
-Worktree `Cyclone-mobile-4.1-s4-fastpath-bg`, branch `grok/mobile-4.1-s4-fastpath-bg`, base B3 **`ee077b3`** (`4.1.0-alpha.3` / 78) on B2 **`0eaef0f`** (`4.1.0-alpha.2` / 77) on B1 **`178c820`** (`4.1.0-alpha.1` / 76) on **`v4.0.4`** (`38f7628`, versionCode 75).
+Worktree `Cyclone-mobile-4.1-s5-release`, branch `grok/mobile-4.1-s5-release`, base B4 tip **`f1e0239`** (`4.1.0-alpha.4` / 79) stacking B3 **`ee077b3`** / B2 **`0eaef0f`** / B1 **`178c820`** on **`v4.0.4`** (`38f7628`, versionCode 75).
 
-| Surface | This alpha | Notes |
+Alphas 76–79 were not published 4.1 APKs. Release identity is **4.1.0** / versionCode **80**.
+
+| Surface | This identity | Notes |
 |---|---|---|
-| Mobile | **4.1.0-alpha.4** / versionCode **79** | `publication_authorized=false`. Not a published 4.1.0. B4 named-VD Fast Path + skills; hot-gate stays 1. |
-| Cyclone One / pc_companion | **1.0.0** (unchanged) | USB / default-foreground pairing still the 4.0.4 contract |
+| Mobile | **4.1.0** / versionCode **80** | `publication_authorized=false`. Release-lane identity only; not a claim that GitHub tag `v4.1.0` exists. |
+| Cyclone One / pc_companion | **1.0.0** (unchanged) | Full Layer 2 MCP needs One ≥ **1.1.0** (separate A5 cut). 4.0.4 phone + One 1.0.0 remains foreground-capable (USB / default-foreground). One 1.1 is not required for mobile-only Ask on device. |
 | Device gateway | **4.0.0** (unchanged) | — |
 | Agent MCP | **4.0.0** (unchanged) | — |
 | python_version | **4.0.0** (unchanged) | — |
 
-Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75. This alpha was not assembled or sideloaded in the B4 docs session. Physical Pixel 8 = **UNVERIFIED**.
+Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75 until the operator cuts `v4.1.0`. Physical Pixel 8 = **UNVERIFIED**. `publication_authorized=false`. Do not claim the GitHub tag exists.
 
 ## Repo divergence (critical)
 
@@ -61,3 +63,5 @@ B2 (`4.1.0-alpha.2` / 77) freezes those mix rules and requires `plane: {kind, la
 B3 (`4.1.0-alpha.3` / 78) adds glass/queue observability on that frozen contract (real Fast Path / skill / Layer 2 subtitle, exact-plane View progress). It does not invent a fourth plane. Hot-gate stays 1.
 
 B4 (`4.1.0-alpha.4` / 79) closes named-VD Fast Path + skills (`session_id≠default-foreground`, `displayId>0`). Hot-gate stays 1. Pixel **UNVERIFIED**.
+
+B5 drops alpha.4 / 79 → **4.1.0** / **80** release-lane identity. Pixel **UNVERIFIED**.
