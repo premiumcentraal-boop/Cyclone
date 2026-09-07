@@ -25,6 +25,8 @@ INFRASTRUCTURE_PERMISSIONS = {
 # Every permission in this set must appear in the Cyclone setup UI as a row that maps to the
 # capability it backs. Add new permissions here only together with a real setup row.
 SETUP_ROW_PERMISSIONS = {
+    "android.permission.REQUEST_INSTALL_PACKAGES",  # User-requested, pinned helper installer in Background setup
+
     "android.permission.POST_NOTIFICATIONS",  # Result notifications
     "android.permission.READ_CALENDAR",  # Calendar context
     "android.permission.RECORD_AUDIO",  # Voice requests
@@ -37,7 +39,6 @@ FORBIDDEN_PERMISSIONS = {
     "android.permission.MANAGE_EXTERNAL_STORAGE",
     "android.permission.READ_CONTACTS",
     "android.permission.RECEIVE_SMS",
-    "android.permission.REQUEST_INSTALL_PACKAGES",
 }
 
 
@@ -152,6 +153,25 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
                 FORBIDDEN_PERMISSIONS & permissions,
                 f"{manifest.name}: {FORBIDDEN_PERMISSIONS & permissions}",
             )
+
+    def test_helper_install_is_explicit_pinned_and_narrowly_shared(self):
+        source = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/background"
+        installer = (source / "BackgroundSetupActivity.kt").read_text()
+        download = (source / "OfficialHelperDownload.kt").read_text()
+        self.assertIn("ACTION_MANAGE_UNKNOWN_APP_SOURCES", installer)
+        self.assertIn("canRequestPackageInstalls()", installer)
+        self.assertIn("installer.launch", installer)
+        self.assertIn("BackHandler", installer)
+        self.assertNotIn("market://", installer)
+        self.assertNotIn("play.google.com", installer)
+        self.assertIn("github.com/RikkaApps/Shizuku/releases/download/", download)
+        self.assertIn("digest(part) == SHA256", download)
+        self.assertIn("info?.packageName == BackgroundSetup.SHIZUKU_PACKAGE", download)
+        provider = next(p for p in application_node(self.app_manifest).findall("provider")
+                        if p.get(f"{ANDROID}name") == "androidx.core.content.FileProvider")
+        self.assertEqual("false", provider.get(f"{ANDROID}exported"))
+        paths = ET.parse(ROOT / "apps/mobile/app/src/main/res/xml/setup_helper_paths.xml").getroot()
+        self.assertEqual([("cache-path", "setup-helper/")], [(p.tag, p.get("path")) for p in paths])
 
     def test_sms_trigger_receiver_is_not_exposed_anywhere(self):
         for manifest in (self.app_manifest, self.diagnostics_manifest):

@@ -20,7 +20,7 @@ object OfficialHelperDownload {
         }
         return hash.digest().joinToString("") { "%02x".format(it) }
     }
-    fun download(context: Context): File {
+    @Synchronized fun download(context: Context): File {
         val final = file(context)
         if (final.exists() && digest(final) == SHA256) return final
         final.parentFile!!.mkdirs()

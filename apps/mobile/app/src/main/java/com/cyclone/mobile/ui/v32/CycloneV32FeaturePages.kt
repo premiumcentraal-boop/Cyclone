@@ -344,8 +344,8 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
         item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Background tasks")
-                Text("Set up Shizuku, phone control and task notifications, with live checks.")
-                Button(onClick = { open(Intent(context, com.cyclone.mobile.runtime.background.BackgroundSetupActivity::class.java)) }) { Text("Guided background setup") }
+                Text("Let Cyclone work on a separate screen while you use your phone.")
+                Button(onClick = { open(Intent(context, com.cyclone.mobile.runtime.background.BackgroundSetupActivity::class.java)) }) { Text("Set up background tasks") }
             }
         }
         item { com.cyclone.mobile.ui.RootFeaturesCard() }
