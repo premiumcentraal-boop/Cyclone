@@ -20,35 +20,28 @@ internal class GatewayProtocolException(
 ) : IllegalArgumentException(message)
 
 internal object GatewayProtocol {
-    // Session operations are an additive Cyclone One extension. Keep the V3.3 transport version so
-    // existing trusted PC companions remain wire-compatible and discover the new operations through
-    // bridge.status instead of negotiating a second trust protocol.
+    // Session and Layer 2 workspace operations are additive extensions. Keep V3.3 transport wire-compatible.
     const val VERSION = "3.3"
     const val SOCKET_NAME = "cyclone_gateway"
     const val DEFAULT_FORWARD_PORT = 8766
     const val MAX_LINE_BYTES = 1024 * 1024
 
-    /**
-     * These operations either negotiate capabilities or carry their own signed challenge proof.
-     * They never authorize a phone action by themselves.
-     */
     val unauthenticatedOperations = setOf(
         "trust.negotiate",
         "trust.begin",
         "trust.complete",
         "trust.session.begin",
         "trust.session.complete",
-        // One transition release keeps the old four-letter pairing bootstrap as an explicit
-        // non-default compatibility path. Credentials from it are read-only at dispatch.
         "pair.begin",
         "pair.complete",
         "pair.qr.complete",
     )
 
-    /** Legacy pairing credentials can inspect state but can never mutate under V3.3 rules. */
     val legacyReadOnlyOperations = setOf(
         "bridge.status",
         "session.list",
+        "workspace.list",
+        "workspace.lock",
         "observe.semantic",
         "observe.page_debug",
         "capture.screenshot",
@@ -73,12 +66,15 @@ internal object GatewayProtocol {
         "session.start",
         "session.status",
         "session.pause",
-        // PC gateway sends continue: ALLOWED_OPS rejects ops whose names contain "su" (resume).
         "session.continue",
         "session.resume",
         "session.handoff",
         "session.stop",
         "session.snapshot",
+        "workspace.list",
+        "workspace.register",
+        "workspace.switch",
+        "workspace.lock",
         "observe.semantic",
         "observe.page_debug",
         "capture.screenshot",
@@ -151,8 +147,7 @@ internal object GatewayAuth {
     }
 }
 
-/** Bounded line reader so a forwarded client cannot grow the phone process without limit. */
-internal object GatewayLineReader {
+object GatewayLineReader {
     fun readUtf8Line(input: InputStream, maxBytes: Int = GatewayProtocol.MAX_LINE_BYTES): String? {
         require(maxBytes > 0)
         val out = ByteArrayOutputStream(minOf(4096, maxBytes))
