@@ -72,16 +72,17 @@ class WorkspaceLayer2Test {
         assertEquals(WorkspaceState.RUNNING, registry.require("b").state)
     }
 
-    @Test fun gateCannotBeBypassedBySwitch() {
+    @Test fun gateCannotBeBypassedAfterGateReleasesMutateLock() {
         val registry = WorkspaceRegistry().apply {
             upsert(CycloneWorkspace("a", "A", "com.example.a", state = WorkspaceState.GATED))
             upsert(CycloneWorkspace("b", "B", "com.example.b"))
         }
-        val lock = WorkspaceMutateLock().apply { acquire("a") }
+        val lock = WorkspaceMutateLock()
         val result = WorkspaceSwitchEngine(registry, lock, FakePlatform()).switch("b")
         assertFalse(result.ok)
         assertEquals("GATE_ACTIVE", result.code)
-        assertEquals("a", lock.holder())
+        assertNull(lock.holder())
+        assertEquals(WorkspaceState.GATED, registry.require("a").state)
     }
 
     @Test fun nonzeroDisplayStaysFailClosed() {
