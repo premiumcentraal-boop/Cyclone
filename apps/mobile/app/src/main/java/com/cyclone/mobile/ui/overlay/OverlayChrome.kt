@@ -438,7 +438,7 @@ private fun ComposerPanel(
             Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 8.dp) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(task.title, color = Color.White, style = MaterialTheme.typography.titleMedium)
-                    Text(task.message, color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                    Text(task.subtitle, color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.bodyMedium, maxLines = 3)
                     if (task.queued != null) Text("Follow-up saved", color = AuroraCyan, style = MaterialTheme.typography.labelMedium)
                     Button(onClick = { onAction(OverlayUserAction.MINIMIZE); context.startActivity(WorkspaceTasks.progressIntent(context, task)) },
                         modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),

@@ -30,7 +30,7 @@ fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
                     }, modifier = Modifier.size(32.dp))
                     Column(Modifier.weight(1f)) {
                         Text(task.title, color = Color.White, style = MaterialTheme.typography.titleSmall)
-                        Text(task.message, color = Color(0xFFBCCBD3), style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                        Text(task.subtitle, color = Color(0xFFBCCBD3), style = MaterialTheme.typography.bodySmall, maxLines = 2)
                     }
                 }
                 Button(onClick = { context.startActivity(WorkspaceTasks.progressIntent(context, task)) },

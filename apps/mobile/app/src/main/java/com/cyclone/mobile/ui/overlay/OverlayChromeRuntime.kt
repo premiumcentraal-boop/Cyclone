@@ -120,6 +120,7 @@ object OverlayChromeRuntime {
             controller?.dismiss()
         }
     }
+    /** Device hook: after cancel / failed start / tearDown, this must be 0. JVM regressions use OverlayWindowRegistry. */
     fun overlayWindowCount(): Int = synchronized(lock) { controller?.attachedWindowCount() ?: 0 }
 
     fun startAnalysis(

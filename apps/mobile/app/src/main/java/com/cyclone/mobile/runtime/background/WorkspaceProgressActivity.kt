@@ -53,14 +53,14 @@ class WorkspaceProgressActivity : ComponentActivity() {
                 } else {
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                        Text(if (task.phase == TaskPhase.HUMAN) "You have control · ${task.app}" else "Cyclone's workspace · ${task.app}",
+                        Text(progressPlaneLabel(task),
                             style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-                        if (task.sessionId != null && task.phase != TaskPhase.HUMAN) {
+                        if (showsVdPreview(task) && task.sessionId != null && task.phase != TaskPhase.HUMAN) {
                             WorkspacePreview(task.sessionId, Modifier.widthIn(max = 300.dp).fillMaxWidth(.80f).aspectRatio(720f / 1280f)) { liveAvailable = it }
                         }
                         Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(task.message, style = MaterialTheme.typography.bodyLarge)
+                                Text(task.subtitle, style = MaterialTheme.typography.bodyLarge)
                                 if (task.phase == TaskPhase.DONE) {
                                     task.steps.distinct().takeLast(4).forEach { Text("✓  $it", style = MaterialTheme.typography.bodyMedium) }
                                     Text("Task done", color = MaterialTheme.colorScheme.secondary)
@@ -94,7 +94,16 @@ class WorkspaceProgressActivity : ComponentActivity() {
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "cancel"); finish() }) { Text("Stop task") }
-                        if (task.sessionId != null) {
+                        if (isLayer2(task)) {
+                            Button(
+                                onClick = {
+                                    val launch = packageManager.getLaunchIntentForPackage(task.packageName)
+                                    if (launch != null) startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                    finish()
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Open ${task.app}") }
+                        } else if (task.sessionId != null) {
                             val human = task.phase == TaskPhase.HUMAN || task.phase == TaskPhase.PAUSED
                             if (!human || task.resumable) Button(
                                 onClick = {
@@ -108,6 +117,22 @@ class WorkspaceProgressActivity : ComponentActivity() {
                 }
             }
         } }
+    }
+
+    private fun isLayer2(task: WorkspaceTaskUi): Boolean =
+        intent.getStringExtra(ViewProgressRouter.EXTRA_PLANE) == ViewProgressRouter.PLANE_LAYER2 ||
+            task.workspaceId != null
+
+    private fun showsVdPreview(task: WorkspaceTaskUi): Boolean {
+        if (isLayer2(task)) return false
+        return ViewProgressRouter.showsVdFrames(task)
+    }
+
+    private fun progressPlaneLabel(task: WorkspaceTaskUi): String = when {
+        isLayer2(task) -> "Layer 2 workspace · ${task.app}"
+        task.phase == TaskPhase.HUMAN -> "You have control · ${task.app}"
+        ViewProgressRouter.showsVdFrames(task) -> "Session Kernel VD · ${task.app}"
+        else -> "Cyclone's workspace · ${task.app}"
     }
 
     @Composable

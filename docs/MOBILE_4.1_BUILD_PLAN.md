@@ -1,9 +1,9 @@
 # Cyclone Mobile 4.1 — Session Contract Mobile (phone sprint)
 
-**Status:** B1 DONE, B2 DONE (source/CI; Pixel **UNVERIFIED**). B3 not started.  
+**Status:** B1 DONE, B2 DONE, B3 DONE (source/CI; Pixel **UNVERIFIED**). B4 not started.  
 **Codename:** Session Contract Mobile  
 **Base:** published **`v4.0.4`** (`38f7628`, versionCode **75**) — NOT stale `main` (4.0.1)  
-**Device today:** Pixel may still be on **4.0.3** / 74. No B1/B2 adb/assemble smoke was run.  
+**Device today:** Pixel may still be on **4.0.3** / 74. No B1/B2/B3 adb/assemble smoke was run.  
 **Out:** Mobile **4.1.0** / next versionCode (76+) signed with update-compatible dev key (or documented migration)  
 **Grok:** each stage on Agent PC with **subagents required**
 
@@ -51,16 +51,17 @@ Acceptance: unit tests for mismatch matrix; no silent display-0 rewrite; Layer 2
 Out of scope: true parallel input; Magisk; B3 glass.
 
 ### B3 — Task glass + queue observability
-Branch: `grok/mobile-4.1-s3-glass` from B2.  
+**Status:** DONE in source/CI. Pixel acceptance **UNVERIFIED**.  
+Branch: `grok/mobile-4.1-s3-glass` from B2 (`0eaef0f`).  
 Goal: finish the Gemini-style feel on top of 4.0.1 glass + 4.0.3 queue.
 Deliverables:
-1. Glass subtitle tracks real Fast Path / skill / Layer 2 slice step.
-2. View progress always opens the **exact** plane (VD session frames vs Layer 2 app).
-3. Ghost overlay / teardown regressions remain green (`overlayWindowCount==0` after cancel).
-4. Ask bar raise / non-blocking human Instagram scroll preserved.
-5. Tests + docs + alpha.3 / versionCode 78.
-Acceptance: scripted overlay teardown tests; Pixel Instagram-scroll scenario UNVERIFIED or VERIFIED.  
-Out of scope: rewriting setup installer.
+1. Glass subtitle tracks real Fast Path / skill / Layer 2 slice step. — **DONE in source**. Pixel **UNVERIFIED**.
+2. View progress always opens the **exact** plane (VD session frames vs Layer 2 app). — **DONE in source**. Pixel **UNVERIFIED**.
+3. Ghost overlay / teardown regressions remain green (`overlayWindowCount==0` after cancel). — **DONE in source**. Pixel **UNVERIFIED**.
+4. Ask bar raise / non-blocking human Instagram scroll preserved. — **DONE in source**. Pixel **UNVERIFIED**.
+5. Tests + docs + alpha.3 / versionCode 78. — **DONE in source**. Pixel **UNVERIFIED**.
+Acceptance: scripted overlay teardown tests; Pixel Instagram-scroll scenario **UNVERIFIED**.  
+Out of scope: rewriting setup installer; B4 Fast Path on named VD.
 
 ### B4 — Fast Path / skills on owned VD
 Branch: `grok/mobile-4.1-s4-fastpath-bg` from B3.  

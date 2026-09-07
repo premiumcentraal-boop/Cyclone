@@ -204,7 +204,17 @@ object Layer2Workspaces {
                     check(!gated()) { engine.pause(); "GATE: queue paused" }
                     val id = engine.queue().firstOrNull() ?: error("QUEUE_EMPTY: arm a workspace job first")
                     engine.disarm(id)
-                    switch(ctx, id).also { engine.arm(id); it.put("goal", goals[id].orEmpty()) }
+                    switch(ctx, id).also { payload ->
+                        engine.arm(id)
+                        payload.put("goal", goals[id].orEmpty())
+                        val workspace = engine.snapshot().firstOrNull { it.id == id }
+                        val generation = payload.optLong("workspaceGeneration", -1L)
+                        if (workspace != null && generation >= 0L) {
+                            com.cyclone.mobile.runtime.background.WorkspaceTasks.observeLayer2Slice(
+                                workspace, generation, goals[id].orEmpty(),
+                            )
+                        }
+                    }
                 }
                 else -> error("Unknown workspace operation")
             }

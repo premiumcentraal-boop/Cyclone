@@ -11,7 +11,9 @@ import android.os.IBinder
 import com.cyclone.mobile.R
 import com.cyclone.mobile.ai.*
 import com.cyclone.mobile.runtime.session.ExecutionContext
+import com.cyclone.mobile.ui.overlay.GlassStepKind
 import com.cyclone.mobile.ui.overlay.PendingTaskAttachment
+import com.cyclone.mobile.ui.overlay.TaskGlassStep
 import kotlinx.coroutines.*
 
 /** One task, one existing agent, one owned display. UI dismissal never ends execution. */
@@ -88,8 +90,14 @@ class WorkspaceTaskService : Service() {
                 }
                 sessionId = session.sessionId
                 if (stopped) { withContext(Dispatchers.IO) { WorkspaceRuntime.close(session.sessionId) }; return@launch }
-                update { it.copy(sessionId = session.sessionId, phase = TaskPhase.WORKING,
-                    message = "Working in ${it.app}…", steps = listOf("Opened ${it.app}")) }
+                update { it.copy(
+                    sessionId = session.sessionId,
+                    displayId = session.displayId,
+                    phase = TaskPhase.WORKING,
+                    message = TaskGlassStep.subtitle(GlassStepKind.FAST_PATH, "Opened ${it.app}"),
+                    glassStepKind = GlassStepKind.FAST_PATH,
+                    steps = listOf("Opened ${it.app}"),
+                ) }
                 val settings = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
                 val profile = CycloneAiAccessProfileStore.read(applicationContext)
                 val config = QuickAgentConfig(
@@ -174,7 +182,13 @@ class WorkspaceTaskService : Service() {
                 if (stopped) return@launch
                 withContext(Dispatchers.IO) { WorkspaceRuntime.resume(id) }
                 awaitWorkspace(id, ExecutionContext(id, com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions.lookup(id).displayId))
-                update { it.copy(phase = TaskPhase.WORKING, message = "Continuing in ${it.app}…") }
+                update {
+                    it.copy(
+                        phase = TaskPhase.WORKING,
+                        message = TaskGlassStep.subtitle(GlassStepKind.FAST_PATH, "Continuing in ${it.app}"),
+                        glassStepKind = GlassStepKind.FAST_PATH,
+                    )
+                }
                 switching = false
                 finishTask(agent?.resume { text -> progress(text) } ?: error("Task unavailable"))
             } catch (error: CancellationException) { throw error }
@@ -207,12 +221,10 @@ class WorkspaceTaskService : Service() {
         }
     }
     private fun progress(text: String) {
-        val message = when {
-            text.contains("verif", true) -> "Checking the result…"
-            text.contains("observ", true) -> "Checking the page…"
-            else -> return
+        val step = TaskGlassStep.fromProgress(text) ?: return
+        update {
+            if (it.working) it.copy(message = step.label, glassStepKind = step.kind) else it
         }
-        update { if (it.working) it.copy(message = message) else it }
     }
     private fun update(change: (WorkspaceTaskUi) -> WorkspaceTaskUi) { taskId?.let { WorkspaceTasks.update(it, change) } }
     private fun notification(task: WorkspaceTaskUi): Notification {
@@ -225,7 +237,7 @@ class WorkspaceTaskService : Service() {
                 TaskPhase.WORKING, TaskPhase.STARTING -> "Cyclone is working"
                 TaskPhase.REVIEW -> "Finish your task"
                 else -> task.title
-            }).setContentText(task.message).setOnlyAlertOnce(true).setShowWhen(false)
+            }).setContentText(task.subtitle).setOnlyAlertOnce(true).setShowWhen(false)
             .setOngoing(task.phase !in setOf(TaskPhase.FAILED, TaskPhase.STOPPED))
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(progress)
             .setPublicVersion(Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)

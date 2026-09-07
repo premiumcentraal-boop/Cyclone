@@ -3,10 +3,16 @@ package com.cyclone.mobile.runtime.background
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionKernel
+import com.cyclone.mobile.runtime.session.SessionPlane
+import com.cyclone.mobile.ui.overlay.GlassStepKind
+import com.cyclone.mobile.ui.overlay.TaskGlassStep
+import com.cyclone.mobile.runtime.workspaces.Workspace
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.json.JSONObject
 import java.util.UUID
 
 enum class TaskPhase { STARTING, WORKING, PAUSED, REVIEW, HUMAN, DONE, FAILED, STOPPED }
@@ -22,6 +28,10 @@ data class WorkspaceTaskUi(
     val queued: String? = null,
     val resumable: Boolean = true,
     val confirmation: WorkspaceConfirmation? = null,
+    val displayId: Int? = null,
+    val workspaceId: String? = null,
+    val workspaceGeneration: Long? = null,
+    val glassStepKind: GlassStepKind? = null,
 ) {
     val working get() = phase == TaskPhase.STARTING || phase == TaskPhase.WORKING
     val title get() = when (phase) {
@@ -33,6 +43,27 @@ data class WorkspaceTaskUi(
         TaskPhase.FAILED -> "Couldn't finish this task"
         TaskPhase.STOPPED -> "Task stopped"
     }
+    /** Collapsed glass subtitle: real Fast Path / skill / Layer 2 slice, not a generic placeholder. */
+    val subtitle: String get() = message
+
+    fun identityJson(): JSONObject {
+        val json = JSONObject()
+        if (workspaceId != null || workspaceGeneration != null) {
+            json.put("sessionId", sessionId ?: "default-foreground")
+            json.put("displayId", displayId ?: 0)
+            workspaceId?.let { json.put("workspaceId", it) }
+            workspaceGeneration?.let { json.put("workspaceGeneration", it) }
+        } else if (!sessionId.isNullOrBlank() && sessionId != "default-foreground") {
+            json.put("sessionId", sessionId)
+            json.put("displayId", displayId ?: -1)
+        } else {
+            json.put("sessionId", sessionId ?: "default-foreground")
+            json.put("displayId", displayId ?: 0)
+        }
+        return json
+    }
+
+    fun plane(): SessionPlane = SessionContract.classify(identityJson())
 }
 
 /** Presentation and task routing only. WorkspaceRuntime and the existing agent own execution. */
@@ -69,10 +100,43 @@ object WorkspaceTasks {
         Intent(context, WorkspaceTaskService::class.java).setAction(action)
             .setData(Uri.parse("cyclone://task/${task.taskId}/$action"))
             .putExtra("task", task.taskId).putExtra("session", task.sessionId)
-    fun progressIntent(context: Context, task: WorkspaceTaskUi) = Intent(context, WorkspaceProgressActivity::class.java)
-        .setData(Uri.parse("cyclone://task/${task.taskId}/progress"))
-        .putExtra("task", task.taskId).putExtra("session", task.sessionId)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    fun progressIntent(context: Context, task: WorkspaceTaskUi) = ViewProgressRouter.intent(context, task)
     fun matches(task: WorkspaceTaskUi?, taskId: String?, sessionId: String?) =
         task != null && task.taskId == taskId && (sessionId == null || task.sessionId == sessionId)
+
+    /**
+     * Queue observability only. Does not start a Session Kernel VD and never replaces an in-flight
+     * named VD task. Layer 2 stays default-foreground / display 0.
+     */
+    fun canPublishLayer2Slice(current: WorkspaceTaskUi?): Boolean {
+        if (current == null || current.phase in setOf(TaskPhase.STOPPED, TaskPhase.FAILED)) return true
+        if (current.workspaceId != null) return true
+        return current.sessionId.isNullOrBlank() || current.sessionId == "default-foreground"
+    }
+
+    fun observeLayer2Slice(workspace: Workspace, generation: Long, goal: String) {
+        val current = mutable.value
+        if (!canPublishLayer2Slice(current)) return
+        val step = TaskGlassStep.layer2Slice(workspace.label)
+        val slice = WorkspaceTaskUi(
+            taskId = current?.takeIf { it.workspaceId != null }?.taskId ?: "layer2-${workspace.id}",
+            sessionId = "default-foreground",
+            app = workspace.label,
+            packageName = workspace.appPackage,
+            goal = goal.ifBlank { workspace.label },
+            phase = TaskPhase.WORKING,
+            message = step.label,
+            displayId = 0,
+            workspaceId = workspace.id,
+            workspaceGeneration = generation,
+            glassStepKind = step.kind,
+        )
+        if (current?.workspaceId != null && current.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED)) {
+            mutable.value = slice
+            return
+        }
+        if (current == null || current.phase in setOf(TaskPhase.STOPPED, TaskPhase.FAILED)) {
+            mutable.value = slice
+        }
+    }
 }
