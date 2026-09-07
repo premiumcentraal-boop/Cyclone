@@ -13,7 +13,7 @@ from .models import (
 )
 
 
-OBSERVATION_CAPABILITIES = {"phone.observe", "phone.find", "phone.wait_for"}
+OBSERVATION_CAPABILITIES = {"workspace.list", "phone.observe", "phone.find", "phone.wait_for"}
 SENSITIVE_PARAMETERS = {"phone.type": ("text", "value")}
 
 

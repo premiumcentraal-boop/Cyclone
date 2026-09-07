@@ -28,7 +28,7 @@ object PhoneToolExecutor {
         "phone.scroll", "phone.swipe", "phone.back", "phone.home", "phone.open_app",
         "phone.open_notification", "phone.set_clipboard", "phone.share", "phone.launch_intent",
     )
-    private val mutationLock = Object()
+    private val mutationLock = com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.engine.mutationLock
     private val resultCache = object : LinkedHashMap<String, PhoneToolResult>(128, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PhoneToolResult>?): Boolean = size > 250
     }
@@ -39,6 +39,30 @@ object PhoneToolExecutor {
      * wait/screenshot/read can no longer hold one global monitor and block unrelated observation.
      */
     fun execute(context: Context, request: PhoneToolRequest): PhoneToolResult {
+        val layer2 = com.cyclone.mobile.runtime.workspaces.Layer2Workspaces
+        val management = request.tool.startsWith("workspace.") || request.tool == "phone.workspace_switch"
+        if (management || request.tool in mutatingTools) return synchronized(mutationLock) {
+            try {
+                val scope = com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(request.params)
+                if (management) {
+                    check(scope.sessionId == "default-foreground" && scope.displayId == 0) { "Layer 2 requires default-foreground / display 0" }
+                    if (request.tool != "workspace.list") {
+                        synchronized(resultCache) { resultCache.clear() }
+                        recentActions.clear()
+                    }
+                    return@synchronized layer2.command(context, request)
+                }
+                layer2.requireMutation(context, request)
+                if (layer2.engine.selectedId() != null) {
+                    check(scope.sessionId == "default-foreground" && scope.displayId == 0) { "MUTATE_LOCK: display-0 workspace owns input" }
+                }
+                executeScoped(context, request)
+            } catch (error: Exception) { scopeFailure(request, error) }
+        }
+        return executeScoped(context, request)
+    }
+
+    private fun executeScoped(context: Context, request: PhoneToolRequest): PhoneToolResult {
         // Validate before cache lookup AND before observing the human display.
         val scope = try { com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(request.params) }
         catch (error: IllegalArgumentException) { return scopeFailure(request, error) }

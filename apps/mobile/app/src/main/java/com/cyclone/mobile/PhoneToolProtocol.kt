@@ -301,6 +301,15 @@ data class PhoneToolResult(
 
 object PhoneToolNames {
     val all = setOf(
+        "workspace.list",
+        "workspace.register",
+        "workspace.switch",
+        "phone.workspace_switch",
+        "workspace.pause",
+        "workspace.release",
+        "workspace.arm",
+        "workspace.next",
+
         "phone.observe",
         "phone.screenshot",
         "phone.find",

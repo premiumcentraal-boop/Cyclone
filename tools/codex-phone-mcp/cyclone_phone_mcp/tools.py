@@ -141,6 +141,14 @@ def _validate_mcp_action_params(tool: str, params: dict[str, Any]) -> str | None
     """
     params = strip_execution_scope(params)
     _validate_typed_params(params)
+    workspace_id = params.get("workspaceId")
+    workspace_generation = params.get("workspaceGeneration")
+    if workspace_id is not None or workspace_generation is not None:
+        if not isinstance(workspace_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", workspace_id):
+            raise ValueError("workspaceId is invalid")
+        if type(workspace_generation) is not int or workspace_generation < 0:
+            raise ValueError("workspaceGeneration is required with workspaceId")
+    params = {key: value for key, value in params.items() if key not in {"workspaceId", "workspaceGeneration"}}
     _reject_coordinate_params(params)
     element_id = _element_id_from_params(params)
 
@@ -407,6 +415,31 @@ class PhoneTools:
         if device_id:
             return redact(self.gateway.device_page_history(device_id))
         return redact(self.gateway.page_history())
+
+    def phone_workspace(self, args: dict[str, Any]) -> Any:
+        """Layer 2 management, with the same trusted gateway/Android authority as phone_act."""
+        operation = args.get("operation")
+        if operation not in {"list", "register", "switch", "pause", "release", "arm", "next"}:
+            raise ValueError("Unknown workspace operation")
+        scope = require_tool_execution_scope(args)
+        if scope["sessionId"] != "default-foreground" or scope["displayId"] != 0:
+            raise ValueError("Layer 2 workspaces require default-foreground / display 0")
+        params = args.get("params", {})
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        allowed = {"id", "label", "appPackage", "androidUserId", "displayId", "goal"}
+        if set(params) - allowed:
+            raise ValueError("Unexpected workspace parameter")
+        _validate_typed_params(params)
+        identity = _identity_kwargs(scope)
+        device_id = _device_id(args)
+        goal = "Manage Cyclone workspace: " + operation
+        forwarded = attach_execution_scope(params, scope)
+        if device_id:
+            self.gateway.device_observe(device_id, include_screenshot=False, mode="compact", **identity)
+            return redact(self.gateway.device_action(device_id, "workspace." + operation, forwarded, goal, **identity))
+        self.gateway.observe(include_screenshot=False, mode="compact", **identity)
+        return redact(self.gateway.action("workspace." + operation, forwarded, goal, **identity))
 
     def phone_act(self, args: dict[str, Any]) -> Any:
         tool = str(args.get("tool") or "")

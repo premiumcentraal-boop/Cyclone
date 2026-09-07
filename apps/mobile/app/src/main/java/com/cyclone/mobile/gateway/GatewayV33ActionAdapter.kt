@@ -30,6 +30,14 @@ internal object GatewayV33ActionAdapter {
     }
 
     private val mutatingTools = setOf(
+        "workspace.register",
+        "workspace.switch",
+        "phone.workspace_switch",
+        "workspace.pause",
+        "workspace.release",
+        "workspace.arm",
+        "workspace.next",
+
         "phone.click",
         "phone.long_press",
         "phone.tap",
@@ -135,6 +143,15 @@ internal object GatewayV33ActionAdapter {
         }
 
         val execution = baseResult.optJSONObject("execution") ?: JSONObject()
+        if (tool.startsWith("workspace.") || tool == "phone.workspace_switch") {
+            val ok = execution.optBoolean("ok", false)
+            return baseResult
+                .put("androidExecution", JSONObject().put("ok", ok))
+                .put("verification", JSONObject().put("ok", ok)
+                    .put("status", if (ok) "PASSED" else "FAILED")
+                    .put("basis", "WORKSPACE_ENGINE_POSTCONDITION"))
+                .put("requiresReobserveBeforeNextMutation", true)
+        }
         val error = execution.optJSONObject("error")
         val errorCode = error?.optString("code").orEmpty()
         val executorReportedOk = execution.optBoolean("ok", false)

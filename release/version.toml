@@ -1,22 +1,22 @@
-# Cyclone Mobile 4.0.2 one-button background install wizard; DEVICE TESTING: UNVERIFIED
+# Cyclone Mobile 4.0.3 Layer 2 workspaces and Root features; DEVICE TESTING: UNVERIFIED
 schema = 1
-product_version = "4.0.2"
+product_version = "4.0.3"
 channel = "development"
-android_version_code = 73
+android_version_code = 74
 python_version = "4.0.0"
 
 [components]
-mobile = "4.0.2"
+mobile = "4.0.3"
 pc_companion = "1.0.0"
 device_gateway = "4.0.0"
 mcp = "4.0.0"
 
 [release]
-previous_mobile_version = "4.0.1"
+previous_mobile_version = "4.0.2"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.0.2-no-tests"
+candidate_generation = "cyclone-4.0.3-workspaces"

@@ -247,6 +247,14 @@ class CycloneAuthorizedActionExecutor(
     companion object {
         /** Mirrors PhoneToolExecutor's mutation family; this set never performs the operations. */
         val MUTATING_TOOLS: Set<String> = setOf(
+            "workspace.register",
+            "workspace.switch",
+            "phone.workspace_switch",
+            "workspace.pause",
+            "workspace.release",
+            "workspace.arm",
+            "workspace.next",
+
             "phone.click",
             "phone.long_press",
             "phone.tap",

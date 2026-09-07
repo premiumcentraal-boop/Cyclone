@@ -67,6 +67,15 @@ internal object V31Bootstrap {
     )
 
     private val capabilitySpecs = listOf(
+        CapabilitySpec("workspace.list", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+        CapabilitySpec("workspace.register", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+        CapabilitySpec("workspace.switch", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+        CapabilitySpec("phone.workspace_switch", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+        CapabilitySpec("workspace.pause", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+        CapabilitySpec("workspace.release", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+        CapabilitySpec("workspace.arm", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+        CapabilitySpec("workspace.next", CORE_PHONE, "Layer 2 workspace operation through the canonical executor"),
+
         CapabilitySpec("phone.observe", CORE_PHONE, "Observe current Android accessibility state"),
         CapabilitySpec("phone.find", CORE_PHONE, "Find a semantic target in the current observation"),
         CapabilitySpec("phone.click", CORE_PHONE, "Request a canonical semantic click"),

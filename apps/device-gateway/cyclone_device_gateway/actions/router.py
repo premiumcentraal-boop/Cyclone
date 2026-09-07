@@ -15,6 +15,15 @@ from .envelope import android_execution_error_class, extract_android_execution
 
 
 ALLOWED_TOOLS = {
+    "workspace.list",
+    "workspace.register",
+    "workspace.switch",
+    "phone.workspace_switch",
+    "workspace.pause",
+    "workspace.release",
+    "workspace.arm",
+    "workspace.next",
+
     "phone.observe",
     "phone.find",
     "phone.click",
@@ -27,7 +36,7 @@ ALLOWED_TOOLS = {
     "phone.open_app",
     "phone.wait_for",
 }
-NON_MUTATING_TOOLS = {"phone.observe", "phone.find", "phone.wait_for"}
+NON_MUTATING_TOOLS = {"workspace.list", "phone.observe", "phone.find", "phone.wait_for"}
 FORBIDDEN_KEYS = {"command", "shell", "powershell", "su", "script"}
 SELECTOR_KEY_ALIASES = {
     "resource_id": "resourceId",

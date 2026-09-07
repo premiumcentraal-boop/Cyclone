@@ -330,8 +330,16 @@ private class V31GatewayPolicyAuthority(
 
     private companion object {
         val GATEWAY_PRINCIPAL = PrincipalRef("cyclone.gateway.pc", PrincipalKind.EXTERNAL_GATEWAY)
-        val READ_ONLY_CAPABILITIES = setOf("phone.observe", "phone.find", "phone.wait_for")
+        val READ_ONLY_CAPABILITIES = setOf("workspace.list", "phone.observe", "phone.find", "phone.wait_for")
         val MUTATING_CAPABILITIES = setOf(
+            "workspace.register",
+            "workspace.switch",
+            "phone.workspace_switch",
+            "workspace.pause",
+            "workspace.release",
+            "workspace.arm",
+            "workspace.next",
+
             "phone.click",
             "phone.long_press",
             "phone.tap",

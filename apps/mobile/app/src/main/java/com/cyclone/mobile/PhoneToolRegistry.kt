@@ -18,6 +18,14 @@ data class PhoneToolDefinition(
 
 object PhoneToolRegistry {
     val definitions: List<PhoneToolDefinition> = listOf(
+        PhoneToolDefinition("workspace.list", false, description = "List durable Layer 2 profiles, armed jobs and global mutation owner"),
+        PhoneToolDefinition("workspace.register", true, description = "Register id, label, appPackage, androidUserId; display 0 only"),
+        PhoneToolDefinition("workspace.switch", true, description = "Release input, launch target and verify package/user before granting a new workspace generation; never bypass GATE"),
+        PhoneToolDefinition("phone.workspace_switch", true, description = "Alias for workspace.switch"),
+        PhoneToolDefinition("workspace.pause", true, description = "Revoke current mutation lease"),
+        PhoneToolDefinition("workspace.release", true, description = "Pause all queued work and return to ordinary foreground mode"),
+        PhoneToolDefinition("workspace.arm", true, description = "Arm one ephemeral job per workspace with id and goal"),
+        PhoneToolDefinition("workspace.next", true, description = "Claim the next round-robin job; observe then act with returned workspaceId/workspaceGeneration"),
         PhoneToolDefinition("phone.observe", false, "accessibility", "A11y-first observation: Page Card with stable elementIndex. Vision/screenshot only when the tree is useless"),
         PhoneToolDefinition("phone.screenshot", false, "screenshot", "Capture the screen or a cropped region; base64 is opt-in"),
         PhoneToolDefinition("phone.find", false, "accessibility", "Resolve stable selectors against the current normalized UI snapshot"),

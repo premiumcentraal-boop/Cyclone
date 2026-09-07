@@ -348,6 +348,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
                 Button(onClick = { open(Intent(context, com.cyclone.mobile.runtime.background.BackgroundSetupActivity::class.java)) }) { Text("Guided background setup") }
             }
         }
+        item { com.cyclone.mobile.ui.RootFeaturesCard() }
         item {
             CycloneHeroCard(
                 title = if (essentialReady == 4) "Phone setup complete" else "$essentialReady of 4 essentials ready",

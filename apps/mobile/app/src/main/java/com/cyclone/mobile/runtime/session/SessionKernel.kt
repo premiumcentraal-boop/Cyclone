@@ -7,6 +7,10 @@ object SessionKernel {
     const val PRODUCT_HOT_BACKGROUND_LIMIT = 1
     const val API_SESSION_CAPACITY = 8
 
+    fun switchWorkspace(context: android.content.Context, id: String): com.cyclone.mobile.PhoneToolResult =
+        com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+            "workspace-switch-${System.nanoTime()}", "workspace.switch", JSONObject().put("id", id)))
+
     fun bind(params: JSONObject): ExecutionContext = ExecutionRequestScope.bind(params)
     fun attach(params: JSONObject, context: ExecutionContext): JSONObject =
         ExecutionRequestScope.attach(params, context)
