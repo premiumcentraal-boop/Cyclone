@@ -107,10 +107,24 @@ private fun GatewayControlCenter(
     val status = remember(refreshTick) { GatewayRuntime.status(context) }
     val enabled = status.optBoolean("gatewayEnabled")
     val accessibilityReady = status.optBoolean("accessibilityConnected")
+    val phoneControlReady = if (status.has("phoneControlReady")) {
+        status.optBoolean("phoneControlReady")
+    } else {
+        accessibilityReady
+    }
+    val phoneControlNeedsRepair = status.optBoolean("phoneControlNeedsRepair")
+    val nextActionJson = status.optJSONObject("nextAction")
+    val nextAction = nextActionJson?.optString("code")?.takeIf { it.isNotBlank() }?.let {
+        GatewayReadyNextAction(
+            code = it,
+            title = nextActionJson.optString("title"),
+            body = nextActionJson.optString("body"),
+            actionLabel = nextActionJson.optString("actionLabel"),
+        )
+    }
     val session = status.optJSONObject("connectedSession")
     val connected = session?.optBoolean("connected") == true
     val bootstrapReady = status.optBoolean("pairingBootstrapListening")
-    val socketReady = status.optBoolean("socketListening")
     val productionAuthority = status.optBoolean("productionActionAuthorityBound")
     val trust = status.optJSONObject("trust")
     val trustState = trust?.optString("trustState").orEmpty()
@@ -157,6 +171,24 @@ private fun GatewayControlCenter(
                         Toast.makeText(context, it.message ?: "Could not change Gateway state", Toast.LENGTH_LONG).show()
                     }
                     refreshTick++
+                }
+            }
+
+            if (nextAction != null) {
+                item {
+                    GatewayNextActionCard(
+                        action = nextAction,
+                        gatewayEnabled = enabled,
+                        onTurnOnGateway = {
+                            runCatching { GatewayRuntime.enable(context) }.onFailure {
+                                Toast.makeText(context, it.message ?: "Could not change Gateway state", Toast.LENGTH_LONG).show()
+                            }
+                            refreshTick++
+                        },
+                        onOpenAccessibility = {
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                    )
                 }
             }
 
@@ -243,8 +275,12 @@ private fun GatewayControlCenter(
                         GatewayStatusLine(
                             icon = Icons.Rounded.PhoneAndroid,
                             title = "Phone control",
-                            value = if (accessibilityReady) "Ready" else "Accessibility off",
-                            ready = accessibilityReady,
+                            value = when {
+                                phoneControlReady -> "Ready"
+                                phoneControlNeedsRepair -> "Needs repair"
+                                else -> "Accessibility off"
+                            },
+                            ready = phoneControlReady,
                         )
                         GatewayStatusLine(
                             icon = Icons.Rounded.Computer,
@@ -372,7 +408,7 @@ private fun GatewayControlCenter(
                 }
             }
 
-            if (!accessibilityReady) {
+            if (!phoneControlReady && nextAction == null) {
                 item {
                     Card(
                         shape = RoundedCornerShape(22.dp),
@@ -486,6 +522,37 @@ private fun scanDesktopPairingQr(context: Context) {
         .addOnFailureListener {
             Toast.makeText(context, "QR scanner unavailable. Use the fallback code below.", Toast.LENGTH_LONG).show()
         }
+}
+
+@Composable
+private fun GatewayNextActionCard(
+    action: GatewayReadyNextAction,
+    gatewayEnabled: Boolean,
+    onTurnOnGateway: () -> Unit,
+    onOpenAccessibility: () -> Unit,
+) {
+    Card(
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(action.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(action.body, style = MaterialTheme.typography.bodyMedium)
+            Button(
+                onClick = {
+                    when (action.code) {
+                        GatewayReadyDoctor.TURN_ON_GATEWAY -> onTurnOnGateway()
+                        GatewayReadyDoctor.FIX_USB_BRIDGE -> if (!gatewayEnabled) onTurnOnGateway()
+                        GatewayReadyDoctor.REPAIR_PHONE_CONTROL,
+                        GatewayReadyDoctor.ENABLE_PHONE_CONTROL,
+                        -> onOpenAccessibility()
+                        else -> Unit
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(action.actionLabel) }
+        }
+    }
 }
 
 @Composable

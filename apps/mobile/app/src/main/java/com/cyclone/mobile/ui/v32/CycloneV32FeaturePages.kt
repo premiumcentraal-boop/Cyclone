@@ -332,11 +332,11 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
     var hasKey by remember(refreshTick) { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
     var selectedModel by rememberSaveable { mutableStateOf(aiPrefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }) }
     var accessProfile by rememberSaveable { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
-    val primaryControl = CyclonePermissionSetup.primaryControlEnabled(context)
+    val phoneControl = CyclonePermissionSetup.phoneControlSnapshot(context)
     val notificationAccess = CyclonePermissionSetup.notificationAccessEnabled(context)
     val resultNotifications = CyclonePermissionSetup.resultNotificationsEnabled(context)
     val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
-    val essentialReady = listOf(primaryControl, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
+    val essentialReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
     fun open(intent: Intent) = context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -362,7 +362,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
         item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Essential access")
-                CyclonePermissionRow(Icons.Rounded.Security, "Phone control", "Read semantic controls and perform policy-approved taps, typing and gestures.", primaryControl, if (primaryControl) "Manage" else "Enable") {
+                CyclonePermissionRow(Icons.Rounded.Security, "Phone control", phoneControl.detail, phoneControl.ready, phoneControl.actionLabel) {
                     open(CyclonePermissionSetup.accessibilitySettings())
                 }
                 CyclonePermissionRow(Icons.Rounded.Notifications, "Notification triggers", "React to selected app notifications without watching screenshots.", notificationAccess, if (notificationAccess) "Manage" else "Enable") {

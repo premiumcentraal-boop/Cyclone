@@ -358,7 +358,7 @@ private fun V32RoutineDetail(context: Context, automation: AutomationDefinition,
 }
 
 internal fun v32AccessibilityEnabled(context: Context): Boolean {
-    return CyclonePermissionSetup.primaryControlEnabled(context)
+    return CyclonePermissionSetup.phoneControlReady(context)
 }
 
 internal fun v32NotificationListenerEnabled(context: Context): Boolean = CyclonePermissionSetup.notificationAccessEnabled(context)

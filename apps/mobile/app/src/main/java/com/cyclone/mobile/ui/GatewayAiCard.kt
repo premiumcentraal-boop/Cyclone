@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.CycloneRelease
+import com.cyclone.mobile.gateway.GatewayReadyDoctor
 import com.cyclone.mobile.gateway.GatewayRuntime
 import com.cyclone.mobile.gateway.GatewaySettingsActivity
 
@@ -44,6 +46,14 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
     val status = remember(refreshTick) { GatewayRuntime.status(context) }
     val enabled = status.optBoolean("gatewayEnabled")
     val accessibilityReady = status.optBoolean("accessibilityConnected")
+    val phoneControlReady = if (status.has("phoneControlReady")) {
+        status.optBoolean("phoneControlReady")
+    } else {
+        accessibilityReady
+    }
+    val phoneControlNeedsRepair = status.optBoolean("phoneControlNeedsRepair")
+    val nextAction = status.optJSONObject("nextAction")
+    val nextActionCode = nextAction?.optString("code").orEmpty()
     val session = status.optJSONObject("connectedSession")
     val pcConnected = session?.optBoolean("connected") == true
     val token = if (enabled) GatewayRuntime.tokenForUser(context).orEmpty() else ""
@@ -87,21 +97,49 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
             )
 
             GatewayStatusRow("Gateway", enabled, if (enabled) "On" else "Off")
-            GatewayStatusRow("Phone control", accessibilityReady, if (accessibilityReady) "Ready" else "Accessibility off")
+            GatewayStatusRow(
+                "Phone control",
+                phoneControlReady,
+                when {
+                    phoneControlReady -> "Ready"
+                    phoneControlNeedsRepair -> "Needs repair"
+                    else -> "Accessibility off"
+                },
+            )
             GatewayStatusRow("USB / PC session", pcConnected, if (pcConnected) "Connected" else if (enabled) "Waiting for PC" else "Off")
             GatewayStatusRow("PC Gateway health", pcConnected, if (pcConnected) "Session active" else "Known after PC connects")
+
+            if (nextAction != null) {
+                Text(nextAction.optString("title"), fontWeight = FontWeight.Bold)
+                Text(nextAction.optString("body"), style = MaterialTheme.typography.bodyMedium)
+            }
 
             status.optString("lastSafeError").takeIf { it.isNotBlank() && it != "null" }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
 
             Button(
-                onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java)) },
+                onClick = {
+                    when (nextActionCode) {
+                        GatewayReadyDoctor.ENABLE_PHONE_CONTROL,
+                        GatewayReadyDoctor.REPAIR_PHONE_CONTROL,
+                        -> context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        else -> context.startActivity(Intent(context, GatewaySettingsActivity::class.java))
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Rounded.Link, null)
                 Spacer(Modifier.width(7.dp))
-                Text(if (enabled) "Open Gateway control center" else "Set up Full Gateway")
+                Text(
+                    when (nextActionCode) {
+                        GatewayReadyDoctor.TURN_ON_GATEWAY,
+                        GatewayReadyDoctor.ENABLE_PHONE_CONTROL,
+                        GatewayReadyDoctor.REPAIR_PHONE_CONTROL,
+                        -> nextAction?.optString("actionLabel").orEmpty().ifBlank { "Open Gateway control center" }
+                        else -> if (enabled) "Open Gateway control center" else "Set up Full Gateway"
+                    },
+                )
             }
 
             if (enabled && token.isNotBlank()) {
