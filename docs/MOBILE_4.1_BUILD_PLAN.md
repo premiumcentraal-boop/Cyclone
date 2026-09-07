@@ -1,9 +1,9 @@
 # Cyclone Mobile 4.1 — Session Contract Mobile (phone sprint)
 
-**Status:** B1 DONE, B2 DONE, B3 DONE (source/CI; Pixel **UNVERIFIED**). B4 not started.  
+**Status:** B1 DONE, B2 DONE, B3 DONE, B4 DONE (source/CI; Pixel **UNVERIFIED**). B5 not started.  
 **Codename:** Session Contract Mobile  
 **Base:** published **`v4.0.4`** (`38f7628`, versionCode **75**) — NOT stale `main` (4.0.1)  
-**Device today:** Pixel may still be on **4.0.3** / 74. No B1/B2/B3 adb/assemble smoke was run.  
+**Device today:** Pixel may still be on **4.0.3** / 74. No B1/B2/B3/B4 adb/assemble smoke was run.  
 **Out:** Mobile **4.1.0** / next versionCode (76+) signed with update-compatible dev key (or documented migration)  
 **Grok:** each stage on Agent PC with **subagents required**
 
@@ -64,15 +64,16 @@ Acceptance: scripted overlay teardown tests; Pixel Instagram-scroll scenario **U
 Out of scope: rewriting setup installer; B4 Fast Path on named VD.
 
 ### B4 — Fast Path / skills on owned VD
-Branch: `grok/mobile-4.1-s4-fastpath-bg` from B3.  
+**Status:** DONE in source/CI. Pixel acceptance **UNVERIFIED**.  
+Branch: `grok/mobile-4.1-s4-fastpath-bg` from B3 (`ee077b3`).  
 Goal: ClosePaw-quality loop on a **named** workspace, not only default-foreground.
 Deliverables:
-1. Acceptance: Chrome search ≤90s on mid model with `session_id≠default-foreground` and `displayId>0`.
-2. Skill compile/replay bound to that session/display; miss escalates correctly.
-3. GATE / Take control / Continue preserved.
-4. Evidence folder + docs + alpha.4 / versionCode 79.
-Acceptance: recorded timing artifact on Pixel or honest UNVERIFIED with CI harness.  
-Out of scope: vision-first primary loop.
+1. Acceptance: Chrome search ≤90s on mid model with `session_id≠default-foreground` and `displayId>0`. — **DONE in source**. Pixel **UNVERIFIED**.
+2. Skill compile/replay bound to that session/display; miss escalates correctly. — **DONE in source**. Pixel **UNVERIFIED**.
+3. GATE / Take control / Continue preserved. — **DONE in source**. Pixel **UNVERIFIED**.
+4. Evidence folder + docs + alpha.4 / versionCode 79. — **DONE in source**. Pixel **UNVERIFIED**.
+Acceptance: recorded timing artifact on Pixel or honest UNVERIFIED with CI harness. Pixel still **UNVERIFIED**.  
+Out of scope: vision-first primary loop. Do not start B5.
 
 ### B5 — Mobile 4.1.0 release
 Branch: `grok/mobile-4.1-s5-release` from B4.  

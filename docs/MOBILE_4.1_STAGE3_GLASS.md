@@ -73,6 +73,8 @@ B4 (`grok/mobile-4.1-s4-fastpath-bg`, identity `4.1.0-alpha.4` / versionCode 79)
 
 Do not implement those here.
 
+B4 now lives on `grok/mobile-4.1-s4-fastpath-bg` — see [`docs/MOBILE_4.1_STAGE4_FASTPATH_BG.md`](MOBILE_4.1_STAGE4_FASTPATH_BG.md). This B3 document does not include named-VD Fast Path.
+
 ## Tests
 
 JVM (source; CI owns execution):
