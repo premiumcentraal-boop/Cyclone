@@ -226,34 +226,72 @@ class GatewayClient:
         self._capability_discovery[key] = response
         return response
 
-    def observe(self, device_id: str | None = None, *, include_screenshot: bool = False, mode: str = "compact") -> Any:
+    def observe(
+        self,
+        device_id: str | None = None,
+        *,
+        include_screenshot: bool = False,
+        mode: str = "compact",
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
         selected = self.select_device(device_id)
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
         if selected.legacy_unscoped:
             response = self._request("POST", "/v1/capabilities/observe", {
                 "protocol_version": CAPABILITY_PROTOCOL_VERSION,
                 "correlation_id": os.urandom(16).hex(),
                 "include_screenshot": include_screenshot,
                 "mode": mode,
+                **identity,
             })
         else:
-            response = self._request("POST", self._agent_path(selected, "/observe"), {"include_screenshot": include_screenshot, "mode": mode})
+            response = self._request("POST", self._agent_path(selected, "/observe"), {
+                "include_screenshot": include_screenshot,
+                "mode": mode,
+                **identity,
+            })
         witness = response.get("witness") if isinstance(response, dict) else None
         if isinstance(witness, dict) and isinstance(witness.get("observation_id"), str):
-            self._last_observation_id[selected.device_id] = witness["observation_id"]
+            self._last_observation_id[_observation_key(selected.device_id, identity)] = witness["observation_id"]
         return response
 
-    def ui_search(self, query: str, device_id: str | None = None) -> Any:
+    def ui_search(
+        self,
+        query: str,
+        device_id: str | None = None,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
         selected = self.select_device(device_id)
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        query_string = urllib.parse.urlencode({"q": query, **identity})
         if selected.legacy_unscoped:
-            return self._request("GET", f"/v1/ui/search?q={urllib.parse.quote(query)}")
-        return self._request("GET", self._agent_path(selected, f"/ui/search?q={urllib.parse.quote(query)}"))
+            return self._request("GET", f"/v1/ui/search?{query_string}")
+        return self._request("GET", self._agent_path(selected, f"/ui/search?{query_string}"))
 
-    def ui_element(self, element_id: str, device_id: str | None = None) -> Any:
+    def ui_element(
+        self,
+        element_id: str,
+        device_id: str | None = None,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
         selected = self.select_device(device_id)
         quoted = urllib.parse.quote(element_id, safe="")
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        suffix = f"?{urllib.parse.urlencode(identity)}" if identity else ""
         if selected.legacy_unscoped:
-            return self._request("GET", f"/v1/ui/element/{quoted}")
-        return self._request("GET", self._agent_path(selected, f"/ui/element/{quoted}"))
+            return self._request("GET", f"/v1/ui/element/{quoted}{suffix}")
+        return self._request("GET", self._agent_path(selected, f"/ui/element/{quoted}{suffix}"))
 
     def current_page(self, device_id: str | None = None) -> Any:
         selected = self.select_device(device_id)
@@ -263,34 +301,49 @@ class GatewayClient:
         selected = self.select_device(device_id)
         return self._request("GET", "/v1/page/history" if selected.legacy_unscoped else self._agent_path(selected, "/page/history"))
 
-    def action(self, tool: str, params: dict[str, Any], goal: str, device_id: str | None = None) -> Any:
+    def action(
+        self,
+        tool: str,
+        params: dict[str, Any],
+        goal: str,
+        device_id: str | None = None,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
         selected = self.select_device(device_id)
         discovery = self.capabilities(selected.device_id)
         capability_ids = self._capability_ids.get(selected.device_id, frozenset())
         if tool not in capability_ids:
             raise GatewayError(f"Capability {tool} is unavailable", body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY"}, "capability_id": tool})
-        observation_id = self._last_observation_id.get(selected.device_id)
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        observation_id = self._last_observation_id.get(_observation_key(selected.device_id, identity))
         if tool not in NON_MUTATING_CAPABILITIES and observation_id is None:
             raise GatewayError("A fresh phone observation is required before mutation", body={"error": {"code": "STALE_OBSERVATION", "layer": "PROTOCOL", "retryable": True}})
+        forwarded_params = dict(params)
+        forwarded_params.update(identity)
         if selected.legacy_unscoped:
             payload = {
                 "protocol_version": CAPABILITY_PROTOCOL_VERSION,
                 "correlation_id": os.urandom(16).hex(),
                 "capability_id": tool,
-                "params": params,
+                "params": forwarded_params,
                 "goal": goal,
                 "source": "PC_AGENT_MCP",
+                **identity,
             }
             if observation_id:
                 payload["expected_observation_id"] = observation_id
             response = self._request("POST", "/v1/capabilities/action", payload)
         else:
-            payload = {"capability_id": tool, "params": params, "goal": goal}
+            payload = {"capability_id": tool, "params": forwarded_params, "goal": goal, **identity}
             if observation_id:
                 payload["expected_observation_id"] = observation_id
             response = self._request("POST", self._agent_path(selected, "/action"), payload)
         if tool not in NON_MUTATING_CAPABILITIES:
-            self._last_observation_id.pop(selected.device_id, None)
+            self._last_observation_id.pop(_observation_key(selected.device_id, identity), None)
         return response
 
     def debug_bundle(self, device_id: str | None = None, *, expected: str = "", goal: str = "") -> Any:
@@ -371,3 +424,28 @@ class GatewayClient:
                     }
                 },
             ) from exc
+
+
+def _execution_identity(
+    *,
+    session_id: str | None = None,
+    sessionId: str | None = None,
+    display_id: int | None = None,
+    displayId: int | None = None,
+) -> dict[str, Any]:
+    session = session_id if session_id not in (None, "") else sessionId
+    display = display_id if display_id is not None else displayId
+    if session in (None, "") and display is None:
+        return {}
+    payload: dict[str, Any] = {}
+    if session not in (None, ""):
+        payload["sessionId"] = session
+    if display is not None:
+        payload["displayId"] = display
+    return payload
+
+
+def _observation_key(device_id: str | None, identity: dict[str, Any] | None) -> str:
+    session_id = identity.get("sessionId") if isinstance(identity, dict) else None
+    return f"{device_id or '__legacy__'}::{session_id or 'default-foreground'}"
+

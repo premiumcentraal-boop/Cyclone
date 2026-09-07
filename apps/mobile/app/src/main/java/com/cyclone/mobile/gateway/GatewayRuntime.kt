@@ -16,6 +16,9 @@ import com.cyclone.mobile.policy.GatePolicy
 import com.cyclone.mobile.policy.PolicyPrincipal
 import com.cyclone.mobile.policy.PrincipalKind
 import com.cyclone.mobile.policy.PrincipalRef
+import com.cyclone.mobile.runtime.session.ExecutionContext
+import com.cyclone.mobile.runtime.session.ExecutionRequestScope
+import com.cyclone.mobile.runtime.session.SessionIdentityException
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONArray
 import org.json.JSONObject
@@ -294,15 +297,15 @@ internal object GatewayDispatcher {
         }
     }
 
+    private val humanDisplayOps = setOf("manual.execute", "clipboard.get", "clipboard.set")
+    private val sessionBindOps = setOf(
+        "observe.semantic", "observe.page_debug", "capture.screenshot",
+        "ui.search", "ui.element", "action.execute", "skill.run",
+    )
+
     private fun dispatch(context: Context, request: GatewayRequest): Any {
         // Trust-session IDs belong to authentication. Only execution operations use this scope.
-        if (request.op in setOf("manual.execute", "clipboard.get", "clipboard.set", "observe.semantic",
-                "observe.page_debug", "capture.screenshot", "ui.search", "ui.element", "action.execute",
-                "skill.run")) {
-            com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(
-                com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(request.args, request.args.optJSONObject("params") ?: JSONObject()),
-            )
-        }
+        val bound = bindDispatchIdentity(request)
         return when (request.op) {
         "trust.negotiate" -> GatewayV33TrustManager.negotiate(context, request.args)
         "trust.begin" -> GatewayV33TrustManager.beginTrust(context, request.args)
@@ -325,7 +328,8 @@ internal object GatewayDispatcher {
         "observe.page_debug" -> GatewayPageDebugAdapter.capture(context, request.args)
         "capture.screenshot" -> GatewayCaptureAdapter.capture(context, request.args)
         "ui.search" -> {
-            val observation = GatewayObservationStore.current() ?: GatewayObservationAdapter.capture(context, request.args)
+            val observation = currentObservation(bound, request.id)
+                ?: GatewayObservationAdapter.capture(context, request.args)
             JSONObject()
                 .put("observationId", observation.id)
                 .put("elementIdScope", "observation-local")
@@ -340,7 +344,7 @@ internal object GatewayDispatcher {
                 )
         }
         "ui.element" -> {
-            val observation = GatewayObservationStore.current()
+            val observation = currentObservation(bound, request.id)
                 ?: throw GatewayProtocolException("STALE_OBSERVATION", "Call observe.semantic before ui.element")
             val requestedObservationId = request.args.optString("observationId").trim()
             if (requestedObservationId.isNotBlank() && requestedObservationId != observation.id) {
@@ -365,6 +369,31 @@ internal object GatewayDispatcher {
         )
     }
 
+    }
+
+    private fun bindDispatchIdentity(request: GatewayRequest): ExecutionContext {
+        if (request.op !in humanDisplayOps && request.op !in sessionBindOps) return ExecutionContext.DEFAULT
+        val merged = ExecutionRequestScope.merge(request.args, request.args.optJSONObject("params") ?: JSONObject())
+        return try {
+            if (request.op in humanDisplayOps) ExecutionRequestScope.requireForeground(merged)
+            else ExecutionRequestScope.bind(merged)
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException(
+                "SESSION_DISPLAY_MISMATCH",
+                error.message ?: "session/display mismatch",
+                request.id,
+            )
+        }
+    }
+
+    private fun currentObservation(bound: ExecutionContext, requestId: String): GatewayObservation? = try {
+        GatewayObservationStore.current(bound)
+    } catch (error: SessionIdentityException) {
+        throw GatewayProtocolException(
+            "SESSION_DISPLAY_MISMATCH",
+            error.message ?: "session/display mismatch",
+            requestId,
+        )
     }
 
     private fun dispatchSkill(context: Context, request: GatewayRequest): JSONObject {

@@ -40,6 +40,8 @@ known route / learned routine / open_app|intent landing
 
 Vision is a fallback when the accessibility tree is empty or a custom canvas (`perceptionMode=vision_escalate`). Unchanged after settle is `verified=false` and must not dispatch a second click channel. Consequential actions retain explicit approval boundaries. See [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md).
 
+Observe/act that can run in a workspace carry `sessionId` + `displayId`. Default-foreground is display 0 (`default-foreground`). Named workspace sessions never fall back to display 0; unknown session, display mismatch, and cross-session observation are rejected before mutation. See [`V4_STAGE2_SESSION_KERNEL.md`](V4_STAGE2_SESSION_KERNEL.md).
+
 ## Observability
 
 Every completed or failed agent run should leave a durable trace. Brain presents recent runs and can export a compact text diagnostic containing model-visible context, decisions, tool requests/results, verification, failures and recovery events. Diagnostics must exclude credentials, raw typed secrets, screenshots/base64, full accessibility trees and hidden provider reasoning.

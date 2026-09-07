@@ -9,6 +9,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from .session import attach_execution_scope, parse_execution_scope
+
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
 NON_MUTATING_CAPABILITIES = {"phone.observe", "phone.find", "phone.wait_for"}
@@ -37,10 +39,9 @@ class GatewayClient:
         parsed = urllib.parse.urlparse(self.base_url)
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise GatewayError("Gateway URL must use loopback HTTP")
-        self._last_observation_id: str | None = None
+        self._observation_ids: dict[str, str] = {}
         self._capability_ids: frozenset[str] | None = None
         self._capability_discovery: dict[str, Any] | None = None
-        self._device_observation_ids: dict[str, str] = {}
         self._device_capabilities: dict[str, dict[str, Any]] = {}
         self._device_capability_ids: dict[str, frozenset[str]] = {}
 
@@ -184,24 +185,58 @@ class GatewayClient:
         self._capability_discovery = response
         return response
 
-    def observe(self, *, include_screenshot: bool = False, mode: str = "compact") -> Any:
-        response = self._request("POST", "/v1/capabilities/observe", {
+    def observe(
+        self,
+        *,
+        include_screenshot: bool = False,
+        mode: str = "compact",
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        payload = {
             "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "correlation_id": str(uuid.uuid4()),
             "include_screenshot": include_screenshot,
             "mode": mode,
-        })
+            **identity,
+        }
+        response = self._request("POST", "/v1/capabilities/observe", payload)
         witness = response.get("witness") if isinstance(response, dict) else None
         if isinstance(witness, dict) and isinstance(witness.get("observation_id"), str):
-            self._last_observation_id = witness["observation_id"]
+            self._observation_ids[_observation_key(None, identity)] = witness["observation_id"]
         return response
 
-    def ui_search(self, query: str) -> Any:
-        encoded = urllib.parse.urlencode({"q": query})
+    def ui_search(
+        self,
+        query: str,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {"q": query}
+        params.update(_execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId))
+        encoded = urllib.parse.urlencode(params)
         return self._request("GET", f"/v1/ui/search?{encoded}")
 
-    def ui_element(self, element_id: str) -> Any:
-        return self._request("GET", f"/v1/ui/element/{urllib.parse.quote(element_id, safe='')}")
+    def ui_element(
+        self,
+        element_id: str,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        path = f"/v1/ui/element/{urllib.parse.quote(element_id, safe='')}"
+        if identity:
+            path = f"{path}?{urllib.parse.urlencode(identity)}"
+        return self._request("GET", path)
 
     def current_page(self) -> Any:
         return self._request("GET", "/v1/page/current")
@@ -209,7 +244,17 @@ class GatewayClient:
     def page_history(self) -> Any:
         return self._request("GET", "/v1/page/history")
 
-    def action(self, tool: str, params: dict[str, Any], goal: str) -> Any:
+    def action(
+        self,
+        tool: str,
+        params: dict[str, Any],
+        goal: str,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
         discovery = self.capabilities()
         if self._capability_ids is None or tool not in self._capability_ids:
             raise GatewayError(
@@ -227,7 +272,9 @@ class GatewayClient:
                 "Connected Cyclone gateway reports unavailable capabilities",
                 body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY", "retryable": True}},
             )
-        if tool not in NON_MUTATING_CAPABILITIES and self._last_observation_id is None:
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        observation_id = self._observation_ids.get(_observation_key(None, identity))
+        if tool not in NON_MUTATING_CAPABILITIES and observation_id is None:
             raise GatewayError(
                 "A fresh phone observation is required before a mutating action",
                 body={
@@ -245,17 +292,18 @@ class GatewayClient:
             "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "correlation_id": str(uuid.uuid4()),
             "capability_id": tool,
-            "params": params,
+            "params": attach_execution_scope(params, identity or None),
             "goal": goal,
             "source": "PC_CODEX",
+            **identity,
         }
-        if self._last_observation_id is not None:
-            payload["expected_observation_id"] = self._last_observation_id
+        if observation_id is not None:
+            payload["expected_observation_id"] = observation_id
         response = self._request("POST", "/v1/capabilities/action", payload)
         if tool not in NON_MUTATING_CAPABILITIES:
             # Element IDs and action evidence are observation-scoped. Force a re-observe after a
             # mutation instead of letting Codex accidentally reuse stale authority.
-            self._last_observation_id = None
+            self._observation_ids.pop(_observation_key(None, identity), None)
         return response
 
     def debug_bundle(self, expected: str | None = None, goal: str | None = None) -> Any:
@@ -354,25 +402,58 @@ class GatewayClient:
         self._device_capabilities[device_id] = response
         return response
 
-    def device_observe(self, device_id: str, *, include_screenshot: bool = False, mode: str = "compact") -> Any:
+    def device_observe(
+        self,
+        device_id: str,
+        *,
+        include_screenshot: bool = False,
+        mode: str = "compact",
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
         response = self._request("POST", f"/v1/devices/{_quote(device_id)}/agent/observe", {
             "mode": mode,
             "include_screenshot": include_screenshot,
+            **identity,
         })
         witness = response.get("witness") if isinstance(response, dict) else None
         if isinstance(witness, dict) and isinstance(witness.get("observation_id"), str):
-            self._device_observation_ids[device_id] = witness["observation_id"]
+            self._observation_ids[_observation_key(device_id, identity)] = witness["observation_id"]
         return response
 
-    def device_ui_search(self, device_id: str, query: str) -> Any:
-        encoded = urllib.parse.urlencode({"q": query})
+    def device_ui_search(
+        self,
+        device_id: str,
+        query: str,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {"q": query}
+        params.update(_execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId))
+        encoded = urllib.parse.urlencode(params)
         return self._request("GET", f"/v1/devices/{_quote(device_id)}/agent/ui/search?{encoded}")
 
-    def device_ui_element(self, device_id: str, element_id: str) -> Any:
-        return self._request(
-            "GET",
-            f"/v1/devices/{_quote(device_id)}/agent/ui/element/{urllib.parse.quote(element_id, safe='')}",
-        )
+    def device_ui_element(
+        self,
+        device_id: str,
+        element_id: str,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        path = f"/v1/devices/{_quote(device_id)}/agent/ui/element/{urllib.parse.quote(element_id, safe='')}"
+        if identity:
+            path = f"{path}?{urllib.parse.urlencode(identity)}"
+        return self._request("GET", path)
 
     def device_current_page(self, device_id: str) -> Any:
         return self._request("GET", f"/v1/devices/{_quote(device_id)}/agent/page/current")
@@ -380,7 +461,18 @@ class GatewayClient:
     def device_page_history(self, device_id: str) -> Any:
         return self._request("GET", f"/v1/devices/{_quote(device_id)}/agent/page/history")
 
-    def device_action(self, device_id: str, tool: str, params: dict[str, Any], goal: str) -> Any:
+    def device_action(
+        self,
+        device_id: str,
+        tool: str,
+        params: dict[str, Any],
+        goal: str,
+        *,
+        session_id: str | None = None,
+        sessionId: str | None = None,
+        display_id: int | None = None,
+        displayId: int | None = None,
+    ) -> Any:
         discovery = self.device_capabilities(device_id)
         advertised = self._device_capability_ids.get(device_id) or frozenset()
         if tool not in advertised:
@@ -399,7 +491,8 @@ class GatewayClient:
                 "Connected phone reports unavailable capabilities",
                 body={"error": {"code": "CAPABILITY_UNAVAILABLE", "layer": "CAPABILITY", "retryable": True}},
             )
-        observation_id = self._device_observation_ids.get(device_id)
+        identity = _execution_identity(session_id=session_id, sessionId=sessionId, display_id=display_id, displayId=displayId)
+        observation_id = self._observation_ids.get(_observation_key(device_id, identity))
         if tool not in NON_MUTATING_CAPABILITIES and not observation_id:
             raise GatewayError(
                 "A fresh phone observation is required before a mutating action",
@@ -416,13 +509,14 @@ class GatewayClient:
             )
         payload = {
             "capability_id": tool,
-            "params": params,
+            "params": attach_execution_scope(params, identity or None),
             "goal": goal,
             "expected_observation_id": observation_id,
+            **identity,
         }
         raw = self._request("POST", f"/v1/devices/{_quote(device_id)}/agent/action", payload)
         if tool not in NON_MUTATING_CAPABILITIES:
-            self._device_observation_ids.pop(device_id, None)
+            self._observation_ids.pop(_observation_key(device_id, identity), None)
         return normalize_desktop_action(device_id, tool, raw)
 
     def device_debug_bundle(self, device_id: str, expected: str = "", goal: str = "") -> Any:
@@ -546,3 +640,28 @@ def _legacy_device_row(legacy: dict[str, Any]) -> dict[str, Any] | None:
 
 def _quote(value: str) -> str:
     return urllib.parse.quote(value, safe="")
+
+
+def _execution_identity(
+    *,
+    session_id: str | None = None,
+    sessionId: str | None = None,
+    display_id: int | None = None,
+    displayId: int | None = None,
+) -> dict[str, Any]:
+    scope = parse_execution_scope({
+        "session_id": session_id,
+        "sessionId": sessionId,
+        "display_id": display_id,
+        "displayId": displayId,
+    })
+    if scope is None:
+        return {}
+    return {"sessionId": scope["sessionId"], "displayId": scope["displayId"]}
+
+
+def _observation_key(device_id: str | None, identity: dict[str, Any] | None) -> str:
+    session_id = None
+    if isinstance(identity, dict):
+        session_id = identity.get("sessionId")
+    return f"{device_id or '__legacy__'}::{session_id or 'default-foreground'}"

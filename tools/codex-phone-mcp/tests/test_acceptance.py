@@ -4,7 +4,7 @@ from cyclone_phone_mcp.acceptance import AcceptanceHarness, MockGateway, _action
 
 
 class FailedOpenGateway(MockGateway):
-    def action(self, tool, params, goal):
+    def action(self, tool, params, goal, **kwargs):
         if tool == "phone.open_app":
             return {
                 "success": False,

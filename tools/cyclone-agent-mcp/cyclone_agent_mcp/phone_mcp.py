@@ -19,6 +19,12 @@ def _ensure_phone_mcp() -> None:
             sys.path.insert(0, str(sibling))
 
 
+def parse_execution_scope(args: dict[str, Any] | None):
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import parse_execution_scope as _parse
+    return _parse(args)
+
+
 def compact_observation(payload: Any, *, goal: str = "") -> dict[str, Any]:
     _ensure_phone_mcp()
     from cyclone_phone_mcp.compact import compact_observation as _compact

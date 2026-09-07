@@ -114,6 +114,11 @@ class CapabilityActionRequest(BaseModel):
     goal: str = ""
     expected_observation_id: str | None = None
     source: Literal["PC_CODEX"] = "PC_CODEX"
+    session_id: str | None = None
+    sessionId: str | None = None
+    display_id: int | None = Field(default=None, ge=0)
+    displayId: int | None = Field(default=None, ge=0)
+    executionContext: dict[str, Any] | None = None
 
     @field_validator("correlation_id", "capability_id")
     @classmethod
@@ -158,6 +163,11 @@ class CapabilityObserveRequest(BaseModel):
     include_screenshot: bool = False
     mode: Literal["compact", "full"] = "compact"
     goal: str | None = None
+    session_id: str | None = None
+    sessionId: str | None = None
+    display_id: int | None = Field(default=None, ge=0)
+    displayId: int | None = Field(default=None, ge=0)
+    executionContext: dict[str, Any] | None = None
 
     @field_validator("correlation_id")
     @classmethod

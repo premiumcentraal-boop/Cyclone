@@ -4,9 +4,9 @@
 
 This repository is intentionally kept as a current-product launchpad. Historical sprint plans, old control planes, one-off release workflows and retired version folders belong in Git history and GitHub Releases—not in the active tree.
 
-## Current baseline — Cyclone 4.0.0-alpha.1 (V4 Stage 1 Fast Path)
+## Current baseline — Cyclone 4.0.0-alpha.2 (V4 Stage 2 Session Kernel)
 
-Mobile identity is `4.0.0-alpha.1` / versionCode `67` on the published **3.9.12** Background Intelligence foundation (one Shizuku workspace, Take control / Continue, GATE confirm). Stage 1 adds ClosePaw-shaped Fast Path: a11y-first Page Cards with stable `elementIndex`, 300ms settle + fingerprint ladder, one screen-changing act per turn, and planner `open_app`/intent landing before icon hunting. Physical Pixel 8 remains **UNVERIFIED**. See [V4 Stage 1 Fast Path](docs/V4_STAGE1_FASTPATH.md).
+Mobile identity is `4.0.0-alpha.2` / versionCode `68` on the published **3.9.12** Background Intelligence foundation plus Stage 1 Fast Path (one Shizuku workspace, Take control / Continue, GATE confirm; a11y-first Page Cards, 300ms settle + fingerprint ladder). Stage 2 adds display-scoped session identity: observe/act carry `sessionId` + `displayId`, workspace inject/launch stay on the owned virtual display, and a named workspace never falls back to display 0. Physical Pixel 8 remains **UNVERIFIED**. See [V4 Stage 2 Session Kernel](docs/V4_STAGE2_SESSION_KERNEL.md) and [V4 Stage 1 Fast Path](docs/V4_STAGE1_FASTPATH.md).
 
 Cyclone 3.9.12 connected Ask Cyclone to isolated background app workspaces, with a compact running card, live View Progress, exact-task Take Control / Continue, local confirmation cards and preserved completed pages. Background work requires Android 15+, Shizuku and a compatible app; the PC companion remains optional. See [the 3.9.12 release notes](docs/RELEASE_3.9.12.md) for that behavior and device-testing limits.
 
@@ -34,7 +34,7 @@ Cyclone 3.9.9 focuses on trustworthy standalone execution, cancellation safety, 
 
 Android package: `com.cyclone.mobile`  
 Minimum Android: 14 (API 34)  
-Current mobile identity: `4.0.0-alpha.1` / versionCode `67` (V4 Stage 1 Fast Path alpha; 3.9.12 workspace retained)
+Current mobile identity: `4.0.0-alpha.2` / versionCode `68` (V4 Stage 2 Session Kernel alpha; 3.9.12 workspace + Stage 1 Fast Path retained)
 
 The product has two deliverables: the Android APK and the optional Windows PC companion.
 Internal API models run from the phone with internet access and an API key; PC pairing is not

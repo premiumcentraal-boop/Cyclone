@@ -41,6 +41,10 @@ class McpProtocolTests(unittest.TestCase):
             list(tools["phone_devices"]["inputSchema"]["properties"].keys()),
         )
         self.assertIn("device_id", tools["phone_observe"]["inputSchema"]["properties"])
+        self.assertIn("session_id", tools["phone_observe"]["inputSchema"]["properties"])
+        self.assertIn("display_id", tools["phone_observe"]["inputSchema"]["properties"])
+        self.assertIn("session_id", tools["phone_act"]["inputSchema"]["properties"])
+        self.assertIn("display_id", tools["phone_act"]["inputSchema"]["properties"])
         self.assertIn("phone_locate", tools)
         self.assertIn("goal", tools["phone_locate"]["inputSchema"]["required"])
         self.assertIn("device_id", tools["phone_act"]["inputSchema"]["properties"])

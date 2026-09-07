@@ -32,7 +32,7 @@ class LocateGateway:
     def status(self, device_id=None):
         return {"device_id": device_id or "phone-a", "state": "READY"}
 
-    def observe(self, device_id=None, include_screenshot=False, mode="compact"):
+    def observe(self, device_id=None, include_screenshot=False, mode="compact", **kwargs):
         return {
             "device_id": device_id,
             "observation": {
@@ -54,13 +54,13 @@ class LocateGateway:
             "witness": {"observation_id": "obs-1"},
         }
 
-    def ui_search(self, query, device_id=None):
+    def ui_search(self, query, device_id=None, **kwargs):
         return {"query": query, "device_id": device_id, "results": [{"id": "apps", "label": "Apps"}]}
 
     def skill_match(self, goal, page_key="", device_id=None):
         return {"matched": False, "skill": {"id": "skill.draft.wifi", "status": "draft", "goal": goal, "pageKey": page_key}}
 
-    def action(self, tool, params, goal, device_id=None):
+    def action(self, tool, params, goal, device_id=None, **kwargs):
         self.actions.append({"tool": tool, "params": dict(params), "goal": goal})
         return {"ok": True, "tool": tool, "echo": params.get("value")}
 
@@ -159,8 +159,8 @@ def test_nested_pixel_blob_without_layer_ok_is_ok_after_translation():
 
 def test_locate_page_card_includes_snapshot_and_one_char_rank():
     class KeypadGateway(LocateGateway):
-        def observe(self, device_id=None, include_screenshot=False, mode="compact"):
-            payload = super().observe(device_id, include_screenshot, mode)
+        def observe(self, device_id=None, include_screenshot=False, mode="compact", **kwargs):
+            payload = super().observe(device_id, include_screenshot, mode, **kwargs)
             payload["observation"]["controls"] = [
                 {"id": "apps", "label": "Apps", "clickable": True, "role": "button"},
                 {"id": "seven", "label": "7", "clickable": True, "role": "button"},

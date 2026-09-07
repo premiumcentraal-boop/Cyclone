@@ -10,6 +10,7 @@ from ..auth import AuditLog, redact_params
 from ..cyclone_bridge.client import BridgeOperationError, BridgeProtocolError
 from ..retrieval.service import RetrievalService
 from ..state.store import StateStore
+from ..execution_scope import attach_execution_identity, parse_execution_identity
 from .envelope import android_execution_error_class, extract_android_execution
 
 
@@ -314,22 +315,32 @@ class ActionRouter:
         validate_action(tool, resolved_params)
 
         request_id = request_id or str(uuid.uuid4())
+        try:
+            identity = parse_execution_identity(params) or parse_execution_identity(resolved_params)
+        except ValueError as exc:
+            raise ActionValidationError(str(exc), code="INVALID_REQUEST") from exc
+        if identity:
+            resolved_params = attach_execution_identity(resolved_params, identity)
         before = self.observe()
         started = time.perf_counter()
         error_class: str | None = None
         transport_ok = True
 
         try:
+            execute_args = {
+                "tool": tool,
+                "params": resolved_params,
+                "goal": goal,
+                "source": source,
+                "requestId": request_id,
+                "correlationId": request_id,
+            }
+            if identity:
+                execute_args["sessionId"] = identity["sessionId"]
+                execute_args["displayId"] = identity["displayId"]
             result = self.bridge.request(
                 "action.execute",
-                {
-                    "tool": tool,
-                    "params": resolved_params,
-                    "goal": goal,
-                    "source": source,
-                    "requestId": request_id,
-                    "correlationId": request_id,
-                },
+                execute_args,
             )
             execution = _android_execution(result)
             if execution is not None:

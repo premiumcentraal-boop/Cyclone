@@ -3,6 +3,7 @@ package com.cyclone.mobile.runtime.background
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.cyclone.mobile.runtime.session.SessionKernel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -36,13 +37,15 @@ data class WorkspaceTaskUi(
 
 /** Presentation and task routing only. WorkspaceRuntime and the existing agent own execution. */
 object WorkspaceTasks {
+    const val PRODUCT_HOT_BACKGROUND_LIMIT = SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT
     private val mutable = MutableStateFlow<WorkspaceTaskUi?>(null)
     val state = mutable.asStateFlow()
     fun update(taskId: String, change: (WorkspaceTaskUi) -> WorkspaceTaskUi) {
         mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let(change) ?: it }
     }
     fun start(context: Context, goal: String, packageName: String, label: String) {
-        check(mutable.value?.let { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) } != true) {
+        val liveCount = mutable.value?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) }?.let { 1 } ?: 0
+        check(liveCount < PRODUCT_HOT_BACKGROUND_LIMIT) {
             "Finish or stop your current task first."
         }
         val task = WorkspaceTaskUi(UUID.randomUUID().toString(), app = label, packageName = packageName, goal = goal)

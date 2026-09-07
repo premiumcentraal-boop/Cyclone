@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+DEFAULT_FOREGROUND_SESSION_ID = "default-foreground"
+IDENTITY_KEYS = frozenset({"sessionId", "session_id", "displayId", "display_id", "executionContext"})
+
+
+def parse_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Return canonical ``{sessionId, displayId}`` or None to omit (legacy default-foreground).
+
+    Execution identity is not usb_session_id, media sessionId, teach sessionId, or MCP report
+    sessionId. Omitted identity must not invent a workspace session. A named workspace session
+    requires displayId > 0 and must never silently fall back to display 0.
+    """
+    if args is None:
+        return None
+    if not isinstance(args, Mapping):
+        raise ValueError("execution scope args must be an object")
+    session = _read_session(args)
+    display = _read_display(args)
+    nested = args.get("executionContext") if "executionContext" in args else None
+    if nested is not None:
+        if not isinstance(nested, Mapping):
+            raise ValueError("executionContext must be an object")
+        nested_session = _read_session(nested)
+        nested_display = _read_display(nested)
+        session = _agree("sessionId", session, nested_session)
+        display = _agree("displayId", display, nested_display)
+    if session is None and display is None:
+        return None
+    if session is None:
+        if display == 0:
+            return None
+        raise ValueError("displayId requires sessionId")
+    if session == DEFAULT_FOREGROUND_SESSION_ID:
+        if display is None:
+            display = 0
+        if display != 0:
+            raise ValueError("default-foreground session must use display 0")
+        return {"sessionId": session, "displayId": 0}
+    if display is None:
+        raise ValueError("An explicit background session requires its displayId")
+    if display <= 0:
+        raise ValueError("Workspace session displayId must be an int > 0")
+    return {"sessionId": session, "displayId": display}
+
+
+def parse_tool_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Parse top-level MCP args and nested action params; reject disagreements."""
+    if not isinstance(args, Mapping):
+        return parse_execution_scope(args)
+    top = parse_execution_scope(args)
+    params = args.get("params")
+    nested = parse_execution_scope(params) if isinstance(params, dict) else None
+    return _agree_scope(top, nested)
+
+
+def attach_execution_scope(params: Mapping[str, Any] | None, scope: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Copy canonical sessionId/displayId onto params. Top-level identity is enough for callers."""
+    out = dict(params or {})
+    existing = parse_execution_scope(out)
+    agreed = _agree_scope(dict(scope) if scope else None, existing)
+    if agreed is None:
+        return out
+    out["sessionId"] = agreed["sessionId"]
+    out["displayId"] = agreed["displayId"]
+    return out
+
+
+def strip_execution_scope(params: Mapping[str, Any] | None) -> dict[str, Any]:
+    return {key: value for key, value in dict(params or {}).items() if key not in IDENTITY_KEYS}
+
+
+def scope_cache_key(device_id: str | None, session_id: str | None) -> str:
+    return f"{device_id or '__gateway_selected__'}::{session_id or DEFAULT_FOREGROUND_SESSION_ID}"
+
+
+def _agree_scope(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any] | None:
+    if left and right:
+        if left["sessionId"] != right["sessionId"] or left["displayId"] != right["displayId"]:
+            raise ValueError("Conflicting execution session identities")
+        return left
+    return left or right
+
+
+def _read_session(args: Mapping[str, Any]) -> str | None:
+    return _agree("sessionId", _session_value(args, "session_id"), _session_value(args, "sessionId"))
+
+
+def _read_display(args: Mapping[str, Any]) -> int | None:
+    return _agree("displayId", _display_value(args, "display_id"), _display_value(args, "displayId"))
+
+
+def _session_value(args: Mapping[str, Any], key: str) -> str | None:
+    if key not in args or args[key] is None:
+        return None
+    value = args[key]
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("Invalid sessionId")
+    return value
+
+
+def _display_value(args: Mapping[str, Any], key: str) -> int | None:
+    if key not in args or args[key] is None:
+        return None
+    value = args[key]
+    if isinstance(value, bool) or isinstance(value, str) or not isinstance(value, (int, float)):
+        raise ValueError("Invalid displayId")
+    if float(value) != int(value) or int(value) < 0:
+        raise ValueError("Invalid displayId")
+    return int(value)
+
+
+def _agree(name: str, left: Any, right: Any) -> Any:
+    if left is not None and right is not None and left != right:
+        raise ValueError(f"Conflicting {name} aliases")
+    return left if left is not None else right

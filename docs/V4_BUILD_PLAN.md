@@ -17,7 +17,7 @@ Base line: **published mobile `v3.9.12`** (`c9ed77a`, versionCode 66) — Backgr
 
 ## Stages (strict order — do not skip)
 
-### Stage 1 — Fast Path harness (THIS RUN)
+### Stage 1 — Fast Path harness (DONE — PR #59)
 Branch: `grok/cyclone-v4-s1-fastpath` from `v3.9.12`.
 Goal: Make ordinary navigation feel like ClosePaw — mid-model capable.
 Deliverables:
@@ -30,8 +30,19 @@ Deliverables:
 Acceptance: unit/integration tests for settle/fingerprint/nav-isolation; honest UNVERIFIED for physical; PR open.
 Out of scope: multi-VD scale-out, skill compiler, One V4 packaging, Magisk.
 
-### Stage 2 — Session Kernel
-Base: Stage 1 merge. Harden 3.9.12 background workspace: displayId on all inject/launch, TRUSTED|OWN_DISPLAY_GROUP where applicable, N≥2 sessions design (may still gate product to 1 hot BG until stable), session_id in gateway/MCP.
+### Stage 2 — Session Kernel (DONE — THIS PR)
+Branch: `grok/cyclone-v4-s2-session` from Stage 1.
+Goal: Display-scoped session identity so Fast Path never crosses displays; MCP/Cyclone One can bind `session_id` later (Stage 4).
+Deliverables:
+1. `sessionId` + `displayId` on observe/act end-to-end (executor workspace routing kept; gateway no longer force-foregrounds observe/act; MCP stubs accept/forward `session_id` + `display_id`).
+2. Virtual display flags: `TRUSTED|OWN_DISPLAY_GROUP|OWN_FOCUS|STEAL_TOP_FOCUS_DISABLED|DESTROY_CONTENT_ON_REMOVAL|OWN_CONTENT_ONLY|PRESENTATION`. `PUBLIC` omitted (ColorOS escape / incompatible with `OWN_DISPLAY_GROUP`). Fail closed if `OWN_DISPLAY_GROUP` cannot be resolved. Launch via `am start --display`; inject via `input -d`. Never inject on display 0 for a named workspace.
+3. Types/APIs designed for N≥2 sessions. Product still hot-gates to 1 concurrent background Ask task (`WorkspaceTasks`). Do not claim 20 concurrent VDs.
+4. Fast Path settle/fingerprint/nav isolation preserved. Take control / Continue / GATE preserved. Handoff to display 0 is intentional human take-over, not a silent fallback.
+5. No silent fallback to display 0 for a named workspace. Unknown session rejected. Display mismatch rejected. Cross-session observation cannot authorize an action.
+6. Tests + `docs/V4_STAGE2_SESSION_KERNEL.md` + version identity **4.0.0-alpha.2** / versionCode 68. Physical Pixel 8 = UNVERIFIED.
+Acceptance: unit tests for display-scoped inject, flags, no cross-session action, gateway/MCP forwarding, N≥2 types, `ExecutionRequestScope` no display-0 rewrite; honest UNVERIFIED for physical; PR open.
+Out of scope: Skill compiler (S3), Cyclone One tiles/installer (S4), Magisk, requiring MCP `session_id` (Stage 4), claiming 20 concurrent VDs.
+Handoff: Stage 3 Skill Compiler should compile playbooks per package **and** per session/display; do not assume display 0. Vision only on miss. Keep `PhoneToolExecutor` as the only mutation engine.
 
 ### Stage 3 — Skill Compiler
 NL playbook per package after runs; promote stable paths to deterministic PhoneToolExecutor routes; vision only on miss.
@@ -47,6 +58,7 @@ Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent
 
 ## Orchestrator coordination (user 2026-09-07)
 - Check progress about **every 30 minutes**; advance **one stage at a time** through to a **V4 release**.
-- **Stage 1** (current): single Grok session as launched — do not restart mid-run.
-- **Stages 2–5**: each Grok prompt MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
-- After Stage 1 PR: offer/use Grok **usage reset** before heavy Stage 2+ burns if the user initiates it.
+- **Stage 2** is the current completed kernel (this PR, `4.0.0-alpha.2`). Do not restart Stage 1 or Stage 2 mid-run.
+- **Stage 3** is next (Skill Compiler). Stages 3–5 Grok prompts MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
+- After Stage 2 PR: offer/use Grok **usage reset** before heavy Stage 3+ burns if the user initiates it.
+

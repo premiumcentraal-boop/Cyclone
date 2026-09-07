@@ -32,15 +32,18 @@ class FakeToolsGateway:
         self.calls.append(("capabilities", device_id, refresh))
         return {"protocol_version": "cyclone.gateway.capability.v1", "capabilities": []}
 
-    def observe(self, device_id=None, include_screenshot=False, mode="compact"):
-        self.calls.append(("observe", device_id, include_screenshot, mode))
+    def observe(self, device_id=None, include_screenshot=False, mode="compact", **kwargs):
+        call = ("observe", device_id, include_screenshot, mode)
+        if kwargs:
+            call = (*call, kwargs)
+        self.calls.append(call)
         return {"device_id": device_id or self.devices[0].device_id, "mode": mode}
 
-    def ui_search(self, query, device_id=None): return {"query": query, "device_id": device_id}
-    def ui_element(self, element_id, device_id=None): return {"element_id": element_id, "device_id": device_id}
+    def ui_search(self, query, device_id=None, **kwargs): return {"query": query, "device_id": device_id}
+    def ui_element(self, element_id, device_id=None, **kwargs): return {"element_id": element_id, "device_id": device_id}
     def current_page(self, device_id=None): return {"device_id": device_id}
     def page_history(self, device_id=None): return {"device_id": device_id}
-    def action(self, tool, params, goal, device_id=None): return {"ok": True, "tool": tool, "device_id": device_id}
+    def action(self, tool, params, goal, device_id=None, **kwargs): return {"ok": True, "tool": tool, "device_id": device_id, "params": params, **kwargs}
     def debug_bundle(self, device_id=None, expected="", goal=""): return {"device_id": device_id}
     def teach_start(self, device_id=None, goal=""): return {"device_id": device_id}
     def teach_status(self, device_id=None): return {"device_id": device_id}
@@ -72,6 +75,25 @@ def test_multi_device_ambiguity_is_explicit_and_safe():
             {"device_id": "phone-a", "state": "READY"},
             {"device_id": "phone-b", "state": "READY"},
         ]
+
+
+def test_phone_tools_forward_execution_session_identity():
+    gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY")])
+    tools = PhoneTools(gateway=gateway)
+    tools.call("phone_observe", {"device_id": "phone-a", "session_id": "workspace-a", "display_id": 7})
+    assert gateway.calls[-1][0] == "observe"
+    assert gateway.calls[-1][-1]["session_id"] == "workspace-a"
+    assert gateway.calls[-1][-1]["display_id"] == 7
+    acted = tools.call("phone_act", {
+        "device_id": "phone-a",
+        "tool": "phone.home",
+        "params": {},
+        "goal": "Go home",
+        "session_id": "workspace-a",
+        "display_id": 7,
+    })
+    assert acted["session_id"] == "workspace-a"
+    assert acted["display_id"] == 7
 
 
 def test_phone_tools_forward_explicit_device_id():

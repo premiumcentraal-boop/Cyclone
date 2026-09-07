@@ -54,6 +54,22 @@ class CompactTests(unittest.TestCase):
         self.assertEqual("apps", result["candidates"]["goalRanked"][0]["elementId"])
         self.assertTrue(result["truncated"]["rawTreeExcluded"])
 
+    def test_page_card_preserves_session_identity(self):
+        result = compact_observation({
+            "sessionId": "workspace-a",
+            "displayId": 7,
+            "observation": {
+                "pageKey": "home",
+                "sessionId": "workspace-a",
+                "displayId": 7,
+                "controls": [],
+            },
+        })
+        self.assertEqual("workspace-a", result["sessionId"])
+        self.assertEqual(7, result["displayId"])
+        self.assertEqual("workspace-a", result["observationScope"]["sessionId"])
+        self.assertEqual(7, result["observationScope"]["displayId"])
+
     def test_page_card_preserves_element_index_and_perception_mode(self):
         result = compact_observation({
             "observation": {

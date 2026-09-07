@@ -12,6 +12,10 @@ import com.cyclone.mobile.agent.contract.SemanticObservationState
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.PcRouteOutcomeEvidence
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
+import com.cyclone.mobile.runtime.session.ExecutionContext
+import com.cyclone.mobile.runtime.session.ExecutionRequestScope
+import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionIdentityException
 import org.json.JSONObject
 
 /**
@@ -43,9 +47,6 @@ internal object GatewayV33ActionAdapter {
     )
 
     fun execute(context: Context, requestId: String, args: JSONObject): JSONObject {
-        com.cyclone.mobile.runtime.session.ExecutionRequestScope.requireForeground(
-            com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()),
-        )
         val tool = args.optString("tool").trim()
         if (tool !in allowedTools) {
             throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Tool is not enabled for the current PC gateway", requestId)
@@ -72,24 +73,43 @@ internal object GatewayV33ActionAdapter {
         args: JSONObject,
         publicCapability: Boolean,
     ): JSONObject {
-        val beforeObservation = if (tool in mutatingTools) requireFreshObservation(requestId, args) else GatewayObservationStore.current()
+        val bound = bindIdentity(requestId, args)
+        val beforeObservation = if (tool in mutatingTools) {
+            requireFreshObservation(requestId, args, bound)
+        } else {
+            try { GatewayObservationStore.current(bound) } catch (_: SessionIdentityException) { null }
+        }
         val normalizedArgs = JSONObject(args.toString())
-        val normalizedParams = JSONObject((args.optJSONObject("params") ?: JSONObject()).toString())
+            .put("sessionId", bound.sessionId)
+            .put("displayId", bound.displayId)
+        val normalizedParams = ExecutionRequestScope.attach(
+            JSONObject((args.optJSONObject("params") ?: JSONObject()).toString()),
+            bound,
+        )
+        normalizedArgs.put("params", normalizedParams)
 
         val baseResult = when (tool) {
             "phone.tap" -> {
                 val observation = beforeObservation
                     ?: throw GatewayProtocolException("STALE_OBSERVATION", "Observe the phone before using coordinate fallback", requestId)
-                val snapshot = CycloneAccessibilityService.instance?.observe(markFresh = false)
-                    ?: throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Accessibility is unavailable for coordinate fallback", requestId)
-                val expectedFingerprint = observation.payload.optString("accessibilityFingerprint")
-                if (expectedFingerprint.isNotBlank() && snapshot.fingerprint != expectedFingerprint) {
-                    throw GatewayProtocolException("STALE_OBSERVATION", "Phone geometry changed; observe again before coordinate fallback", requestId)
+                val display = observation.payload.optJSONObject("display")
+                val screenWidth = display?.optInt("width") ?: 0
+                val screenHeight = display?.optInt("height") ?: 0
+                if (screenWidth <= 0 || screenHeight <= 0) {
+                    throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Display metrics are unavailable for coordinate fallback", requestId)
+                }
+                if (bound.sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID) {
+                    val snapshot = CycloneAccessibilityService.instance?.observe(markFresh = false)
+                        ?: throw GatewayProtocolException("CAPABILITY_UNAVAILABLE", "Accessibility is unavailable for coordinate fallback", requestId)
+                    val expectedFingerprint = observation.payload.optString("accessibilityFingerprint")
+                    if (expectedFingerprint.isNotBlank() && snapshot.fingerprint != expectedFingerprint) {
+                        throw GatewayProtocolException("STALE_OBSERVATION", "Phone geometry changed; observe again before coordinate fallback", requestId)
+                    }
                 }
                 val x = try {
                     DesktopManualControlContract.normalizedPixel(
                         normalizedParams.optDouble("normalizedX", Double.NaN),
-                        snapshot.screenWidth,
+                        screenWidth,
                     )
                 } catch (_: IllegalArgumentException) {
                     throw GatewayProtocolException("PROTOCOL_MISMATCH", "normalizedX must be between 0 and 1", requestId)
@@ -97,7 +117,7 @@ internal object GatewayV33ActionAdapter {
                 val y = try {
                     DesktopManualControlContract.normalizedPixel(
                         normalizedParams.optDouble("normalizedY", Double.NaN),
-                        snapshot.screenHeight,
+                        screenHeight,
                     )
                 } catch (_: IllegalArgumentException) {
                     throw GatewayProtocolException("PROTOCOL_MISMATCH", "normalizedY must be between 0 and 1", requestId)
@@ -106,11 +126,11 @@ internal object GatewayV33ActionAdapter {
                 normalizedParams.remove("normalizedY")
                 normalizedParams.put("x", x).put("y", y)
                 normalizedArgs.put("params", normalizedParams)
-                executeDirect(context, requestId, tool, normalizedArgs, normalizedParams)
+                executeDirect(context, requestId, tool, normalizedArgs, normalizedParams, bound)
                     .put("coordinateBasisObservationId", observation.id)
                     .put("coordinateSpace", "normalized-current-display")
             }
-            "phone.set_clipboard" -> executeDirect(context, requestId, tool, normalizedArgs, normalizedParams)
+            "phone.set_clipboard" -> executeDirect(context, requestId, tool, normalizedArgs, normalizedParams, bound)
             else -> GatewayActionAdapter.execute(context, requestId, normalizedArgs)
         }
 
@@ -121,7 +141,7 @@ internal object GatewayV33ActionAdapter {
         val verificationFailedInExecutor = errorCode == "ASSERTION_FAILED"
         val androidExecutionOk = executorReportedOk || verificationFailedInExecutor
         val afterObservation = if (tool in mutatingTools && androidExecutionOk) {
-            captureAfterAction(context, tool, normalizedParams, beforeObservation)
+            captureAfterAction(context, tool, normalizedParams, beforeObservation, bound)
         } else null
         val expect = normalizedParams.optJSONObject("expect")
         val goalLabel = args.optString("goal")
@@ -205,9 +225,12 @@ internal object GatewayV33ActionAdapter {
         tool: String,
         params: JSONObject,
         before: GatewayObservation?,
+        bound: ExecutionContext? = null,
     ): GatewayObservation? {
+        val identity = bound ?: ExecutionRequestScope.bind(params)
+        val captureArgs = ExecutionRequestScope.attach(JSONObject(params.toString()), identity)
         val deadline = System.currentTimeMillis() + if (tool in pageTransitionTools) 1_800L else 0L
-        var after = runCatching { GatewayObservationAdapter.capture(context, com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(params, JSONObject())) }.getOrNull()
+        var after = runCatching { GatewayObservationAdapter.capture(context, captureArgs) }.getOrNull()
         while (
             after != null &&
             tool in pageTransitionTools &&
@@ -223,7 +246,7 @@ internal object GatewayV33ActionAdapter {
             System.currentTimeMillis() < deadline
         ) {
             Thread.sleep(120L)
-            after = runCatching { GatewayObservationAdapter.capture(context, com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(params, JSONObject())) }.getOrNull()
+            after = runCatching { GatewayObservationAdapter.capture(context, captureArgs) }.getOrNull()
         }
         return after
     }
@@ -371,6 +394,7 @@ internal object GatewayV33ActionAdapter {
         tool: String,
         args: JSONObject,
         params: JSONObject,
+        bound: ExecutionContext,
     ): JSONObject {
         val observationId = args.optString("currentObservationId").trim()
         val authorityRequest = GatewayActionAuthorityRequest(
@@ -384,7 +408,8 @@ internal object GatewayV33ActionAdapter {
         )
         val decision = GatewayActionAuthorityRegistry.authorize(context, authorityRequest)
         decision.requireAuthorized(requestId)
-        val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, JSONObject(params.toString())))
+        val scopedParams = ExecutionRequestScope.attach(JSONObject(params.toString()), bound)
+        val result = PhoneToolExecutor.execute(context, PhoneToolRequest(requestId, tool, scopedParams))
         val safeParams = if (tool == "phone.set_clipboard") {
             JSONObject().put("text", "[REDACTED]").put("redacted", true)
         } else {
@@ -401,11 +426,22 @@ internal object GatewayV33ActionAdapter {
             .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
     }
 
-    private fun requireFreshObservation(requestId: String, args: JSONObject): GatewayObservation {
-        val current = GatewayObservationStore.current()
-            ?: throw GatewayProtocolException("STALE_OBSERVATION", "Call observe.semantic before a mutating phone action", requestId)
+    private fun bindIdentity(requestId: String, args: JSONObject): ExecutionContext = try {
+        ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()))
+    } catch (error: SessionIdentityException) {
+        throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch", requestId)
+    }
+
+    private fun requireFreshObservation(requestId: String, args: JSONObject, bound: ExecutionContext): GatewayObservation {
+        val current = try {
+            GatewayObservationStore.current(bound)
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException("STALE_OBSERVATION", error.message ?: "Call observe.semantic before a mutating phone action", requestId)
+        } ?: throw GatewayProtocolException("STALE_OBSERVATION", "Call observe.semantic before a mutating phone action", requestId)
         val requested = args.optString("currentObservationId").trim()
-        if (requested.isBlank() || requested != current.id) {
+        if (requested.isBlank() || requested != current.id ||
+            current.execution.sessionId != bound.sessionId || current.execution.displayId != bound.displayId
+        ) {
             throw GatewayProtocolException(
                 "STALE_OBSERVATION",
                 "Mutating actions require the exact current observationId; observe again after page changes.",

@@ -138,10 +138,10 @@ class FreshSessionGateway:
             },
         }
 
-    def ui_search(self, query):
+    def ui_search(self, query, **kwargs):
         return {"results": [{"id": "apps", "label": query, "clickable": True}]}
 
-    def action(self, tool, params, goal):
+    def action(self, tool, params, goal, **kwargs):
         self.action_calls += 1
         return {
             "protocol_version": "cyclone.gateway.capability.v1",

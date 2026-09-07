@@ -1,12 +1,12 @@
-# Cyclone 4.0.0-alpha.1 V4 Stage 1 Fast Path; DEVICE TESTING: UNVERIFIED
+# Cyclone 4.0.0-alpha.2 V4 Stage 2 Session Kernel; DEVICE TESTING: UNVERIFIED
 schema = 1
-product_version = "4.0.0-alpha.1"
+product_version = "4.0.0-alpha.2"
 channel = "development"
-android_version_code = 67
+android_version_code = 68
 python_version = "3.8.4"
 
 [components]
-mobile = "4.0.0-alpha.1"
+mobile = "4.0.0-alpha.2"
 pc_companion = "3.8.4"
 device_gateway = "3.8.4"
 mcp = "3.8.4"
@@ -19,4 +19,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.0.0-alpha.1"
+candidate_generation = "cyclone-4.0.0-alpha.2"

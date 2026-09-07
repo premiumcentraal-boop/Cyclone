@@ -101,8 +101,9 @@ class Gateway:
         screenshot: bool = False,
         uiautomator: bool = True,
         diagnostics: bool = False,
+        execution_scope: dict[str, Any] | None = None,
     ) -> dict:
-        semantic = self.bridge.request("observe.semantic", {})
+        semantic = self.bridge.request("observe.semantic", dict(execution_scope or {}))
 
         page_debug: dict[str, Any] | None = None
         debug_snapshot: dict[str, Any] | None = None
