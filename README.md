@@ -33,7 +33,7 @@ Cyclone 3.9.9 focuses on trustworthy standalone execution, cancellation safety, 
 - **PC integration** — optional Device Gateway, Windows Companion and constrained MCP adapters without creating a second phone-control engine.
 
 Android package: `com.cyclone.mobile`  
-Minimum Android: 14 (API 34)  
+Minimum Android: 13 (API 33); isolated background displays require Android 15+
 Current mobile identity: `4.0.0` / versionCode `71` (V4 Session OS + Cyclone One 1.0.0 pairing; 3.9.12 workspace + Fast Path + Session Kernel + Skill Compiler + One glass retained)
 
 The product has two deliverables: the Android APK and the optional Windows PC companion.

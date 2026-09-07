@@ -53,7 +53,7 @@ private fun ProfileSetupPage(onClose: () -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var apps by remember { mutableStateOf(emptyList<ProfileApp>()) }
-    var selected by remember { mutableStateOf(setOf<String>()) }
+    var selected by remember { mutableStateOf(ProfileSetupRuntime.selectedPackages(context)) }
     var query by rememberSaveable { mutableStateOf("") }
     var registered by remember { mutableStateOf(emptyList<Workspace>()) }
     fun refresh() { scope.launch {
@@ -66,6 +66,7 @@ private fun ProfileSetupPage(onClose: () -> Unit) {
             val root = withContext(Dispatchers.IO) { RootProbe.check() }
             if (root == RootStatus.ROOTED) {
                 apps = withContext(Dispatchers.IO) { ProfileSetupRuntime.apps(context) }
+                selected = selected.intersect(apps.map { it.packageName }.toSet())
                 page = 1; message = ""
             } else {
                 message = "Your phone hasn’t allowed extra profiles. You can keep using Profile A. If your phone already has root access, allow Cyclone when it asks, then try again."
@@ -141,13 +142,25 @@ private fun ProfileSetupPage(onClose: () -> Unit) {
                                         context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                                     } else scope.launch {
                                         message = "Opening ${workspace.label}…"
-                                        val result = withContext(Dispatchers.IO) { SessionKernel.switchWorkspace(context, workspace.id) }
+                                        val result = withContext(Dispatchers.IO) {
+                                            RootProbe.check()
+                                            SessionKernel.switchWorkspace(context, workspace.id)
+                                        }
                                         message = if (result.ok) "Opened ${workspace.label} in Profile B" else "Couldn’t safely open that app. Make sure Profile B is on and unlocked, then try again."
                                     }
                                 }, modifier = Modifier.fillMaxWidth()) { Text("Open ${workspace.label}") }
                             }
                             item {
                                 OutlinedButton(onClick = { chooseApps() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) { Text("Add apps / finish setup") }
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        val result = withContext(Dispatchers.IO) {
+                                            com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+                                                "profile-home-${System.nanoTime()}", "workspace.release"))
+                                        }
+                                        if (result.ok) onClose() else message = "Finish the request waiting for your approval, then return to Profile A."
+                                    }
+                                }) { Text("Return to Profile A") }
                                 TextButton(onClick = onClose) { Text("Done") }
                             }
                         }

@@ -15,6 +15,9 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -143,6 +146,7 @@ class BackgroundSetupActivity : ComponentActivity() {
 
                 val nextStep = nextInstallStep(status)
                 LaunchedEffect(phase, nextStep, retryNonce) {
+                    if (phase == InstallPhase.INSTALLED && status.setupFailure != null) phase = InstallPhase.READY
                     if (phase != InstallPhase.INSTALLING) return@LaunchedEffect
                     if (!status.android) {
                         phase = InstallPhase.BLOCKED
@@ -155,6 +159,7 @@ class BackgroundSetupActivity : ComponentActivity() {
                     val launchKey = nextStep to retryNonce
                     if (lastLaunchKey != launchKey) {
                         lastLaunchKey = launchKey
+                        installMessage = null
                         try { launchInstallStep(nextStep) }
                         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                         catch (error: Exception) { installMessage = error.message ?: "Setup paused. Please retry." }
@@ -243,10 +248,10 @@ private fun InstallerScreen(
             .systemBarsPadding()
             .padding(horizontal = 22.dp, vertical = 18.dp),
     ) {
-        TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) { Text("Back") }
+        TextButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).zIndex(1f)) { Text("Back") }
 
         Surface(
-            modifier = Modifier.fillMaxWidth().align(Alignment.Center),
+            modifier = Modifier.fillMaxWidth().align(Alignment.Center).padding(top = 52.dp).verticalScroll(rememberScrollState()),
             shape = RoundedCornerShape(32.dp),
             tonalElevation = 1.dp,
         ) {

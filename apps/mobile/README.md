@@ -7,7 +7,7 @@ Cyclone Mobile is the Android app at the center of Cyclone. It combines an on-de
 - Product line: Cyclone 3.9
 - Package: `com.cyclone.mobile`
 - Launcher: `.MainActivity`
-- Minimum Android: 14 / API 34
+- Minimum Android: 13 / API 33 (isolated background displays: Android 15+)
 - Compile/target SDK: 35
 - UI: Home, Teach, Ask Cyclone, Routines, Brain and Settings
 - Ask Cyclone: chat-style task composer with model selection

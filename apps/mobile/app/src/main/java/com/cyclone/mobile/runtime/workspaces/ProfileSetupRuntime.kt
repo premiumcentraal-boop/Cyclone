@@ -23,6 +23,7 @@ object ProfileSetupRuntime {
     private val cancel = AtomicBoolean(false)
     private var job: Job? = null
     private fun prefs(context: Context) = context.getSharedPreferences("cyclone_profile_setup", Context.MODE_PRIVATE)
+    fun selectedPackages(context: Context): Set<String> = prefs(context).getStringSet("plan_apps", emptySet()).orEmpty().toSet()
     fun existingUser(context: Context): Int? = prefs(context).getInt("user", -1).takeIf { it > 0 }
     fun apps(context: Context): List<ProfileApp> = context.packageManager.queryIntentActivities(
         Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), PackageManager.MATCH_ALL)
@@ -49,6 +50,7 @@ object ProfileSetupRuntime {
                 val available = apps(ctx).associateBy { it.packageName }
                 check(choices.all { available.containsKey(it.packageName) }) { "One of these apps is no longer installed. Choose your apps again." }
                 val store = prefs(ctx)
+                check(store.edit().putStringSet("plan_apps", choices.map { it.packageName }.toSet()).commit()) { "Free some space, then try again." }
                 val name = store.getString("name", null) ?: ("Cyclone_" + UUID.randomUUID().toString().replace("-", "").take(16)).also {
                     check(store.edit().putString("name", it).commit()) { "Free some space, then try again." }
                 }

@@ -57,7 +57,7 @@ class WorkspaceTaskService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Cyclone tasks", NotificationManager.IMPORTANCE_LOW))
         if (android.os.Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION, notification(task), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        else startForeground(NOTIFICATION, notification(task))
+        else startForeground(NOTIFICATION, notification(task), 0)
         observer = scope.launch { WorkspaceTasks.state.collect { state ->
             if (state != null && state.taskId == taskId) getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification(state))
         } }
