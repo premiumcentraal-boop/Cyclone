@@ -1,5 +1,6 @@
 import "./styles.css";
 import "./scan.css";
+import "./tasks.css";
 import { CyclonePcCompanionApp } from "./app.js";
 import { createDesktopService } from "./services/serviceFactory.js";
 

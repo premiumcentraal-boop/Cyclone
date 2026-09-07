@@ -67,7 +67,7 @@ class LocateGateway:
 
 def test_phone_locate_preserves_v1_page_text_and_draft_does_not_skip_model():
     tools = PhoneTools(gateway=LocateGateway())
-    located = tools.call("phone_locate", {"device_id": "phone-a", "goal": "Open Apps"})
+    located = tools.call("phone_locate", {"device_id": "phone-a", "goal": "Open Apps", "session_id": "default-foreground"})
     assert located["kind"] == "phone_locate"
     assert "Network & internet" in located["pageCard"]["pageText"]
     assert "Settings" in located["pageCard"]["pageSummary"]
@@ -84,6 +84,7 @@ def test_authorized_type_strips_plaintext_from_result():
         "tool": "phone.type",
         "params": {"value": secret},
         "goal": "type",
+        "session_id": "default-foreground",
     })
     assert denied["error"]["code"] == "INVALID_REQUEST"
     assert secret not in str(denied)
@@ -93,6 +94,7 @@ def test_authorized_type_strips_plaintext_from_result():
         "params": {"value": secret},
         "goal": "type",
         "user_authorized": True,
+        "session_id": "default-foreground",
     })
     assert secret not in str(allowed)
     assert allowed.get("echo") in (None, "<redacted>")
@@ -168,7 +170,7 @@ def test_locate_page_card_includes_snapshot_and_one_char_rank():
             return payload
 
     tools = PhoneTools(gateway=KeypadGateway())
-    located = tools.call("phone_locate", {"device_id": "phone-a", "goal": "7"})
+    located = tools.call("phone_locate", {"device_id": "phone-a", "goal": "7", "session_id": "default-foreground"})
     card = located["pageCard"]
     assert "snapshot" in card
     assert "[ref=e" in card["snapshot"]

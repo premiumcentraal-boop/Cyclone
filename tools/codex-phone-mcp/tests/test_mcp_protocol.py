@@ -25,6 +25,8 @@ class McpProtocolTests(unittest.TestCase):
         self.assertIn("semantic-first", response["result"]["instructions"])
         self.assertIn("Fast Path", response["result"]["instructions"])
         self.assertIn("elementIndex", response["result"]["instructions"])
+        self.assertIn("session_id is required", response["result"]["instructions"])
+        self.assertIn("default-foreground", response["result"]["instructions"])
 
     def test_tool_list_has_no_shell(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
@@ -43,8 +45,13 @@ class McpProtocolTests(unittest.TestCase):
         self.assertIn("device_id", tools["phone_observe"]["inputSchema"]["properties"])
         self.assertIn("session_id", tools["phone_observe"]["inputSchema"]["properties"])
         self.assertIn("display_id", tools["phone_observe"]["inputSchema"]["properties"])
+        self.assertIn("session_id", tools["phone_observe"]["inputSchema"]["required"])
         self.assertIn("session_id", tools["phone_act"]["inputSchema"]["properties"])
         self.assertIn("display_id", tools["phone_act"]["inputSchema"]["properties"])
+        self.assertIn("session_id", tools["phone_act"]["inputSchema"]["required"])
+        self.assertIn("request_ai_control", tools["phone_act"]["inputSchema"]["properties"])
+        self.assertIn("session_id", tools["phone_skill_run"]["inputSchema"]["required"])
+        self.assertNotIn("session_id", tools["phone_status"]["inputSchema"].get("required") or [])
         self.assertIn("phone_locate", tools)
         self.assertIn("goal", tools["phone_locate"]["inputSchema"]["required"])
         self.assertIn("device_id", tools["phone_act"]["inputSchema"]["properties"])
@@ -94,7 +101,7 @@ class McpProtocolTests(unittest.TestCase):
                     "jsonrpc": "2.0",
                     "id": 20 + index,
                     "method": "tools/call",
-                    "params": {"name": "phone_observe", "arguments": {"mode": "compact"}},
+                    "params": {"name": "phone_observe", "arguments": {"mode": "compact", "session_id": "default-foreground"}},
                 })
                 self.assertTrue(response["result"]["isError"])
                 self.assertIn(raw["error"]["code"], response["result"]["content"][0]["text"])

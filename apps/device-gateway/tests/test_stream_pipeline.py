@@ -155,6 +155,40 @@ class VideoStreamPipelineTests(unittest.TestCase):
         self.assertEqual(status.json()["protocol"], VIDEO_PROTOCOL_VERSION)
         self.assertIn("video", status.json())
 
+    def test_focus_producer_prefers_jpeg_without_provisional_avc(self):
+        adb = FakeStreamADB()
+
+        class TrackingBackend:
+            def start(self, *_args, **_kwargs):
+                raise AssertionError("JPEG-first live view must not start scrcpy")
+            def stop(self, *_args, **_kwargs):
+                return None
+            def latest_safe_snapshot(self, *_args, **_kwargs):
+                raise AssertionError("live producer should capture directly")
+            def status(self, *_args, **_kwargs):
+                return {"backend": "unused", "sessionCount": 0, "sessions": []}
+            def probe(self, *_args, **_kwargs):
+                return {"artifactVerified": False}
+
+        controller = VideoStreamController(
+            FakeStreamSession(adb),
+            VideoFleetLimiter(),
+            media_backend=TrackingBackend(),
+        )
+        q = controller.subscribe("focus")
+        init = q.get(timeout=2)
+        frame = q.get(timeout=2)
+        self.assertEqual(init.kind, "text")
+        self.assertIn('"codec":"image/', init.data)
+        self.assertIn('"backend":"adb-screenshot"', init.data)
+        self.assertNotIn("video/avc", init.data)
+        self.assertNotIn('"provisional":true', init.data)
+        self.assertEqual(frame.kind, "binary")
+        self.assertEqual(controller.diagnostics()["primaryBackend"], "adb-screenshot")
+        self.assertTrue(controller.diagnostics()["jpegFirst"])
+        controller.unsubscribe("focus", q)
+        controller.stop_all()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,10 @@ KEEPALIVE_INTERVAL_S = 2.0
 CAPTURE_OUTAGE_BACKOFF_S = 2.0
 DEGRADED_FOCUS_FPS = 2
 DEGRADED_THUMBNAIL_FPS = 1
+JPEG_INIT_TIMEOUT_S = 20.0
+JPEG_STALE_TIMEOUT_S = 15.0
+JPEG_SCREENCAP_TIMEOUT_S = JPEG_INIT_TIMEOUT_S
+JPEG_PRIMARY_BACKEND = "adb-screenshot"
 
 
 @dataclass(frozen=True)
@@ -70,10 +74,10 @@ class VideoFleetLimiter:
 
 
 class VideoStreamController:
-    """Compatibility adapter from the gateway WebSocket surface to the V3.3 media backend.
+    """Compatibility adapter from the gateway WebSocket surface to the live-view producer.
 
-    The primary path is a pinned scrcpy H.264 stream. Screenshot capture is intentionally limited
-    to a one-shot snapshot and a slow degraded preview when scrcpy cannot start.
+    Physical focus prefers JPEG/adb-screenshot (~2 fps). scrcpy H.264 is opt-in for tests and is
+    never a provisional ``video/avc`` handshake that can time out before a frame exists.
     """
 
     def __init__(
@@ -82,9 +86,12 @@ class VideoStreamController:
         limiter: VideoFleetLimiter,
         diagnostic=None,
         media_backend: ScrcpyMediaBackend | None = None,
+        *,
+        jpeg_first: bool = True,
     ):
         self.session = session
         self.limiter = limiter
+        self.jpeg_first = jpeg_first
         self._lock = threading.RLock()
         self._subscribers: dict[str, set[queue.Queue]] = {"thumbnail": set(), "focus": set()}
         self._threads: dict[str, threading.Thread] = {}
@@ -99,6 +106,9 @@ class VideoStreamController:
         self.media_backend = media_backend or ScrcpyMediaBackend(
             diagnostic=lambda stage, details: self._mark(stage, details)
         )
+
+    def _primary_backend(self) -> str:
+        return JPEG_PRIMARY_BACKEND if self.jpeg_first else "scrcpy-v4.0"
 
     def subscribe(self, profile: str) -> queue.Queue:
         if profile not in VIDEO_PROFILES:
@@ -169,7 +179,10 @@ class VideoStreamController:
                 "lastFrameAvailable": self._last_frame_meta is not None,
                 "sequence": self._sequence,
                 "fleetLimiter": self.limiter.snapshot(),
-                "primaryBackend": "scrcpy-v4.0",
+                "primaryBackend": self._primary_backend(),
+                "jpegFirst": self.jpeg_first,
+                "initTimeoutSeconds": JPEG_INIT_TIMEOUT_S if self.jpeg_first else None,
+                "staleTimeoutSeconds": JPEG_STALE_TIMEOUT_S if self.jpeg_first else None,
                 "mediaProbe": probe,
                 "media": media,
             }
@@ -217,7 +230,7 @@ class VideoStreamController:
         }
 
     def _producer(self, profile: str, stop: threading.Event) -> None:
-        self._mark("server.producer.start", {"profile": profile, "primaryBackend": "scrcpy-v4.0"})
+        self._mark("server.producer.start", {"profile": profile, "primaryBackend": self._primary_backend()})
         allowed, focus_allowed = self.limiter.acquire(profile)
         if not allowed:
             self._mark("server.producer.capacity", {"profile": profile, "code": "STREAM_CAPACITY"})
@@ -233,21 +246,24 @@ class VideoStreamController:
             )
             return
         try:
-            try:
-                self._produce_scrcpy(profile, stop)
-                if stop.is_set():
-                    return
-            except Exception as exc:
-                self._mark(
-                    "server.media.scrcpy_unavailable",
-                    {
-                        "profile": profile,
-                        "errorClass": exc.__class__.__name__,
-                        "retryable": True,
-                    },
-                )
-            if not stop.is_set():
-                self._produce_degraded(profile, stop)
+            if self.jpeg_first:
+                self._produce_jpeg(profile, stop)
+            else:
+                try:
+                    self._produce_scrcpy(profile, stop)
+                    if stop.is_set():
+                        return
+                except Exception as exc:
+                    self._mark(
+                        "server.media.scrcpy_unavailable",
+                        {
+                            "profile": profile,
+                            "errorClass": exc.__class__.__name__,
+                            "retryable": True,
+                        },
+                    )
+                if not stop.is_set():
+                    self._produce_jpeg(profile, stop)
         finally:
             try:
                 self.media_backend.stop(self.session.device_id)
@@ -394,7 +410,7 @@ class VideoStreamController:
         finally:
             media.unsubscribe(events)
 
-    def _produce_degraded(self, profile: str, stop: threading.Event) -> None:
+    def _produce_jpeg(self, profile: str, stop: threading.Event) -> None:
         codec = _image_codec()
         width, height = self._target_dimensions(VIDEO_PROFILES[profile].max_long_edge)
         self._broadcast(
@@ -404,8 +420,8 @@ class VideoStreamController:
                 self._init_json(
                     profile,
                     codec,
-                    "adb-screenshot-degraded",
-                    fallback=True,
+                    JPEG_PRIMARY_BACKEND,
+                    fallback=False,
                     width=width,
                     height=height,
                 ),
@@ -413,10 +429,14 @@ class VideoStreamController:
         )
         self._mark(
             "server.stream.init",
-            {"profile": profile, "source": "adb-screenshot-degraded", "degraded": True},
+            {"profile": profile, "source": JPEG_PRIMARY_BACKEND, "jpegFirst": True},
         )
         target_fps = DEGRADED_FOCUS_FPS if profile == "focus" else DEGRADED_THUMBNAIL_FPS
         self._produce_images(profile, stop, target_fps=target_fps)
+
+    def _produce_degraded(self, profile: str, stop: threading.Event) -> None:
+        # Retained name for older tests/callers; JPEG is the primary physical preview path.
+        self._produce_jpeg(profile, stop)
 
     def _produce_images(self, profile: str, stop: threading.Event, target_fps: int) -> None:
         interval = 1.0 / max(1, target_fps)
@@ -460,7 +480,7 @@ class VideoStreamController:
                 sleeping_sent = False
                 last_keepalive = time.monotonic()
             try:
-                png = self.session.adb.exec_out("screencap", "-p", timeout=5)
+                png = self.session.adb.exec_out("screencap", "-p", timeout=JPEG_SCREENCAP_TIMEOUT_S)
                 if not is_png(png):
                     raise ValueError("screencap returned a non-PNG payload")
                 encoded, codec, width, height = _encode_frame(
@@ -485,7 +505,7 @@ class VideoStreamController:
                 if first:
                     self._mark(
                         "server.frame.first",
-                        {"profile": profile, "source": "adb-screenshot-degraded"},
+                        {"profile": profile, "source": JPEG_PRIMARY_BACKEND},
                     )
             except Exception as exc:
                 consecutive_failures += 1
@@ -619,8 +639,8 @@ class VideoStreamController:
                 },
                 "timestampClock": "monotonic-media-us" if is_h264 else "unix-us",
                 "targetFps": (
-                    DEGRADED_FOCUS_FPS if fallback and profile == "focus"
-                    else DEGRADED_THUMBNAIL_FPS if fallback
+                    DEGRADED_FOCUS_FPS if (not is_h264) and profile == "focus"
+                    else DEGRADED_THUMBNAIL_FPS if not is_h264
                     else 30 if profile == "focus" and is_h264
                     else 8 if profile == "thumbnail" and is_h264
                     else spec.target_fps

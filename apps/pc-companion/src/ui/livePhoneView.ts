@@ -1,4 +1,5 @@
 import { mapPointerGesture } from "../core/coordinates.js";
+import { operatorInputEnabled, operatorInputPausedMessage } from "../core/operatorInput.js";
 import type { DesktopDevice, DesktopService, StreamProfile, StreamUiState } from "../services/types.js";
 import { LivePhoneController } from "../video/livePhoneController.js";
 import { createDeviceHealthPanel } from "./deviceHealthPanel.js";
@@ -21,6 +22,8 @@ export interface LivePhoneViewHandle {
   element: HTMLElement;
   destroy(): void;
 }
+
+export { operatorInputEnabled, operatorInputPausedMessage };
 
 export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneViewHandle {
   const { device } = options;
@@ -155,7 +158,7 @@ export function createLivePhoneView(options: LivePhoneViewOptions): LivePhoneVie
     frame.setAttribute("aria-label", `Control ${device.name}. Click to tap, hold and drag to swipe.`);
     let pointerStart: { clientX: number; clientY: number; startedAtMs: number; pointerId: number } | null = null;
     frame.addEventListener("pointerdown", (event) => {
-      if (currentState !== "LIVE") return;
+      if (!operatorInputEnabled(currentState, device.state)) return;
       if (event.button !== 0) return;
       pointerStart = { clientX: event.clientX, clientY: event.clientY, startedAtMs: performance.now(), pointerId: event.pointerId };
       frame.setPointerCapture(event.pointerId);
@@ -213,18 +216,23 @@ function renderStreamStatus(
 ): void {
   status.textContent = "";
   overlay.replaceChildren();
+  const inputEnabled = operatorInputEnabled(state, device.state);
   overlay.classList.toggle("visible", state !== "LIVE");
-  overlay.classList.toggle("passive", state === "CONNECTING" || state === "RECONNECTING");
+  overlay.classList.toggle("passive", state === "CONNECTING" || state === "RECONNECTING" || (inputEnabled && state !== "SLEEPING"));
+  overlay.classList.toggle("input-enabled", inputEnabled && state !== "LIVE");
 
   if (state === "LIVE") {
     status.textContent = diagnosticCode === "FALLBACK_PREVIEW"
-      ? "Low-resolution live preview - quality returns when the main stream reconnects."
-      : "";
+      ? "JPEG live preview (~2 fps). Mouse control stays active."
+      : diagnosticCode === "JPEG_FRAME_OK"
+        ? ""
+        : "";
     status.hidden = diagnosticCode !== "FALLBACK_PREVIEW";
     return;
   }
-  status.textContent = "";
-  status.hidden = true;
+  const paused = !inputEnabled ? operatorInputPausedMessage(state) : null;
+  status.textContent = paused ?? "";
+  status.hidden = paused == null;
   const title = state === "SLEEPING"
     ? "Sleeping"
     : state === "RECONNECTING"
@@ -239,6 +247,11 @@ function renderStreamStatus(
     overlay.append(el("div", "state-copy", `Unlock ${device.name} to show protected screen content. Cyclone can wake the display but never bypass Android's lock screen.`));
   } else {
     overlay.append(el("div", "state-copy", `Connection code: ${diagnosticCode}`));
+    if (inputEnabled) {
+      overlay.append(el("div", "state-copy", "Mouse tap and swipe stay available while the preview recovers."));
+    } else if (paused) {
+      overlay.append(el("div", "state-copy", paused));
+    }
   }
   if (state === "RECONNECTING" || state === "STREAM_ERROR" || state === "UNAVAILABLE") {
     const actions = el("div", "stream-recovery-actions");

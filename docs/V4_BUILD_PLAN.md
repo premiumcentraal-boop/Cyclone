@@ -58,20 +58,31 @@ Acceptance: unit tests for store/compile/replay/miss-escalate; honest UNVERIFIED
 Out of scope: Cyclone One tiles/installer (S4), Magisk, 20 hot LLM agents, requiring MCP `session_id` (Stage 4).
 Handoff: Stage 4 Cyclone One glass. MCP may require `session_id`; compiled skills already carry session/display. Do not start Stage 4 in this PR.
 
-### Stage 4 — Cyclone One V4 glass
-Merge One 0.2.1 JPEG/handoff; session.added/removed; tiles; MCP requires session_id; no second navigator on PC.
+### Stage 4 — Cyclone One V4 glass (DONE — THIS PR)
+Branch: `grok/cyclone-v4-s4-one` from Stage 3.
+Goal: Cyclone One is glass/MCP, not a second brain. Phone owns Fast Path / Session Kernel / Skill Compiler.
+Deliverables:
+1. Port One 0.2.1 JPEG live view + human/AI handoff into the V4 PC companion / gateway path (JPEG/adb-screenshot first; Give control to AI / Take control; locked phone not stolen).
+2. Session fabric: `session.added` / `session.removed`; tiles bound to `session_id` (+ `displayId` when present). Named workspace never rewritten to display 0.
+3. MCP requires `session_id` on observe/act and related UI tools; `SESSION_REQUIRED` / `SESSION_DISPLAY_MISMATCH`; forward `display_id` when provided.
+4. PC remains glass — no second PhoneToolExecutor / Fast Path on Windows.
+5. Preserve mobile Fast Path + Session Kernel + Skill Compiler + 3.9.12 Take control/GATE.
+6. Tests + `docs/V4_STAGE4_ONE_GLASS.md` + version identity **4.0.0-alpha.4** / versionCode 70. Physical Pixel 8 = UNVERIFIED.
+Acceptance: unit/contract tests for JPEG-first, handoff, session tiles/events, MCP session_id requirement; honest UNVERIFIED for physical; PR open.
+Out of scope: `v4.0.0` / One 1.0 (Stage 5), Magisk, 20 concurrent VLMs, rewriting Stage 1–3.
+Handoff: Stage 5 V4 release lane. Do not start Stage 5 in this PR.
 
 ### Stage 5 — V4 release lane
-`v4.0.0` / Cyclone One 1.0 pairing, CI tags, release notes, physical checklist.
+`v4.0.0` / Cyclone One 1.0 pairing, CI tags, release notes, physical checklist. Do not start until Stage 4 PR exists.
 
 ## Coordination rule
 Each Grok session reads `artifacts/V4_BUILD_PLAN.md` + previous stage PR. Parent orchestrator only starts next stage after PR exists.
 
 ## Orchestrator coordination (user 2026-09-07)
 - Check progress about **every 30 minutes**; advance **one stage at a time** through to a **V4 release**.
-- **Stage 3** is the current completed compiler (this PR, `4.0.0-alpha.3`). Do not restart Stage 1, Stage 2, or Stage 3 mid-run.
-- **Stage 4** is next (Cyclone One V4 glass). Stages 4–5 Grok prompts MUST tell the agent to **use subagents** to parallelize independent work (tests, docs, MCP, gateway, UI) while keeping one coherent PR.
-- After Stage 3 PR: offer/use Grok **usage reset** before heavy Stage 4+ burns if the user initiates it.
+- **Stage 4** is the current completed One glass (this PR, `4.0.0-alpha.4`). Do not restart Stage 1, Stage 2, Stage 3, or Stage 4 mid-run.
+- **Stage 5** is next (V4 release lane: `v4.0.0` / One 1.0 pairing). Stage 5 Grok prompts MUST tell the agent to **use subagents** to parallelize independent work (CI tags, release notes, physical checklist) while keeping one coherent PR.
+- After Stage 4 PR: offer/use Grok **usage reset** before heavy Stage 5 burns if the user initiates it.
 
 
 

@@ -138,7 +138,17 @@ export class LivePhoneController {
           else this.setState(state);
           if (state === "UNAVAILABLE") this.activateFallback();
         },
-        onError: (_error: unknown) => this.report({ stage: "client.render.error", code: "FRAME_RENDER_ERROR", retryable: true }),
+        onError: (error: unknown) => {
+          // Specific connection codes are reported through onDiagnostic. Only emit
+          // FRAME_RENDER_ERROR when the renderer failed without a known code.
+          const message = error instanceof Error ? error.message : "";
+          const known = /^[A-Z][A-Z0-9_.-]{2,80}$/.test(message) ? message : undefined;
+          this.report({
+            stage: "client.render.error",
+            code: known ?? "FRAME_RENDER_ERROR",
+            retryable: true,
+          });
+        },
         onDiagnostic: (event: StreamDiagnosticEvent) => this.report(event),
       },
     };

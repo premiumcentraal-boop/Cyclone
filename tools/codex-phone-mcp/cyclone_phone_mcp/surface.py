@@ -17,7 +17,8 @@ from .skills import (
     save_success,
     strip_secret_slots,
 )
-from .tools import PhoneTools as CorePhoneTools
+from .session import attach_execution_scope, parse_tool_execution_scope, require_tool_execution_scope
+from .tools import PhoneTools as CorePhoneTools, _identity_kwargs
 
 SKILL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
@@ -67,6 +68,9 @@ class PhoneTools(CorePhoneTools):
         payload = built.get("_compile")
         if not isinstance(payload, dict):
             raise ValueError("skill compile payload is invalid")
+        scope = parse_tool_execution_scope(args)
+        if scope:
+            payload = attach_execution_scope(payload, scope)
         device_id = str(args.get("device_id") or "").strip()
         try:
             if device_id:
@@ -86,6 +90,9 @@ class PhoneTools(CorePhoneTools):
         dry_run = bool(args.get("dryRun") or args.get("dry_run"))
         params = args.get("params") if isinstance(args.get("params"), dict) else {}
         params = strip_secret_slots(params)
+        scope = require_tool_execution_scope(args)
+        params = attach_execution_scope(params, scope)
+        identity = _identity_kwargs(scope)
         device_id = str(args.get("device_id") or "").strip()
         if not dry_run:
             meta = _skill_meta(self.gateway, device_id, skill_id)
@@ -93,9 +100,13 @@ class PhoneTools(CorePhoneTools):
                 return draft_run_denied(skill_id, "draft")
         try:
             if device_id:
-                result = self.gateway.device_skill_run(device_id, skill_id, dry_run=dry_run, params=params)
+                result = _call_skill_run(
+                    self.gateway.device_skill_run, device_id, skill_id, dry_run=dry_run, params=params, identity=identity,
+                )
             else:
-                result = self.gateway.skill_run(skill_id, dry_run=dry_run, params=params)
+                result = _call_skill_run(
+                    self.gateway.skill_run, skill_id, dry_run=dry_run, params=params, identity=identity,
+                )
         except GatewayError as exc:
             if android_skill_ops_missing(exc):
                 return missing_android_skill_ops(
@@ -104,6 +115,13 @@ class PhoneTools(CorePhoneTools):
                 )
             raise
         return normalize_run(result, skill_id=skill_id, dry_run=dry_run)
+
+
+def _call_skill_run(method: Any, *positional: Any, dry_run: bool, params: dict[str, Any], identity: dict[str, Any]) -> Any:
+    try:
+        return method(*positional, dry_run=dry_run, params=params, **identity)
+    except TypeError:
+        return method(*positional, dry_run=dry_run, params=params)
 
 
 def _skill_meta(gateway: Any, device_id: str, skill_id: str) -> dict[str, Any] | None:

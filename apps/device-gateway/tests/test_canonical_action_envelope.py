@@ -125,6 +125,7 @@ def make_runtime(tmp_path, bridge):
     session.bridge_gateway_enabled = True
     session.bridge_socket_listening = True
     session.accessibility_connected = True
+    session.input_owner = "AI"
     session.bridge = lambda token=None, auto_forward=False: bridge
     runtime = DesktopRuntime(Settings("gateway-secret", None, "adb", tmp_path), fleet=fleet)
     return runtime, session

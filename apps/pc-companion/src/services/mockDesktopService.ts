@@ -7,12 +7,17 @@ import type {
   DesktopRuntimeStatus,
   DesktopService,
   DeviceControlAction,
+  DeviceSessionDescriptor,
+  DeviceSessionList,
+  DeviceSessionResult,
+  FleetWsEvent,
   PairBeginResult,
   PairConfirmResult,
   PairQrConfirmResult,
   StreamDiagnosticEvent,
   StreamProfile,
 } from "./types.js";
+import { DEFAULT_FOREGROUND_SESSION_ID, isDefaultForegroundSession, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 const MOCK_CODE = "NOVA";
 
@@ -21,14 +26,30 @@ export class MockDesktopService implements DesktopService {
   private devices: DesktopDevice[];
   private pairings = new Map<string, PairBeginResult>();
   private pairingSequence = 0;
+  private sessionSequence = 0;
+  private sessions = new Map<string, DeviceSessionDescriptor[]>();
+  private fleetListeners: Array<(event?: FleetWsEvent) => void> = [];
 
   constructor(deviceCount = 4) {
     this.devices = createMockDevices(deviceCount);
+    for (const device of this.devices) {
+      if (!device.paired) continue;
+      this.sessions.set(device.id, seedMockSessions(device.id));
+    }
   }
 
   async listDevices(): Promise<DesktopDevice[]> { return this.devices.map(copyDevice); }
   async scanDevices(): Promise<DesktopDevice[]> { return this.listDevices(); }
-  watchFleet(_onChange: () => void): () => void { return () => undefined; }
+  watchFleet(onChange: (event?: FleetWsEvent) => void): () => void {
+    this.fleetListeners.push(onChange);
+    return () => {
+      this.fleetListeners = this.fleetListeners.filter((listener) => listener !== onChange);
+    };
+  }
+
+  emitFleetEvent(event: FleetWsEvent): void {
+    for (const listener of this.fleetListeners) listener(event);
+  }
 
   async pairBegin(deviceId: string): Promise<PairBeginResult> {
     const device = this.requireDevice(deviceId);
@@ -74,7 +95,88 @@ export class MockDesktopService implements DesktopService {
       device.connectionHealth = healthyConnectionHealth();
     }
     else if (action.type === "clipboard_sync") device.capabilities.clipboardSync = action.enabled;
+    else if (action.type === "yield_ai") {
+      if (device.state === "SLEEPING") return { ok: false, deviceId, verification: "PHONE_LOCKED" };
+      device.inputOwner = "AI";
+      return { ok: true, deviceId, verification: "AI_HAS_CONTROL", inputOwner: "AI" };
+    }
+    else if (action.type === "take_human") {
+      device.inputOwner = "HUMAN";
+      return { ok: true, deviceId, verification: "HUMAN_HAS_CONTROL", inputOwner: "HUMAN" };
+    }
     return { ok: true, deviceId, verification: `mock-${action.type}` };
+  }
+
+  async listDeviceSessions(deviceId: string): Promise<DeviceSessionList> {
+    this.requireDevice(deviceId);
+    return { protocol: "cyclone-one-session/1", deviceId, sessions: this.deviceSessions(deviceId).map(copySession) };
+  }
+
+  async startDeviceSession(deviceId: string, packageName: string): Promise<DeviceSessionResult> {
+    this.requireDevice(deviceId);
+    const session: DeviceSessionDescriptor = {
+      sessionId: `workspace-${++this.sessionSequence}`,
+      displayId: 2 + this.sessionSequence,
+      targetPackage: packageName,
+      backend: "Android workspace",
+      inputOwner: "AI",
+      state: "RUNNING",
+      executable: true,
+      frameHealthy: true,
+    };
+    this.deviceSessions(deviceId).push(session);
+    this.emitFleetEvent({ event: "session.added", deviceId, sessionId: session.sessionId, displayId: session.displayId });
+    return { protocol: "cyclone-one-session/1", deviceId, session: copySession(session) };
+  }
+
+  async pauseDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    return this.mutateSession(deviceId, sessionId, (session) => { session.state = "PAUSED"; });
+  }
+
+  async resumeDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    return this.mutateSession(deviceId, sessionId, (session) => { session.state = "RUNNING"; });
+  }
+
+  async handoffDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    return this.mutateSession(deviceId, sessionId, (session) => { session.inputOwner = "HUMAN"; });
+  }
+
+  async stopDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    const result = this.mutateSession(deviceId, sessionId, (session) => { session.state = "STOPPED"; });
+    this.sessions.set(deviceId, this.deviceSessions(deviceId).filter((session) => session.sessionId !== sessionId));
+    this.emitFleetEvent({ event: "session.removed", deviceId, sessionId, displayId: result.session.displayId });
+    return result;
+  }
+
+  async snapshotDeviceSession(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number }> {
+    const session = this.deviceSessions(deviceId).find((item) => item.sessionId === sessionId);
+    if (!session) throw new Error("Mock session not found");
+    if (isDefaultForegroundSession(session.sessionId) || session.displayId == null || session.displayId <= 0) {
+      throw new Error("Cyclone refused an unproven background preview");
+    }
+    const headers = {
+      get(name: string): string | null {
+        if (name === "X-Cyclone-Foreground-Substitution") return "false";
+        if (name === "X-Cyclone-Display-Id") return String(session.displayId);
+        return null;
+      },
+    };
+    const { displayId } = readExactSessionSnapshotHeaders(headers);
+    return { url: mockFrameDataUrl(deviceId, "focus"), displayId };
+  }
+
+  addMockSession(deviceId: string, session: DeviceSessionDescriptor): DeviceSessionDescriptor {
+    this.requireDevice(deviceId);
+    const next = copySession(session);
+    this.deviceSessions(deviceId).push(next);
+    this.emitFleetEvent({ event: "session.added", deviceId, sessionId: next.sessionId, displayId: next.displayId });
+    return copySession(next);
+  }
+
+  removeMockSession(deviceId: string, sessionId: string): void {
+    const existing = this.deviceSessions(deviceId).find((item) => item.sessionId === sessionId);
+    this.sessions.set(deviceId, this.deviceSessions(deviceId).filter((item) => item.sessionId !== sessionId));
+    this.emitFleetEvent({ event: "session.removed", deviceId, sessionId, displayId: existing?.displayId });
   }
 
   getVideoUrl(deviceId: string, profile: StreamProfile): string { return `mock://video/${encodeURIComponent(deviceId)}?profile=${profile}`; }
@@ -139,6 +241,23 @@ export class MockDesktopService implements DesktopService {
     if (!device) throw new Error("Mock device not found");
     return device;
   }
+
+  private deviceSessions(deviceId: string): DeviceSessionDescriptor[] {
+    const existing = this.sessions.get(deviceId);
+    if (existing) return existing;
+    const created: DeviceSessionDescriptor[] = [];
+    this.sessions.set(deviceId, created);
+    return created;
+  }
+
+  private mutateSession(deviceId: string, sessionId: string, mutate: (session: DeviceSessionDescriptor) => void): DeviceSessionResult {
+    this.requireDevice(deviceId);
+    if (isDefaultForegroundSession(sessionId)) throw new Error("Foreground session lifecycle stays on the human display");
+    const session = this.deviceSessions(deviceId).find((item) => item.sessionId === sessionId);
+    if (!session) throw new Error("Mock session not found");
+    mutate(session);
+    return { protocol: "cyclone-one-session/1", deviceId, session: copySession(session) };
+  }
 }
 
 export function createMockDevices(count: number): DesktopDevice[] {
@@ -175,6 +294,7 @@ export function createMockDevices(count: number): DesktopDevice[] {
             }
           : healthyConnectionHealth(),
       lastFrameUrl: mockFrameDataUrl(`phone-${index + 1}`, "thumbnail"),
+      inputOwner: "AI",
     };
   });
 }
@@ -192,6 +312,32 @@ function healthyConnectionHealth() {
 }
 
 function copyDevice(device: DesktopDevice): DesktopDevice { return { ...device, video: { ...device.video }, capabilities: { ...device.capabilities } }; }
+
+function copySession(session: DeviceSessionDescriptor): DeviceSessionDescriptor { return { ...session }; }
+
+function seedMockSessions(deviceId: string): DeviceSessionDescriptor[] {
+  return [
+    {
+      sessionId: DEFAULT_FOREGROUND_SESSION_ID,
+      displayId: 0,
+      backend: "default-foreground",
+      inputOwner: "HUMAN",
+      state: "FOREGROUND",
+      executable: true,
+      frameHealthy: true,
+    },
+    {
+      sessionId: `workspace-${deviceId}`,
+      displayId: 2,
+      targetPackage: "com.android.chrome",
+      backend: "Android workspace",
+      inputOwner: "AI",
+      state: "RUNNING",
+      executable: true,
+      frameHealthy: true,
+    },
+  ];
+}
 
 function mockFrameDataUrl(deviceId: string, profile: StreamProfile): string {
   const seed = Number(deviceId.replace(/\D/g, "")) || 1;

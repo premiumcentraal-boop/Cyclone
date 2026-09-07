@@ -288,15 +288,18 @@ class GatewayClient:
                     },
                 },
             )
+        forwarded, request_ai_control = _split_ai_control(params)
         payload = {
             "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "correlation_id": str(uuid.uuid4()),
             "capability_id": tool,
-            "params": attach_execution_scope(params, identity or None),
+            "params": attach_execution_scope(forwarded, identity or None),
             "goal": goal,
             "source": "PC_CODEX",
             **identity,
         }
+        if request_ai_control:
+            payload["request_ai_control"] = True
         if observation_id is not None:
             payload["expected_observation_id"] = observation_id
         response = self._request("POST", "/v1/capabilities/action", payload)
@@ -507,13 +510,16 @@ class GatewayClient:
                     },
                 },
             )
+        forwarded, request_ai_control = _split_ai_control(params)
         payload = {
             "capability_id": tool,
-            "params": attach_execution_scope(params, identity or None),
+            "params": attach_execution_scope(forwarded, identity or None),
             "goal": goal,
             "expected_observation_id": observation_id,
             **identity,
         }
+        if request_ai_control:
+            payload["request_ai_control"] = True
         raw = self._request("POST", f"/v1/devices/{_quote(device_id)}/agent/action", payload)
         if tool not in NON_MUTATING_CAPABILITIES:
             self._observation_ids.pop(_observation_key(device_id, identity), None)
@@ -640,6 +646,12 @@ def _legacy_device_row(legacy: dict[str, Any]) -> dict[str, Any] | None:
 
 def _quote(value: str) -> str:
     return urllib.parse.quote(value, safe="")
+
+
+def _split_ai_control(params: dict[str, Any] | None) -> tuple[dict[str, Any], bool]:
+    forwarded = dict(params or {})
+    requested = forwarded.pop("request_ai_control", False) is True
+    return forwarded, requested
 
 
 def _execution_identity(

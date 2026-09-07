@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Cyclone PC Companion",
-  "version": "3.8.4",
+  "productName": "Cyclone One",
+  "version": "4.0.0-alpha.4",
   "identifier": "com.cyclone.pccompanion",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Cyclone PC Companion",
+        "title": "Cyclone One",
         "width": 1440,
         "height": 920,
         "minWidth": 760,

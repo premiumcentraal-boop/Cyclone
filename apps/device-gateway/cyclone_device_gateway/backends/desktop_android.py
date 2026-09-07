@@ -62,11 +62,14 @@ class DesktopAndroidBackend:
         observed = self.agent.observe(self.device_id, mode="compact")
         witness = observed.get("witness") or {}
         observation_id = str(witness.get("observation_id") or "")
+        payload_params = dict(params)
+        request_ai = bool(payload_params.pop("request_ai_control", False))
         return self.agent.action(self.device_id, {
             "capability_id": capability_id,
-            "params": dict(params),
+            "params": payload_params,
             "goal": goal,
             "expected_observation_id": observation_id,
+            "request_ai_control": request_ai,
         })
 
     def screenshot(self, *, profile: str = "thumbnail") -> dict[str, Any]:

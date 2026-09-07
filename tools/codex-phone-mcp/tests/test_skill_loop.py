@@ -15,6 +15,8 @@ from cyclone_phone_mcp.skills import (
 )
 from cyclone_phone_mcp.surface import PhoneTools
 
+FG = {"session_id": "default-foreground"}
+
 
 def _verified_step(tool, page_from, page_to, label="Apps"):
     return {
@@ -223,6 +225,7 @@ class SkillLoopTests(unittest.TestCase):
         tools = PhoneTools(SkillGateway())
         payload = json.loads(tools.call("phone_skill_run", {
             "skill_id": "skill.verified.open-settings",
+            **FG,
         })[0]["text"])
         self.assertTrue(payload["ok"])
         self.assertEqual(2, len(payload["steps"]))
@@ -243,6 +246,7 @@ class SkillLoopTests(unittest.TestCase):
         tools = PhoneTools(gateway)
         payload = json.loads(tools.call("phone_skill_run", {
             "skill_id": "skill.draft.wifi",
+            **FG,
         })[0]["text"])
         self.assertFalse(payload["ok"])
         self.assertEqual("DRAFT_RUN_DENIED", payload["errorClass"])
@@ -251,6 +255,7 @@ class SkillLoopTests(unittest.TestCase):
         dry = json.loads(tools.call("phone_skill_run", {
             "skill_id": "skill.draft.wifi",
             "dryRun": True,
+            **FG,
         })[0]["text"])
         self.assertTrue(dry["ok"])
         self.assertTrue(dry["dryRun"])
@@ -259,7 +264,7 @@ class SkillLoopTests(unittest.TestCase):
 
     def test_locate_goal_includes_page_text_and_page_summary(self):
         tools = PhoneTools(SkillGateway())
-        located = json.loads(tools.call("phone_locate", {"goal": "Open Settings"})[0]["text"])
+        located = json.loads(tools.call("phone_locate", {"goal": "Open Settings", **FG})[0]["text"])
         card = located["pageCard"]
         self.assertEqual("page_card", card["kind"])
         self.assertIn("Home screen", card["pageText"])
@@ -306,7 +311,7 @@ class SkillLoopTests(unittest.TestCase):
 
     def test_locate_draft_skill_does_not_skip_model(self):
         tools = PhoneTools(SkillGateway())
-        located = json.loads(tools.call("phone_locate", {"goal": "Open Wi-Fi"})[0]["text"])
+        located = json.loads(tools.call("phone_locate", {"goal": "Open Wi-Fi", **FG})[0]["text"])
         self.assertEqual("page_card", located["pageCard"]["kind"])
         self.assertIsNone(located["matchedSkill"])
         self.assertFalse(located["skipModel"])
@@ -333,6 +338,7 @@ class SkillLoopTests(unittest.TestCase):
         tools = PhoneTools(gateway)
         payload = json.loads(tools.call("phone_skill_run", {
             "skill_id": "skill.verified.open-settings",
+            **FG,
         })[0]["text"])
         self.assertFalse(payload["ok"])
         self.assertEqual(ANDROID_SKILL_OPS_MISSING, payload["errorClass"])
@@ -341,7 +347,7 @@ class SkillLoopTests(unittest.TestCase):
 
     def test_locate_missing_android_ops_fail_closed_keeps_page_card(self):
         tools = PhoneTools(MissingOpsGateway())
-        located = json.loads(tools.call("phone_locate", {"goal": "Open Settings"})[0]["text"])
+        located = json.loads(tools.call("phone_locate", {"goal": "Open Settings", **FG})[0]["text"])
         self.assertEqual("phone_locate", located["kind"])
         self.assertEqual("page_card", located["pageCard"]["kind"])
         self.assertIn("Home screen", located["pageCard"]["pageText"])
@@ -358,6 +364,7 @@ class SkillLoopTests(unittest.TestCase):
         ]
         payload = json.loads(PhoneTools(gateway).call("phone_skill_run", {
             "skill_id": "skill.verified.open-settings",
+            **FG,
         })[0]["text"])
         self.assertFalse(payload["ok"])
         self.assertEqual(2, len(payload["steps"]))

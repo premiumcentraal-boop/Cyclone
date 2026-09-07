@@ -18,7 +18,9 @@ import type {
   FleetBatchTask,
   FleetGroup,
   FleetWorkspace,
+  FleetWsEvent,
 } from "./types.js";
+import { parseFleetWsEvent } from "../core/sessionTiles.js";
 
 export interface HttpDesktopServiceOptions {
   httpBaseUrl?: string;
@@ -149,7 +151,7 @@ export class HttpDesktopService implements DesktopService {
     return this.request(`/v1/fleet/batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST" });
   }
 
-  watchFleet(onChange: () => void): () => void {
+  watchFleet(onChange: (event?: FleetWsEvent) => void): () => void {
     let disposed = false;
     let authRejected = false;
     let socket: WebSocket | null = null;
@@ -163,8 +165,10 @@ export class HttpDesktopService implements DesktopService {
         scheduleReconnect();
         return;
       }
-      socket.addEventListener("message", () => {
-        if (!disposed) onChange();
+      socket.addEventListener("message", (message) => {
+        if (disposed) return;
+        const parsed = parseFleetWsEvent(typeof message.data === "string" ? message.data : undefined);
+        onChange(parsed ?? undefined);
       });
       socket.addEventListener("error", () => {
         try { socket?.close(); } catch { /* noop */ }
@@ -304,13 +308,27 @@ export class HttpDesktopService implements DesktopService {
     else if (action.type === "key" && action.key === "BACK") body = { kind: "back" };
     else if (action.type === "key" && action.key === "HOME") body = { kind: "home" };
     else if (action.type === "key" && action.key === "ENTER") body = { kind: "text", text: "\n" };
+    else if (action.type === "yield_ai") body = { kind: "yield_ai" };
+    else if (action.type === "take_human") body = { kind: "take_human" };
     else return { ok: false, deviceId, verification: "KEY_UNAVAILABLE" };
 
-    const result = await this.request<{ ok?: boolean; status?: string }>(`/v1/devices/${encodeURIComponent(deviceId)}/control`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    return { ok: result.ok === true, deviceId, verification: result.status ?? "android-result" };
+    try {
+      const result = await this.request<{ ok?: boolean; status?: string; inputOwner?: string }>(`/v1/devices/${encodeURIComponent(deviceId)}/control`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      return {
+        ok: result.ok === true,
+        deviceId,
+        verification: result.status ?? "android-result",
+        inputOwner: result.inputOwner,
+      };
+    } catch (error) {
+      if (error instanceof DesktopHttpError && (error.code === "PHONE_LOCKED" || error.code === "HUMAN_HAS_CONTROL")) {
+        return { ok: false, deviceId, verification: error.code };
+      }
+      throw error;
+    }
   }
 
   getVideoUrl(deviceId: string, profile: StreamProfile): string {

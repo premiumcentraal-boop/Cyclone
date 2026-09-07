@@ -25,6 +25,24 @@ def parse_execution_scope(args: dict[str, Any] | None):
     return _parse(args)
 
 
+def require_tool_execution_scope(args: dict[str, Any] | None):
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import require_tool_execution_scope as _require
+    return _require(args)
+
+
+def session_scope_error_result(exc: Exception) -> dict[str, Any]:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import session_scope_error_result as _result
+    return _result(exc)  # type: ignore[arg-type]
+
+
+def is_session_scope_error(exc: Exception) -> bool:
+    _ensure_phone_mcp()
+    from cyclone_phone_mcp.session import SessionScopeError
+    return isinstance(exc, SessionScopeError)
+
+
 def compact_observation(payload: Any, *, goal: str = "") -> dict[str, Any]:
     _ensure_phone_mcp()
     from cyclone_phone_mcp.compact import compact_observation as _compact

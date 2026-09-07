@@ -106,9 +106,46 @@ def test_phone_tools_forward_explicit_device_id():
 def test_phone_type_requires_intent_acknowledgement():
     gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY")])
     tools = PhoneTools(gateway=gateway)
-    result = tools.call("phone_act", {"tool": "phone.type", "params": {"value": "secret"}, "goal": "type", "device_id": "phone-a"})
+    result = tools.call("phone_act", {
+        "tool": "phone.type", "params": {"value": "secret"}, "goal": "type", "device_id": "phone-a",
+        "session_id": "default-foreground",
+    })
     assert result["error"]["code"] == "INVALID_REQUEST"
     assert "secret" not in str(result)
+
+
+def test_missing_session_id_is_rejected_and_not_forwarded():
+    gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY")])
+    tools = PhoneTools(gateway=gateway)
+    observed = tools.call("phone_observe", {"device_id": "phone-a"})
+    assert observed["errorClass"] == "SESSION_REQUIRED"
+    assert observed["error"]["code"] == "SESSION_REQUIRED"
+    assert gateway.calls == []
+    acted = tools.call("phone_act", {
+        "device_id": "phone-a", "tool": "phone.home", "params": {}, "goal": "Go home",
+    })
+    assert acted["errorClass"] == "SESSION_REQUIRED"
+    assert gateway.calls == []
+    located = tools.call("phone_locate", {"device_id": "phone-a", "goal": "Open Apps"})
+    assert located["errorClass"] == "SESSION_REQUIRED"
+    assert gateway.calls == []
+
+
+def test_default_foreground_session_forwards_display_zero():
+    gateway = FakeToolsGateway([DeviceSummary("phone-a", "READY")])
+    tools = PhoneTools(gateway=gateway)
+    tools.call("phone_observe", {"device_id": "phone-a", "session_id": "default-foreground"})
+    assert gateway.calls[-1][-1]["session_id"] == "default-foreground"
+    assert gateway.calls[-1][-1]["display_id"] == 0
+    acted = tools.call("phone_act", {
+        "device_id": "phone-a",
+        "tool": "phone.home",
+        "params": {},
+        "goal": "Go home",
+        "session_id": "default-foreground",
+    })
+    assert acted["session_id"] == "default-foreground"
+    assert acted["display_id"] == 0
 
 
 def test_every_phone_scoped_server_function_has_device_id_and_no_escape_hatch():
@@ -153,12 +190,14 @@ def test_group_action_requires_explicit_unique_targets_and_observes_each_first()
         "tool": "phone.home",
         "params": {},
         "goal": "Return selected test devices home",
+        "session_id": "default-foreground",
     })
     assert result["ok"] is True
     assert result["selected_device_ids"] == ["phone-a", "phone-b"]
+    identity = {"session_id": "default-foreground", "display_id": 0}
     assert gateway.calls == [
-        ("observe", "phone-a", False, "compact"),
-        ("observe", "phone-b", False, "compact"),
+        ("observe", "phone-a", False, "compact", identity),
+        ("observe", "phone-b", False, "compact", identity),
     ]
     duplicate = tools.call("phone_group_act", {
         "device_ids": ["phone-a", "phone-a"], "tool": "phone.home", "params": {}, "goal": "x",
@@ -174,6 +213,7 @@ def test_command_shaped_params_and_batch_typing_are_rejected():
         "tool": "phone.click",
         "params": {"selector": {"text": "Apps"}, "command": "whoami"},
         "goal": "Open Apps",
+        "session_id": "default-foreground",
     })
     assert injected["error"]["code"] == "INVALID_REQUEST"
     typed = tools.call("phone_group_act", {

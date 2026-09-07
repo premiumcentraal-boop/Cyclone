@@ -4,6 +4,28 @@ from typing import Any, Mapping
 
 DEFAULT_FOREGROUND_SESSION_ID = "default-foreground"
 IDENTITY_KEYS = frozenset({"sessionId", "session_id", "displayId", "display_id", "executionContext"})
+SESSION_REQUIRED = "SESSION_REQUIRED"
+SESSION_DISPLAY_MISMATCH = "SESSION_DISPLAY_MISMATCH"
+
+
+class SessionScopeError(ValueError):
+    """MCP-surface execution identity failure. Never invent default-foreground."""
+
+    def __init__(self, message: str, error_class: str = SESSION_REQUIRED):
+        super().__init__(message)
+        self.error_class = error_class
+
+
+def session_scope_error_result(exc: SessionScopeError) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "errorClass": exc.error_class,
+        "error": {
+            "code": exc.error_class,
+            "layer": "protocol",
+            "message": str(exc),
+        },
+    }
 
 
 def parse_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -54,6 +76,31 @@ def parse_tool_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any]
     params = args.get("params")
     nested = parse_execution_scope(params) if isinstance(params, dict) else None
     return _agree_scope(top, nested)
+
+
+def require_tool_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Fail closed unless an explicit sessionId is present. Never invent default-foreground."""
+    try:
+        scope = parse_tool_execution_scope(args)
+    except ValueError as exc:
+        raise _scope_error(exc) from exc
+    if not scope or not str(scope.get("sessionId") or "").strip():
+        raise SessionScopeError(
+            "session_id is required. Pass default-foreground for the live human display, "
+            "or a named workspace session with display_id > 0.",
+            SESSION_REQUIRED,
+        )
+    return scope
+
+
+def _scope_error(exc: ValueError) -> SessionScopeError:
+    message = str(exc)
+    lowered = message.lower()
+    if "display" in lowered:
+        return SessionScopeError(message, SESSION_DISPLAY_MISMATCH)
+    if "session" in lowered or "conflicting" in lowered:
+        return SessionScopeError(message, SESSION_REQUIRED)
+    return SessionScopeError(message, SESSION_REQUIRED)
 
 
 def attach_execution_scope(params: Mapping[str, Any] | None, scope: Mapping[str, Any] | None) -> dict[str, Any]:

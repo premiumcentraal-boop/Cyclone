@@ -26,6 +26,7 @@ from .fleet import DeviceFleetManager
 from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES
 from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
+from .sessions import ExecutionSessionService
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 from .workspace import FleetWorkspaceStore
@@ -44,7 +45,7 @@ class PairQrCompleteBody(BaseModel):
 
 class ManualControlBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake"]
+    kind: Literal["tap", "swipe", "back", "home", "scroll_up", "scroll_down", "text", "wake", "yield_ai", "take_human"]
     x: float | None = None
     y: float | None = None
     x1: float | None = None
@@ -77,6 +78,7 @@ class AgentActionBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     goal: str = ""
     expected_observation_id: str | None = None
+    request_ai_control: bool = False
     session_id: str | None = None
     sessionId: str | None = None
     display_id: int | None = Field(default=None, ge=0)
@@ -174,6 +176,7 @@ class DesktopRuntime:
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
         self.agent = DesktopAgentService(self.fleet, snapshot=self._snapshot_for_batch)
+        self.sessions = ExecutionSessionService(self.fleet)
         self.batches = FleetBatchService(lambda device_id: DesktopAndroidBackend(
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
         ))
@@ -697,6 +700,8 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             await websocket.close(code=close_code)
             return
         await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
+        if profile == "focus":
+            session.input_owner = "HUMAN"
         q = controller.subscribe(profile)
         runtime.live_diagnostics.mark(device_id, "server.ws.accepted", details={"profile": profile, "transport": "websocket"})
         first_binary = True
@@ -854,9 +859,16 @@ def _call(fn):
             RuntimeErrorCode.TRUST_AUTH_FAILED.value: 403,
             RuntimeErrorCode.PROTOCOL_MISMATCH.value: 426,
             RuntimeErrorCode.PHONE_LOCKED.value: 423,
+            RuntimeErrorCode.HUMAN_HAS_CONTROL.value: 409,
+            RuntimeErrorCode.BACKGROUND_MODE_UNAVAILABLE.value: 409,
+            RuntimeErrorCode.STALE_SESSION.value: 410,
+            RuntimeErrorCode.FOREGROUND_REQUIRED.value: 409,
+            RuntimeErrorCode.STALE_OBSERVATION.value: 409,
+            RuntimeErrorCode.POLICY_DENIED.value: 403,
             RuntimeErrorCode.AUTH_REJECTED.value: 403,
             RuntimeErrorCode.INVALID_REQUEST.value: 400,
             RuntimeErrorCode.STREAM_CAPACITY.value: 503,
+            RuntimeErrorCode.CAPABILITY_UNAVAILABLE.value: 503,
         }.get(exc.code, 503)
         raise HTTPException(status_code=status, detail=exc.to_dict()) from exc
 

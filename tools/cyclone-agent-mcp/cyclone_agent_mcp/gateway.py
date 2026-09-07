@@ -323,6 +323,7 @@ class GatewayClient:
         if tool not in NON_MUTATING_CAPABILITIES and observation_id is None:
             raise GatewayError("A fresh phone observation is required before mutation", body={"error": {"code": "STALE_OBSERVATION", "layer": "PROTOCOL", "retryable": True}})
         forwarded_params = dict(params)
+        request_ai_control = forwarded_params.pop("request_ai_control", False) is True
         forwarded_params.update(identity)
         if selected.legacy_unscoped:
             payload = {
@@ -334,11 +335,15 @@ class GatewayClient:
                 "source": "PC_AGENT_MCP",
                 **identity,
             }
+            if request_ai_control:
+                payload["request_ai_control"] = True
             if observation_id:
                 payload["expected_observation_id"] = observation_id
             response = self._request("POST", "/v1/capabilities/action", payload)
         else:
             payload = {"capability_id": tool, "params": forwarded_params, "goal": goal, **identity}
+            if request_ai_control:
+                payload["request_ai_control"] = True
             if observation_id:
                 payload["expected_observation_id"] = observation_id
             response = self._request("POST", self._agent_path(selected, "/action"), payload)

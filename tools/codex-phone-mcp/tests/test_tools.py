@@ -7,6 +7,8 @@ from cyclone_phone_mcp.reports import SessionRecorder
 from cyclone_phone_mcp.protocol import classify_failure
 from cyclone_phone_mcp.tools import PhoneTools
 
+FG = {"session_id": "default-foreground"}
+
 
 class FakeGateway:
     def status(self): return {"ok": True}
@@ -159,11 +161,12 @@ class ToolTests(unittest.TestCase):
             "tool": "phone.click",
             "params": {"selector": {"text": "Apps"}, "command": "whoami"},
             "goal": "Open Apps",
+            **FG,
         })
         self.assertIn("not a permitted typed phone parameter", content[0]["text"])
 
     def test_locate_fuses_status_page_card_and_bounded_goal_search(self):
-        located = json.loads(self.tools.call("phone_locate", {"goal": "Open Apps"})[0]["text"])
+        located = json.loads(self.tools.call("phone_locate", {"goal": "Open Apps", **FG})[0]["text"])
         self.assertEqual("phone_locate", located["kind"])
         self.assertTrue(located["status"]["available"])
         self.assertEqual("page_card", located["pageCard"]["kind"])
@@ -173,11 +176,12 @@ class ToolTests(unittest.TestCase):
     def test_mutation_returns_atomic_before_after_cards_and_never_verifies_transport_alone(self):
         gateway = AtomicPageGateway()
         tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
-        located = json.loads(tools.call("phone_locate", {"goal": "Open Apps"})[0]["text"])
+        located = json.loads(tools.call("phone_locate", {"goal": "Open Apps", **FG})[0]["text"])
         result = json.loads(tools.call("phone_act", {
             "tool": "phone.click",
             "params": {"elementId": located["pageCard"]["candidates"]["goalRanked"][0]["elementId"]},
             "goal": "Open Apps",
+            **FG,
         })[0]["text"])
         self.assertTrue(result["ok"])
         self.assertEqual("Home", result["beforePageCard"]["title"])
@@ -186,30 +190,31 @@ class ToolTests(unittest.TestCase):
         self.assertTrue(result["actionStatus"]["afterObserved"])
         self.assertGreaterEqual(gateway.observe_calls, 2)
         stale = json.loads(tools.call("phone_act", {
-            "tool": "phone.click", "params": {"elementId": "apps"}, "goal": "Repeat",
+            "tool": "phone.click", "params": {"elementId": "apps"}, "goal": "Repeat", **FG,
         })[0]["text"])
         self.assertEqual("STALE_OBSERVATION", stale["errorClass"])
 
     def test_click_by_element_index_resolves_current_page_card_id(self):
         gateway = AtomicPageGateway()
         tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
-        tools.call("phone_observe", {})
+        tools.call("phone_observe", dict(FG))
         result = json.loads(tools.call("phone_act", {
             "tool": "phone.click",
             "params": {"elementIndex": 1},
             "goal": "Open Apps",
+            **FG,
         })[0]["text"])
         self.assertTrue(result["ok"])
         self.assertTrue(result["pageChanged"])
 
     def test_mcp_rejects_unscoped_selectors_and_coordinates(self):
-        self.tools.call("phone_observe", {})
+        self.tools.call("phone_observe", dict(FG))
         selector = self.tools.call("phone_act", {
-            "tool": "phone.click", "params": {"selector": {"text": "Apps"}}, "goal": "Open Apps",
+            "tool": "phone.click", "params": {"selector": {"text": "Apps"}}, "goal": "Open Apps", **FG,
         })[0]["text"]
         self.assertIn("observation-scoped elementId", selector)
         coordinate = self.tools.call("phone_act", {
-            "tool": "phone.click", "params": {"elementId": "1", "x": 20, "y": 20}, "goal": "Open Apps",
+            "tool": "phone.click", "params": {"elementId": "1", "x": 20, "y": 20}, "goal": "Open Apps", **FG,
         })[0]["text"]
         self.assertIn("free-form coordinates", coordinate)
 
@@ -219,6 +224,7 @@ class ToolTests(unittest.TestCase):
             "tool": "phone.home",
             "params": {},
             "goal": "Return selected test phones home",
+            **FG,
         })[0]["text"])
         self.assertTrue(payload["ok"])
         self.assertEqual(["dev_a"], payload["selected_device_ids"])
@@ -230,17 +236,17 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn("secret", rejected)
 
     def test_type_requires_authorization_and_redacts_report(self):
-        self.tools.call("phone_observe", {})
-        content = self.tools.call("phone_act", {"tool": "phone.type", "params": {"elementId": "1", "text": "secret"}, "goal": "fill"})
+        self.tools.call("phone_observe", dict(FG))
+        content = self.tools.call("phone_act", {"tool": "phone.type", "params": {"elementId": "1", "text": "secret"}, "goal": "fill", **FG})
         self.assertIn("user_authorized", content[0]["text"])
-        self.tools.call("phone_act", {"tool": "phone.type", "params": {"elementId": "1", "text": "secret"}, "goal": "fill", "user_authorized": True})
+        self.tools.call("phone_act", {"tool": "phone.type", "params": {"elementId": "1", "text": "secret"}, "goal": "fill", "user_authorized": True, **FG})
         report = json.loads(next(Path(self.temp.name).glob("*.json")).read_text())
         text = json.dumps(report)
         self.assertNotIn("secret", text)
         self.assertIn("typed_value_redacted", text)
 
     def test_inspection_redacts_password(self):
-        result = self.tools.call("phone_inspect_element", {"element_id": "1"})[0]["text"]
+        result = self.tools.call("phone_inspect_element", {"element_id": "1", **FG})[0]["text"]
         self.assertNotIn("should-not-leak", result)
 
     def test_debug_classification_and_teaching_lifecycle(self):
@@ -263,16 +269,17 @@ class ToolTests(unittest.TestCase):
     def test_device_scoped_status_observe_search_and_act(self):
         status = json.loads(self.tools.call("phone_status", {"device_id": "dev_a"})[0]["text"])
         self.assertEqual("dev_a", status["device_id"])
-        observed = json.loads(self.tools.call("phone_observe", {"device_id": "dev_a", "mode": "compact"})[0]["text"])
+        observed = json.loads(self.tools.call("phone_observe", {"device_id": "dev_a", "mode": "compact", **FG})[0]["text"])
         self.assertEqual("obs-dev", observed["witness"]["observation_id"])
         self.assertEqual("home", observed["pageKey"])
-        search = json.loads(self.tools.call("phone_ui_search", {"device_id": "dev_a", "query": "Apps"})[0]["text"])
+        search = json.loads(self.tools.call("phone_ui_search", {"device_id": "dev_a", "query": "Apps", **FG})[0]["text"])
         self.assertEqual("Apps", search["results"][0]["label"])
         acted = json.loads(self.tools.call("phone_act", {
             "device_id": "dev_a",
             "tool": "phone.click",
             "params": {"elementId": "1"},
             "goal": "Open Apps",
+            **FG,
         })[0]["text"])
         self.assertEqual("ok", acted["actionStatus"]["execution"])
         self.assertTrue(acted["actionStatus"]["afterObserved"])
@@ -281,12 +288,13 @@ class ToolTests(unittest.TestCase):
     def test_device_scoped_action_failure_is_mcp_error(self):
         recorder = SessionRecorder(self.temp.name)
         tools = PhoneTools(FailedDeviceActionGateway(), recorder)
-        tools.call("phone_observe", {"device_id": "dev_a"})
+        tools.call("phone_observe", {"device_id": "dev_a", **FG})
         content = tools.call("phone_act", {
             "device_id": "dev_a",
             "tool": "phone.click",
             "params": {"elementId": "1"},
             "goal": "Open missing",
+            **FG,
         })
         payload = json.loads(content[0]["text"])
         self.assertEqual("phone_action_result", payload["kind"])
@@ -296,7 +304,7 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(report["failedActions"], 1)
 
     def test_device_screenshot_reports_semantic_only_evidence(self):
-        content = self.tools.call("phone_screenshot", {"device_id": "dev_a"})[0]["text"]
+        content = self.tools.call("phone_screenshot", {"device_id": "dev_a", **FG})[0]["text"]
         payload = json.loads(content)
         self.assertFalse(payload["screenshotAvailable"])
         self.assertIn("Desktop agent endpoint", payload["note"])
@@ -313,9 +321,9 @@ class ToolTests(unittest.TestCase):
         self.assertFalse(stopped["teaching"]["active"])
 
     def test_session_report_counts_actions_and_searches(self):
-        self.tools.call("phone_ui_search", {"query": "Apps"})
-        self.tools.call("phone_observe", {})
-        self.tools.call("phone_act", {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "Open Apps"})
+        self.tools.call("phone_ui_search", {"query": "Apps", **FG})
+        self.tools.call("phone_observe", dict(FG))
+        self.tools.call("phone_act", {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "Open Apps", **FG})
         report = self.recorder.snapshot()
         self.assertEqual(report["uiSearches"], 1)
         self.assertEqual(report["actions"], 1)
@@ -324,10 +332,10 @@ class ToolTests(unittest.TestCase):
     def test_returned_android_action_failure_is_mcp_error_and_report_failure(self):
         recorder = SessionRecorder(self.temp.name)
         tools = PhoneTools(FailedActionGateway(), recorder)
-        tools.call("phone_observe", {})
+        tools.call("phone_observe", dict(FG))
         content = tools.call(
             "phone_act",
-            {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "Open missing"},
+            {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "Open missing", **FG},
         )
         payload = json.loads(content[0]["text"])
         self.assertEqual(payload["kind"], "phone_action_result")
@@ -343,19 +351,19 @@ class ToolTests(unittest.TestCase):
             {"protocol_version": "cyclone.gateway.capability.v1", "capability_id": "phone.click", "ok": True, "transport": {"ok": True}, "verification": {"ok": True, "status": "verified"}, "error": None},
         ):
             gateway = FakeGateway()
-            gateway.action = lambda *_: response
+            gateway.action = lambda *args, **kwargs: response
             tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
-            tools.call("phone_observe", {})
-            payload = json.loads(tools.call("phone_act", {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "x"})[0]["text"])
+            tools.call("phone_observe", dict(FG))
+            payload = json.loads(tools.call("phone_act", {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "x", **FG})[0]["text"])
             self.assertEqual("phone_action_result", payload["kind"])
             self.assertFalse(payload["ok"])
 
     def test_error_null_success_is_not_misclassified(self):
         gateway = FakeGateway()
-        gateway.action = lambda *_: {"ok": True, "error": None}
+        gateway.action = lambda *args, **kwargs: {"ok": True, "error": None}
         tools = PhoneTools(gateway, SessionRecorder(self.temp.name))
-        tools.call("phone_observe", {})
-        payload = json.loads(tools.call("phone_act", {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "x"})[0]["text"])
+        tools.call("phone_observe", dict(FG))
+        payload = json.loads(tools.call("phone_act", {"tool": "phone.click", "params": {"elementId": "1"}, "goal": "x", **FG})[0]["text"])
         self.assertEqual("VERIFICATION_REQUIRED", payload["errorClass"])
         self.assertTrue(tools.last_call_failed)
 
@@ -451,11 +459,12 @@ class ToolTests(unittest.TestCase):
                 }
 
         tools = PhoneTools(AlreadyOnPageGateway(), SessionRecorder(self.temp.name))
-        tools.call("phone_observe", {})
+        tools.call("phone_observe", dict(FG))
         payload = json.loads(tools.call("phone_act", {
             "tool": "phone.click",
             "params": {"elementId": "see-all"},
             "goal": "See all 98 apps",
+            **FG,
         })[0]["text"])
         self.assertIs(False, payload["pageChanged"])
         self.assertNotEqual("VERIFICATION_FAILED", payload.get("errorClass"))

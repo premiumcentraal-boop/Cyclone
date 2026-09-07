@@ -169,6 +169,7 @@ export interface DesktopDevice {
   source?: "USB" | "LAN" | "VIRTUAL";
   provider?: string | null;
   providerInstanceId?: string | null;
+  inputOwner?: "AI" | "HUMAN" | string;
 }
 
 export interface FleetGroup {
@@ -234,12 +235,55 @@ export type DeviceControlAction =
   | { type: "clipboard_paste"; text: string }
   | { type: "wake" }
   | { type: "disconnect" }
-  | { type: "reconnect" };
+  | { type: "reconnect" }
+  | { type: "yield_ai" }
+  | { type: "take_human" };
 
 export interface ControlResult {
   ok: boolean;
   deviceId: string;
   verification?: string;
+  inputOwner?: "AI" | "HUMAN" | string;
+}
+
+export type DeviceSessionState =
+  | "FOREGROUND"
+  | "RUNNING"
+  | "PAUSED"
+  | "WAITING_FOR_CONFIRMATION"
+  | "ATTENTION"
+  | "STOPPED"
+  | string;
+
+export interface DeviceSessionDescriptor {
+  sessionId: string;
+  displayId?: number;
+  targetPackage?: string | null;
+  backend?: string;
+  inputOwner?: string;
+  state: DeviceSessionState;
+  executable?: boolean;
+  executionGeneration?: number | null;
+  frameHealthy?: boolean | null;
+}
+
+export interface DeviceSessionList {
+  protocol: string;
+  deviceId: string;
+  sessions: DeviceSessionDescriptor[];
+}
+
+export interface DeviceSessionResult {
+  protocol: string;
+  deviceId: string;
+  session: DeviceSessionDescriptor;
+}
+
+export interface FleetWsEvent {
+  event: string;
+  deviceId?: string;
+  sessionId?: string;
+  displayId?: number;
 }
 
 export type ConnectorState =
@@ -340,7 +384,14 @@ export interface DesktopService {
   readonly mode: "real" | "mock";
   listDevices(): Promise<DesktopDevice[]>;
   scanDevices(): Promise<DesktopDevice[]>;
-  watchFleet(onChange: () => void): () => void;
+  watchFleet(onChange: (event?: FleetWsEvent) => void): () => void;
+  listDeviceSessions?(deviceId: string): Promise<DeviceSessionList>;
+  startDeviceSession?(deviceId: string, packageName: string): Promise<DeviceSessionResult>;
+  pauseDeviceSession?(deviceId: string, sessionId: string): Promise<DeviceSessionResult>;
+  resumeDeviceSession?(deviceId: string, sessionId: string): Promise<DeviceSessionResult>;
+  handoffDeviceSession?(deviceId: string, sessionId: string): Promise<DeviceSessionResult>;
+  stopDeviceSession?(deviceId: string, sessionId: string): Promise<DeviceSessionResult>;
+  snapshotDeviceSession?(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number }>;
   trustStatus?(deviceId: string): Promise<TrustStatusResult>;
   trustBegin?(deviceId: string): Promise<TrustStatusResult>;
   trustComplete?(deviceId: string): Promise<TrustStatusResult>;

@@ -6,7 +6,8 @@ import {
   type CompanionState,
 } from "./core/fleet.js";
 import { TopologyRefreshGate } from "./core/topologyRefresh.js";
-import type { DesktopDevice, DesktopService } from "./services/types.js";
+import type { DesktopDevice, DesktopService, FleetWsEvent } from "./services/types.js";
+import { isSessionFabricEvent } from "./core/sessionTiles.js";
 import { createConnectionsPage } from "./pages/connectionsPage.js";
 import { createAutomationsPage } from "./pages/automationsPage.js";
 import { createFleetPage } from "./pages/fleetPage.js";
@@ -20,6 +21,7 @@ interface PageHandle {
   element: HTMLElement;
   destroy(): void;
   updateDevice?(device: DesktopDevice): void;
+  applyFleetEvent?(event: FleetWsEvent): void;
 }
 
 export class CyclonePcCompanionApp {
@@ -46,7 +48,13 @@ export class CyclonePcCompanionApp {
     await this.refreshDevices(true);
     // Normal updates are pushed from ADB's topology event stream. The 20 second list refresh is
     // only a very cheap UI recovery net and does not itself execute ADB commands.
-    this.fleetUnsubscribe = this.service.watchFleet(() => this.scheduleEventRefresh());
+    this.fleetUnsubscribe = this.service.watchFleet((event) => {
+      if (event && isSessionFabricEvent(event) && this.currentPage?.applyFleetEvent) {
+        this.currentPage.applyFleetEvent(event);
+        return;
+      }
+      this.scheduleEventRefresh();
+    });
     this.pollTimer = window.setInterval(() => void this.refreshDevices(false), 20_000);
   }
 
@@ -76,14 +84,14 @@ export class CyclonePcCompanionApp {
     const shell = el("div", "app-shell");
     const topbar = el("header", "app-topbar");
     const brand = el("div", "brand");
-    brand.append(el("div", "cyclone-mark"), el("div", "brand-name", "Cyclone"));
+    brand.append(el("div", "cyclone-mark"), el("div", "brand-name", "Cyclone One"));
     const nav = el("nav", "primary-nav");
     nav.setAttribute("aria-label", "Cyclone PC Companion");
 
     const entries: Array<[Exclude<AppRoute, "focused">, string, string]> = [
       ["home", "⌂", "Home"],
       ["fleet", "▣", "Control"],
-      ["automations", "↻", "Automations"],
+      ["automations", "↻", "Tasks"],
       ["connections", "◇", "Connections"],
     ];
     for (const [route, symbol, label] of entries) {
@@ -244,7 +252,7 @@ export class CyclonePcCompanionApp {
     if (!this.currentPage && this.state.route === "automations") {
       this.currentPage = createAutomationsPage(this.state.devices, (device) => {
         if (device) this.focusDevice(device); else this.navigate("fleet");
-      });
+      }, this.service);
     }
     if (!this.currentPage && this.state.route === "connections") {
       this.currentPage = createConnectionsPage(this.service);
