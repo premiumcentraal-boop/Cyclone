@@ -1,6 +1,9 @@
 package com.cyclone.mobile.runtime.session
 
-class SessionIdentityException(message: String) : IllegalArgumentException(message)
+class SessionIdentityException(
+    message: String,
+    val errorClass: String = "SESSION_DISPLAY_MISMATCH",
+) : IllegalArgumentException(message)
 
 class ExecutionSessionStore {
     private val lock = Any()

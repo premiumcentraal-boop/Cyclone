@@ -8,6 +8,7 @@ import android.os.UserHandle
 import android.os.UserManager
 import com.cyclone.mobile.*
 import com.cyclone.mobile.gateway.GatewayObservationStore
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import org.json.JSONArray
@@ -98,11 +99,16 @@ object Layer2Workspaces {
         p.getString("appPackage"), p.optInt("androidUserId", 0), p.optInt("displayId", 0))
     fun status(ctx: Context): JSONObject = synchronized(engine.mutationLock) {
         initialize(ctx)
-        JSONObject().put("workspaces", JSONArray(engine.snapshot().map(::json)))
-            .put("holder", engine.holder()?.workspaceId ?: JSONObject.NULL)
-            .put("workspaceGeneration", engine.holder()?.generation ?: JSONObject.NULL)
-            .put("armed", JSONArray(engine.queue())).put("gated", gated())
-            .put("root", RootProbe.status.label).put("displayId", 0)
+        val holder = engine.holder()
+        attachPlane(
+            JSONObject().put("workspaces", JSONArray(engine.snapshot().map(::json)))
+                .put("holder", holder?.workspaceId ?: JSONObject.NULL)
+                .put("workspaceGeneration", holder?.generation ?: JSONObject.NULL)
+                .put("armed", JSONArray(engine.queue())).put("gated", gated())
+                .put("root", RootProbe.status.label).put("displayId", 0),
+            holder?.workspaceId,
+            holder?.generation,
+        )
     }
     private fun launch(w: Workspace) {
         check(!gated()) { "GATE: human review required" }
@@ -160,10 +166,23 @@ object Layer2Workspaces {
         }
         // Old frame references are invalid; the agent must obtain a new Page Card after switch.
         GatewayObservationStore.clear("default-foreground")
-        JSONObject().put("workspaceId", lease.workspaceId).put("workspaceGeneration", lease.generation)
-            .put("sessionId", "default-foreground").put("displayId", 0).put("verified", true)
-            .put("next", "phone.observe; include workspaceId and workspaceGeneration on every mutation")
+        attachPlane(
+            JSONObject().put("workspaceId", lease.workspaceId).put("workspaceGeneration", lease.generation)
+                .put("sessionId", "default-foreground").put("displayId", 0).put("verified", true)
+                .put("next", "phone.observe; include workspaceId and workspaceGeneration on every mutation"),
+            lease.workspaceId,
+            lease.generation,
+        )
     }
+    private fun attachPlane(payload: JSONObject, workspaceId: String? = null, workspaceGeneration: Long? = null): JSONObject {
+        val identity = JSONObject().put("sessionId", "default-foreground").put("displayId", 0)
+        if (workspaceId != null) {
+            identity.put("workspaceId", workspaceId)
+            if (workspaceGeneration != null) identity.put("workspaceGeneration", workspaceGeneration)
+        }
+        return SessionContract.attach(payload, SessionContract.classify(identity))
+    }
+
     fun requireMutation(ctx: Context, request: PhoneToolRequest) {
         initialize(ctx)
         val id = request.params.optString("workspaceId").takeIf { it.isNotBlank() }

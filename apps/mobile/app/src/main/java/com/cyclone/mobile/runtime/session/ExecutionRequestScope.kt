@@ -45,6 +45,10 @@ object ExecutionRequestScope {
         }
     }
 
+    fun requireUi(params: JSONObject): ExecutionContext = SessionContract.requireUi(params).let {
+        ExecutionContext(it.sessionId, it.displayId)
+    }
+
     /** Carry outer identity through adapters instead of dropping it while normalizing params. */
     fun merge(envelope: JSONObject, params: JSONObject): JSONObject {
         val out = JSONObject(params.toString())

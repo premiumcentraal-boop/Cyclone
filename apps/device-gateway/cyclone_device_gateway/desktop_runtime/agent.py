@@ -16,6 +16,8 @@ from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationErro
 from ..execution_scope import (
     DEFAULT_FOREGROUND_SESSION_ID,
     attach_execution_identity,
+    attach_plane,
+    classify_session_plane,
     history_key,
     parse_execution_identity,
 )
@@ -136,6 +138,7 @@ class DesktopAgentService:
     ) -> dict[str, Any]:
         session = self._paired(device_id)  # USB/trust pairing, not execution sessionId.
         identity = self._execution_identity(payload)
+        plane = classify_session_plane(payload) if payload is not None else None
         raw_observation = self._request(session, "observe.semantic", dict(identity or {}))
         if identity:
             raw_observation.setdefault("sessionId", identity["sessionId"])
@@ -167,7 +170,7 @@ class DesktopAgentService:
         }
         if include_screenshot:
             response["screenshot"] = self.screenshot(device_id, profile="thumbnail")["screenshot"]
-        return response
+        return attach_plane(response, plane)
 
     def ui_search(self, device_id: str, query: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         session = self._paired(device_id)
@@ -213,6 +216,7 @@ class DesktopAgentService:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object.")
         params = dict(params)
         identity = self._execution_identity(payload)
+        plane = classify_session_plane(payload)
         if identity:
             params = attach_execution_identity(params, identity)
         goal = str(payload.get("goal") or tool.replace("phone.", "").replace("_", " "))[:1000]
@@ -383,7 +387,7 @@ class DesktopAgentService:
             )
         if error is not None and execution_ok and not verification_passed:
             verification_layer["error"] = error
-        return {
+        return attach_plane({
             **self._operation_context(session, device_id, "act"),
             "protocol_version": CAPABILITY_PROTOCOL_VERSION,
             "capability_id": tool,
@@ -395,7 +399,7 @@ class DesktopAgentService:
             "after": after,
             "afterState": self._after_state(after_raw),
             "error": error,
-        }
+        }, plane)
 
     def _observe_after_action(
         self,
@@ -610,7 +614,10 @@ class DesktopAgentService:
 
     def _execution_identity(self, payload: dict[str, Any] | None) -> dict[str, Any] | None:
         try:
-            return parse_execution_identity(payload)
+            identity = parse_execution_identity(payload)
+            if payload is not None:
+                classify_session_plane(payload)
+            return identity
         except ValueError as exc:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, str(exc)) from exc
 
