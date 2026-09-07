@@ -145,8 +145,6 @@ internal object GatewayBrainAdapter {
 
 internal object GatewayActionAdapter {
     val allowedTools = linkedSetOf(
-        "workspace.list", "workspace.register", "workspace.switch", "phone.workspace_switch",
-        "workspace.pause", "workspace.release", "workspace.arm", "workspace.next",
         "phone.observe",
         "phone.find",
         "phone.click",

@@ -24,8 +24,14 @@ import org.json.JSONObject
  * of Android execution from after-state verification. It is not a second executor.
  */
 internal object GatewayV33ActionAdapter {
+    private val workspaceTools = setOf(
+        "workspace.list", "workspace.register", "workspace.switch", "phone.workspace_switch",
+        "workspace.pause", "workspace.release", "workspace.arm", "workspace.next",
+    )
+
     val allowedTools = linkedSetOf<String>().apply {
         addAll(GatewayActionAdapter.allowedTools)
+        addAll(workspaceTools)
         add("phone.tap")
     }
 
@@ -139,6 +145,7 @@ internal object GatewayV33ActionAdapter {
                     .put("coordinateSpace", "normalized-current-display")
             }
             "phone.set_clipboard" -> executeDirect(context, requestId, tool, normalizedArgs, normalizedParams, bound)
+            in workspaceTools -> executeDirect(context, requestId, tool, normalizedArgs, normalizedParams, bound)
             else -> GatewayActionAdapter.execute(context, requestId, normalizedArgs)
         }
 
