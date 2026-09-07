@@ -134,7 +134,7 @@ jobs:
           echo "::add-mask::$STORE_PASSWORD"
           echo "::add-mask::$KEY_ALIAS"
           echo "::add-mask::$KEY_PASSWORD"
-          mkdir -p signed "$RUNNER_TEMP/previous"
+          mkdir -p signed "$RUNNER_TEMP/previous-signed"
           apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
           aapt="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt"
           "$apksigner" sign \
@@ -154,8 +154,10 @@ jobs:
             exit 1
           fi
 
-          gh release download v4.0.1 --repo "$GITHUB_REPOSITORY" --pattern 'Cyclone-4.0.1.apk' --dir "$RUNNER_TEMP/previous"
-          previous_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$RUNNER_TEMP/previous/Cyclone-4.0.1.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
+          # v4.0.1's published CI APK is unsigned, so the most recent usable signing baseline is
+          # v3.9.10, which was published with the same historical update-compatible dev signer.
+          gh release download v3.9.10 --repo "$GITHUB_REPOSITORY" --pattern 'Cyclone-3.9.10.apk' --dir "$RUNNER_TEMP/previous-signed"
+          previous_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs "$RUNNER_TEMP/previous-signed/Cyclone-3.9.10.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
           current_cert="$("$apksigner" verify --min-sdk-version 34 --print-certs signed/Cyclone-4.0.2.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
           test -n "$previous_cert"
           test "$current_cert" = "$previous_cert"
@@ -163,7 +165,7 @@ jobs:
           (cd signed && sha256sum Cyclone-4.0.2.apk > Cyclone-4.0.2.apk.sha256)
           cp candidate/source-sha.txt candidate/run-id.txt candidate/mobile-metadata.json signed/
           printf '%s\n' 'SIGNED_LEGACY_UPDATE_COMPATIBILITY_KEY_BUILD_ONLY_UNTESTED' > signed/signing-state.txt
-          printf '%s\n' 'Signed with the historical v4.0.1-compatible development key; certificate equality with the published v4.0.1 APK was verified.' > signed/update-compatibility.txt
+          printf '%s\n' 'Signed with the historical update-compatible development key; certificate equality with the published signed v3.9.10 APK was verified. The published v4.0.1 APK is unsigned and cannot provide a certificate baseline.' > signed/update-compatibility.txt
 
       - name: Destroy recovered signing material
         if: always()
@@ -173,7 +175,7 @@ jobs:
             "$RUNNER_TEMP/release.keystore.b64" \
             "$RUNNER_TEMP/legacy.gradle.kts" \
             "$RUNNER_TEMP/legacy-signing.env" \
-            "$RUNNER_TEMP/previous" \
+            "$RUNNER_TEMP/previous-signed" \
             "$RUNNER_TEMP/badging.txt"
 
       - name: Publish Cyclone 4.0.2

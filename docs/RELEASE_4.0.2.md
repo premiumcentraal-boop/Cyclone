@@ -19,8 +19,9 @@ Cyclone does not bypass Android security. Installing or starting Shizuku, enabli
 
 - Version: **4.0.2**
 - Android versionCode: **73**
-- Base: Cyclone 4.0.1
+- Functional base: Cyclone 4.0.1
 - Physical device testing: **UNVERIFIED**
 - UI acceptance: **UNVERIFIED**
-- Automated tests/lint: **NOT RUN — release requested without tests; user will device-test**
-- Release build: assemble/sign/package only
+- Automated test suites: **NOT RUN — release requested without tests; user will device-test**
+- Android `lintVital` runs automatically as part of Gradle release packaging; no unit, instrumentation, Python or gateway test suites are invoked by this release workflow.
+- APK signing is checked against the last known signed release, 3.9.10. The published 4.0.1 APK is unsigned and therefore cannot provide a signing-certificate baseline.
