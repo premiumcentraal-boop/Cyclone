@@ -257,6 +257,16 @@ button { color: inherit; }
 .context-card-title { font-size: 11px; font-weight: 690; }
 .context-card-copy { margin: 6px 0 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
 .context-card .button { margin-top: 10px; margin-right: 8px; }
+.layer2-strip-compact {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px dashed rgba(64, 196, 180, .3);
+  border-radius: 12px;
+  background: rgba(10, 22, 22, .55);
+  box-shadow: none;
+}
+.layer2-strip-compact .layer2-actions { margin-top: 8px; }
+.layer2-strip-compact .layer2-actions .button { margin-top: 0; }
 .focus-live-column { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; border: 1px solid var(--border); border-radius: 22px; background: rgba(12,14,19,.76); padding: 12px; }
 .direct-control-hint { flex: 0 0 auto; color: var(--muted); font-size: 9px; letter-spacing: .02em; }
 .focused-live-phone { width: auto; height: min(100%, calc(100vh - 205px)); max-width: min(100%, 560px); aspect-ratio: var(--phone-aspect, 9 / 19.5); border-radius: 25px; border-color: rgba(255,255,255,.13); box-shadow: 0 24px 80px rgba(0,0,0,.48), 0 0 70px rgba(91,52,164,.08); }

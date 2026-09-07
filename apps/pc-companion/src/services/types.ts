@@ -279,6 +279,37 @@ export interface DeviceSessionResult {
   session: DeviceSessionDescriptor;
 }
 
+/** Display-0 time-sliced app/profile lock. Not a named VD session and not FleetWorkspace (device groups). */
+export interface Layer2Workspace {
+  id: string;
+  label: string;
+  appPackage: string;
+  androidUserId: number;
+  displayId: number;
+  state: string;
+}
+
+export type Layer2Operation = "list" | "register" | "switch" | "pause" | "release" | "arm" | "next";
+
+export interface Layer2Status {
+  protocol: string;
+  deviceId: string;
+  sessionId: string;
+  displayId: number;
+  plane: "layer2";
+  workspaces: Layer2Workspace[];
+  holder: string | null;
+  lockOwner: string | null;
+  workspaceGeneration: number | null;
+  armed: string[];
+  goals?: Record<string, string>;
+  gated: boolean;
+  root?: string;
+  workspaceId?: string;
+  verified?: boolean;
+  next?: string;
+}
+
 export interface FleetWsEvent {
   event: string;
   deviceId?: string;
@@ -392,6 +423,8 @@ export interface DesktopService {
   handoffDeviceSession?(deviceId: string, sessionId: string): Promise<DeviceSessionResult>;
   stopDeviceSession?(deviceId: string, sessionId: string): Promise<DeviceSessionResult>;
   snapshotDeviceSession?(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number }>;
+  listLayer2Workspaces?(deviceId: string): Promise<Layer2Status>;
+  layer2Workspace?(deviceId: string, operation: Layer2Operation, params?: Record<string, unknown>): Promise<Layer2Status>;
   trustStatus?(deviceId: string): Promise<TrustStatusResult>;
   trustBegin?(deviceId: string): Promise<TrustStatusResult>;
   trustComplete?(deviceId: string): Promise<TrustStatusResult>;

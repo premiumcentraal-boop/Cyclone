@@ -1,5 +1,18 @@
-import type { DesktopDevice, DesktopService, DeviceSessionDescriptor, FleetWsEvent } from "../services/types.js";
+import type { DesktopDevice, DesktopService, DeviceSessionDescriptor, FleetWsEvent, Layer2Status } from "../services/types.js";
 import { CycloneOneSessionClient } from "../services/sessionClient.js";
+import {
+  armedGoalLabel,
+  bindLayer2Status,
+  canPauseLayer2,
+  canReleaseLayer2,
+  gatedLabel,
+  generationLabel,
+  LAYER2_DISPLAY_LABEL,
+  LAYER2_EMPTY_COPY,
+  LAYER2_STRIP_COPY,
+  LAYER2_STRIP_TITLE,
+  lockOwnerLabel,
+} from "../core/layer2.js";
 import {
   applySessionEvent,
   bindSessionTile,
@@ -78,6 +91,15 @@ export function createAutomationsPage(
   const formStatus = el("div", "task-form-status");
   composer.append(form, formStatus);
 
+  const layer2Section = el("section", "layer2-strip");
+  const layer2Heading = el("div", "layer2-heading");
+  layer2Heading.append(
+    el("h2", "task-section-title", LAYER2_STRIP_TITLE),
+    el("p", "task-muted", LAYER2_STRIP_COPY),
+  );
+  const layer2Host = el("div", "layer2-device-list");
+  layer2Section.append(layer2Heading, layer2Host);
+
   const toolbar = el("div", "task-list-toolbar");
   toolbar.append(
     el("div", "task-list-heading-wrap"),
@@ -95,7 +117,7 @@ export function createAutomationsPage(
   openPhone.addEventListener("click", () => onOpenControl(eligible[0]));
   footer.append(openPhone, el("span", "task-muted", "Foreground phone control remains separate from named workspace sessions."));
 
-  page.append(header, explainer, composer, toolbar, list, footer);
+  page.append(header, explainer, composer, layer2Section, toolbar, list, footer);
 
   let disposed = false;
   let client: CycloneOneSessionClient | null = null;
@@ -136,6 +158,16 @@ export function createAutomationsPage(
   const snapshotSession = async (deviceId: string, sessionId: string) => {
     if (service?.snapshotDeviceSession) return service.snapshotDeviceSession(deviceId, sessionId);
     return (await getClient()).snapshot(deviceId, sessionId);
+  };
+
+  const listLayer2 = async (deviceId: string) => {
+    if (!service?.listLayer2Workspaces) throw new Error("Layer 2 workspaces need a DesktopService");
+    return bindLayer2Status(deviceId, await service.listLayer2Workspaces(deviceId));
+  };
+
+  const runLayer2 = async (deviceId: string, operation: "pause" | "release") => {
+    if (!service?.layer2Workspace) throw new Error("Layer 2 workspaces need a DesktopService");
+    return bindLayer2Status(deviceId, await service.layer2Workspace(deviceId, operation));
   };
 
   const renderEmpty = (message: string): void => {
@@ -269,6 +301,86 @@ export function createAutomationsPage(
     if (!disposed) renderTiles();
   };
 
+  const renderLayer2 = (device: DesktopDevice, status: Layer2Status): HTMLElement => {
+    const card = el("article", "layer2-card");
+    card.dataset.plane = "layer2";
+    card.dataset.displayId = "0";
+    const top = el("div", "layer2-card-top");
+    const title = el("div", "layer2-card-title-wrap");
+    title.append(
+      el("div", "layer2-card-title", device.name),
+      el("div", "layer2-card-meta", LAYER2_DISPLAY_LABEL),
+    );
+    top.append(title, el("span", `layer2-gate${status.gated ? " layer2-gate-pending" : ""}`, gatedLabel(status)));
+
+    const facts = el("div", "layer2-facts");
+    facts.append(
+      layer2Fact("Lock owner", lockOwnerLabel(status).replace(/^Lock owner: /, "")),
+      layer2Fact("Generation", generationLabel(status).replace(/^Generation: /, "")),
+      layer2Fact("Armed goal", armedGoalLabel(status).replace(/^Armed goal: /, "")),
+      layer2Fact("Display", "0 · time-sliced lock"),
+    );
+
+    const rows = el("div", "layer2-workspace-list");
+    if (status.workspaces.length === 0) {
+      rows.append(el("div", "layer2-empty", LAYER2_EMPTY_COPY));
+    } else {
+      for (const workspace of status.workspaces) {
+        const row = el("div", "layer2-workspace-row");
+        row.append(
+          el("span", "layer2-workspace-label", workspace.label),
+          el("span", "layer2-workspace-package", workspace.appPackage),
+          el("span", "layer2-workspace-user", `user ${workspace.androidUserId}`),
+          el("span", "layer2-workspace-state", workspace.state),
+        );
+        rows.append(row);
+      }
+    }
+
+    const actions = el("div", "layer2-actions");
+    const pause = button("Pause", "button secondary compact");
+    const release = button("Release", "button secondary compact");
+    pause.disabled = !canPauseLayer2(status);
+    release.disabled = !canReleaseLayer2(status);
+    const errorHost = el("div", "layer2-inline-error");
+    const mutate = (operation: "pause" | "release", node: HTMLButtonElement) => {
+      node.disabled = true;
+      void runLayer2(device.id, operation)
+        .then(() => { if (!disposed) return refreshLayer2(); })
+        .catch((error) => {
+          if (disposed) return;
+          errorHost.textContent = friendlyError(error);
+          node.disabled = operation === "pause" ? !canPauseLayer2(status) : !canReleaseLayer2(status);
+        });
+    };
+    pause.addEventListener("click", () => mutate("pause", pause));
+    release.addEventListener("click", () => mutate("release", release));
+    actions.append(pause, release);
+    card.append(top, facts, rows, actions, errorHost);
+    return card;
+  };
+
+  const refreshLayer2 = async (): Promise<void> => {
+    if (!service?.listLayer2Workspaces) {
+      layer2Host.replaceChildren(el("div", "layer2-empty", "Layer 2 workspaces need a connected phone on mobile 4.0.3+."));
+      return;
+    }
+    if (eligible.length === 0) {
+      layer2Host.replaceChildren(el("div", "layer2-empty", "Trust a phone in Connections to register Layer 2 profiles."));
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const device of eligible) {
+      try {
+        fragment.append(renderLayer2(device, await listLayer2(device.id)));
+      } catch (error) {
+        const failed = el("div", "layer2-inline-error", friendlyError(error));
+        fragment.append(failed);
+      }
+    }
+    if (!disposed) layer2Host.replaceChildren(fragment.childNodes.length ? fragment : el("div", "layer2-empty", LAYER2_EMPTY_COPY));
+  };
+
   const refresh = async (): Promise<void> => {
     refreshButton.disabled = true;
     const prior = refreshButton.textContent;
@@ -287,6 +399,7 @@ export function createAutomationsPage(
       }
       tiles = markSessionInventory(next);
       if (!disposed) renderTiles();
+      await refreshLayer2();
     } catch (error) {
       if (!disposed) renderEmpty(friendlyError(error));
     } finally {
@@ -327,6 +440,7 @@ export function createAutomationsPage(
   });
 
   void refresh();
+  void refreshLayer2();
 
   return {
     element: page,
@@ -343,6 +457,12 @@ export function createAutomationsPage(
 function fact(label: string, value: string): HTMLElement {
   const node = el("div", "task-fact");
   node.append(el("span", "task-fact-label", label), el("span", "task-fact-value", value));
+  return node;
+}
+
+function layer2Fact(label: string, value: string): HTMLElement {
+  const node = el("div", "layer2-fact");
+  node.append(el("span", "layer2-fact-label", label), el("span", "layer2-fact-value", value));
   return node;
 }
 

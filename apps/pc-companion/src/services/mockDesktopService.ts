@@ -11,12 +11,16 @@ import type {
   DeviceSessionList,
   DeviceSessionResult,
   FleetWsEvent,
+  Layer2Operation,
+  Layer2Status,
+  Layer2Workspace,
   PairBeginResult,
   PairConfirmResult,
   PairQrConfirmResult,
   StreamDiagnosticEvent,
   StreamProfile,
 } from "./types.js";
+import { bindLayer2Status, LAYER2_PROTOCOL } from "../core/layer2.js";
 import { DEFAULT_FOREGROUND_SESSION_ID, isDefaultForegroundSession, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 const MOCK_CODE = "NOVA";
@@ -28,6 +32,7 @@ export class MockDesktopService implements DesktopService {
   private pairingSequence = 0;
   private sessionSequence = 0;
   private sessions = new Map<string, DeviceSessionDescriptor[]>();
+  private layer2 = new Map<string, MockLayer2State>();
   private fleetListeners: Array<(event?: FleetWsEvent) => void> = [];
 
   constructor(deviceCount = 4) {
@@ -35,6 +40,7 @@ export class MockDesktopService implements DesktopService {
     for (const device of this.devices) {
       if (!device.paired) continue;
       this.sessions.set(device.id, seedMockSessions(device.id));
+      this.layer2.set(device.id, seedMockLayer2());
     }
   }
 
@@ -148,6 +154,66 @@ export class MockDesktopService implements DesktopService {
     return result;
   }
 
+  async listLayer2Workspaces(deviceId: string): Promise<Layer2Status> {
+    this.requireDevice(deviceId);
+    return this.layer2Status(deviceId);
+  }
+
+  async layer2Workspace(deviceId: string, operation: Layer2Operation, params: Record<string, unknown> = {}): Promise<Layer2Status> {
+    this.requireDevice(deviceId);
+    const state = this.layer2State(deviceId);
+    if (operation === "list") return this.layer2Status(deviceId);
+    if (operation === "pause") {
+      pauseLayer2(state);
+      return this.layer2Status(deviceId);
+    }
+    if (operation === "release") {
+      if (state.gated) throw new Error("GATE: resolve review before clearing selection");
+      pauseLayer2(state);
+      state.selected = null;
+      state.armed = [];
+      state.goals = {};
+      return this.layer2Status(deviceId);
+    }
+    if (operation === "switch") return this.switchLayer2(deviceId, params);
+    if (operation === "register") {
+      if (state.gated) throw new Error("GATE: review required");
+      const workspace = workspaceFromParams(params);
+      if (state.selected === workspace.id) throw new Error("Pause and clear selection before editing this workspace");
+      const existing = state.workspaces.findIndex((row) => row.id === workspace.id);
+      if (existing >= 0) state.workspaces[existing] = workspace;
+      else state.workspaces.push(workspace);
+      return this.layer2Status(deviceId);
+    }
+    if (operation === "arm") {
+      if (state.gated) throw new Error("GATE: review required");
+      const id = stringParam(params, "id");
+      if (!state.workspaces.some((row) => row.id === id)) throw new Error("Unknown workspace");
+      if (!state.armed.includes(id)) state.armed.push(id);
+      const goal = typeof params.goal === "string" ? params.goal.trim().slice(0, 500) : "";
+      if (goal) state.goals[id] = goal;
+      return this.layer2Status(deviceId);
+    }
+    if (operation === "next") {
+      if (state.gated) {
+        pauseLayer2(state);
+        throw new Error("GATE: queue paused");
+      }
+      const id = state.armed[0];
+      if (!id) throw new Error("QUEUE_EMPTY: arm a workspace job first");
+      state.armed = state.armed.filter((item) => item !== id);
+      const switched = this.switchLayer2(deviceId, { id });
+      state.armed.push(id);
+      return this.layer2Status(deviceId, {
+        workspaceId: switched.workspaceId,
+        workspaceGeneration: switched.workspaceGeneration ?? state.workspaceGeneration,
+        verified: switched.verified,
+        next: switched.next,
+      });
+    }
+    throw new Error("Unknown workspace operation");
+  }
+
   async snapshotDeviceSession(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number }> {
     const session = this.deviceSessions(deviceId).find((item) => item.sessionId === sessionId);
     if (!session) throw new Error("Mock session not found");
@@ -258,6 +324,55 @@ export class MockDesktopService implements DesktopService {
     mutate(session);
     return { protocol: "cyclone-one-session/1", deviceId, session: copySession(session) };
   }
+
+  private layer2State(deviceId: string): MockLayer2State {
+    const existing = this.layer2.get(deviceId);
+    if (existing) return existing;
+    const created = emptyMockLayer2();
+    this.layer2.set(deviceId, created);
+    return created;
+  }
+
+  private switchLayer2(deviceId: string, params: Record<string, unknown>): Layer2Status {
+    const state = this.layer2State(deviceId);
+    if (state.gated) throw new Error("GATE: resolve the pending human review before switching");
+    const id = stringParam(params, "id");
+    const target = state.workspaces.find((row) => row.id === id);
+    if (!target) throw new Error("Unknown workspace");
+    if (target.displayId !== 0) throw new Error("Layer 2 supports display 0 only");
+    pauseLayer2(state);
+    state.selected = id;
+    state.holder = id;
+    for (const row of state.workspaces) {
+      row.state = row.id === id ? "running" : row.state === "running" ? "paused" : row.state;
+    }
+    return this.layer2Status(deviceId, {
+      workspaceId: id,
+      workspaceGeneration: state.workspaceGeneration,
+      verified: true,
+      next: "phone.observe; include workspaceId and workspaceGeneration on every mutation",
+    });
+  }
+
+  private layer2Status(deviceId: string, extra: Partial<Layer2Status> = {}): Layer2Status {
+    const state = this.layer2State(deviceId);
+    return bindLayer2Status(deviceId, {
+      protocol: LAYER2_PROTOCOL,
+      deviceId,
+      sessionId: DEFAULT_FOREGROUND_SESSION_ID,
+      displayId: 0,
+      plane: "layer2",
+      workspaces: state.workspaces.map((row) => ({ ...row, displayId: 0 })),
+      holder: state.holder,
+      lockOwner: state.holder,
+      workspaceGeneration: state.workspaceGeneration,
+      armed: [...state.armed],
+      goals: { ...state.goals },
+      gated: state.gated,
+      root: state.root,
+      ...extra,
+    });
+  }
 }
 
 export function createMockDevices(count: number): DesktopDevice[] {
@@ -314,6 +429,73 @@ function healthyConnectionHealth() {
 function copyDevice(device: DesktopDevice): DesktopDevice { return { ...device, video: { ...device.video }, capabilities: { ...device.capabilities } }; }
 
 function copySession(session: DeviceSessionDescriptor): DeviceSessionDescriptor { return { ...session }; }
+
+interface MockLayer2State {
+  workspaces: Layer2Workspace[];
+  holder: string | null;
+  selected: string | null;
+  workspaceGeneration: number;
+  armed: string[];
+  goals: Record<string, string>;
+  gated: boolean;
+  root: string;
+}
+
+function seedMockLayer2(): MockLayer2State {
+  return {
+    workspaces: [
+      { id: "profile-a", label: "Profile A", appPackage: "com.android.chrome", androidUserId: 0, displayId: 0, state: "running" },
+      { id: "profile-b", label: "Profile B", appPackage: "com.google.android.apps.maps", androidUserId: 10, displayId: 0, state: "idle" },
+    ],
+    holder: "profile-a",
+    selected: "profile-a",
+    workspaceGeneration: 1,
+    armed: ["profile-a"],
+    goals: { "profile-a": "Keep Chrome in the foreground" },
+    gated: false,
+    root: "Unknown",
+  };
+}
+
+function emptyMockLayer2(): MockLayer2State {
+  return {
+    workspaces: [],
+    holder: null,
+    selected: null,
+    workspaceGeneration: 0,
+    armed: [],
+    goals: {},
+    gated: false,
+    root: "Unknown",
+  };
+}
+
+function pauseLayer2(state: MockLayer2State): void {
+  state.holder = null;
+  state.workspaceGeneration += 1;
+  if (state.selected) {
+    const selected = state.workspaces.find((row) => row.id === state.selected);
+    if (selected) selected.state = "paused";
+  }
+}
+
+function workspaceFromParams(params: Record<string, unknown>): Layer2Workspace {
+  const displayId = params.displayId;
+  if (typeof displayId === "number" && displayId !== 0) throw new Error("Layer 2 supports display 0 only");
+  const id = stringParam(params, "id");
+  const label = stringParam(params, "label");
+  const appPackage = stringParam(params, "appPackage");
+  const androidUserId = typeof params.androidUserId === "number" && Number.isInteger(params.androidUserId) && params.androidUserId >= 0
+    ? params.androidUserId
+    : 0;
+  return { id, label, appPackage, androidUserId, displayId: 0, state: "idle" };
+}
+
+function stringParam(params: Record<string, unknown>, key: string): string {
+  const value = params[key];
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Missing workspace ${key}`);
+  return value.trim();
+}
 
 function seedMockSessions(deviceId: string): DeviceSessionDescriptor[] {
   return [

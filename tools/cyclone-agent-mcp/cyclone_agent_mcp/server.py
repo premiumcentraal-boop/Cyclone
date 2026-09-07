@@ -16,6 +16,7 @@ INSTRUCTIONS = (
     "session_id is required on observe/act/locate/search/inspect/screenshot/skill_run/group_act. "
     "Read session_id from phone_status (sessions inventory when present). "
     "Pass session_id=default-foreground for the live human display (display 0). Named workspace sessions require display_id > 0 and must never be rewritten onto display 0. "
+    "Use phone_workspace on default-foreground display 0, then pass workspaceId+workspaceGeneration on mutating phone_act. Layer 2 is not a VD session. "
     "Do not invent default-foreground when session_id is missing. "
     "Observe before mutations, re-observe afterward, verify meaningful changes, and use screenshots only when structured evidence is insufficient. "
     "If Companion owns input, yield in Cyclone or retry with request_ai_control=true; a locked phone is never stolen. "
@@ -121,6 +122,20 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         return tools.call("phone_page_history", {"device_id": device_id})
 
     @mcp.tool(annotations=WRITE)
+    def phone_workspace(
+        operation: Literal["list", "register", "switch", "pause", "release", "arm", "next"],
+        session_id: str,
+        params: dict[str, Any] | None = None,
+        device_id: str | None = None,
+        display_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Layer 2 workspaces on default-foreground display 0. After switch/next, pass workspaceId+workspaceGeneration on mutating phone_act.params. Not a VD session."""
+        return tools.call("phone_workspace", {
+            "operation": operation, "params": params or {},
+            "device_id": device_id, "session_id": session_id, "display_id": display_id,
+        })
+
+    @mcp.tool(annotations=WRITE)
     def phone_act(
         tool: Literal["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"],
         params: dict[str, Any],
@@ -131,7 +146,7 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         display_id: int | None = None,
         request_ai_control: bool = False,
     ) -> dict[str, Any]:
-        """Forward one typed action to Cyclone. session_id is required. request_ai_control yields Companion input and never steals a locked phone. There is no generic command/shell/ADB escape hatch."""
+        """Forward one typed action to Cyclone. session_id is required. After a Layer 2 switch, mutating params MUST include workspaceId+workspaceGeneration. request_ai_control yields Companion input and never steals a locked phone. There is no generic command/shell/ADB escape hatch."""
         return tools.call("phone_act", {
             "device_id": device_id, "tool": tool, "params": params, "goal": goal,
             "user_authorized": user_authorized, "session_id": session_id, "display_id": display_id,

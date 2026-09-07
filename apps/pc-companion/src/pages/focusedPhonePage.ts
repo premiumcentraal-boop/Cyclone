@@ -1,8 +1,18 @@
 import { keyboardCommandForEvent } from "../core/keyboard.js";
 import { KeyboardCapture } from "../core/keyboardCapture.js";
 import { needsTrustRepair, trustRepairMessage } from "../core/trustRecovery.js";
-import type { DesktopDevice, DesktopService, DeviceControlAction } from "../services/types.js";
+import type { DesktopDevice, DesktopService, DeviceControlAction, Layer2Status } from "../services/types.js";
 import { CycloneOneSessionClient } from "../services/sessionClient.js";
+import {
+  bindLayer2Status,
+  canPauseLayer2,
+  canReleaseLayer2,
+  generationLabel,
+  LAYER2_COMPACT_COPY,
+  LAYER2_EMPTY_COPY,
+  LAYER2_STRIP_TITLE,
+  lockOwnerLabel,
+} from "../core/layer2.js";
 import { button, el, icon } from "../ui/dom.js";
 import { createLivePhoneView } from "../ui/livePhoneView.js";
 import { createDeviceHealthPanel } from "../ui/deviceHealthPanel.js";
@@ -67,7 +77,8 @@ export function createFocusedPhonePage(
     yieldAi,
     takeHuman,
   );
-  contextPanel.append(health, healthSlot, humanInput, aiInput);
+  const layer2Strip = el("div", "layer2-strip layer2-strip-compact");
+  contextPanel.append(health, healthSlot, humanInput, aiInput, layer2Strip);
 
   const controlStatus = el("div", "control-status", "Ready");
   const trustRepairBanner = el("section", "trust-repair-banner");
@@ -158,6 +169,11 @@ export function createFocusedPhonePage(
   takeHuman.addEventListener("click", () => void runOwnership("take_human", "Take control"));
   void runOwnership("take_human", "Take control");
   void loadSessionSummary(service, device.id, sessionList);
+  let disposed = false;
+  const refreshLayer2 = () => loadLayer2Strip(service, device.id, layer2Strip, () => {
+    if (!disposed) void refreshLayer2();
+  });
+  void refreshLayer2();
   const primary = el("div", "control-rail");
   const controlDefs: Array<[string, string, DeviceControlAction]> = [
     ["←", "Back", { type: "key", key: "BACK" }],
@@ -289,6 +305,7 @@ export function createFocusedPhonePage(
   return {
     element: page,
     destroy: () => {
+      disposed = true;
       setKeyboardActive(false);
       window.removeEventListener("keydown", keydown, true);
       live.destroy();
@@ -303,6 +320,7 @@ export function createFocusedPhonePage(
       healthSlot.replaceChildren(createDeviceHealthPanel(next));
       trustRepairBanner.hidden = !needsTrustRepair(next);
       ownerLabel.textContent = ownerCopy(next);
+      if (!disposed) void refreshLayer2();
     },
   };
 }
@@ -319,6 +337,50 @@ function ownershipFailureCopy(label: string, detail?: string): string {
   if (code.includes("PHONE_LOCKED")) return "Phone is locked — unlock it first. A locked phone is never stolen.";
   if (code.includes("HUMAN_HAS_CONTROL")) return "Companion still owns input. Click Give control to AI, then retry.";
   return detail ? `${label} unavailable (${String(detail).slice(0, 80)})` : `${label} unavailable`;
+}
+
+async function loadLayer2Strip(
+  service: DesktopService,
+  deviceId: string,
+  target: HTMLElement,
+  onChanged: () => void,
+): Promise<void> {
+  target.replaceChildren(el("div", "context-card-title", LAYER2_STRIP_TITLE));
+  const listWorkspaces = service.listLayer2Workspaces;
+  const mutateWorkspace = service.layer2Workspace;
+  if (!listWorkspaces || !mutateWorkspace) {
+    target.append(el("p", "context-card-copy", LAYER2_EMPTY_COPY));
+    return;
+  }
+  let status: Layer2Status;
+  try {
+    status = bindLayer2Status(deviceId, await listWorkspaces(deviceId));
+  } catch {
+    target.append(el("p", "context-card-copy", LAYER2_EMPTY_COPY));
+    return;
+  }
+  if (status.workspaces.length === 0) {
+    target.append(el("p", "context-card-copy", LAYER2_EMPTY_COPY));
+    return;
+  }
+  target.append(
+    el("p", "context-card-copy", LAYER2_COMPACT_COPY),
+    el("p", "context-card-copy", lockOwnerLabel(status)),
+    el("p", "context-card-copy", generationLabel(status)),
+  );
+  const actions = el("div", "layer2-actions");
+  const pause = button("Pause", "button secondary compact");
+  const release = button("Release", "button secondary compact");
+  pause.disabled = !canPauseLayer2(status);
+  release.disabled = !canReleaseLayer2(status);
+  const run = (operation: "pause" | "release", node: HTMLButtonElement) => {
+    node.disabled = true;
+    void mutateWorkspace(deviceId, operation).finally(onChanged);
+  };
+  pause.addEventListener("click", () => run("pause", pause));
+  release.addEventListener("click", () => run("release", release));
+  actions.append(pause, release);
+  target.append(actions);
 }
 
 async function loadSessionSummary(service: DesktopService, deviceId: string, target: HTMLElement): Promise<void> {

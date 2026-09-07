@@ -22,6 +22,7 @@ TOOL_CONTRACTS = (
     ToolContract("phone_current_page", True, True),
     ToolContract("phone_page_history", True, True),
     ToolContract("phone_act", False, True),
+    ToolContract("phone_workspace", False, True),
     ToolContract("phone_skill_save", False, True),
     ToolContract("phone_skill_run", False, True),
     ToolContract("phone_group_act", False, False),

@@ -1,10 +1,10 @@
 # Cyclone One 1.1 — Session Contract Glass (PC sprint)
 
-**Status:** A1 DONE (code+docs; physical Pixel UNVERIFIED; do not run doctor against a live phone as a merge gate). A2+ not started.  
+**Status:** A1 DONE, A2 DONE (code+docs; Pixel UNVERIFIED). A3 not started.  
 **Codename:** Session Contract Glass  
 **Base:** installed One **1.0.0** sources as of `v4.0.0`, rebased onto **`v4.0.4` mobile protocol** (tag `38f7628`) so gateway/MCP can speak Layer 2  
 **Out:** Cyclone One **1.1.0** Setup.exe + device_gateway **4.1.0** + mcp **4.1.0**  
-**Now:** One **1.1.0-alpha.1** + gateway/MCP **4.1.0-alpha.1** on this branch; mobile stays **4.0.4** / versionCode **75**  
+**Now:** One **1.1.0-alpha.2** + gateway/MCP **4.1.0-alpha.2** on this branch; mobile stays **4.0.4** / versionCode **75**  
 **Grok:** each stage on Agent PC with **subagents required**
 
 ## Why this sprint exists
@@ -36,17 +36,18 @@ Acceptance: cold MCP attach → `phone_status` without manual token; doctor READ
 Out of scope: Layer 2 UI, multi-tile media, mobile APK.  
 Handoff: next work is **A2** on `grok/one-1.1-s2-layer2` from this A1 tip. See [`ONE_1.1_STAGE1_TOOLING.md`](ONE_1.1_STAGE1_TOOLING.md).
 
-### A2 — Absorb mobile Layer 2 (4.0.3 protocol)
+### A2 — Absorb mobile Layer 2 (4.0.3 protocol) ✅ DONE
 Branch: `grok/one-1.1-s2-layer2` from A1.  
 Goal: One/MCP speak `workspace.*` / `phone_workspace` as shipped on phone 4.0.3+.
-Deliverables:
-1. Gateway routes for `workspace.list/register/switch/pause/release/arm/next`.
-2. MCP tool `phone_workspace` (+ schemas); after switch, require `workspaceId` + `workspaceGeneration` on mutating `phone_act.params`.
-3. Glass: Layer 2 strip — registered workspaces, lock owner, pause/release, armed goal, generation.
-4. Fail closed on stale generation / wrong package / pending GATE.
-5. Tests + `docs/ONE_1.1_STAGE2_LAYER2.md` + alpha.2 identity.
+Deliverables (landed):
+1. Gateway routes for `workspace.list/register/switch/pause/release/arm/next` and GET/POST `/v1/devices/{id}/workspaces` protocol `cyclone.one.layer2.v1`.
+2. MCP tool `phone_workspace` (+ schemas); after switch, mutating `phone_act.params` carry `workspaceId` + `workspaceGeneration`.
+3. Glass: Layer 2 strip — registered workspaces, lock owner, pause/release, armed goal, generation; distinct from VD session tiles.
+4. Fail closed on stale generation / wrong package (`TARGET_MISMATCH`) / pending GATE / named session mix.
+5. Docs `docs/ONE_1.1_STAGE2_LAYER2.md` + version identity **1.1.0-alpha.2** / gateway-mcp **4.1.0-alpha.2**. A1 tooling seam preserved.
 Acceptance: contract tests against mobile 4.0.4 fixtures; Pixel smoke UNVERIFIED unless run.  
-Out of scope: lifting mobile hot-gate; Magisk.
+Out of scope: lifting mobile hot-gate; Magisk; named VD tiles; operator pack; release cut; mobile APK.  
+Handoff: next work is **A3** on `grok/one-1.1-s3-sessions` from this A2 tip. Do not implement A3 here. See [`ONE_1.1_STAGE2_LAYER2.md`](ONE_1.1_STAGE2_LAYER2.md).
 
 ### A3 — Session Kernel glass (named VD tiles)
 Branch: `grok/one-1.1-s3-sessions` from A2.  

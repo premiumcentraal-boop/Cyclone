@@ -13,6 +13,9 @@ The generic server talks only to the authenticated loopback Cyclone PC Device Ga
 `phone_devices` auto-detects connected phones through the gateway fleet surface, and every tool
 accepts a `device_id` when multiple phones are connected. Observe/act/locate/search/inspect/screenshot/skill_run
 require `session_id`. Pass `default-foreground` for the live human display; named workspaces need `display_id > 0`.
+
+Layer 2 `phone_workspace` manages default-foreground / display 0 workspaces (`list`, `register`, `switch`, `pause`, `release`, `arm`, `next`). After `switch`/`next`, mutating `phone_act.params` must include the returned `workspaceId` and `workspaceGeneration`. Missing or stale generation fails closed (`MUTATE_LOCK`). Layer 2 is not a named VD session.
+
 For setup, registration, tool order and
 troubleshooting, read `docs/agent-system/CODEX_PHONE_CONNECTION.md`.
 

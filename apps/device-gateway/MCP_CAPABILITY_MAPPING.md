@@ -13,6 +13,9 @@ cyclone.gateway.capability.v1
 | `GET /v1/device/status` | status/readiness |
 | `GET /v1/devices`, `GET /v1/fleet`, `POST /v1/fleet/scan` | auto-detect connected phones (fleet surface) |
 | `/v1/devices/{device_id}/agent/*` | per-device routing when multiple phones are connected |
+| `GET /v1/devices/{device_id}/workspaces` | Layer 2 list (`workspace.list`); display 0 time-sliced lock, not fleet groups |
+| `POST /v1/devices/{device_id}/workspaces` | Layer 2 `register/switch/pause/release/arm/next` via Android `action.execute` |
+| `GET /v1/fleet/workspace` | Fleet device groups / wall selection — **not** Layer 2 |
 | `GET /v1/capabilities` | typed capability discovery/health |
 | `POST /v1/capabilities/observe` | compact/full structured observation with correlation + witness |
 | `GET /v1/ui/search` | deterministic semantic/raw/UiAutomator search |
@@ -32,7 +35,8 @@ cyclone.gateway.capability.v1
 | `phone_locate` | locate | Default PC-agent entry point: readiness + Page Card + semantic search ranked for one stated goal. |
 | `phone_ui_search` | search | Use before screenshots when target missing from compact context. |
 | `phone_inspect_element` | inspect | Element IDs remain observation-scoped. |
-| `phone_act` | act | Typed allowlist only. Requires a current observation-scoped element ID and returns before/after Page Cards, delta, action status, and verification result. |
+| `phone_act` | act | Typed allowlist only. Requires a current observation-scoped element ID and returns before/after Page Cards, delta, action status, and verification result. After a Layer 2 switch, `params` must include matching `workspaceId` + `workspaceGeneration`. |
+| `phone_workspace` | Layer 2 workspace | `operation=list/register/switch/pause/release/arm/next` maps to `workspace.*` (switch also aliases `phone.workspace_switch`). Always `session_id=default-foreground` / `display_id=0`. Switch/next returns `workspaceId` + `workspaceGeneration`. Pause/release are operator glass and do not take AI ownership. GATE is never synthesized. |
 | `phone_teach_start/status/stop` | teach | Existing canonical teaching store only. |
 | `phone_debug_bundle` | debug | Transport/execution/verification disagreements. |
 | `phone_screenshot` | vision fallback | Use only when structured evidence is insufficient/conflicting. |
@@ -102,6 +106,12 @@ Canonical public error codes:
 | `DEVICE_DISCONNECTED` | ADB/socket/USB transport unavailable | transport |
 | `PROTOCOL_MISMATCH` | incompatible/malformed V3 contract | protocol |
 | `AUTH_REJECTED` | PC or Android session credential rejected | protocol/auth boundary |
+| `GATE` | Android human-review overlay blocks switch/queue/mutate; never auto-approved | Layer 2 |
+| `MUTATE_LOCK` | Layer 2 lease holds display 0; missing or wrong `workspaceId`/`workspaceGeneration` | Layer 2 |
+| `TARGET_MISMATCH` | Switch/mutate verified the wrong package, user, or display | Layer 2 |
+| `STALE_WORKSPACE` | `workspaceGeneration` does not match the current lease | Layer 2 |
+| `QUEUE_EMPTY` | `workspace.next` with no armed job | Layer 2 |
+| `USER_UNVERIFIED` | Cross-profile identity could not be proven | Layer 2 |
 
 HTTP 200 is never sufficient evidence of phone success. MCP's success flag is computed from the typed transport/execution/verification body.
 

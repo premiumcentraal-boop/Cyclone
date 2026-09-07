@@ -20,6 +20,12 @@ from ..execution_scope import (
     parse_execution_identity,
 )
 from .fleet import DeviceFleetManager, DeviceSession
+from .layer2 import (
+    LAYER2_OPS,
+    WORKSPACE_ID,
+    layer2_error_from_execution,
+    parse_layer2_error,
+)
 from .models import DesktopRuntimeError, RuntimeErrorCode, now_ms
 from .page_text import _compact_observation
 from .readiness import enrich_device_public
@@ -27,8 +33,22 @@ from .readiness import enrich_device_public
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
 DEVICE_OPERATION_CONTRACT_VERSION = "cyclone.desktop.device-operation.v1"
 ALLOWED_PHONE_TOOLS = frozenset({
+    "workspace.list", "workspace.register", "workspace.switch", "phone.workspace_switch",
+    "workspace.pause", "workspace.release", "workspace.arm", "workspace.next",
     "phone.observe", "phone.find", "phone.click", "phone.long_press", "phone.swipe",
     "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for",
+})
+WORKSPACE_PHONE_TOOLS = frozenset({
+    "workspace.list", "workspace.register", "workspace.switch", "phone.workspace_switch",
+    "workspace.pause", "workspace.release", "workspace.arm", "workspace.next",
+})
+WORKSPACE_AI_TOOLS = frozenset({
+    "workspace.register", "workspace.switch", "phone.workspace_switch", "workspace.arm", "workspace.next",
+})
+LAYER2_MUTATING_PHONE_TOOLS = frozenset({
+    "phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type",
+    "phone.back", "phone.home", "phone.open_app", "phone.launch_intent", "phone.set_clipboard",
+    "phone.tap",
 })
 PAGE_TRANSITION_TOOLS = frozenset({
     "phone.click", "phone.long_press", "phone.back", "phone.home", "phone.open_app",
@@ -70,12 +90,14 @@ class DesktopAgentService:
         snapshot=None,
         after_action_timeout_seconds: float = 1.0,
         after_action_poll_seconds: float = 0.1,
+        layer2=None,
     ):
         self.fleet = fleet
         self.history_limit = max(5, min(int(history_limit), 100))
         self._snapshot = snapshot
         self._after_action_timeout_seconds = max(0.0, min(float(after_action_timeout_seconds), 2.0))
         self._after_action_poll_seconds = max(0.01, min(float(after_action_poll_seconds), 0.25))
+        self._layer2 = layer2
         self._history: dict[str, deque[dict[str, Any]]] = defaultdict(lambda: deque(maxlen=self.history_limit))
         self._lock = threading.RLock()
 
@@ -85,7 +107,7 @@ class DesktopAgentService:
         self.fleet.record_bridge_status(session, result)
         controller_owner = result.get("controllerOwner") if isinstance(result, dict) else None
         owner = getattr(session, "input_owner", "HUMAN")
-        return {
+        payload = {
             **self._operation_context(session, device_id, "status"),
             "status": result,
             "connection_health": self._connection_health(session),
@@ -97,6 +119,9 @@ class DesktopAgentService:
                 "yieldHint": HUMAN_HAS_CONTROL_HINT if owner == "HUMAN" else None,
             },
         }
+        if self._layer2 is not None:
+            payload["layer2"] = self._layer2.summary(device_id)
+        return payload
 
     @staticmethod
     def _connection_health(session: DeviceSession) -> dict[str, Any]:
@@ -213,16 +238,21 @@ class DesktopAgentService:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object.")
         params = dict(params)
         identity = self._execution_identity(payload)
+        self._reject_mixed_planes(params, identity)
+        self._enforce_layer2_mutate_lock(device_id, tool, params, identity)
         if identity:
             params = attach_execution_identity(params, identity)
         goal = str(payload.get("goal") or tool.replace("phone.", "").replace("_", " "))[:1000]
         expected = str(payload.get("expected_observation_id") or payload.get("currentObservationId") or "")
-        mutating = tool not in {"phone.observe", "phone.find", "phone.wait_for"}
+        workspace_tool = tool in WORKSPACE_PHONE_TOOLS or tool.startswith("workspace.")
+        mutating = tool not in {"phone.observe", "phone.find", "phone.wait_for", "workspace.list"}
         request_ai = bool(payload.get("request_ai_control") or params.pop("request_ai_control", False))
-        if mutating:
+        if tool in WORKSPACE_AI_TOOLS or (mutating and not workspace_tool):
             self._require_ai_ownership(session, request_ai)
-        if mutating and not expected:
+        if mutating and not expected and not workspace_tool:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A fresh observation is required before mutation.")
+        if workspace_tool:
+            return self._workspace_action(session, device_id, tool, params, goal)
 
         before = self._latest_observation(device_id, identity)
         args: dict[str, Any] = {
@@ -267,6 +297,10 @@ class DesktopAgentService:
             execution_error_class = (
                 None if execution_ok else android_execution_error_class(parsed_execution)
             )
+            if not execution_ok:
+                layer2_error = layer2_error_from_execution(parsed_execution)
+                if layer2_error is not None:
+                    raise layer2_error
         android_execution = safe_android_execution(execution)
         android_verification = execution.get("verification") if isinstance(execution, dict) else None
         if not isinstance(android_verification, dict) and isinstance(parsed_execution, dict):
@@ -396,6 +430,124 @@ class DesktopAgentService:
             "afterState": self._after_state(after_raw),
             "error": error,
         }
+
+    def _workspace_action(
+        self,
+        session: DeviceSession,
+        device_id: str,
+        tool: str,
+        params: dict[str, Any],
+        goal: str,
+    ) -> dict[str, Any]:
+        op = "switch" if tool == "phone.workspace_switch" else tool.split(".", 1)[-1]
+        if op not in LAYER2_OPS:
+            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Requested phone capability is unavailable.")
+        if self._layer2 is None:
+            raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Layer 2 workspace service is unavailable.")
+        public = self._layer2.command(device_id, op, params, tool=tool, goal=goal)
+        response = {
+            **self._operation_context(session, device_id, "act"),
+            "protocol_version": CAPABILITY_PROTOCOL_VERSION,
+            "capability_id": tool,
+            "ok": True,
+            "transport": {"ok": True, "status": "connected"},
+            "execution": {
+                "ok": True,
+                "authoritative": True,
+                "status": "android_succeeded",
+                "androidExecution": {"ok": True},
+            },
+            "verification": {
+                "ok": True,
+                "passed": True,
+                "authoritative": True,
+                "status": "PASSED",
+                "authority": "ANDROID_CANONICAL",
+                "basis": "WORKSPACE_ENGINE_POSTCONDITION",
+            },
+            "android_execution": {"ok": True},
+            "after": {},
+            "afterState": {},
+            "error": None,
+            "layer2": public,
+        }
+        for key in (
+            "workspaceId",
+            "workspaceGeneration",
+            "holder",
+            "workspaces",
+            "armed",
+            "gated",
+            "verified",
+            "next",
+            "lockOwner",
+        ):
+            if key in public:
+                response[key] = public[key]
+        return response
+
+    def _reject_mixed_planes(self, params: dict[str, Any], identity: dict[str, Any] | None) -> None:
+        workspace_id = params.get("workspaceId")
+        if workspace_id in (None, ""):
+            return
+        named = identity is not None and (
+            identity.get("sessionId") != DEFAULT_FOREGROUND_SESSION_ID
+            or identity.get("displayId") not in (None, 0)
+        )
+        if named:
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.INVALID_REQUEST,
+                "Do not mix Layer 2 workspaceId with a named session or non-zero displayId.",
+            )
+
+    def _enforce_layer2_mutate_lock(
+        self,
+        device_id: str,
+        tool: str,
+        params: dict[str, Any],
+        identity: dict[str, Any] | None,
+    ) -> None:
+        workspace_id = params.get("workspaceId")
+        generation = params.get("workspaceGeneration")
+        has_id = workspace_id not in (None, "")
+        has_generation = generation is not None
+        if has_id or has_generation:
+            if not isinstance(workspace_id, str) or not WORKSPACE_ID.fullmatch(workspace_id):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "workspaceId is invalid.")
+            if type(generation) is not int or generation < 0:
+                raise DesktopRuntimeError(
+                    RuntimeErrorCode.INVALID_REQUEST,
+                    "workspaceGeneration is required with workspaceId.",
+                )
+        if tool not in LAYER2_MUTATING_PHONE_TOOLS:
+            return
+        lease = self._layer2.lease(device_id) if self._layer2 is not None else None
+        if not lease:
+            return
+        named = identity is not None and (
+            identity.get("sessionId") != DEFAULT_FOREGROUND_SESSION_ID
+            or identity.get("displayId") not in (None, 0)
+        )
+        if named:
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.INVALID_REQUEST,
+                "Do not mix Layer 2 workspaceId with a named session or non-zero displayId.",
+            )
+        if not has_id or not has_generation:
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.MUTATE_LOCK,
+                "MUTATE_LOCK: switch and use the current workspaceId/workspaceGeneration",
+            )
+        if workspace_id != lease.get("workspaceId"):
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.MUTATE_LOCK,
+                "MUTATE_LOCK: switch and use the current workspaceId/workspaceGeneration",
+            )
+        if generation != lease.get("generation"):
+            raise DesktopRuntimeError(
+                RuntimeErrorCode.STALE_WORKSPACE,
+                "STALE_WORKSPACE: observe again after switch and pass the current workspaceGeneration",
+            )
 
     def _observe_after_action(
         self,
@@ -553,8 +705,18 @@ class DesktopAgentService:
                 "BACKGROUND_MODE_UNAVAILABLE": RuntimeErrorCode.BACKGROUND_MODE_UNAVAILABLE,
                 "STALE_SESSION": RuntimeErrorCode.STALE_SESSION,
                 "FOREGROUND_REQUIRED": RuntimeErrorCode.FOREGROUND_REQUIRED,
+                "GATE": RuntimeErrorCode.GATE,
+                "MUTATE_LOCK": RuntimeErrorCode.MUTATE_LOCK,
+                "TARGET_MISMATCH": RuntimeErrorCode.TARGET_MISMATCH,
+                "STALE_WORKSPACE": RuntimeErrorCode.STALE_WORKSPACE,
+                "QUEUE_EMPTY": RuntimeErrorCode.QUEUE_EMPTY,
+                "USER_UNVERIFIED": RuntimeErrorCode.USER_UNVERIFIED,
             }
-            raise DesktopRuntimeError(mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE), f"Android Gateway rejected {op}.") from exc
+            mapped = parse_layer2_error(exc.code, str(exc))
+            raise DesktopRuntimeError(
+                mapping.get(mapped or exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE),
+                f"Android Gateway rejected {op}.",
+            ) from exc
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Phone disconnected from Cyclone Gateway.", retryable=True) from exc
 

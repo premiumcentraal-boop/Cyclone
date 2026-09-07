@@ -34,6 +34,7 @@ INSTRUCTIONS = (
     "phone_skill_save writes status=draft into existing AutomationStore via SkillCompiler.compile only when 2+ steps are verified; secret slots are stripped. "
     "phone_skill_run runs verified skills (or dryRun on a draft) through PhoneToolExecutor via the gateway and returns per-step act envelopes. "
     "When multiple phones are connected, pass device_id from phone_devices. "
+    "Use phone_workspace to list/register/switch/pause/release/arm/next Layer 2 workspaces on default-foreground display 0, then pass workspaceId+workspaceGeneration on mutating phone_act.params. Layer 2 is not a VD session. "
     "session_id is required on observe/act/locate/search/inspect/screenshot/skill_run/group_act. "
     "Read session_id from phone_status (sessions inventory when present). "
     "Pass session_id=default-foreground for the live human display (display 0). Named workspace sessions require display_id > 0 and must never be rewritten onto display 0. "
@@ -136,10 +137,38 @@ def _with_session(schema: dict[str, Any], *, required: bool = True) -> dict[str,
 
 
 TOOLS = [
-    _tool("phone_workspace", "Layer 2 workspaces: register profiles, switch with verified package/user binding, pause/release the global mutate lock, arm jobs and claim next round-robin slice. GATE stays authoritative. Switch/next returns workspaceId + workspaceGeneration; pass both inside phone_act.params after a fresh observe. No parallel input.", _with_session(_with_device({"type": "object", "properties": {"operation": {"type": "string", "enum": ["list", "register", "switch", "pause", "release", "arm", "next"]}, "params": {"type": "object"}}, "required": ["operation"]})), read_only=False),
+    _tool(
+        "phone_workspace",
+        "Layer 2 workspaces: register profiles, switch with verified package/user binding, pause/release the global mutate lock, arm jobs and claim next round-robin slice. GATE stays authoritative. Switch/next returns workspaceId + workspaceGeneration; pass both inside phone_act.params after a fresh observe. Layer 2 is default-foreground / display 0 only, not a named VD session. No parallel input.",
+        _with_session(_with_device({
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["list", "register", "switch", "pause", "release", "arm", "next"],
+                    "description": "Layer 2 workspace operation. GATE stays authoritative.",
+                },
+                "params": {
+                    "type": "object",
+                    "description": "Typed Layer 2 parameters. displayId must be 0 when sent. Layer 2 is not a VD session.",
+                    "properties": {
+                        "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,80}$"},
+                        "label": {"type": "string"},
+                        "appPackage": {"type": "string"},
+                        "androidUserId": {"type": "integer"},
+                        "displayId": {"type": "integer", "const": 0, "description": "Layer 2 is display 0 only."},
+                        "goal": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            "required": ["operation"],
+        })),
+        read_only=False,
+    ),
     _tool("phone_status", "Read Cyclone gateway, ADB, bridge and Accessibility readiness for one phone.", _with_device({"type": "object", "properties": {}}), read_only=True),
     _tool("phone_locate", "Primary locate-first tool: fuse device status, a bounded Page Card (pageText + pageSummary), and goal-aware semantic search. If a verified skill matches goal + pageKey, skip the model and call phone_skill_run.", _with_session(_with_device({"type": "object", "properties": {"goal": {"type": "string"}, "query": {"type": "string"}}, "required": ["goal"]})), read_only=True),
-    _tool("phone_act", "Execute one typed Cyclone phone action through the V3 Android authority seam and canonical PhoneToolExecutor. Planner: phone.open_app / phone.wait_for. UI: click/type/scroll by current elementId or elementIndex. Locate first. click/long_press/type require a current observation-scoped elementId, elementIndex, snapshot ref, or role+name; free-form selectors and coordinates are rejected. One screen-changing act per turn. Fast Path settles 300ms then fingerprints; UNCHANGED is verified=false — do not double-click. phone.scroll accepts direction=forward/backward; phone.swipe has no safe MCP route. Every mutation returns action status plus before/after Page Cards, pageChanged, delta, errorClass, and generation. phone.type requires user_authorized=true but Android policy remains authoritative. request_ai_control=true asks Companion to yield input; it never steals a locked phone.", _with_session(_with_device({"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object", "description": "Typed safe parameters only. Use current elementId or elementIndex for element actions; raw selector text/fuzzy/bounds/coordinates are rejected."}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}, "request_ai_control": {"type": "boolean", "default": False, "description": "Ask Companion to yield input so MCP can act. Boolean only. Never steals a locked phone and never bypasses Android policy."}}, "required": ["tool", "params", "goal"]})), read_only=False, destructive=True),
+    _tool("phone_act", "Execute one typed Cyclone phone action through the V3 Android authority seam and canonical PhoneToolExecutor. Planner: phone.open_app / phone.wait_for. UI: click/type/scroll by current elementId or elementIndex. Locate first. click/long_press/type require a current observation-scoped elementId, elementIndex, snapshot ref, or role+name; free-form selectors and coordinates are rejected. One screen-changing act per turn. Fast Path settles 300ms then fingerprints; UNCHANGED is verified=false — do not double-click. phone.scroll accepts direction=forward/backward; phone.swipe has no safe MCP route. Every mutation returns action status plus before/after Page Cards, pageChanged, delta, errorClass, and generation. phone.type requires user_authorized=true but Android policy remains authoritative. request_ai_control=true asks Companion to yield input; it never steals a locked phone. After a Layer 2 phone_workspace switch/next, mutating params MUST include workspaceId + workspaceGeneration from that result.", _with_session(_with_device({"type": "object", "properties": {"tool": {"type": "string", "enum": ["phone.click", "phone.long_press", "phone.swipe", "phone.scroll", "phone.type", "phone.back", "phone.home", "phone.open_app", "phone.wait_for"]}, "params": {"type": "object", "description": "Typed safe parameters only. Use current elementId or elementIndex for element actions; raw selector text/fuzzy/bounds/coordinates are rejected. After a Layer 2 switch/next, mutating params MUST include workspaceId (string [A-Za-z0-9_-]{1,80}) and workspaceGeneration (integer >= 0) from that result. Layer 2 is not a named VD session.", "properties": {"workspaceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,80}$", "description": "Required on mutating phone_act after a Layer 2 switch/next. Must match the current lease."}, "workspaceGeneration": {"type": "integer", "minimum": 0, "description": "Required on mutating phone_act after a Layer 2 switch/next. Stale generation fails closed."}}}, "goal": {"type": "string"}, "user_authorized": {"type": "boolean", "default": False}, "request_ai_control": {"type": "boolean", "default": False, "description": "Ask Companion to yield input so MCP can act. Boolean only. Never steals a locked phone and never bypasses Android policy."}}, "required": ["tool", "params", "goal"]})), read_only=False, destructive=True),
     _tool("phone_skill_save", "Compile verified 2+ phone_act steps into a disabled draft skill in the existing AutomationStore (SkillCompiler.compile). Unverified steps do not write. Secret slots are stripped. Workers cannot mark verified.", _with_session(_with_device({"type": "object", "properties": {"goal": {"type": "string"}, "pageKey": {"type": "string"}, "app": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "minItems": 2}, "params": {"type": "object", "description": "Slot values only. Secret slots are stripped and never persisted."}}, "required": ["goal", "steps"]}), required=False), read_only=False),
     _tool("phone_skill_run", "Run one skill from AutomationStore through PhoneToolExecutor via the gateway. Only status=verified runs live; drafts require dryRun=true. Returns per-step act envelopes.", _with_session(_with_device({"type": "object", "properties": {"skill_id": {"type": "string"}, "dryRun": {"type": "boolean", "default": False}, "params": {"type": "object"}}, "required": ["skill_id"]})), read_only=False, destructive=True),
     _tool("phone_capabilities", "Discover the typed V3 phone capability inventory and health. Discovery is metadata, not action authority.", _with_device({"type": "object", "properties": {"refresh": {"type": "boolean", "default": False}}}), read_only=True),

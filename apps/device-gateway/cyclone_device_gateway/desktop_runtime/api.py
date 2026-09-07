@@ -26,6 +26,7 @@ from .fleet import DeviceFleetManager
 from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorCode, VIDEO_PROFILES
 from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
+from .layer2 import Layer2WorkspaceService
 from .sessions import ExecutionSessionService
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
@@ -175,7 +176,8 @@ class DesktopRuntime:
         self.trust = PCTrustCoordinator(self.fleet)
         self.controls = ManualControlService(self.fleet)
         self.clipboard = ClipboardService(self.fleet)
-        self.agent = DesktopAgentService(self.fleet, snapshot=self._snapshot_for_batch)
+        self.layer2 = Layer2WorkspaceService(self.fleet)
+        self.agent = DesktopAgentService(self.fleet, snapshot=self._snapshot_for_batch, layer2=self.layer2)
         self.sessions = ExecutionSessionService(self.fleet)
         self.batches = FleetBatchService(lambda device_id: DesktopAndroidBackend(
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
@@ -869,6 +871,12 @@ def _call(fn):
             RuntimeErrorCode.INVALID_REQUEST.value: 400,
             RuntimeErrorCode.STREAM_CAPACITY.value: 503,
             RuntimeErrorCode.CAPABILITY_UNAVAILABLE.value: 503,
+            RuntimeErrorCode.GATE.value: 409,
+            RuntimeErrorCode.MUTATE_LOCK.value: 409,
+            RuntimeErrorCode.TARGET_MISMATCH.value: 409,
+            RuntimeErrorCode.STALE_WORKSPACE.value: 409,
+            RuntimeErrorCode.QUEUE_EMPTY.value: 409,
+            RuntimeErrorCode.USER_UNVERIFIED.value: 409,
         }.get(exc.code, 503)
         raise HTTPException(status_code=status, detail=exc.to_dict()) from exc
 
