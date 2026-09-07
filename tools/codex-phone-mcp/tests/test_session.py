@@ -4,7 +4,16 @@ import unittest
 
 from cyclone_phone_mcp.mcp_server import McpServer, TOOLS
 from cyclone_phone_mcp.reports import SessionRecorder
-from cyclone_phone_mcp.session import parse_execution_scope, parse_tool_execution_scope, scope_cache_key
+from cyclone_phone_mcp.session import (
+    SESSION_DISPLAY_MISMATCH,
+    SESSION_REQUIRED,
+    SessionScopeError,
+    classify_session_plane,
+    parse_execution_scope,
+    parse_tool_execution_scope,
+    require_tool_execution_scope,
+    scope_cache_key,
+)
 from cyclone_phone_mcp.tools import PhoneTools
 
 
@@ -80,6 +89,40 @@ class SessionParseTests(unittest.TestCase):
         self.assertEqual(scope_cache_key("dev_a", None), "dev_a::default-foreground")
         self.assertEqual(scope_cache_key("dev_a", "workspace-a"), "dev_a::workspace-a")
         self.assertNotEqual(scope_cache_key("dev_a", "workspace-a"), scope_cache_key("dev_a", "workspace-b"))
+
+    def test_named_session_classifies_as_session_kernel_vd(self):
+        plane = classify_session_plane("workspace-a", 7)
+        self.assertEqual(plane["kind"], "session_kernel_vd")
+        self.assertEqual(plane["sessionId"], "workspace-a")
+        self.assertEqual(plane["displayId"], 7)
+        self.assertEqual(plane["label"], "Session Kernel VD")
+        self.assertNotIn("workspaceId", plane)
+
+    def test_default_foreground_classifies_as_foreground(self):
+        plane = classify_session_plane("default-foreground", 0)
+        self.assertEqual(plane["kind"], "foreground")
+        self.assertEqual(plane["sessionId"], "default-foreground")
+        self.assertEqual(plane["displayId"], 0)
+        self.assertEqual(plane["label"], "Foreground")
+        omitted_display = classify_session_plane("default-foreground")
+        self.assertEqual(omitted_display["kind"], "foreground")
+        self.assertEqual(omitted_display["displayId"], 0)
+
+    def test_named_display_zero_classifies_as_session_display_mismatch(self):
+        with self.assertRaises(SessionScopeError) as raised:
+            classify_session_plane("workspace-a", 0)
+        self.assertEqual(raised.exception.error_class, SESSION_DISPLAY_MISMATCH)
+        with self.assertRaises(SessionScopeError) as required:
+            require_tool_execution_scope({"session_id": "workspace-a", "display_id": 0})
+        self.assertEqual(required.exception.error_class, SESSION_DISPLAY_MISMATCH)
+
+    def test_missing_session_id_classifies_as_session_required(self):
+        with self.assertRaises(SessionScopeError) as raised:
+            classify_session_plane(None)
+        self.assertEqual(raised.exception.error_class, SESSION_REQUIRED)
+        with self.assertRaises(SessionScopeError) as required:
+            require_tool_execution_scope({"goal": "Open Apps"})
+        self.assertEqual(required.exception.error_class, SESSION_REQUIRED)
 
 
 class RecordingGateway:

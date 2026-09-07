@@ -1,10 +1,10 @@
 # Cyclone One 1.1 — Session Contract Glass (PC sprint)
 
-**Status:** A1 DONE, A2 DONE (code+docs; Pixel UNVERIFIED). A3 not started.  
+**Status:** A1 DONE, A2 DONE, A3 DONE (code+docs; Pixel UNVERIFIED). A4 not started.  
 **Codename:** Session Contract Glass  
 **Base:** installed One **1.0.0** sources as of `v4.0.0`, rebased onto **`v4.0.4` mobile protocol** (tag `38f7628`) so gateway/MCP can speak Layer 2  
 **Out:** Cyclone One **1.1.0** Setup.exe + device_gateway **4.1.0** + mcp **4.1.0**  
-**Now:** One **1.1.0-alpha.2** + gateway/MCP **4.1.0-alpha.2** on this branch; mobile stays **4.0.4** / versionCode **75**  
+**Now:** One **1.1.0-alpha.3** + gateway/MCP **4.1.0-alpha.3** on this branch; mobile stays **4.0.4** / versionCode **75**  
 **Grok:** each stage on Agent PC with **subagents required**
 
 ## Why this sprint exists
@@ -49,17 +49,18 @@ Acceptance: contract tests against mobile 4.0.4 fixtures; Pixel smoke UNVERIFIED
 Out of scope: lifting mobile hot-gate; Magisk; named VD tiles; operator pack; release cut; mobile APK.  
 Handoff: next work is **A3** on `grok/one-1.1-s3-sessions` from this A2 tip. Do not implement A3 here. See [`ONE_1.1_STAGE2_LAYER2.md`](ONE_1.1_STAGE2_LAYER2.md).
 
-### A3 — Session Kernel glass (named VD tiles)
+### A3 — Session Kernel glass (named VD tiles) ✅ DONE
 Branch: `grok/one-1.1-s3-sessions` from A2.  
 Goal: named Shizuku sessions are first-class on One, distinct from Layer 2.
-Deliverables:
+Deliverables (landed):
 1. Real `session.added/removed` tiles with `session_id`, `displayId`, owner HUMAN/AI.
 2. Per-session JPEG focus tile (no silent rewrite named → display 0).
 3. Pause / Take control / Give to AI per tile; `PHONE_LOCKED` / `HUMAN_HAS_CONTROL` preserved.
-4. Clear UI copy separating **Foreground** vs **VD session** vs **Layer 2 workspace**.
-5. Tests + docs + alpha.3.
+4. Clear UI copy separating **Foreground** vs **Session Kernel VD** vs **Layer 2 workspace**. A2 Layer 2 strip stays distinct.
+5. Docs `docs/ONE_1.1_STAGE3_SESSIONS.md` + version identity **1.1.0-alpha.3** / gateway-mcp **4.1.0-alpha.3**. A1 tooling seam + A2 `phone_workspace` / Layer 2 glass preserved. Tests as source: MCP observe/act with non-default `session_id` routes to the matching tile in UI wiring tests.
 Acceptance: MCP observe/act with non-default `session_id` routes to matching tile in UI wiring tests; physical UNVERIFIED.  
-Out of scope: 20 concurrent VDs; claiming parallel input.
+Out of scope: A4 operator MCP pack; A5 release cut; mobile APK; Magisk; 20 concurrent VDs; local compile; claiming parallel input.  
+Handoff: next work is **A4** on `grok/one-1.1-s4-operator` from this A3 tip. Do not implement A4 here. See [`ONE_1.1_STAGE3_SESSIONS.md`](ONE_1.1_STAGE3_SESSIONS.md).
 
 ### A4 — Operator MCP pack
 Branch: `grok/one-1.1-s4-operator` from A3.  

@@ -55,6 +55,8 @@ class ManualControlBody(BaseModel):
     y2: float | None = None
     duration_ms: int | None = None
     text: str | None = None
+    sessionId: str | None = Field(default=None, min_length=1, max_length=160)
+    session_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class ClipboardBody(BaseModel):
