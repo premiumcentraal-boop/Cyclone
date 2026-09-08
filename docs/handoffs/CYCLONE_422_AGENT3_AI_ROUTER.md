@@ -2,7 +2,7 @@
 
 BRANCH: `agent/422-ai-auto-router-polish`
 
-FINAL SHA: `029a28a29b87cb23d8b3ee0cf50b79b29203009c` (final implementation/ownership-cleanup commit; this refreshed handoff is committed separately as metadata only)
+FINAL SHA: `b4e0891c59a491b1076029b9461c0a4c2fad3ec9` (final implementation/test-compatibility commit; this refreshed handoff is committed separately as metadata only)
 
 BASE SHA: `7d263f4a49ea08e6903427653e90723cd818d7e9`
 
@@ -35,16 +35,19 @@ FILES CHANGED:
 - `apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt`
 - `apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV32Components.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/ai/RequestIntentRouterTest.kt`
+- `apps/mobile/app/src/test/java/com/cyclone/mobile/ui/v32/CycloneV39AiChatPageTest.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/ui/v32/CycloneV39AiPageContractTest.kt`
+- `apps/mobile/app/src/test/java/com/cyclone/mobile/ui/v32/TaskComposerSeparationTest.kt`
 - `docs/handoffs/CYCLONE_422_AGENT3_AI_ROUTER.md` (handoff metadata only)
 
 TESTS:
 - PASS — standalone JUnit-style `RequestIntentRouterTest` and `CycloneV39AiPageContractTest` compiled/run with local Kotlin/JUnit stubs.
 - PASS — routing matrix includes required image/chat/phone cases, attachment-only behavior, no classifier flag, conservative consequential fallback, and dispatch behavior preventing CHAT from entering Up Next.
 - PASS — source-contract guards verify no Chat/Phone segmented control, router-before-phone-readiness ordering, bounded task area before composer, chat-only Stop Reply, zero-elevation/outline surface treatment, and transparent AI Material indicator.
+- PASS — legacy `CycloneV39AiChatPageTest` and `TaskComposerSeparationTest` were updated from 4.2.1 mode-toggle assertions to the 4.2.2 one-composer contract; their source assertions were rechecked against the final page.
 - PASS — changed-file whitespace/privacy guards; Kotlin parser smoke found no syntax errors.
-- PASS — GitHub base comparison confirms exactly five Agent 3 code/test paths plus this handoff; no prohibited runtime/Agent 2 file changed. Navigation-file diff is 24 additions / 4 deletions and limited to the owned nav treatment.
-- NOT RUN — `./gradlew :app:testDebugUnitTest`, `./gradlew :app:compileDebugKotlin`, `./gradlew :app:lintDebug`: this execution environment has no checked-out Android workspace/dependency classpath, and `mobile-ci.yml` does not automatically run for this agent branch. No PR was opened because the mission explicitly forbids one.
+- PASS — GitHub base comparison confirms exactly seven Agent 3 code/test paths plus this handoff; no prohibited runtime/Agent 2 file changed. Navigation-file diff is 24 additions / 4 deletions and limited to the owned nav treatment.
+- NOT RUN — `./gradlew :app:testDebugUnitTest`, `./gradlew :app:compileDebugKotlin`, `./gradlew :app:lintDebug`: this execution environment has no checked-out Android workspace/dependency classpath. Direct container access to GitHub is unavailable, `mobile-ci.yml` does not automatically run for this agent branch, and no PR was opened because the mission explicitly forbids one.
 - NOT RUN as a real repository command — `git diff --check`; equivalent trailing-whitespace/tab guards passed on every changed source/test file.
 
 PHYSICAL UI STATUS:
