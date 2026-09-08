@@ -29,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -37,6 +38,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -106,15 +108,33 @@ fun CycloneV32TopBar(
 fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         V32Destination.entries.forEach { destination ->
+            val isSelected = selected == destination
+            val isAi = destination == V32Destination.AI
             NavigationBarItem(
-                selected = selected == destination,
+                selected = isSelected,
                 onClick = { onSelect(destination) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = if (isAi) Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
                 icon = {
-                    if (destination == V32Destination.AI) {
+                    if (isAi) {
                         Box(
-                            Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+                            Modifier.size(48.dp).background(
+                                if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                CircleShape,
+                            ),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(destination.icon, destination.label, tint = MaterialTheme.colorScheme.onPrimary) }
+                        ) {
+                            Icon(
+                                destination.icon,
+                                destination.label,
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     } else Icon(
                         painter = androidx.compose.ui.res.painterResource(when (destination) {
                             V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42

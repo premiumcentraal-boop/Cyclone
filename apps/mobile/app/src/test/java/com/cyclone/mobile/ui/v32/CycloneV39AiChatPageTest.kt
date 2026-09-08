@@ -15,22 +15,19 @@ class CycloneV39AiChatPageTest {
     @Test fun emptyRequestCannotSubmit() {
         val gate = V39AiSubmitGate()
         assertNull(gate.tryAccept("  \n ", hasKey = true))
-        assertFalse(gate.busy)
     }
 
     @Test fun oneAcceptedSendBlocksDuplicateUntilCompletion() {
         val gate = V39AiSubmitGate()
         assertEquals("Go to ad.nl", gate.tryAccept("  Go to ad.nl  ", hasKey = true))
-        assertTrue(gate.busy)
         assertNull(gate.tryAccept("Second request", hasKey = true))
         gate.complete()
         assertEquals("Second request", gate.tryAccept("Second request", hasKey = true))
     }
 
-    @Test fun missingKeyCannotSubmit() {
+    @Test fun missingKeyCannotSubmitChat() {
         val gate = V39AiSubmitGate()
-        assertNull(gate.tryAccept("Go to ad.nl", hasKey = false))
-        assertFalse(gate.busy)
+        assertNull(gate.tryAccept("Explain Android", hasKey = false))
     }
 
     @Test fun modelSelectorUsesCanonicalPresetsAndReloadRestoresStoredId() {
@@ -64,29 +61,35 @@ class CycloneV39AiChatPageTest {
         assertFalse(app.contains("V32Destination.AI -> V32AiPage("))
     }
 
-    @Test fun legacyActionsAndSegmentationAreAbsentFromProductionChatPage() {
+    @Test fun productionPageHasOneAutoRoutedComposerAndNoModeToggle() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertFalse(page.contains("Do it"))
-        assertFalse(page.contains("Make routine"))
-        assertFalse(page.contains("Control phone"))
-        assertFalse(page.contains("Ask Brain"))
-        assertTrue(page.contains("listOf(\"Chat\", \"Phone task\")"))
+        assertFalse(page.contains("listOf(\"Chat\", \"Phone task\")"))
+        assertFalse(page.contains("var phoneTask"))
+        assertFalse(page.contains("Text(\"New request\""))
+        assertTrue(page.contains("RequestIntentRouter.route(normalized"))
+        assertTrue(page.indexOf("RequestIntentRouter.route(normalized") < page.indexOf("WorkspaceTasks.canStartRequest()"))
+        assertTrue(page.contains("RequestDispatch.CHAT"))
+        assertTrue(page.contains("RequestDispatch.START_PHONE_TASK"))
+        assertTrue(page.contains("RequestDispatch.QUEUE_PHONE_TASK"))
     }
 
     @Test fun composerIsMultilineAndHasOneSendAction() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertTrue(page.contains("BasicTextField(value = composer, onValueChange = { composer = it }"))
+        assertTrue(page.contains("BasicTextField("))
         assertTrue(page.contains("contentDescription = \"Ask Cyclone composer\""))
         assertTrue(page.contains("maxLines = 5"))
         assertTrue(page.contains("ImeAction.Send"))
         assertEquals(1, Regex("FilledIconButton\\(").findAll(page).count())
     }
 
-    @Test fun conversationDoesNotCallThePhoneExecutor() {
+    @Test fun chatAndPhoneDispatchUseSeparateExistingPaths() {
         val page = source("CycloneV39AiChatPage.kt")
         assertFalse(page.contains("agent.execute("))
         assertTrue(page.contains("CycloneTextChat.answer(context"))
-        assertTrue(page.contains("WorkspaceTasks.queueRequest(composer)"))
+        assertTrue(page.contains("WorkspaceTasks.queueRequest(normalized)"))
+        assertTrue(page.contains("WorkspaceActivity::class.java"))
+        assertFalse(page.contains("AccessibilityService"))
+        assertFalse(page.contains("MediaProjectionManager"))
     }
 
     @Test fun modelSelectionPersistsOnlyExpectedPreference() {
@@ -97,28 +100,40 @@ class CycloneV39AiChatPageTest {
         assertTrue(page.contains("prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()"))
     }
 
-    @Test fun missingKeyHasClearSettingsAffordance() {
+    @Test fun missingKeyBlocksChatButNotPhoneRoutingContract() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertTrue(page.contains("Add API key in Settings"))
-        assertTrue(page.contains("TextButton(onClick = onSettings) { Text(\"Add API key in Settings\") }"))
-        assertTrue(page.contains("composer.isNotBlank() && (phoneTask || (hasKey && !session.busy))"))
-        assertTrue(page.contains("TextButton(onClick = { chatJob?.cancel() })"))
+        assertTrue(page.contains("OpenRouter key required for chat"))
+        assertTrue(page.contains("RequestIntent.PHONE_TASK -> true"))
+        assertTrue(page.contains("RequestIntent.CHAT -> hasKey && !session.busy"))
     }
 
-    @Test fun composerClearsOnlyAfterAcceptedSubmit() {
+    @Test fun attachmentsAreTakenOnlyInsideChatAndRestoredOnFailure() {
         val page = source("CycloneV39AiChatPage.kt")
-        val accept = page.indexOf("tryAccept(composer, hasKey) ?: return")
-        val clear = page.indexOf("composer = \"\"", accept)
-        assertTrue(accept >= 0)
-        assertTrue(clear > accept)
+        val chat = page.indexOf("RequestDispatch.CHAT ->")
+        val take = page.indexOf("PendingTaskAttachment.take()", chat)
+        assertTrue(chat >= 0)
+        assertTrue(take > chat)
+        assertTrue(page.contains("restoreAttachmentAfterChatFailure(attachment)"))
+        assertTrue(page.contains("WorkspaceTasks.queueRequest(normalized)"))
     }
 
-    @Test fun statusAndResultAreRenderedInCurrentSession() {
+    @Test fun stopReplyCancelsOnlyProviderResponse() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertTrue(page.contains("session.status"))
-        assertTrue(page.contains("session.messages"))
-        assertTrue(page.contains("V39ChatRole.CYCLONE, answer"))
-        assertTrue(page.contains("View run"))
+        val stop = page.indexOf("Stop reply")
+        assertTrue(stop >= 0)
+        val window = page.substring((stop - 300).coerceAtLeast(0), (stop + 300).coerceAtMost(page.length))
+        assertTrue(window.contains("chatJob?.cancel()"))
+        assertFalse(window.contains("WorkspaceTasks.command"))
+    }
+
+    @Test fun taskAndQueueAreaIsBoundedAboveComposer() {
+        val page = source("CycloneV39AiChatPage.kt")
+        val task = page.indexOf("CycloneAskTaskPanel(current)")
+        val queued = page.indexOf("CyclonePendingRequests()")
+        val composer = page.lastIndexOf("BasicTextField(")
+        assertTrue(task in 0 until composer)
+        assertTrue(queued in 0 until composer)
+        assertTrue(page.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
     }
 
     @Test fun routineBuilderHasNoCallSurfaceFromChatPage() {

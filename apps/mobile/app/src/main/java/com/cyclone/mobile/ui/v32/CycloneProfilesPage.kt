@@ -29,6 +29,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     var profiles by remember { mutableStateOf(emptyList<Workspace>()) }
     var error by remember { mutableStateOf("") }
     val task by WorkspaceTasks.state.collectAsState()
+    val profileSetup by ProfileSetupRuntime.state.collectAsState()
     val revision by Layer2Workspaces.engine.revision.collectAsState()
     LaunchedEffect(refreshTick, revision) {
         withContext(Dispatchers.IO) { runCatching { Layer2Workspaces.initialize(context); Layer2Workspaces.engine.snapshot() } }
@@ -85,6 +86,23 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             Text("Profiles", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
             TextButton(onClick = { setup = true }) { Text("+ Add") }
         } }
+        profileSetup.issue?.takeIf { !profileSetup.busy && !profileSetup.ready }?.let { issue ->
+            item {
+                CycloneSurface(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(issue.headline, style = MaterialTheme.typography.titleMedium)
+                        Text(issue.reason, style = MaterialTheme.typography.bodyMedium)
+                        if (issue.retryUseful) {
+                            Button(onClick = { setup = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(issue.action)
+                            }
+                        } else {
+                            Text(issue.action, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        }
         task?.takeIf { UiTask(it).active }?.let { active ->
             item { CycloneSectionTitle("Active now") }
             item { CycloneTaskProgress(active) }
