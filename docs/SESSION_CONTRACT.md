@@ -22,7 +22,7 @@ Classifier mix:
 ## Hard rules
 
 1. MCP UI observe/act missing `session_id` → `SESSION_REQUIRED` (no silent default). Android gateway omitted identity still binds default-foreground for One 1.0.0 pairing; it never invents a named VD or rewrites a named session onto display 0.
-2. Named VD missing/`0` display → `SESSION_DISPLAY_MISMATCH`.
+2. Named VD missing/`0` display → `SESSION_DISPLAY_MISMATCH`. Trusted Android gateway `session.snapshot` for a named workspace with `displayId=0` (camelCase or `session_id`/`display_id`) fail-closes with `PROTOCOL_MISMATCH` — same hole, gateway wire code. Named display-0 inventory is not listed as a Session Kernel VD tile.
 3. Layer 2 mutate without matching generation → fail closed (`MUTATE_LOCK` / `WORKSPACE_GENERATION_STALE`).
 4. GATE blocks switch and queue; never synthesize approval.
 5. PC is glass only; `PhoneToolExecutor` on Android is the only mutator.
@@ -43,6 +43,7 @@ Responses include `plane: {kind, sessionId, displayId, workspaceId, workspaceGen
 |---|---|
 | `SESSION_REQUIRED` | MCP UI observe/act (`requireUi`) missing `session_id` / `sessionId` |
 | `SESSION_DISPLAY_MISMATCH` | Named VD missing or `0` display; default-foreground with `displayId != 0`; conflicting `sessionId` / `session_id` aliases |
+| `PROTOCOL_MISMATCH` | Gateway `session.snapshot` / owned-session wire: named workspace bound to display 0 (classifier still uses `SESSION_DISPLAY_MISMATCH`) |
 | `PLANE_MISMATCH` | Named VD identity mixed with `workspaceId`, or Layer 2 ids mixed with `displayId>0` |
 | `WORKSPACE_GENERATION_REQUIRED` | Exactly one of `workspaceId` / `workspaceGeneration` present |
 | `WORKSPACE_GENERATION_STALE` | Layer 2 mutate generation does not match the current lease |

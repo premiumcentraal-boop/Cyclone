@@ -428,8 +428,16 @@ internal object GatewayDispatcher {
                 SessionContract.classify(merged)
             } else SessionContract.classify(merged)
         } catch (error: SessionIdentityException) {
+            val code = if (
+                request.op == "session.snapshot" &&
+                error.errorClass == SessionContract.SESSION_DISPLAY_MISMATCH
+            ) {
+                "PROTOCOL_MISMATCH"
+            } else {
+                error.errorClass
+            }
             throw GatewayProtocolException(
-                error.errorClass,
+                code,
                 error.message ?: "session/display mismatch",
                 request.id,
             )

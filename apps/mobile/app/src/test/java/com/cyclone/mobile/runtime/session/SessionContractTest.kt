@@ -40,6 +40,12 @@ class SessionContractTest {
         }
     }
 
+    @Test fun classifyNamedDisplayIdSnakeZeroIsSessionDisplayMismatch() {
+        assertErrorClass(SessionContract.SESSION_DISPLAY_MISMATCH) {
+            SessionContract.classify(JSONObject().put("session_id", "named-vd").put("display_id", 0))
+        }
+    }
+
     @Test fun classifyNamedDisplaySevenIsSessionKernelVd() {
         val plane = SessionContract.classify(JSONObject().put("sessionId", "named-vd").put("displayId", 7))
         assertEquals(SessionPlaneKind.SESSION_KERNEL_VD, plane.kind)
