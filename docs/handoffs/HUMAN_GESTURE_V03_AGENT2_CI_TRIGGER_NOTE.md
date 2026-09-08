@@ -1,0 +1,1 @@
+Temporary note: the Agent 2 V0.3 branch uses a permitted draft PR only to trigger repository Mobile CI. This note will be removed before final handoff.
