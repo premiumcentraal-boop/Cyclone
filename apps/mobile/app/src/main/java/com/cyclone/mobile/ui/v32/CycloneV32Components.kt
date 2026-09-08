@@ -20,7 +20,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,7 +46,7 @@ private const val LEGACY_ENHANCED_CONTROL_ROW = "Enhanced control engine"
 
 enum class V32Destination(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Rounded.Home),
-    TEACH("Teach", Icons.Rounded.School),
+    PROFILES("Profiles", Icons.Rounded.Person),
     AI("AI", Icons.Rounded.AutoAwesome),
     ROUTINES("Routines", Icons.Rounded.Bolt),
     BRAIN("Brain", Icons.Rounded.AccountTree),
@@ -80,10 +80,10 @@ fun CycloneV32TopBar(
             }
             Column(Modifier.weight(1f)) {
                 Text(if (settingsOpen) "Settings" else title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(CycloneRelease.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (!settingsOpen) {
                 Surface(
+                    modifier = Modifier.clickable(onClick = onSettings),
                     shape = RoundedCornerShape(999.dp),
                     color = if (ready) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
                     contentColor = if (ready) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
