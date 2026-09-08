@@ -14,7 +14,8 @@ class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
     @Synchronized fun listAutomations(): List<AutomationDefinition> = decodeArray(KEY_AUTOMATIONS, AutomationCodec::automationFromJson)
     @Synchronized fun getAutomation(id: String): AutomationDefinition? = listAutomations().firstOrNull { it.id == id }
     @Synchronized fun saveAutomation(value: AutomationDefinition) {
-        val persisted = if (isSkillCapsule(value)) value.copy(enabled = false) else value
+        val associated = if (value.appPackages.isEmpty()) value.copy(appPackages = RoutineAssociations.infer(value)) else value
+        val persisted = if (isSkillCapsule(associated)) associated.copy(enabled = false) else associated
         replaceById(KEY_AUTOMATIONS, persisted.id, AutomationCodec.automationToJson(persisted))
     }
     @Synchronized fun deleteAutomation(id: String) = deleteById(KEY_AUTOMATIONS, id)

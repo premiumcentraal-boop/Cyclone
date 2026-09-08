@@ -129,7 +129,7 @@ fun CycloneMobileV32App() {
                         )
                         V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick)
                         V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }
-                        V32Destination.ROUTINES -> V32RoutinesPage(context, refreshTick) { refreshTick++ }
+                        V32Destination.ROUTINES -> CycloneRoutinesPage(context, refreshTick, { destination = V32Destination.AI }) { refreshTick++ }
                         V32Destination.BRAIN -> CycloneV39BrainPage(context, refreshTick)
                     }
                 }
@@ -269,7 +269,7 @@ private fun V32RoutinesPage(context: Context, refreshTick: Int, refresh: () -> U
 }
 
 @Composable
-private fun V32RoutineDetail(context: Context, automation: AutomationDefinition, onBack: () -> Unit, refresh: () -> Unit) {
+internal fun V32RoutineDetail(context: Context, automation: AutomationDefinition, onBack: () -> Unit, refresh: () -> Unit) {
     var enabled by remember(automation.id, automation.enabled) { mutableStateOf(automation.enabled) }
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { OutlinedButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null); Spacer(Modifier.size(6.dp)); Text("All routines") } }

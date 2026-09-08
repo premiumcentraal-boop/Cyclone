@@ -19,6 +19,8 @@ object AutomationCodec {
         put("verification", JSONArray().apply { value.verification.forEach { put(conditionToJson(it)) } })
         put("failureBehavior", value.failureBehavior.name)
         put("outputVariables", JSONArray(value.outputVariables))
+        put("appPackages", JSONArray(value.appPackages))
+        put("categories", JSONArray(value.categories))
     }
 
     fun automationFromJson(json: JSONObject): AutomationDefinition = AutomationDefinition(
@@ -33,8 +35,10 @@ object AutomationCodec {
         steps = json.optJSONArray("steps").toSteps(),
         verification = json.optJSONArray("verification").toConditions(),
         failureBehavior = enumOrDefault(json.optString("failureBehavior"), FailureAction.ABORT),
-        outputVariables = json.optJSONArray("outputVariables").toStringList()
-    )
+        outputVariables = json.optJSONArray("outputVariables").toStringList(),
+        appPackages = json.optJSONArray("appPackages").toStringList(),
+        categories = json.optJSONArray("categories").toStringList()
+    ).let { if (json.has("appPackages")) it else it.copy(appPackages = RoutineAssociations.infer(it)) }
 
     fun skillToJson(value: SkillDefinition): JSONObject = JSONObject().apply {
         put("id", value.id)
