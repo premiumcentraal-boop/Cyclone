@@ -35,6 +35,9 @@
       "binaries/CyclonePCRuntime",
       "binaries/CycloneAgentMCP"
     ],
+    "resources": [
+      "resources/mcp-tunnel"
+    ],
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,
