@@ -1,0 +1,124 @@
+name: Publish Cyclone Mobile 4.2.2
+
+on:
+  push:
+    branches: ['ops/publish-mobile-v4.2.2']
+    paths:
+      - '.github/workflows/ops-publish-mobile-v422.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: publish-mobile-v4.2.2
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    uses: ./.github/workflows/mobile-release.yml
+    with:
+      build_run_id: '34287510152'
+      artifact_name: 'Cyclone-Android-4.2.2'
+    secrets: inherit
+
+  publish:
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v4.2.2
+      SOURCE_SHA: e1e6ff44d8bad25afeb84ff92beabdebf5870a77
+      APK_NAME: Cyclone-4.2.2.apk
+    steps:
+      - name: Download signed exact-source artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Cyclone-Android-4.2.2-signed
+          path: signed
+
+      - name: Verify signed artifact provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "signed/$APK_NAME"
+          test -s "signed/$APK_NAME.sha256"
+          test -s signed/source-sha.txt
+          test -s signed/run-id.txt
+          test -s signed/mobile-metadata.json
+          test -s signed/signing-state.txt
+          test -s signed/signing-lineage.txt
+          test "$(tr -d '\r\n' < signed/source-sha.txt)" = "$SOURCE_SHA"
+          test "$(tr -d '\r\n' < signed/run-id.txt)" = "34287510152"
+          test "$(tr -d '\r\n' < signed/signing-state.txt)" = "SIGNED_PROTECTED_ENVIRONMENT_ROTATED"
+          (cd signed && sha256sum --check "$APK_NAME.sha256")
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path('signed/mobile-metadata.json').read_text())
+          assert m['application_id'] == 'com.cyclone.mobile'
+          assert m['version_name'] == '4.2.2'
+          assert m['version_code'] == 83
+          assert m['apk_name'] == 'Cyclone-4.2.2.apk'
+          assert m['artifact_name'] == 'Cyclone-Android-4.2.2'
+          PY
+
+      - name: Refuse to overwrite an existing 4.2.2 tag or release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "ERROR: tag $TAG already exists; refusing replacement" >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "ERROR: release $TAG already exists; refusing replacement" >&2
+            exit 1
+          fi
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          # Cyclone Mobile 4.2.2
+
+          Cyclone Mobile **4.2.2** is built from exact source commit `e1e6ff44d8bad25afeb84ff92beabdebf5870a77`, on top of preserved 4.2.1 commit `7d263f4a49ea08e6903427653e90723cd818d7e9`.
+
+          ## What changed
+
+          - Repairs Profiles / Profile B provisioning with typed provisioning failures, live root verification, Android user/profile preflight, exact ownership checks, resumable retry recovery, duplicate-profile prevention, resumable app installation, final readiness verification, and separate Shizuku capability truth.
+          - Rebuilds the active-task glass: removes the phantom current-task card, resolves real app icons, humanizes task names, keeps View Progress bound to the exact task, and gives queued tasks individual **Steer / Stop** controls with conservative FIFO promotion.
+          - Simplifies Ask Cyclone to one composer with deterministic local **CHAT vs PHONE_TASK** routing, preserves normal chat while phone work is active, queues additional phone tasks instead of replacing the active task, and keeps attachments bound to the chosen route.
+          - Cleans up light/dark surfaces, keyboard and large-font behavior, and the selected AI navigation treatment.
+
+          ## Validation
+
+          The exact source commit passed GitHub CI run **34287510152** including Android unit tests, `lintDebug`, release Kotlin compilation, and `assembleRelease`. The APK attached to this release is signed from that exact CI artifact in the protected mobile release environment and includes source/run/signing provenance files.
+
+          ## Hardware status
+
+          Physical Profile B creation with real root/Shizuku/OEM behavior, plus final light/dark/keyboard overlay acceptance, remain **UNVERIFIED on a physical phone** for this cut. CI success is not device evidence.
+
+          Cyclone One is released separately; this release contains the Cyclone Mobile APK only.
+          EOF
+
+      - name: Publish immutable 4.2.2 release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            "signed/$APK_NAME" \
+            "signed/$APK_NAME.sha256" \
+            signed/source-sha.txt \
+            signed/run-id.txt \
+            signed/mobile-metadata.json \
+            signed/signing-state.txt \
+            signed/signing-lineage.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "Cyclone Mobile 4.2.2" \
+            --notes-file release-notes.md
