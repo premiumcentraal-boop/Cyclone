@@ -77,20 +77,25 @@ object HumanGestureTraceAdapter {
         t: Double,
     ): NormalizedTracePoint {
         require(viewport.contains(point)) { "Trace point must be inside viewport" }
+        val width = viewport.width.toDouble()
+        val height = viewport.height.toDouble()
         return NormalizedTracePoint(
-            u = ((point.x - viewport.left) / viewport.width).toDouble().coerceIn(0.0, 1.0),
-            v = ((point.y - viewport.top) / viewport.height).toDouble().coerceIn(0.0, 1.0),
+            u = ((point.x.toDouble() - viewport.left.toDouble()) / width).coerceIn(0.0, 1.0),
+            v = ((point.y.toDouble() - viewport.top.toDouble()) / height).coerceIn(0.0, 1.0),
             t = t.coerceIn(0.0, 1.0),
         )
     }
 
-    private fun normalizeBounds(bounds: GestureBounds, viewport: GestureBounds): NormalizedTraceBounds =
-        NormalizedTraceBounds(
-            left = ((bounds.left - viewport.left) / viewport.width).toDouble().coerceIn(0.0, 1.0),
-            top = ((bounds.top - viewport.top) / viewport.height).toDouble().coerceIn(0.0, 1.0),
-            right = ((bounds.right - viewport.left) / viewport.width).toDouble().coerceIn(0.0, 1.0),
-            bottom = ((bounds.bottom - viewport.top) / viewport.height).toDouble().coerceIn(0.0, 1.0),
+    private fun normalizeBounds(bounds: GestureBounds, viewport: GestureBounds): NormalizedTraceBounds {
+        val width = viewport.width.toDouble()
+        val height = viewport.height.toDouble()
+        return NormalizedTraceBounds(
+            left = ((bounds.left.toDouble() - viewport.left.toDouble()) / width).coerceIn(0.0, 1.0),
+            top = ((bounds.top.toDouble() - viewport.top.toDouble()) / height).coerceIn(0.0, 1.0),
+            right = ((bounds.right.toDouble() - viewport.left.toDouble()) / width).coerceIn(0.0, 1.0),
+            bottom = ((bounds.bottom.toDouble() - viewport.top.toDouble()) / height).coerceIn(0.0, 1.0),
         )
+    }
 
     private fun requireViewport(viewport: GestureBounds) {
         require(viewport.width > 0f && viewport.height > 0f) { "Viewport must have positive size" }
