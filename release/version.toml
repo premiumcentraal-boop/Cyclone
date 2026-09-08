@@ -1,5 +1,7 @@
-# Cyclone Mobile 4.1.0 release-lane identity; DEVICE TESTING: UNVERIFIED
-# publication_authorized=false. Not a claim that GitHub tag v4.1.0 already exists.
+# Cyclone Mobile 4.1.0; DEVICE TESTING: UNVERIFIED
+# publication_authorized=true authorizes mobile-publish-v3910.yml on
+# release/cyclone-mobile-v4.1.0 (same path as v4.0.4). Not a claim that
+# GitHub tag v4.1.0 already exists until Full Release creates it.
 # Publishing reuses the authoritative Mobile CI artifact; no second Android assembly.
 schema = 1
 product_version = "4.1.0"
@@ -15,7 +17,7 @@ mcp = "4.0.0"
 
 [release]
 previous_mobile_version = "4.0.4"
-publication_authorized = false
+publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"

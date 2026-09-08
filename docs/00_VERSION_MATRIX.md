@@ -18,13 +18,13 @@ Alphas 76–79 were not published 4.1 APKs. Release identity is **4.1.0** / vers
 
 | Surface | This identity | Notes |
 |---|---|---|
-| Mobile | **4.1.0** / versionCode **80** | `publication_authorized=false`. Release-lane identity only; not a claim that GitHub tag `v4.1.0` exists. |
+| Mobile | **4.1.0** / versionCode **80** | `publication_authorized=true` for the `release/cyclone-mobile-v4.1.0` Full Release cut. Physical Pixel 8 = UNVERIFIED. |
 | Cyclone One / pc_companion | **1.0.0** (unchanged) | Full Layer 2 MCP needs One ≥ **1.1.0** (separate A5 cut). 4.0.4 phone + One 1.0.0 remains foreground-capable (USB / default-foreground). One 1.1 is not required for mobile-only Ask on device. |
 | Device gateway | **4.0.0** (unchanged) | — |
 | Agent MCP | **4.0.0** (unchanged) | — |
 | python_version | **4.0.0** (unchanged) | — |
 
-Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75 until the operator cuts `v4.1.0`. Physical Pixel 8 = **UNVERIFIED**. `publication_authorized=false`. Do not claim the GitHub tag exists.
+Installed Pixel may still be **4.0.3** / 74. Latest published mobile remains **4.0.4** / 75 until Full Release creates `v4.1.0`. Physical Pixel 8 = **UNVERIFIED**. Protocol-fix tip `d249f2a` Mobile CI **SUCCESS**: https://github.com/premiumcentraal-boop/Cyclone/actions/runs/34172841433 — not a device pass.
 
 ## Repo divergence (critical)
 
