@@ -23,7 +23,8 @@ export function isDefaultForegroundSession(sessionId: string): boolean {
   return sessionId === DEFAULT_FOREGROUND_SESSION_ID;
 }
 
-/** Named workspaces keep their Android display; missing identity is not rewritten to 0. */
+/** Named VD workspaces keep their Android display; missing identity is not rewritten to 0.
+ *  Layer 2 display-0 profile locks are a different plane — never bind them as session tiles. */
 export function bindSessionTile(deviceId: string, session: DeviceSessionDescriptor): SessionTile {
   const sessionId = String(session.sessionId || "").trim();
   const foreground = isDefaultForegroundSession(sessionId);

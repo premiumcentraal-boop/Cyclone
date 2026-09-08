@@ -10,7 +10,7 @@ from typing import Any
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8765"
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
-NON_MUTATING_CAPABILITIES = {"phone.observe", "phone.find", "phone.wait_for"}
+NON_MUTATING_CAPABILITIES = {"workspace.list", "phone.observe", "phone.find", "phone.wait_for"}
 
 
 class GatewayError(RuntimeError):

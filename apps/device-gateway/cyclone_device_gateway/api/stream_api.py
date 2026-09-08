@@ -17,6 +17,7 @@ from ..desktop_runtime.models import (
     VIDEO_PROFILES,
     VIDEO_PROTOCOL_VERSION,
 )
+from .layer2_api import create_layer2_router
 from .session_api import create_session_router
 
 
@@ -76,4 +77,5 @@ def create_stream_router(runtime: Any, token: str) -> APIRouter:
     # Session routes share the same ephemeral local bearer, but every operation behind them also
     # requires the phone's trusted Android Gateway credential. No direct ADB execution route exists.
     router.include_router(create_session_router(runtime, token))
+    router.include_router(create_layer2_router(runtime, token))
     return router

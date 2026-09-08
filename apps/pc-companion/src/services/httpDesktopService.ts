@@ -19,7 +19,10 @@ import type {
   FleetGroup,
   FleetWorkspace,
   FleetWsEvent,
+  Layer2Operation,
+  Layer2Status,
 } from "./types.js";
+import { bindLayer2Status } from "../core/layer2.js";
 import { parseFleetWsEvent } from "../core/sessionTiles.js";
 
 export interface HttpDesktopServiceOptions {
@@ -198,6 +201,18 @@ export class HttpDesktopService implements DesktopService {
       try { socket?.close(); } catch { /* noop */ }
       socket = null;
     };
+  }
+
+  listLayer2Workspaces(deviceId: string): Promise<Layer2Status> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/workspaces`)
+      .then((value) => bindLayer2Status(deviceId, value));
+  }
+
+  layer2Workspace(deviceId: string, operation: Layer2Operation, params: Record<string, unknown> = {}): Promise<Layer2Status> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/workspaces`, {
+      method: "POST",
+      body: JSON.stringify({ operation, params }),
+    }).then((value) => bindLayer2Status(deviceId, value));
   }
 
   trustStatus(deviceId: string): Promise<TrustStatusResult> {

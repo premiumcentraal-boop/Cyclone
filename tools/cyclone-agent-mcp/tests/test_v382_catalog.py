@@ -9,6 +9,7 @@ def test_catalog_includes_locate_and_skill_tools():
     assert "phone_locate" in TOOL_NAMES
     assert "phone_skill_save" in TOOL_NAMES
     assert "phone_skill_run" in TOOL_NAMES
+    assert "phone_workspace" in TOOL_NAMES
     assert surface_role("phone_observe") == "ui"
     assert surface_role("phone_act") == "ui"
     assert surface_role("phone_status") == "planner"
@@ -23,6 +24,7 @@ def test_frozen_connector_catalog_includes_locate_and_skill_tools(monkeypatch):
     assert "phone_locate" in names
     assert "phone_skill_save" in names
     assert "phone_skill_run" in names
+    assert "phone_workspace" in names
 
 
 class LocateGateway:

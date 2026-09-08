@@ -21,6 +21,17 @@ from .phone_mcp import (
     skill_save_success,
 )
 
+MUTATING_ACTIONS = ALLOWED_ACTIONS - {"phone.wait_for"}
+WORKSPACE_OPERATIONS = {"list", "register", "switch", "pause", "release", "arm", "next"}
+WORKSPACE_PARAM_KEYS = {"id", "label", "appPackage", "androidUserId", "displayId", "goal"}
+WORKSPACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+_WORKSPACE_NEST_KEYS = ("result", "payload", "workspace", "data", "status", "body")
+_HOLDER_MISSING = object()
+_LAYER2_NEXT = (
+    "Pass workspaceId and workspaceGeneration on mutating phone_act.params. "
+    "Layer 2 is not a VD session."
+)
+
 
 PROVIDER_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,79}$")
 IMAGE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.;+:-]{0,239}$")
@@ -64,10 +75,125 @@ def _only_keys(args: dict[str, Any], allowed: set[str]) -> None:
         raise ValueError("Unexpected parameters are not permitted")
 
 
+def _require_workspace_identity(workspace_id: Any, workspace_generation: Any) -> tuple[str, int]:
+    if not isinstance(workspace_id, str) or not WORKSPACE_ID_RE.fullmatch(workspace_id):
+        raise ValueError("workspaceId is invalid")
+    if type(workspace_generation) is not int or workspace_generation < 0:
+        raise ValueError("workspaceGeneration is required with workspaceId")
+    return workspace_id, workspace_generation
+
+
+def _validate_workspace_operation_params(operation: str, params: dict[str, Any]) -> None:
+    if "displayId" in params and params.get("displayId") != 0:
+        raise ValueError("Layer 2 workspaces require displayId 0")
+    workspace_id = params.get("id")
+    if workspace_id is not None and not (isinstance(workspace_id, str) and WORKSPACE_ID_RE.fullmatch(workspace_id)):
+        raise ValueError("id is invalid")
+    if operation == "register":
+        for key in ("id", "label", "appPackage"):
+            if not str(params.get(key) or "").strip():
+                raise ValueError(f"{key} is required to register a workspace")
+    if operation in {"switch", "arm"} and not str(params.get("id") or "").strip():
+        raise ValueError("id is required")
+
+
+def _as_workspace_id(value: Any) -> str | None:
+    if isinstance(value, str) and WORKSPACE_ID_RE.fullmatch(value):
+        return value
+    return None
+
+
+def _as_workspace_generation(value: Any) -> int | None:
+    if type(value) is int and value >= 0:
+        return value
+    return None
+
+
+def _workspace_identity(value: Any, *, _depth: int = 0) -> tuple[str, int] | None:
+    if not isinstance(value, dict) or _depth > 4:
+        return None
+    workspace_id = _as_workspace_id(value.get("workspaceId") or value.get("workspace_id"))
+    generation = None
+    for key in ("workspaceGeneration", "workspace_generation", "generation"):
+        if key in value:
+            generation = _as_workspace_generation(value.get(key))
+            break
+    holder = value.get("holder")
+    if workspace_id is None:
+        if isinstance(holder, str):
+            workspace_id = _as_workspace_id(holder)
+        elif isinstance(holder, dict):
+            workspace_id = _as_workspace_id(holder.get("id") or holder.get("workspaceId"))
+            if generation is None:
+                generation = _as_workspace_generation(
+                    holder.get("workspaceGeneration") if "workspaceGeneration" in holder else holder.get("generation")
+                )
+    if workspace_id is not None and generation is not None:
+        return workspace_id, generation
+    for key in _WORKSPACE_NEST_KEYS:
+        nested = _workspace_identity(value.get(key), _depth=_depth + 1)
+        if nested:
+            return nested
+    return None
+
+
+def _workspace_holder(value: Any, *, _depth: int = 0) -> Any:
+    if not isinstance(value, dict) or _depth > 4:
+        return _HOLDER_MISSING
+    if "holder" in value:
+        return value["holder"]
+    for key in _WORKSPACE_NEST_KEYS:
+        nested = _workspace_holder(value.get(key), _depth=_depth + 1)
+        if nested is not _HOLDER_MISSING:
+            return nested
+    return _HOLDER_MISSING
+
+
+def _execution_ok_false(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    execution = value.get("execution")
+    if isinstance(execution, dict):
+        if execution.get("ok") is False:
+            return True
+        nested = execution.get("androidExecution")
+        if not isinstance(nested, dict):
+            nested = execution.get("android_execution")
+        if isinstance(nested, dict) and nested.get("ok") is False:
+            return True
+    return False
+
+
+def _compact_layer2_envelope(result: Any) -> dict[str, Any] | None:
+    if _execution_ok_false(result):
+        return None
+    identity = _workspace_identity(result)
+    if identity is None:
+        return None
+    envelope: dict[str, Any] = {
+        "workspaceId": identity[0],
+        "workspaceGeneration": identity[1],
+        "next": _LAYER2_NEXT,
+    }
+    if isinstance(result, dict):
+        for key in ("holder", "gated", "workspaces", "status"):
+            if key in result:
+                envelope[key] = result[key]
+        for nest_key in _WORKSPACE_NEST_KEYS:
+            nested = result.get(nest_key)
+            if not isinstance(nested, dict):
+                continue
+            for key in ("holder", "gated", "workspaces", "status"):
+                if key not in envelope and key in nested:
+                    envelope[key] = nested[key]
+    return envelope
+
+
 class PhoneTools:
     def __init__(self, gateway: GatewayClient | None = None, audit: SafeAuditLog | None = None):
         self.gateway = gateway or GatewayClient()
         self.audit = audit or SafeAuditLog()
+        self._layer2_leases: dict[str, dict[str, Any]] = {}
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
         if name not in TOOL_NAMES:
@@ -102,6 +228,61 @@ class PhoneTools:
             return None
         value = str(value).strip()
         return value or None
+
+    def _update_layer2_lease(self, device_id: str, operation: str, result: Any) -> None:
+        key = str(device_id or "")
+        if operation in {"pause", "release"}:
+            self._layer2_leases.pop(key, None)
+            return
+        if operation == "list":
+            holder = _workspace_holder(result)
+            if holder is None:
+                self._layer2_leases.pop(key, None)
+                return
+            identity = _workspace_identity(result)
+            if identity is not None and not _execution_ok_false(result):
+                self._layer2_leases[key] = {
+                    "workspaceId": identity[0],
+                    "workspaceGeneration": identity[1],
+                }
+            return
+        if operation in {"switch", "next"}:
+            identity = _workspace_identity(result)
+            if identity is not None and not _execution_ok_false(result):
+                self._layer2_leases[key] = {
+                    "workspaceId": identity[0],
+                    "workspaceGeneration": identity[1],
+                }
+
+    def _require_layer2_mutate_lock(
+        self,
+        device_id: str,
+        tool: str,
+        action_params: dict[str, Any],
+        scope: dict[str, Any],
+    ) -> None:
+        workspace_id = action_params.get("workspaceId")
+        workspace_generation = action_params.get("workspaceGeneration")
+        if workspace_id is not None or workspace_generation is not None:
+            if scope.get("sessionId") != "default-foreground" or scope.get("displayId") != 0:
+                raise ValueError(
+                    "workspaceId is only valid on default-foreground / display 0; Layer 2 is not a VD session"
+                )
+            _require_workspace_identity(workspace_id, workspace_generation)
+        if tool not in MUTATING_ACTIONS:
+            return
+        lease = self._layer2_leases.get(str(device_id or ""))
+        if not lease:
+            return
+        if workspace_id is None or workspace_generation is None:
+            raise ValueError(
+                "Layer 2 MUTATE_LOCK: mutating phone_act requires workspaceId and workspaceGeneration "
+                "matching the current lease; do not invent ids"
+            )
+        if workspace_id != lease["workspaceId"] or workspace_generation != lease["workspaceGeneration"]:
+            raise ValueError(
+                "Layer 2 MUTATE_LOCK: stale generation or workspaceId does not match the current lease"
+            )
 
     def phone_list(self, _: dict[str, Any]) -> Any:
         return {"devices": [device.safe_dict() for device in self.gateway.list_devices()]}
@@ -182,6 +363,36 @@ class PhoneTools:
     def phone_page_history(self, args: dict[str, Any]) -> Any:
         return self.gateway.page_history(self._device(args))
 
+    def phone_workspace(self, args: dict[str, Any]) -> Any:
+        """Layer 2 management on default-foreground / display 0. Not a VD session."""
+        operation = args.get("operation")
+        if operation not in WORKSPACE_OPERATIONS:
+            raise ValueError("Unknown workspace operation")
+        scope = require_tool_execution_scope(args)
+        if scope["sessionId"] != "default-foreground" or scope["displayId"] != 0:
+            raise ValueError("Layer 2 workspaces require default-foreground / display 0")
+        params = args.get("params", {})
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        if set(params) - WORKSPACE_PARAM_KEYS:
+            raise ValueError("Unexpected workspace parameter")
+        validate_typed_params(params)
+        _validate_workspace_operation_params(str(operation), params)
+        identity = _required_identity_kwargs(args)
+        device_id = self._device(args)
+        goal = str(params.get("goal") or ("Manage Cyclone workspace: " + str(operation)))
+        forwarded = dict(params)
+        self.gateway.observe(device_id, include_screenshot=False, mode="compact", **identity)
+        result = self.gateway.action("workspace." + str(operation), forwarded, goal, device_id, **identity)
+        self._update_layer2_lease(device_id or "", str(operation), result)
+        if str(operation) in {"switch", "next"}:
+            compact = _compact_layer2_envelope(result)
+            if compact is not None:
+                return compact
+        return result
+
     def phone_act(self, args: dict[str, Any]) -> Any:
         tool = str(args.get("tool") or "")
         if tool not in ALLOWED_ACTIONS:
@@ -195,10 +406,15 @@ class PhoneTools:
             raise ValueError("goal is required")
         if tool == "phone.type" and args.get("user_authorized") is not True:
             raise ValueError("phone.type requires user_authorized=true; Android policy remains authoritative")
+        params = dict(params)
+        if "workspaceId" in params or "workspaceGeneration" in params:
+            _require_workspace_identity(params.get("workspaceId"), params.get("workspaceGeneration"))
         params = _forward_type_authorization(tool, args, params)
         if args.get("request_ai_control") is True:
             params = dict(params)
             params["request_ai_control"] = True
+        scope = require_tool_execution_scope(args)
+        self._require_layer2_mutate_lock(self._device(args) or "", tool, params, scope)
         result = self.gateway.action(tool, params, goal, self._device(args), **_required_identity_kwargs(args))
         if tool == "phone.type":
             typed = params.get("value") if isinstance(params.get("value"), str) else params.get("text")
