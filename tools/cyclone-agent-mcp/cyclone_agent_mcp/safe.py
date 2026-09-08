@@ -37,12 +37,16 @@ def compact_json(value: Any) -> str:
 
 
 def validate_typed_params(value: Any, *, path: str = "params") -> None:
-    """Reject command-shaped escape hatches while preserving typed phone-action parameters."""
+    """Reject escape hatches and PC-authored trajectories while preserving semantic action params."""
     if isinstance(value, dict):
         for key, item in value.items():
             key_text = str(key)
             if _FORBIDDEN_OPERATION_KEY.fullmatch(key_text):
                 raise ValueError(f"{path}.{key_text} is not a permitted typed phone parameter")
+            if key_text in _RAW_TRAJECTORY_KEYS:
+                raise ValueError(f"{path}.{key_text} is not permitted; Android owns gesture trajectory synthesis")
+            if key_text == "humanize" and (not isinstance(item, str) or item not in _HUMANIZE_PROFILES):
+                raise ValueError("humanize must be one of auto, off, light, normal")
             validate_typed_params(item, path=f"{path}.{key_text}")
     elif isinstance(value, list):
         if len(value) > 100:
