@@ -73,9 +73,10 @@ For plan diagnostics, swipes always use 24 trace segments (`HumanGestureDiagnost
 Golden binary fixture:
 
 - trace: `docs/fixtures/human-gesture-v03/production_tap_trace_v1.json`
-- expected hash: `7a6f03e5084e2bc89bc17bedc5ca5f475bf53aae7e69eb4144441fd48c653d31`
+- trace-hash metadata: `docs/fixtures/human-gesture-v03/production_tap_trace_v1.tracehash`
+- expected canonical trace hash: `7a6f03e5084e2bc89bc17bedc5ca5f475bf53aae7e69eb4144441fd48c653d31`
 
-The fixture is valid `cyclone.human_gesture.trace.v1` and is reproduced in JVM tests through the real production `HumanGestureTraceAdapter`.
+The `.tracehash` value is the SHA-256 of the canonical trace-hash bytes defined above; it is intentionally **not** the byte digest of the JSON fixture file. The fixture is valid `cyclone.human_gesture.trace.v1` and is reproduced in JVM tests through the real production `HumanGestureTraceAdapter`.
 
 ## Agent 2 runtime seam
 
