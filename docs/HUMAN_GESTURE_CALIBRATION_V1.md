@@ -15,14 +15,25 @@ mutation authority; `PhoneToolExecutor` remains authoritative.
 
 ## Round 1 evidence boundary
 
-At Agent 3 build time, `agent/human-gesture-round1-core` existed but still pointed to the untouched
-Cyclone Mobile 4.2.0 base `011de009ff6871be64a3df1e63308a3ac027e282`. Therefore no Agent 1
-production trace exporter or handoff was available to fuzz.
+The lab implementation and its synthetic measurements were completed while
+`agent/human-gesture-round1-core` still pointed to the untouched Cyclone Mobile 4.2.0 base
+`011de009ff6871be64a3df1e63308a3ac027e282`. Before Agent 3 final handoff, Agent 1 completed its
+core and handoff at branch head `657fbe3ae95fe880bf6db7a6ef316af8d33bb367`; Agent 3 then performed
+a late compatibility pass against the shipped `GestureModel.kt` and `HumanGestureEngine.kt` API.
 
-The numbers below come from the deterministic **lab synthetic reference generator**. They validate
-the trace/metric/fuzz machinery and establish provisional acceptance windows. They are **not**
-Android production-engine benchmark or quality claims. The first follow-up after Agent 1 lands is to
-export real engine traces in this schema and rerun the same analysis.
+That pass found no contract mismatch. Agent 1 exposes platform-neutral `StrokePlan` cubic geometry,
+`sampleAt()` / `sample()` deterministic inspection, grounded start/end points, LIGHT desired bow of
+approximately 1–2% capped at 8 px, and NORMAL desired bow of approximately 2.5–5.5% capped at 42 px.
+The V1 trace schema can represent samples from that core directly after viewport normalization.
+Pixel caps mean measured relative bow will intentionally fall below the percentage target on long
+strokes, and edge-aware capacity may reduce or remove bow near constrained edges; calibration must
+judge those as safety behavior rather than profile failure.
+
+The numbers below still come from the deterministic **lab synthetic reference generator**. They
+validate the trace/metric/fuzz machinery and establish provisional acceptance windows. They are
+**not** Android production-engine benchmark or quality claims. Agent 3 did not merge Agent 1 into its
+independent branch, so production-core trace fuzzing remains an integration follow-up: export
+`StrokePlan.sample()` plus duration/profile/seed/viewport into this schema and rerun the same lab.
 
 ## Trace schema
 
@@ -233,12 +244,12 @@ large regression corpora are cheap enough to run routinely.
 
 ## Next calibration step
 
-When Agent 1's core/handoff is available:
+With Agent 1's core now available:
 
-1. add a debug/test-only exporter from its platform-neutral plan into `trace.v1`;
-2. generate the same deterministic corpus from the real engine;
+1. add a debug/test-only exporter from `StrokePlan.sample()` into `trace.v1`;
+2. generate the same deterministic corpus from the real engine on the integration lineage;
 3. run lab validation/metrics without changing the analyzer;
-4. record all failing seeds;
+4. record all failing seeds, especially long-stroke pixel-cap and edge-capacity cases;
 5. replace synthetic profile tables above with engine distributions;
 6. benchmark Android synthesis separately at p50/p95/p99;
 7. use recorded human template data only after the procedural baseline is stable.
