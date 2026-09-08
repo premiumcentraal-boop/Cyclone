@@ -8,6 +8,8 @@ After installing an update, close any still-open window and launch **Cyclone One
 
 The **AI connections** page provides one-click Codex setup. It configures the packaged Cyclone MCP server without copying a Gateway token, reports live Gateway/phone/tool readiness, and recovers a long-running Codex session after One rotates its protected local connection. Restart Codex once after the first connection.
 
+**Settings → Remote MCP (ChatGPT / Grok chat)** starts and stops the public HTTPS auth-gateway tunnel used by ChatGPT and grok.com connectors. Copy the MCP URL and bearer from that card. Local Grok Build / Cursor stdio MCP (`~/.grok/config.toml`) is not changed. See [`docs/A4_MCP_TUNNEL_SETTINGS.md`](../../docs/A4_MCP_TUNNEL_SETTINGS.md).
+
 ## Development
 
 ```bash

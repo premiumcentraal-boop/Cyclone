@@ -1,3 +1,5 @@
+mod mcp_tunnel;
+
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use std::net::TcpListener;
@@ -253,7 +255,16 @@ pub fn run() {
             open_diagnostics_folder,
             connector_status,
             connector_action,
-            legacy_companion_warning
+            legacy_companion_warning,
+            mcp_tunnel::mcp_tunnel_status,
+            mcp_tunnel::mcp_tunnel_start,
+            mcp_tunnel::mcp_tunnel_stop,
+            mcp_tunnel::mcp_tunnel_restart,
+            mcp_tunnel::mcp_tunnel_rotate_token,
+            mcp_tunnel::mcp_tunnel_set_mode,
+            mcp_tunnel::mcp_tunnel_token,
+            mcp_tunnel::mcp_tunnel_smoke,
+            mcp_tunnel::mcp_tunnel_open_docs
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyclone PC Companion");
