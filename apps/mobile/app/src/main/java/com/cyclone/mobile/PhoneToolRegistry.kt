@@ -8,15 +8,26 @@ data class PhoneToolDefinition(
     val mutating: Boolean,
     val requiredCapability: String? = null,
     val description: String,
+    val parameters: JSONObject? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
         .put("mutating", mutating)
         .put("requiredCapability", requiredCapability ?: JSONObject.NULL)
         .put("description", description)
+        .put("parameters", parameters ?: JSONObject.NULL)
 }
 
 object PhoneToolRegistry {
+    private fun humanizeParameters(): JSONObject = JSONObject().put(
+        "humanize",
+        JSONObject()
+            .put("type", "string")
+            .put("enum", JSONArray(listOf("auto", "off", "light", "normal")))
+            .put("default", "auto")
+            .put("unknownValues", "reject"),
+    )
+
     val definitions: List<PhoneToolDefinition> = listOf(
         PhoneToolDefinition("workspace.list", false, description = "List durable Layer 2 profiles, armed jobs and global mutation owner"),
         PhoneToolDefinition("workspace.register", true, description = "Register id, label, appPackage, androidUserId; display 0 only"),
@@ -30,12 +41,12 @@ object PhoneToolRegistry {
         PhoneToolDefinition("phone.screenshot", false, "screenshot", "Capture the screen or a cropped region; base64 is opt-in"),
         PhoneToolDefinition("phone.find", false, "accessibility", "Resolve stable selectors against the current normalized UI snapshot"),
         PhoneToolDefinition("phone.click", true, "accessibility", "Click a current observation-scoped element. Fast Path settles 300ms then fingerprints; Unchanged is verified=false and must not retry via a second click channel"),
-        PhoneToolDefinition("phone.long_press", true, "accessibility", "Long-press the center of a selected element"),
-        PhoneToolDefinition("phone.tap", true, "accessibility", "Tap screen coordinates"),
+        PhoneToolDefinition("phone.long_press", true, "accessibility", "Long-press a selected element; semantic ACTION_LONG_CLICK first, coordinate fallback uses bounded Human Gesture", humanizeParameters()),
+        PhoneToolDefinition("phone.tap", true, "accessibility", "Tap screen coordinates; auto resolves to LIGHT Human Gesture and off preserves the straight compatibility path", humanizeParameters()),
         PhoneToolDefinition("phone.type", true, "accessibility", "Set text on a selected or focused editable element"),
         PhoneToolDefinition("phone.replace_text", true, "accessibility", "Replace text on a selected or focused editable element"),
-        PhoneToolDefinition("phone.scroll", true, "accessibility", "Scroll a selected or first scrollable container"),
-        PhoneToolDefinition("phone.swipe", true, "accessibility", "Dispatch a coordinate swipe gesture"),
+        PhoneToolDefinition("phone.scroll", true, "accessibility", "Scroll semantically first; when unsupported, safe grounded coordinate fallback uses auto=NORMAL Human Gesture", humanizeParameters()),
+        PhoneToolDefinition("phone.swipe", true, "accessibility", "Dispatch a coordinate swipe gesture; auto resolves to NORMAL Human Gesture and off preserves the straight compatibility path", humanizeParameters()),
         PhoneToolDefinition("phone.back", true, "accessibility", "Perform Android Back"),
         PhoneToolDefinition("phone.home", true, "accessibility", "Perform Android Home"),
         PhoneToolDefinition("phone.open_app", true, "app_launch", "Planner landing: launch an installed package through its launcher intent before hunting icons"),
