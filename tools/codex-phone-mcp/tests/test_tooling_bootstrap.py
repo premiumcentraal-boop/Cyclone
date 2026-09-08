@@ -4,25 +4,11 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
 from cyclone_phone_mcp.gateway import GatewayClient, GatewayError
 from cyclone_phone_mcp.tooling import apply_gateway_env, load_connection
-
-
-def _posix_runtime():
-    stack = ExitStack()
-    stack.enter_context(patch.object(os, "name", "posix"))
-    stack.enter_context(patch("cyclone_phone_mcp.tooling.os.name", "posix"))
-    try:
-        import cyclone_device_gateway.tooling_seam as seam
-    except ImportError:
-        pass
-    else:
-        stack.enter_context(patch.object(seam.os, "name", "posix"))
-    return stack
 
 
 class ToolingBootstrapTests(unittest.TestCase):
@@ -62,10 +48,9 @@ class ToolingBootstrapTests(unittest.TestCase):
                     "CYCLONE_DEVICE_GATEWAY_RUNTIME",
                 ):
                     os.environ.pop(key, None)
-                with _posix_runtime():
-                    self.assertNotIn("CYCLONE_DEVICE_GATEWAY_TOKEN", os.environ)
-                    loaded = load_connection(include_env=False)
-                    client = GatewayClient(timeout=1)
+                self.assertNotIn("CYCLONE_DEVICE_GATEWAY_TOKEN", os.environ)
+                loaded = load_connection(include_env=False)
+                client = GatewayClient(timeout=1)
             self.assertIsNotNone(loaded)
             self.assertEqual(loaded["token"], token)
             self.assertEqual(client.token, token)
@@ -107,18 +92,27 @@ class ToolingBootstrapTests(unittest.TestCase):
                     "CYCLONE_DEVICE_GATEWAY_RUNTIME",
                 ):
                     os.environ.pop(key, None)
-                with _posix_runtime():
-                    target: dict[str, str] = {}
-                    public = apply_gateway_env(target)
-                    self.assertEqual(target.get("CYCLONE_DEVICE_GATEWAY_TOKEN"), token)
-                    self.assertEqual(target.get("CYCLONE_DEVICE_GATEWAY_URL"), url)
-                    self.assertEqual(target.get("CYCLONE_DEVICE_GATEWAY_PORT"), "19876")
-                    self.assertNotIn("CYCLONE_DEVICE_GATEWAY_TOKEN", json.dumps(public))
-                    self.assertEqual(public.get("sessionSecretPersisted"), "true")
+                target: dict[str, str] = {}
+                public = apply_gateway_env(target)
+                self.assertEqual(target.get("CYCLONE_DEVICE_GATEWAY_TOKEN"), token)
+                self.assertEqual(target.get("CYCLONE_DEVICE_GATEWAY_URL"), url)
+                self.assertEqual(target.get("CYCLONE_DEVICE_GATEWAY_PORT"), "19876")
+                self.assertNotIn("CYCLONE_DEVICE_GATEWAY_TOKEN", json.dumps(public))
+                self.assertEqual(public.get("sessionSecretPersisted"), "true")
 
     def test_missing_bearer_asks_to_start_cyclone_one(self):
-        with self.assertRaises(GatewayError) as raised:
-            GatewayClient("http://127.0.0.1:8765", "").status()
+        with tempfile.TemporaryDirectory() as raw:
+            extra = {"CYCLONE_TOOLING_TEST_ROOT": raw, "LOCALAPPDATA": raw}
+            with patch.dict(os.environ, extra, clear=False):
+                for key in (
+                    "CYCLONE_DEVICE_GATEWAY_TOKEN",
+                    "CYCLONE_DEVICE_GATEWAY_URL",
+                    "CYCLONE_DEVICE_GATEWAY_PORT",
+                    "CYCLONE_DEVICE_GATEWAY_RUNTIME",
+                ):
+                    os.environ.pop(key, None)
+                with self.assertRaises(GatewayError) as raised:
+                    GatewayClient("http://127.0.0.1:8765", "").status()
         message = str(raised.exception)
         self.assertIn("not persisted", message.lower())
         self.assertIn("Cyclone One", message)

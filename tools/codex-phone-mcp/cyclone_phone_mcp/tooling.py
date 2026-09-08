@@ -28,6 +28,19 @@ else:
     DATA_BLOB = None  # type: ignore[misc, assignment]
 
 
+def _isolated_tooling_root() -> bool:
+    return bool(os.getenv("CYCLONE_TOOLING_TEST_ROOT", "").strip())
+
+
+def _uses_dpapi_token() -> bool:
+    """Windows DPAPI bearer file unless an isolated tooling test root is set."""
+    return os.name == "nt" and not _isolated_tooling_root()
+
+
+def _token_filename() -> str:
+    return "gateway-token.dpapi" if _uses_dpapi_token() else "gateway-token.json"
+
+
 def _local_app_data() -> Path:
     override = os.getenv("CYCLONE_TOOLING_TEST_ROOT", "").strip()
     if override:
@@ -52,13 +65,11 @@ def _one_runtime_dir() -> Path:
 
 
 def _token_path() -> Path:
-    return _one_runtime_dir() / ("gateway-token.dpapi" if os.name == "nt" else "gateway-token.json")
+    return _one_runtime_dir() / _token_filename()
 
 
 def _legacy_token_path() -> Path:
-    return _local_app_data() / "Cyclone" / "pc-companion" / (
-        "gateway-token.dpapi" if os.name == "nt" else "gateway-token.json"
-    )
+    return _local_app_data() / "Cyclone" / "pc-companion" / _token_filename()
 
 
 def _locator_path() -> Path:
@@ -130,7 +141,7 @@ def _load_secret_file(path: Path) -> dict[str, Any] | None:
         return None
     try:
         raw = path.read_bytes()
-        text = (_unprotect(raw) if os.name == "nt" and path.suffix == ".dpapi" else raw).decode("utf-8").strip()
+        text = (_unprotect(raw) if _uses_dpapi_token() and path.suffix == ".dpapi" else raw).decode("utf-8").strip()
     except Exception:
         return None
     if not text:

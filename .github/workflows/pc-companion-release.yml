@@ -2,6 +2,14 @@ name: Cyclone PC Companion Release Candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_github_release:
+        description: >
+          Must stay false. This workflow never publishes a GitHub Release;
+          it only builds and uploads a candidate artifact.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -10,6 +18,11 @@ jobs:
   build-candidate:
     runs-on: windows-latest
     steps:
+      - name: Refuse GitHub Release publication
+        if: ${{ inputs.publish_github_release }}
+        shell: pwsh
+        run: |
+          throw 'This workflow never publishes a GitHub Release. Leave publish_github_release=false and use the uploaded candidate artifact.'
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

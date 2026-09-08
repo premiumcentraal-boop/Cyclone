@@ -26,7 +26,6 @@ def _isolate(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("CYCLONE_DEVICE_GATEWAY_URL", raising=False)
     monkeypatch.delenv("CYCLONE_DEVICE_GATEWAY_PORT", raising=False)
     monkeypatch.delenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", raising=False)
-    monkeypatch.setattr("cyclone_device_gateway.tooling_seam.os.name", "posix")
 
 
 def test_persist_roundtrip_without_process_env(monkeypatch, tmp_path):
