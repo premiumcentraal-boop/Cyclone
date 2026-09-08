@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material3.IconButton
@@ -470,14 +471,12 @@ private fun V39AiChatContent(
             }
         }
 
-        if (session.busy) {
-            TextButton(onClick = { session.status = "Stopping…"; agent.cancelActiveTask() }) { Text("Stop task") }
-        }
         if (inputMessage.isNotBlank()) Text(inputMessage, color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall)
-        task?.let { CycloneTaskProgress(it) }
         if (attached) Text("Attachment ready", style = MaterialTheme.typography.labelSmall)
         CycloneGlassSurface(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+            Column {
+            task?.let { CycloneAskTaskPanel(it) }
             Row(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 CycloneIntelligenceControls(enabled = !session.busy)
                 Box {
@@ -500,8 +499,9 @@ private fun V39AiChatContent(
                         .onFailure { inputMessage = "Dictation isn't available. You can type your request." }
                 }) { Icon(Icons.Rounded.Mic, "Dictate request") }
                 FilledIconButton(onClick = { if (session.busy) agent.cancelActiveTask() else submit() }, enabled = session.busy || (hasKey && composer.isNotBlank())) {
-                    if (session.busy) Text("■") else Icon(Icons.Rounded.ArrowUpward, "Send request")
+                    if (session.busy) Icon(Icons.Rounded.Stop, "Stop task") else Icon(Icons.Rounded.ArrowUpward, "Send request")
                 }
+            }
             }
         }
     }
