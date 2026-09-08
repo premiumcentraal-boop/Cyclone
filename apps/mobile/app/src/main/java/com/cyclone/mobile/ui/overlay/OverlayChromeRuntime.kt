@@ -241,12 +241,12 @@ object OverlayChromeRuntime {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
         val context = synchronized(lock) { service } ?: return
-        val backgroundTask = com.cyclone.mobile.runtime.background.WorkspaceTasks.state.value
-        if (backgroundTask != null && backgroundTask.phase !in setOf(
-                com.cyclone.mobile.runtime.background.TaskPhase.STOPPED,
-                com.cyclone.mobile.runtime.background.TaskPhase.FAILED)) {
-            com.cyclone.mobile.runtime.background.WorkspaceTasks.update(backgroundTask.taskId) { it.copy(queued = request) }
-            updateComposer("")
+        val busy = com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask() ||
+            snapshot().state in setOf(OverlayChromeState.ANALYSIS, OverlayChromeState.WORKING, OverlayChromeState.LIVE, OverlayChromeState.GATE)
+        if (busy) {
+            runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.queueRequest(request) }
+                .onSuccess { updateComposer("") }
+                .onFailure { android.widget.Toast.makeText(context, it.message, android.widget.Toast.LENGTH_LONG).show() }
             return
         }
         // A named installed app is a suitable isolated task. Ambiguity is resolved by the user,

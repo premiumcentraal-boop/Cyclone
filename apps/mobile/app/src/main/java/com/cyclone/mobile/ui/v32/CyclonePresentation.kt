@@ -64,11 +64,11 @@ fun CycloneTaskProgress(task: WorkspaceTaskUi, modifier: Modifier = Modifier) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { ui.open(context) }) { Text(if (task.confirmation != null) "Review" else "View progress") }
                 // Layer 2 commands belong to its runtime, never the VD service.
-                if (task.workspaceId == null && task.sessionId != null) {
+                if (runCatching { task.plane().kind == com.cyclone.mobile.runtime.session.SessionPlaneKind.SESSION_KERNEL_VD }.getOrDefault(false)) {
                     if (task.working) TextButton(onClick = { WorkspaceTasks.command(context, task, "pause") }) { Text("Pause") }
                     if (task.resumable && task.phase in setOf(TaskPhase.PAUSED, TaskPhase.HUMAN))
                         TextButton(onClick = { WorkspaceTasks.command(context, task, "resume") }) { Text("Continue") }
-                    if (ui.active) TextButton(onClick = { WorkspaceTasks.command(context, task, "cancel") }) { Text("Stop") }
+                    TextButton(onClick = { WorkspaceTasks.command(context, task, "cancel") }) { Text(if (ui.active) "Stop task" else "Close task") }
                 }
             }
         }

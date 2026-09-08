@@ -17,29 +17,30 @@ import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 
 /** Presentation state only. Every action receives the original exact-plane task. */
 @Composable
-internal fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
+fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
     var expanded by rememberSaveable(task.taskId) { mutableStateOf(UiTask(task).active) }
     val context = LocalContext.current
+    val keyboardOpen = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
     LaunchedEffect(task.taskId, task.confirmation) {
         if (task.confirmation != null) expanded = true
     }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             CycloneOrbitMark(Modifier.size(28.dp))
-            Text(UiTask(task).consumerStatus, style = MaterialTheme.typography.titleSmall,
+            Text("Current task · ${UiTask(task).consumerStatus}", style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f).padding(horizontal = 10.dp))
             IconButton(onClick = { expanded = !expanded }) {
                 Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     if (expanded) "Collapse task details" else "Expand task details")
             }
         }
-        if (expanded) {
+        if (expanded && !keyboardOpen) {
             Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
                 CycloneTaskProgress(task)
             }
         } else {
             TextButton(onClick = { UiTask(task).open(context) }) {
-                Text(if (task.confirmation != null) "Review required" else "View progress")
+                Text(if (task.confirmation != null) "Review required" else "View progress & controls")
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))

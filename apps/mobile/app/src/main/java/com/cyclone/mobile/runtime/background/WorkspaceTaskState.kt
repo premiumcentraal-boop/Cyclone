@@ -80,6 +80,7 @@ object WorkspaceTasks {
         mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let(change) ?: it }
     }
     fun start(context: Context, goal: String, packageName: String, label: String, pendingRequestId: String? = null) {
+        check(!com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.gated()) { "Review the current task before starting another." }
         val liveCount = mutable.value?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) }?.let { 1 } ?: 0
         check(liveCount < PRODUCT_HOT_BACKGROUND_LIMIT) {
             "Finish or stop your current task first."

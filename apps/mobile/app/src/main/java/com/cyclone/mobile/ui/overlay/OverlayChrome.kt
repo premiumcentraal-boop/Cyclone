@@ -436,17 +436,17 @@ private fun ComposerPanel(
         }
 
         if (task != null) {
-            Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 8.dp) {
-                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(task.title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
-                    Text(task.subtitle, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), style = MaterialTheme.typography.bodyMedium, maxLines = 3)
-                    if (task.queued != null) Text("Follow-up saved", color = AuroraCyan, style = MaterialTheme.typography.labelMedium)
-                    Button(onClick = { onAction(OverlayUserAction.MINIMIZE); context.startActivity(WorkspaceTasks.progressIntent(context, task)) },
-                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AuroraBlue)) { Text("View progress") }
+            com.cyclone.mobile.ui.v32.CycloneAskTaskPanel(task)
+        } else if (snapshot.state in setOf(OverlayChromeState.ANALYSIS, OverlayChromeState.WORKING, OverlayChromeState.LIVE, OverlayChromeState.GATE)) {
+            Surface(shape = RoundedCornerShape(24.dp), color = ComposerInk) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Current phone task", modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onAction(OverlayUserAction.STOP_TASK) }) { Text("Stop task") }
                 }
             }
         }
+        com.cyclone.mobile.ui.v32.CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
+        Text("New phone task", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp))
         if (sharing.phase != ScreenSharePhase.OFF) {
             ScreenSharePill(sharing) { LiveCaptureService.stop(context) }
         }
@@ -570,8 +570,8 @@ private fun ComposerPanel(
                 }
 
                 FilledIconButton(
-                    onClick = { if (task?.working == true && snapshot.composerText.isBlank()) WorkspaceTasks.command(context, task, "cancel") else submit() },
-                    enabled = task?.working == true || snapshot.composerText.isNotBlank(),
+                    onClick = { submit() },
+                    enabled = snapshot.composerText.isNotBlank(),
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = AuroraBlue,
@@ -580,8 +580,7 @@ private fun ComposerPanel(
                         disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .30f),
                     ),
                 ) {
-                    Icon(if (task?.working == true && snapshot.composerText.isBlank()) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
-                        if (task?.working == true && snapshot.composerText.isBlank()) "Stop task" else "Send request", modifier = Modifier.size(23.dp))
+                    Icon(Icons.Rounded.ArrowUpward, "Send new task", modifier = Modifier.size(23.dp))
                 }
             }
         }
