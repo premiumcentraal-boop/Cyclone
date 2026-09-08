@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -387,9 +388,10 @@ private fun V39AiChatContent(
                 Text(selectedModel.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Icon(Icons.Rounded.ArrowDropDown, null)
             }
-            DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+            DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }, modifier = Modifier.heightIn(max = 320.dp)) {
+                Text("Select model", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall)
                 V39AiChatContract.models().forEach { model ->
-                    DropdownMenuItem(text = { Text(model.label) }, onClick = {
+                    DropdownMenuItem(text = { Text(model.label) }, trailingIcon = { if (V39AiChatContract.storageId(model) == selectedModelId) Text("✓") }, onClick = {
                         selectedModelId = V39AiChatContract.storageId(model)
                         prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()
                         modelMenuOpen = false
@@ -410,7 +412,7 @@ private fun V39AiChatContent(
                     Column(Modifier.fillMaxWidth().padding(top = 32.dp, bottom = 28.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         CycloneOrbitMark(Modifier.size(64.dp))
-                        Text("A little less doing.\nA little more done.", fontSize = 32.sp, lineHeight = 39.sp,
+                        Text("Ask Cyclone", fontSize = 32.sp, lineHeight = 39.sp,
                             fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurface)
                         Text("What would you like me to do?", style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)

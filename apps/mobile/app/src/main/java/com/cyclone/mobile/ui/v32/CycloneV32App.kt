@@ -267,7 +267,7 @@ internal fun V32RoutineDetail(context: Context, automation: AutomationDefinition
     var enabled by remember(automation.id, automation.enabled) { mutableStateOf(automation.enabled) }
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { OutlinedButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null); Spacer(Modifier.size(6.dp)); Text("All routines") } }
-        item { CyclonePageIntro("Routine", automation.name, automation.description.ifBlank { "A readable, reviewable phone routine." }) }
+        item { CyclonePageIntro("Routine", automation.name, "${automation.steps.size} steps · ${automation.v32TriggerSummary()}") }
         item {
             CycloneHeroCard(automation.v32TriggerSummary(), "This is when Cyclone starts.", Icons.Rounded.Bolt, tone = CyclonePastel.SKY)
         }

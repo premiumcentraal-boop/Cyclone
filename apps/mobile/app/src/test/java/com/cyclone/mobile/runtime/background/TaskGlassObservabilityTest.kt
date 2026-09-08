@@ -25,13 +25,13 @@ class TaskGlassObservabilityTest {
             message = fast.label,
         )
         assertEquals(GlassStepKind.FAST_PATH, vd.glassStepKind)
-        assertTrue(vd.subtitle.startsWith("Fast Path ·"))
+        assertEquals("Navigating Chrome", vd.subtitle)
         assertEquals(SessionPlaneKind.SESSION_KERNEL_VD, vd.plane().kind)
         assertTrue(ViewProgressRouter.showsVdFrames(vd))
         assertFalse(ViewProgressRouter.showsLayer2App(vd))
         val skilled = vd.copy(message = skill!!.label, glassStepKind = skill.kind)
         assertEquals(GlassStepKind.SKILL, skilled.glassStepKind)
-        assertTrue(skilled.subtitle.startsWith("Skill ·"))
+        assertEquals("Using your Chrome routine", skilled.subtitle)
         assertEquals(SessionPlaneKind.SESSION_KERNEL_VD, skilled.plane().kind)
     }
 
@@ -51,7 +51,7 @@ class TaskGlassObservabilityTest {
             message = step.label,
         )
         assertEquals(GlassStepKind.LAYER2_SLICE, layer2.glassStepKind)
-        assertTrue(layer2.subtitle.startsWith("Layer 2 slice"))
+        assertEquals("Working in Shop", layer2.subtitle)
         assertEquals(SessionPlaneKind.LAYER2_WORKSPACE, layer2.plane().kind)
         assertTrue(ViewProgressRouter.showsLayer2App(layer2))
         assertFalse(ViewProgressRouter.showsVdFrames(layer2))

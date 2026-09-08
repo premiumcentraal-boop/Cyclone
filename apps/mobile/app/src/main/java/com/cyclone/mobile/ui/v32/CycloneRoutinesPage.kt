@@ -28,7 +28,17 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
     BackHandler(selected != null || group != null || mode.isNotEmpty()) { selected = null; group = null; mode = "" }
     when {
         mode == "teach" -> CycloneFollowMePage(context, refreshTick) { mode = "" }
-        mode == "advanced" -> V32RoutineBuilder(onBack = { mode = "" }, onSave = { draft ->
+        mode == "manual" -> Column {
+            TextButton(onClick = { mode = "advanced" }) { Text("‹ Advanced") }
+            V32TeachPage(context, refreshTick)
+        }
+        mode == "advanced" -> Column(Modifier.padding(18.dp)) {
+            TextButton(onClick = { mode = "" }) { Text("‹ Routines") }
+            Text("Advanced", style = MaterialTheme.typography.headlineSmall)
+            TextButton(onClick = { mode = "builder" }) { Text("Routine builder") }
+            TextButton(onClick = { mode = "manual" }) { Text("Manual teacher & teaching history") }
+        }
+        mode == "builder" -> V32RoutineBuilder(onBack = { mode = "" }, onSave = { draft ->
             val routine = draft.toAutomationForDevice(notificationAccess = v32NotificationListenerEnabled(context))
             AutomationRuntime.store.saveAutomation(routine)
             if (routine.trigger.type == TriggerType.SCHEDULE) AutomationRuntime.registerSchedule(context, routine)

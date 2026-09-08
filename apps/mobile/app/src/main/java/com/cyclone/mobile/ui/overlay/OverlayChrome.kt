@@ -311,7 +311,7 @@ internal fun OverlayIdleHalo(
             center = center,
         )
         drawCircle(
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f + response * 0.34f),
+            color = Color.White.copy(alpha = 0.34f + response * 0.34f),
             radius = if (state.activating) 3.2.dp.toPx() else 2.3.dp.toPx(),
             center = center,
         )
