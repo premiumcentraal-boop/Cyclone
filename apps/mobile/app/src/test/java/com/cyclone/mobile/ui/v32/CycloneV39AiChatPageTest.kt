@@ -75,7 +75,8 @@ class CycloneV39AiChatPageTest {
 
     @Test fun composerIsMultilineAndHasOneSendAction() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertTrue(page.contains("minLines = 2"))
+        assertTrue(page.contains("BasicTextField(value = composer, onValueChange = { composer = it }"))
+        assertTrue(page.contains("contentDescription = \"Ask Cyclone composer\""))
         assertTrue(page.contains("maxLines = 5"))
         assertTrue(page.contains("ImeAction.Send"))
         assertEquals(1, Regex("FilledIconButton\\(").findAll(page).count())
@@ -97,7 +98,9 @@ class CycloneV39AiChatPageTest {
     @Test fun missingKeyHasClearSettingsAffordance() {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("Add API key in Settings"))
-        assertTrue(page.contains("hasKey && composer.isNotBlank() && !session.busy"))
+        assertTrue(page.contains("TextButton(onClick = onSettings) { Text(\"Add API key in Settings\") }"))
+        assertTrue(page.contains("enabled = session.busy || (hasKey && composer.isNotBlank())"))
+        assertTrue(page.contains("if (session.busy) agent.cancelActiveTask() else submit()"))
     }
 
     @Test fun composerClearsOnlyAfterAcceptedSubmit() {
