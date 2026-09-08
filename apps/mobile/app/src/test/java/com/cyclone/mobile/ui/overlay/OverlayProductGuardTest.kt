@@ -23,6 +23,8 @@ class OverlayProductGuardTest {
     fun primaryShellHasFiveConsumerDestinationsAndNoOverlayTab() {
         assertEquals(listOf("HOME", "PROFILES", "AI", "ROUTINES", "BRAIN"), V32Destination.entries.map { it.name })
         assertEquals(listOf("Home", "Profiles", "AI", "Routines", "Brain"), V32Destination.entries.map { it.label })
+        assertEquals(OverlayChromeContract.homeDestinationNames, V32Destination.entries.map { it.name })
+        assertEquals(OverlayChromeContract.homeDestinationLabels, V32Destination.entries.map { it.label })
         assertEquals(5, V32Destination.entries.size)
         assertTrue(V32Destination.entries.none { it.name == "OVERLAY" || it.label == "Overlay" })
     }

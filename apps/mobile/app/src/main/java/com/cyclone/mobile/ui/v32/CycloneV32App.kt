@@ -305,6 +305,7 @@ internal fun V32RoutineDetail(context: Context, automation: AutomationDefinition
                     })
                 }
                 Button(
+                    enabled = enabled,
                     onClick = { AutomationRuntime.router.runManual(automation.id); Toast.makeText(context, "Routine started", Toast.LENGTH_SHORT).show() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.size(6.dp)); Text("Run now") }

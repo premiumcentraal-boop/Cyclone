@@ -27,6 +27,9 @@ data class UiTask(val source: WorkspaceTaskUi) {
         TaskPhase.STOPPED -> "Stopped"
     }
     val subtitle get() = source.subtitle
+    fun belongsToProfile(id: String): Boolean = source.workspaceId == id &&
+        source.workspaceGeneration?.let { it >= 0 } == true && source.displayId == 0 &&
+        (source.sessionId == null || source.sessionId == "default-foreground")
     fun open(context: Context) = context.startActivity(ViewProgressRouter.intent(context, source))
 }
 

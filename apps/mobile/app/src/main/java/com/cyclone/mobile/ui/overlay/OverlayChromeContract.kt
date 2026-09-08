@@ -33,8 +33,8 @@ object OverlayChromeContract {
     /** Overlay chrome is not an Activity. Null means no launcher component is added. */
     val overlayLauncherActivity: String? = null
 
-    val homeDestinationNames: List<String> = listOf("HOME", "TEACH", "AI", "ROUTINES", "BRAIN")
-    val homeDestinationLabels: List<String> = listOf("Home", "Teach", "AI", "Routines", "Brain")
+    val homeDestinationNames: List<String> = listOf("HOME", "PROFILES", "AI", "ROUTINES", "BRAIN")
+    val homeDestinationLabels: List<String> = listOf("Home", "Profiles", "AI", "Routines", "Brain")
 
     val overlayStates: List<String> = listOf("IDLE", "ANALYSIS", "WORKING", "LIVE", "GATE", "DONE")
 

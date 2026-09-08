@@ -11,6 +11,14 @@ class CycloneTaskPresentationTest {
         assertSame(source, UiTask(source).source)
         assertEquals(19L, UiTask(source).source.workspaceGeneration)
     }
+    @Test fun profileDetailRejectsOtherPlanesAndIncompleteIdentity() {
+        val source = WorkspaceTaskUi("task", "default-foreground", "App", "com.app", "Goal", displayId = 0, workspaceId = "profile", workspaceGeneration = 4)
+        assertTrue(UiTask(source).belongsToProfile("profile"))
+        assertFalse(UiTask(source).belongsToProfile("other"))
+        assertFalse(UiTask(source.copy(sessionId = "named-vd", displayId = 7)).belongsToProfile("profile"))
+        assertFalse(UiTask(source.copy(workspaceGeneration = null)).belongsToProfile("profile"))
+        assertFalse(UiTask(source.copy(workspaceId = null, workspaceGeneration = null)).belongsToProfile("profile"))
+    }
     @Test fun consumerCopyDoesNotExposeExecutionPlane() {
         val source = WorkspaceTaskUi("task", "named-vd", "Instagram", "com.instagram.android", "Find creators", phase = TaskPhase.WORKING, displayId = 7, glassStepKind = GlassStepKind.FAST_PATH, message = "Fast Path · phone.click")
         assertEquals("Navigating Instagram", UiTask(source).subtitle)

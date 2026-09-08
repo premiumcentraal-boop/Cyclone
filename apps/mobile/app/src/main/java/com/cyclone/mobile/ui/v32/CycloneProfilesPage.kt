@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.runtime.workspaces.*
 import com.cyclone.mobile.ui.ProfileSetupPage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,9 +20,10 @@ import kotlinx.coroutines.withContext
 @Composable
 fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     val scope = rememberCoroutineScope()
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    var selectedId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     var waiting by remember { mutableStateOf(emptyList<String>()) }
     var busy by remember { mutableStateOf(false) }
+    var activeOnly by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(selectedId != null) { selectedId = null }
     var setup by remember { mutableStateOf(false) }
     var profiles by remember { mutableStateOf(emptyList<Workspace>()) }
@@ -33,21 +35,34 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     }
     fun openForHuman(profile: Workspace) {
         busy = true
+        error = ""
         scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val params = org.json.JSONObject().put("sessionId", "default-foreground").put("displayId", 0).put("id", profile.id)
-                val switched = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(java.util.UUID.randomUUID().toString(), "workspace.switch", params))
-                // Human opening does not retain AI injection authority.
-                if (switched.ok) com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(java.util.UUID.randomUUID().toString(), "workspace.pause", params))
-                switched
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val params = org.json.JSONObject().put("sessionId", "default-foreground").put("displayId", 0).put("id", profile.id)
+                    val switched = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(java.util.UUID.randomUUID().toString(), "workspace.switch", params))
+                    // Success requires the existing authority to finish the human handoff too.
+                    if (switched.ok) com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(java.util.UUID.randomUUID().toString(), "workspace.pause", params))
+                    else switched
+                }
+                if (!result.ok) error = "Couldn't hand control to you safely. Review the current task or check profile setup."
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                error = "Profile opening was interrupted. You can try again."
+            } finally {
+                busy = false
             }
-            busy = false
-            if (!result.ok) error = "Couldn't open this profile safely. Check profile setup."
         }
     }
+
+    val activeProfiles = profiles.filter { it.state != WorkspaceState.idle || it.id in waiting }
+    val visibleProfiles = (if (activeOnly) activeProfiles else profiles).sortedWith(
+        compareBy<Workspace> { when (it.state) { WorkspaceState.gated -> 0; WorkspaceState.running -> 1; WorkspaceState.paused -> 2; else -> 3 } }.thenBy { it.label.lowercase() },
+    )
     val selected = profiles.firstOrNull { it.id == selectedId }
     if (selected != null) {
-        val exactTask = task?.takeIf { it.workspaceId == selected.id }
+        val exactTask = task?.takeIf { UiTask(it).belongsToProfile(selected.id) }
         LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item { TextButton(onClick = { selectedId = null }) { Text("‹ Profiles") } }
             item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -73,10 +88,11 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             item { CycloneSectionTitle("Active now") }
             item { CycloneTaskProgress(active) }
         }
-        item { CycloneSectionTitle("All profiles") }
+        item { CycloneSegmentedControl(listOf("All (${profiles.size})", "Active (${activeProfiles.size})"), if (activeOnly) 1 else 0, { activeOnly = it == 1 }) }
+        if (activeOnly && activeProfiles.isEmpty()) item { Text("No profiles are active right now.") }
         if (error.isNotEmpty()) item { Text(error) }
         if (profiles.isEmpty()) item { Text("Add a profile to keep another app account separate.") }
-        items(profiles.sortedBy { if (it.state == WorkspaceState.running) 0 else 1 }, key = { it.id }) { profile ->
+        items(visibleProfiles, key = { it.id }) { profile ->
             CycloneSurface(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CycloneAppIcon(profile.appPackage)
                 Column(Modifier.weight(1f)) {

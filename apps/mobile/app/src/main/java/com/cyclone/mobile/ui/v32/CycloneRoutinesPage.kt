@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -57,13 +58,13 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
                 item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Routines", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
                     TextButton(onClick = { grouped = !grouped; group = null }) { Text(if (grouped) "Individual" else "Grouped") }
-                    TextButton(onClick = { create = true }) { Text("+") }
+                    IconButton(onClick = { create = true }) { Icon(androidx.compose.material.icons.Icons.Rounded.Add, "Create routine") }
                 } }
                 item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Search routines") }) }
                 item { CycloneSegmentedControl(listOf("Apps", "Categories", "Specifics"), grouping, { grouping = it; group = null }) }
                 if (group != null) item { TextButton(onClick = { group = null }) { Text("‹ ${if (grouping == 0) appLabel(context, group!!) else group}") } }
                 task?.takeIf { grouping == 0 && group == it.packageName && UiTask(it).active }?.let { current -> item { CycloneTaskProgress(current) } }
-                if (filtered.isEmpty()) item { Text("No routines yet. Describe one or teach Cyclone by doing.") }
+                if (filtered.isEmpty()) item { Text(if (query.isNotBlank()) "No routines match your search." else "No routines yet. Describe one or teach Cyclone by doing.") }
                 if (grouped && group == null) {
                     items(groups.keys.sorted()) { key ->
                         TextButton(onClick = { group = key }, modifier = Modifier.fillMaxWidth()) {
