@@ -100,6 +100,9 @@ internal object V39AiChatSessionRuntime {
     private val nextId = AtomicLong(1L)
     val messages = mutableStateListOf<V39ChatMessage>()
     val submitGate = V39AiSubmitGate()
+    var pendingRequest by mutableStateOf("")
+    var backgroundGoal by mutableStateOf<String?>(null)
+    var reportedTask by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
     var status by mutableStateOf("")
 
@@ -299,6 +302,20 @@ private fun V39AiChatContent(
 
     fun submit() {
         val request = session.submitGate.tryAccept(composer, hasKey) ?: return
+        val share = com.cyclone.mobile.capture.LiveCaptureSessionManager.state.value
+        val explicitForeground = share.phase == com.cyclone.mobile.capture.ScreenSharePhase.LIVE && share.scope == com.cyclone.mobile.capture.CaptureScope.WHOLE_DISPLAY
+        if (!explicitForeground) {
+            session.submitGate.complete()
+            if (!com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.isAttached()) {
+                inputMessage = "Phone control needs setup or repair. Open Settings to continue."
+                return
+            }
+            session.append(V39ChatRole.USER, request)
+            session.backgroundGoal = request
+            com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.submitRequest(request)
+            composer = ""
+            return
+        }
         val baseConfig = V39AiChatContract.config(selectedModelId, CycloneAiAccessProfileStore.read(context))
         val config = baseConfig.copy(model = baseConfig.model.copy(reasoningEffort = prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium"), attachment = com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take())
         composer = ""
@@ -336,6 +353,19 @@ private fun V39AiChatContent(
                 session.submitGate.complete()
                 session.busy = false
             }
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val pending = session.pendingRequest
+        if (pending.isNotBlank()) { composer = pending; session.pendingRequest = ""; submit() }
+    }
+    androidx.compose.runtime.LaunchedEffect(task?.taskId, task?.phase) {
+        val current = task
+        if (current != null && current.goal == session.backgroundGoal && current.taskId != session.reportedTask &&
+            current.phase in setOf(com.cyclone.mobile.runtime.background.TaskPhase.DONE, com.cyclone.mobile.runtime.background.TaskPhase.FAILED, com.cyclone.mobile.runtime.background.TaskPhase.STOPPED)) {
+            session.append(V39ChatRole.CYCLONE, current.message, current.phase == com.cyclone.mobile.runtime.background.TaskPhase.DONE)
+            session.reportedTask = current.taskId
         }
     }
 

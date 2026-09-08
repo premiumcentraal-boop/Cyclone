@@ -99,7 +99,8 @@ private val AuroraBlue = Color(0xFF4A8DFF)
 private val AuroraCyan = Color(0xFF80E9FF)
 private val AuroraViolet = Color(0xFF8568FF)
 private val AuroraMagenta = Color(0xFFE56CFF)
-private val ComposerInk = Color(0xFF191A20)
+private val ComposerInk: Color
+    @Composable get() = MaterialTheme.colorScheme.surface
 
 data class OverlayAiSettings(
     val modelId: String = OpenRouterModelPresets.DEFAULT.id,
@@ -310,7 +311,7 @@ internal fun OverlayIdleHalo(
             center = center,
         )
         drawCircle(
-            color = Color.White.copy(alpha = 0.34f + response * 0.34f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f + response * 0.34f),
             radius = if (state.activating) 3.2.dp.toPx() else 2.3.dp.toPx(),
             center = center,
         )
@@ -431,14 +432,14 @@ private fun ComposerPanel(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Box(Modifier.size(34.dp, 4.dp).clip(CircleShape).background(Color.White.copy(alpha = .36f)))
+            Box(Modifier.size(34.dp, 4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = .36f)))
         }
 
         if (task != null) {
             Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 8.dp) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(task.title, color = Color.White, style = MaterialTheme.typography.titleMedium)
-                    Text(task.subtitle, color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                    Text(task.title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+                    Text(task.subtitle, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .72f), style = MaterialTheme.typography.bodyMedium, maxLines = 3)
                     if (task.queued != null) Text("Follow-up saved", color = AuroraCyan, style = MaterialTheme.typography.labelMedium)
                     Button(onClick = { onAction(OverlayUserAction.MINIMIZE); context.startActivity(WorkspaceTasks.progressIntent(context, task)) },
                         modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
@@ -460,7 +461,21 @@ private fun ComposerPanel(
                             launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
                         }) { Text("Share screen") }
                     }
-                    ComposerAccessory.MODEL -> Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+                    ComposerAccessory.MODEL -> Column(Modifier.heightIn(max = 310.dp).padding(12.dp).verticalScroll(rememberScrollState())) {
+                        Text("Intelligence", style = MaterialTheme.typography.titleSmall)
+                        val levels = listOf("low", "medium", "high")
+                        androidx.compose.material3.Slider(value = levels.indexOf(aiSettings.reasoningEffort).coerceAtLeast(0).toFloat(), valueRange = 0f..2f, steps = 1,
+                            onValueChange = { onAiSettingsChanged(aiSettings.copy(reasoningEffort = levels[kotlin.math.round(it).toInt().coerceIn(0, 2)])) })
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { listOf("Low", "Medium", "High").forEach { Text(it, style = MaterialTheme.typography.labelSmall) } }
+                        Text("Phone autonomy", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                        var autonomy by remember { mutableStateOf(com.cyclone.mobile.ai.CycloneAiAccessProfileStore.read(context)) }
+                        Row {
+                            listOf(com.cyclone.mobile.ai.CycloneAiAccessProfile.GUIDED to "Ask often", com.cyclone.mobile.ai.CycloneAiAccessProfile.BALANCED to "Balanced", com.cyclone.mobile.ai.CycloneAiAccessProfile.FULL to "Independent").forEach { (profile, label) ->
+                                TextButton(onClick = { autonomy = profile; com.cyclone.mobile.ai.CycloneAiAccessProfileStore.write(context, profile) }) { Text((if (autonomy == profile) "✓ " else "") + label, style = MaterialTheme.typography.labelSmall) }
+                            }
+                        }
+                        Text("Sensitive actions always ask.", style = MaterialTheme.typography.bodySmall)
+
                         TextButton(onClick = { modelsExpanded = !modelsExpanded }) {
                             Text(OpenRouterModelPresets.byId(aiSettings.modelId).label + if (modelsExpanded) " ▴" else " ▾")
                         }
@@ -471,7 +486,6 @@ private fun ComposerPanel(
                                 modelsExpanded = false
                             }) { Text((if (model.id == aiSettings.modelId) "✓ " else "") + model.label) }
                         }
-                        TextButton(onClick = { launchExternal(Intent(context, CycloneAiSettingsActivity::class.java)) }) { Text("More AI settings") }
                         TextButton(enabled = !sharing.active, onClick = {
                             launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
                         }) { Text("Share for cross-app control") }
@@ -500,24 +514,25 @@ private fun ComposerPanel(
                     .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(
-                    onClick = { accessory = accessory.toggle(ComposerAccessory.ATTACHMENTS) },
-                    modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                ) {
-                    Icon(Icons.Rounded.Add, "Add attachment", tint = Color.White, modifier = Modifier.size(27.dp))
-                }
                 if (!compactRunning) IconButton(
                     onClick = { accessory = accessory.toggle(ComposerAccessory.MODEL) },
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                 ) {
-                    Icon(Icons.Rounded.Tune, "Choose model", tint = Color.White, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Rounded.Tune, "Choose model", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
                 }
+                IconButton(
+                    onClick = { accessory = accessory.toggle(ComposerAccessory.ATTACHMENTS) },
+                    modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
+                ) {
+                    Icon(Icons.Rounded.Add, "Add attachment", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(27.dp))
+                }
+
 
                 BasicTextField(
                     value = snapshot.composerText,
                     onValueChange = onComposerChanged,
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.White),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(AuroraCyan),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { submit() }),
@@ -533,7 +548,7 @@ private fun ComposerPanel(
                             if (snapshot.composerText.isEmpty()) {
                                 Text(
                                     if (snapshot.voiceListening) OverlayCopy.LISTENING else OverlayCopy.COMPOSER,
-                                    color = Color.White.copy(alpha = .68f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f),
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
                             }
@@ -549,7 +564,7 @@ private fun ComposerPanel(
                     Icon(
                         Icons.Rounded.Mic,
                         contentDescription = "Dictate request",
-                        tint = if (snapshot.voiceListening) AuroraCyan else Color.White,
+                        tint = if (snapshot.voiceListening) AuroraCyan else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(25.dp),
                     )
                 }
@@ -560,9 +575,9 @@ private fun ComposerPanel(
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = AuroraBlue,
-                        disabledContainerColor = Color.White.copy(alpha = .10f),
-                        contentColor = Color.White,
-                        disabledContentColor = Color.White.copy(alpha = .30f),
+                        disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .10f),
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .30f),
                     ),
                 ) {
                     Icon(if (task?.working == true && snapshot.composerText.isBlank()) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
@@ -593,12 +608,12 @@ private fun GatePanel(
         Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 10.dp) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Confirmation needed", style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.weight(1f))
+                    Text("Confirmation needed", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                     IconButton(onClick = { onAction(OverlayUserAction.EXIT) }) {
-                        Icon(Icons.Rounded.Close, "Cancel", tint = Color.White.copy(alpha = .8f))
+                        Icon(Icons.Rounded.Close, "Cancel", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = .8f))
                     }
                 }
-                Text(OverlayCopy.GATE, color = Color.White.copy(alpha = .82f))
+                Text(OverlayCopy.GATE, color = MaterialTheme.colorScheme.onSurface.copy(alpha = .82f))
                 TextButton(
                     onClick = { onAction(OverlayUserAction.GATE_CONFIRM) },
                     modifier = Modifier.fillMaxWidth(),
@@ -608,7 +623,7 @@ private fun GatePanel(
                 if (snapshot.gateClass != null) {
                     Text(
                         "Cyclone will authorize only this exact ${snapshot.gateClass.wire} action.",
-                        color = Color.White.copy(alpha = .58f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .58f),
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -634,7 +649,7 @@ internal fun ScreenSharePill(state: com.cyclone.mobile.capture.ScreenShareState,
                 ScreenSharePhase.ERROR -> state.message ?: "Screen sharing failed"
                 ScreenSharePhase.REVOKED -> "Screen sharing ended"
                 ScreenSharePhase.OFF -> "Screen sharing off"
-            }, color = Color.White, modifier = Modifier.weight(1f, fill = false))
+            }, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f, fill = false))
             if (state.active) TextButton(onClick = onStop, enabled = state.phase != ScreenSharePhase.STOPPING) { Text("Stop") }
         }
     }

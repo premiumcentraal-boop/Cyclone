@@ -158,13 +158,7 @@ private fun V32HomePage(
                 TextButton(onClick = onSettings) { CycloneStatus(if (ready.ready) "Ready" else if (ready.needsRepair) "Repair" else "Setup needed", ready.ready) }
             }
         }
-        item { CycloneGlassSurface { Column(Modifier.padding(16.dp)) {
-            TextButton(onClick = onAi, modifier = Modifier.fillMaxWidth()) { Text("What should Cyclone do?", style = MaterialTheme.typography.bodyLarge) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = onSettings) { Text("Settings") }
-                Button(onClick = onAi) { Text("Ask Cyclone") }
-            }
-        } } }
+        item { CycloneHomeComposer { request -> V39AiChatSessionRuntime.pendingRequest = request; onAi() } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onAi, modifier = Modifier.weight(1f)) { Text("Ask Cyclone") }
             OutlinedButton(onClick = onRoutines, modifier = Modifier.weight(1f)) { Text("Routines") }

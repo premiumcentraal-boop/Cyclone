@@ -464,7 +464,7 @@ object OverlayChromeRuntime {
     private fun readAiSettings(context: Context): OverlayAiSettings {
         val prefs = context.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE)
         val savedModel = prefs.getString(MODEL_KEY, OpenRouterModelPresets.DEFAULT.id).orEmpty()
-        val modelId = savedModel.takeIf { id -> OpenRouterModelPresets.all.any { it.id == id } }
+        val modelId = com.cyclone.mobile.ai.model.ModelRegistry.resolve(savedModel)?.let(com.cyclone.mobile.ai.model.ModelRegistry::preset)?.id
             ?: OpenRouterModelPresets.DEFAULT.id
         val effort = prefs.getString(EFFORT_KEY, "medium").orEmpty()
             .takeIf { it in REASONING_LEVELS } ?: "medium"

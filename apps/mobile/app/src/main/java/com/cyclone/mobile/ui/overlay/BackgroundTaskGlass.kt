@@ -22,25 +22,25 @@ fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
     Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
         .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Surface(shape = RoundedCornerShape(28.dp), color = Color(0xF21A2329), shadowElevation = 6.dp) {
+        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f), shadowElevation = 6.dp) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (icon != null) AndroidView(factory = { ImageView(it) }, update = {
                         it.setImageDrawable(icon); it.contentDescription = task.app
                     }, modifier = Modifier.size(32.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(task.title, color = Color.White, style = MaterialTheme.typography.titleSmall)
-                        Text(task.subtitle, color = Color(0xFFBCCBD3), style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                        Text(task.title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleSmall)
+                        Text(task.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                     }
                 }
                 Button(onClick = { context.startActivity(WorkspaceTasks.progressIntent(context, task)) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) { Text("View progress") }
             }
         }
-        Surface(onClick = onAsk, shape = RoundedCornerShape(30.dp), color = Color(0xF21A2329)) {
+        Surface(onClick = onAsk, shape = RoundedCornerShape(30.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f)) {
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Ask Cyclone", modifier = Modifier.weight(1f), color = Color.White.copy(alpha = .75f))
-                if (task.working) TextButton(onClick = { WorkspaceTasks.command(context, task, "cancel") }) { Text("■", color = Color.White) }
+                Text("Ask Cyclone", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .75f))
+                if (task.working && task.workspaceId == null) TextButton(onClick = { WorkspaceTasks.command(context, task, "cancel") }) { Text("■", color = MaterialTheme.colorScheme.onSurface) }
             }
         }
     }
