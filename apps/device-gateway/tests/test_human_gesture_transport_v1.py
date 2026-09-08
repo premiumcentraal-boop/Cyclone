@@ -270,6 +270,45 @@ def test_bounded_android_gesture_projection_keeps_only_authoritative_safe_fields
     }
 
 
+def test_exact_mobile_diagnostic_shape_projects_to_canonical_bounded_fields():
+    trace_hash = "b" * 64
+    projected = _safe_android_execution({
+        "result": {"execution": {
+            "ok": True,
+            "humanGesture": {
+                "controlVersion": "cyclone.human_gesture.control.v1",
+                "traceVersion": "cyclone.human_gesture.trace.v1",
+                "synthesisVersion": "human-gesture-v03",
+                "requestedHumanize": "normal",
+                "resolvedProfile": "LIGHT",
+                "appliedProfile": "LIGHT",
+                "interactionMode": "synthesized_touch",
+                "dispatchMode": "human_gesture",
+                "backend": "accessibility_dispatch_gesture",
+                "traceHash": trace_hash,
+                "synthesisUs": 317,
+                "downgradeReason": "EDGE_CAPACITY",
+                "rawPoints": [{"x": 1, "y": 2}],
+            },
+        }}
+    })
+    assert projected == {
+        "ok": True,
+        "gesture": {
+            "controlVersion": "cyclone.human_gesture.control.v1",
+            "traceVersion": "cyclone.human_gesture.trace.v1",
+            "synthesisVersion": "human-gesture-v03",
+            "backend": "accessibility_dispatch_gesture",
+            "profileRequested": "normal",
+            "profileResolved": "LIGHT",
+            "mode": "synthesized_touch",
+            "traceHash": trace_hash,
+            "synthesisUs": 317,
+            "downgradeReason": "EDGE_CAPACITY",
+        },
+    }
+
+
 def test_malformed_gesture_fields_are_dropped_not_reinterpreted():
     projected = _safe_android_execution({
         "result": {"execution": {
