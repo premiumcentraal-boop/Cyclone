@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -208,7 +209,7 @@ fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Uni
 }
 @Composable
 fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(modifier, shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f), tonalElevation = 0.dp, shadowElevation = 6.dp, content = content)
+    Surface(modifier.animateContentSize(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f), tonalElevation = 0.dp, shadowElevation = 6.dp, content = content)
 }
 @Composable
 fun CycloneStatus(label: String, positive: Boolean = true) = CycloneStatusPill(label, positive)

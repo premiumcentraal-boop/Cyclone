@@ -464,7 +464,7 @@ private fun ComposerPanel(
                     ComposerAccessory.MODEL -> Column(Modifier.heightIn(max = 310.dp).padding(12.dp).verticalScroll(rememberScrollState())) {
                         Text("Intelligence", style = MaterialTheme.typography.titleSmall)
                         val levels = listOf("low", "medium", "high")
-                        androidx.compose.material3.Slider(value = levels.indexOf(aiSettings.reasoningEffort).coerceAtLeast(0).toFloat(), valueRange = 0f..2f, steps = 1,
+                        androidx.compose.material3.Slider(value = (if (aiSettings.reasoningEffort == "max") 2 else levels.indexOf(aiSettings.reasoningEffort).coerceAtLeast(0)).toFloat(), valueRange = 0f..2f, steps = 1,
                             onValueChange = { onAiSettingsChanged(aiSettings.copy(reasoningEffort = levels[kotlin.math.round(it).toInt().coerceIn(0, 2)])) })
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { listOf("Low", "Medium", "High").forEach { Text(it, style = MaterialTheme.typography.labelSmall) } }
                         Text("Phone autonomy", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))

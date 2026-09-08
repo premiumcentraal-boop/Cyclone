@@ -24,7 +24,7 @@ fun CycloneIntelligenceControls(enabled: Boolean = true, onChanged: () -> Unit =
             Column(Modifier.widthIn(max = 310.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Intelligence", style = MaterialTheme.typography.titleSmall)
                 val levels = listOf("low", "medium", "high")
-                Slider(value = levels.indexOf(level).coerceAtLeast(0).toFloat(), valueRange = 0f..2f, steps = 1,
+                Slider(value = (if (level == "max") 2 else levels.indexOf(level).coerceAtLeast(0)).toFloat(), valueRange = 0f..2f, steps = 1,
                     onValueChange = { level = levels[kotlin.math.round(it).toInt().coerceIn(0, 2)] },
                     onValueChangeFinished = { prefs.edit().putString("openrouter_reasoning_effort", level).apply(); onChanged() })
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { listOf("Low", "Medium", "High").forEach { Text(it, style = MaterialTheme.typography.labelSmall) } }

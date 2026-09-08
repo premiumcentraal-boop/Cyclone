@@ -101,7 +101,8 @@ class WorkspaceTaskService : Service() {
                 val settings = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
                 val profile = CycloneAiAccessProfileStore.read(applicationContext)
                 val config = QuickAgentConfig(
-                    model = settings.getString("openrouter_model", null)?.let(OpenRouterModelPresets::byId) ?: OpenRouterModelPresets.DEFAULT,
+                    model = (settings.getString("openrouter_model", null)?.let(OpenRouterModelPresets::byId) ?: OpenRouterModelPresets.DEFAULT).copy(
+                        reasoningEffort = settings.getString("openrouter_reasoning_effort", "medium")?.takeIf { it in setOf("low", "medium", "high", "max") } ?: "medium"),
                     safeMode = profile != CycloneAiAccessProfile.FULL, accessProfile = profile,
                     attachment = PendingTaskAttachment.take())
                 awaitWorkspace(session.sessionId, ExecutionContext.from(session))
