@@ -22,8 +22,33 @@ class PhoneToolResultHumanGestureEvidenceTest {
         assertEquals("semantic_action", evidence.getString("dispatchMode"))
         assertEquals("semantic", evidence.getString("interactionMode"))
         assertEquals("none", evidence.getString("appliedProfile"))
+        assertEquals("accessibility_dispatch_gesture", evidence.getString("backend"))
+        assertEquals("cyclone.human_gesture.control.v1", evidence.getString("controlVersion"))
+        assertEquals("cyclone.human_gesture.trace.v1", evidence.getString("traceVersion"))
         assertTrue(evidence.isNull("requestedHumanize"))
         assertFalse(evidence.getBoolean("correctedOrRejected"))
+    }
+
+    @Test
+    fun `named virtual display click reports endpoint duration compatibility`() {
+        val result = PhoneToolResult(
+            commandId = "vd-click-test",
+            tool = "phone.click",
+            ok = true,
+            startedAtMs = 10L,
+            finishedAtMs = 11L,
+            payload = JSONObject()
+                .put("performed", true)
+                .put("sessionId", "workspace-mail")
+                .put("displayId", 7),
+        ).toJson()
+
+        val evidence = result.getJSONObject("payload").getJSONObject("humanGesture")
+        assertEquals("workspace_endpoint_duration", evidence.getString("dispatchMode"))
+        assertEquals("workspace_endpoint_duration", evidence.getString("backend"))
+        assertEquals("workspace-mail", evidence.getString("sessionId"))
+        assertEquals(7, evidence.getInt("displayId"))
+        assertTrue(evidence.getBoolean("correctedOrRejected"))
     }
 
     @Test
