@@ -115,7 +115,11 @@ object SessionContract {
     private fun withSessionAlias(params: JSONObject): JSONObject {
         val out = JSONObject(params.toString())
         copySessionAlias(out)
-        out.optJSONObject("executionContext")?.let(::copySessionAlias)
+        copyDisplayAlias(out)
+        out.optJSONObject("executionContext")?.let { nested ->
+            copySessionAlias(nested)
+            copyDisplayAlias(nested)
+        }
         return out
     }
 
@@ -128,6 +132,17 @@ object SessionContract {
             return
         }
         json.put("sessionId", json.get("session_id"))
+    }
+
+    private fun copyDisplayAlias(json: JSONObject) {
+        if (!json.has("display_id")) return
+        if (json.has("displayId")) {
+            if (json.get("displayId").toString() != json.get("display_id").toString()) {
+                throw SessionIdentityException("Conflicting displayId aliases", SESSION_DISPLAY_MISMATCH)
+            }
+            return
+        }
+        json.put("displayId", json.get("display_id"))
     }
 
     private fun wrapBindFailure(error: SessionIdentityException): SessionIdentityException {
