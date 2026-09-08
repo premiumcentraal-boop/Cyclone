@@ -1,5 +1,6 @@
 package com.cyclone.mobile
 
+import com.cyclone.mobile.gesture.HumanGestureRuntimeCapabilities
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -292,9 +293,10 @@ data class PhoneToolResult(
             !ok && HumanGestureDispatch.peekTrace(commandId) == null -> payload
             else -> {
                 val base = if (payload is JSONObject) JSONObject(payload.toString()) else JSONObject()
-                base.put("humanGesture", serializedClickEvidence())
+                base.put("humanGesture", serializedClickEvidence(base))
             }
         }
+        val finalizedPayload = addRuntimeEvidence(renderedPayload)
         return JSONObject()
             .put("commandId", commandId)
             .put("tool", tool)
@@ -305,12 +307,29 @@ data class PhoneToolResult(
             .put("attempts", attempts)
             .put("beforeFingerprint", beforeFingerprint ?: JSONObject.NULL)
             .put("afterFingerprint", afterFingerprint ?: JSONObject.NULL)
-            .put("payload", renderedPayload ?: JSONObject.NULL)
+            .put("payload", finalizedPayload ?: JSONObject.NULL)
             .put("error", error?.toJson() ?: JSONObject.NULL)
     }
 
-    private fun serializedClickEvidence(): JSONObject {
+    private fun serializedClickEvidence(base: JSONObject): JSONObject {
         val trace = HumanGestureDispatch.peekTrace(commandId)
+        val sessionId = base.optString("sessionId").takeIf { it.isNotBlank() }
+        val displayId = if (base.has("displayId")) base.optInt("displayId") else 0
+        val namedVirtualDisplay = (sessionId != null && sessionId != "default-foreground") || displayId > 0
+        if (namedVirtualDisplay) {
+            return JSONObject()
+                .put("requestedHumanize", JSONObject.NULL)
+                .put("resolvedProfile", JSONObject.NULL)
+                .put("profileSource", "workspace_compatibility")
+                .put("appliedProfile", "compatibility_endpoint_duration")
+                .put("dispatchMode", "workspace_endpoint_duration")
+                .put("interactionMode", "coordinate_compatibility")
+                .put("correctedOrRejected", true)
+                .put("reason", "named virtual display backend exposes endpoint+duration only; curved Android path not claimed")
+                .put("durationMs", JSONObject.NULL)
+                .put("sessionId", sessionId ?: JSONObject.NULL)
+                .put("displayId", displayId)
+        }
         return if (trace == null) {
             JSONObject()
                 .put("requestedHumanize", JSONObject.NULL)
@@ -338,6 +357,27 @@ data class PhoneToolResult(
                 .put("sessionId", "default-foreground")
                 .put("displayId", 0)
         }
+    }
+
+    private fun addRuntimeEvidence(value: Any?): Any? {
+        if (value !is JSONObject) return value
+        val humanGesture = value.optJSONObject("humanGesture") ?: return value
+        val out = JSONObject(value.toString())
+        val evidence = out.getJSONObject("humanGesture")
+        val dispatchMode = evidence.optString("dispatchMode")
+        val displayId = evidence.optInt("displayId", 0)
+        val backend = if (dispatchMode == "workspace_endpoint_duration" || displayId > 0) {
+            "workspace_endpoint_duration"
+        } else {
+            "accessibility_dispatch_gesture"
+        }
+        val capabilities = HumanGestureRuntimeCapabilities.toJson(accessibilityConnected = true)
+        evidence
+            .put("backend", backend)
+            .put("controlVersion", capabilities.getString("controlVersion"))
+            .put("traceVersion", capabilities.getString("traceVersion"))
+            .put("synthesisVersion", capabilities.getString("synthesisVersion"))
+        return out
     }
 }
 
