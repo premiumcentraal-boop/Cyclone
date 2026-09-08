@@ -3,7 +3,7 @@ package com.cyclone.mobile
 import com.cyclone.mobile.gesture.HumanizePreference
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFailsWith
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class PhoneToolExecutorHumanizeBoundaryTest {
@@ -25,7 +25,7 @@ class PhoneToolExecutorHumanizeBoundaryTest {
     @Test
     fun `explicit malformed strings fail closed`() {
         listOf("", "natural", "max", "arbitrary-path").forEach { value ->
-            assertFailsWith<IllegalArgumentException> {
+            assertThrows(IllegalArgumentException::class.java) {
                 HumanizePreference.parse(JSONObject().put("humanize", value).optString("humanize"))
             }
         }
@@ -36,7 +36,7 @@ class PhoneToolExecutorHumanizeBoundaryTest {
         listOf<Any>(true, 1, 2.5, JSONObject().put("mode", "normal"), org.json.JSONArray().put("light"))
             .forEach { value ->
                 val coerced = JSONObject().put("humanize", value).optString("humanize")
-                assertFailsWith<IllegalArgumentException> { HumanizePreference.parse(coerced) }
+                assertThrows(IllegalArgumentException::class.java) { HumanizePreference.parse(coerced) }
             }
     }
 }
