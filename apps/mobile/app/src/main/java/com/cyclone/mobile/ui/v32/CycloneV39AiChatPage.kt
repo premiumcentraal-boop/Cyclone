@@ -274,7 +274,8 @@ private fun V39AiChatContent(
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     val scope = rememberCoroutineScope()
     val agent = remember { OpenRouterAdaptiveAgent(context) }
-    val qualifier = remember { ModelQualificationRunner(context) }
+    var chatJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var phoneTask by rememberSaveable { mutableStateOf(false) }
     val session = V39AiChatSessionRuntime
     var composer by rememberSaveable { mutableStateOf("") }
     var toolsMenuOpen by remember { mutableStateOf(false) }
@@ -303,54 +304,33 @@ private fun V39AiChatContent(
     }
 
     fun submit() {
-        val request = session.submitGate.tryAccept(composer, hasKey) ?: return
-        val share = com.cyclone.mobile.capture.LiveCaptureSessionManager.state.value
-        val explicitForeground = share.phase == com.cyclone.mobile.capture.ScreenSharePhase.LIVE && share.scope == com.cyclone.mobile.capture.CaptureScope.WHOLE_DISPLAY
-        if (!explicitForeground) {
-            session.submitGate.complete()
-            if (!com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.isAttached()) {
-                inputMessage = "Phone control needs setup or repair. Open Settings to continue."
-                return
-            }
-            session.append(V39ChatRole.USER, request)
-            session.backgroundGoal = request
-            com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.submitRequest(request)
-            composer = ""
+        inputMessage = ""
+        if (phoneTask) {
+            runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.queueRequest(composer) }
+                .onSuccess { composer = ""; inputMessage = "Saved to Up next. Your current task continues." }
+                .onFailure { inputMessage = it.message ?: "Couldn't save this task." }
             return
         }
-        val baseConfig = V39AiChatContract.config(selectedModelId, CycloneAiAccessProfileStore.read(context))
-        val config = baseConfig.copy(model = baseConfig.model.copy(reasoningEffort = prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium"), attachment = com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take())
+        val request = session.submitGate.tryAccept(composer, hasKey) ?: return
+        val history = session.messages.map { (if (it.role == V39ChatRole.USER) "user" else "assistant") to it.text }
+        val attachment = com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take()
+        val model = V39AiChatContract.modelForStored(selectedModelId).copy(
+            reasoningEffort = prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium")
         composer = ""
         session.busy = true
-        session.status = "Qualifying ${config.model.label}…"
+        session.status = "Answering…"
         session.append(V39ChatRole.USER, request)
-        scope.launch {
+        chatJob = scope.launch {
             try {
-                when (val qualification = qualifier.qualify(config.model)) {
-                    is ModelQualificationOutcome.Failed -> {
-                        recordPreflightFailure(context, request, qualification)
-                        session.status = "Model unavailable"
-                        session.append(V39ChatRole.CYCLONE, qualification.failure.userMessage, false)
-                        return@launch
-                    }
-                    is ModelQualificationOutcome.Passed -> {
-                        session.status = if (qualification.cached) "Model ready · starting…" else "Model qualified · starting…"
-                        val run = agent.execute(request, config) { progress ->
-                            scope.launch {
-                                if (session.submitGate.busy) session.status = progress.trim().ifBlank { "Working…" }
-                            }
-                        }
-                        attachPreflightSuccess(context, run, qualification)
-                        session.status = V39AiChatContract.finalStatus(run)
-                        session.append(V39ChatRole.CYCLONE, run.message, run.ok)
-                    }
-                }
+                val answer = com.cyclone.mobile.ai.CycloneTextChat.answer(context, model, history, request, attachment)
+                session.append(V39ChatRole.CYCLONE, answer)
+                session.status = ""
             } catch (cancelled: CancellationException) {
-                agent.cancelActiveTask()
+                session.status = "Reply stopped"
                 throw cancelled
-            } catch (_: Exception) {
-                session.status = "Stopped safely"
-                session.append(V39ChatRole.CYCLONE, "Cyclone stopped before the task completed.", false)
+            } catch (error: Exception) {
+                session.status = "Couldn't get a reply"
+                session.append(V39ChatRole.CYCLONE, error.message ?: "Chat failed. Try again.")
             } finally {
                 session.submitGate.complete()
                 session.busy = false
@@ -360,7 +340,7 @@ private fun V39AiChatContent(
 
     androidx.compose.runtime.LaunchedEffect(Unit) {
         val pending = session.pendingRequest
-        if (pending.isNotBlank()) { composer = pending; session.pendingRequest = ""; submit() }
+        if (pending.isNotBlank()) { phoneTask = true; composer = pending; session.pendingRequest = ""; submit() }
     }
     androidx.compose.runtime.LaunchedEffect(task?.taskId, task?.phase) {
         val current = task
@@ -436,14 +416,14 @@ private fun V39AiChatContent(
                                 if (session.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                 Column {
                                     Text("Cyclone", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    Text(if (session.busy) "Working on your request…" else session.status, style = MaterialTheme.typography.bodyMedium)
+                                    Text(if (session.busy) "Answering your message…" else session.status, style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
                     }
                 }
             }
-            if (!session.busy && session.messages.lastOrNull()?.role == V39ChatRole.CYCLONE && latestRun != null && latestRun.status != "RUNNING") {
+            if (!session.busy && session.reportedTask != null && latestRun != null && latestRun.status != "RUNNING" && latestRun.goal == session.backgroundGoal) {
                 item {
                     TextButton(onClick = {
                         context.startActivity(
@@ -477,6 +457,13 @@ private fun V39AiChatContent(
         CycloneGlassSurface(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
             Column {
             task?.let { CycloneAskTaskPanel(it) }
+            CyclonePendingRequests()
+            if (session.busy) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Current reply · Answering", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
+            }
+            Text("New request", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp))
+            CycloneSegmentedControl(listOf("Chat", "Phone task"), if (phoneTask) 1 else 0, { phoneTask = it == 1 })
             Row(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 CycloneIntelligenceControls(enabled = !session.busy)
                 Box {
@@ -494,12 +481,12 @@ private fun V39AiChatContent(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { submit() }),
                     modifier = Modifier.weight(1f).padding(vertical = 10.dp).semantics { contentDescription = "Ask Cyclone composer" },
                     decorationBox = { field -> Box { if (composer.isEmpty()) Text("Ask Cyclone", color = MaterialTheme.colorScheme.onSurfaceVariant); field() } })
-                if (!session.busy) IconButton(onClick = {
+                IconButton(onClick = {
                     runCatching { dictation.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)) }
                         .onFailure { inputMessage = "Dictation isn't available. You can type your request." }
                 }) { Icon(Icons.Rounded.Mic, "Dictate request") }
-                FilledIconButton(onClick = { if (session.busy) agent.cancelActiveTask() else submit() }, enabled = session.busy || (hasKey && composer.isNotBlank())) {
-                    if (session.busy) Icon(Icons.Rounded.Stop, "Stop task") else Icon(Icons.Rounded.ArrowUpward, "Send request")
+                FilledIconButton(onClick = { submit() }, enabled = composer.isNotBlank() && (phoneTask || (hasKey && !session.busy))) {
+                    Icon(Icons.Rounded.ArrowUpward, if (phoneTask) "Save new phone task" else "Send request")
                 }
             }
             }
