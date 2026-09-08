@@ -24,7 +24,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,97 +62,54 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
         }
     }
 
-    LazyColumn(
-        contentPadding = PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        item {
-            CyclonePageIntro(
-                "Learn once, debug fast",
-                "Cyclone Brain",
-                "Recent AI runs are saved as compact diagnostics you can inspect, download and share when something goes wrong.",
-            )
-        }
-
-        item { CycloneSectionTitle("Recent runs") }
-        if (runs.isEmpty()) {
-            item {
-                CycloneSimpleCard {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(Icons.Rounded.History, null)
-                        Column {
-                            Text("No AI runs yet", fontWeight = FontWeight.Bold)
-                            Text("Ask Cyclone to do something and its diagnostic run will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        } else {
-            items(runs, key = { it.session.id }) { run ->
-                V39RunCard(run) {
-                    context.startActivity(
-                        Intent(context, TaskResultActivityV292::class.java)
-                            .putExtra(TaskResultActivityV292.EXTRA_SESSION_ID, run.session.id)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            }
-        }
-
-        item {
-            CycloneHeroCard(
-                title = "${skills.count { it.confidence >= .7 }} strong skills",
-                body = "Across ${apps.size} apps and ${paths.size} reusable paths.",
-                icon = Icons.Rounded.AccountTree,
-                tone = CyclonePastel.SKY,
-            ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    V39Metric("Skills", skills.size, Modifier.weight(1f))
-                    V39Metric("Apps", apps.size, Modifier.weight(1f))
-                    V39Metric("Paths", paths.size, Modifier.weight(1f))
-                }
-            }
-        }
-
-        item { CycloneSectionTitle("Reusable skills") }
-        if (skills.isEmpty()) {
-            item {
-                CycloneSimpleCard {
-                    Text("Nothing verified yet", fontWeight = FontWeight.Bold)
-                    Text("Complete phone tasks or teach Cyclone to build reusable evidence.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        } else {
-            items(skills.take(16), key = { it.signature }) { skill ->
-                CycloneSimpleCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.secondary)
-                        Spacer(Modifier.size(10.dp))
+    var tab by remember { mutableIntStateOf(0) }
+    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { Text("What Cyclone knows", style = MaterialTheme.typography.headlineSmall) }
+        item { CycloneSegmentedControl(listOf("Skills", "Apps", "Insights"), tab, { tab = it }) }
+        when (tab) {
+            0 -> {
+                item { CycloneSectionTitle("Verified skills") }
+                val verified = skills.filter { it.successCount > 0 }
+                if (verified.isEmpty()) item { Text("Complete a task or teach Cyclone to build reusable skills.") }
+                items(verified, key = { it.signature }) { skill ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CycloneAppIcon(skill.fromPackage)
                         Column(Modifier.weight(1f)) {
-                            Text(skill.name, fontWeight = FontWeight.Bold)
-                            Text(
-                                "${skill.successCount} success · ${skill.failureCount} failed",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Text(skill.name, style = MaterialTheme.typography.titleSmall)
+                            Text("${skill.successCount} successful uses", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        CycloneStatusPill("${(skill.confidence * 100).toInt()}%", skill.confidence >= .55)
+                        CycloneStatus("${(skill.confidence.coerceIn(0.0, 1.0) * 100).toInt()}%")
+                    }
+                }
+                if (paths.isNotEmpty()) item { Text("${paths.size} learned paths", style = MaterialTheme.typography.bodySmall) }
+            }
+            1 -> {
+                if (apps.isEmpty()) item { Text("Apps Cyclone learns will appear here.") }
+                items(apps, key = { it.packageName }) { app ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CycloneAppIcon(app.packageName)
+                        Column {
+                            Text(app.label, style = MaterialTheme.typography.titleMedium)
+                            Text("${app.openSuccessCount} successful visits", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
             }
-        }
-
-        if (notes.isNotEmpty()) {
-            item {
-                CycloneSimpleCard {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                        Icon(Icons.Rounded.Memory, null)
-                        Text("Latest learning", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-                    notes.take(6).forEach {
-                        Text("• ${it.text}", style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            else -> {
+                item { CycloneSectionTitle("Recent outcomes") }
+                if (runs.isEmpty()) item { Text("Your completed tasks will appear here.") }
+                items(runs, key = { it.session.id }) { run ->
+                    androidx.compose.material3.TextButton(onClick = {
+                        context.startActivity(Intent(context, TaskResultActivityV292::class.java).putExtra(TaskResultActivityV292.EXTRA_SESSION_ID, run.session.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(run.session.goal, style = MaterialTheme.typography.titleSmall, maxLines = 2)
+                            Text(run.session.result ?: if (run.session.status == "RUNNING") "Working" else "Task ended", style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                        }
                     }
                 }
+                if (notes.isNotEmpty()) item { CycloneSectionTitle("Recent learning") }
+                items(notes, key = { it.id }) { Text(it.text, style = MaterialTheme.typography.bodyMedium, maxLines = 3) }
             }
         }
     }

@@ -15,9 +15,9 @@ MAIN = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/MainActivity.kt"
 
 REQUIRED_APP = (
     "V32Destination.HOME -> V32HomePage",
-    "V32Destination.TEACH -> V32TeachPage",
+    "V32Destination.PROFILES -> CycloneProfilesPage",
     "V32Destination.AI -> V39AiChatPage",
-    "V32Destination.ROUTINES -> V32RoutinesPage",
+    "V32Destination.ROUTINES -> CycloneRoutinesPage",
     "V32Destination.BRAIN -> CycloneV39BrainPage",
     "V32SettingsPage(context, refreshTick)",
 )
@@ -37,7 +37,7 @@ REQUIRED_AI_CHAT = (
 )
 REQUIRED_BRAIN_V39 = (
     "internal fun CycloneV39BrainPage",
-    'CycloneSectionTitle("Recent runs")',
+    'CycloneSectionTitle("Recent outcomes")',
     "TaskResultActivityV292",
     '"Tap to inspect and download .txt"',
 )
