@@ -48,6 +48,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -254,7 +255,7 @@ private fun attachPreflightSuccess(
 
 @Composable
 internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
-    CycloneIntelligenceTheme { V39AiChatContent(context, refreshTick, onSettings) }
+    V39AiChatContent(context, refreshTick, onSettings)
 }
 
 @Composable
@@ -263,6 +264,8 @@ private fun V39AiChatContent(
     refreshTick: Int,
     onSettings: () -> Unit,
 ) {
+    val task by com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collectAsState()
+    val attached by com.cyclone.mobile.ui.overlay.PendingTaskAttachment.present.collectAsState()
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     val scope = rememberCoroutineScope()
     val agent = remember { OpenRouterAdaptiveAgent(context) }
@@ -296,7 +299,8 @@ private fun V39AiChatContent(
 
     fun submit() {
         val request = session.submitGate.tryAccept(composer, hasKey) ?: return
-        val config = V39AiChatContract.config(selectedModelId, accessProfile)
+        val baseConfig = V39AiChatContract.config(selectedModelId, CycloneAiAccessProfileStore.read(context))
+        val config = baseConfig.copy(model = baseConfig.model.copy(reasoningEffort = prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium"), attachment = com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take())
         composer = ""
         session.busy = true
         session.status = "Qualifying ${config.model.label}…"
@@ -336,7 +340,7 @@ private fun V39AiChatContent(
     }
 
     Column(
-        Modifier.fillMaxSize().background(CycloneIntelligenceStyle.Ink).imePadding()
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -398,7 +402,7 @@ private fun V39AiChatContent(
                                 if (session.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                 Column {
                                     Text("Cyclone", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                    Text(session.status.ifBlank { "Working…" }, style = MaterialTheme.typography.bodyMedium)
+                                    Text(if (session.busy) "Working on your request…" else session.status, style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
                         }
@@ -438,54 +442,35 @@ private fun V39AiChatContent(
         }
         if (inputMessage.isNotBlank()) Text(inputMessage, color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall)
-        Surface(shape = RoundedCornerShape(30.dp), color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp)) {
-                BasicTextField(value = composer, onValueChange = { composer = it }, enabled = !session.busy,
+        task?.let { CycloneTaskProgress(it) }
+        if (attached) Text("Attachment ready", style = MaterialTheme.typography.labelSmall)
+        CycloneGlassSurface(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+            Row(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                CycloneIntelligenceControls(enabled = !session.busy)
+                Box {
+                    IconButton(onClick = { toolsMenuOpen = true }, enabled = !session.busy) { Icon(Icons.Rounded.Add, "Add to task") }
+                    DropdownMenu(expanded = toolsMenuOpen, onDismissRequest = { toolsMenuOpen = false }) {
+                        DropdownMenuItem(text = { Text("File") }, onClick = { toolsMenuOpen = false; context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)) })
+                        DropdownMenuItem(text = { Text("Take photo") }, onClick = { toolsMenuOpen = false; context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java).putExtra("camera", true)) })
+                        DropdownMenuItem(text = { Text("Share screen") }, onClick = { toolsMenuOpen = false; context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java)) })
+                        DropdownMenuItem(text = { Text("Background task") }, onClick = { toolsMenuOpen = false; context.startActivity(Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java).putExtra("goal", composer)) })
+                    }
+                }
+                BasicTextField(value = composer, onValueChange = { composer = it },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), minLines = 2, maxLines = 5,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp)
-                        .semantics { contentDescription = "Ask Cyclone composer" },
-                    decorationBox = { field ->
-                        Box { if (composer.isEmpty()) Text("Ask Cyclone", color = MaterialTheme.colorScheme.onSurfaceVariant); field() }
-                    })
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box {
-                        IconButton(onClick = { toolsMenuOpen = true }, enabled = !session.busy) {
-                            Icon(Icons.Rounded.Add, "Add to your task")
-                        }
-                        DropdownMenu(expanded = toolsMenuOpen, onDismissRequest = { toolsMenuOpen = false }) {
-                            DropdownMenuItem(text = { Text("Share screen") }, onClick = {
-                                toolsMenuOpen = false
-                                context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
-                            })
-                            DropdownMenuItem(text = { Text("Background task") }, onClick = {
-                                toolsMenuOpen = false
-                                context.startActivity(Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
-                                    .putExtra("goal", composer))
-                            })
-                        }
-                    }
-                    Text("On your phone", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                    IconButton(onClick = {
-                        runCatching { dictation.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask Cyclone")) }
-                            .onFailure { inputMessage = "Dictation isn't available. You can type your request." }
-                    }, enabled = !session.busy) { Icon(Icons.Rounded.Mic, "Dictate request") }
-                    FilledIconButton(onClick = { submit() }, enabled = hasKey && composer.isNotBlank() && !session.busy,
-                        shape = CircleShape, modifier = Modifier.size(48.dp)
-                            .semantics { contentDescription = "Send Ask Cyclone request" }) {
-                        if (session.busy) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.Rounded.ArrowUpward, "Send")
-                    }
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), maxLines = 5,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { submit() }),
+                    modifier = Modifier.weight(1f).padding(vertical = 10.dp).semantics { contentDescription = "Ask Cyclone composer" },
+                    decorationBox = { field -> Box { if (composer.isEmpty()) Text("Ask Cyclone", color = MaterialTheme.colorScheme.onSurfaceVariant); field() } })
+                if (!session.busy) IconButton(onClick = {
+                    runCatching { dictation.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)) }
+                        .onFailure { inputMessage = "Dictation isn't available. You can type your request." }
+                }) { Icon(Icons.Rounded.Mic, "Dictate request") }
+                FilledIconButton(onClick = { if (session.busy) agent.cancelActiveTask() else submit() }, enabled = session.busy || (hasKey && composer.isNotBlank())) {
+                    if (session.busy) Text("■") else Icon(Icons.Rounded.ArrowUpward, "Send request")
                 }
             }
         }
-        Spacer(Modifier.height(2.dp))
     }
 }
 
@@ -498,8 +483,8 @@ private fun V39ChatBubble(message: V39ChatMessage) {
     ) {
         Surface(
             shape = RoundedCornerShape(22.dp),
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            border = if (isUser) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+            border = null,
             modifier = Modifier.fillMaxWidth(.88f),
         ) {
             Column(Modifier.padding(horizontal = 15.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
