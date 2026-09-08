@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -29,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -37,11 +36,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.automation.AutomationDefinition
 
 private const val LEGACY_ENHANCED_CONTROL_ROW = "Enhanced control engine"
@@ -77,11 +76,17 @@ fun CycloneV32TopBar(
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ) {
-                    Box(contentAlignment = Alignment.Center) { Text("C", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge) }
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("C", fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+                    }
                 }
             }
             Column(Modifier.weight(1f)) {
-                Text(if (settingsOpen) "Settings" else title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    if (settingsOpen) "Settings" else title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
             }
             if (!settingsOpen) {
                 Surface(
@@ -90,9 +95,22 @@ fun CycloneV32TopBar(
                     color = if (ready) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
                     contentColor = if (ready) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
                 ) {
-                    Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Box(Modifier.size(7.dp).background(if (ready) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary, CircleShape))
-                        Text(if (ready) "Ready" else "Set up", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            Modifier.size(7.dp).background(
+                                if (ready) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary,
+                                CircleShape,
+                            ),
+                        )
+                        Text(
+                            if (ready) "Ready" else "Set up",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                     }
                 }
             } else {
@@ -106,24 +124,54 @@ fun CycloneV32TopBar(
 fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         V32Destination.entries.forEach { destination ->
+            val isSelected = selected == destination
+            val isAi = destination == V32Destination.AI
             NavigationBarItem(
-                selected = selected == destination,
+                selected = isSelected,
                 onClick = { onSelect(destination) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = if (isAi) Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
                 icon = {
-                    if (destination == V32Destination.AI) {
+                    if (isAi) {
                         Box(
-                            Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+                            Modifier
+                                .size(48.dp)
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    CircleShape,
+                                ),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(destination.icon, destination.label, tint = MaterialTheme.colorScheme.onPrimary) }
-                    } else Icon(
-                        painter = androidx.compose.ui.res.painterResource(when (destination) {
-                            V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
-                            V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
-                            V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
-                            V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
-                            V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
-                        }), contentDescription = destination.label, modifier = Modifier.size(28.dp),
-                    )
+                        ) {
+                            Icon(
+                                destination.icon,
+                                destination.label,
+                                tint = if (isSelected) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    } else {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(
+                                when (destination) {
+                                    V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
+                                    V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
+                                    V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
+                                    V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
+                                    V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
+                                },
+                            ),
+                            contentDescription = destination.label,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
                 },
                 label = { Text(destination.label, style = MaterialTheme.typography.labelSmall) },
             )
@@ -142,7 +190,11 @@ fun CycloneSegmentedControl(
         Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             options.forEachIndexed { index, label ->
                 Surface(
-                    modifier = Modifier.weight(1f).selectable(selected = selected == index, role = Role.Tab, onClick = { onSelect(index) }),
+                    modifier = Modifier.weight(1f).selectable(
+                        selected = selected == index,
+                        role = Role.Tab,
+                        onClick = { onSelect(index) },
+                    ),
                     shape = RoundedCornerShape(15.dp),
                     color = if (selected == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = if (selected == index) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -172,17 +224,42 @@ fun CycloneRoutineCard(
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Surface(shape = CircleShape, color = colors.content.copy(alpha = 0.12f), contentColor = colors.content) {
-                    Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(21.dp)) }
+                    Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(21.dp))
+                    }
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(automation.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(automation.v32TriggerSummary(), style = MaterialTheme.typography.bodySmall, color = colors.content.copy(alpha = 0.74f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        automation.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        automation.v32TriggerSummary(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.content.copy(alpha = 0.74f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 Switch(checked = automation.enabled, onCheckedChange = onEnabledChange)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("${automation.steps.size} ${if (automation.steps.size == 1) "action" else "actions"}", style = MaterialTheme.typography.labelMedium)
-                Text(if (automation.enabled) "On" else "Off", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${automation.steps.size} ${if (automation.steps.size == 1) "action" else "actions"}",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    if (automation.enabled) "On" else "Off",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
@@ -207,15 +284,33 @@ fun CyclonePermissionRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Surface(shape = CircleShape, color = if (ready) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
+        Surface(
+            shape = CircleShape,
+            color = if (ready) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        ) {
             Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                Icon(if (ready) Icons.Rounded.Check else icon, null, tint = if (ready) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    if (ready) Icons.Rounded.Check else icon,
+                    null,
+                    tint = if (ready) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.SemiBold)
-            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Text(actionLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        Text(
+            actionLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
