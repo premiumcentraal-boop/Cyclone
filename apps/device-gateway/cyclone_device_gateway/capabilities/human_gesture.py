@@ -41,12 +41,51 @@ _FALLBACK_PLANES = {
     "session_kernel_vd": "runtime_unreported",
     "layer2_workspace": "runtime_unreported",
 }
+_ACTION_ALIASES = {
+    "phone.click": ("phone.click", "clickFallback", "click_fallback", "tap"),
+    "phone.long_press": ("phone.long_press", "longPressFallback", "long_press_fallback"),
+    "phone.swipe": ("phone.swipe", "swipe"),
+    "phone.scroll": ("phone.scroll", "scroll"),
+}
+_PLANE_ALIASES = {
+    "foreground": ("foreground", "foregroundDisplay0", "foreground_display0"),
+    "session_kernel_vd": (
+        "session_kernel_vd",
+        "sessionKernelVd",
+        "namedVirtualDisplay",
+        "named_virtual_display",
+    ),
+    "layer2_workspace": ("layer2_workspace", "layer2Workspace", "layer2"),
+}
 
 
 def _read(mapping: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in mapping:
             return mapping[key]
+    return None
+
+
+def _runtime_from_capability_entry(entry: Any) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    name = _read(entry, "name", "key", "id")
+    if isinstance(name, str) and name.replace("-", "_").lower() not in {"human_gesture", "humangesture"}:
+        return None
+    runtime = entry.get("runtime")
+    if isinstance(runtime, dict):
+        return runtime
+    config = entry.get("config")
+    if isinstance(config, dict):
+        details = config.get("details")
+        if isinstance(details, dict):
+            runtime = details.get("runtime")
+            if isinstance(runtime, dict):
+                return runtime
+            if _read(details, "controlVersion", "control_version") is not None:
+                return details
+    if _read(entry, "controlVersion", "control_version") is not None:
+        return entry
     return None
 
 
@@ -62,7 +101,26 @@ def _runtime_block(status: Any) -> dict[str, Any] | None:
         for key in ("humanGesture", "human_gesture"):
             value = capabilities.get(key)
             if isinstance(value, dict):
-                return value
+                nested = _runtime_from_capability_entry(value)
+                return nested or value
+        nested_capabilities = capabilities.get("capabilities")
+        if isinstance(nested_capabilities, list):
+            for entry in nested_capabilities:
+                runtime = _runtime_from_capability_entry(entry)
+                if runtime is not None:
+                    return runtime
+    elif isinstance(capabilities, list):
+        for entry in capabilities:
+            runtime = _runtime_from_capability_entry(entry)
+            if runtime is not None:
+                return runtime
+    for key in ("phoneCapabilities", "phone_capabilities"):
+        values = status.get(key)
+        if isinstance(values, list):
+            for entry in values:
+                runtime = _runtime_from_capability_entry(entry)
+                if runtime is not None:
+                    return runtime
     return None
 
 
@@ -83,14 +141,22 @@ def _normalize_state(value: Any, allowed: frozenset[str]) -> str:
     if isinstance(value, bool):
         return "supported" if value else "unsupported"
     if isinstance(value, dict):
-        if value.get("supported") is False:
+        if value.get("supported") is False or value.get("humanizeAccepted") is False:
             return "unsupported"
-        value = (
-            value.get("mode")
-            or value.get("state")
-            or value.get("support")
-            or ("supported" if value.get("supported") is True else None)
-        )
+        explicit = value.get("mode") or value.get("state") or value.get("support")
+        if explicit is None and "foregroundMode" in value:
+            explicit = value.get("foregroundMode")
+        if explicit is None and value.get("supported") is True:
+            explicit = "supported"
+        if explicit is None and value.get("cubicPath") is True:
+            explicit = "full_fidelity"
+        if explicit is None and value.get("humanGesture") is True:
+            explicit = "full_fidelity"
+        if explicit is None and value.get("compatibility") is not None:
+            explicit = value.get("compatibility")
+        if explicit is None and value.get("humanizeAccepted") is True:
+            explicit = "supported"
+        value = explicit
     if not isinstance(value, str):
         return "not_reported"
     token = value.strip().lower().replace("-", "_").replace(" ", "_")
@@ -103,11 +169,27 @@ def _normalize_state(value: Any, allowed: frozenset[str]) -> str:
         "semantic_only": "semantic_native",
         "semantic_first": "semantic_native",
         "semantic_first_with_fallback": "semantic_or_touch",
+        "semantic_first_then_synthesized_touch": "semantic_or_touch",
+        "semantic_first_then_safe_grounded_fallback": "semantic_or_touch",
         "human_gesture": "synthesized_touch",
         "touch": "synthesized_touch",
     }
     token = aliases.get(token, token)
     return token if token in allowed else "not_reported"
+
+
+def _action_state(raw_actions: dict[str, Any], action: str) -> str:
+    for key in _ACTION_ALIASES[action]:
+        if key in raw_actions:
+            return _normalize_state(raw_actions.get(key), SAFE_ACTION_STATES)
+    return "not_reported"
+
+
+def _plane_state(raw_planes: dict[str, Any], plane: str) -> str:
+    for key in _PLANE_ALIASES[plane]:
+        if key in raw_planes:
+            return _normalize_state(raw_planes.get(key), SAFE_PLANE_STATES)
+    return "not_reported"
 
 
 def discovery_from_bridge_status(status: Any) -> dict[str, Any]:
@@ -140,25 +222,12 @@ def discovery_from_bridge_status(status: Any) -> dict[str, Any]:
 
     raw_actions = _read(block, "actions", "actionSupport", "action_support")
     raw_actions = raw_actions if isinstance(raw_actions, dict) else {}
-    actions = {
-        action: _normalize_state(raw_actions.get(action), SAFE_ACTION_STATES)
-        for action in sorted(HUMANIZE_ACTIONS)
-    }
+    actions = {action: _action_state(raw_actions, action) for action in sorted(HUMANIZE_ACTIONS)}
     actions["phone.drag"] = "unsupported"
 
     raw_planes = _read(block, "executionPlanes", "execution_planes", "planes")
     raw_planes = raw_planes if isinstance(raw_planes, dict) else {}
-    planes = {
-        "foreground": _normalize_state(raw_planes.get("foreground"), SAFE_PLANE_STATES),
-        "session_kernel_vd": _normalize_state(
-            raw_planes.get("session_kernel_vd", raw_planes.get("sessionKernelVd")),
-            SAFE_PLANE_STATES,
-        ),
-        "layer2_workspace": _normalize_state(
-            raw_planes.get("layer2_workspace", raw_planes.get("layer2Workspace")),
-            SAFE_PLANE_STATES,
-        ),
-    }
+    planes = {plane: _plane_state(raw_planes, plane) for plane in _PLANE_ALIASES}
 
     out = {
         "control_version": CONTROL_VERSION,
