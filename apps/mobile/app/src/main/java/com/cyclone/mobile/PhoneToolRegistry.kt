@@ -40,7 +40,7 @@ object PhoneToolRegistry {
         PhoneToolDefinition("phone.observe", false, "accessibility", "A11y-first observation: Page Card with stable elementIndex. Vision/screenshot only when the tree is useless"),
         PhoneToolDefinition("phone.screenshot", false, "screenshot", "Capture the screen or a cropped region; base64 is opt-in"),
         PhoneToolDefinition("phone.find", false, "accessibility", "Resolve stable selectors against the current normalized UI snapshot"),
-        PhoneToolDefinition("phone.click", true, "accessibility", "Click a current observation-scoped element. Fast Path settles 300ms then fingerprints; Unchanged is verified=false and must not retry via a second click channel"),
+        PhoneToolDefinition("phone.click", true, "accessibility", "Click a current observation-scoped element. Semantic ACTION_CLICK/ACTION_SELECT remains first; only the grounded coordinate fallback uses bounded Human Gesture", humanizeParameters()),
         PhoneToolDefinition("phone.long_press", true, "accessibility", "Long-press a selected element; semantic ACTION_LONG_CLICK first, coordinate fallback uses bounded Human Gesture", humanizeParameters()),
         PhoneToolDefinition("phone.tap", true, "accessibility", "Tap screen coordinates; auto resolves to LIGHT Human Gesture and off preserves the straight compatibility path", humanizeParameters()),
         PhoneToolDefinition("phone.type", true, "accessibility", "Set text on a selected or focused editable element"),
