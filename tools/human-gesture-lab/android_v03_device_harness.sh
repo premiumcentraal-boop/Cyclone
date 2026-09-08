@@ -2,22 +2,46 @@
 set -euo pipefail
 
 ADB_BIN="${ADB_BIN:-adb}"
-APK="${1:-apps/mobile/app/build/outputs/apk/debug/app-debug.apk}"
+DEFAULT_APK="apps/mobile/app/build/outputs/apk/debug/app-debug.apk"
 COMPONENT="com.cyclone.mobile/com.cyclone.mobile.debug.HumanGestureTestActivity"
 
-mapfile -t DEVICES < <("$ADB_BIN" devices | awk 'NR>1 && $2=="device" {print $1}')
-if [[ ${#DEVICES[@]} -ne 1 ]]; then
-  echo "Expected exactly one authorized Android device; found ${#DEVICES[@]}." >&2
-  "$ADB_BIN" devices -l >&2
-  exit 2
+SERIAL_ARG=""
+APK="$DEFAULT_APK"
+
+# V0.3 contract: optional serial, then optional APK. For compatibility, a lone *.apk first argument
+# is still treated as the APK and device selection remains automatic.
+if [[ $# -ge 1 ]]; then
+  if [[ "$1" == *.apk ]]; then
+    APK="$1"
+  else
+    SERIAL_ARG="$1"
+    APK="${2:-$DEFAULT_APK}"
+  fi
 fi
-SERIAL="${DEVICES[0]}"
+
+mapfile -t DEVICES < <("$ADB_BIN" devices | awk 'NR>1 && $2=="device" {print $1}')
+if [[ -n "$SERIAL_ARG" ]]; then
+  if ! printf '%s\n' "${DEVICES[@]}" | grep -Fxq "$SERIAL_ARG"; then
+    echo "Requested Android device '$SERIAL_ARG' is not connected and authorized." >&2
+    "$ADB_BIN" devices -l >&2
+    exit 2
+  fi
+  SERIAL="$SERIAL_ARG"
+else
+  if [[ ${#DEVICES[@]} -ne 1 ]]; then
+    echo "Expected exactly one authorized Android device when no serial is supplied; found ${#DEVICES[@]}." >&2
+    "$ADB_BIN" devices -l >&2
+    exit 2
+  fi
+  SERIAL="${DEVICES[0]}"
+fi
 ADB=("$ADB_BIN" -s "$SERIAL")
 
 echo "serial=$SERIAL"
 echo "model=$(${ADB[@]} shell getprop ro.product.model | tr -d '\r')"
 echo "api=$(${ADB[@]} shell getprop ro.build.version.sdk | tr -d '\r')"
 echo "build=$(${ADB[@]} shell getprop ro.build.fingerprint | tr -d '\r')"
+echo "apk=$APK"
 
 if [[ -f "$APK" ]]; then
   echo "Installing debug APK: $APK"
