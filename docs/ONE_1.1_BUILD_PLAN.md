@@ -1,10 +1,10 @@
 # Cyclone One 1.1 — Session Contract Glass (PC sprint)
 
-**Status:** A1 DONE, A2 DONE, A3 DONE, A4 DONE (code+docs; Pixel UNVERIFIED). A5 not started.  
+**Status:** A1 DONE, A2 DONE, A3 DONE, A4 DONE (code+docs; Pixel UNVERIFIED). A5 DONE (source/docs; Pixel UNVERIFIED). This lane does not claim GitHub tag one-1.1.0 already exists.  
 **Codename:** Session Contract Glass  
 **Base:** installed One **1.0.0** sources as of `v4.0.0`, rebased onto **`v4.0.4` mobile protocol** (tag `38f7628`) so gateway/MCP can speak Layer 2  
 **Out:** Cyclone One **1.1.0** Setup.exe + device_gateway **4.1.0** + mcp **4.1.0**  
-**Now:** One **1.1.0-alpha.4** + gateway/MCP **4.1.0-alpha.4** on this branch; mobile stays **4.0.4** / versionCode **75**  
+**Now:** One **1.1.0** + gateway/MCP **4.1.0** on this branch; mobile stays **4.0.4** / versionCode **75**  
 **Grok:** each stage on Agent PC with **subagents required**
 
 ## Why this sprint exists
@@ -76,15 +76,20 @@ Acceptance: scripted suite status→observe→locate→home→open Chrome withou
 Out of scope: A5 release cut; mobile APK; Magisk; local compile; claiming Pixel verified.  
 Handoff: next work is **A5** on `grok/one-1.1-s5-release` from this A4 tip. Do not implement A5 here. See [`ONE_1.1_STAGE4_OPERATOR.md`](ONE_1.1_STAGE4_OPERATOR.md).
 
-### A5 — One 1.1.0 release lane
-Branch: `grok/one-1.1-s5-release` from A4.  
+### A5 — One 1.1.0 release lane ✅ DONE
+Branch: `grok/one-1.1-s5-release` from A4 tip (PR #72, `4d75911`).  
 Goal: cut One **1.1.0** + gateway/MCP **4.1.0** paired for mobile ≥4.0.4.
-Deliverables:
-1. Drop alphas; `release/version.toml` components updated.
-2. CI Setup.exe + release notes `docs/RELEASE_ONE_1.1.md`.
-3. Pixel checklist (USB, bearer doctor, Layer 2 list, default-foreground Chrome open).
-4. Publication path documented; physical marked honestly.
-Acceptance: GitHub release assets; uninstall note for legacy Companion 3.8.1.
+Deliverables (landed):
+1. Drop alphas; identity One **1.1.0** / gateway-MCP **4.1.0**.
+2. Docs `docs/RELEASE_ONE_1.1.md`.
+3. Docs `docs/ONE_1.1_STAGE5_RELEASE.md`.
+4. Pixel/doctor checklist **UNVERIFIED**.
+5. Uninstall note for legacy Companion **3.8.1**.
+6. Operator cut path `pc-companion-release.yml` → `Cyclone-PC-Companion-1.1.0-Setup.exe`.
+7. Helper `scripts/ci/cut_one_1_1_release.py`.
+Acceptance: GitHub release assets are operator-after-CI, not created in this PR. Physical UNVERIFIED.  
+Out of scope: publishing the GitHub Release in this PR; mobile B5 (PR #73); Magisk; local compile/test; merging other PRs.  
+Handoff: stack merge order **#66 → #68 → #70 → #72** then this A5 PR. Operator cut after merge. Do not implement further stages here.
 
 ## Coordination
 
