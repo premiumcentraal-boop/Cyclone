@@ -30,7 +30,7 @@ The field is accepted only on the touch-relevant phone tools exposed by `PhoneTo
 | `phone.swipe` | NORMAL | coordinate touch | Foreground/display 0 uses cubic Human Gesture for LIGHT/NORMAL; OFF uses legacy straight endpoint path. |
 | `phone.scroll` | NORMAL if fallback is necessary | Accessibility `ACTION_SCROLL_FORWARD/BACKWARD` | If semantic scroll rejects, foreground may synthesize only inside a safely grounded scrollable node. No ungrounded PC-authored choreography is accepted. |
 | named VD / Session Kernel | requested profile is parsed but curved fidelity is not claimed | existing workspace input backend | Endpoint+duration compatibility only. Non-OFF requested profiles are reported as downgraded/compatibility behavior. |
-| Layer2 display-0 workspace | requested profile is parsed but curved fidelity is not claimed | existing workspace input backend | Endpoint+duration compatibility only. Non-OFF requested profiles are reported as downgraded/compatibility behavior. |
+| Layer2 display-0 workspace | same as foreground action | Accessibility path under the existing Layer2 mutation lease | Because Layer2 remains `default-foreground` / display 0, it inherits the foreground `dispatchGesture` backend and cubic Human Gesture support while preserving Layer2 ownership checks. |
 
 ## Foreground scroll fallback
 
@@ -50,9 +50,10 @@ The fallback remains inside the already-authorized `PhoneToolExecutor` mutation 
 
 `phone.capabilities` now includes one `human_gesture` capability supplied by Mobile. The capability detail is a bounded JSON object describing actual Android/runtime facts, including:
 
-- `available`
+- `runtimeAvailable`
 - `controlVersion = cyclone.human_gesture.control.v1`
 - `traceVersion = cyclone.human_gesture.trace.v1`
+- `traceSchema = cyclone.human_gesture.trace.v1`
 - `synthesisVersion`
 - supported profiles: `auto`, `off`, `light`, `normal`
 - action support and semantic-first/fallback notes
@@ -62,13 +63,13 @@ Current execution-plane truth:
 
 - foreground/display 0: Accessibility `dispatchGesture`, cubic path fidelity available for synthesized taps/swipes/long-press fallback and safely grounded scroll fallback;
 - named VD: endpoint+duration compatibility backend only; full curved-path equivalence is not claimed;
-- Layer2: endpoint+duration compatibility backend only; full curved-path equivalence is not claimed.
+- Layer2: display-0 Accessibility backend under the existing Layer2 mutation lease, so cubic Human Gesture support is available without creating a new execution plane.
 
 Higher layers should consume the phone-originated `human_gesture` capability instead of hard-coding runtime availability.
 
 ## Android-authoritative execution evidence
 
-Touch-relevant foreground results add a bounded `humanGesture` object. Fields produced by this Agent 2 seam include:
+Touch-relevant results add a bounded `humanGesture` object when an execution fact is available. Fields produced or enriched by this Agent 2 seam include:
 
 - `requestedHumanize`
 - `resolvedProfile`
@@ -81,6 +82,12 @@ Touch-relevant foreground results add a bounded `humanGesture` object. Fields pr
 - `durationMs`
 - `sessionId`
 - `displayId`
+- `backend`
+- `controlVersion`
+- `traceVersion`
+- `synthesisVersion`
+
+For a successful semantic click, the profile request is deliberately reported as null/not-applied because no gesture profile affected execution. A blocked click with no Android dispatch does not fabricate a `humanGesture` execution object.
 
 Examples of truthful `dispatchMode` values include:
 
@@ -96,9 +103,23 @@ This object deliberately excludes raw traces, page text, selectors, screenshots,
 
 ### Agent 1 diagnostics integration seam
 
-Agent 2 intentionally keeps plan-level evidence minimal because Agent 1 owns the canonical V0.3 trace hash / replay diagnostics contract. During integration, replace or enrich `HumanGestureDispatchTrace` with Agent 1's authoritative plan diagnostics after `HumanGestureEngine.planTap/planSwipe` succeeds. Agent 1 should supply canonical trace hash/version/engine identity; Agent 2 should continue supplying execution-only fields such as backend, dispatch mode, session/display and downgrade reason.
+Agent 2 intentionally keeps plan-level evidence minimal because Agent 1 owns the canonical V0.3 trace hash / replay diagnostics contract. During integration, replace or enrich `HumanGestureDispatchTrace` with Agent 1's authoritative plan diagnostics after `HumanGestureEngine.planTap/planSwipe` succeeds. Agent 1 should supply canonical trace hash, synthesis time and canonical engine identity; Agent 2 should continue supplying execution-only fields such as backend, dispatch mode, session/display and downgrade reason.
 
 Do not introduce a second hash/canonicalization algorithm in this lane.
+
+## Safety and semantic-first regression coverage
+
+V0.3 adds tests for:
+
+- omitted/valid/invalid/wrong-type `humanize` boundary behavior;
+- public tool-registry enum publication including `phone.click`;
+- AUTO profile policy including scroll;
+- execution evidence serialization and named-VD downgrade truth;
+- phone-originated capability matrix;
+- Session Contract identity with `humanize` present;
+- production source ordering that keeps GATE, semantic click/select/long-click/scroll, human ownership, fresh observation, duplicate suppression, stale-session checks, policy/confirmation and mutation locking ahead of Human Gesture dispatch.
+
+The source-order contract test exists because plain JVM tests cannot instantiate Android `AccessibilityService`; it inspects the real production source rather than asserting duplicated constants. Existing workspace/session tests still run in the full Mobile CI suite.
 
 ## Debug-only device harness
 
