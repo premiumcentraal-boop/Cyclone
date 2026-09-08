@@ -25,7 +25,9 @@ class CycloneVisual42ContractTest {
         assertTrue(panel.contains("CycloneTaskProgress(task)"))
         assertTrue(panel.contains("UiTask(task).open(context)"))
         assertFalse(panel.contains("WorkspaceTaskUi("))
-        assertFalse(panel.contains("WorkspaceTasks.command"))
+        // 4.2.1 adds Stop/Close on the current-task card. It must route the exact existing
+        // task identity into WorkspaceTasks instead of reconstructing or replacing the task.
+        assertTrue(panel.contains("WorkspaceTasks.command(context, task, \"cancel\")"))
         assertTrue(source("CyclonePresentation.kt").contains("ViewProgressRouter.intent(context, source)"))
     }
 
