@@ -39,6 +39,23 @@ else:
     DATA_BLOB = None  # type: ignore[misc, assignment]
 
 
+def _isolated_tooling_root() -> bool:
+    return bool(os.getenv("CYCLONE_TOOLING_TEST_ROOT", "").strip())
+
+
+def _uses_dpapi_token() -> bool:
+    """Windows DPAPI bearer file unless an isolated tooling test root is set.
+
+    Tests must not patch ``os.name`` to force the JSON path: Python 3.13 pathlib
+    then tries to construct PosixPath on Windows and raises.
+    """
+    return os.name == "nt" and not _isolated_tooling_root()
+
+
+def token_filename() -> str:
+    return "gateway-token.dpapi" if _uses_dpapi_token() else "gateway-token.json"
+
+
 def local_app_data() -> Path:
     override = os.getenv("CYCLONE_TOOLING_TEST_ROOT", "").strip()
     if override:
@@ -67,13 +84,11 @@ def one_runtime_dir() -> Path:
 
 
 def token_path() -> Path:
-    return one_runtime_dir() / ("gateway-token.dpapi" if os.name == "nt" else "gateway-token.json")
+    return one_runtime_dir() / token_filename()
 
 
 def legacy_token_path() -> Path:
-    return local_app_data() / "Cyclone" / "pc-companion" / (
-        "gateway-token.dpapi" if os.name == "nt" else "gateway-token.json"
-    )
+    return local_app_data() / "Cyclone" / "pc-companion" / token_filename()
 
 
 def locator_path() -> Path:
@@ -154,7 +169,7 @@ def save_connection(
         {"version": 1, "token": value, "url": safe_url, "port": resolved_port},
         separators=(",", ":"),
     ).encode("utf-8")
-    path = runtime_dir / ("gateway-token.dpapi" if os.name == "nt" else "gateway-token.json")
+    path = runtime_dir / token_filename()
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_secret_bytes(path, payload)
     locator = {
@@ -166,7 +181,7 @@ def save_connection(
         "mcpExecutable": str(mcp_executable) if mcp_executable else _resolve_mcp_executable(),
         "sessionSecretPersisted": True,
         "tokenPath": str(path),
-        "tokenStorage": "dpapi" if os.name == "nt" else "runtime-file",
+        "tokenStorage": "dpapi" if _uses_dpapi_token() else "runtime-file",
     }
     _write_json(runtime_dir / "gateway-locator.json", locator)
     return locator
@@ -462,10 +477,10 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def _write_secret_bytes(path: Path, payload: bytes) -> None:
-    encrypted = _protect(payload) if os.name == "nt" else payload
+    encrypted = _protect(payload) if _uses_dpapi_token() else payload
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_bytes(encrypted)
-    if os.name != "nt":
+    if not _uses_dpapi_token():
         os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
     temporary.replace(path)
 
@@ -475,7 +490,7 @@ def _load_secret_file(path: Path) -> dict[str, Any] | None:
         return None
     try:
         raw = path.read_bytes()
-        text = (_unprotect(raw) if os.name == "nt" and path.suffix == ".dpapi" else raw).decode("utf-8").strip()
+        text = (_unprotect(raw) if _uses_dpapi_token() and path.suffix == ".dpapi" else raw).decode("utf-8").strip()
     except Exception:
         return None
     if not text:

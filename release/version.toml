@@ -1,24 +1,24 @@
-# Cyclone Mobile 4.0.4 + One 1.1.0-alpha.4 / gateway-mcp 4.1.0-alpha.4 operator MCP pack; DEVICE TESTING: UNVERIFIED
-# Mobile publishing reuses the authoritative Mobile CI artifact; no second Android assembly.
-# One/gateway/MCP alphas are branch identity, not a GitHub release cut.
+# Cyclone One 1.1.0 + gateway/MCP 4.1.0 release-lane identity; DEVICE TESTING: UNVERIFIED
+# publication_authorized=false; this is not a claim that GitHub tag one-1.1.0 already exists.
+# Mobile stays 4.0.4 / android_version_code 75.
 schema = 1
 product_version = "4.0.4"
 channel = "development"
 android_version_code = 75
-python_version = "4.1.0-alpha.4"
+python_version = "4.1.0"
 
 [components]
 mobile = "4.0.4"
-pc_companion = "1.1.0-alpha.4"
-device_gateway = "4.1.0-alpha.4"
-mcp = "4.1.0-alpha.4"
+pc_companion = "1.1.0"
+device_gateway = "4.1.0"
+mcp = "4.1.0"
 
 [release]
 previous_mobile_version = "4.0.3"
-publication_authorized = true
+publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.0.4-simple-setup"
+candidate_generation = "cyclone-one-1.1.0-session-contract-glass"
