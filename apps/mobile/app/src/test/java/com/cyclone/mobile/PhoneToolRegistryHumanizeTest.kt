@@ -8,7 +8,7 @@ class PhoneToolRegistryHumanizeTest {
     @Test
     fun `touch tools publish the bounded v03 humanize enum`() {
         val expected = listOf("auto", "off", "light", "normal")
-        listOf("phone.long_press", "phone.tap", "phone.scroll", "phone.swipe").forEach { name ->
+        listOf("phone.click", "phone.long_press", "phone.tap", "phone.scroll", "phone.swipe").forEach { name ->
             val definition = requireNotNull(PhoneToolRegistry.definition(name)).toJson()
             val humanize = definition.getJSONObject("parameters").getJSONObject("humanize")
             val values = humanize.getJSONArray("enum")
