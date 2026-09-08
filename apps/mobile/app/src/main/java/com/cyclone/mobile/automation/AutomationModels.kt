@@ -75,7 +75,8 @@ data class AutomationDefinition(
     val failureBehavior: FailureAction = FailureAction.ABORT,
     val outputVariables: List<String> = emptyList(),
     val appPackages: List<String> = emptyList(),
-    val categories: List<String> = emptyList()
+    val categories: List<String> = emptyList(),
+    val associationVersion: Int = 0
 )
 
 data class SkillDefinition(

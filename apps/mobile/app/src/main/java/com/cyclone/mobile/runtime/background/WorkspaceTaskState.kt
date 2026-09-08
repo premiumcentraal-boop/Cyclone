@@ -44,7 +44,7 @@ data class WorkspaceTaskUi(
         TaskPhase.STOPPED -> "Task stopped"
     }
     /** Collapsed glass subtitle: real Fast Path / skill / Layer 2 slice, not a generic placeholder. */
-    val subtitle: String get() = message
+    val subtitle: String get() = TaskConsumerCopy.subtitle(this)
 
     fun identityJson(): JSONObject {
         val json = JSONObject()

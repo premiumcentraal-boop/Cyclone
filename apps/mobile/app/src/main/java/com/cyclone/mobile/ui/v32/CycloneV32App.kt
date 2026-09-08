@@ -102,7 +102,7 @@ fun CycloneMobileV32App() {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                CycloneV32TopBar(
+                if (settingsOpen) CycloneV32TopBar(
                     title = destination.label,
                     settingsOpen = settingsOpen,
                     ready = phoneReady,
@@ -170,7 +170,7 @@ private fun V32HomePage(
         item { CycloneSectionTitle("Your routines") { TextButton(onClick = onRoutines) { Text("See all") } } }
         if (routines.isEmpty()) item { Text("Your saved routines will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         items(routines.take(6), key = { it.id }) { routine ->
-            TextButton(onClick = onRoutines, modifier = Modifier.fillMaxWidth()) { Text(routine.name, modifier = Modifier.weight(1f)) ; Text("›") }
+            TextButton(onClick = onRoutines, modifier = Modifier.fillMaxWidth()) { CycloneAppIcon(routine.appPackages.firstOrNull()); Text(routine.name, modifier = Modifier.weight(1f).padding(12.dp)); Text("›") }
         }
     }
 }
@@ -271,6 +271,7 @@ internal fun V32RoutineDetail(context: Context, automation: AutomationDefinition
         item {
             CycloneHeroCard(automation.v32TriggerSummary(), "This is when Cyclone starts.", Icons.Rounded.Bolt, tone = CyclonePastel.SKY)
         }
+        item { CycloneRoutineAssociations(automation, refresh) }
         item { CycloneSectionTitle("Then") }
         items(automation.steps.withIndex().toList(), key = { it.value.id }) { (index, step) ->
             CycloneSimpleCard {
