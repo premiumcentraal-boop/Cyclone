@@ -273,7 +273,6 @@ private fun V39AiChatContent(
     val attached by com.cyclone.mobile.ui.overlay.PendingTaskAttachment.present.collectAsState()
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     val scope = rememberCoroutineScope()
-    val agent = remember { OpenRouterAdaptiveAgent(context) }
     var chatJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var phoneTask by rememberSaveable { mutableStateOf(false) }
     val session = V39AiChatSessionRuntime

@@ -9,6 +9,8 @@ import org.json.JSONObject
  * no second JSON brain and no parallel routines file.
  */
 class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
+    private val mutableRevision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val revision: kotlinx.coroutines.flow.StateFlow<Long> = mutableRevision
     constructor(context: Context) : this(SharedAutomationPrefs(context))
 
     @Synchronized fun listAutomations(): List<AutomationDefinition> = decodeArray(KEY_AUTOMATIONS, AutomationCodec::automationFromJson)
@@ -32,6 +34,7 @@ class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
         existing.add(runToJson(run))
         val trimmed = existing.takeLast(MAX_RUNS)
         prefs.putString(KEY_RUNS, JSONArray(trimmed).toString())
+        mutableRevision.value += 1
     }
 
     @Synchronized fun listRuns(limit: Int = 50): List<AutomationRun> {
@@ -48,6 +51,7 @@ class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
         val all = rawObject(KEY_CHECKPOINTS)
         all.put(checkpoint.runId, checkpointToJson(checkpoint))
         prefs.putString(KEY_CHECKPOINTS, all.toString())
+        mutableRevision.value += 1
     }
 
     @Synchronized fun getCheckpoint(runId: String): Checkpoint? = rawObject(KEY_CHECKPOINTS).optJSONObject(runId)?.let(::checkpointFromJson)
@@ -56,6 +60,7 @@ class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
         val all = rawObject(KEY_CHECKPOINTS)
         all.remove(runId)
         prefs.putString(KEY_CHECKPOINTS, all.toString())
+        mutableRevision.value += 1
     }
 
     @Synchronized fun exportAutomation(id: String): String? = getAutomation(id)?.let { AutomationCodec.automationToJson(it).toString(2) }
@@ -78,6 +83,7 @@ class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
         for (i in 0 until array.length()) array.optJSONObject(i)?.takeIf { it.optString("id") != id }?.let(values::add)
         values.add(value)
         prefs.putString(key, JSONArray(values).toString())
+        mutableRevision.value += 1
     }
 
     private fun deleteById(key: String, id: String) {
@@ -85,6 +91,7 @@ class AutomationStore internal constructor(private val prefs: AutomationPrefs) {
         val values = mutableListOf<JSONObject>()
         for (i in 0 until array.length()) array.optJSONObject(i)?.takeIf { it.optString("id") != id }?.let(values::add)
         prefs.putString(key, JSONArray(values).toString())
+        mutableRevision.value += 1
     }
 
     private fun rawArray(key: String) = runCatching { JSONArray(prefs.getString(key, "[]") ?: "[]") }.getOrElse { JSONArray() }

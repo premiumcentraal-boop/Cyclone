@@ -70,7 +70,7 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("Make routine"))
         assertFalse(page.contains("Control phone"))
         assertFalse(page.contains("Ask Brain"))
-        assertFalse(page.contains("CycloneSegmentedControl"))
+        assertTrue(page.contains("listOf(\"Chat\", \"Phone task\")"))
     }
 
     @Test fun composerIsMultilineAndHasOneSendAction() {
@@ -82,9 +82,11 @@ class CycloneV39AiChatPageTest {
         assertEquals(1, Regex("FilledIconButton\\(").findAll(page).count())
     }
 
-    @Test fun oneSendFlowCallsAdaptiveAgentExecuteExactlyOnce() {
+    @Test fun conversationDoesNotCallThePhoneExecutor() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertEquals(1, Regex("agent\\.execute\\(").findAll(page).count())
+        assertFalse(page.contains("agent.execute("))
+        assertTrue(page.contains("CycloneTextChat.answer(context"))
+        assertTrue(page.contains("WorkspaceTasks.queueRequest(composer)"))
     }
 
     @Test fun modelSelectionPersistsOnlyExpectedPreference() {
@@ -99,14 +101,14 @@ class CycloneV39AiChatPageTest {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("Add API key in Settings"))
         assertTrue(page.contains("TextButton(onClick = onSettings) { Text(\"Add API key in Settings\") }"))
-        assertTrue(page.contains("enabled = session.busy || (hasKey && composer.isNotBlank())"))
-        assertTrue(page.contains("if (session.busy) agent.cancelActiveTask() else submit()"))
+        assertTrue(page.contains("composer.isNotBlank() && (phoneTask || (hasKey && !session.busy))"))
+        assertTrue(page.contains("TextButton(onClick = { chatJob?.cancel() })"))
     }
 
     @Test fun composerClearsOnlyAfterAcceptedSubmit() {
         val page = source("CycloneV39AiChatPage.kt")
         val accept = page.indexOf("tryAccept(composer, hasKey) ?: return")
-        val clear = page.indexOf("composer = \"\"")
+        val clear = page.indexOf("composer = \"\"", accept)
         assertTrue(accept >= 0)
         assertTrue(clear > accept)
     }
@@ -115,7 +117,7 @@ class CycloneV39AiChatPageTest {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("session.status"))
         assertTrue(page.contains("session.messages"))
-        assertTrue(page.contains("V39ChatRole.CYCLONE, run.message"))
+        assertTrue(page.contains("V39ChatRole.CYCLONE, answer"))
         assertTrue(page.contains("View run"))
     }
 

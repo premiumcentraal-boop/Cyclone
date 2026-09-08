@@ -72,6 +72,12 @@ object WorkspaceTasks {
     private val attachments = java.util.concurrent.ConcurrentHashMap<String, com.cyclone.mobile.ui.overlay.TaskAttachment>()
     fun takeAttachment(taskId: String) = attachments.remove(taskId)
     fun queueRequest(goal: String) = requests.add(goal) { com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take() }
+    fun canStartRequest(): Boolean = !hasCurrentTask() &&
+        com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.snapshot().state !in setOf(
+            com.cyclone.mobile.ui.overlay.OverlayChromeState.ANALYSIS,
+            com.cyclone.mobile.ui.overlay.OverlayChromeState.WORKING,
+            com.cyclone.mobile.ui.overlay.OverlayChromeState.LIVE,
+            com.cyclone.mobile.ui.overlay.OverlayChromeState.GATE)
     fun hasCurrentTask(): Boolean = state.value?.phase?.let { it !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) } == true
     const val PRODUCT_HOT_BACKGROUND_LIMIT = SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT
     private val mutable = MutableStateFlow<WorkspaceTaskUi?>(null)
@@ -80,6 +86,7 @@ object WorkspaceTasks {
         mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let(change) ?: it }
     }
     fun start(context: Context, goal: String, packageName: String, label: String, pendingRequestId: String? = null) {
+        check(canStartRequest()) { "Finish or close the current phone task before starting another." }
         check(!com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.gated()) { "Review the current task before starting another." }
         val liveCount = mutable.value?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) }?.let { 1 } ?: 0
         check(liveCount < PRODUCT_HOT_BACKGROUND_LIMIT) {

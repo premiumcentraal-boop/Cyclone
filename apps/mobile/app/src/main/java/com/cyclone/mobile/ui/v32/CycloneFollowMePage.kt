@@ -16,8 +16,10 @@ import com.cyclone.mobile.guided.*
 /** Consumer review of the existing Follow Me timeline/compiler, never a second recorder. */
 @Composable
 fun CycloneFollowMePage(context: Context, refreshTick: Int, onBack: () -> Unit) {
-    val progress = remember(refreshTick) { FollowMeLearnerRuntime.progress() }
-    val session = remember(refreshTick) { RoutineTeachingRuntime.listSessions().firstOrNull { it.id == progress.teachingSessionId && it.endedAt != null } }
+    val progress by produceState(FollowMeLearnerRuntime.progress(), refreshTick) {
+        while (true) { value = FollowMeLearnerRuntime.progress(); kotlinx.coroutines.delay(800) }
+    }
+    val session = remember(refreshTick, progress) { RoutineTeachingRuntime.listSessions().firstOrNull { it.id == progress.teachingSessionId && it.endedAt != null } }
     var draft by remember { mutableStateOf<AutomationDefinition?>(null) }
     var message by remember { mutableStateOf("") }
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {

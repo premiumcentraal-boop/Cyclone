@@ -91,11 +91,16 @@ fun CycloneMobileV32App() {
         AgentTraceRuntime.initialize(context)
         TaskResultNotifierV292.ensureChannel(context)
 
-        LaunchedEffect(Unit) {
-            while (true) {
-                delay(800)
-                refreshTick++
+        val task by com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collectAsState()
+        val routinesRevision by AutomationRuntime.store.revision.collectAsState()
+        LaunchedEffect(destination, settingsOpen, task?.taskId, task?.phase, routinesRevision) { refreshTick++ }
+        androidx.compose.runtime.DisposableEffect(context) {
+            val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refreshTick++
             }
+            lifecycle?.addObserver(observer)
+            onDispose { lifecycle?.removeObserver(observer) }
         }
 
         val phoneReady = v32AccessibilityEnabled(context)

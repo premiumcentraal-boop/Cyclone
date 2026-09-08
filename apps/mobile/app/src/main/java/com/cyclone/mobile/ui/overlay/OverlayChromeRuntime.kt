@@ -37,6 +37,8 @@ object OverlayChromeRuntime {
         emit = OverlayChromeBus::publish,
         cycloneState = cycloneState,
     )
+    private val mutableActivity = kotlinx.coroutines.flow.MutableStateFlow(machine.state())
+    val activity: kotlinx.coroutines.flow.StateFlow<OverlayChromeState> = mutableActivity
     private var controller: OverlayChromeController? = null
     private var service: CycloneAccessibilityService? = null
     private var aiJob: Job? = null
@@ -283,6 +285,7 @@ object OverlayChromeRuntime {
             val changed = before.state == OverlayChromeState.ANALYSIS ||
                 before.state == OverlayChromeState.WORKING ||
                 before.state == OverlayChromeState.LIVE
+            mutableActivity.value = machine.state()
             controller?.render(machine.snapshot())
             changed
         }
@@ -424,6 +427,7 @@ object OverlayChromeRuntime {
     private fun mutate(block: (OverlayChromeMachine) -> Unit) {
         synchronized(lock) {
             block(machine)
+            mutableActivity.value = machine.state()
             controller?.render(machine.snapshot())
         }
     }

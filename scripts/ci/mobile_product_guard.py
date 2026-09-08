@@ -31,7 +31,8 @@ REQUIRED_FEATURES = (
 )
 REQUIRED_AI_CHAT = (
     "internal fun V39AiChatPage",
-    "OpenRouterAdaptiveAgent(context)",
+    "CycloneTextChat.answer(context",
+    "WorkspaceTasks.queueRequest(composer)",
     "OpenRouterModelPresets.all",
     '"Ask Cyclone to do something…"',
 )

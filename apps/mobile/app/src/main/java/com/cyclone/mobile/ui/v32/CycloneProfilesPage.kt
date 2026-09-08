@@ -29,7 +29,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     var profiles by remember { mutableStateOf(emptyList<Workspace>()) }
     var error by remember { mutableStateOf("") }
     val task by WorkspaceTasks.state.collectAsState()
-    LaunchedEffect(refreshTick) {
+    val revision by Layer2Workspaces.engine.revision.collectAsState()
+    LaunchedEffect(refreshTick, revision) {
         withContext(Dispatchers.IO) { runCatching { Layer2Workspaces.initialize(context); Layer2Workspaces.engine.snapshot() } }
             .onSuccess { profiles = it; waiting = Layer2Workspaces.engine.queue() }.onFailure { error = "Profiles couldn't load. Open profile setup to repair." }
     }
