@@ -156,6 +156,13 @@ class BridgeDoctor:
 
         mcp_ready = importlib.util.find_spec("cyclone_phone_mcp") is not None
         checks["MCP"] = self._check(READY if mcp_ready else ERROR, "cyclone_phone_mcp is installed" if mcp_ready else "Install tools/codex-phone-mcp into the bridge virtual environment")
+        checks["MCP Session"] = self._check(
+            READY,
+            "MCP observe/act/locate/search/inspect/screenshot/skill_run/group_act require session_id. "
+            "Pass session_id=default-foreground for the live human display (display 0). "
+            "Named Session Kernel VD needs display_id > 0. "
+            "Layer 2 is default-foreground / display 0, not a VD tile.",
+        )
 
         bad = {MISSING, UNAUTHORIZED, OFF, BROKEN, ERROR, TOKEN_MISMATCH}
         overall = READY if all(item["status"] not in bad for item in checks.values()) else DEGRADED
@@ -266,6 +273,7 @@ def format_human(report: dict[str, Any]) -> str:
     for name in (
         "ADB", "Phone", "Cyclone APK", "Android Gateway", "Accessibility", "ADB Forward",
         "PC Gateway", "PC Bearer", "Install Path", "Cursor MCP", "Authentication", "Capabilities", "MCP",
+        "MCP Session",
     ):
         item = report["checks"][name]
         lines.append(f"{name:<20} {item['status']}")

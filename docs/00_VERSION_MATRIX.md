@@ -2,15 +2,15 @@
 
 ## What is installed / published
 
-| Surface | Installed (Pixel / Agent PC) | Latest published | This branch (`grok/one-1.1-s3-sessions`) |
+| Surface | Installed (Pixel / Agent PC) | Latest published | This branch (`grok/one-1.1-s4-operator`) |
 |---|---|---|---|
 | Mobile APK | **4.0.3** / versionCode **74** (Pixel may lag) | **4.0.4** / versionCode **75** (`v4.0.4` @ `38f7628`) | still **4.0.4** / **75** — do not bump |
-| Cyclone One | **1.0.0** (`C:\Users\Agent\AppData\Local\Cyclone One`) | **1.0.0** (cut with `v4.0.0`) | **1.1.0-alpha.3** (not a GitHub release) |
-| Device gateway | (bundled with One 1.0.0) | published **4.0.0** | **4.1.0-alpha.3** |
-| Agent MCP | One 1.0.0 `CycloneAgentMCP.exe` | published **4.0.0** | **4.1.0-alpha.3** |
+| Cyclone One | **1.0.0** (`C:\Users\Agent\AppData\Local\Cyclone One`) | **1.0.0** (cut with `v4.0.0`) | **1.1.0-alpha.4** (not a GitHub release) |
+| Device gateway | (bundled with One 1.0.0) | published **4.0.0** | **4.1.0-alpha.4** |
+| Agent MCP | One 1.0.0 `CycloneAgentMCP.exe` | published **4.0.0** | **4.1.0-alpha.4** |
 | Legacy Companion | **3.8.1** still installed beside One | obsolete for V4 | warn + prefer Cyclone One; uninstall legacy |
 
-Authoritative IDs: `release/version.toml` — `product_version=4.0.4`, `android_version_code=75`, `python_version=4.1.0-alpha.3`, `components.mobile=4.0.4`, `pc_companion=1.1.0-alpha.3`, `device_gateway=4.1.0-alpha.3`, `mcp=4.1.0-alpha.3`, `channel=development`. Physical Pixel stays **UNVERIFIED**.
+Authoritative IDs: `release/version.toml` — `product_version=4.0.4`, `android_version_code=75`, `python_version=4.1.0-alpha.4`, `components.mobile=4.0.4`, `pc_companion=1.1.0-alpha.4`, `device_gateway=4.1.0-alpha.4`, `mcp=4.1.0-alpha.4`, `channel=development`. Physical Pixel stays **UNVERIFIED**.
 
 ## Repo divergence (critical)
 
@@ -25,19 +25,22 @@ Works today with `session_id=default-foreground` + live PC gateway bearer:
 - USB / a11y / AI trust / semantic observe → locate → home → `open_app` (`params.package`) → Chrome
 - MCP cold-start `serve` ~3s per process
 - PC bearer **no longer requires env scrape** (A1 code path: DPAPI / 0600 runtime file + token-free locator; Pixel **UNVERIFIED**)
-- Raw NDJSON without token = AUTH_REQUIRED; HTTP `/v1/observe` = empty 422
+- Raw NDJSON without token = AUTH_REQUIRED
+
+Installed One **1.0.0** HTTP `/v1/observe` empty body 422'd. This branch (`grok/one-1.1-s4-operator`) accepts empty-body legacy compact observe; MCP uses `/v1/capabilities/observe`. Operator pack browse is typed MCP status→observe→locate→home→open_app Chrome **without OpenRouter**. Timings live in the operator pack test dict. Physical Pixel remains **UNVERIFIED**.
 
 ## MCP gap vs mobile 4.0.3 notes
 
 Installed One **1.0.0** MCP tools include `phone_virtual_*` but **no `phone_workspace`**, and its glass does not treat named Session Kernel VDs as first-class tiles.
 
-This branch (`grok/one-1.1-s3-sessions`) keeps those gaps closed in source:
+This branch (`grok/one-1.1-s4-operator`) keeps those gaps closed in source:
 
 - **A1** bearer seam: persisted DPAPI / 0600 runtime file, token-free locator, doctor-without-scrape.
 - **A2** Layer 2: MCP `phone_workspace` plus gateway `workspace.list/register/switch/pause/release/arm/next` and GET/POST `/v1/devices/{id}/workspaces` (`cyclone.one.layer2.v1`). After switch, mutating `phone_act.params` carry `workspaceId` + `workspaceGeneration`.
 - **A3** named VD tiles: `session.added` / `session.removed` with `session_id`, `displayId`, owner HUMAN/AI, per-session JPEG focus, no silent rewrite to display 0.
+- **A4** operator pack: `phone.open_app` requires `params.package`; HTTP `/v1/observe` empty 422 is fixed; `phone.home` already-on-home is not `VERIFICATION_FAILED`; typed MCP browse without OpenRouter; `session_id=default-foreground` in One UI + doctor.
 
-Installed One **1.0.0** still lacks A1/A2/A3 until **A5**. Physical Pixel remains **UNVERIFIED**.
+Installed One **1.0.0** still lacks A1/A2/A3/A4 until **A5**. Physical Pixel remains **UNVERIFIED**.
 
 ## Three control planes (do not collapse)
 

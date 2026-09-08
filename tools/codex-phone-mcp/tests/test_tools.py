@@ -5,7 +5,15 @@ from pathlib import Path
 
 from cyclone_phone_mcp.reports import SessionRecorder
 from cyclone_phone_mcp.protocol import classify_failure
-from cyclone_phone_mcp.tools import PhoneTools
+from cyclone_phone_mcp.tools import (
+    OPEN_APP_DISPLAY_NAME,
+    OPEN_APP_EXTRA_KEYS,
+    OPEN_APP_INVALID_PACKAGE,
+    OPEN_APP_MISSING_PACKAGE,
+    OPEN_APP_PACKAGE_NAME,
+    PhoneTools,
+    _validate_mcp_action_params,
+)
 
 FG = {"session_id": "default-foreground"}
 
@@ -464,6 +472,127 @@ class ToolTests(unittest.TestCase):
             "tool": "phone.click",
             "params": {"elementId": "see-all"},
             "goal": "See all 98 apps",
+            **FG,
+        })[0]["text"])
+        self.assertIs(False, payload["pageChanged"])
+        self.assertNotEqual("VERIFICATION_FAILED", payload.get("errorClass"))
+        self.assertTrue(payload["ok"])
+        self.assertEqual("passed", payload["actionStatus"]["gatewayVerification"])
+
+    def test_open_app_accepts_params_package(self):
+        _validate_mcp_action_params("phone.open_app", {"package": "com.android.chrome"})
+        _validate_mcp_action_params("phone.open_app", {
+            "package": "com.android.chrome",
+            "workspaceId": "a",
+            "workspaceGeneration": 4,
+        })
+        self.tools.call("phone_observe", dict(FG))
+        payload = json.loads(self.tools.call("phone_act", {
+            "tool": "phone.open_app",
+            "params": {"package": "com.android.chrome"},
+            "goal": "Open Chrome",
+            **FG,
+        })[0]["text"])
+        text = json.dumps(payload)
+        self.assertNotIn(OPEN_APP_MISSING_PACKAGE, text)
+        self.assertNotIn(OPEN_APP_PACKAGE_NAME, text)
+        self.assertNotIn(OPEN_APP_DISPLAY_NAME, text)
+        self.assertNotIn(OPEN_APP_INVALID_PACKAGE, text)
+        self.assertNotEqual("phone_act", payload.get("error"))
+
+    def test_open_app_rejects_package_name(self):
+        with self.assertRaises(ValueError) as ctx:
+            _validate_mcp_action_params("phone.open_app", {"packageName": "com.android.chrome"})
+        self.assertEqual(str(ctx.exception), OPEN_APP_PACKAGE_NAME)
+        with self.assertRaises(ValueError) as ctx:
+            _validate_mcp_action_params("phone.open_app", {"package_name": "com.android.chrome"})
+        self.assertEqual(str(ctx.exception), OPEN_APP_PACKAGE_NAME)
+        content = self.tools.call("phone_act", {
+            "tool": "phone.open_app",
+            "params": {"packageName": "com.android.chrome"},
+            "goal": "Open Chrome",
+            **FG,
+        })[0]["text"]
+        self.assertIn(OPEN_APP_PACKAGE_NAME, content)
+
+    def test_open_app_rejects_display_name(self):
+        for params in ({"name": "Chrome"}, {"appName": "Chrome"}, {"app": "Chrome"}, {"app_name": "Chrome"}):
+            with self.assertRaises(ValueError) as ctx:
+                _validate_mcp_action_params("phone.open_app", params)
+            self.assertEqual(str(ctx.exception), OPEN_APP_DISPLAY_NAME)
+        content = self.tools.call("phone_act", {
+            "tool": "phone.open_app",
+            "params": {"name": "Chrome"},
+            "goal": "Open Chrome",
+            **FG,
+        })[0]["text"]
+        self.assertIn(OPEN_APP_DISPLAY_NAME, content)
+
+    def test_open_app_rejects_missing_package(self):
+        with self.assertRaises(ValueError) as ctx:
+            _validate_mcp_action_params("phone.open_app", {})
+        self.assertEqual(str(ctx.exception), OPEN_APP_MISSING_PACKAGE)
+        content = self.tools.call("phone_act", {
+            "tool": "phone.open_app",
+            "params": {},
+            "goal": "Open Chrome",
+            **FG,
+        })[0]["text"]
+        self.assertIn(OPEN_APP_MISSING_PACKAGE, content)
+
+    def test_open_app_rejects_invalid_package_id(self):
+        with self.assertRaises(ValueError) as ctx:
+            _validate_mcp_action_params("phone.open_app", {"package": "Chrome"})
+        self.assertEqual(str(ctx.exception), OPEN_APP_INVALID_PACKAGE)
+        content = self.tools.call("phone_act", {
+            "tool": "phone.open_app",
+            "params": {"package": "Chrome"},
+            "goal": "Open Chrome",
+            **FG,
+        })[0]["text"]
+        self.assertIn(OPEN_APP_INVALID_PACKAGE, content)
+
+    def test_open_app_rejects_extra_keys(self):
+        with self.assertRaises(ValueError) as ctx:
+            _validate_mcp_action_params("phone.open_app", {
+                "package": "com.android.chrome",
+                "intent": "android.intent.action.VIEW",
+            })
+        self.assertEqual(str(ctx.exception), OPEN_APP_EXTRA_KEYS)
+
+    def test_home_already_on_home_is_not_verification_failed(self):
+        class AlreadyOnHomeGateway(FakeGateway):
+            def observe(self, **kwargs):
+                return {
+                    "witness": {"observation_id": "obs-home"},
+                    "observation": {
+                        "pageKey": "home",
+                        "title": "Home",
+                        "package": "com.android.launcher3",
+                        "pageText": "Ask Cyclone. Phone. Messages.",
+                        "controls": [
+                            {"id": "phone", "label": "Phone", "clickable": True},
+                        ],
+                    },
+                }
+
+            def action(self, tool, params, goal, **kwargs):
+                return {
+                    "protocol_version": "cyclone.gateway.capability.v1",
+                    "capability_id": tool,
+                    "ok": False,
+                    "transport": {"ok": True},
+                    "execution": {"ok": True},
+                    "verification": {"ok": False, "status": "OBSERVED", "code": "VERIFICATION_FAILED"},
+                    "error": {"code": "VERIFICATION_FAILED", "layer": "VERIFICATION"},
+                }
+
+        tools = PhoneTools(AlreadyOnHomeGateway(), SessionRecorder(self.temp.name))
+        tools.call("phone_observe", dict(FG))
+        payload = json.loads(tools.call("phone_act", {
+            "tool": "phone.home",
+            "params": {},
+            "goal": "Go home",
             **FG,
         })[0]["text"])
         self.assertIs(False, payload["pageChanged"])

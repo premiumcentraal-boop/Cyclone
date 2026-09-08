@@ -15,11 +15,15 @@ import {
 } from "../core/layer2.js";
 import {
   bindSessionTile,
+  DEFAULT_FOREGROUND_SESSION_ID,
   FOREGROUND_KIND,
+  FOREGROUND_PLANE_COPY,
   FOREGROUND_PLANE_LABEL,
   isSessionKernelVd,
   jpegFocusTarget,
   markSessionInventory,
+  MCP_FOREGROUND_OPERATOR_LINE,
+  MCP_FOREGROUND_SESSION_COPY,
   SESSION_KERNEL_VD_KIND,
   SESSION_TILES_COPY,
   SESSION_TILES_TITLE,
@@ -75,16 +79,17 @@ export function createFocusedPhonePage(
   const healthSlot = el("div", "focus-health-slot");
   healthSlot.append(createDeviceHealthPanel(device));
   const humanInput = el("div", "context-card");
-  const planeCopy = el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} JPEG is display 0 live on session_id=default-foreground. Select a ${VD_PLANE_LABEL} tile to focus its isolated JPEG (displayId>0, never rewritten to display 0). Layer 2 is the display-0 time-sliced lock in the strip below — not a VD tile.`);
+  const planeCopy = el("p", "context-card-copy", `${FOREGROUND_PLANE_COPY} Select a ${VD_PLANE_LABEL} tile to focus its isolated JPEG (displayId>0, never rewritten to display 0). Layer 2 is the display-0 time-sliced lock in the strip below — not a VD tile.`);
   const humanCopy = el("p", "context-card-copy", "Click anywhere on the Foreground JPEG to tap. Hold and drag naturally to swipe. Mouse control stays available while display 0 live view warms up. Session Kernel VD JPEG is snapshot-only.");
   humanInput.append(
     el("div", "context-card-title", "Human control"),
     planeCopy,
+    el("p", "context-card-copy", MCP_FOREGROUND_OPERATOR_LINE),
     humanCopy,
   );
   const aiInput = el("div", "context-card accent");
   const ownerLabel = el("p", "context-card-copy", ownerCopy(device));
-  const sessionList = el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} session: default-foreground`);
+  const sessionList = el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} session_id=${DEFAULT_FOREGROUND_SESSION_ID}`);
   const pauseSession = button("Pause", "button secondary compact");
   const yieldAi = button("Give to AI", "button primary compact");
   const takeHuman = button("Take control", "button secondary compact");
@@ -93,6 +98,7 @@ export function createFocusedPhonePage(
     el("div", "context-card-title", "Human ↔ AI handoff"),
     ownerLabel,
     sessionList,
+    el("p", "context-card-copy", MCP_FOREGROUND_SESSION_COPY),
     el("p", "context-card-copy", "MCP mutations fail with HUMAN_HAS_CONTROL while Companion owns input. Yield here, or pass request_ai_control=true. A locked phone is never stolen."),
     pauseSession,
     yieldAi,
@@ -101,6 +107,7 @@ export function createFocusedPhonePage(
   const sessionStrip = el("div", "task-session-compact");
   sessionStrip.append(
     el("div", "context-card-title", SESSION_TILES_TITLE),
+    el("p", "context-card-copy", FOREGROUND_PLANE_COPY),
     el("p", "context-card-copy", SESSION_TILES_COPY),
   );
   const sessionTileList = el("div", "task-session-list-compact");
@@ -177,7 +184,7 @@ export function createFocusedPhonePage(
     }
   };
   let disposed = false;
-  let selectedSessionId = "default-foreground";
+  let selectedSessionId = DEFAULT_FOREGROUND_SESSION_ID;
   let sessionTiles: SessionTile[] = [];
   let jpegUrl: string | null = null;
 
@@ -194,7 +201,7 @@ export function createFocusedPhonePage(
     if (jpegUrl) URL.revokeObjectURL(jpegUrl);
     jpegUrl = null;
     liveHint.textContent = "Foreground JPEG · display 0 live · click to tap · drag to swipe";
-    planeCopy.textContent = `${FOREGROUND_PLANE_LABEL} JPEG is display 0 live on session_id=default-foreground. Session Kernel VD JPEG is selected from the tiles below. Layer 2 is the display-0 time-sliced lock in the strip — not a VD tile.`;
+    planeCopy.textContent = `${FOREGROUND_PLANE_COPY} ${VD_PLANE_LABEL} JPEG is selected from the tiles below. Layer 2 is the display-0 time-sliced lock in the strip — not a VD tile.`;
   };
 
   const showVdJpeg = async (tile: SessionTile): Promise<void> => {
@@ -305,7 +312,7 @@ export function createFocusedPhonePage(
       }
     } catch {
       if (!disposed) {
-        sessionTileList.replaceChildren(el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} session: default-foreground`));
+        sessionTileList.replaceChildren(el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} session_id=${DEFAULT_FOREGROUND_SESSION_ID}`));
         restoreForegroundLive();
       }
     }
@@ -603,8 +610,8 @@ async function loadSessionSummary(service: DesktopService, deviceId: string, tar
     });
     target.textContent = ids.length
       ? `Sessions: ${ids.join(" · ")}`
-      : `Sessions: default-foreground (${FOREGROUND_PLANE_LABEL})`;
+      : `Sessions: ${DEFAULT_FOREGROUND_SESSION_ID} (${FOREGROUND_PLANE_LABEL})`;
   } catch {
-    target.textContent = `Sessions: default-foreground (${FOREGROUND_PLANE_LABEL})`;
+    target.textContent = `Sessions: ${DEFAULT_FOREGROUND_SESSION_ID} (${FOREGROUND_PLANE_LABEL})`;
   }
 }

@@ -404,6 +404,62 @@ def test_mcp_observe_contract_returns_compact_agent2_controls(tmp_path):
     assert payload["screenshot"] is None
 
 
+def _legacy_observe_client(tmp_path):
+    configured = settings(tmp_path)
+    gateway = Gateway(
+        configured,
+        adb=FakeADB(),
+        bridge=FakeBridge(),
+        uia=FakeUIA(),
+        root=RootProvider(FakeADB(), tmp_path / "traces"),
+    )
+    return TestClient(create_app(configured, gateway))
+
+
+def test_legacy_observe_accepts_missing_body(tmp_path):
+    client = _legacy_observe_client(tmp_path)
+    response = client.post(
+        "/v1/observe",
+        headers={"Authorization": "Bearer http-secret"},
+    )
+    assert response.status_code == 200
+    assert response.status_code != 422
+    payload = response.json()
+    assert payload["pageKey"] == "HOME"
+    assert payload["controls"][0]["label"] == "Apps"
+    assert payload["screenshot"] is None
+    empty_json = client.post(
+        "/v1/observe",
+        headers={
+            "Authorization": "Bearer http-secret",
+            "Content-Type": "application/json",
+        },
+        content=b"",
+    )
+    assert empty_json.status_code == 200
+    assert empty_json.json()["pageKey"] == "HOME"
+
+
+def test_legacy_observe_accepts_empty_object(tmp_path):
+    client = _legacy_observe_client(tmp_path)
+    response = client.post(
+        "/v1/observe",
+        headers={"Authorization": "Bearer http-secret"},
+        json={},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pageKey"] == "HOME"
+    assert payload["controls"][0]["label"] == "Apps"
+    assert payload["screenshot"] is None
+
+
+def test_legacy_observe_unauthenticated_is_401(tmp_path):
+    client = _legacy_observe_client(tmp_path)
+    assert client.post("/v1/observe").status_code == 401
+    assert client.post("/v1/observe", json={}).status_code == 401
+
+
 def test_wait_for_stable_requires_two_matching_semantic_samples(tmp_path):
     gateway = Gateway(
         settings(tmp_path),

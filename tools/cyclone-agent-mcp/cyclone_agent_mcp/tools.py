@@ -19,6 +19,7 @@ from .phone_mcp import (
     skill_run_normalize,
     skill_save_payload,
     skill_save_success,
+    validate_open_app_params,
 )
 
 MUTATING_ACTIONS = ALLOWED_ACTIONS - {"phone.wait_for"}
@@ -409,6 +410,11 @@ class PhoneTools:
         params = dict(params)
         if "workspaceId" in params or "workspaceGeneration" in params:
             _require_workspace_identity(params.get("workspaceId"), params.get("workspaceGeneration"))
+        if tool == "phone.open_app":
+            validate_open_app_params({
+                key: value for key, value in params.items()
+                if key not in {"workspaceId", "workspaceGeneration"}
+            })
         params = _forward_type_authorization(tool, args, params)
         if args.get("request_ai_control") is True:
             params = dict(params)
@@ -481,6 +487,11 @@ class PhoneTools:
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
+        if tool == "phone.open_app":
+            validate_open_app_params({
+                key: value for key, value in params.items()
+                if key not in {"workspaceId", "workspaceGeneration"}
+            })
         identity = _required_identity_kwargs(args)
         results: list[dict[str, Any]] = []
         for device_id in device_ids:

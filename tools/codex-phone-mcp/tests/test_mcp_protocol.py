@@ -27,6 +27,8 @@ class McpProtocolTests(unittest.TestCase):
         self.assertIn("elementIndex", response["result"]["instructions"])
         self.assertIn("session_id is required", response["result"]["instructions"])
         self.assertIn("default-foreground", response["result"]["instructions"])
+        self.assertIn("params.package=com.android.chrome", response["result"]["instructions"])
+        self.assertIn("does not use OpenRouter", response["result"]["instructions"])
 
     def test_tool_list_has_no_shell(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
@@ -64,6 +66,17 @@ class McpProtocolTests(unittest.TestCase):
         self.assertEqual("ui", tools["phone_observe"]["annotations"]["cycloneSurface"])
         self.assertTrue(tools["phone_act"]["annotations"]["cycloneFastPath"])
         self.assertIn("elementIndex", tools["phone_act"]["description"])
+        package = tools["phone_act"]["inputSchema"]["properties"]["params"]["properties"]["package"]
+        self.assertEqual("string", package["type"])
+        self.assertIn("com.android.chrome", package["description"])
+        self.assertIn("packageName", package["description"])
+
+    def test_phone_act_schema_lists_params_package(self):
+        response = self.server.handle({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
+        tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        properties = tools["phone_act"]["inputSchema"]["properties"]["params"]["properties"]
+        self.assertIn("package", properties)
+        self.assertIn("required Android package id for phone.open_app", properties["package"]["description"])
 
     def test_unknown_tool_rejected(self):
         response = self.server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "root_shell", "arguments": {}}})

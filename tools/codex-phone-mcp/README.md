@@ -16,6 +16,8 @@ require `session_id`. Pass `default-foreground` for the live human display; name
 
 Layer 2 `phone_workspace` manages default-foreground / display 0 workspaces (`list`, `register`, `switch`, `pause`, `release`, `arm`, `next`). After `switch`/`next`, mutating `phone_act.params` must include the returned `workspaceId` and `workspaceGeneration`. Missing or stale generation fails closed (`MUTATE_LOCK`). Layer 2 is not a named VD session.
 
+Browse/open Chrome is `phone_act` with `tool=phone.open_app` and `params.package=com.android.chrome`. `phone.open_app` uses `params.package` only (Android package id). Do not send an app display name or `packageName`. This operator browse path does not use OpenRouter.
+
 For setup, registration, tool order and
 troubleshooting, read `docs/agent-system/CODEX_PHONE_CONNECTION.md`.
 

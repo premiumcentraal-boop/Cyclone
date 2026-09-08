@@ -7,8 +7,9 @@ import shutil
 import time
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 import uvicorn
 
 from .actions.router import ActionRouter, ActionValidationError
@@ -325,6 +326,26 @@ class Gateway:
         return {"bundle_id": stamp, "path": str(folder), **manifest}
 
 
+def _parse_observe_request(raw: bytes) -> ObserveRequest:
+    """Legacy `/v1/observe` accepts a missing or empty body as ObserveRequest defaults."""
+    if not raw or not raw.strip():
+        return ObserveRequest()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="Invalid JSON body") from exc
+    if payload is None:
+        return ObserveRequest()
+    try:
+        return ObserveRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=json.loads(exc.json())) from exc
+
+
+async def _observe_request_body(http_request: Request) -> ObserveRequest:
+    return _parse_observe_request(await http_request.body())
+
+
 def create_app(settings: Settings | None = None, gateway: Gateway | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     gateway = gateway or Gateway(settings)
@@ -338,7 +359,8 @@ def create_app(settings: Settings | None = None, gateway: Gateway | None = None)
         return gateway.device_status()
 
     @app.post("/v1/observe", dependencies=[Depends(auth)])
-    def observe(request: ObserveRequest):
+    def observe(request: ObserveRequest = Depends(_observe_request_body)):
+        request = request or ObserveRequest()
         gateway.observe(
             screenshot=request.wants_screenshot,
             uiautomator=request.uiautomator,

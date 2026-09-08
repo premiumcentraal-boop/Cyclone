@@ -9,6 +9,18 @@ export const VD_PLANE_LABEL = "Session Kernel VD";
 export const SESSION_TILES_TITLE = "Session Kernel VD tiles";
 export const SESSION_TILES_COPY =
   "Named virtual-display (VD) sessions bound to session_id with displayId>0 and HUMAN/AI owner. These are not Layer 2 display-0 workspaces.";
+export const FOREGROUND_PLANE_COPY =
+  `${FOREGROUND_PLANE_LABEL} uses session_id=${DEFAULT_FOREGROUND_SESSION_ID} on display 0, the live human display.`;
+export const MCP_FOREGROUND_SESSION_COPY =
+  `MCP observe/act/locate require session_id=${DEFAULT_FOREGROUND_SESSION_ID} for the live human display (display 0).`;
+export const MCP_FOREGROUND_OPERATOR_LINE =
+  `MCP tools need session_id=${DEFAULT_FOREGROUND_SESSION_ID} for this Foreground JPEG (display 0). Named VD tiles use their own session_id plus display_id>0.`;
+export const CODEX_MCP_PROMPT =
+  `Use Cyclone to list my connected phones, observe the one I choose with session_id=${DEFAULT_FOREGROUND_SESSION_ID}, and tell me what is currently on screen.`;
+export const HOME_MCP_SESSION_COPY =
+  `Live control and MCP use session_id=${DEFAULT_FOREGROUND_SESSION_ID}.`;
+export const SETTINGS_MCP_SESSION_COPY =
+  `${MCP_FOREGROUND_SESSION_COPY} Doctor also reports this.`;
 
 export type SessionTileKind = "foreground" | "session_kernel_vd";
 export type SessionInputOwner = "HUMAN" | "AI";

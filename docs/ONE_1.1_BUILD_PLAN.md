@@ -1,10 +1,10 @@
 # Cyclone One 1.1 — Session Contract Glass (PC sprint)
 
-**Status:** A1 DONE, A2 DONE, A3 DONE (code+docs; Pixel UNVERIFIED). A4 not started.  
+**Status:** A1 DONE, A2 DONE, A3 DONE, A4 DONE (code+docs; Pixel UNVERIFIED). A5 not started.  
 **Codename:** Session Contract Glass  
 **Base:** installed One **1.0.0** sources as of `v4.0.0`, rebased onto **`v4.0.4` mobile protocol** (tag `38f7628`) so gateway/MCP can speak Layer 2  
 **Out:** Cyclone One **1.1.0** Setup.exe + device_gateway **4.1.0** + mcp **4.1.0**  
-**Now:** One **1.1.0-alpha.3** + gateway/MCP **4.1.0-alpha.3** on this branch; mobile stays **4.0.4** / versionCode **75**  
+**Now:** One **1.1.0-alpha.4** + gateway/MCP **4.1.0-alpha.4** on this branch; mobile stays **4.0.4** / versionCode **75**  
 **Grok:** each stage on Agent PC with **subagents required**
 
 ## Why this sprint exists
@@ -62,18 +62,19 @@ Acceptance: MCP observe/act with non-default `session_id` routes to matching til
 Out of scope: A4 operator MCP pack; A5 release cut; mobile APK; Magisk; 20 concurrent VDs; local compile; claiming parallel input.  
 Handoff: next work is **A4** on `grok/one-1.1-s4-operator` from this A3 tip. Do not implement A4 here. See [`ONE_1.1_STAGE3_SESSIONS.md`](ONE_1.1_STAGE3_SESSIONS.md).
 
-### A4 — Operator MCP pack
+### A4 — Operator MCP pack ✅ DONE
 Branch: `grok/one-1.1-s4-operator` from A3.  
 Goal: make the retest suite boringly reliable.
-Deliverables:
-1. Schema clarity: `phone.open_app` → `params.package` required; improve error text.
-2. Fix or remove dead HTTP `/v1/observe` (no empty 422).
-3. `phone.home` already-on-home ≠ `VERIFICATION_FAILED` false negative.
-4. Browse path does not require OpenRouter key.
-5. Document `session_id=default-foreground` in One UI + doctor.
-6. Tests + docs + alpha.4.
-Acceptance: scripted suite status→observe→locate→home→open Chrome without OpenRouter; timings recorded.  
-Out of scope: mobile skill compiler changes.
+Deliverables (landed):
+1. Schema clarity: `phone.open_app` → `params.package` required; clear errors vs app name / `packageName`. Chrome is `com.android.chrome`.
+2. HTTP `/v1/observe` no longer empty-422 (legacy compact observe accepts empty body; MCP uses `/v1/capabilities/observe`).
+3. `phone.home` already-on-home is not `VERIFICATION_FAILED`.
+4. Browse path is typed MCP status→observe→locate→home→open_app Chrome; no OpenRouter key.
+5. `session_id=default-foreground` documented in One UI + doctor.
+6. Docs `docs/ONE_1.1_STAGE4_OPERATOR.md` + version identity **1.1.0-alpha.4** / gateway-mcp **4.1.0-alpha.4**. A1 tooling seam, A2 `phone_workspace` / Layer 2 glass, A3 named VD tiles preserved. Tests as source: operator pack suite + schema/home/observe/doctor/UI copy tests. Timings recorded in the operator pack test dict (not a live Pixel run).
+Acceptance: scripted suite status→observe→locate→home→open Chrome without OpenRouter; timings in the operator pack test dict; physical UNVERIFIED.  
+Out of scope: A5 release cut; mobile APK; Magisk; local compile; claiming Pixel verified.  
+Handoff: next work is **A5** on `grok/one-1.1-s5-release` from this A4 tip. Do not implement A5 here. See [`ONE_1.1_STAGE4_OPERATOR.md`](ONE_1.1_STAGE4_OPERATOR.md).
 
 ### A5 — One 1.1.0 release lane
 Branch: `grok/one-1.1-s5-release` from A4.  

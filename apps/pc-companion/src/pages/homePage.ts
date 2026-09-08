@@ -1,4 +1,5 @@
 import type { DesktopDevice } from "../services/types.js";
+import { HOME_MCP_SESSION_COPY } from "../core/sessionTiles.js";
 import { needsTrustRepair } from "../core/trustRecovery.js";
 import { button, el } from "../ui/dom.js";
 
@@ -23,6 +24,7 @@ export function createHomePage(
     el("div", "home-kicker", "CYCLONE WORKSPACE"),
     el("h1", "page-title", "Home"),
     el("p", "page-subtitle", "See phone readiness, open live control, and review the safe automation path."),
+    el("p", "page-subtitle", HOME_MCP_SESSION_COPY),
   );
   const primary = button("Open Control", "button primary");
   primary.addEventListener("click", onControl);

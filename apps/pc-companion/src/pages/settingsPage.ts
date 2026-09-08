@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { DEFAULT_FOREGROUND_SESSION_ID, SETTINGS_MCP_SESSION_COPY } from "../core/sessionTiles.js";
 import type { DesktopDevice, DesktopRuntimeStatus, DesktopService } from "../services/types.js";
 import { button, el } from "../ui/dom.js";
 
@@ -30,6 +31,11 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
     "Phones",
     `${devices.length} detected`,
     devices.length === 0 ? "No phones are currently in Cyclone's fleet." : "Phone screens and controls stay isolated per device.",
+  );
+  const mcpLiveDisplay = statusCard(
+    "MCP live display",
+    `session_id=${DEFAULT_FOREGROUND_SESSION_ID}`,
+    SETTINGS_MCP_SESSION_COPY,
   );
   const adb = statusCard("ADB connection", "Checking…", "Cyclone is checking Android Platform Tools and USB devices.");
   const adbPath = el("div", "diagnostic-path", "");
@@ -78,7 +84,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   crashDiagnostics.append(diagnosticsPath, diagnosticsDetail, openDiagnostics);
 
   const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI or live crash monitor.");
-  cards.append(companion, installPath, phones, adb, autoDetect, bridgeRecovery, crashDiagnostics, connectionDiagnostics, privacy);
+  cards.append(companion, installPath, phones, mcpLiveDisplay, adb, autoDetect, bridgeRecovery, crashDiagnostics, connectionDiagnostics, privacy);
   page.append(header, cards);
 
   if (service.mode === "real") {
