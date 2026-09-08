@@ -1,43 +1,214 @@
 package com.cyclone.mobile.ui.v32
 
-import android.content.Intent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.runtime.background.PendingWorkspaceRequest
+import com.cyclone.mobile.runtime.background.WorkspaceDestinationHint
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
-import com.cyclone.mobile.runtime.background.WorkspaceActivity
 
-/** Shared pending requests. Starting always enters existing app selection and execution checks. */
+/** FIFO presentation only: queued work has Steer + Stop and starts automatically when safely eligible. */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
     val requests by WorkspaceTasks.requests.state.collectAsState()
-    val current by WorkspaceTasks.state.collectAsState()
-    val overlay by com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.activity.collectAsState()
-    val context = LocalContext.current
     if (requests.isEmpty()) return
-    val keyboardOpen = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
-    CycloneGlassSurface(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp).heightIn(max = 150.dp).verticalScroll(rememberScrollState())) {
-            Text("Up next · ${requests.size}", style = MaterialTheme.typography.titleSmall)
-            if (!keyboardOpen) {
-            Text("Saved for this session. Start when the current task is closed.", style = MaterialTheme.typography.bodySmall)
-            requests.forEach { request ->
-                Row(Modifier.fillMaxWidth()) {
-                    Text(request.goal, maxLines = 2, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
-                    TextButton(enabled = remember(current, overlay) { WorkspaceTasks.canStartRequest() }, onClick = {
-                        onOpen()
-                        context.startActivity(Intent(context, WorkspaceActivity::class.java)
-                            .putExtra("goal", request.goal).putExtra("pendingRequestId", request.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }) { Text("Start") }
-                    TextButton(onClick = { WorkspaceTasks.requests.remove(request.id) }) { Text("Remove") }
+    val context = LocalContext.current
+    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var steering by remember { mutableStateOf<PendingWorkspaceRequest?>(null) }
+    val visible = if (keyboardOpen) requests.take(KEYBOARD_VISIBLE_QUEUE_CARDS) else requests
+
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Up next",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                requests.size.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        visible.forEach { request ->
+            QueuedTaskCard(
+                request = request,
+                compact = keyboardOpen,
+                onSteer = { steering = request },
+                onStop = {
+                    if (steering?.id == request.id) steering = null
+                    WorkspaceTasks.requests.remove(request.id)
+                },
+            )
+            if (steering?.id == request.id) {
+                SteerDestinationSheet(
+                    request = request,
+                    destinations = WorkspaceTasks.queueDestinations(context),
+                    onSelected = { destination ->
+                        WorkspaceTasks.requests.steer(request.id, destination)
+                        steering = null
+                    },
+                    onDismiss = { steering = null },
+                )
+            }
+        }
+        if (keyboardOpen && requests.size > visible.size) {
+            Text(
+                "+${requests.size - visible.size} more queued",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun QueuedTaskCard(
+    request: PendingWorkspaceRequest,
+    compact: Boolean,
+    onSteer: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val context = LocalContext.current
+    val target = remember(request) { WorkspaceTasks.resolveQueueTarget(context, request) }
+    val status = remember(request) { WorkspaceTasks.queuePresentationStatus(context, request) }
+    val model = TaskGlassPresentation.queued(
+        request = request,
+        appLabel = target?.appLabel ?: request.targetAppLabel,
+        packageName = target?.packageName ?: request.targetPackageName,
+        status = status,
+    )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .90f),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .64f)),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Column(
+            Modifier.padding(if (compact) 12.dp else 14.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CycloneAppIcon(model.packageName, Modifier.size(36.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        model.taskLabel,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = if (compact) 1 else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        model.status,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onSteer,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = model.steerContentDescription },
+                    shape = RoundedCornerShape(18.dp),
+                ) { Text("Steer") }
+                OutlinedButton(
+                    onClick = onStop,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = model.stopContentDescription },
+                    shape = RoundedCornerShape(18.dp),
+                ) { Text("Stop") }
             }
         }
     }
 }
+
+/** Inline by design: an AccessibilityService overlay cannot safely depend on an Activity dialog token. */
+@Composable
+private fun SteerDestinationSheet(
+    request: PendingWorkspaceRequest,
+    destinations: List<WorkspaceDestinationHint>,
+    onSelected: (WorkspaceDestinationHint) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .70f)),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Column(
+            Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("Steer task", style = MaterialTheme.typography.labelLarge)
+            Text(
+                TaskHumanizer.humanize(request.goal, request.targetAppLabel),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            destinations.forEach { destination ->
+                val selected = request.preferredDestination?.androidUserId == destination.androidUserId
+                OutlinedButton(
+                    onClick = { onSelected(destination) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .semantics { contentDescription = "Steer to ${destination.label}" },
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Text((if (selected) "✓ " else "") + destination.label)
+                }
+            }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text("Cancel") }
+        }
+    }
+}
+
+private const val KEYBOARD_VISIBLE_QUEUE_CARDS = 2

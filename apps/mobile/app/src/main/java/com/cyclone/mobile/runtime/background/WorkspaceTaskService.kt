@@ -12,7 +12,6 @@ import com.cyclone.mobile.R
 import com.cyclone.mobile.ai.*
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.ui.overlay.GlassStepKind
-import com.cyclone.mobile.ui.overlay.PendingTaskAttachment
 import com.cyclone.mobile.ui.overlay.TaskGlassStep
 import kotlinx.coroutines.*
 
@@ -253,6 +252,8 @@ class WorkspaceTaskService : Service() {
         return builder.build()
     }
     override fun onDestroy() {
+        // Only a task that was already truly terminal/closed may release the FIFO head.
+        val promoteAfterDestroy = current?.phase in setOf(TaskPhase.FAILED, TaskPhase.STOPPED)
         taskId?.let { WorkspaceTasks.takeAttachment(it) }
         stopped = true
         agent?.cancelActiveTask()
@@ -261,6 +262,7 @@ class WorkspaceTaskService : Service() {
         if (current?.phase !in setOf(TaskPhase.FAILED, TaskPhase.STOPPED))
             update { it.copy(phase = TaskPhase.STOPPED, message = "Task ended. Start a new task when you're ready.", resumable = false) }
         super.onDestroy()
+        if (promoteAfterDestroy) WorkspaceTasks.scheduleQueuePromotion(applicationContext)
     }
     override fun onBind(intent: Intent?): IBinder? = null
     companion object { private const val CHANNEL = "cyclone-workspace-task"; private const val NOTIFICATION = 902 }

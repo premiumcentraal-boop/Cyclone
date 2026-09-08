@@ -18,17 +18,18 @@ class CycloneVisual42ContractTest {
         assertFalse(home.contains("Your phone, simplified"))
     }
 
-    @Test fun askExpansionKeepsTheOriginalTaskAndReviewRoute() {
+    @Test fun askTaskGlassKeepsExactTaskAndMovesDestructiveControlsIntoProgress() {
         val panel = source("CycloneAskTaskPanel.kt")
-        assertTrue(panel.contains("rememberSaveable(task.taskId)"))
-        assertTrue(panel.contains("if (task.confirmation != null) expanded = true"))
-        assertTrue(panel.contains("CycloneTaskProgress(task)"))
+        assertTrue(panel.contains("TaskGlassPresentation.current(task, resolvedApp)"))
+        assertTrue(panel.contains("CycloneAppIcon(presentation.packageName"))
         assertTrue(panel.contains("UiTask(task).open(context)"))
+        assertTrue(panel.contains("presentation.actionContentDescription"))
         assertFalse(panel.contains("WorkspaceTaskUi("))
-        // 4.2.1 adds Stop/Close on the current-task card. It must route the exact existing
-        // task identity into WorkspaceTasks instead of reconstructing or replacing the task.
-        assertTrue(panel.contains("WorkspaceTasks.command(context, task, \"cancel\")"))
+        assertFalse(panel.contains("WorkspaceTasks.command(context, task, \"cancel\")"))
+        assertFalse(panel.contains("Stop task"))
+        assertFalse(panel.contains("Close task"))
         assertTrue(source("CyclonePresentation.kt").contains("ViewProgressRouter.intent(context, source)"))
+        assertTrue(source("CyclonePresentation.kt").contains("WorkspaceTasks.command(context, task, \"cancel\")"))
     }
 
     private fun source(name: String): String {

@@ -1,53 +1,82 @@
 package com.cyclone.mobile.ui.v32
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 
-/** Presentation state only. Every action receives the original exact-plane task. */
+/** One real task, projected into the calm collapsed task glass. Destructive controls live in progress. */
 @Composable
 fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
-    var expanded by rememberSaveable(task.taskId) { mutableStateOf(UiTask(task).active) }
     val context = LocalContext.current
-    val keyboardOpen = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
-    LaunchedEffect(task.taskId, task.confirmation) {
-        if (task.confirmation != null) expanded = true
-    }
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            CycloneOrbitMark(Modifier.size(28.dp))
-            Text("Current task · ${UiTask(task).consumerStatus}", style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f).padding(horizontal = 10.dp))
-            if (runCatching { task.plane().kind == com.cyclone.mobile.runtime.session.SessionPlaneKind.SESSION_KERNEL_VD }.getOrDefault(false)) {
-                TextButton(onClick = { com.cyclone.mobile.runtime.background.WorkspaceTasks.command(context, task, "cancel") }) {
-                    Text(if (UiTask(task).active) "Stop" else "Close")
+    val resolvedApp = remember(task.packageName) { appLabel(context, task.packageName) }
+    val presentation = TaskGlassPresentation.current(task, resolvedApp) ?: return
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Column(
+            Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CycloneAppIcon(presentation.packageName, Modifier.size(42.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        presentation.status,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        presentation.taskLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
-            IconButton(onClick = { expanded = !expanded }) {
-                Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                    if (expanded) "Collapse task details" else "Expand task details")
+            Button(
+                onClick = { UiTask(task).open(context) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .semantics { contentDescription = presentation.actionContentDescription },
+                shape = RoundedCornerShape(22.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+            ) {
+                Text(presentation.actionLabel)
             }
         }
-        if (expanded && !keyboardOpen) {
-            Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
-                CycloneTaskProgress(task)
-            }
-        } else {
-            TextButton(onClick = { UiTask(task).open(context) }) {
-                Text(if (task.confirmation != null) "Review required" else "View progress & controls")
-            }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
     }
 }
