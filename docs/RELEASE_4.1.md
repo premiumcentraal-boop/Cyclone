@@ -10,9 +10,9 @@ Base: published mobile **`v4.0.4`** (`38f7628`, versionCode **75**). Stacked B1�
 | B2 Session Contract | #67 | `grok/mobile-4.1-s2-contract` tip `0eaef0f` | `4.1.0-alpha.2` / 77 |
 | B3 Task glass | #69 | `grok/mobile-4.1-s3-glass` tip `ee077b3` | `4.1.0-alpha.3` / 78 |
 | B4 Fast Path named VD | #71 | `grok/mobile-4.1-s4-fastpath-bg` tip `f1e0239` | `4.1.0-alpha.4` / 79 |
-| B5 Release lane | this PR | `grok/mobile-4.1-s5-release` | **`4.1.0` / 80** |
+| B5 Release lane | this PR | `grok/mobile-4.1-s5-release` tip `d249f2a` + cut commit | **`4.1.0` / 80** |
 
-Physical Pixel 8: **UNVERIFIED**. `publication_authorized=false`. This document is release notes for the 4.1 cut, not a claim that tag `v4.1.0` or a GitHub Release already exists. Alpha identities on the way here (`4.1.0-alpha.1` … `alpha.4`, versionCodes 76–79) were not published 4.1 APKs. The release identity is **`4.1.0` / 80**.
+Physical Pixel 8: **UNVERIFIED**. `publication_authorized=true` authorizes the same Full Release path as `v4.0.4` (`mobile-publish-v3910.yml` on `release/cyclone-mobile-v4.1.0`). This document is not device evidence. Protocol-fix tip `d249f2a` Mobile CI **SUCCESS**: https://github.com/premiumcentraal-boop/Cyclone/actions/runs/34172841433. Alpha identities on the way here (`4.1.0-alpha.1` … `alpha.4`, versionCodes 76–79) were not published 4.1 APKs. The release identity is **`4.1.0` / 80**.
 
 ## Session Contract Mobile
 
@@ -144,8 +144,8 @@ Retained from 4.0.4 / V4:
 Install / pairing notes:
 
 - Android `versionCode` **80** is greater than **75**; in-place upgrade from 4.0.4 is the expected mobile path **if** the same update-compatible dev signer (`LEGACY_UPDATE_COMPATIBLE_DEV_KEY`) is used. If the signer does not match, documented wipe — do not claim an in-place update succeeded.
-- Publication reuses the exact green Mobile CI APK (no second Android assembly), then `mobile-release.yml` signs with the historical update-compatible dev signer.
-- Keep `publication_authorized=false` until a signed exact-source CI artifact exists. Physical Pixel 8 remains **UNVERIFIED**. This notes file does not flip that flag.
+- Publication reuses the exact green Mobile CI APK (no second Android assembly). `mobile-publish-v3910.yml` signs with the historical update-compatible dev signer. `mobile-release.yml` (rotated-key secrets) is the blocked fallback.
+- `publication_authorized=true` so Full Release can sign the exact green Mobile CI APK with the historical update-compatible dev signer. Physical Pixel 8 remains **UNVERIFIED**.
 - Loopback gateway only. Do not expose generic shell / root / ADB as model tools.
 
 Operator commands live in [`MOBILE_4.1_STAGE5_RELEASE.md`](MOBILE_4.1_STAGE5_RELEASE.md).
@@ -159,7 +159,7 @@ Operator commands live in [`MOBILE_4.1_STAGE5_RELEASE.md`](MOBILE_4.1_STAGE5_REL
 - ColorOS / OxygenOS may ignore `OWN_DISPLAY_GROUP` or steal focus. Fail closed rather than acting on display 0.
 - Virtual display + Accessibility `windowsOnAllDisplays` is OEM-dependent. An empty workspace tree is `perceptionMode=vision_escalate`, not permission to inject on the human display.
 - One 1.0.0 mixed with a 4.1.0 phone is not a Layer 2 operator demo.
-- `publication_authorized=false` until a signed exact-source CI artifact exists. Physical remains **UNVERIFIED**. This notes file does not flip that flag.
+- `publication_authorized=true` on the cut commit. Physical remains **UNVERIFIED**.
 - Do not claim tag `v4.1.0` exists.
 
 ## How this is published
@@ -172,6 +172,6 @@ Intended cut:
 2. Land B5 (this notes file + the version / CI / packaging work owned by the other B5 agents).
 3. Require Mobile CI (unit tests, lint, APK assembly) and repository product / security / version guards on the merged commit.
 4. Create immutable tag `v4.1.0` from that commit. Pair the Android APK (`4.1.0` / versionCode 80) with the existing Cyclone One `1.0.0` installer for foreground pairing. Do not wait on One 1.1.0 (A5) to cut mobile 4.1.0.
-5. Keep `publication_authorized=false` until the successful exact-source CI artifact, existing signer-continuity / protected-environment workflow, and historical update-compatible dev signer are in place. Do not publish from a local Gradle tree. Physical Pixel 8 remains **UNVERIFIED**.
+5. Authorize publication (`publication_authorized=true`) and push `release/cyclone-mobile-v4.1.0` so `mobile-publish-v3910.yml` reuses the exact green Mobile CI APK and the historical 4.0.4-compatible signer. Do not publish from a local Gradle tree. Physical Pixel 8 remains **UNVERIFIED**.
 
 Alpha identities on the way here (`4.1.0-alpha.1` … `alpha.4`, versionCodes 76–79) were not published 4.1 APKs. The release identity is **`4.1.0` / 80**, with `pc_companion` still **`1.0.0`**.

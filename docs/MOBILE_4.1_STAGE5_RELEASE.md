@@ -6,7 +6,9 @@
 
 Stage B5 is the Mobile 4.1.0 packaging handoff. It does **not** rewrite B1–B4, cut Magisk, invent a physical pass, or bump Cyclone One. Product notes live in [`RELEASE_4.1.md`](RELEASE_4.1.md); this file is merge order + operator commands only.
 
-`publication_authorized` remains **false** until a signed artifact exists. Do not claim the GitHub tag `v4.1.0` already exists. This PR does not create the tag.
+`publication_authorized` is flipped **true** on the cut commit so `.github/workflows/mobile-publish-v3910.yml` (Cyclone Mobile Full Release) can sign and publish the same way **v4.0.4** did. Physical Pixel 8 remains **UNVERIFIED**. Do not claim the GitHub tag `v4.1.0` already exists until Full Release creates it.
+
+Protocol-fix tip `d249f2a` Mobile CI **SUCCESS**: https://github.com/premiumcentraal-boop/Cyclone/actions/runs/34172841433 (pull_request run on `grok/mobile-4.1-s5-release`). That is unit-test / lint / assemble evidence, not a physical Pixel pass and not the Full Release push run.
 
 ## Merge order
 
@@ -22,22 +24,18 @@ After the stack lands, cut `v4.1.0` from the merged SHA. This PR does not create
 
 ## Operator cut path
 
-Mobile CI artifact + update-compatible signer continuity vs 4.0.4:
+Match the successful **v4.0.4** path (not `mobile-release.yml` rotated secrets):
 
-1. After stack merge, create and push `release/cyclone-mobile-v4.1.0` from the merged SHA so Mobile CI **push** run fires (`on.push.branches` includes `release/cyclone-mobile-v*` in [`.github/workflows/mobile-ci.yml`](../.github/workflows/mobile-ci.yml)).
-2. Wait for [`.github/workflows/mobile-ci.yml`](../.github/workflows/mobile-ci.yml) success on that **push** run (not a pull_request run). Record the run id and unsigned artifact name (typically `Cyclone-Android-4.1.0` if `versionName` is `4.1.0` — do not invent the name).
-3. Dispatch [`.github/workflows/mobile-release.yml`](../.github/workflows/mobile-release.yml) with that run id + artifact name (environment `mobile-release-approval`). Signing reuses the exact green Mobile CI APK. `android_signing` = `LEGACY_UPDATE_COMPATIBLE_DEV_KEY` — same update-compatible dev signer as 4.0.4 so in-place upgrade from versionCode 75→80 works. If the signer does not match a device's 4.0.4 install, documented wipe; do not claim update succeeded.
-4. Do **not** dispatch [`.github/workflows/pc-companion-release.yml`](../.github/workflows/pc-companion-release.yml) as part of this mobile 4.1.0 cut. One/PC 1.1.0 is A5, out of scope. Pairing: full Layer 2 MCP needs One ≥ 1.1.0; 4.0.4/4.1.0 phone + One 1.0.0 remains foreground-capable.
-5. Dry-run: `python scripts/ci/cut_v41_release.py`
-6. Tag only when CI is green and no `v4.1.0` tag already exists:
-
-```bash
-gh release create v4.1.0 --title "Cyclone Mobile 4.1.0" --notes-file docs/RELEASE_4.1.md
-```
+1. After Mobile CI is green on the protocol-fix tip, set `publication_authorized=true` on the cut commit (Pixel remains UNVERIFIED).
+2. Create and push `release/cyclone-mobile-v4.1.0` from that SHA so Mobile CI **push** and Cyclone Mobile Full Release (`mobile-publish-v3910.yml`) both fire (`on.push.branches` includes `release/cyclone-mobile-v*`).
+3. Wait for [`.github/workflows/mobile-ci.yml`](../.github/workflows/mobile-ci.yml) success on that **push** run (not a pull_request run). Full Release waits for the same SHA, recovers the historical 3.9.0/4.0.4-compatible keystore, signs `Cyclone-4.1.0.apk`, verifies cert equality vs `v4.0.4`, and `gh release create v4.1.0`. Do **not** also create the tag locally.
+4. `android_signing` = `LEGACY_UPDATE_COMPATIBLE_DEV_KEY` — same update-compatible dev signer as 4.0.4 so in-place upgrade from versionCode 75→80 works. If the signer does not match a device's 4.0.4 install, documented wipe; do not claim update succeeded.
+5. Do **not** dispatch [`.github/workflows/pc-companion-release.yml`](../.github/workflows/pc-companion-release.yml) as part of this mobile 4.1.0 cut. One/PC 1.1.0 is A5, out of scope. Pairing: full Layer 2 MCP needs One ≥ 1.1.0; 4.0.4/4.1.0 phone + One 1.0.0 remains foreground-capable.
+6. `mobile-release.yml` (rotated-key secrets) is the B5-documented fallback and is **blocked** unless `mobile-release-approval` has the five `CYCLONE_ANDROID_*` secrets. Do not invent a keystore.
 
 Never force-push. Never replace an existing `v4.1.0`.
 
-The helper refuses leftover `4.1.0-alpha.4` / versionCode `79`. `--execute` is for the operator after CI; this session does not run it.
+The helper refuses leftover `4.1.0-alpha.4` / versionCode `79`. `--execute` is not used when Full Release publishes the tag.
 
 ## Physical Pixel 8
 
@@ -49,6 +47,6 @@ Physical Pixel 8 remains **UNVERIFIED**. Use the checklist in [`RELEASE_4.1.md`]
 - Magisk / root / a second mutation engine
 - Merge other PRs
 - Invent device results or mark Pixel 8 verified
-- Claim the GitHub tag `v4.1.0` already exists
-- Flip `publication_authorized` without a signed artifact
+- Claim the GitHub tag `v4.1.0` already exists before Full Release creates it
+- Dispatch `pc-companion-release.yml` or invent a new keystore
 - Cut One/PC A5 (1.1.0)

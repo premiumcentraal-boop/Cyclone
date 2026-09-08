@@ -85,7 +85,7 @@ Deliverables:
 3. Pairing note: requires One ≥ **1.1.0** for full Layer 2 MCP (4.0.4/4.1.0 phone + One 1.0.0 remains foreground-capable). — **DONE in source/docs**. Pixel **UNVERIFIED**.
 4. Physical checklist. — **DONE as UNVERIFIED** (no assemble/adb this session). Tag not cut.
 Acceptance: GitHub release is operator-after-CI; install over 4.0.4 documented (signer continuity vs wipe). Pixel still **UNVERIFIED**.  
-Out of scope: rewrite B1–B4; Magisk; merge other PRs; invent device results; claim tag `v4.1.0` exists; flip `publication_authorized`; cut One/PC A5.
+Out of scope: rewrite B1–B4; Magisk; invent device results; claim tag `v4.1.0` exists before Full Release creates it; dispatch `pc-companion-release.yml` or invent a new keystore; cut One/PC A5.
 
 ## Coordination
 
