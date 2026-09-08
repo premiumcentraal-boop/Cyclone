@@ -125,6 +125,82 @@ def test_matching_phone_runtime_signal_drives_action_and_plane_truth():
     }
 
 
+def test_exact_mobile_capability_registry_shape_is_normalized_truthfully():
+    bridge = Bridge(ready_status(capabilities=[{
+        "name": "human_gesture",
+        "status": "AVAILABLE",
+        "detail": None,
+        "runtime": {
+            "runtimeAvailable": True,
+            "controlVersion": "cyclone.human_gesture.control.v1",
+            "traceVersion": "cyclone.human_gesture.trace.v1",
+            "synthesisVersion": "human-gesture-v03",
+            "supportedProfiles": ["auto", "off", "light", "normal"],
+            "actions": {
+                "clickFallback": {
+                    "humanizeAccepted": True,
+                    "autoProfile": "light",
+                    "foregroundMode": "semantic_first_then_synthesized_touch",
+                },
+                "tap": {
+                    "humanizeAccepted": True,
+                    "autoProfile": "light",
+                    "foregroundMode": "synthesized_touch",
+                },
+                "longPressFallback": {
+                    "humanizeAccepted": True,
+                    "autoProfile": "light",
+                    "foregroundMode": "semantic_first_then_synthesized_touch",
+                },
+                "swipe": {
+                    "humanizeAccepted": True,
+                    "autoProfile": "normal",
+                    "foregroundMode": "synthesized_touch",
+                },
+                "scroll": {
+                    "humanizeAccepted": True,
+                    "autoProfile": "normal",
+                    "foregroundMode": "semantic_first_then_safe_grounded_fallback",
+                },
+            },
+            "executionPlanes": {
+                "foregroundDisplay0": {
+                    "backend": "accessibility_dispatch_gesture",
+                    "cubicPath": True,
+                    "humanGesture": True,
+                },
+                "namedVirtualDisplay": {
+                    "backend": "workspace_endpoint_duration",
+                    "cubicPath": False,
+                    "humanGesture": False,
+                    "compatibility": "endpoint_duration_only",
+                },
+                "layer2": {
+                    "backend": "accessibility_dispatch_gesture",
+                    "cubicPath": True,
+                    "humanGesture": True,
+                    "ownership": "layer2_display0_mutation_lease",
+                },
+            },
+        },
+    }]))
+    gesture = CapabilityRegistry().discover(bridge).model_dump()["human_gesture"]
+    assert gesture["runtime_available"] is True
+    assert gesture["profiles"] == ("auto", "off", "light", "normal")
+    assert gesture["actions"] == {
+        "phone.click": "semantic_or_touch",
+        "phone.long_press": "semantic_or_touch",
+        "phone.scroll": "semantic_or_touch",
+        "phone.swipe": "synthesized_touch",
+        "phone.drag": "unsupported",
+    }
+    assert gesture["execution_planes"] == {
+        "foreground": "full_fidelity",
+        "session_kernel_vd": "legacy_touch",
+        "layer2_workspace": "full_fidelity",
+    }
+
+
 def test_wrong_mobile_control_version_stays_unavailable():
     bridge = Bridge(ready_status(humanGesture={
         "runtimeAvailable": True,
