@@ -2,7 +2,7 @@
 
 BRANCH: `agent/422-ai-auto-router-polish`
 
-FINAL SHA: `ce0c91042e632e5965d5e1643f3473d32dadf16a` (final implementation commit; this handoff is committed separately as metadata only)
+FINAL SHA: `029a28a29b87cb23d8b3ee0cf50b79b29203009c` (final implementation/ownership-cleanup commit; this refreshed handoff is committed separately as metadata only)
 
 BASE SHA: `7d263f4a49ea08e6903427653e90723cd818d7e9`
 
@@ -28,7 +28,7 @@ LIGHT THEME FIX: AI status, task container, composer, and assistant bubbles use 
 
 DARK THEME FIX: AI page surfaces define theme-appropriate `contentColor`; text/icons use `onSurface`, `onSurfaceVariant`, container content colors, primary, or error. No black-on-dark/white-only content assumptions were introduced.
 
-AI NAV FIX: `CycloneV32BottomBar` now explicitly supplies `NavigationBarItemDefaults.colors`. AI uses a transparent Material selected indicator and one Cyclone-primary 48 dp circle when selected, removing the green-pill-behind-blue-circle double indicator while preserving `NavigationBarItem` selection semantics. Other destinations retain a coherent Material selected indicator.
+AI NAV FIX: `CycloneV32BottomBar` explicitly supplies `NavigationBarItemDefaults.colors`. AI uses a transparent Material selected indicator and one Cyclone-primary 48 dp circle when selected, removing the green-pill-behind-blue-circle double indicator while preserving `NavigationBarItem` selection semantics. Other destinations retain a coherent Material selected indicator. The final ownership cleanup reduced `CycloneV32Components.kt` to a 28-line diff versus base, confined to nav imports and `CycloneV32BottomBar`.
 
 FILES CHANGED:
 - `apps/mobile/app/src/main/java/com/cyclone/mobile/ai/RequestIntentRouter.kt`
@@ -36,15 +36,16 @@ FILES CHANGED:
 - `apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV32Components.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/ai/RequestIntentRouterTest.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/ui/v32/CycloneV39AiPageContractTest.kt`
-- `docs/handoffs/CYCLONE_422_AGENT3_AI_ROUTER.md` (handoff metadata commit only)
+- `docs/handoffs/CYCLONE_422_AGENT3_AI_ROUTER.md` (handoff metadata only)
 
 TESTS:
 - PASS — standalone JUnit-style `RequestIntentRouterTest` and `CycloneV39AiPageContractTest` compiled/run with local Kotlin/JUnit stubs.
 - PASS — routing matrix includes required image/chat/phone cases, attachment-only behavior, no classifier flag, conservative consequential fallback, and dispatch behavior preventing CHAT from entering Up Next.
 - PASS — source-contract guards verify no Chat/Phone segmented control, router-before-phone-readiness ordering, bounded task area before composer, chat-only Stop Reply, zero-elevation/outline surface treatment, and transparent AI Material indicator.
 - PASS — changed-file whitespace/privacy guards; Kotlin parser smoke found no syntax errors.
+- PASS — GitHub base comparison confirms exactly five Agent 3 code/test paths plus this handoff; no prohibited runtime/Agent 2 file changed. Navigation-file diff is 24 additions / 4 deletions and limited to the owned nav treatment.
 - NOT RUN — `./gradlew :app:testDebugUnitTest`, `./gradlew :app:compileDebugKotlin`, `./gradlew :app:lintDebug`: this execution environment has no checked-out Android workspace/dependency classpath, and `mobile-ci.yml` does not automatically run for this agent branch. No PR was opened because the mission explicitly forbids one.
-- NOT RUN as a real repository command — `git diff --check`; equivalent trailing-whitespace/tab guards passed on every changed source/test file. GitHub compare confirms the implementation commit changes only the five Agent 3-owned/new code/test paths.
+- NOT RUN as a real repository command — `git diff --check`; equivalent trailing-whitespace/tab guards passed on every changed source/test file.
 
 PHYSICAL UI STATUS:
 - LIGHT THEME UI: UNVERIFIED
