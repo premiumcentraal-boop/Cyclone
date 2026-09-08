@@ -7,12 +7,12 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .human_gesture import CONTROL_VERSION as HUMAN_GESTURE_CONTROL_VERSION
+from .human_gesture import HUMANIZE_ACTIONS, PROFILE_VALUES, TRACE_VERSION as HUMAN_GESTURE_TRACE_VERSION
+
 
 CAPABILITY_PROTOCOL_VERSION = "cyclone.gateway.capability.v1"
-HUMAN_GESTURE_CONTROL_VERSION = "cyclone.human_gesture.control.v1"
-HUMAN_GESTURE_TRACE_VERSION = "cyclone.human_gesture.trace.v1"
-HUMANIZE_PROFILES = frozenset({"auto", "off", "light", "normal"})
-HUMANIZE_ACTIONS = frozenset({"phone.click", "phone.swipe", "phone.scroll"})
+HUMANIZE_PROFILES = frozenset(PROFILE_VALUES)
 RAW_TRAJECTORY_KEYS = frozenset({"control1", "control2", "controlPoints", "bezier", "path", "points", "samples", "trajectory", "strokes"})
 SAFE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 
@@ -105,7 +105,7 @@ def _validate_human_gesture_params(capability_id: str, params: dict[str, Any]) -
     humanize = params.get("humanize")
     if humanize is not None:
         if capability_id not in HUMANIZE_ACTIONS:
-            raise ValueError("humanize is only valid for typed click, swipe, or scroll actions")
+            raise ValueError("humanize is only valid for typed click, long-press, swipe, or scroll actions")
         if not isinstance(humanize, str) or humanize not in HUMANIZE_PROFILES:
             raise ValueError("humanize must be one of auto, off, light, normal")
     forbidden = RAW_TRAJECTORY_KEYS.intersection(params)
@@ -161,20 +161,24 @@ class CapabilityActionResponse(BaseModel):
 class HumanGestureDiscovery(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     control_version: Literal["cyclone.human_gesture.control.v1"] = HUMAN_GESTURE_CONTROL_VERSION
-    trace_version: Literal["cyclone.human_gesture.trace.v1"] = HUMAN_GESTURE_TRACE_VERSION
+    trace_version: str = HUMAN_GESTURE_TRACE_VERSION
+    synthesis_version: str | None = None
     transport_schema_ready: Literal[True] = True
-    runtime_available: Literal[False] = False
-    profiles: tuple[Literal["auto", "off", "light", "normal"], ...] = ("auto", "off", "light", "normal")
+    runtime_available: bool = False
+    runtime_source: Literal["legacy_fallback", "bridge_status"] = "legacy_fallback"
+    reason_code: str | None = "MOBILE_SIGNAL_ABSENT"
+    profiles: tuple[Literal["auto", "off", "light", "normal"], ...] = ()
     actions: dict[str, str] = Field(default_factory=lambda: {
-        "phone.click": "schema_ready_runtime_unverified",
-        "phone.scroll": "schema_ready_runtime_unverified",
-        "phone.swipe": "schema_ready_runtime_unverified",
+        "phone.click": "transport_ready_runtime_unreported",
+        "phone.long_press": "transport_ready_runtime_unreported",
+        "phone.scroll": "transport_ready_runtime_unreported",
+        "phone.swipe": "transport_ready_runtime_unreported",
         "phone.drag": "unsupported",
     })
     execution_planes: dict[str, str] = Field(default_factory=lambda: {
-        "foreground": "runtime_unverified",
-        "session_kernel_vd": "runtime_unverified",
-        "layer2_workspace": "runtime_unverified",
+        "foreground": "runtime_unreported",
+        "session_kernel_vd": "runtime_unreported",
+        "layer2_workspace": "runtime_unreported",
     })
 
 

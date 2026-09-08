@@ -8,14 +8,25 @@ enum class HumanizePreference {
     NORMAL;
 
     companion object {
-        /** Unknown values intentionally degrade to AUTO instead of widening the control surface. */
-        fun parse(raw: String?): HumanizePreference = when (raw?.trim()?.lowercase()) {
-            "off" -> OFF
-            "light" -> LIGHT
-            "normal" -> NORMAL
-            null, "", "auto" -> AUTO
-            else -> AUTO
+        /**
+         * V0.3 contract: absence defaults to AUTO, but an explicit unknown value is invalid.
+         * Callers that accept phone-tool input must reject the IllegalArgumentException before any
+         * Android mutation is attempted rather than silently widening/coercing the request.
+         */
+        fun parse(raw: String?): HumanizePreference {
+            if (raw == null) return AUTO
+            return when (raw.trim().lowercase()) {
+                "auto" -> AUTO
+                "off" -> OFF
+                "light" -> LIGHT
+                "normal" -> NORMAL
+                else -> throw IllegalArgumentException(
+                    "Invalid humanize '$raw'; expected one of auto, off, light, normal",
+                )
+            }
         }
+
+        fun parseOrNull(raw: String?): HumanizePreference? = runCatching { parse(raw) }.getOrNull()
     }
 }
 
@@ -24,6 +35,7 @@ enum class RuntimeGestureKind {
     COORDINATE_TAP,
     LONG_PRESS,
     SWIPE,
+    SCROLL,
     GUIDED_TAP,
     GUIDED_LONG_PRESS,
     GUIDED_SWIPE,
@@ -43,6 +55,7 @@ object HumanGestureRuntimePolicy {
             RuntimeGestureKind.GUIDED_TAP,
             RuntimeGestureKind.GUIDED_LONG_PRESS -> HumanizeProfile.LIGHT
             RuntimeGestureKind.SWIPE,
+            RuntimeGestureKind.SCROLL,
             RuntimeGestureKind.GUIDED_SWIPE -> HumanizeProfile.NORMAL
             RuntimeGestureKind.PRECISION -> HumanizeProfile.OFF
         }

@@ -1,11 +1,11 @@
 # Human Gesture Control V1 — PC/Mobile Semantic Contract
 
-Status: **Round 1 cross-device architecture contract**  
+Status: **V0.3 amended cross-device contract**  
 Contract identifier: `cyclone.human_gesture.control.v1`
 
 ## Principle
 
-PC-hosted Cyclone One intelligence provides **phone-control intent**. The Android phone retains:
+PC-hosted Cyclone One intelligence provides **typed phone-control intent**. Android retains:
 
 - observation grounding;
 - policy/GATE decisions;
@@ -15,9 +15,9 @@ PC-hosted Cyclone One intelligence provides **phone-control intent**. The Androi
 - execution-plane validation;
 - target resolution;
 - Human Gesture profile resolution and motion synthesis;
-- final Android mutation through `PhoneToolExecutor`.
+- final mutation through `PhoneToolExecutor`.
 
-There is one phone mutation authority, not a PC copy of Android input logic.
+There is one phone mutation authority. The PC never becomes a second Android input engine.
 
 ```text
 Mobile AI -------------------------┐
@@ -33,56 +33,55 @@ PC / Cyclone One AI -> Device Gateway
                               Android
 ```
 
-The diagram is logical: the PC route reaches `PhoneToolExecutor` through the authenticated Android
-Gateway, just as existing typed actions do. Human Gesture is below authorization, not beside it.
+Human Gesture is below authorization, never beside it.
 
-## Existing gateway grounding
+## Transport boundary
 
-Cyclone 4.2.0 already provides the right transport boundary:
+The existing Device Gateway / MCP path remains authoritative:
 
-- Device Gateway allowlists typed tools such as `phone.click`, `phone.swipe` and `phone.scroll`.
-- observation-scoped `elementId` values are resolved to stable selector evidence before forwarding;
-- action source is constrained to `PC_CODEX` at the current router boundary;
-- the gateway calls Android `action.execute` and treats nested Android execution as authoritative;
-- `sessionId` / `displayId` are attached to the action envelope when an explicit execution identity
-  is present;
-- workspace identity is mutually exclusive with named virtual-display identity.
+- only typed phone actions are exposed;
+- observation-scoped element IDs/selectors keep their existing grounding rules;
+- the Gateway calls Android `action.execute`;
+- nested Android execution remains authoritative;
+- `{sessionId, displayId}` and Layer2 workspace generation rules remain unchanged;
+- no Human Gesture field creates a new execution plane.
 
-Human Gesture V1 should extend these typed actions rather than introduce `phone.raw_path` or a PC
-side gesture renderer.
+The existing `cyclone.gateway.capability.v1` transport is retained.
 
-## Control version is semantic, not transport-specific
+## Public preference field
 
-`cyclone.human_gesture.control.v1` describes the action meaning. It may ride through MCP, another
-future desktop adapter, or Mobile AI without changing the phone-side semantics.
-
-The existing gateway transport (`cyclone.gateway.capability.v1`) does not need to be replaced merely
-to add Human Gesture.
-
-## Public profile field
-
-Where a coordinate/touch fallback is possible, callers may request:
+For typed actions that may reach a physical touch fallback, callers may request:
 
 ```text
 humanize = auto | off | light | normal
 ```
 
+V0.3 PC scope is:
+
+```text
+phone.click
+phone.long_press
+phone.swipe
+phone.scroll
+```
+
 Rules:
 
-- missing is equivalent to `auto` once the runtime advertises Human Gesture support;
-- `auto` means Android chooses the profile from action type, target geometry and backend capability;
-- `off`, `light`, `normal` are preferences inside the already-authorized action;
-- unknown values fail with `INVALID_REQUEST` / protocol validation; never silently reinterpret;
-- phone policy may downgrade a requested profile for safety/precision/backend fidelity;
-- the resolved profile belongs in bounded execution diagnostics.
+- omission is backward compatible;
+- `auto` asks Android to choose the profile from action, target and backend facts;
+- `off`, `light`, and `normal` are preferences inside an already-authorized action;
+- explicit unknown/wrong values fail closed;
+- Android may downgrade for correctness, precision, edge capacity or backend fidelity;
+- capability discovery must say whether a backend/action can actually honor Human Gesture;
+- bounded Android diagnostics, not the PC request, report what actually happened.
 
-The PC must not send Bezier control points, sampled paths, RNG internals or arbitrary timing gaps.
+The PC must not send Bezier controls, sampled point arrays, path/trajectory/stroke objects, RNG state or arbitrary timing choreography.
 
-## V1 semantic actions
+## Typed actions
 
-### 1. Tap a grounded target
+### Click
 
-Preferred PC request remains the existing typed click surface:
+Preferred request remains a grounded typed click:
 
 ```json
 {
@@ -94,96 +93,113 @@ Preferred PC request remains the existing typed click surface:
 }
 ```
 
-Android behavior:
+Android must preserve semantic activation first (`ACTION_CLICK`, `ACTION_SELECT`, activatable relative/ancestor behavior as applicable). Humanization must never force a reliable semantic click into a decorative gesture. Only an authorized coordinate/touch fallback may synthesize Human Gesture motion.
 
-1. verify the observation/selector as today;
-2. preserve semantic Android click preference (`ACTION_CLICK`, activatable relative, etc.);
-3. only if the authorized runtime reaches coordinate fallback, resolve the actual valid target bounds;
-4. synthesize a target-aware LIGHT tap for `auto` unless runtime evidence supports a better choice;
-5. dispatch through the existing phone execution backend.
+### Long press
 
-`humanize` must never force a semantic click to become a slower coordinate gesture.
-
-### 2. Scroll a grounded region
-
-Preferred semantic shape:
+V0.3 adds the same bounded preference to `phone.long_press`:
 
 ```json
 {
-  "tool": "phone.scroll",
+  "tool": "phone.long_press",
   "params": {
-    "direction": "down",
-    "extent": "medium",
-    "region": {"elementId": "observation-scoped-scroll-container"},
-    "humanize": "auto"
+    "elementId": "observation-scoped-id",
+    "durationMs": 650,
+    "humanize": "light"
   }
 }
 ```
 
-The exact runtime field names may adapt to Agent 2's existing parser, but the semantics are fixed:
-direction + extent + grounded region, not a desktop-authored pixel polyline.
+`ACTION_LONG_CLICK` remains preferred when Android exposes it. Human Gesture applies only to the authorized fallback. Omission remains compatible with old callers.
 
-For `auto`, ordinary navigation should resolve to NORMAL when the active backend supports the planned
-stroke faithfully. If the backend only supports start/end/duration, Android may use a documented
-adapter or downgrade while preserving correctness.
+### Scroll
 
-### 3. Swipe a grounded region
+`phone.scroll` remains semantic-first. The V0.2 Mobile runtime performs `ACTION_SCROLL_FORWARD` / `ACTION_SCROLL_BACKWARD` for grounded scrollables and does not synthesize a gesture merely because `humanize` is present.
 
-Use `phone.swipe` when the action is intentionally a swipe rather than a semantic scroll:
+Therefore:
+
+- the field remains accepted for transport compatibility;
+- a runtime that only performs semantic scrolling must advertise `semantic_native`;
+- a future safe grounded touch fallback may advertise a stronger state only when the phone runtime reports it;
+- the PC must not invent scroll coordinates to make the preference appear honored.
+
+### Swipe
+
+`phone.swipe` is the typed explicit gesture action. Existing bounded start/end compatibility fields may remain where already supported, but raw trajectory authoring is forbidden. Android owns the path mathematics and may resolve/downgrade the requested profile according to backend fidelity.
+
+### Drag
+
+There is still no dedicated grounded `phone.drag` contract. Advertise it as `unsupported`. Do not disguise drag as swipe.
+
+## Runtime-driven capability truth
+
+The PC schema knowing `humanize` is not evidence that a connected phone can execute Human Gesture.
+
+Device Gateway capability discovery must derive runtime truth from `bridge.status` when the phone exposes a bounded Human Gesture block. Accepted integration placement is either:
+
+```text
+bridge.status.humanGesture
+bridge.status.capabilities.humanGesture
+```
+
+with narrow snake_case aliases for integration compatibility.
+
+A V0.3-style phone signal is conceptually:
 
 ```json
 {
-  "tool": "phone.swipe",
-  "params": {
-    "direction": "left",
-    "extent": "medium",
-    "regionBoundsNorm": {"left": 0.05, "top": 0.2, "right": 0.95, "bottom": 0.8},
-    "humanize": "normal"
+  "humanGesture": {
+    "runtimeAvailable": true,
+    "controlVersion": "cyclone.human_gesture.control.v1",
+    "traceVersion": "cyclone.human_gesture.trace.v1",
+    "synthesisVersion": "phone-owned-version",
+    "profiles": ["auto", "off", "light", "normal"],
+    "actions": {
+      "phone.click": "semantic_or_touch",
+      "phone.long_press": "semantic_or_touch",
+      "phone.scroll": "semantic_native",
+      "phone.swipe": "synthesized_touch"
+    },
+    "executionPlanes": {
+      "foreground": "full_fidelity",
+      "sessionKernelVd": "legacy_touch",
+      "layer2Workspace": "legacy_touch"
+    }
   }
 }
 ```
 
-`regionBoundsNorm` is acceptable only when it comes from current grounded phone observation or an
-Android-resolved target. It is not permission for PC vision to invent an unrestricted raw path.
+The exact action/plane values are phone-originated facts. Device Gateway normalizes them into a fixed bounded vocabulary; it does not infer support from application version or Python schema presence.
 
-Existing raw start/end coordinate parameters may remain as a compatibility escape hatch. They
-should not become the preferred Cyclone One semantic dialect.
+If the block is absent, malformed, reports `runtimeAvailable != true`, or uses a different control version:
 
-### 4. Drag a grounded object
+- `transport_schema_ready` may remain true;
+- `runtime_available` remains false;
+- profiles are not invented;
+- action/plane runtime support remains unreported/conservative;
+- ordinary legacy phone control still works.
 
-Cyclone 4.2.0's current Device Gateway allowlist does **not** expose a dedicated `phone.drag` action.
-Do not disguise drag semantics as an ordinary swipe merely to satisfy this document.
-
-When runtime support exists, add a typed action whose semantic payload names a grounded source and
-grounded destination. Until then, advertise drag as unsupported in Human Gesture capability
-metadata and fail closed.
+`phone.drag` remains unsupported even if an unrecognized phone signal tries to claim it.
 
 ## Execution-plane identity
 
-Human Gesture does not create a fourth execution plane.
+Human Gesture preserves the three existing planes exactly.
 
-### Foreground / display 0
-
-Legacy omission may continue to mean default foreground. Explicit identity is:
+### Foreground
 
 ```json
 {"sessionId": "default-foreground", "displayId": 0}
 ```
 
-### Session Kernel named virtual display
-
-A named background session must carry both:
+### Session Kernel named VD
 
 ```json
 {"sessionId": "named-session", "displayId": 7}
 ```
 
-with `displayId > 0`. Human Gesture synthesis occurs for that exact execution identity.
+`displayId` must be greater than zero. The V0.2 backend is endpoint/duration style for background input, so full curved-path fidelity must not be claimed unless a future phone runtime explicitly reports it.
 
-### Layer 2 display-0 workspace
-
-Layer 2 uses its existing workspace generation identity and may not be mixed with a named session or
-non-zero display:
+### Layer2 display-0 workspace
 
 ```json
 {
@@ -194,113 +210,91 @@ non-zero display:
 }
 ```
 
-The gateway/Android runtime must reject plane mismatch exactly as it does today. Human Gesture must
-never normalize conflicting identities into a seemingly valid request.
+Layer2 identity may not be mixed with a named session or non-zero display. Human Gesture must never normalize a conflicting/missing identity into another valid plane.
 
 ## Request invariants
 
-Every PC-originated Human Gesture action inherits the existing action invariants:
+Every PC-originated Human Gesture action inherits existing invariants:
 
-- current observation / grounded target where required;
+- current grounded observation/target where required;
 - one screen-changing mutation per agent decision turn;
-- request/correlation identity for duplicate suppression and diagnostics;
-- approval boundaries for pay/send/delete/permission/auth-sensitive actions;
-- no generic shell/root/ADB command primitive;
-- no secret persistence in traces/audits;
+- request/correlation identity and duplicate suppression;
+- GATE/confirmation boundaries;
+- human ownership/takeover;
+- no generic shell/root/ADB primitive;
+- no secret persistence in traces or audits;
 - transport success is not execution success;
 - re-observe after page-changing mutation.
 
-A natural-looking path cannot turn an unauthorized action into an authorized one.
+A natural-looking path cannot authorize an otherwise unauthorized action.
 
-## Capability discovery
+## Bounded execution diagnostics
 
-Do not make desktop clients guess whether a runtime can honor Human Gesture. Extend capability
-metadata with a bounded block conceptually like:
+Only Android can truthfully report the resolved execution.
 
-```json
-{
-  "humanGesture": {
-    "controlVersion": "cyclone.human_gesture.control.v1",
-    "traceVersion": "cyclone.human_gesture.trace.v1",
-    "profiles": ["off", "light", "normal", "auto"],
-    "actions": {
-      "phone.click": "semantic_or_touch_fallback",
-      "phone.scroll": "semantic_or_touch",
-      "phone.swipe": "touch",
-      "phone.drag": "unsupported"
-    },
-    "executionPlanes": {
-      "foreground": "supported",
-      "session_kernel_vd": "backend_dependent",
-      "layer2_workspace": "backend_dependent"
-    }
-  }
-}
-```
-
-The exact support matrix must come from Agent 2's runtime/backend audit. Do not claim full curved
-path support on a backend that only accepts start/end/duration.
-
-## Execution result diagnostics
-
-Ordinary action responses should remain bounded. Add only motion metadata useful for verification and
-reproducibility, for example:
+The Gateway may project this bounded subset when Android supplies it:
 
 ```json
 {
   "gesture": {
     "controlVersion": "cyclone.human_gesture.control.v1",
     "traceVersion": "cyclone.human_gesture.trace.v1",
-    "profileRequested": "auto",
-    "profileResolved": "LIGHT",
-    "mode": "semantic_native",
-    "traceHash": null,
-    "synthesisUs": 0
+    "synthesisVersion": "phone-owned-version",
+    "profileRequested": "normal",
+    "profileResolved": "NORMAL",
+    "mode": "synthesized_touch",
+    "backend": "accessibility_dispatch",
+    "traceHash": "64-hex-sha256",
+    "synthesisUs": 211,
+    "downgradeReason": "EDGE_CAPACITY"
   }
 }
 ```
 
-For coordinate execution, `mode` could be `procedural_touch`, `template_touch`, or a truthful
-backend downgrade. `traceHash` may identify a trace available in a debug/test artifact; raw point
-arrays do not belong in every MCP action response.
+Allowed execution modes are bounded to:
 
-Important current implication: Device Gateway's safe Android execution projection only preserves a
-small allowlist of fields. If gesture diagnostics are added, extend that safe projection with one
-explicitly bounded `gesture` object rather than forwarding arbitrary Android execution payloads.
+```text
+semantic_native
+synthesized_touch
+legacy_touch
+downgraded
+unsupported
+```
 
-## Trace and debug retrieval
+Unknown fields and malformed values are dropped. Raw points, selectors, page text, typed values and arbitrary Android payloads are never forwarded as gesture diagnostics. The Gateway never fabricates a profile, hash, backend or synthesis time.
 
-The normalized trace format is for calibration, replay and bounded diagnostics. Recommended policy:
+## Evidence and trace retrieval
 
-- production action response: trace hash + bounded synthesis metadata;
-- debug bundle / lab run: normalized trace points when diagnostics are enabled;
-- never include page text, selectors, credentials or typed values in the motion trace;
-- trace identity must include enough engine/profile/seed metadata to reproduce procedural motion.
+`cyclone.human_gesture.trace.v1` is a calibration/replay format, not an ordinary action-response payload.
 
-## Gateway changes implied by this contract
+Evidence provenance must distinguish:
 
-Round 2 / Agent 2 integration should:
+```text
+production_core
+device_capture
+synthetic_reference
+unclassified
+```
 
-1. accept/validate the optional `humanize` enum on relevant typed tools;
-2. preserve it unchanged through gateway normalization;
-3. keep `elementId`/selector grounding behavior unchanged;
-4. preserve current execution identity parsing and plane mismatch rules;
-5. advertise Human Gesture support/capabilities truthfully;
-6. expose bounded gesture execution metadata in the safe response envelope;
-7. add stale-observation, GATE, duplicate and plane-equivalence regression tests;
-8. avoid adding any raw-path or generic command endpoint.
+Synthetic reference statistics are generator evidence only and must never be described as human or physical-device behavior.
 
-No Device Gateway production code is changed by Agent 3 Round 1; this document defines the contract
-for the runtime owner to implement once Agent 1/2 APIs are available.
+## Mobile/PC equivalence
 
-## Mobile/PC equivalence requirement
+A Mobile-local AI request and a PC AI request that resolve to the same typed action, grounded target, execution identity, requested preference and phone runtime must reach the same Android authorization and gesture policy. PC transport latency does not justify different gesture mathematics or a second policy path.
 
-A Mobile AI request and a PC AI request that resolve to the same typed action, same grounded target,
-same execution identity, same profile/seed (when seed is explicitly diagnostic), and same phone
-runtime version should reach the same phone-side plan and safety logic.
+## Compatibility
 
-The PC route may have additional transport latency. It must not have different gesture mathematics or
-a second policy path.
+### New PC + new Mobile
+
+Use phone-originated runtime discovery and bounded Android diagnostics.
+
+### New PC + old Mobile
+
+Schema support on the PC does not imply Mobile support. Capability discovery remains conservative and ordinary phone actions remain available. Callers may omit Human Gesture preference when the phone does not advertise support.
+
+### Old PC + new Mobile
+
+Omitted `humanize` remains valid; Android uses its backward-compatible default/auto behavior. No transport-version upgrade is required for ordinary actions.
 
 ## Non-goals
 
@@ -311,5 +305,5 @@ Human Gesture Control V1 does not provide:
 - unrestricted pixel choreography;
 - shell/root/ADB execution for models;
 - a PC-side Android mutation engine;
-- a new execution plane;
+- a fourth execution plane;
 - permission to weaken semantic Android actions for aesthetics.
