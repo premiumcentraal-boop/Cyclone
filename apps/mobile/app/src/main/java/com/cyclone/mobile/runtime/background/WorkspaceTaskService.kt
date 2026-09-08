@@ -253,6 +253,7 @@ class WorkspaceTaskService : Service() {
         return builder.build()
     }
     override fun onDestroy() {
+        taskId?.let { WorkspaceTasks.takeAttachment(it) }
         stopped = true
         agent?.cancelActiveTask()
         scope.cancel()
