@@ -11,6 +11,7 @@ import com.cyclone.mobile.fastpath.FastPathLoop
 import com.cyclone.mobile.fastpath.FastPathSettleResult
 import com.cyclone.mobile.fastpath.FastPathTimings
 import com.cyclone.mobile.gateway.GatewayObservationStore
+import com.cyclone.mobile.gesture.HumanizePreference
 import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionPlane
 import com.cyclone.mobile.runtime.session.SessionPlaneKind
@@ -278,8 +279,12 @@ object PhoneToolExecutor {
         return selector
     }
 
+    private fun humanizePreference(params: JSONObject): HumanizePreference =
+        HumanizePreference.parse(params.optString("humanize").takeIf { params.has("humanize") })
+
     private fun dispatch(context: Context, request: PhoneToolRequest, service: CycloneAccessibilityService?, before: String?): Outcome {
         val p = request.params
+        val humanize = humanizePreference(p)
         return when (request.tool) {
             "phone.observe" -> {
                 val s = service ?: return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
@@ -300,14 +305,19 @@ object PhoneToolExecutor {
             "phone.screenshot" -> screenshot(service, p)
             "phone.click" -> actionWithConfirmation(service, request, before) {
                 val selector = requireSelector(p)
-                service?.click(selector) == true
+                service?.click(selector, humanize, request.commandId) == true
             }
             "phone.long_press" -> actionWithConfirmation(service, request, before) {
                 val selector = requireSelector(p)
-                service?.longPress(selector, p.optLong("durationMs", 650L)) == true
+                service?.longPress(selector, p.optLong("durationMs", 650L), humanize, request.commandId) == true
             }
             "phone.tap" -> actionWithConfirmation(service, request, before) {
-                service?.tap(p.optDouble("x").toFloat(), p.optDouble("y").toFloat()) == true
+                service?.tap(
+                    p.optDouble("x").toFloat(),
+                    p.optDouble("y").toFloat(),
+                    humanize,
+                    request.commandId,
+                ) == true
             }
             "phone.type", "phone.replace_text" -> typeEditable(service, request)
             "phone.scroll" -> actionWithConfirmation(service, request, before) {
@@ -320,6 +330,8 @@ object PhoneToolExecutor {
                     p.optDouble("x1").toFloat(), p.optDouble("y1").toFloat(),
                     p.optDouble("x2").toFloat(), p.optDouble("y2").toFloat(),
                     p.optLong("durationMs", 350L),
+                    humanize,
+                    request.commandId,
                 ) == true
             }
             "phone.back" -> actionWithConfirmation(service, request, before) { service?.goBack() == true }
@@ -620,7 +632,8 @@ object PhoneToolExecutor {
         val signature = if (request.tool == "phone.type" || request.tool == "phone.replace_text") {
             PhoneTypeEngine.duplicateSignature(request.tool, request.params)
         } else {
-            "${request.tool}|${request.params}"
+            val paramsForIdentity = JSONObject(request.params.toString()).apply { remove("humanize") }
+            "${request.tool}|$paramsForIdentity"
         }
         val previous = recentActions[signature]
         recentActions[signature] = now
