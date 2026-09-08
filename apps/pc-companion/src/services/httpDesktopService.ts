@@ -8,6 +8,8 @@ import type {
   DesktopRuntimeStatus,
   DesktopService,
   DeviceControlAction,
+  DeviceSessionList,
+  DeviceSessionResult,
   PairBeginResult,
   PairConfirmResult,
   PairQrConfirmResult,
@@ -23,7 +25,7 @@ import type {
   Layer2Status,
 } from "./types.js";
 import { bindLayer2Status } from "../core/layer2.js";
-import { parseFleetWsEvent } from "../core/sessionTiles.js";
+import { isDefaultForegroundSession, parseFleetWsEvent, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 export interface HttpDesktopServiceOptions {
   httpBaseUrl?: string;
@@ -327,23 +329,57 @@ export class HttpDesktopService implements DesktopService {
     else if (action.type === "take_human") body = { kind: "take_human" };
     else return { ok: false, deviceId, verification: "KEY_UNAVAILABLE" };
 
-    try {
-      const result = await this.request<{ ok?: boolean; status?: string; inputOwner?: string }>(`/v1/devices/${encodeURIComponent(deviceId)}/control`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      return {
-        ok: result.ok === true,
-        deviceId,
-        verification: result.status ?? "android-result",
-        inputOwner: result.inputOwner,
-      };
-    } catch (error) {
-      if (error instanceof DesktopHttpError && (error.code === "PHONE_LOCKED" || error.code === "HUMAN_HAS_CONTROL")) {
-        return { ok: false, deviceId, verification: error.code };
-      }
-      throw error;
+    if (action.type === "yield_ai" || action.type === "take_human") {
+      const sessionId = action.sessionId?.trim();
+      if (sessionId) body.sessionId = sessionId;
     }
+
+    return this.postControl(deviceId, body);
+  }
+
+  async sendSessionControl(deviceId: string, sessionId: string, kind: "yield_ai" | "take_human"): Promise<ControlResult> {
+    return this.postControl(deviceId, { kind, sessionId: sessionId.trim() });
+  }
+
+  listDeviceSessions(deviceId: string): Promise<DeviceSessionList> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/sessions`);
+  }
+
+  startDeviceSession(deviceId: string, packageName: string): Promise<DeviceSessionResult> {
+    return this.request(`/v1/devices/${encodeURIComponent(deviceId)}/sessions`, {
+      method: "POST",
+      body: JSON.stringify({ package: packageName }),
+    });
+  }
+
+  pauseDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    return this.request(this.sessionPath(deviceId, sessionId, "pause"), { method: "POST" });
+  }
+
+  resumeDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    return this.request(this.sessionPath(deviceId, sessionId, "resume"), { method: "POST" });
+  }
+
+  handoffDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    return this.request(this.sessionPath(deviceId, sessionId, "handoff"), { method: "POST" });
+  }
+
+  stopDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    return this.request(this.sessionPath(deviceId, sessionId, "stop"), { method: "POST" });
+  }
+
+  async snapshotDeviceSession(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number; sessionId?: string }> {
+    if (isDefaultForegroundSession(sessionId)) {
+      throw new Error("Cyclone refused an unproven background preview");
+    }
+    const response = await this.requestRaw(this.sessionPath(deviceId, sessionId, "snapshot"), {
+      headers: { Accept: "image/png" },
+    });
+    const { displayId } = readExactSessionSnapshotHeaders(response.headers);
+    const headerSessionId = response.headers.get("X-Cyclone-Session-Id")?.trim() || undefined;
+    const blob = await response.blob();
+    if (blob.type && blob.type !== "image/png") throw new Error("Background preview is not a PNG frame");
+    return { url: URL.createObjectURL(blob), displayId, sessionId: headerSessionId };
   }
 
   getVideoUrl(deviceId: string, profile: StreamProfile): string {
@@ -475,7 +511,32 @@ export class HttpDesktopService implements DesktopService {
     }
   }
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private sessionPath(deviceId: string, sessionId: string, suffix = ""): string {
+    const base = `/v1/devices/${encodeURIComponent(deviceId)}/sessions/${encodeURIComponent(sessionId)}`;
+    return suffix ? `${base}/${suffix}` : base;
+  }
+
+  private async postControl(deviceId: string, body: Record<string, unknown>): Promise<ControlResult> {
+    try {
+      const result = await this.request<{ ok?: boolean; status?: string; inputOwner?: string }>(
+        `/v1/devices/${encodeURIComponent(deviceId)}/control`,
+        { method: "POST", body: JSON.stringify(body) },
+      );
+      return {
+        ok: result.ok === true,
+        deviceId,
+        verification: result.status ?? "android-result",
+        inputOwner: result.inputOwner,
+      };
+    } catch (error) {
+      if (error instanceof DesktopHttpError && (error.code === "PHONE_LOCKED" || error.code === "HUMAN_HAS_CONTROL")) {
+        return { ok: false, deviceId, verification: error.code };
+      }
+      throw error;
+    }
+  }
+
+  private async requestRaw(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await fetch(`${this.httpBase}${path}`, {
       ...init,
       headers: {
@@ -496,6 +557,11 @@ export class HttpDesktopService implements DesktopService {
       } catch { /* safe fallback */ }
       throw new DesktopHttpError(response.status, code, detail);
     }
+    return response;
+  }
+
+  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.requestRaw(path, init);
     return (await response.json()) as T;
   }
 }

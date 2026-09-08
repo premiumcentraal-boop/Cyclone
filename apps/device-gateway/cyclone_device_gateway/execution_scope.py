@@ -4,13 +4,49 @@ from typing import Any, Mapping
 
 DEFAULT_FOREGROUND_SESSION_ID = "default-foreground"
 IDENTITY_KEYS = frozenset({"sessionId", "session_id", "displayId", "display_id", "executionContext"})
+FOREGROUND_PLANE_KIND = "foreground"
+SESSION_KERNEL_VD_PLANE_KIND = "session_kernel_vd"
+FOREGROUND_PLANE_LABEL = "Foreground"
+SESSION_KERNEL_VD_PLANE_LABEL = "Session Kernel VD"
+
+
+def classify_session_plane(session_id: str | None, display_id: int | None = None) -> dict[str, Any]:
+    """Label Foreground vs Session Kernel VD. Does not classify Layer 2 workspaces."""
+    session = str(session_id or "").strip()
+    if not session:
+        raise ValueError("sessionId is required")
+    if session == DEFAULT_FOREGROUND_SESSION_ID:
+        if display_id is None:
+            display_id = 0
+        if display_id != 0:
+            raise ValueError("default-foreground session must use display 0")
+        return {
+            "kind": FOREGROUND_PLANE_KIND,
+            "sessionId": session,
+            "displayId": 0,
+            "workspaceId": None,
+            "workspaceGeneration": None,
+            "label": FOREGROUND_PLANE_LABEL,
+        }
+    if display_id is None:
+        raise ValueError("An explicit background session requires its displayId")
+    if display_id <= 0:
+        raise ValueError("Named Session Kernel VD displayId must be an int > 0")
+    return {
+        "kind": SESSION_KERNEL_VD_PLANE_KIND,
+        "sessionId": session,
+        "displayId": display_id,
+        "workspaceId": None,
+        "workspaceGeneration": None,
+        "label": SESSION_KERNEL_VD_PLANE_LABEL,
+    }
 
 
 def parse_execution_identity(args: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """Canonical `{sessionId, displayId}` or None to omit (legacy default-foreground).
 
     Execution identity is not usb_session_id, media sessionId, teach sessionId, or MCP report
-    sessionId. Named workspace sessions require displayId > 0; never silently send display 0.
+    sessionId. Named Session Kernel VD sessions require displayId > 0; never silently send display 0.
     """
     if args is None:
         return None
@@ -40,17 +76,8 @@ def parse_execution_identity(args: Mapping[str, Any] | None) -> dict[str, Any] |
         if display == 0:
             return None
         raise ValueError("displayId requires sessionId")
-    if session == DEFAULT_FOREGROUND_SESSION_ID:
-        if display is None:
-            display = 0
-        if display != 0:
-            raise ValueError("default-foreground session must use display 0")
-        return {"sessionId": session, "displayId": 0}
-    if display is None:
-        raise ValueError("An explicit background session requires its displayId")
-    if display <= 0:
-        raise ValueError("Workspace session displayId must be an int > 0")
-    return {"sessionId": session, "displayId": display}
+    plane = classify_session_plane(session, display)
+    return {"sessionId": plane["sessionId"], "displayId": plane["displayId"]}
 
 
 def attach_execution_identity(payload: Mapping[str, Any] | None, identity: Mapping[str, Any] | None) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DeviceSessionDescriptor, DeviceSessionList, DeviceSessionResult } from "./types.js";
-import { readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
+import { isDefaultForegroundSession, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 interface GatewaySession {
   token: string;
@@ -62,14 +62,18 @@ export class CycloneOneSessionClient {
     return this.lifecycle(deviceId, sessionId, "stop");
   }
 
-  async snapshot(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number }> {
+  async snapshot(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number; sessionId?: string }> {
+    if (isDefaultForegroundSession(sessionId)) {
+      throw new Error("Cyclone refused an unproven background preview");
+    }
     const response = await this.fetch(this.sessionPath(deviceId, sessionId, "snapshot"), {
       headers: { Accept: "image/png" },
     });
     const { displayId } = readExactSessionSnapshotHeaders(response.headers);
+    const headerSessionId = response.headers.get("X-Cyclone-Session-Id")?.trim() || undefined;
     const blob = await response.blob();
     if (blob.type && blob.type !== "image/png") throw new Error("Background preview is not a PNG frame");
-    return { url: URL.createObjectURL(blob), displayId };
+    return { url: URL.createObjectURL(blob), displayId, sessionId: headerSessionId };
   }
 
   private lifecycle(deviceId: string, sessionId: string, op: "pause" | "resume" | "handoff" | "stop"): Promise<CycloneOneSessionResult> {

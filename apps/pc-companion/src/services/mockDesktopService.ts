@@ -21,7 +21,7 @@ import type {
   StreamProfile,
 } from "./types.js";
 import { bindLayer2Status, LAYER2_PROTOCOL } from "../core/layer2.js";
-import { DEFAULT_FOREGROUND_SESSION_ID, isDefaultForegroundSession, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
+import { bindSessionTile, DEFAULT_FOREGROUND_SESSION_ID, isDefaultForegroundSession, jpegFocusTarget, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 const MOCK_CODE = "NOVA";
 
@@ -101,16 +101,20 @@ export class MockDesktopService implements DesktopService {
       device.connectionHealth = healthyConnectionHealth();
     }
     else if (action.type === "clipboard_sync") device.capabilities.clipboardSync = action.enabled;
-    else if (action.type === "yield_ai") {
-      if (device.state === "SLEEPING") return { ok: false, deviceId, verification: "PHONE_LOCKED" };
-      device.inputOwner = "AI";
-      return { ok: true, deviceId, verification: "AI_HAS_CONTROL", inputOwner: "AI" };
-    }
-    else if (action.type === "take_human") {
-      device.inputOwner = "HUMAN";
-      return { ok: true, deviceId, verification: "HUMAN_HAS_CONTROL", inputOwner: "HUMAN" };
+    else if (action.type === "yield_ai" || action.type === "take_human") {
+      const sessionId = action.sessionId?.trim() || undefined;
+      return this.applyInputOwner(device, action.type === "yield_ai" ? "AI" : "HUMAN", sessionId);
     }
     return { ok: true, deviceId, verification: `mock-${action.type}` };
+  }
+
+  async sendSessionControl(deviceId: string, sessionId: string, kind: "yield_ai" | "take_human"): Promise<ControlResult> {
+    const device = this.requireDevice(deviceId);
+    if (!device.paired) return { ok: false, deviceId };
+    if (device.state === "DISCONNECTED") return { ok: false, deviceId };
+    const id = sessionId.trim();
+    if (!id) throw new Error("Mock session not found");
+    return this.applyInputOwner(device, kind === "yield_ai" ? "AI" : "HUMAN", id);
   }
 
   async listDeviceSessions(deviceId: string): Promise<DeviceSessionList> {
@@ -124,18 +128,19 @@ export class MockDesktopService implements DesktopService {
       sessionId: `workspace-${++this.sessionSequence}`,
       displayId: 2 + this.sessionSequence,
       targetPackage: packageName,
-      backend: "Android workspace",
+      backend: "Session Kernel VD",
       inputOwner: "AI",
       state: "RUNNING",
       executable: true,
       frameHealthy: true,
     };
     this.deviceSessions(deviceId).push(session);
-    this.emitFleetEvent({ event: "session.added", deviceId, sessionId: session.sessionId, displayId: session.displayId });
+    this.emitSessionFabric("session.added", deviceId, session);
     return { protocol: "cyclone-one-session/1", deviceId, session: copySession(session) };
   }
 
   async pauseDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
+    // Pause is lifecycle-only: it never rewrites inputOwner, including on a locked phone.
     return this.mutateSession(deviceId, sessionId, (session) => { session.state = "PAUSED"; });
   }
 
@@ -150,7 +155,7 @@ export class MockDesktopService implements DesktopService {
   async stopDeviceSession(deviceId: string, sessionId: string): Promise<DeviceSessionResult> {
     const result = this.mutateSession(deviceId, sessionId, (session) => { session.state = "STOPPED"; });
     this.sessions.set(deviceId, this.deviceSessions(deviceId).filter((session) => session.sessionId !== sessionId));
-    this.emitFleetEvent({ event: "session.removed", deviceId, sessionId, displayId: result.session.displayId });
+    this.emitSessionFabric("session.removed", deviceId, result.session);
     return result;
   }
 
@@ -214,35 +219,42 @@ export class MockDesktopService implements DesktopService {
     throw new Error("Unknown workspace operation");
   }
 
-  async snapshotDeviceSession(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number }> {
+  async snapshotDeviceSession(deviceId: string, sessionId: string): Promise<{ url: string; displayId: number; sessionId?: string }> {
     const session = this.deviceSessions(deviceId).find((item) => item.sessionId === sessionId);
     if (!session) throw new Error("Mock session not found");
     if (isDefaultForegroundSession(session.sessionId) || session.displayId == null || session.displayId <= 0) {
       throw new Error("Cyclone refused an unproven background preview");
     }
+    const focus = jpegFocusTarget(bindSessionTile(deviceId, session));
     const headers = {
       get(name: string): string | null {
         if (name === "X-Cyclone-Foreground-Substitution") return "false";
-        if (name === "X-Cyclone-Display-Id") return String(session.displayId);
+        if (name === "X-Cyclone-Display-Id") return String(focus.displayId);
+        if (name === "X-Cyclone-Session-Id") return focus.sessionId;
         return null;
       },
     };
     const { displayId } = readExactSessionSnapshotHeaders(headers);
-    return { url: mockFrameDataUrl(deviceId, "focus"), displayId };
+    return {
+      url: mockFrameDataUrl(deviceId, "focus", { sessionId: focus.sessionId, displayId }),
+      displayId,
+      sessionId: focus.sessionId,
+    };
   }
 
   addMockSession(deviceId: string, session: DeviceSessionDescriptor): DeviceSessionDescriptor {
     this.requireDevice(deviceId);
     const next = copySession(session);
     this.deviceSessions(deviceId).push(next);
-    this.emitFleetEvent({ event: "session.added", deviceId, sessionId: next.sessionId, displayId: next.displayId });
+    this.emitSessionFabric("session.added", deviceId, next);
     return copySession(next);
   }
 
   removeMockSession(deviceId: string, sessionId: string): void {
     const existing = this.deviceSessions(deviceId).find((item) => item.sessionId === sessionId);
     this.sessions.set(deviceId, this.deviceSessions(deviceId).filter((item) => item.sessionId !== sessionId));
-    this.emitFleetEvent({ event: "session.removed", deviceId, sessionId, displayId: existing?.displayId });
+    if (existing) this.emitSessionFabric("session.removed", deviceId, existing);
+    else this.emitFleetEvent({ event: "session.removed", deviceId, sessionId });
   }
 
   getVideoUrl(deviceId: string, profile: StreamProfile): string { return `mock://video/${encodeURIComponent(deviceId)}?profile=${profile}`; }
@@ -306,6 +318,42 @@ export class MockDesktopService implements DesktopService {
     const device = this.devices.find((candidate) => candidate.id === deviceId);
     if (!device) throw new Error("Mock device not found");
     return device;
+  }
+
+  private applyInputOwner(device: DesktopDevice, owner: "AI" | "HUMAN", sessionId?: string): ControlResult {
+    if (device.state === "SLEEPING") return { ok: false, deviceId: device.id, verification: "PHONE_LOCKED" };
+    if (sessionId) {
+      const session = this.deviceSessions(device.id).find((item) => item.sessionId === sessionId);
+      if (!session) throw new Error("Mock session not found");
+      if (!isDefaultForegroundSession(sessionId) && (session.displayId == null || session.displayId <= 0)) {
+        throw new Error("Named VD session is missing a proven Android display");
+      }
+      session.inputOwner = owner;
+      if (isDefaultForegroundSession(sessionId)) device.inputOwner = owner;
+    } else {
+      device.inputOwner = owner;
+    }
+    return {
+      ok: true,
+      deviceId: device.id,
+      verification: owner === "AI" ? "AI_HAS_CONTROL" : "HUMAN_HAS_CONTROL",
+      inputOwner: owner,
+    };
+  }
+
+  private emitSessionFabric(
+    event: "session.added" | "session.removed",
+    deviceId: string,
+    session: Pick<DeviceSessionDescriptor, "sessionId" | "displayId" | "inputOwner">,
+  ): void {
+    const payload = {
+      event,
+      deviceId,
+      sessionId: session.sessionId,
+      displayId: session.displayId,
+      inputOwner: session.inputOwner === "AI" ? "AI" : "HUMAN",
+    };
+    this.emitFleetEvent(payload);
   }
 
   private deviceSessions(deviceId: string): DeviceSessionDescriptor[] {
@@ -512,7 +560,7 @@ function seedMockSessions(deviceId: string): DeviceSessionDescriptor[] {
       sessionId: `workspace-${deviceId}`,
       displayId: 2,
       targetPackage: "com.android.chrome",
-      backend: "Android workspace",
+      backend: "Session Kernel VD",
       inputOwner: "AI",
       state: "RUNNING",
       executable: true,
@@ -521,11 +569,20 @@ function seedMockSessions(deviceId: string): DeviceSessionDescriptor[] {
   ];
 }
 
-function mockFrameDataUrl(deviceId: string, profile: StreamProfile): string {
+function mockFrameDataUrl(
+  deviceId: string,
+  profile: StreamProfile,
+  identity?: { sessionId: string; displayId: number },
+): string {
   const seed = Number(deviceId.replace(/\D/g, "")) || 1;
   const hueA = 248 + (seed * 11) % 35;
   const hueB = 270 + (seed * 7) % 45;
-  const label = profile === "focus" ? "Cyclone live phone" : "Cyclone";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="1200" viewBox="0 0 540 1200"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="hsl(${hueA} 42% 16%)"/><stop offset="1" stop-color="hsl(${hueB} 52% 8%)"/></linearGradient></defs><rect width="540" height="1200" fill="url(#g)"/><rect x="28" y="70" width="484" height="120" rx="28" fill="rgba(255,255,255,.08)"/><rect x="28" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.07)"/><rect x="284" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.05)"/><rect x="28" y="474" width="484" height="190" rx="36" fill="rgba(255,255,255,.06)"/><rect x="28" y="692" width="484" height="320" rx="36" fill="rgba(255,255,255,.045)"/><circle cx="54" cy="1136" r="22" fill="#8b5cf6"/><text x="88" y="1146" fill="white" opacity=".82" font-family="system-ui" font-size="30">${label}</text></svg>`;
+  const label = identity
+    ? `session ${identity.sessionId} display ${identity.displayId}`
+    : profile === "focus" ? "Cyclone live phone" : "Cyclone";
+  const comment = identity
+    ? `<!-- cyclone-session:${identity.sessionId} display:${identity.displayId} -->`
+    : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="1200" viewBox="0 0 540 1200">${comment}<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="hsl(${hueA} 42% 16%)"/><stop offset="1" stop-color="hsl(${hueB} 52% 8%)"/></linearGradient></defs><rect width="540" height="1200" fill="url(#g)"/><rect x="28" y="70" width="484" height="120" rx="28" fill="rgba(255,255,255,.08)"/><rect x="28" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.07)"/><rect x="284" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.05)"/><rect x="28" y="474" width="484" height="190" rx="36" fill="rgba(255,255,255,.06)"/><rect x="28" y="692" width="484" height="320" rx="36" fill="rgba(255,255,255,.045)"/><circle cx="54" cy="1136" r="22" fill="#8b5cf6"/><text x="88" y="1146" fill="white" opacity=".82" font-family="system-ui" font-size="30">${label}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

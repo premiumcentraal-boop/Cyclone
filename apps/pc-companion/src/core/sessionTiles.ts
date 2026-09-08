@@ -2,12 +2,24 @@ import type { DeviceSessionDescriptor, FleetWsEvent } from "../services/types.js
 
 export const MAX_HOT_BACKGROUND_ASK = 1;
 export const DEFAULT_FOREGROUND_SESSION_ID = "default-foreground";
+export const SESSION_KERNEL_VD_KIND = "session_kernel_vd";
+export const FOREGROUND_KIND = "foreground";
+export const FOREGROUND_PLANE_LABEL = "Foreground";
+export const VD_PLANE_LABEL = "Session Kernel VD";
+export const SESSION_TILES_TITLE = "Session Kernel VD tiles";
+export const SESSION_TILES_COPY =
+  "Named virtual-display (VD) sessions bound to session_id with displayId>0 and HUMAN/AI owner. These are not Layer 2 display-0 workspaces.";
+
+export type SessionTileKind = "foreground" | "session_kernel_vd";
+export type SessionInputOwner = "HUMAN" | "AI";
+export type SessionTilePlane = "foreground" | "session_kernel_vd";
 
 export interface SessionTile {
   sessionId: string;
   deviceId: string;
   displayId?: number;
-  kind: "foreground" | "workspace";
+  kind: SessionTileKind;
+  plane: SessionTilePlane;
   targetPackage?: string | null;
   backend?: string;
   inputOwner?: string;
@@ -23,23 +35,40 @@ export function isDefaultForegroundSession(sessionId: string): boolean {
   return sessionId === DEFAULT_FOREGROUND_SESSION_ID;
 }
 
-/** Named VD workspaces keep their Android display; missing identity is not rewritten to 0.
+export function isSessionKernelVd(tile: { kind?: string; plane?: string }): boolean {
+  if (tile.kind === FOREGROUND_KIND || tile.plane === "foreground" || tile.plane === "layer2") return false;
+  return tile.kind === SESSION_KERNEL_VD_KIND || tile.plane === "session_kernel_vd";
+}
+
+export function sessionPlaneLabel(tile: SessionTile): string {
+  return isSessionKernelVd(tile) ? VD_PLANE_LABEL : FOREGROUND_PLANE_LABEL;
+}
+
+export function normalizeInputOwner(value: unknown): SessionInputOwner | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toUpperCase();
+  return normalized === "HUMAN" || normalized === "AI" ? normalized : undefined;
+}
+
+/** Named Session Kernel VD tiles keep their Android display; missing identity is not rewritten to 0.
  *  Layer 2 display-0 profile locks are a different plane — never bind them as session tiles. */
 export function bindSessionTile(deviceId: string, session: DeviceSessionDescriptor): SessionTile {
   const sessionId = String(session.sessionId || "").trim();
   const foreground = isDefaultForegroundSession(sessionId);
   const rawDisplay = session.displayId;
   const displayId = Number.isInteger(rawDisplay) ? rawDisplay : undefined;
+  const plane: SessionTilePlane = foreground ? "foreground" : "session_kernel_vd";
   return {
     sessionId,
     deviceId,
     displayId: foreground
       ? (displayId === 0 || displayId == null ? 0 : displayId)
       : (displayId != null && displayId > 0 ? displayId : undefined),
-    kind: foreground ? "foreground" : "workspace",
+    kind: foreground ? FOREGROUND_KIND : SESSION_KERNEL_VD_KIND,
+    plane,
     targetPackage: session.targetPackage,
     backend: session.backend,
-    inputOwner: session.inputOwner,
+    inputOwner: normalizeInputOwner(session.inputOwner) ?? session.inputOwner,
     state: session.state,
     executable: session.executable,
     executionGeneration: session.executionGeneration,
@@ -52,7 +81,7 @@ export function bindSessionTile(deviceId: string, session: DeviceSessionDescript
 export function markSessionInventory(tiles: SessionTile[]): SessionTile[] {
   let hot = 0;
   return tiles.map((tile) => {
-    if (tile.kind === "foreground") return { ...tile, inventory: false, hotAsk: false };
+    if (tile.kind === FOREGROUND_KIND || tile.plane === "foreground") return { ...tile, inventory: false, hotAsk: false };
     const active = tile.state !== "STOPPED";
     if (active && hot < MAX_HOT_BACKGROUND_ASK) {
       hot += 1;
@@ -75,7 +104,10 @@ export function parseFleetWsEvent(raw: unknown): FleetWsEvent | null {
   const sessionId = stringField(rec, "sessionId") ?? stringField(rec, "session_id") ?? (nested ? stringField(nested, "sessionId") ?? stringField(nested, "session_id") : undefined);
   const deviceId = stringField(rec, "deviceId") ?? stringField(rec, "device_id") ?? (nested ? stringField(nested, "deviceId") ?? stringField(nested, "device_id") : undefined);
   const displayId = intField(rec, "displayId") ?? intField(rec, "display_id") ?? (nested ? intField(nested, "displayId") ?? intField(nested, "display_id") : undefined);
-  return { event, sessionId, deviceId, displayId };
+  const inputOwner = stringField(rec, "inputOwner") ?? stringField(rec, "input_owner") ?? (nested ? stringField(nested, "inputOwner") ?? stringField(nested, "input_owner") : undefined);
+  const owner = stringField(rec, "owner") ?? (nested ? stringField(nested, "owner") : undefined);
+  const state = stringField(rec, "state") ?? (nested ? stringField(nested, "state") : undefined);
+  return { event, sessionId, deviceId, displayId, inputOwner, owner, state };
 }
 
 export function isSessionFabricEvent(event: FleetWsEvent): boolean {
@@ -94,22 +126,61 @@ export function applySessionEvent(tiles: SessionTile[], event: FleetWsEvent): Se
   const next = bindSessionTile(event.deviceId || "", {
     sessionId,
     displayId: event.displayId,
-    state: "RUNNING",
+    state: event.state || "RUNNING",
     targetPackage: null,
+    inputOwner: normalizeInputOwner(event.inputOwner) ?? normalizeInputOwner(event.owner),
   });
   const existing = tiles.findIndex((tile) => tile.sessionId === sessionId);
   if (existing >= 0) {
     const copy = tiles.slice();
-    copy[existing] = { ...copy[existing], ...next, state: copy[existing].state || next.state };
+    copy[existing] = {
+      ...copy[existing],
+      ...next,
+      state: event.state || copy[existing].state || next.state,
+      inputOwner: next.inputOwner ?? copy[existing].inputOwner,
+    };
     return markSessionInventory(copy);
   }
   return markSessionInventory([...tiles, next]);
 }
 
 export function sessionDisplayLabel(tile: SessionTile): string {
-  if (tile.kind === "foreground") return tile.displayId === 0 || tile.displayId == null ? "default (human)" : String(tile.displayId);
+  if (tile.kind === FOREGROUND_KIND || tile.plane === "foreground") {
+    return tile.displayId === 0 || tile.displayId == null ? "default (human)" : String(tile.displayId);
+  }
   if (tile.displayId != null && tile.displayId > 0) return String(tile.displayId);
   return "unknown (not display 0)";
+}
+
+export function jpegFocusTarget(tile: SessionTile): { sessionId: string; displayId: number } {
+  const named = isSessionKernelVd(tile) || (tile.kind !== FOREGROUND_KIND && !isDefaultForegroundSession(tile.sessionId));
+  if (named) {
+    if (tile.displayId == null || tile.displayId <= 0) {
+      throw new Error("Named Session Kernel VD JPEG focus cannot rewrite to display 0");
+    }
+    return { sessionId: tile.sessionId, displayId: tile.displayId };
+  }
+  return { sessionId: tile.sessionId, displayId: tile.displayId ?? 0 };
+}
+
+export function tileForSessionScope(
+  tiles: SessionTile[],
+  scope: { sessionId?: string; session_id?: string; displayId?: number; display_id?: number },
+): SessionTile | null {
+  const sessionId = String(scope.sessionId ?? scope.session_id ?? "").trim();
+  const rawDisplay = scope.displayId ?? scope.display_id;
+  const displayId = typeof rawDisplay === "number" && Number.isInteger(rawDisplay) ? rawDisplay : undefined;
+  if (sessionId && isDefaultForegroundSession(sessionId)) {
+    return tiles.find((tile) => tile.sessionId === sessionId && (tile.kind === FOREGROUND_KIND || tile.plane === "foreground")) ?? null;
+  }
+  if (displayId === 0) return null;
+  return tiles.find((tile) => {
+    if (!isSessionKernelVd(tile)) return false;
+    if (sessionId && tile.sessionId !== sessionId) return false;
+    if (!sessionId && (displayId == null || displayId <= 0)) return false;
+    if (displayId != null && displayId > 0 && tile.displayId !== displayId) return false;
+    return true;
+  }) ?? null;
 }
 
 export function readExactSessionSnapshotHeaders(headers: { get(name: string): string | null }): { displayId: number } {
@@ -128,5 +199,7 @@ function stringField(record: Record<string, unknown>, key: string): string | und
 
 function intField(record: Record<string, unknown>, key: string): number | undefined {
   const value = record[key];
-  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) return Number(value.trim());
+  return undefined;
 }

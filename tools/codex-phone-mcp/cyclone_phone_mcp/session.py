@@ -6,6 +6,14 @@ DEFAULT_FOREGROUND_SESSION_ID = "default-foreground"
 IDENTITY_KEYS = frozenset({"sessionId", "session_id", "displayId", "display_id", "executionContext"})
 SESSION_REQUIRED = "SESSION_REQUIRED"
 SESSION_DISPLAY_MISMATCH = "SESSION_DISPLAY_MISMATCH"
+FOREGROUND_PLANE_KIND = "foreground"
+SESSION_KERNEL_VD_PLANE_KIND = "session_kernel_vd"
+FOREGROUND_PLANE_LABEL = "Foreground"
+SESSION_KERNEL_VD_PLANE_LABEL = "Session Kernel VD"
+SESSION_REQUIRED_MESSAGE = (
+    "session_id is required. Pass default-foreground for the live human display, "
+    "or a named Session Kernel VD with display_id > 0."
+)
 
 
 class SessionScopeError(ValueError):
@@ -28,11 +36,29 @@ def session_scope_error_result(exc: SessionScopeError) -> dict[str, Any]:
     }
 
 
+def classify_session_plane(session_id: str | None, display_id: int | None = None) -> dict[str, Any]:
+    """Label Foreground vs Session Kernel VD for glass/MCP. Never invents default-foreground."""
+    try:
+        args: dict[str, Any] = {}
+        if session_id is not None:
+            args["sessionId"] = session_id
+        if display_id is not None:
+            args["displayId"] = display_id
+        identity = parse_execution_scope(args)
+        if not identity or not str(identity.get("sessionId") or "").strip():
+            raise SessionScopeError(SESSION_REQUIRED_MESSAGE, SESSION_REQUIRED)
+        return _plane_for_identity(identity["sessionId"], identity["displayId"])
+    except SessionScopeError:
+        raise
+    except ValueError as exc:
+        raise _scope_error(exc) from exc
+
+
 def parse_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any] | None:
     """Return canonical ``{sessionId, displayId}`` or None to omit (legacy default-foreground).
 
     Execution identity is not usb_session_id, media sessionId, teach sessionId, or MCP report
-    sessionId. Omitted identity must not invent a workspace session. A named workspace session
+    sessionId. Omitted identity must not invent a Session Kernel VD. A named Session Kernel VD
     requires displayId > 0 and must never silently fall back to display 0.
     """
     if args is None:
@@ -55,17 +81,8 @@ def parse_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any] | No
         if display == 0:
             return None
         raise ValueError("displayId requires sessionId")
-    if session == DEFAULT_FOREGROUND_SESSION_ID:
-        if display is None:
-            display = 0
-        if display != 0:
-            raise ValueError("default-foreground session must use display 0")
-        return {"sessionId": session, "displayId": 0}
-    if display is None:
-        raise ValueError("An explicit background session requires its displayId")
-    if display <= 0:
-        raise ValueError("Workspace session displayId must be an int > 0")
-    return {"sessionId": session, "displayId": display}
+    plane = _plane_for_identity(session, display)
+    return {"sessionId": plane["sessionId"], "displayId": plane["displayId"]}
 
 
 def parse_tool_execution_scope(args: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -85,11 +102,7 @@ def require_tool_execution_scope(args: Mapping[str, Any] | None) -> dict[str, An
     except ValueError as exc:
         raise _scope_error(exc) from exc
     if not scope or not str(scope.get("sessionId") or "").strip():
-        raise SessionScopeError(
-            "session_id is required. Pass default-foreground for the live human display, "
-            "or a named workspace session with display_id > 0.",
-            SESSION_REQUIRED,
-        )
+        raise SessionScopeError(SESSION_REQUIRED_MESSAGE, SESSION_REQUIRED)
     return scope
 
 
@@ -121,6 +134,30 @@ def strip_execution_scope(params: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def scope_cache_key(device_id: str | None, session_id: str | None) -> str:
     return f"{device_id or '__gateway_selected__'}::{session_id or DEFAULT_FOREGROUND_SESSION_ID}"
+
+
+def _plane_for_identity(session: str, display: int | None) -> dict[str, Any]:
+    if session == DEFAULT_FOREGROUND_SESSION_ID:
+        if display is None:
+            display = 0
+        if display != 0:
+            raise ValueError("default-foreground session must use display 0")
+        return {
+            "kind": FOREGROUND_PLANE_KIND,
+            "sessionId": session,
+            "displayId": 0,
+            "label": FOREGROUND_PLANE_LABEL,
+        }
+    if display is None:
+        raise ValueError("An explicit background session requires its displayId")
+    if display <= 0:
+        raise ValueError("Named Session Kernel VD displayId must be an int > 0")
+    return {
+        "kind": SESSION_KERNEL_VD_PLANE_KIND,
+        "sessionId": session,
+        "displayId": display,
+        "label": SESSION_KERNEL_VD_PLANE_LABEL,
+    }
 
 
 def _agree_scope(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any] | None:

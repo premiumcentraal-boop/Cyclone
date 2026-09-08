@@ -16,10 +16,19 @@ import {
 import {
   applySessionEvent,
   bindSessionTile,
+  FOREGROUND_KIND,
+  FOREGROUND_PLANE_LABEL,
   isSessionFabricEvent,
+  isSessionKernelVd,
+  jpegFocusTarget,
   markSessionInventory,
   MAX_HOT_BACKGROUND_ASK,
+  SESSION_KERNEL_VD_KIND,
+  SESSION_TILES_COPY,
+  SESSION_TILES_TITLE,
   sessionDisplayLabel,
+  sessionPlaneLabel,
+  VD_PLANE_LABEL,
   type SessionTile,
 } from "../core/sessionTiles.js";
 import { button, el } from "../ui/dom.js";
@@ -43,7 +52,7 @@ export function createAutomationsPage(
   heading.append(
     el("div", "task-kicker", "CYCLONE ONE · SESSION FABRIC"),
     el("h1", "page-title", "Active Tasks"),
-    el("p", "page-subtitle", "Foreground human display and named Android workspaces, each bound to session_id. Extra tiles are inventory, not concurrent VLMs."),
+    el("p", "page-subtitle", "Three planes: Foreground (session_id=default-foreground, display 0, human display), Session Kernel VD (named session_id, displayId>0, isolated virtual display — not Layer 2), and Layer 2 workspace (display 0 time-sliced lock in the strip)."),
   );
   header.append(heading);
 
@@ -55,11 +64,11 @@ export function createAutomationsPage(
   const explainerCopy = explainer.lastElementChild as HTMLElement;
   explainerCopy.append(
     el("h2", "task-section-title", "Android stays in charge"),
-    el("p", "task-muted", `Cyclone One asks the phone to create a non-default execution display. Product hot-gates ${MAX_HOT_BACKGROUND_ASK} background Ask task; N≥2 tiles are inventory. Policy gates, payment confirmation, screen-lock pauses and Android session identity remain authoritative on the phone.`),
+    el("p", "task-muted", `Foreground is session_id=default-foreground on display 0, the human display. A Session Kernel VD is a named session_id on displayId>0 — an isolated virtual display, not Layer 2. Layer 2 workspace is the display-0 time-sliced lock in the strip, not a VD tile. Product hot-gates ${MAX_HOT_BACKGROUND_ASK} background Ask task; N≥2 tiles are inventory. Policy gates, payment confirmation, screen-lock pauses and Android session identity remain authoritative on the phone.`),
   );
 
   const composer = el("article", "task-composer-card");
-  composer.append(el("h2", "task-section-title", "Start a background workspace"));
+  composer.append(el("h2", "task-section-title", "Start a Session Kernel VD"));
   const form = el("form", "task-start-form") as HTMLFormElement;
   const deviceSelect = el("select", "task-input") as HTMLSelectElement;
   deviceSelect.setAttribute("aria-label", "Phone");
@@ -84,7 +93,7 @@ export function createAutomationsPage(
   packageInput.autocomplete = "off";
   packageInput.spellcheck = false;
   packageInput.setAttribute("aria-label", "Android package name");
-  const startButton = button("Start workspace", "button primary task-start-button");
+  const startButton = button("Start VD session", "button primary task-start-button");
   startButton.type = "submit";
   startButton.disabled = eligible.length === 0;
   form.append(deviceSelect, packageInput, startButton);
@@ -107,15 +116,15 @@ export function createAutomationsPage(
   );
   const toolbarHeading = toolbar.firstElementChild as HTMLElement;
   toolbarHeading.append(
-    el("h2", "task-section-title", "Session tiles"),
-    el("p", "task-muted", "Every tile is bound to session_id. Named workspace tiles never rewrite to display 0. Background previews refuse foreground-substituted frames."),
+    el("h2", "task-section-title", SESSION_TILES_TITLE),
+    el("p", "task-muted", SESSION_TILES_COPY),
   );
   const refreshButton = toolbar.lastElementChild as HTMLButtonElement;
   const list = el("div", "task-session-list");
   const footer = el("div", "task-page-footer");
   const openPhone = button("Open normal phone control", "button secondary compact");
   openPhone.addEventListener("click", () => onOpenControl(eligible[0]));
-  footer.append(openPhone, el("span", "task-muted", "Foreground phone control remains separate from named workspace sessions."));
+  footer.append(openPhone, el("span", "task-muted", "Foreground phone control remains separate from Session Kernel VD tiles and from the Layer 2 strip."));
 
   page.append(header, explainer, composer, layer2Section, toolbar, list, footer);
 
@@ -160,6 +169,12 @@ export function createAutomationsPage(
     return (await getClient()).snapshot(deviceId, sessionId);
   };
 
+  const sendHandoff = async (deviceId: string, sessionId: string, kind: "yield_ai" | "take_human") => {
+    if (service?.sendSessionControl) return service.sendSessionControl(deviceId, sessionId, kind);
+    if (service?.sendControl) return service.sendControl(deviceId, { type: kind, sessionId });
+    throw new Error("Session control is unavailable");
+  };
+
   const listLayer2 = async (deviceId: string) => {
     if (!service?.listLayer2Workspaces) throw new Error("Layer 2 workspaces need a DesktopService");
     return bindLayer2Status(deviceId, await service.listLayer2Workspaces(deviceId));
@@ -179,24 +194,35 @@ export function createAutomationsPage(
     if (!disposed) await refresh();
   };
 
-  const showPreview = async (device: DesktopDevice, session: DeviceSessionDescriptor, container: HTMLElement, trigger: HTMLButtonElement): Promise<void> => {
+  const showJpegFocus = async (device: DesktopDevice, tile: SessionTile, session: DeviceSessionDescriptor, container: HTMLElement, trigger: HTMLButtonElement): Promise<void> => {
     trigger.disabled = true;
     trigger.textContent = "Loading…";
     try {
-      const frame = await snapshotSession(device.id, session.sessionId);
+      const target = jpegFocusTarget(tile);
+      const vd = isSessionKernelVd(tile) || tile.kind === SESSION_KERNEL_VD_KIND || tile.kind !== FOREGROUND_KIND;
+      if (vd && !(target.displayId > 0)) {
+        throw new Error("SESSION_DISPLAY_MISMATCH");
+      }
+      const frame = await snapshotSession(device.id, target.sessionId);
+      if (vd && !(frame.displayId > 0)) {
+        throw new Error("SESSION_DISPLAY_MISMATCH");
+      }
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       previewUrl = frame.url.startsWith("blob:") ? frame.url : null;
       const image = document.createElement("img");
-      image.className = "task-preview-image";
+      image.className = "task-preview-image task-jpeg-focus";
       image.src = frame.url;
-      image.alt = `Background workspace preview from Android display ${frame.displayId}`;
-      const meta = el("div", "task-preview-meta", `Exact Android display ${frame.displayId} · foreground substitution: false`);
+      image.alt = `${sessionPlaneLabel(tile)} JPEG for ${session.sessionId} on Android display ${frame.displayId}`;
+      image.dataset.sessionId = session.sessionId;
+      image.dataset.displayId = String(frame.displayId);
+      image.dataset.plane = tile.plane || (isSessionKernelVd(tile) ? SESSION_KERNEL_VD_KIND : tile.kind);
+      const meta = el("div", "task-preview-meta", `Exact Android display ${frame.displayId} · session_id ${session.sessionId} · foreground substitution: false`);
       container.replaceChildren(image, meta);
     } catch (error) {
       container.replaceChildren(el("div", "task-inline-error", friendlyError(error)));
     } finally {
       trigger.disabled = false;
-      trigger.textContent = "Preview";
+      trigger.textContent = "Focus JPEG";
     }
   };
 
@@ -231,57 +257,83 @@ export function createAutomationsPage(
     }
     const fragment = document.createDocumentFragment();
     for (const { device, session, tile } of rows) {
-      const card = el("article", `task-session-card task-kind-${tile.kind}${tile.inventory ? " task-inventory" : ""}`);
+      const foreground = tile.kind === FOREGROUND_KIND;
+      const vd = isSessionKernelVd(tile) || tile.kind === SESSION_KERNEL_VD_KIND || !foreground;
+      const kindName = foreground ? FOREGROUND_KIND : SESSION_KERNEL_VD_KIND;
+      const card = el("article", `task-session-card task-kind-${tile.kind} task-kind-${kindName}${tile.inventory ? " task-inventory" : ""}`);
       card.dataset.sessionId = tile.sessionId;
       if (tile.displayId != null) card.dataset.displayId = String(tile.displayId);
       card.dataset.kind = tile.kind;
+      card.dataset.plane = tile.plane || kindName;
       const top = el("div", "task-session-top");
       const title = el("div", "task-session-title-wrap");
-      const packageName = tile.kind === "foreground"
-        ? "Default foreground (human display)"
-        : session.targetPackage || "Named workspace";
+      const packageName = foreground
+        ? `${FOREGROUND_PLANE_LABEL} (session_id=default-foreground, display 0)`
+        : session.targetPackage || VD_PLANE_LABEL;
       title.append(
         el("div", "task-session-package", packageName),
-        el("div", "task-session-device", `${device.name} · display ${sessionDisplayLabel(tile)} · ${tile.sessionId}`),
+        el("div", "task-session-device", `${device.name} · ${sessionPlaneLabel(tile)} · display ${sessionDisplayLabel(tile)} · ${tile.sessionId}`),
       );
-      const state = el("span", `task-state task-state-${normalizeState(session.state)}`, humanState(session.state));
-      top.append(title, state);
+      const badges = el("div", "task-session-badges");
+      badges.append(
+        el("span", `task-plane task-kind-${kindName}`, sessionPlaneLabel(tile)),
+        ownerBadge(session.inputOwner),
+        el("span", `task-state task-state-${normalizeState(session.state)}`, humanState(session.state)),
+      );
+      top.append(title, badges);
 
       const facts = el("div", "task-facts");
       facts.append(
-        fact("Session", shortId(session.sessionId)),
+        fact("Session", session.sessionId),
         fact("Display", sessionDisplayLabel(tile)),
-        fact("Kind", tile.kind === "foreground" ? "Human display" : tile.inventory ? "Inventory workspace" : "Hot Ask workspace"),
-        fact("Input", session.inputOwner || "—"),
+        fact("Owner", ownerText(session.inputOwner)),
+        fact("Plane", sessionPlaneLabel(tile)),
       );
 
       const actions = el("div", "task-session-actions");
-      const preview = button("Preview", "button secondary compact");
+      const focusJpeg = button("Focus JPEG", "button secondary compact");
       const pause = button("Pause", "button secondary compact");
       const resume = button("Resume", "button secondary compact");
-      const handoff = button("Hand off", "button secondary compact");
+      const takeHuman = button("Take control", "button secondary compact");
+      const giveAi = button("Give to AI", "button secondary compact");
       const stop = button("Stop", "button danger compact");
-      const workspace = tile.kind === "workspace";
-      preview.disabled = !workspace || tile.displayId == null || tile.displayId <= 0;
-      pause.disabled = !workspace || session.state !== "RUNNING";
-      resume.disabled = !workspace || session.state !== "PAUSED";
-      handoff.disabled = !workspace || !["RUNNING", "PAUSED", "ATTENTION"].includes(session.state);
-      stop.disabled = !workspace || session.state === "STOPPED";
-      actions.append(preview, pause, resume, handoff, stop);
+      focusJpeg.disabled = !vd || tile.displayId == null || tile.displayId <= 0;
+      pause.disabled = !vd || session.state !== "RUNNING";
+      resume.disabled = !vd || session.state !== "PAUSED";
+      takeHuman.disabled = session.state === "STOPPED";
+      giveAi.disabled = session.state === "STOPPED";
+      stop.disabled = !vd || session.state === "STOPPED";
+      actions.append(focusJpeg, pause, resume, takeHuman, giveAi, stop);
 
       const previewHost = el("div", "task-preview-host");
-      preview.addEventListener("click", () => void showPreview(device, session, previewHost, preview));
+      focusJpeg.addEventListener("click", () => void showJpegFocus(device, tile, session, previewHost, focusJpeg));
       for (const [node, operation] of [
         [pause, "pause"],
         [resume, "resume"],
-        [handoff, "handoff"],
         [stop, "stop"],
-      ] as Array<[HTMLButtonElement, "pause" | "resume" | "handoff" | "stop"]>) {
+      ] as Array<[HTMLButtonElement, "pause" | "resume" | "stop"]>) {
         node.addEventListener("click", () => {
           node.disabled = true;
           void updateSession(device, session, operation).catch((error) => {
             if (!disposed) previewHost.replaceChildren(el("div", "task-inline-error", friendlyError(error)));
           }).finally(() => { if (!disposed) node.disabled = false; });
+        });
+      }
+      for (const [node, kind] of [
+        [takeHuman, "take_human"],
+        [giveAi, "yield_ai"],
+      ] as Array<[HTMLButtonElement, "take_human" | "yield_ai"]>) {
+        node.addEventListener("click", () => {
+          node.disabled = true;
+          void sendHandoff(device.id, session.sessionId, kind)
+            .then((result) => {
+              if (result.ok === false) throw new Error(result.verification || "Session control failed");
+              if (!disposed) return refresh();
+            })
+            .catch((error) => {
+              if (!disposed) previewHost.replaceChildren(el("div", "task-inline-error", friendlyError(error)));
+            })
+            .finally(() => { if (!disposed) node.disabled = false; });
         });
       }
 
@@ -418,14 +470,15 @@ export function createAutomationsPage(
       return;
     }
     startButton.disabled = true;
-    formStatus.textContent = "Asking Android to create an isolated workspace…";
+    formStatus.textContent = "Asking Android to create a Session Kernel VD…";
     void startSession(deviceId, packageName)
       .then(async (result) => {
         if (disposed) return;
-        const display = result.session.displayId != null && result.session.displayId > 0
-          ? `Android display ${result.session.displayId}`
-          : "a named workspace (display not rewritten to 0)";
-        formStatus.textContent = `Started ${result.session.targetPackage || packageName} as ${result.session.sessionId} on ${display}.`;
+        const started = result.session.targetPackage || packageName;
+        const displayId = result.session.displayId;
+        formStatus.textContent = displayId != null && displayId > 0
+          ? `Started ${started} as ${result.session.sessionId} on Session Kernel VD display ${displayId}.`
+          : `Started ${started} as ${result.session.sessionId} as a Session Kernel VD (isolated virtual display, not display 0).`;
         packageInput.value = "";
         await refresh();
       })
@@ -456,18 +509,35 @@ export function createAutomationsPage(
 
 function fact(label: string, value: string): HTMLElement {
   const node = el("div", "task-fact");
-  node.append(el("span", "task-fact-label", label), el("span", "task-fact-value", value));
+  const valueNode = el("span", "task-fact-value", value);
+  const owner = label === "Owner" ? ownerClass(value) : "";
+  if (owner) valueNode.classList.add(owner);
+  node.append(el("span", "task-fact-label", label), valueNode);
   return node;
+}
+
+function ownerText(value?: string): string {
+  const owner = String(value || "").toUpperCase();
+  if (owner === "AI" || owner === "HUMAN") return owner;
+  return owner || "—";
+}
+
+function ownerClass(value?: string): string {
+  const owner = String(value || "").toUpperCase();
+  if (owner === "AI") return "task-owner-ai";
+  if (owner === "HUMAN") return "task-owner-human";
+  return "";
+}
+
+function ownerBadge(value?: string): HTMLElement {
+  const text = ownerText(value);
+  return el("span", `task-owner-badge ${ownerClass(text)}`.trim(), text);
 }
 
 function layer2Fact(label: string, value: string): HTMLElement {
   const node = el("div", "layer2-fact");
   node.append(el("span", "layer2-fact-label", label), el("span", "layer2-fact-value", value));
   return node;
-}
-
-function shortId(value: string): string {
-  return value.length > 24 ? `${value.slice(0, 12)}…${value.slice(-8)}` : value;
 }
 
 function humanState(value: string): string {
@@ -486,8 +556,10 @@ function normalizeState(value: string): string {
 
 function friendlyError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Cyclone One task request failed.";
-  if (/shizuku|background_mode_unavailable/i.test(message)) return "Background workspaces need Shizuku installed, running and authorized on this phone.";
+  if (/shizuku|background_mode_unavailable/i.test(message)) return "Session Kernel VD needs Shizuku installed, running and authorized on this phone.";
   if (/locked|phone_locked/i.test(message)) return "Unlock the phone, then resume this task.";
+  if (/human_has_control/i.test(message)) return "Companion still owns input. Click Give control to AI, then retry.";
+  if (/session_display_mismatch|rewrite to display 0/i.test(message)) return "Named Session Kernel VD JPEG refused display 0.";
   if (/policy|confirm|foreground_required/i.test(message)) return "Android paused autonomous work because this step needs you on the phone.";
   if (/trust|401|403|auth/i.test(message)) return "This phone needs a fresh trusted Cyclone connection.";
   return message.slice(0, 220);

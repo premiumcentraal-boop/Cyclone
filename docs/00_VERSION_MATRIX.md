@@ -2,15 +2,15 @@
 
 ## What is installed / published
 
-| Surface | Installed (Pixel / Agent PC) | Latest published | This branch (`grok/one-1.1-s2-layer2`) |
+| Surface | Installed (Pixel / Agent PC) | Latest published | This branch (`grok/one-1.1-s3-sessions`) |
 |---|---|---|---|
 | Mobile APK | **4.0.3** / versionCode **74** (Pixel may lag) | **4.0.4** / versionCode **75** (`v4.0.4` @ `38f7628`) | still **4.0.4** / **75** — do not bump |
-| Cyclone One | **1.0.0** (`C:\Users\Agent\AppData\Local\Cyclone One`) | **1.0.0** (cut with `v4.0.0`) | **1.1.0-alpha.2** (not a GitHub release) |
-| Device gateway | (bundled with One 1.0.0) | published **4.0.0** | **4.1.0-alpha.2** |
-| Agent MCP | One 1.0.0 `CycloneAgentMCP.exe` | published **4.0.0** | **4.1.0-alpha.2** |
+| Cyclone One | **1.0.0** (`C:\Users\Agent\AppData\Local\Cyclone One`) | **1.0.0** (cut with `v4.0.0`) | **1.1.0-alpha.3** (not a GitHub release) |
+| Device gateway | (bundled with One 1.0.0) | published **4.0.0** | **4.1.0-alpha.3** |
+| Agent MCP | One 1.0.0 `CycloneAgentMCP.exe` | published **4.0.0** | **4.1.0-alpha.3** |
 | Legacy Companion | **3.8.1** still installed beside One | obsolete for V4 | warn + prefer Cyclone One; uninstall legacy |
 
-Authoritative IDs: `release/version.toml` — `product_version=4.0.4`, `android_version_code=75`, `python_version=4.1.0-alpha.2`, `components.mobile=4.0.4`, `pc_companion=1.1.0-alpha.2`, `device_gateway=4.1.0-alpha.2`, `mcp=4.1.0-alpha.2`, `channel=development`. Physical Pixel stays **UNVERIFIED**.
+Authoritative IDs: `release/version.toml` — `product_version=4.0.4`, `android_version_code=75`, `python_version=4.1.0-alpha.3`, `components.mobile=4.0.4`, `pc_companion=1.1.0-alpha.3`, `device_gateway=4.1.0-alpha.3`, `mcp=4.1.0-alpha.3`, `channel=development`. Physical Pixel stays **UNVERIFIED**.
 
 ## Repo divergence (critical)
 
@@ -29,10 +29,15 @@ Works today with `session_id=default-foreground` + live PC gateway bearer:
 
 ## MCP gap vs mobile 4.0.3 notes
 
-Installed One **1.0.0** MCP tools include `phone_virtual_*` but **no `phone_workspace`**.
-This branch (`grok/one-1.1-s2-layer2`) closes that gap in source: MCP `phone_workspace` plus gateway `workspace.list/register/switch/pause/release/arm/next` and GET/POST `/v1/devices/{id}/workspaces` (`cyclone.one.layer2.v1`). After switch, mutating `phone_act.params` carry `workspaceId` + `workspaceGeneration`.
+Installed One **1.0.0** MCP tools include `phone_virtual_*` but **no `phone_workspace`**, and its glass does not treat named Session Kernel VDs as first-class tiles.
 
-Installed One **1.0.0** still lacks `phone_workspace` until **A5**. Physical Pixel remains **UNVERIFIED**.
+This branch (`grok/one-1.1-s3-sessions`) keeps those gaps closed in source:
+
+- **A1** bearer seam: persisted DPAPI / 0600 runtime file, token-free locator, doctor-without-scrape.
+- **A2** Layer 2: MCP `phone_workspace` plus gateway `workspace.list/register/switch/pause/release/arm/next` and GET/POST `/v1/devices/{id}/workspaces` (`cyclone.one.layer2.v1`). After switch, mutating `phone_act.params` carry `workspaceId` + `workspaceGeneration`.
+- **A3** named VD tiles: `session.added` / `session.removed` with `session_id`, `displayId`, owner HUMAN/AI, per-session JPEG focus, no silent rewrite to display 0.
+
+Installed One **1.0.0** still lacks A1/A2/A3 until **A5**. Physical Pixel remains **UNVERIFIED**.
 
 ## Three control planes (do not collapse)
 

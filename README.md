@@ -6,7 +6,7 @@ This repository is intentionally kept as a current-product launchpad. Historical
 
 ## Current baseline — Cyclone 4.0.0 (V4 Session OS) + Cyclone One 1.0.0
 
-Mobile identity is `4.0.0` / versionCode `71` on the published **3.9.12** Background Intelligence foundation plus Stage 1 Fast Path, Stage 2 Session Kernel, Stage 3 Skill Compiler and Stage 4 Cyclone One glass (one Shizuku workspace, Take control / Continue, GATE confirm; a11y-first Page Cards, 300ms settle + fingerprint ladder; display-scoped `sessionId` + `displayId`; learn→compile→replay; JPEG-first live view, human/AI handoff, session tiles bound to `session_id`, MCP observe/act require `session_id`). Phone remains the mutation engine. Cyclone One **1.0.0** is the paired glass/MCP companion. This branch's One/gateway/MCP alpha identity (`1.1.0-alpha.2` / `4.1.0-alpha.2`) lives in [`release/version.toml`](release/version.toml) and is not a GitHub release. Physical Pixel 8 remains **UNVERIFIED**. See [V4 Stage 5 release lane](docs/V4_STAGE5_RELEASE.md), [V4 4.0.0 release notes](docs/RELEASE_V4.md), [V4 Stage 4 One glass](docs/V4_STAGE4_ONE_GLASS.md), [V4 Stage 3 Skill Compiler](docs/V4_STAGE3_SKILL_COMPILER.md), [V4 Stage 2 Session Kernel](docs/V4_STAGE2_SESSION_KERNEL.md) and [V4 Stage 1 Fast Path](docs/V4_STAGE1_FASTPATH.md).
+Mobile identity is `4.0.0` / versionCode `71` on the published **3.9.12** Background Intelligence foundation plus Stage 1 Fast Path, Stage 2 Session Kernel, Stage 3 Skill Compiler and Stage 4 Cyclone One glass (one Shizuku workspace, Take control / Continue, GATE confirm; a11y-first Page Cards, 300ms settle + fingerprint ladder; display-scoped `sessionId` + `displayId`; learn→compile→replay; JPEG-first live view, human/AI handoff, session tiles bound to `session_id`, MCP observe/act require `session_id`). Phone remains the mutation engine. Cyclone One **1.0.0** is the paired glass/MCP companion. This branch's One/gateway/MCP alpha identity (`1.1.0-alpha.3` / `4.1.0-alpha.3`) lives in [`release/version.toml`](release/version.toml) and is not a GitHub release. Physical Pixel 8 remains **UNVERIFIED**. See [V4 Stage 5 release lane](docs/V4_STAGE5_RELEASE.md), [V4 4.0.0 release notes](docs/RELEASE_V4.md), [V4 Stage 4 One glass](docs/V4_STAGE4_ONE_GLASS.md), [V4 Stage 3 Skill Compiler](docs/V4_STAGE3_SKILL_COMPILER.md), [V4 Stage 2 Session Kernel](docs/V4_STAGE2_SESSION_KERNEL.md) and [V4 Stage 1 Fast Path](docs/V4_STAGE1_FASTPATH.md).
 
 Cyclone 3.9.12 connected Ask Cyclone to isolated background app workspaces, with a compact running card, live View Progress, exact-task Take Control / Continue, local confirmation cards and preserved completed pages. Background work requires Android 15+, Shizuku and a compatible app; the PC companion remains optional. See [the 3.9.12 release notes](docs/RELEASE_3.9.12.md) for that behavior and device-testing limits.
 
@@ -63,7 +63,7 @@ scripts/
   pc-companion/        companion tooling
 
 docs/                  current architecture/development/release docs
-release/version.toml    product/component version source (this branch: One/gateway/MCP 1.1.0-alpha.2 / 4.1.0-alpha.2; mobile stays 4.0.4)
+release/version.toml    product/component version source (this branch: One/gateway/MCP 1.1.0-alpha.3 / 4.1.0-alpha.3; mobile stays 4.0.4)
 .github/workflows/      current CI and candidate verification
 ```
 

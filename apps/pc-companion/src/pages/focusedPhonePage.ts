@@ -1,7 +1,7 @@
 import { keyboardCommandForEvent } from "../core/keyboard.js";
 import { KeyboardCapture } from "../core/keyboardCapture.js";
 import { needsTrustRepair, trustRepairMessage } from "../core/trustRecovery.js";
-import type { DesktopDevice, DesktopService, DeviceControlAction, Layer2Status } from "../services/types.js";
+import type { ControlResult, DesktopDevice, DesktopService, DeviceControlAction, Layer2Status } from "../services/types.js";
 import { CycloneOneSessionClient } from "../services/sessionClient.js";
 import {
   bindLayer2Status,
@@ -13,6 +13,22 @@ import {
   LAYER2_STRIP_TITLE,
   lockOwnerLabel,
 } from "../core/layer2.js";
+import {
+  bindSessionTile,
+  FOREGROUND_KIND,
+  FOREGROUND_PLANE_LABEL,
+  isSessionKernelVd,
+  jpegFocusTarget,
+  markSessionInventory,
+  SESSION_KERNEL_VD_KIND,
+  SESSION_TILES_COPY,
+  SESSION_TILES_TITLE,
+  sessionDisplayLabel,
+  sessionPlaneLabel,
+  tileForSessionScope,
+  VD_PLANE_LABEL,
+  type SessionTile,
+} from "../core/sessionTiles.js";
 import { button, el, icon } from "../ui/dom.js";
 import { createLivePhoneView } from "../ui/livePhoneView.js";
 import { createDeviceHealthPanel } from "../ui/deviceHealthPanel.js";
@@ -59,26 +75,38 @@ export function createFocusedPhonePage(
   const healthSlot = el("div", "focus-health-slot");
   healthSlot.append(createDeviceHealthPanel(device));
   const humanInput = el("div", "context-card");
-  const humanCopy = el("p", "context-card-copy", "Click anywhere on the screen to tap. Hold and drag naturally to swipe. Mouse control stays available while JPEG live view warms up.");
+  const planeCopy = el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} JPEG is display 0 live on session_id=default-foreground. Select a ${VD_PLANE_LABEL} tile to focus its isolated JPEG (displayId>0, never rewritten to display 0). Layer 2 is the display-0 time-sliced lock in the strip below — not a VD tile.`);
+  const humanCopy = el("p", "context-card-copy", "Click anywhere on the Foreground JPEG to tap. Hold and drag naturally to swipe. Mouse control stays available while display 0 live view warms up. Session Kernel VD JPEG is snapshot-only.");
   humanInput.append(
     el("div", "context-card-title", "Human control"),
+    planeCopy,
     humanCopy,
   );
   const aiInput = el("div", "context-card accent");
   const ownerLabel = el("p", "context-card-copy", ownerCopy(device));
-  const sessionList = el("p", "context-card-copy", "Foreground session: default-foreground");
-  const yieldAi = button("Give control to AI", "button primary compact");
+  const sessionList = el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} session: default-foreground`);
+  const pauseSession = button("Pause", "button secondary compact");
+  const yieldAi = button("Give to AI", "button primary compact");
   const takeHuman = button("Take control", "button secondary compact");
+  pauseSession.disabled = true;
   aiInput.append(
     el("div", "context-card-title", "Human ↔ AI handoff"),
     ownerLabel,
     sessionList,
     el("p", "context-card-copy", "MCP mutations fail with HUMAN_HAS_CONTROL while Companion owns input. Yield here, or pass request_ai_control=true. A locked phone is never stolen."),
+    pauseSession,
     yieldAi,
     takeHuman,
   );
+  const sessionStrip = el("div", "task-session-compact");
+  sessionStrip.append(
+    el("div", "context-card-title", SESSION_TILES_TITLE),
+    el("p", "context-card-copy", SESSION_TILES_COPY),
+  );
+  const sessionTileList = el("div", "task-session-list-compact");
+  sessionStrip.append(sessionTileList);
   const layer2Strip = el("div", "layer2-strip layer2-strip-compact");
-  contextPanel.append(health, healthSlot, humanInput, aiInput, layer2Strip);
+  contextPanel.append(health, healthSlot, humanInput, sessionStrip, aiInput, layer2Strip);
 
   const controlStatus = el("div", "control-status", "Ready");
   const trustRepairBanner = el("section", "trust-repair-banner");
@@ -129,7 +157,10 @@ export function createFocusedPhonePage(
     },
   });
   live.element.classList.add("focused-live-phone");
-  liveColumn.append(el("div", "direct-control-hint", "Mouse control · click to tap · drag to swipe"), live.element);
+  const liveHint = el("div", "direct-control-hint", "Foreground JPEG · display 0 live · click to tap · drag to swipe");
+  const jpegHost = el("div", "task-jpeg-focus-host");
+  jpegHost.hidden = true;
+  liveColumn.append(liveHint, live.element, jpegHost);
 
   const controls = el("aside", "focus-controls");
   controls.append(el("div", "panel-eyebrow", "CONTROLLER"));
@@ -145,17 +176,154 @@ export function createFocusedPhonePage(
       controlStatus.classList.add("error");
     }
   };
+  let disposed = false;
+  let selectedSessionId = "default-foreground";
+  let sessionTiles: SessionTile[] = [];
+  let jpegUrl: string | null = null;
+
+  const selectedTile = (): SessionTile | undefined => {
+    return tileForSessionScope(sessionTiles, { sessionId: selectedSessionId })
+      ?? sessionTiles.find((tile) => tile.sessionId === selectedSessionId)
+      ?? undefined;
+  };
+
+  const restoreForegroundLive = (): void => {
+    live.element.hidden = false;
+    jpegHost.hidden = true;
+    jpegHost.replaceChildren();
+    if (jpegUrl) URL.revokeObjectURL(jpegUrl);
+    jpegUrl = null;
+    liveHint.textContent = "Foreground JPEG · display 0 live · click to tap · drag to swipe";
+    planeCopy.textContent = `${FOREGROUND_PLANE_LABEL} JPEG is display 0 live on session_id=default-foreground. Session Kernel VD JPEG is selected from the tiles below. Layer 2 is the display-0 time-sliced lock in the strip — not a VD tile.`;
+  };
+
+  const showVdJpeg = async (tile: SessionTile): Promise<void> => {
+    const target = jpegFocusTarget(tile);
+    if (!(target.displayId > 0)) throw new Error("SESSION_DISPLAY_MISMATCH");
+    const snapshot = service.snapshotDeviceSession
+      ? await service.snapshotDeviceSession(device.id, target.sessionId)
+      : await (await CycloneOneSessionClient.connect()).snapshot(device.id, target.sessionId);
+    if (!(snapshot.displayId > 0)) throw new Error("SESSION_DISPLAY_MISMATCH");
+    if (jpegUrl) URL.revokeObjectURL(jpegUrl);
+    jpegUrl = snapshot.url.startsWith("blob:") ? snapshot.url : null;
+    const image = document.createElement("img");
+    image.className = "task-jpeg-focus";
+    image.src = snapshot.url;
+    image.alt = `${VD_PLANE_LABEL} JPEG for ${tile.sessionId} on Android display ${snapshot.displayId}`;
+    image.dataset.sessionId = tile.sessionId;
+    image.dataset.displayId = String(snapshot.displayId);
+    image.dataset.plane = tile.plane || (isSessionKernelVd(tile) ? SESSION_KERNEL_VD_KIND : tile.kind);
+    const meta = el("div", "task-preview-meta", `Exact Android display ${snapshot.displayId} · session_id ${tile.sessionId}`);
+    jpegHost.replaceChildren(image, meta);
+    jpegHost.hidden = false;
+    live.element.hidden = true;
+    liveHint.textContent = `${VD_PLANE_LABEL} JPEG · display ${snapshot.displayId} · session_id ${tile.sessionId} · not display 0`;
+    planeCopy.textContent = `${VD_PLANE_LABEL} JPEG for session_id=${tile.sessionId} on display ${snapshot.displayId}. Isolated virtual display — not Layer 2, not rewritten to display 0.`;
+  };
+
+  const isVdTile = (tile: SessionTile): boolean => {
+    return isSessionKernelVd(tile) || tile.kind === SESSION_KERNEL_VD_KIND || tile.kind !== FOREGROUND_KIND;
+  };
+
+  const syncSelectedActions = (tile: SessionTile | undefined): void => {
+    const vd = tile ? isVdTile(tile) : false;
+    pauseSession.disabled = !tile || !vd || tile.state !== "RUNNING";
+    takeHuman.disabled = !tile || tile.state === "STOPPED";
+    yieldAi.disabled = !tile || tile.state === "STOPPED";
+  };
+
+  const renderSessionTiles = (): void => {
+    if (sessionTiles.length === 0) {
+      sessionTileList.replaceChildren(el("p", "context-card-copy", "No Session Kernel VD tiles yet. Foreground remains display 0 live."));
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const tile of sessionTiles) {
+      const kindName = tile.kind === FOREGROUND_KIND ? FOREGROUND_KIND : SESSION_KERNEL_VD_KIND;
+      const row = button("", `task-session-tile-compact task-kind-${tile.kind} task-kind-${kindName}${tile.sessionId === selectedSessionId ? " task-session-selected" : ""}`);
+      row.dataset.sessionId = tile.sessionId;
+      if (tile.displayId != null) row.dataset.displayId = String(tile.displayId);
+      row.dataset.kind = tile.kind;
+      row.dataset.plane = tile.plane || kindName;
+      const owner = String(tile.inputOwner || "").toUpperCase();
+      row.append(
+        el("div", `task-plane task-kind-${kindName}`, sessionPlaneLabel(tile)),
+        el("div", "task-session-compact-id", `${tile.sessionId} · display ${sessionDisplayLabel(tile)}`),
+        el("span", owner === "AI" ? "task-owner-ai" : "task-owner-human", owner === "AI" || owner === "HUMAN" ? owner : (owner || "—")),
+      );
+      row.addEventListener("click", () => {
+        void applyTileSelection(tile).catch((error) => {
+          controlStatus.textContent = ownershipFailureCopy("Focus JPEG", error instanceof Error ? error.message : undefined);
+          controlStatus.classList.add("error");
+        });
+      });
+      fragment.append(row);
+    }
+    sessionTileList.replaceChildren(fragment);
+  };
+
+  const applyTileSelection = async (tile: SessionTile): Promise<void> => {
+    selectedSessionId = tile.sessionId;
+    syncSelectedActions(tile);
+    renderSessionTiles();
+    controlStatus.classList.remove("error");
+    if (tile.kind === FOREGROUND_KIND || !isVdTile(tile)) {
+      restoreForegroundLive();
+      return;
+    }
+    try {
+      await showVdJpeg(tile);
+    } catch (error) {
+      live.element.hidden = true;
+      jpegHost.hidden = false;
+      jpegHost.replaceChildren(el("div", "task-inline-error", ownershipFailureCopy("Focus JPEG", error instanceof Error ? error.message : undefined)));
+      liveHint.textContent = `${VD_PLANE_LABEL} JPEG unavailable · not rewritten to display 0`;
+      planeCopy.textContent = `${VD_PLANE_LABEL} JPEG for session_id=${tile.sessionId} did not land on display 0. Isolated virtual display remains distinct from Foreground JPEG and the Layer 2 strip.`;
+      throw error;
+    }
+  };
+
+  const refreshSessions = async (): Promise<void> => {
+    try {
+      const listed = service.listDeviceSessions
+        ? await service.listDeviceSessions(device.id)
+        : await (await CycloneOneSessionClient.connect()).list(device.id);
+      sessionTiles = markSessionInventory(listed.sessions.map((session) => bindSessionTile(device.id, session)));
+      if (disposed) return;
+      const scoped = tileForSessionScope(sessionTiles, { sessionId: selectedSessionId })
+        ?? sessionTiles.find((tile) => tile.sessionId === selectedSessionId)
+        ?? sessionTiles.find((tile) => tile.kind === FOREGROUND_KIND)
+        ?? sessionTiles[0];
+      renderSessionTiles();
+      if (scoped) {
+        selectedSessionId = scoped.sessionId;
+        syncSelectedActions(scoped);
+        if (scoped.kind === FOREGROUND_KIND || !isVdTile(scoped)) restoreForegroundLive();
+      } else {
+        restoreForegroundLive();
+        syncSelectedActions(undefined);
+      }
+    } catch {
+      if (!disposed) {
+        sessionTileList.replaceChildren(el("p", "context-card-copy", `${FOREGROUND_PLANE_LABEL} session: default-foreground`));
+        restoreForegroundLive();
+      }
+    }
+  };
+
   const runOwnership = async (kind: "yield_ai" | "take_human", label: string) => {
     controlStatus.textContent = `${label}…`;
     controlStatus.classList.remove("error");
     try {
-      const result = await service.sendControl(device.id, { type: kind });
+      const sessionId = selectedTile()?.sessionId ?? selectedSessionId;
+      const result = await sendSessionHandoff(service, device.id, sessionId, kind);
       if (result.ok) {
         device.inputOwner = result.inputOwner ?? (kind === "yield_ai" ? "AI" : "HUMAN");
         ownerLabel.textContent = ownerCopy(device);
         controlStatus.textContent = kind === "yield_ai"
           ? "AI has control · MCP can mutate after observe"
           : "You have control · yield before MCP mutations";
+        if (!disposed) await refreshSessions();
       } else {
         controlStatus.textContent = ownershipFailureCopy(label, result.verification);
         controlStatus.classList.add("error");
@@ -165,11 +333,33 @@ export function createFocusedPhonePage(
       controlStatus.classList.add("error");
     }
   };
-  yieldAi.addEventListener("click", () => void runOwnership("yield_ai", "Give control to AI"));
+  yieldAi.addEventListener("click", () => void runOwnership("yield_ai", "Give to AI"));
   takeHuman.addEventListener("click", () => void runOwnership("take_human", "Take control"));
+  pauseSession.addEventListener("click", () => {
+    const tile = selectedTile();
+    if (!tile || !isVdTile(tile)) return;
+    pauseSession.disabled = true;
+    controlStatus.textContent = "Pause…";
+    controlStatus.classList.remove("error");
+    const pause = service.pauseDeviceSession
+      ? service.pauseDeviceSession(device.id, tile.sessionId)
+      : CycloneOneSessionClient.connect().then((client) => client.pause(device.id, tile.sessionId));
+    void pause
+      .then(() => {
+        if (!disposed) {
+          controlStatus.textContent = `${VD_PLANE_LABEL} paused`;
+          return refreshSessions();
+        }
+      })
+      .catch((error) => {
+        controlStatus.textContent = ownershipFailureCopy("Pause", error instanceof Error ? error.message : undefined);
+        controlStatus.classList.add("error");
+      })
+      .finally(() => { if (!disposed) syncSelectedActions(selectedTile()); });
+  });
   void runOwnership("take_human", "Take control");
   void loadSessionSummary(service, device.id, sessionList);
-  let disposed = false;
+  void refreshSessions();
   const refreshLayer2 = () => loadLayer2Strip(service, device.id, layer2Strip, () => {
     if (!disposed) void refreshLayer2();
   });
@@ -308,6 +498,8 @@ export function createFocusedPhonePage(
       disposed = true;
       setKeyboardActive(false);
       window.removeEventListener("keydown", keydown, true);
+      if (jpegUrl) URL.revokeObjectURL(jpegUrl);
+      jpegUrl = null;
       live.destroy();
     },
     updateDevice: (next) => {
@@ -320,7 +512,11 @@ export function createFocusedPhonePage(
       healthSlot.replaceChildren(createDeviceHealthPanel(next));
       trustRepairBanner.hidden = !needsTrustRepair(next);
       ownerLabel.textContent = ownerCopy(next);
-      if (!disposed) void refreshLayer2();
+      if (!disposed) {
+        void refreshLayer2();
+        void refreshSessions();
+        void loadSessionSummary(service, next.id, sessionList);
+      }
     },
   };
 }
@@ -336,7 +532,20 @@ function ownershipFailureCopy(label: string, detail?: string): string {
   const code = String(detail || "").toUpperCase();
   if (code.includes("PHONE_LOCKED")) return "Phone is locked — unlock it first. A locked phone is never stolen.";
   if (code.includes("HUMAN_HAS_CONTROL")) return "Companion still owns input. Click Give control to AI, then retry.";
+  if (code.includes("SESSION_DISPLAY_MISMATCH") || code.includes("REWRITE TO DISPLAY 0")) {
+    return "Named Session Kernel VD JPEG refused display 0.";
+  }
   return detail ? `${label} unavailable (${String(detail).slice(0, 80)})` : `${label} unavailable`;
+}
+
+async function sendSessionHandoff(
+  service: DesktopService,
+  deviceId: string,
+  sessionId: string,
+  kind: "yield_ai" | "take_human",
+): Promise<ControlResult> {
+  if (service.sendSessionControl) return service.sendSessionControl(deviceId, sessionId, kind);
+  return service.sendControl(deviceId, { type: kind, sessionId });
 }
 
 async function loadLayer2Strip(
@@ -389,15 +598,13 @@ async function loadSessionSummary(service: DesktopService, deviceId: string, tar
       ? await service.listDeviceSessions(deviceId)
       : await (await CycloneOneSessionClient.connect()).list(deviceId);
     const ids = listed.sessions.map((item) => {
-      const kind = item.sessionId === "default-foreground"
-        ? "execution"
-        : item.executable === false ? "read-only share/reference" : "background execution";
-      return `${item.sessionId} (${kind})`;
+      const tile = bindSessionTile(deviceId, item);
+      return `${item.sessionId} (${sessionPlaneLabel(tile)})`;
     });
     target.textContent = ids.length
       ? `Sessions: ${ids.join(" · ")}`
-      : "Sessions: default-foreground (execution)";
+      : `Sessions: default-foreground (${FOREGROUND_PLANE_LABEL})`;
   } catch {
-    target.textContent = "Sessions: default-foreground (execution)";
+    target.textContent = `Sessions: default-foreground (${FOREGROUND_PLANE_LABEL})`;
   }
 }

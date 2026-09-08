@@ -7,7 +7,7 @@ import threading
 from typing import Any
 
 from ..cyclone_bridge.client import BridgeDisconnectedError, BridgeOperationError, BridgeProtocolError
-from ..execution_scope import DEFAULT_FOREGROUND_SESSION_ID
+from ..execution_scope import DEFAULT_FOREGROUND_SESSION_ID, classify_session_plane
 from .fleet import DeviceFleetManager, DeviceSession
 from .models import CYCLONE_ONE_SESSION_PROTOCOL_VERSION, DesktopRuntimeError, FleetEventType, RuntimeErrorCode
 
@@ -81,6 +81,7 @@ class ExecutionSessionService:
         session = self._paired(device_id)
         result = self._request(session, "session.start", {"package": package_name})
         descriptor = self._descriptor(result, allow_foreground=False)
+        descriptor["inputOwner"] = descriptor.get("inputOwner") or "AI"
         self._forget(device_id, descriptor["sessionId"])
         self._remember_added(device_id, descriptor)
         return {"protocol": CYCLONE_ONE_SESSION_PROTOCOL_VERSION, "deviceId": device_id, "session": descriptor}
@@ -312,12 +313,21 @@ class ExecutionSessionService:
         if not session_id or not isinstance(display_id, int) or display_id < 0:
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Android returned an invalid execution-session identity.")
         if session_id != DEFAULT_FOREGROUND_SESSION_ID and display_id <= 0:
-            raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Workspace session displayId must be an int > 0")
+            raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Named Session Kernel VD displayId must be an int > 0")
         if not allow_foreground and (session_id == DEFAULT_FOREGROUND_SESSION_ID or display_id <= 0):
             raise DesktopRuntimeError(RuntimeErrorCode.BACKGROUND_MODE_UNAVAILABLE, "Android did not return an isolated non-default execution session.")
         if session_id == DEFAULT_FOREGROUND_SESSION_ID and display_id != 0:
             raise DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, "Foreground session/display identity is inconsistent.")
-        return dict(value)
+        out = dict(value)
+        if session_id != DEFAULT_FOREGROUND_SESSION_ID:
+            out.pop("workspaceId", None)
+            out.pop("workspaceGeneration", None)
+        out["plane"] = classify_session_plane(session_id, display_id)
+        owner = out.get("inputOwner") or out.get("owner")
+        if not owner:
+            owner = "HUMAN" if session_id == DEFAULT_FOREGROUND_SESSION_ID else "AI"
+        out["inputOwner"] = owner
+        return out
 
     @staticmethod
     def _synthetic_foreground(session: DeviceSession) -> dict[str, Any]:
@@ -325,11 +335,12 @@ class ExecutionSessionService:
             "sessionId": DEFAULT_FOREGROUND_SESSION_ID,
             "displayId": 0,
             "state": "FOREGROUND",
-            "inputOwner": getattr(session, "input_owner", "HUMAN"),
+            "inputOwner": getattr(session, "input_owner", None) or "HUMAN",
             "executable": True,
             "kind": "FOREGROUND",
             "readOnly": False,
             "targetPackage": None,
+            "plane": classify_session_plane(DEFAULT_FOREGROUND_SESSION_ID, 0),
         }
 
     @staticmethod
@@ -386,12 +397,21 @@ class ExecutionSessionService:
         session_id = descriptor.get("sessionId")
         if session_id is not None:
             payload["sessionId"] = session_id
+            payload["session_id"] = session_id
         if "displayId" in descriptor:
             payload["displayId"] = descriptor["displayId"]
         if "executable" in descriptor:
             payload["executable"] = descriptor["executable"]
         if "state" in descriptor:
             payload["state"] = descriptor["state"]
+        owner = descriptor.get("inputOwner") or descriptor.get("owner")
+        if not owner:
+            owner = "HUMAN" if str(session_id or "") == DEFAULT_FOREGROUND_SESSION_ID else "AI"
+        payload["inputOwner"] = owner
+        payload["owner"] = owner
+        plane = descriptor.get("plane")
+        if isinstance(plane, dict):
+            payload["plane"] = plane
         return payload
 
     def _publish_session(self, event: FleetEventType, device_id: str, descriptor: dict[str, Any]) -> None:

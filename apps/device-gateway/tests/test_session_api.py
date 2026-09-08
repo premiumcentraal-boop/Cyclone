@@ -14,7 +14,11 @@ from cyclone_device_gateway.desktop_runtime.agent import DesktopAgentService
 from cyclone_device_gateway.desktop_runtime.events import FleetEventBroker
 from cyclone_device_gateway.desktop_runtime.models import DesktopRuntimeError, RuntimeErrorCode
 from cyclone_device_gateway.desktop_runtime.sessions import ExecutionSessionService
-from cyclone_device_gateway.execution_scope import DEFAULT_FOREGROUND_SESSION_ID, parse_execution_identity
+from cyclone_device_gateway.execution_scope import (
+    DEFAULT_FOREGROUND_SESSION_ID,
+    classify_session_plane,
+    parse_execution_identity,
+)
 
 
 _PNG_1X1 = (
@@ -176,11 +180,18 @@ def test_session_rest_list_start_stop_and_events():
     assert body["sessions"][0]["sessionId"] == DEFAULT_FOREGROUND_SESSION_ID
     assert body["sessions"][0]["displayId"] == 0
     assert body["sessions"][0]["executable"] is True
+    assert body["sessions"][0]["inputOwner"] == "HUMAN"
+    assert body["sessions"][0]["plane"]["kind"] == "foreground"
+    assert body["sessions"][0]["plane"]["label"] == "Foreground"
+    assert body["sessions"][0]["plane"]["workspaceId"] is None
     added_foreground = q.get_nowait()
     assert added_foreground["event"] == "session.added"
     assert added_foreground["deviceId"] == "dev_glass"
     assert added_foreground["sessionId"] == DEFAULT_FOREGROUND_SESSION_ID
+    assert added_foreground["session_id"] == DEFAULT_FOREGROUND_SESSION_ID
     assert added_foreground["displayId"] == 0
+    assert added_foreground["inputOwner"] == "HUMAN"
+    assert added_foreground["owner"] == "HUMAN"
 
     started = client.post(
         "/v1/devices/dev_glass/sessions",
@@ -191,12 +202,25 @@ def test_session_rest_list_start_stop_and_events():
     session = started.json()["session"]
     assert session["sessionId"] == "workspace-1"
     assert session["displayId"] == 11
+    assert session["displayId"] != 0
+    assert session["inputOwner"] in {"AI", "HUMAN"}
+    assert session["plane"]["kind"] == "session_kernel_vd"
+    assert session["plane"]["sessionId"] == "workspace-1"
+    assert session["plane"]["displayId"] == 11
+    assert session["plane"]["workspaceId"] is None
+    assert session["plane"]["workspaceGeneration"] is None
+    assert session["plane"]["label"] == "Session Kernel VD"
     added = q.get_nowait()
     assert added["event"] == "session.added"
     assert added["sessionId"] == "workspace-1"
+    assert added["session_id"] == "workspace-1"
     assert added["displayId"] == 11
+    assert added["displayId"] > 0
     assert added["executable"] is True
     assert added["state"] == "ACTIVE"
+    assert added["inputOwner"] in {"AI", "HUMAN"}
+    assert added["owner"] == added["inputOwner"]
+    assert added["plane"]["kind"] == "session_kernel_vd"
 
     stopped = client.post("/v1/devices/dev_glass/sessions/workspace-1/stop", headers=headers)
     assert stopped.status_code == 200
@@ -204,6 +228,7 @@ def test_session_rest_list_start_stop_and_events():
     assert removed["event"] == "session.removed"
     assert removed["deviceId"] == "dev_glass"
     assert removed["sessionId"] == "workspace-1"
+    assert removed["session_id"] == "workspace-1"
 
 
 def test_session_list_synthetic_foreground_when_android_unavailable():
@@ -221,13 +246,25 @@ def test_session_list_synthetic_foreground_when_android_unavailable():
             "kind": "FOREGROUND",
             "readOnly": False,
             "targetPackage": None,
+            "plane": {
+                "kind": "foreground",
+                "sessionId": DEFAULT_FOREGROUND_SESSION_ID,
+                "displayId": 0,
+                "workspaceId": None,
+                "workspaceGeneration": None,
+                "label": "Foreground",
+            },
         },
     ]
     event = q.get_nowait()
     assert event["event"] == "session.added"
     assert event["sessionId"] == DEFAULT_FOREGROUND_SESSION_ID
+    assert event["session_id"] == DEFAULT_FOREGROUND_SESSION_ID
     assert event["displayId"] == 0
     assert event["executable"] is True
+    assert event["inputOwner"] == "HUMAN"
+    assert event["owner"] == "HUMAN"
+    assert event["plane"]["kind"] == "foreground"
 
 
 def test_list_delta_emits_removed_when_android_session_disappears():
@@ -252,6 +289,7 @@ def test_list_delta_emits_removed_when_android_session_disappears():
     removed = [item for item in events if item["event"] == "session.removed"]
     assert removed
     assert removed[0]["sessionId"] == session_id
+    assert removed[0]["session_id"] == session_id
     assert removed[0]["deviceId"] == "dev_glass"
 
 
@@ -286,8 +324,10 @@ def test_exact_session_snapshot_never_substitutes_display_zero():
     response = client.get(f"/v1/devices/dev_glass/sessions/{session_id}/snapshot", headers=headers)
     assert response.status_code == 200
     assert response.headers["x-cyclone-foreground-substitution"] == "false"
+    assert response.headers["X-Cyclone-Foreground-Substitution".lower()] == "false"
     assert response.headers["x-cyclone-session-id"] == session_id
     assert response.headers["x-cyclone-display-id"] == "11"
+    assert response.headers["x-cyclone-display-id"] != "0"
     assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
@@ -307,3 +347,24 @@ def test_agent_status_lists_foreground_and_share_readonly():
     assert sessions["workspace-a"]["readOnly"] is False
     assert status["inputOwner"] == "HUMAN"
     assert status["handoff"]["companionOwner"] == "HUMAN"
+
+
+def test_classify_session_plane_labels_foreground_and_named_vd():
+    named = classify_session_plane("workspace-a", 7)
+    assert named == {
+        "kind": "session_kernel_vd",
+        "sessionId": "workspace-a",
+        "displayId": 7,
+        "workspaceId": None,
+        "workspaceGeneration": None,
+        "label": "Session Kernel VD",
+    }
+    foreground = classify_session_plane(DEFAULT_FOREGROUND_SESSION_ID, 0)
+    assert foreground["kind"] == "foreground"
+    assert foreground["label"] == "Foreground"
+    assert foreground["displayId"] == 0
+    assert classify_session_plane(DEFAULT_FOREGROUND_SESSION_ID)["kind"] == "foreground"
+    with pytest.raises(ValueError):
+        classify_session_plane("workspace-a", 0)
+    with pytest.raises(ValueError):
+        parse_execution_identity({"sessionId": "workspace-a", "displayId": 0})

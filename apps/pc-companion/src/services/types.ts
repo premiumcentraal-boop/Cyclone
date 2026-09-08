@@ -236,8 +236,8 @@ export type DeviceControlAction =
   | { type: "wake" }
   | { type: "disconnect" }
   | { type: "reconnect" }
-  | { type: "yield_ai" }
-  | { type: "take_human" };
+  | { type: "yield_ai"; sessionId?: string }
+  | { type: "take_human"; sessionId?: string };
 
 export interface ControlResult {
   ok: boolean;
@@ -265,6 +265,7 @@ export interface DeviceSessionDescriptor {
   executable?: boolean;
   executionGeneration?: number | null;
   frameHealthy?: boolean | null;
+  plane?: "foreground" | "session_kernel_vd";
 }
 
 export interface DeviceSessionList {
@@ -315,6 +316,9 @@ export interface FleetWsEvent {
   deviceId?: string;
   sessionId?: string;
   displayId?: number;
+  inputOwner?: string;
+  owner?: string;
+  state?: string;
 }
 
 export type ConnectorState =
@@ -434,6 +438,7 @@ export interface DesktopService {
   pairConfirm(deviceId: string, pairingId: string, code: string): Promise<PairConfirmResult>;
   pairQrConfirm(deviceId: string, pairingId: string): Promise<PairQrConfirmResult>;
   sendControl(deviceId: string, action: DeviceControlAction): Promise<ControlResult>;
+  sendSessionControl?(deviceId: string, sessionId: string, kind: "yield_ai" | "take_human"): Promise<ControlResult>;
   getVideoUrl(deviceId: string, profile: StreamProfile): string;
   getVideoProtocols(): string[];
   getFallbackFrameUrl(deviceId: string, profile: StreamProfile): string;

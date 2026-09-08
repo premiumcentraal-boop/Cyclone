@@ -101,7 +101,7 @@ test("Layer 2 status is not a session tile", async () => {
   assert.equal(isLayer2Plane(status), true);
   assert.equal(status.plane, LAYER2_PLANE);
   assert.equal("kind" in status, false);
-  assert.equal(tile.kind, "workspace");
+  assert.equal(tile.kind, "session_kernel_vd");
   assert.notEqual(tile.kind, status.plane);
   assert.ok(tile.displayId > 0);
   assert.equal(status.displayId, 0);
@@ -120,4 +120,5 @@ test("Layer 2 copy and plane are layer2, not workspace-VD", () => {
   assert.doesNotMatch(LAYER2_STRIP_COPY, /session_id/);
   assert.equal(LAYER2_PLANE, "layer2");
   assert.notEqual(LAYER2_PLANE, "workspace");
+  assert.notEqual(LAYER2_PLANE, "session_kernel_vd");
 });
