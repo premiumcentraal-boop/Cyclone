@@ -1,5 +1,5 @@
-# Cyclone One 1.1.1 + gateway/MCP 4.1.0 patch on published one-1.1.0; DEVICE TESTING: UNVERIFIED
-# publication_authorized=false; GitHub tag one-1.1.0 already exists. This cut is one-1.1.1.
+# Cyclone One 1.1.2 + gateway/MCP 4.1.0 connections UX patch on published one-1.1.1; DEVICE TESTING: UNVERIFIED
+# publication_authorized=false; GitHub tag one-1.1.1 already exists. This cut is one-1.1.2.
 # Mobile stays 4.0.4 / android_version_code 75.
 schema = 1
 product_version = "4.0.4"
@@ -9,7 +9,7 @@ python_version = "4.1.0"
 
 [components]
 mobile = "4.0.4"
-pc_companion = "1.1.1"
+pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
@@ -21,4 +21,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-one-1.1.1-mcp-tunnel-settings"
+candidate_generation = "cyclone-one-1.1.2-connections-remote-mcp-wizard"

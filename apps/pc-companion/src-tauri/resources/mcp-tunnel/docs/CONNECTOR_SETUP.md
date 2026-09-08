@@ -1,39 +1,55 @@
-# ChatGPT + Grok chat connector setup
+# Cloud AI Remote MCP setup
 
-Use **Cyclone One → Settings → Remote MCP (ChatGPT / Grok chat)** for the live URL and bearer. Do not hunt PowerShell scripts.
+Use **Cyclone One -> Connections -> Remote MCP**. The normal setup is intentionally three steps; you should not need PowerShell or the technical docs below.
 
-Local Grok Build and Cursor keep stdio MCP (`CycloneAgentMCP.exe serve` in `~/.grok/config.toml`). Do **not** paste the public `*.trycloudflare.com` URL there.
+## Quick setup
 
-## Before you paste anything
+1. In Connections, choose **View only** or **Control phone**, then press **Start secure connection**.
+2. In your cloud AI's custom Remote MCP / connector screen, add:
+   - Name: `Cyclone Phone`
+   - MCP URL: press **Copy MCP URL** in Cyclone.
+   - Authentication: **Bearer token**.
+   - Token: press **Copy token** in Cyclone and paste it only into the authentication field.
+3. Back in Cyclone, press **Copy agent prompt** and paste that prompt into a new AI chat/task after the connector is attached.
 
-1. Settings → Remote MCP → **Start tunnel**.
-2. Wait until status is **Running**.
-3. Copy **MCP URL** (`https://…/mcp`) and **Copy token**.
-4. Run **Smoke**. It must show 401 without auth and 200 initialize with the bearer.
+Quick tunnels mint a **new hostname every Start/Restart**. Re-copy the URL after a restart.
 
-Quick tunnels mint a **new hostname every Start/Restart**. Re-copy the URL after each restart.
+The bearer token is a secret. Do not paste it into normal chat messages, prompts, screenshots, logs, issue reports, or diagnostics.
 
-## ChatGPT (web, Developer Mode)
+## ChatGPT
 
-1. ChatGPT web → profile → Settings → enable **Developer mode** (under Security / Apps / Connectors — OpenAI moves this toggle).
-2. Settings → Apps / Connectors / Plugins → create a custom **Remote MCP** app.
-3. Name: `Cyclone Phone`.
-4. MCP server URL: the Settings MCP URL (`…/mcp`).
-5. Authentication: **Bearer token** (the token from Copy token). Never pick “No authentication”.
-6. Trust this application (it is your own MCP).
-7. Phase 1 (readonly, default): enable observe tools only (`phone_status`, `phone_observe`, `phone_locate`, `phone_screenshot`, `phone_devices`). `phone_act` is hidden until you switch Settings to **full**.
+1. Open ChatGPT settings and enable the option that allows custom/remote MCP apps if your plan/workspace supports it.
+2. Create a custom Remote MCP app named `Cyclone Phone`.
+3. Paste the MCP URL from Cyclone One.
+4. Choose Bearer authentication and paste the token from **Copy token**.
+5. Attach/enable the app for the chat, then paste the **Cyclone agent prompt**.
 
-ChatGPT cannot use `localhost`. Free / Go plans cannot add custom MCP.
+ChatGPT cannot connect to `localhost` on your PC; use Cyclone's generated HTTPS URL.
 
-## grok.com connectors
+## Grok
 
-1. Open [grok.com/connectors](https://grok.com/connectors).
-2. Add a custom connector with the **same** MCP URL and bearer.
-3. xAI rejects localhost and RFC1918 URLs — the cloudflared HTTPS URL is required.
-4. Do not use OpenAI Secure MCP Tunnel as the dual-front URL.
+1. Open Grok connectors.
+2. Add a custom connector using the same Cyclone MCP URL and bearer token.
+3. Attach the connector to the chat/task, then paste the **Cyclone agent prompt**.
 
-## Safety
+Do not use the public Remote MCP URL in local Grok Build or Cursor configuration. Local MCP clients continue to use `CycloneAgentMCP.exe serve` over stdio.
 
-- Default mode is **readonly**. Full mode exposes mutating phone tools to anyone who has the bearer.
-- Rotate the token from Settings after sharing it, and after a suspected leak.
-- `session_id=default-foreground` is required for live-display observe/act/locate.
+## Access levels
+
+- **View only** is the default. The cloud AI can inspect the phone with observation tools but cannot mutate it.
+- **Control phone** exposes mutating tools such as `phone_act` to a client holding the bearer token. Only enable it for AI accounts/connectors you trust.
+
+For the live human screen, Cyclone MCP tools use `session_id=default-foreground` (display 0). The universal agent prompt teaches this contract automatically.
+
+## Advanced diagnostics
+
+Connections -> Remote MCP -> **Advanced · diagnostics and security** contains:
+
+- Check connection / smoke test
+- Restart
+- Rotate bearer token
+- Stop Remote MCP
+- Health URL
+- Open technical docs
+
+Expected smoke behavior is `/health` 200, `/mcp` without authorization 401, and MCP initialize with the bearer 200.
