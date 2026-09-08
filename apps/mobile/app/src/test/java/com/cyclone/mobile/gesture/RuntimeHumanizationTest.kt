@@ -2,21 +2,25 @@ package com.cyclone.mobile.gesture
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class RuntimeHumanizationTest {
     @Test
-    fun `bounded preference parsing defaults invalid values to auto`() {
+    fun `bounded preference parsing accepts only the v03 contract`() {
         assertEquals(HumanizePreference.AUTO, HumanizePreference.parse(null))
         assertEquals(HumanizePreference.AUTO, HumanizePreference.parse("auto"))
         assertEquals(HumanizePreference.OFF, HumanizePreference.parse("OFF"))
         assertEquals(HumanizePreference.LIGHT, HumanizePreference.parse("light"))
         assertEquals(HumanizePreference.NORMAL, HumanizePreference.parse(" normal "))
-        assertEquals(HumanizePreference.AUTO, HumanizePreference.parse("arbitrary-path"))
+        assertThrows(IllegalArgumentException::class.java) { HumanizePreference.parse("") }
+        assertThrows(IllegalArgumentException::class.java) { HumanizePreference.parse("arbitrary-path") }
+        assertNull(HumanizePreference.parseOrNull("arbitrary-path"))
     }
 
     @Test
-    fun `auto selects light taps normal swipes and off precision`() {
+    fun `auto selects light taps and long press normal swipe and scroll and off precision`() {
         assertEquals(
             HumanizeProfile.LIGHT,
             HumanGestureRuntimePolicy.resolve(HumanizePreference.AUTO, RuntimeGestureKind.FALLBACK_TAP),
@@ -26,8 +30,16 @@ class RuntimeHumanizationTest {
             HumanGestureRuntimePolicy.resolve(HumanizePreference.AUTO, RuntimeGestureKind.COORDINATE_TAP),
         )
         assertEquals(
+            HumanizeProfile.LIGHT,
+            HumanGestureRuntimePolicy.resolve(HumanizePreference.AUTO, RuntimeGestureKind.LONG_PRESS),
+        )
+        assertEquals(
             HumanizeProfile.NORMAL,
             HumanGestureRuntimePolicy.resolve(HumanizePreference.AUTO, RuntimeGestureKind.SWIPE),
+        )
+        assertEquals(
+            HumanizeProfile.NORMAL,
+            HumanGestureRuntimePolicy.resolve(HumanizePreference.AUTO, RuntimeGestureKind.SCROLL),
         )
         assertEquals(
             HumanizeProfile.NORMAL,
