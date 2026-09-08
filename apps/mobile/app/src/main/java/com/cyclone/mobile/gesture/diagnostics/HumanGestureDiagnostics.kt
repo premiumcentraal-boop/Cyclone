@@ -27,6 +27,21 @@ data class HumanGesturePlanDiagnostics(
     val traceHashSha256: String,
 ) {
     init {
+        require(controlVersion == HumanGestureDiagnostics.CONTROL_VERSION) {
+            "Unsupported Human Gesture control version"
+        }
+        require(traceVersion == HumanGestureDiagnostics.TRACE_VERSION) {
+            "Unsupported Human Gesture trace version"
+        }
+        require(hashVersion == HumanGestureDiagnostics.HASH_VERSION) {
+            "Unsupported Human Gesture hash version"
+        }
+        require(engineName == HumanGestureTraceAdapter.ENGINE_NAME) {
+            "Unsupported Human Gesture engine name"
+        }
+        require(engineVersion == HumanGestureTraceAdapter.ENGINE_VERSION) {
+            "Unsupported Human Gesture engine version"
+        }
         require(traceHashSha256.length == 64 && traceHashSha256.all { it in '0'..'9' || it in 'a'..'f' }) {
             "traceHashSha256 must be a lowercase SHA-256 hex digest"
         }
@@ -122,6 +137,13 @@ object HumanGestureDiagnostics {
     }
 
     fun fromTrace(trace: NormalizedGestureTrace): HumanGesturePlanDiagnostics {
+        require(trace.schema == TRACE_VERSION) { "Unsupported production trace schema: ${trace.schema}" }
+        require(trace.engineName == HumanGestureTraceAdapter.ENGINE_NAME) {
+            "Unsupported production engine name: ${trace.engineName}"
+        }
+        require(trace.engineVersion == HumanGestureTraceAdapter.ENGINE_VERSION) {
+            "Unsupported production engine version: ${trace.engineVersion}"
+        }
         val type = when (trace.gestureType) {
             "tap" -> HumanGestureDiagnosticGestureType.TAP
             "swipe" -> HumanGestureDiagnosticGestureType.SWIPE
