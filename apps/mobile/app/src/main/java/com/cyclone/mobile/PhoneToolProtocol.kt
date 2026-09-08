@@ -285,18 +285,60 @@ data class PhoneToolResult(
     val payload: Any? = null,
     val error: PhoneToolError? = null,
 ) {
-    fun toJson(): JSONObject = JSONObject()
-        .put("commandId", commandId)
-        .put("tool", tool)
-        .put("ok", ok)
-        .put("startedAtMs", startedAtMs)
-        .put("finishedAtMs", finishedAtMs)
-        .put("durationMs", finishedAtMs - startedAtMs)
-        .put("attempts", attempts)
-        .put("beforeFingerprint", beforeFingerprint ?: JSONObject.NULL)
-        .put("afterFingerprint", afterFingerprint ?: JSONObject.NULL)
-        .put("payload", payload ?: JSONObject.NULL)
-        .put("error", error?.toJson() ?: JSONObject.NULL)
+    fun toJson(): JSONObject {
+        val renderedPayload = when {
+            tool != "phone.click" -> payload
+            payload is JSONObject && payload.optJSONObject("humanGesture") != null -> payload
+            !ok && HumanGestureDispatch.peekTrace(commandId) == null -> payload
+            else -> {
+                val base = if (payload is JSONObject) JSONObject(payload.toString()) else JSONObject()
+                base.put("humanGesture", serializedClickEvidence())
+            }
+        }
+        return JSONObject()
+            .put("commandId", commandId)
+            .put("tool", tool)
+            .put("ok", ok)
+            .put("startedAtMs", startedAtMs)
+            .put("finishedAtMs", finishedAtMs)
+            .put("durationMs", finishedAtMs - startedAtMs)
+            .put("attempts", attempts)
+            .put("beforeFingerprint", beforeFingerprint ?: JSONObject.NULL)
+            .put("afterFingerprint", afterFingerprint ?: JSONObject.NULL)
+            .put("payload", renderedPayload ?: JSONObject.NULL)
+            .put("error", error?.toJson() ?: JSONObject.NULL)
+    }
+
+    private fun serializedClickEvidence(): JSONObject {
+        val trace = HumanGestureDispatch.peekTrace(commandId)
+        return if (trace == null) {
+            JSONObject()
+                .put("requestedHumanize", JSONObject.NULL)
+                .put("resolvedProfile", JSONObject.NULL)
+                .put("profileSource", "not_applied_semantic")
+                .put("appliedProfile", "none")
+                .put("dispatchMode", "semantic_action")
+                .put("interactionMode", "semantic")
+                .put("correctedOrRejected", false)
+                .put("reason", JSONObject.NULL)
+                .put("durationMs", JSONObject.NULL)
+                .put("sessionId", "default-foreground")
+                .put("displayId", 0)
+        } else {
+            JSONObject()
+                .put("requestedHumanize", JSONObject.NULL)
+                .put("resolvedProfile", trace.profile.name.lowercase())
+                .put("profileSource", "android_dispatch_trace")
+                .put("appliedProfile", trace.profile.name.lowercase())
+                .put("dispatchMode", trace.dispatchMode)
+                .put("interactionMode", "coordinate")
+                .put("correctedOrRejected", !trace.accepted)
+                .put("reason", trace.reason ?: JSONObject.NULL)
+                .put("durationMs", trace.durationMs)
+                .put("sessionId", "default-foreground")
+                .put("displayId", 0)
+        }
+    }
 }
 
 object PhoneToolNames {
