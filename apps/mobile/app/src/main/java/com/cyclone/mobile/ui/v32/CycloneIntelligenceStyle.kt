@@ -28,15 +28,7 @@ internal object CycloneIntelligenceStyle {
 
 @Composable
 internal fun CycloneIntelligenceTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = darkColorScheme(
-        primary = CycloneIntelligenceStyle.Blue, onPrimary = Color(0xFF102943),
-        primaryContainer = Color(0xFF293C50), onPrimaryContainer = CycloneIntelligenceStyle.Text,
-        secondary = CycloneIntelligenceStyle.Mint, onSecondary = Color(0xFF103B33),
-        background = CycloneIntelligenceStyle.Ink, surface = CycloneIntelligenceStyle.Surface,
-        onBackground = CycloneIntelligenceStyle.Text, onSurface = CycloneIntelligenceStyle.Text,
-        surfaceVariant = CycloneIntelligenceStyle.Raised, onSurfaceVariant = CycloneIntelligenceStyle.Muted,
-        outlineVariant = Color(0xFF3B4652), error = Color(0xFFFFB4B0),
-    )) { CompositionLocalProvider(LocalContentColor provides CycloneIntelligenceStyle.Text, content = content) }
+    CycloneTheme(content)
 }
 
 /** Three open orbital strokes evoke a cyclone without borrowing another product's logo. */

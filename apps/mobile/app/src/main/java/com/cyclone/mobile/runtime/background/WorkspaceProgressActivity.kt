@@ -129,9 +129,9 @@ class WorkspaceProgressActivity : ComponentActivity() {
     }
 
     private fun progressPlaneLabel(task: WorkspaceTaskUi): String = when {
-        isLayer2(task) -> "Layer 2 workspace · ${task.app}"
+        isLayer2(task) -> "Your app profile · ${task.app}"
         task.phase == TaskPhase.HUMAN -> "You have control · ${task.app}"
-        ViewProgressRouter.showsVdFrames(task) -> "Session Kernel VD · ${task.app}"
+        ViewProgressRouter.showsVdFrames(task) -> "Cyclone is working · ${task.app}"
         else -> "Cyclone's workspace · ${task.app}"
     }
 
