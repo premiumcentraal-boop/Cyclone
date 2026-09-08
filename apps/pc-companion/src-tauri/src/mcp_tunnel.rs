@@ -478,7 +478,7 @@ pub async fn mcp_tunnel_set_mode(app: AppHandle, mode: String) -> Result<Value, 
     tauri::async_runtime::spawn_blocking({
         let mode = mode.clone();
         let app = app.clone();
-        move || {
+        move || -> Result<PathBuf, String> {
             let root = ensure_installed(&app)?;
             set_env_key(&env_file(&root), "GATEWAY_MODE", &mode)?;
             Ok(root)
