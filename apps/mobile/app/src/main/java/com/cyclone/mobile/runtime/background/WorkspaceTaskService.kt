@@ -104,11 +104,12 @@ class WorkspaceTaskService : Service() {
                     model = (settings.getString("openrouter_model", null)?.let(OpenRouterModelPresets::byId) ?: OpenRouterModelPresets.DEFAULT).copy(
                         reasoningEffort = settings.getString("openrouter_reasoning_effort", "medium")?.takeIf { it in setOf("low", "medium", "high", "max") } ?: "medium"),
                     safeMode = profile != CycloneAiAccessProfile.FULL, accessProfile = profile,
-                    attachment = PendingTaskAttachment.take())
+                    attachment = WorkspaceTasks.takeAttachment(task.taskId))
                 awaitWorkspace(session.sessionId, ExecutionContext.from(session))
                 agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session))
                 finishTask(agent!!.execute(task.goal, config) { text -> progress(text) })
             } catch (error: Exception) {
+                WorkspaceTasks.takeAttachment(task.taskId)
                 if (error is CancellationException && error !is TimeoutCancellationException) throw error
                 sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it, WorkspaceState.FAILED) } }
                 sessionId = null

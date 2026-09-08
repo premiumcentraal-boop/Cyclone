@@ -68,13 +68,18 @@ data class WorkspaceTaskUi(
 
 /** Presentation and task routing only. WorkspaceRuntime and the existing agent own execution. */
 object WorkspaceTasks {
+    val requests = WorkspaceRequestQueue()
+    private val attachments = java.util.concurrent.ConcurrentHashMap<String, com.cyclone.mobile.ui.overlay.TaskAttachment>()
+    fun takeAttachment(taskId: String) = attachments.remove(taskId)
+    fun queueRequest(goal: String) = requests.add(goal) { com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take() }
+    fun hasCurrentTask(): Boolean = state.value?.phase?.let { it !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) } == true
     const val PRODUCT_HOT_BACKGROUND_LIMIT = SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT
     private val mutable = MutableStateFlow<WorkspaceTaskUi?>(null)
     val state = mutable.asStateFlow()
     fun update(taskId: String, change: (WorkspaceTaskUi) -> WorkspaceTaskUi) {
         mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let(change) ?: it }
     }
-    fun start(context: Context, goal: String, packageName: String, label: String) {
+    fun start(context: Context, goal: String, packageName: String, label: String, pendingRequestId: String? = null) {
         val liveCount = mutable.value?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) }?.let { 1 } ?: 0
         check(liveCount < PRODUCT_HOT_BACKGROUND_LIMIT) {
             "Finish or stop your current task first."
@@ -86,11 +91,17 @@ object WorkspaceTasks {
         if (BackgroundSetup.foregroundPackage() == context.packageName) {
             context.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
+        val pending = pendingRequestId?.let { requests.find(it) ?: error("This saved task was removed. Return to Up next.") }
         val task = WorkspaceTaskUi(UUID.randomUUID().toString(), app = label, packageName = packageName, goal = goal)
+        val attachment = if (pending != null) pending.attachment else com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take()
+        attachment?.let { attachments[task.taskId] = it }
         mutable.value = task
         try { context.startForegroundService(Intent(context, WorkspaceTaskService::class.java)
-            .putExtra("task", task.taskId).putExtra("goal", goal).putExtra("package", packageName).putExtra("label", label)) }
-        catch (error: Exception) { update(task.taskId) { it.copy(phase = TaskPhase.FAILED,
+            .putExtra("task", task.taskId).putExtra("goal", goal).putExtra("package", packageName).putExtra("label", label))
+            pendingRequestId?.let(requests::remove) }
+        catch (error: Exception) {
+            attachments.remove(task.taskId)?.let { if (pending == null) com.cyclone.mobile.ui.overlay.PendingTaskAttachment.set(it) }
+            update(task.taskId) { it.copy(phase = TaskPhase.FAILED,
             message = "Couldn't start background work. Open Cyclone and try again.") }; throw error }
     }
     fun command(context: Context, task: WorkspaceTaskUi, action: String) {
