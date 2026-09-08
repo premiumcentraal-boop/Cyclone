@@ -30,35 +30,75 @@ class CaptureGateway:
         return {"ok": True}
 
 
-def action_args(tool: str, params: dict) -> dict:
+def action_args(
+    tool: str,
+    params: dict,
+    *,
+    session_id: str = "default-foreground",
+    display_id: int = 0,
+) -> dict:
     return {
         "tool": tool,
         "params": params,
         "goal": "test human gesture transport",
-        "session_id": "default-foreground",
-        "display_id": 0,
+        "session_id": session_id,
+        "display_id": display_id,
     }
 
 
-def test_humanize_profiles_are_semantic_preferences():
-    for tool in ("phone.click", "phone.swipe", "phone.scroll"):
+def test_humanize_profiles_are_semantic_preferences_including_long_press():
+    for tool in ("phone.click", "phone.long_press", "phone.swipe", "phone.scroll"):
         for profile in ("auto", "off", "light", "normal"):
             params = {"humanize": profile}
             validate_typed_params(params)
             validate_human_gesture_params(tool, params)
 
 
-def test_phone_act_forwards_humanize_and_execution_identity_unchanged():
+def test_foreground_phone_act_forwards_humanize_and_identity_unchanged():
     gateway = CaptureGateway()
     tools = PhoneTools(gateway=gateway)
 
-    tools.phone_act(action_args("phone.click", {"elementId": "current-observation-element", "humanize": "light"}))
+    tools.phone_act(action_args("phone.click", {
+        "elementId": "current-observation-element",
+        "humanize": "light",
+    }))
 
     assert len(gateway.calls) == 1
     call = gateway.calls[0]
     assert call["tool"] == "phone.click"
     assert call["params"] == {"elementId": "current-observation-element", "humanize": "light"}
     assert call["identity"] == {"session_id": "default-foreground", "display_id": 0}
+
+
+def test_named_vd_phone_act_preserves_exact_nonzero_display_identity():
+    gateway = CaptureGateway()
+    tools = PhoneTools(gateway=gateway)
+
+    tools.phone_act(action_args(
+        "phone.swipe",
+        {"x1": 10, "y1": 700, "x2": 10, "y2": 200, "humanize": "normal"},
+        session_id="orders-session",
+        display_id=7,
+    ))
+
+    assert gateway.calls[0]["identity"] == {"session_id": "orders-session", "display_id": 7}
+    assert gateway.calls[0]["params"]["humanize"] == "normal"
+
+
+def test_layer2_phone_act_preserves_workspace_generation_and_display_zero():
+    gateway = CaptureGateway()
+    tools = PhoneTools(gateway=gateway)
+    params = {
+        "elementId": "current-observation-element",
+        "humanize": "auto",
+        "workspaceId": "workspace_abc",
+        "workspaceGeneration": 12,
+    }
+
+    tools.phone_act(action_args("phone.long_press", params))
+
+    assert gateway.calls[0]["identity"] == {"session_id": "default-foreground", "display_id": 0}
+    assert gateway.calls[0]["params"] == params
 
 
 def test_omitted_field_keeps_old_clients_and_payload_shape_valid():
@@ -103,5 +143,39 @@ def test_raw_path_choreography_rejected_before_transport():
     ):
         with pytest.raises(ValueError):
             tools.phone_act(action_args("phone.swipe", params))
+
+    assert gateway.calls == []
+
+
+def test_missing_execution_identity_fails_before_transport():
+    gateway = CaptureGateway()
+    tools = PhoneTools(gateway=gateway)
+
+    with pytest.raises(ValueError):
+        tools.phone_act({
+            "tool": "phone.click",
+            "params": {"elementId": "current-observation-element", "humanize": "light"},
+            "goal": "must stay scoped",
+        })
+
+    assert gateway.calls == []
+
+
+def test_named_vd_cannot_be_normalized_into_layer2():
+    gateway = CaptureGateway()
+    tools = PhoneTools(gateway=gateway)
+
+    with pytest.raises(ValueError):
+        tools.phone_act(action_args(
+            "phone.click",
+            {
+                "elementId": "current-observation-element",
+                "humanize": "light",
+                "workspaceId": "workspace_abc",
+                "workspaceGeneration": 12,
+            },
+            session_id="named-session",
+            display_id=8,
+        ))
 
     assert gateway.calls == []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..actions.router import ActionValidationError
 from ..execution_scope import attach_execution_identity, parse_execution_identity
+from .human_gesture import safe_gesture_diagnostics
 from .models import (
     CAPABILITY_PROTOCOL_VERSION,
     CapabilityActionRequest,
@@ -38,39 +39,22 @@ class CapabilityService:
         self.store = store
         self.registry = registry or CapabilityRegistry()
 
-    def observe(
-        self,
-        request: CapabilityObserveRequest,
-        observe,
-        retrieval,
-        knowledge_context,
-    ) -> CapabilityObservationResponse:
+    def observe(self, request: CapabilityObserveRequest, observe, retrieval, knowledge_context) -> CapabilityObservationResponse:
         if request.protocol_version != CAPABILITY_PROTOCOL_VERSION:
-            error = _error(
-                GatewayErrorCode.PROTOCOL_MISMATCH,
-                FailureLayer.PROTOCOL,
-                "Capability protocol version is not supported.",
-            )
+            error = _error(GatewayErrorCode.PROTOCOL_MISMATCH, FailureLayer.PROTOCOL,
+                           "Capability protocol version is not supported.")
             return CapabilityObservationResponse(
-                correlation_id=request.correlation_id,
-                ok=False,
-                transport=LayerOutcome(ok=True, status="not_attempted"),
-                error=error,
+                correlation_id=request.correlation_id, ok=False,
+                transport=LayerOutcome(ok=True, status="not_attempted"), error=error,
             )
         try:
             try:
                 identity = parse_execution_identity(request.model_dump(exclude_none=True))
             except ValueError as exc:
-                error = _error(
-                    GatewayErrorCode.PROTOCOL_MISMATCH,
-                    FailureLayer.PROTOCOL,
-                    str(exc)[:240],
-                )
+                error = _error(GatewayErrorCode.PROTOCOL_MISMATCH, FailureLayer.PROTOCOL, str(exc)[:240])
                 return CapabilityObservationResponse(
-                    correlation_id=request.correlation_id,
-                    ok=False,
-                    transport=LayerOutcome(ok=True, status="not_attempted"),
-                    error=error,
+                    correlation_id=request.correlation_id, ok=False,
+                    transport=LayerOutcome(ok=True, status="not_attempted"), error=error,
                 )
             observe(
                 screenshot=request.include_screenshot,
@@ -84,40 +68,24 @@ class CapabilityService:
             observation.update(knowledge_context(request.goal))
             witness = _parse_observation_witness(self.store.current_observation())
             return CapabilityObservationResponse(
-                correlation_id=request.correlation_id,
-                ok=True,
+                correlation_id=request.correlation_id, ok=True,
                 transport=LayerOutcome(ok=True, status="connected"),
-                witness=witness,
-                observation=observation,
+                witness=witness, observation=observation,
             )
         except Exception as exc:
             code = getattr(exc, "code", None)
             if code == GatewayErrorCode.AUTH_REJECTED or code == "AUTH_REJECTED":
-                error = _error(
-                    GatewayErrorCode.AUTH_REJECTED,
-                    FailureLayer.PROTOCOL,
-                    "Android bridge authentication was rejected.",
-                )
+                error = _error(GatewayErrorCode.AUTH_REJECTED, FailureLayer.PROTOCOL,
+                               "Android bridge authentication was rejected.")
             elif code == GatewayErrorCode.PROTOCOL_MISMATCH or code == "PROTOCOL_MISMATCH":
-                error = _error(
-                    GatewayErrorCode.PROTOCOL_MISMATCH,
-                    FailureLayer.PROTOCOL,
-                    "Android bridge protocol is incompatible.",
-                )
+                error = _error(GatewayErrorCode.PROTOCOL_MISMATCH, FailureLayer.PROTOCOL,
+                               "Android bridge protocol is incompatible.")
             elif code == GatewayErrorCode.CAPABILITY_UNAVAILABLE or code == "CAPABILITY_UNAVAILABLE":
-                error = _error(
-                    GatewayErrorCode.CAPABILITY_UNAVAILABLE,
-                    FailureLayer.CAPABILITY,
-                    "Required Android observation capability is unavailable.",
-                    retryable=True,
-                )
+                error = _error(GatewayErrorCode.CAPABILITY_UNAVAILABLE, FailureLayer.CAPABILITY,
+                               "Required Android observation capability is unavailable.", retryable=True)
             else:
-                error = _error(
-                    GatewayErrorCode.DEVICE_DISCONNECTED,
-                    FailureLayer.TRANSPORT,
-                    "Android device observation transport is unavailable.",
-                    retryable=True,
-                )
+                error = _error(GatewayErrorCode.DEVICE_DISCONNECTED, FailureLayer.TRANSPORT,
+                               "Android device observation transport is unavailable.", retryable=True)
             return CapabilityObservationResponse(
                 correlation_id=request.correlation_id,
                 ok=False,
@@ -133,9 +101,7 @@ class CapabilityService:
         available = CapabilityHealth(state=CapabilityHealthState.AVAILABLE)
         descriptor = self.registry.descriptor(request.capability_id, available)
         safety = descriptor.safety if descriptor else SafetyMetadata(
-            mutates_phone=False,
-            requires_fresh_observation=False,
-            requires_android_policy=False,
+            mutates_phone=False, requires_fresh_observation=False, requires_android_policy=False,
         )
 
         if request.protocol_version != CAPABILITY_PROTOCOL_VERSION:
@@ -160,8 +126,7 @@ class CapabilityService:
             if current_id != request.expected_observation_id:
                 return self._rejected(
                     request, safety, GatewayErrorCode.STALE_OBSERVATION,
-                    FailureLayer.PROTOCOL, "Expected observation is no longer current.",
-                    retryable=True,
+                    FailureLayer.PROTOCOL, "Expected observation is no longer current.", retryable=True,
                 )
 
         try:
@@ -184,8 +149,7 @@ class CapabilityService:
             if str(getattr(exc, "code", "") or "").upper() == GatewayErrorCode.STALE_OBSERVATION:
                 return self._rejected(
                     request, safety, GatewayErrorCode.STALE_OBSERVATION,
-                    FailureLayer.PROTOCOL, "Expected observation is no longer current.",
-                    retryable=True,
+                    FailureLayer.PROTOCOL, "Expected observation is no longer current.", retryable=True,
                 )
             return self._rejected(
                 request, safety, GatewayErrorCode.PROTOCOL_MISMATCH,
@@ -201,13 +165,11 @@ class CapabilityService:
             if code == "CAPABILITY_UNAVAILABLE":
                 return self._rejected(
                     request, safety, GatewayErrorCode.CAPABILITY_UNAVAILABLE,
-                    FailureLayer.CAPABILITY, "Android action capability is unavailable.",
-                    retryable=True,
+                    FailureLayer.CAPABILITY, "Android action capability is unavailable.", retryable=True,
                 )
             return self._rejected(
                 request, safety, GatewayErrorCode.DEVICE_DISCONNECTED,
-                FailureLayer.TRANSPORT, "Android device transport is unavailable.",
-                retryable=True,
+                FailureLayer.TRANSPORT, "Android device transport is unavailable.", retryable=True,
             )
 
         transport_ok = raw.get("transport_ok") is True
@@ -218,10 +180,7 @@ class CapabilityService:
         error = self._map_error(raw, transport_ok, execution_ok, verification_ok)
         transport_error = error if error and error.layer == FailureLayer.TRANSPORT else None
         execution_error = error if error and error.layer in {
-            FailureLayer.CAPABILITY,
-            FailureLayer.POLICY,
-            FailureLayer.EXECUTION,
-            FailureLayer.PROTOCOL,
+            FailureLayer.CAPABILITY, FailureLayer.POLICY, FailureLayer.EXECUTION, FailureLayer.PROTOCOL,
         } else None
         verification_error = error if error and error.layer == FailureLayer.VERIFICATION else None
         return CapabilityActionResponse(
@@ -234,19 +193,13 @@ class CapabilityService:
                 error=transport_error,
             ),
             execution=LayerOutcome(
-                ok=execution_ok,
-                authoritative=True,
+                ok=execution_ok, authoritative=True,
                 status="android_succeeded" if execution_ok else "android_failed",
                 error=execution_error,
             ),
             verification=LayerOutcome(
-                ok=verification_ok,
-                authoritative=True,
-                status=(
-                    "not_required"
-                    if not verification_required
-                    else str(raw.get("verification") or "missing")
-                ),
+                ok=verification_ok, authoritative=True,
+                status="not_required" if not verification_required else str(raw.get("verification") or "missing"),
                 error=verification_error,
             ),
             before=_parse_witness(raw.get("before_witness")),
@@ -258,77 +211,39 @@ class CapabilityService:
             error=error,
         )
 
-    def _map_error(
-        self,
-        raw: dict,
-        transport_ok: bool,
-        execution_ok: bool,
-        verification_ok: bool,
-    ) -> GatewayError | None:
+    def _map_error(self, raw: dict, transport_ok: bool, execution_ok: bool,
+                   verification_ok: bool) -> GatewayError | None:
         if not transport_ok:
-            return _error(
-                GatewayErrorCode.DEVICE_DISCONNECTED,
-                FailureLayer.TRANSPORT,
-                "Android device transport is unavailable.",
-                retryable=True,
-            )
+            return _error(GatewayErrorCode.DEVICE_DISCONNECTED, FailureLayer.TRANSPORT,
+                          "Android device transport is unavailable.", retryable=True)
         if not execution_ok:
             error_class = str(raw.get("error_class") or "").upper()
             if error_class == GatewayErrorCode.AUTH_REJECTED:
-                return _error(
-                    GatewayErrorCode.AUTH_REJECTED,
-                    FailureLayer.PROTOCOL,
-                    "Android bridge authentication was rejected.",
-                )
+                return _error(GatewayErrorCode.AUTH_REJECTED, FailureLayer.PROTOCOL,
+                              "Android bridge authentication was rejected.")
             if error_class == GatewayErrorCode.CAPABILITY_UNAVAILABLE:
-                return _error(
-                    GatewayErrorCode.CAPABILITY_UNAVAILABLE,
-                    FailureLayer.CAPABILITY,
-                    "Android action capability is unavailable.",
-                    retryable=True,
-                )
+                return _error(GatewayErrorCode.CAPABILITY_UNAVAILABLE, FailureLayer.CAPABILITY,
+                              "Android action capability is unavailable.", retryable=True)
             if error_class == GatewayErrorCode.POLICY_DENIED:
-                return _error(
-                    GatewayErrorCode.POLICY_DENIED,
-                    FailureLayer.POLICY,
-                    "Android policy denied the action.",
-                )
+                return _error(GatewayErrorCode.POLICY_DENIED, FailureLayer.POLICY,
+                              "Android policy denied the action.")
             if error_class == GatewayErrorCode.STALE_OBSERVATION:
-                return _error(
-                    GatewayErrorCode.STALE_OBSERVATION,
-                    FailureLayer.PROTOCOL,
-                    "Android rejected stale observation evidence.",
-                    retryable=True,
-                )
+                return _error(GatewayErrorCode.STALE_OBSERVATION, FailureLayer.PROTOCOL,
+                              "Android rejected stale observation evidence.", retryable=True)
             if error_class == GatewayErrorCode.PROTOCOL_MISMATCH:
-                return _error(
-                    GatewayErrorCode.PROTOCOL_MISMATCH,
-                    FailureLayer.PROTOCOL,
-                    "Android execution result did not match the capability protocol.",
-                )
-            return _error(
-                GatewayErrorCode.EXECUTION_FAILED,
-                FailureLayer.EXECUTION,
-                "Android PhoneToolExecutor reported execution failure.",
-            )
+                return _error(GatewayErrorCode.PROTOCOL_MISMATCH, FailureLayer.PROTOCOL,
+                              "Android execution result did not match the capability protocol.")
+            return _error(GatewayErrorCode.EXECUTION_FAILED, FailureLayer.EXECUTION,
+                          "Android PhoneToolExecutor reported execution failure.")
         if not verification_ok:
-            return _error(
-                GatewayErrorCode.VERIFICATION_FAILED,
-                FailureLayer.VERIFICATION,
-                "The authoritative after-state did not verify the action.",
-                retryable=True,
-            )
+            return _error(GatewayErrorCode.VERIFICATION_FAILED, FailureLayer.VERIFICATION,
+                          "The authoritative after-state did not verify the action.", retryable=True)
         return None
 
     @staticmethod
-    def _rejected(
-        request: CapabilityActionRequest,
-        safety: SafetyMetadata,
-        code: GatewayErrorCode,
-        layer: FailureLayer,
-        message: str,
-        retryable: bool = False,
-    ) -> CapabilityActionResponse:
+    def _rejected(request: CapabilityActionRequest, safety: SafetyMetadata,
+                  code: GatewayErrorCode, layer: FailureLayer, message: str,
+                  retryable: bool = False) -> CapabilityActionResponse:
         error = _error(code, layer, message, retryable)
         return CapabilityActionResponse(
             correlation_id=request.correlation_id,
@@ -340,20 +255,13 @@ class CapabilityService:
                 error=error if layer == FailureLayer.TRANSPORT else None,
             ),
             execution=LayerOutcome(
-                ok=False,
-                authoritative=True,
-                status="not_attempted",
+                ok=False, authoritative=True, status="not_attempted",
                 error=error if layer in {
-                    FailureLayer.CAPABILITY,
-                    FailureLayer.POLICY,
-                    FailureLayer.EXECUTION,
-                    FailureLayer.PROTOCOL,
+                    FailureLayer.CAPABILITY, FailureLayer.POLICY, FailureLayer.EXECUTION, FailureLayer.PROTOCOL,
                 } else None,
             ),
             verification=LayerOutcome(
-                ok=False,
-                authoritative=True,
-                status="not_attempted",
+                ok=False, authoritative=True, status="not_attempted",
                 error=error if layer == FailureLayer.VERIFICATION else None,
             ),
             safety=safety,
@@ -405,20 +313,25 @@ def _parse_observation_witness(observation: dict | None) -> Witness | None:
 
 
 def _safe_android_execution(raw: dict) -> dict | None:
+    """Project Android authority plus a strictly bounded Human Gesture diagnostic block."""
     result = raw.get("result")
     if not isinstance(result, dict):
         return None
     execution = result.get("execution")
     if not isinstance(execution, dict):
+        execution = result.get("androidExecution")
+    if not isinstance(execution, dict):
+        execution = result.get("android_execution")
+    if not isinstance(execution, dict):
         return None
-    allowed = ("ok", "beforeFingerprint", "afterFingerprint", "error", "verification")
-    return {key: execution[key] for key in allowed if key in execution}
+    allowed = ("ok", "beforeFingerprint", "afterFingerprint", "error", "verification", "pageChanged")
+    projected = {key: execution[key] for key in allowed if key in execution}
+    gesture = safe_gesture_diagnostics(execution)
+    if gesture is not None:
+        projected["gesture"] = gesture
+    return projected or None
 
 
-def _error(
-    code: GatewayErrorCode,
-    layer: FailureLayer,
-    message: str,
-    retryable: bool = False,
-) -> GatewayError:
+def _error(code: GatewayErrorCode, layer: FailureLayer, message: str,
+           retryable: bool = False) -> GatewayError:
     return GatewayError(code=code, layer=layer, message=message, retryable=retryable)
