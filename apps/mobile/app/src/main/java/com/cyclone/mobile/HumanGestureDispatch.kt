@@ -42,6 +42,11 @@ object HumanGestureDispatch {
         return trace.accepted
     }
 
+    /** Non-consuming read used only when result serialization needs to distinguish semantic click from fallback touch. */
+    @Synchronized
+    fun peekTrace(commandId: String?): HumanGestureDispatchTrace? =
+        commandId?.takeIf { it.isNotBlank() }?.let(traces::get)
+
     @Synchronized
     fun consumeTrace(commandId: String?): HumanGestureDispatchTrace? =
         commandId?.takeIf { it.isNotBlank() }?.let(traces::remove)
