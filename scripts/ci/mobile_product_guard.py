@@ -35,7 +35,7 @@ REQUIRED_AI_CHAT = (
     "RequestIntentRouter.route(",
     "WorkspaceTasks.queueRequest(normalized)",
     "OpenRouterModelPresets.all",
-    '"Ask Cyclone to do something…"',
+    '"Ask Cyclone…"',
 )
 REQUIRED_BRAIN_V39 = (
     "internal fun CycloneV39BrainPage",
