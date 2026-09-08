@@ -370,8 +370,9 @@ private fun V39AiChatContent(
         }
     }
 
+    CycloneAlpineBackdrop {
     Column(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()
+        Modifier.fillMaxSize().imePadding()
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -504,6 +505,7 @@ private fun V39AiChatContent(
             }
         }
     }
+    }
 }
 
 @Composable
@@ -515,7 +517,7 @@ private fun V39ChatBubble(message: V39ChatMessage) {
     ) {
         Surface(
             shape = RoundedCornerShape(22.dp),
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface.copy(alpha = .96f),
             border = null,
             modifier = Modifier.fillMaxWidth(.88f),
         ) {

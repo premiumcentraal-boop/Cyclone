@@ -31,16 +31,12 @@ internal fun CycloneIntelligenceTheme(content: @Composable () -> Unit) {
     CycloneTheme(content)
 }
 
-/** Three open orbital strokes evoke a cyclone without borrowing another product's logo. */
+/** Exact mark geometry from the supplied Cyclone Asset Pack v1. */
 @Composable
 internal fun CycloneOrbitMark(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val width = size.minDimension
-        for (index in 0..2) {
-            val inset = width * (0.10f + index * 0.115f)
-            drawArc(CycloneIntelligenceStyle.Gradient, -75f + index * 110f, 245f, false,
-                Offset(inset, inset), Size(width - inset * 2, width - inset * 2),
-                style = Stroke(width * 0.065f, cap = StrokeCap.Round))
-        }
-    }
+    androidx.compose.foundation.Image(
+        painter = androidx.compose.ui.res.painterResource(com.cyclone.mobile.R.drawable.ic_cyclone_mark_42),
+        contentDescription = null,
+        modifier = modifier,
+    )
 }

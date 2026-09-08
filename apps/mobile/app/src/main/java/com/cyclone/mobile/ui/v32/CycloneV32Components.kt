@@ -113,7 +113,15 @@ fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> 
                             Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
                             contentAlignment = Alignment.Center,
                         ) { Icon(destination.icon, destination.label, tint = MaterialTheme.colorScheme.onPrimary) }
-                    } else Icon(destination.icon, destination.label)
+                    } else Icon(
+                        painter = androidx.compose.ui.res.painterResource(when (destination) {
+                            V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
+                            V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
+                            V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
+                            V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
+                            V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
+                        }), contentDescription = destination.label, modifier = Modifier.size(28.dp),
+                    )
                 },
                 label = { Text(destination.label, style = MaterialTheme.typography.labelSmall) },
             )
