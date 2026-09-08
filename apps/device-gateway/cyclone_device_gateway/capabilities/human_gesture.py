@@ -267,16 +267,23 @@ def safe_gesture_diagnostics(execution: Any) -> dict[str, Any] | None:
         if isinstance(value, str) and len(value) <= limit and _SAFE_TOKEN.fullmatch(value):
             out[key] = value
 
-    requested = raw.get("profileRequested")
+    requested = _read(raw, "profileRequested", "requestedHumanize")
     if isinstance(requested, str) and requested.strip().lower() in PROFILE_VALUES:
         out["profileRequested"] = requested.strip().lower()
-    resolved = raw.get("profileResolved")
+    resolved = _read(raw, "profileResolved", "resolvedProfile", "appliedProfile")
     if isinstance(resolved, str) and resolved.strip().lower() in PROFILE_VALUES[1:]:
         out["profileResolved"] = resolved.strip().upper()
 
-    mode = raw.get("mode")
+    mode = _read(raw, "mode", "interactionMode", "dispatchMode")
     if isinstance(mode, str):
-        normalized_mode = mode.strip().lower()
+        normalized_mode = mode.strip().lower().replace("-", "_").replace(" ", "_")
+        mode_aliases = {
+            "human_gesture": "synthesized_touch",
+            "touch": "synthesized_touch",
+            "semantic": "semantic_native",
+            "semantic_only": "semantic_native",
+        }
+        normalized_mode = mode_aliases.get(normalized_mode, normalized_mode)
         if normalized_mode in {
             "semantic_native", "synthesized_touch", "legacy_touch", "downgraded", "unsupported"
         }:
