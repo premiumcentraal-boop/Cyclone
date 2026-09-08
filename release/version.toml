@@ -1,5 +1,5 @@
 # Cyclone Mobile 4.1.0; DEVICE TESTING: UNVERIFIED
-# retrigger Full Release push 2026-09-08T02:54:29.3797396+02:00
+# retrigger Full Release push 2026-09-08T02:59:18+02:00 + RELEASE_4.1.0.md present
 # publication_authorized=true authorizes mobile-publish-v3910.yml on
 # release/cyclone-mobile-v4.1.0 (same path as v4.0.4). Not a claim that
 # GitHub tag v4.1.0 already exists until Full Release creates it.
