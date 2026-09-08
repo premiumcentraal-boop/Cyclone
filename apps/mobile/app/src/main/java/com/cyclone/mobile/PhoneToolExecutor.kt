@@ -11,7 +11,10 @@ import com.cyclone.mobile.fastpath.FastPathLoop
 import com.cyclone.mobile.fastpath.FastPathSettleResult
 import com.cyclone.mobile.fastpath.FastPathTimings
 import com.cyclone.mobile.gateway.GatewayObservationStore
+import com.cyclone.mobile.gesture.HumanGestureRuntimePolicy
 import com.cyclone.mobile.gesture.HumanizePreference
+import com.cyclone.mobile.gesture.HumanizeProfile
+import com.cyclone.mobile.gesture.RuntimeGestureKind
 import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionPlane
 import com.cyclone.mobile.runtime.session.SessionPlaneKind
@@ -32,6 +35,8 @@ object PhoneToolExecutor {
         "phone.scroll", "phone.swipe", "phone.back", "phone.home", "phone.open_app",
         "phone.open_notification", "phone.set_clipboard", "phone.share", "phone.launch_intent",
     )
+    private val touchHumanizeTools = setOf("phone.tap", "phone.long_press", "phone.swipe", "phone.scroll")
+    private val humanizeAwareTools = touchHumanizeTools + "phone.click"
     private val mutationLock = com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.engine.mutationLock
     private val resultCache = object : LinkedHashMap<String, PhoneToolResult>(128, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PhoneToolResult>?): Boolean = size > 250
@@ -71,9 +76,10 @@ object PhoneToolExecutor {
     }
 
     private fun executeScoped(context: Context, request: PhoneToolRequest, plane: SessionPlane? = null): PhoneToolResult {
-        // Validate before cache lookup AND before observing the human display.
+        // Validate session scope before cache lookup AND before observing the human display.
         val resolved = try { plane ?: SessionContract.classify(request.params) }
         catch (error: IllegalArgumentException) { return scopeFailure(request, error) }
+        validateHumanize(request, resolved)?.let { return it }
         val scope = com.cyclone.mobile.runtime.session.ExecutionContext(resolved.sessionId, resolved.displayId)
         if (scope.sessionId != "default-foreground") {
             return synchronized(mutationLock) { withPlane(executeWorkspace(context, request, scope), resolved) }
@@ -88,6 +94,38 @@ object PhoneToolExecutor {
             executeInternal(context, request, mutating = false)
         }
         return withPlane(result, resolved)
+    }
+
+    private fun validateHumanize(request: PhoneToolRequest, plane: SessionPlane): PhoneToolResult? {
+        if (request.tool !in humanizeAwareTools || !request.params.has("humanize")) return null
+        val raw = request.params.optString("humanize")
+        return try {
+            HumanizePreference.parse(raw)
+            null
+        } catch (error: IllegalArgumentException) {
+            val now = System.currentTimeMillis()
+            PhoneToolResult(
+                commandId = request.commandId,
+                tool = request.tool,
+                ok = false,
+                startedAtMs = now,
+                finishedAtMs = now,
+                payload = JSONObject().put(
+                    "humanGesture",
+                    JSONObject()
+                        .put("requestedHumanize", raw)
+                        .put("resolvedProfile", JSONObject.NULL)
+                        .put("profileSource", "invalid_request")
+                        .put("dispatchMode", "none")
+                        .put("interactionMode", "none")
+                        .put("correctedOrRejected", true)
+                        .put("reason", error.message ?: "invalid humanize")
+                        .put("sessionId", plane.sessionId)
+                        .put("displayId", plane.displayId),
+                ),
+                error = PhoneToolError(PhoneToolErrorCode.INVALID_REQUEST, error.message ?: "invalid humanize"),
+            )
+        }
     }
 
     private fun withPlane(result: PhoneToolResult, plane: SessionPlane): PhoneToolResult {
@@ -203,16 +241,20 @@ object PhoneToolExecutor {
                 observeFingerprint = { runtime.observe(scope).fingerprint },
             )
             val after = runtime.observe(scope)
+            val payload = JSONObject()
+                .put("performed", true)
+                .put("verified", settle.verified)
+                .put("screenChanged", settle.changed ?: JSONObject.NULL)
+                .put("fastPath", settle.toJson())
+                .put("sessionId", scope.sessionId)
+                .put("displayId", scope.displayId)
+            if (request.tool in touchHumanizeTools) {
+                payload.put("humanGesture", workspaceGestureEvidence(request, scope))
+            }
             PhoneToolResult(request.commandId, request.tool, true, started, System.currentTimeMillis(),
                 beforeFingerprint = snapshot.fingerprint,
                 afterFingerprint = settle.afterFingerprint ?: after.fingerprint,
-                payload = JSONObject()
-                    .put("performed", true)
-                    .put("verified", settle.verified)
-                    .put("screenChanged", settle.changed ?: JSONObject.NULL)
-                    .put("fastPath", settle.toJson())
-                    .put("sessionId", scope.sessionId)
-                    .put("displayId", scope.displayId))
+                payload = payload)
         } catch (error: Exception) {
             if (request.tool in mutatingTools) runCatching { GatewayObservationStore.clear(scope.sessionId) }
             PhoneToolResult(request.commandId, request.tool, false, started, System.currentTimeMillis(),
@@ -284,7 +326,7 @@ object PhoneToolExecutor {
 
     private fun dispatch(context: Context, request: PhoneToolRequest, service: CycloneAccessibilityService?, before: String?): Outcome {
         val p = request.params
-        val humanize = humanizePreference(p)
+        val humanize = if (request.tool in humanizeAwareTools) humanizePreference(p) else HumanizePreference.AUTO
         return when (request.tool) {
             "phone.observe" -> {
                 val s = service ?: return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
@@ -307,32 +349,58 @@ object PhoneToolExecutor {
                 val selector = requireSelector(p)
                 service?.click(selector, humanize, request.commandId) == true
             }
-            "phone.long_press" -> actionWithConfirmation(service, request, before) {
-                val selector = requireSelector(p)
-                service?.longPress(selector, p.optLong("durationMs", 650L), humanize, request.commandId) == true
+            "phone.long_press" -> {
+                val outcome = actionWithConfirmation(service, request, before) {
+                    val selector = requireSelector(p)
+                    service?.longPress(selector, p.optLong("durationMs", 650L), humanize, request.commandId) == true
+                }
+                val trace = HumanGestureDispatch.consumeTrace(request.commandId)
+                attachGestureEvidence(
+                    outcome,
+                    gestureEvidence(
+                        request = request,
+                        preference = humanize,
+                        kind = RuntimeGestureKind.LONG_PRESS,
+                        trace = trace,
+                        dispatchMode = trace?.dispatchMode ?: if (outcome.error == null) "semantic_action" else "not_dispatched",
+                        interactionMode = if (trace == null && outcome.error == null) "semantic" else "coordinate",
+                    ),
+                )
             }
-            "phone.tap" -> actionWithConfirmation(service, request, before) {
-                service?.tap(
-                    p.optDouble("x").toFloat(),
-                    p.optDouble("y").toFloat(),
-                    humanize,
-                    request.commandId,
-                ) == true
+            "phone.tap" -> {
+                val outcome = actionWithConfirmation(service, request, before) {
+                    service?.tap(
+                        p.optDouble("x").toFloat(),
+                        p.optDouble("y").toFloat(),
+                        humanize,
+                        request.commandId,
+                    ) == true
+                }
+                val trace = HumanGestureDispatch.consumeTrace(request.commandId)
+                attachGestureEvidence(
+                    outcome,
+                    gestureEvidence(request, humanize, RuntimeGestureKind.COORDINATE_TAP, trace,
+                        trace?.dispatchMode ?: "not_dispatched", "coordinate"),
+                )
             }
             "phone.type", "phone.replace_text" -> typeEditable(service, request)
-            "phone.scroll" -> actionWithConfirmation(service, request, before) {
-                val selector = p.optJSONObject("selector")?.let(ElementSelector::fromJson)
-                val direction = p.optString("direction", "forward")
-                service?.scroll(selector, direction != "backward") == true
-            }
-            "phone.swipe" -> actionWithConfirmation(service, request, before) {
-                service?.swipe(
-                    p.optDouble("x1").toFloat(), p.optDouble("y1").toFloat(),
-                    p.optDouble("x2").toFloat(), p.optDouble("y2").toFloat(),
-                    p.optLong("durationMs", 350L),
-                    humanize,
-                    request.commandId,
-                ) == true
+            "phone.scroll" -> foregroundScroll(service, request, before, humanize)
+            "phone.swipe" -> {
+                val outcome = actionWithConfirmation(service, request, before) {
+                    service?.swipe(
+                        p.optDouble("x1").toFloat(), p.optDouble("y1").toFloat(),
+                        p.optDouble("x2").toFloat(), p.optDouble("y2").toFloat(),
+                        p.optLong("durationMs", 350L),
+                        humanize,
+                        request.commandId,
+                    ) == true
+                }
+                val trace = HumanGestureDispatch.consumeTrace(request.commandId)
+                attachGestureEvidence(
+                    outcome,
+                    gestureEvidence(request, humanize, RuntimeGestureKind.SWIPE, trace,
+                        trace?.dispatchMode ?: "not_dispatched", "coordinate"),
+                )
             }
             "phone.back" -> actionWithConfirmation(service, request, before) { service?.goBack() == true }
             "phone.home" -> actionWithConfirmation(service, request, before) { service?.goHome() == true }
@@ -393,6 +461,145 @@ object PhoneToolExecutor {
             "phone.assert" -> waitFor(service, p, assertOnly = true)
             else -> errorResult(PhoneToolErrorCode.UNKNOWN_TOOL, "Unknown tool ${request.tool}")
         }
+    }
+
+    private fun foregroundScroll(
+        service: CycloneAccessibilityService?,
+        request: PhoneToolRequest,
+        before: String?,
+        humanize: HumanizePreference,
+    ): Outcome {
+        val p = request.params
+        var semanticSucceeded = false
+        var fallbackAttempted = false
+        var fallbackUnavailableReason: String? = null
+        val outcome = actionWithConfirmation(service, request, before) {
+            val s = service ?: return@actionWithConfirmation false
+            val selector = p.optJSONObject("selector")?.let(ElementSelector::fromJson)
+            val forward = p.optString("direction", "forward") != "backward"
+            if (s.scroll(selector, forward)) {
+                semanticSucceeded = true
+                return@actionWithConfirmation true
+            }
+            val snapshot = s.observe(markFresh = false)
+            val selected = selector?.let { SelectorEngine.resolve(snapshot, it, 1).firstOrNull()?.node }
+            val node = selected?.takeIf { it.scrollable } ?: snapshot.nodes.firstOrNull { it.scrollable }
+            if (node == null) {
+                fallbackUnavailableReason = "no grounded scrollable control for coordinate fallback"
+                return@actionWithConfirmation false
+            }
+            if (node.bounds.width < 8 || node.bounds.height < 96) {
+                fallbackUnavailableReason = "scrollable bounds are too small for a safe bounded fallback"
+                return@actionWithConfirmation false
+            }
+            fallbackAttempted = true
+            val x = node.bounds.centerX
+            val top = node.bounds.top + node.bounds.height * 0.25f
+            val bottom = node.bounds.top + node.bounds.height * 0.75f
+            s.swipe(
+                x,
+                if (forward) bottom else top,
+                x,
+                if (forward) top else bottom,
+                350L,
+                humanize,
+                request.commandId,
+            )
+        }
+        val trace = HumanGestureDispatch.consumeTrace(request.commandId)
+        val dispatchMode = when {
+            semanticSucceeded -> "semantic_action"
+            trace != null -> trace.dispatchMode
+            fallbackAttempted -> "coordinate_fallback_rejected"
+            else -> "fallback_unavailable"
+        }
+        val evidence = gestureEvidence(
+            request = request,
+            preference = humanize,
+            kind = RuntimeGestureKind.SCROLL,
+            trace = trace,
+            dispatchMode = dispatchMode,
+            interactionMode = if (semanticSucceeded) "semantic" else "coordinate",
+            correctedOrRejected = fallbackUnavailableReason != null || (fallbackAttempted && outcome.error != null),
+            reason = fallbackUnavailableReason ?: trace?.reason,
+        )
+        return attachGestureEvidence(outcome, evidence)
+    }
+
+    private fun workspaceGestureEvidence(
+        request: PhoneToolRequest,
+        scope: com.cyclone.mobile.runtime.session.ExecutionContext,
+    ): JSONObject {
+        val preference = humanizePreference(request.params)
+        val kind = gestureKind(request.tool)
+        val resolved = HumanGestureRuntimePolicy.resolve(preference, kind)
+        val correction = resolved != HumanizeProfile.OFF
+        return baseGestureEvidence(request, preference, resolved)
+            .put("appliedProfile", if (resolved == HumanizeProfile.OFF) "off" else "compatibility_endpoint_duration")
+            .put("dispatchMode", "workspace_endpoint_duration")
+            .put("interactionMode", "coordinate_compatibility")
+            .put("correctedOrRejected", correction)
+            .put(
+                "reason",
+                if (correction) "workspace backend exposes endpoint+duration only; curved Android path not claimed" else JSONObject.NULL,
+            )
+            .put("sessionId", scope.sessionId)
+            .put("displayId", scope.displayId)
+    }
+
+    private fun gestureKind(tool: String): RuntimeGestureKind = when (tool) {
+        "phone.tap" -> RuntimeGestureKind.COORDINATE_TAP
+        "phone.long_press" -> RuntimeGestureKind.LONG_PRESS
+        "phone.scroll" -> RuntimeGestureKind.SCROLL
+        "phone.swipe" -> RuntimeGestureKind.SWIPE
+        else -> RuntimeGestureKind.PRECISION
+    }
+
+    private fun gestureEvidence(
+        request: PhoneToolRequest,
+        preference: HumanizePreference,
+        kind: RuntimeGestureKind,
+        trace: HumanGestureDispatchTrace?,
+        dispatchMode: String,
+        interactionMode: String,
+        correctedOrRejected: Boolean = trace?.accepted == false,
+        reason: String? = trace?.reason,
+    ): JSONObject {
+        val resolved = HumanGestureRuntimePolicy.resolve(preference, kind)
+        return baseGestureEvidence(request, preference, resolved)
+            .put("appliedProfile", trace?.profile?.name?.lowercase() ?: if (interactionMode == "semantic") "none" else JSONObject.NULL)
+            .put("dispatchMode", dispatchMode)
+            .put("interactionMode", interactionMode)
+            .put("correctedOrRejected", correctedOrRejected)
+            .put("reason", reason ?: JSONObject.NULL)
+            .put("durationMs", trace?.durationMs ?: JSONObject.NULL)
+            .put("sessionId", "default-foreground")
+            .put("displayId", 0)
+    }
+
+    private fun baseGestureEvidence(
+        request: PhoneToolRequest,
+        preference: HumanizePreference,
+        resolved: HumanizeProfile,
+    ): JSONObject {
+        val explicit = request.params.has("humanize")
+        return JSONObject()
+            .put("requestedHumanize", if (explicit) request.params.optString("humanize").lowercase() else "auto")
+            .put("resolvedProfile", resolved.name.lowercase())
+            .put(
+                "profileSource",
+                when {
+                    !explicit -> "default_auto"
+                    preference == HumanizePreference.AUTO -> "explicit_auto_policy"
+                    else -> "explicit"
+                },
+            )
+    }
+
+    private fun attachGestureEvidence(outcome: Outcome, evidence: JSONObject): Outcome {
+        val payload = (outcome.payload as? JSONObject) ?: JSONObject()
+        payload.put("humanGesture", evidence)
+        return outcome.copy(payload = payload)
     }
 
     private fun typeEditable(service: CycloneAccessibilityService?, request: PhoneToolRequest): Outcome {
