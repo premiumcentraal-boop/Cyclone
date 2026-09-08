@@ -32,6 +32,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -140,7 +142,7 @@ fun CycloneSegmentedControl(
         Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             options.forEachIndexed { index, label ->
                 Surface(
-                    modifier = Modifier.weight(1f).clickable { onSelect(index) },
+                    modifier = Modifier.weight(1f).selectable(selected = selected == index, role = Role.Tab, onClick = { onSelect(index) }),
                     shape = RoundedCornerShape(15.dp),
                     color = if (selected == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = if (selected == index) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,

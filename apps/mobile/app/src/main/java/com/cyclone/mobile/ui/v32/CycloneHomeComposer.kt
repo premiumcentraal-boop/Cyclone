@@ -16,6 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 @Composable
 fun CycloneHomeComposer(onSubmit: (String) -> Unit) {
@@ -28,7 +31,8 @@ fun CycloneHomeComposer(onSubmit: (String) -> Unit) {
     }
     CycloneGlassSurface {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            BasicTextField(text, { text = it }, modifier = Modifier.fillMaxWidth().padding(10.dp).heightIn(min = 60.dp),
+            BasicTextField(text, { text = it }, modifier = Modifier.fillMaxWidth().padding(10.dp).heightIn(min = 60.dp).semantics { contentDescription = "Home request composer" },
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), maxLines = 5,
                 decorationBox = { field -> Box { if (text.isEmpty()) Text("What should Cyclone do?", color = MaterialTheme.colorScheme.onSurfaceVariant); field() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

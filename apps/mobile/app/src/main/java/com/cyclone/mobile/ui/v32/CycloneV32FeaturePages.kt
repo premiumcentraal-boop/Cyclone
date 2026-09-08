@@ -361,7 +361,16 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
     }
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { TextButton(onClick = { section = "" }) { Text("‹ $section") } }
-        if (section == "Default intelligence") item { CycloneIntelligenceControls(onChanged = refresh) }
+        if (section == "Default intelligence") item {
+            CycloneSimpleCard {
+                Text("How much should Cyclone think?", style = MaterialTheme.typography.titleMedium)
+                Text("Choose a lighter response or more thought for complex tasks.", style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Intelligence & autonomy", modifier = Modifier.weight(1f))
+                    CycloneIntelligenceControls(onChanged = refresh)
+                }
+            }
+        }
         if (section == "Storage") item { Text("Routines and learned app knowledge are stored on this phone. Manage individual routines in Routines; view learned data in Brain.") }
         if (section == "Background work") item {
             CycloneSimpleCard {
@@ -479,7 +488,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
         if (section == "PC Gateway") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("Optional PC companion")
-                Text("Ask Cyclone, Teach, Routines and Brain run on this phone. Internal API models need an internet connection and your API key, with no PC pairing required.")
+                Text("Ask Cyclone, Profiles, Routines and Brain run on this phone. Internal API models need an internet connection and your API key, with no PC pairing required.")
                 Button(onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.Smartphone, null)
                     Spacer(Modifier.size(6.dp))
