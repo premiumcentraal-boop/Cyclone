@@ -65,7 +65,7 @@ class WorkspaceActivity : ComponentActivity() {
                                 }
                                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                     apps.forEachIndexed { index, app ->
-                                        DropdownMenuItem(text = { Text(app.loadLabel(packageManager).toString(), intent.getStringExtra("pendingRequestId")) },
+                                        DropdownMenuItem(text = { Text(app.loadLabel(packageManager).toString()) },
                                             onClick = { selected = index; menu = false })
                                     }
                                 }
