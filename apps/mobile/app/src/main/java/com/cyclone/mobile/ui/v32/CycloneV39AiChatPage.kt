@@ -27,6 +27,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -269,6 +271,7 @@ private fun V39AiChatContent(
     refreshTick: Int,
     onSettings: () -> Unit,
 ) {
+    val keyboardOpen = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
     val task by com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collectAsState()
     val attached by com.cyclone.mobile.ui.overlay.PendingTaskAttachment.present.collectAsState()
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
@@ -356,7 +359,7 @@ private fun V39AiChatContent(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (!keyboardOpen) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             CycloneOrbitMark(Modifier.size(32.dp))
             Spacer(Modifier.size(10.dp))
             Text("Cyclone", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium,

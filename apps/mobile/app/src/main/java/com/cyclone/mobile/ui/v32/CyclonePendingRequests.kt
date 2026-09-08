@@ -20,9 +20,11 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
     val overlay by com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.activity.collectAsState()
     val context = LocalContext.current
     if (requests.isEmpty()) return
+    val keyboardOpen = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
     CycloneGlassSurface(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp).heightIn(max = 150.dp).verticalScroll(rememberScrollState())) {
             Text("Up next · ${requests.size}", style = MaterialTheme.typography.titleSmall)
+            if (!keyboardOpen) {
             Text("Saved for this session. Start when the current task is closed.", style = MaterialTheme.typography.bodySmall)
             requests.forEach { request ->
                 Row(Modifier.fillMaxWidth()) {
@@ -34,6 +36,7 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
                     }) { Text("Start") }
                     TextButton(onClick = { WorkspaceTasks.requests.remove(request.id) }) { Text("Remove") }
                 }
+            }
             }
         }
     }

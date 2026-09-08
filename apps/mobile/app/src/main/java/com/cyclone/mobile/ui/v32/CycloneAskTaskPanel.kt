@@ -29,6 +29,11 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
             CycloneOrbitMark(Modifier.size(28.dp))
             Text("Current task · ${UiTask(task).consumerStatus}", style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f).padding(horizontal = 10.dp))
+            if (runCatching { task.plane().kind == com.cyclone.mobile.runtime.session.SessionPlaneKind.SESSION_KERNEL_VD }.getOrDefault(false)) {
+                TextButton(onClick = { com.cyclone.mobile.runtime.background.WorkspaceTasks.command(context, task, "cancel") }) {
+                    Text(if (UiTask(task).active) "Stop" else "Close")
+                }
+            }
             IconButton(onClick = { expanded = !expanded }) {
                 Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     if (expanded) "Collapse task details" else "Expand task details")
