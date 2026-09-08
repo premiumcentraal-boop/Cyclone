@@ -14,6 +14,8 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.automation.Selector as AutomationSelector
+import com.cyclone.mobile.gesture.HumanizePreference
+import com.cyclone.mobile.gesture.RuntimeGestureKind
 import com.cyclone.mobile.guided.GuidedRecorderOverlayController
 import com.cyclone.mobile.guided.RoutineTeachingOverlayRuntime
 import com.cyclone.mobile.ui.overlay.ClickGateIntercept
@@ -264,7 +266,11 @@ class CycloneAccessibilityService : AccessibilityService() {
     fun find(selector: ElementSelector, limit: Int = 20): List<SelectorMatch> =
         SelectorEngine.resolve(observe(markFresh = false), selector, limit)
 
-    fun click(selector: ElementSelector): Boolean {
+    fun click(
+        selector: ElementSelector,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
         repeat(2) {
             val snapshot = observe(markFresh = false)
@@ -299,7 +305,15 @@ class CycloneAccessibilityService : AccessibilityService() {
             if (preferHost && clickActivatableAncestor(targetLive)) return true
             if (activateNode(targetLive, activation.role)) return true
             if (!preferHost && clickActivatableAncestor(targetLive)) return true
-            return tap(activation.bounds.centerX, activation.bounds.centerY)
+            return HumanGestureDispatch.tap(
+                service = this,
+                x = activation.bounds.centerX,
+                y = activation.bounds.centerY,
+                preference = humanize,
+                kind = RuntimeGestureKind.FALLBACK_TAP,
+                commandId = commandId,
+                targetBounds = activation.bounds,
+            )
         }
         return false
     }
@@ -392,7 +406,12 @@ class CycloneAccessibilityService : AccessibilityService() {
      * ACTION_LONG_CLICK Cyclone sends that semantic action immediately. The original gesture duration
      * remains only as a compatibility fallback for apps that do not expose a native long-click.
      */
-    fun longPress(selector: ElementSelector, durationMs: Long = 650): Boolean {
+    fun longPress(
+        selector: ElementSelector,
+        durationMs: Long = 650,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
         repeat(2) {
             val target = resolveLiveTarget(selector) ?: return@repeat
@@ -403,7 +422,16 @@ class CycloneAccessibilityService : AccessibilityService() {
                 DeviceState.addLog("Semantic ACTION_LONG_CLICK used instead of timed hold")
                 return true
             }
-            return rawLongPress(snapshotNode.bounds.centerX, snapshotNode.bounds.centerY, durationMs)
+            return HumanGestureDispatch.longPress(
+                service = this,
+                x = snapshotNode.bounds.centerX,
+                y = snapshotNode.bounds.centerY,
+                durationMs = durationMs,
+                preference = humanize,
+                kind = RuntimeGestureKind.LONG_PRESS,
+                commandId = commandId,
+                targetBounds = snapshotNode.bounds,
+            )
         }
         return false
     }
@@ -488,28 +516,94 @@ class CycloneAccessibilityService : AccessibilityService() {
         return node.performAction(action)
     }
 
-    fun tap(x: Float, y: Float): Boolean {
+    fun tap(
+        x: Float,
+        y: Float,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
-        return rawTap(x, y)
+        return HumanGestureDispatch.tap(
+            service = this,
+            x = x,
+            y = y,
+            preference = humanize,
+            kind = RuntimeGestureKind.COORDINATE_TAP,
+            commandId = commandId,
+        )
     }
 
-    fun longPress(x: Float, y: Float, durationMs: Long = 650): Boolean {
+    fun longPress(
+        x: Float,
+        y: Float,
+        durationMs: Long = 650,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
-        return rawLongPress(x, y, durationMs)
+        return HumanGestureDispatch.longPress(
+            service = this,
+            x = x,
+            y = y,
+            durationMs = durationMs,
+            preference = humanize,
+            kind = RuntimeGestureKind.LONG_PRESS,
+            commandId = commandId,
+        )
     }
 
-    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean {
+    fun swipe(
+        x1: Float,
+        y1: Float,
+        x2: Float,
+        y2: Float,
+        durationMs: Long = 350,
+        humanize: HumanizePreference = HumanizePreference.AUTO,
+        commandId: String? = null,
+    ): Boolean {
         if (!agentCanAct()) return false
-        return rawSwipe(x1, y1, x2, y2, durationMs)
+        return HumanGestureDispatch.swipe(
+            service = this,
+            x1 = x1,
+            y1 = y1,
+            x2 = x2,
+            y2 = y2,
+            durationMs = durationMs,
+            preference = humanize,
+            kind = RuntimeGestureKind.SWIPE,
+            commandId = commandId,
+        )
     }
 
     fun goBack(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_BACK)
     fun goHome(): Boolean = agentCanAct() && performGlobalAction(GLOBAL_ACTION_HOME)
 
     /** Guided gestures are direct user instructions and bypass the AGENT lock. */
-    fun guidedTap(x: Float, y: Float): Boolean = rawTap(x, y)
-    fun guidedLongPress(x: Float, y: Float, durationMs: Long = 750): Boolean = rawLongPress(x, y, durationMs)
-    fun guidedSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean = rawSwipe(x1, y1, x2, y2, durationMs)
+    fun guidedTap(x: Float, y: Float): Boolean = HumanGestureDispatch.tap(
+        service = this,
+        x = x,
+        y = y,
+        preference = HumanizePreference.AUTO,
+        kind = RuntimeGestureKind.GUIDED_TAP,
+    )
+    fun guidedLongPress(x: Float, y: Float, durationMs: Long = 750): Boolean = HumanGestureDispatch.longPress(
+        service = this,
+        x = x,
+        y = y,
+        durationMs = durationMs,
+        preference = HumanizePreference.AUTO,
+        kind = RuntimeGestureKind.GUIDED_LONG_PRESS,
+    )
+    fun guidedSwipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean = HumanGestureDispatch.swipe(
+        service = this,
+        x1 = x1,
+        y1 = y1,
+        x2 = x2,
+        y2 = y2,
+        durationMs = durationMs,
+        preference = HumanizePreference.AUTO,
+        kind = RuntimeGestureKind.GUIDED_SWIPE,
+    )
     fun guidedBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
     fun guidedHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
 

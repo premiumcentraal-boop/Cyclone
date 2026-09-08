@@ -9,6 +9,9 @@ _SECRET_VALUE = re.compile(r"(?i)^(bearer\s+\S+|sk-[A-Za-z0-9_-]{12,})$")
 _FORBIDDEN_OPERATION_KEY = re.compile(
     r"(?i)^(?:cmd|command|shell|adb|powershell|subprocess|executable|script|root|su|docker|host_command)$"
 )
+_HUMANIZE_PROFILES = frozenset({"auto", "off", "light", "normal"})
+_HUMANIZE_ACTIONS = frozenset({"phone.click", "phone.swipe", "phone.scroll"})
+_RAW_TRAJECTORY_KEYS = frozenset({"control1", "control2", "controlPoints", "bezier", "path", "points", "samples", "trajectory", "strokes"})
 
 
 def redact(value: Any) -> Any:
@@ -34,18 +37,35 @@ def compact_json(value: Any) -> str:
 
 
 def validate_typed_params(value: Any, *, path: str = "params") -> None:
-    """Reject command-shaped escape hatches while preserving typed phone-action parameters."""
+    """Reject escape hatches and PC-authored trajectories while preserving semantic action params."""
     if isinstance(value, dict):
         for key, item in value.items():
             key_text = str(key)
             if _FORBIDDEN_OPERATION_KEY.fullmatch(key_text):
                 raise ValueError(f"{path}.{key_text} is not a permitted typed phone parameter")
+            if key_text in _RAW_TRAJECTORY_KEYS:
+                raise ValueError(f"{path}.{key_text} is not permitted; Android owns gesture trajectory synthesis")
+            if key_text == "humanize" and (not isinstance(item, str) or item not in _HUMANIZE_PROFILES):
+                raise ValueError("humanize must be one of auto, off, light, normal")
             validate_typed_params(item, path=f"{path}.{key_text}")
     elif isinstance(value, list):
         if len(value) > 100:
             raise ValueError(f"{path} exceeds the bounded list size")
         for index, item in enumerate(value):
             validate_typed_params(item, path=f"{path}[{index}]")
+
+
+def validate_human_gesture_params(tool: str, params: dict[str, Any]) -> None:
+    """Keep PC gesture control semantic: profile preference only, never trajectory synthesis."""
+    humanize = params.get("humanize")
+    if humanize is not None:
+        if tool not in _HUMANIZE_ACTIONS:
+            raise ValueError("humanize is only valid for phone.click, phone.swipe, or phone.scroll")
+        if not isinstance(humanize, str) or humanize not in _HUMANIZE_PROFILES:
+            raise ValueError("humanize must be one of auto, off, light, normal")
+    forbidden = _RAW_TRAJECTORY_KEYS.intersection(params)
+    if forbidden:
+        raise ValueError("PC-authored raw gesture trajectories are not permitted")
 
 
 def strip_typed_plaintext(value: Any, typed: str | None) -> Any:
