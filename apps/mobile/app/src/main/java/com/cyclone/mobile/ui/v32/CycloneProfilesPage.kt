@@ -323,176 +323,99 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
                         }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(profile.label, style = MaterialTheme.typography.titleSmall)
-                            Text("Choose apps to finish this profile", style = MaterialThem…10829 tokens truncated…lineHeight = 30.sp, fontWeight = FontWeight.SemiBold),
-    headlineSmall = TextStyle(fontSize = 21.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
-    titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold),
-    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
-    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Normal),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal),
-    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Normal),
-    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
-    labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold),
-    labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
-)
-
-@Composable
-fun CycloneTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) CycloneV32DarkColors else CycloneV32LightColors,
-        shapes = CycloneV32Shapes,
-        typography = CycloneTypography,
-        content = content,
-    )
-}
-
-enum class CyclonePastel { PRIMARY, LILAC, MINT, LEMON, PEACH, SKY }
-
-@Immutable
-data class CyclonePastelColors(val container: Color, val content: Color)
-
-@Composable
-fun cyclonePastel(tone: CyclonePastel): CyclonePastelColors {
-    // Legacy tone callers intentionally collapse into the shared neutral system.
-    return CyclonePastelColors(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)
-}
-
-@Composable
-fun CycloneHeroCard(
-    title: String,
-    body: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    tone: CyclonePastel = CyclonePastel.PRIMARY,
-    action: (@Composable () -> Unit)? = null,
-) {
-    val colors = cyclonePastel(tone)
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.container, contentColor = colors.content),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                    Icon(icon, null, modifier = Modifier.size(22.dp))
+                            Text("Choose apps to finish this profile", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(title, style = MaterialTheme.typography.titleLarge)
-                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        if (!activeOnly && profiles.isEmpty() && incompleteInventory.isEmpty() && profileSetup.issue == null) {
+            item {
+                CycloneSimpleCard(Modifier.fillMaxWidth()) {
+                    Text("Add your first profile", style = MaterialTheme.typography.titleMedium)
+                    Text("Keep another account or app setup ready for Cyclone without mixing its app data with your main profile.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { setup = true }, modifier = Modifier.fillMaxWidth()) { Text("Add profile") }
+                }
             }
-            action?.invoke()
         }
     }
+
+    if (setup) ProfileSetupPage { setup = false }
 }
 
 @Composable
-fun CycloneSectionTitle(title: String, action: (@Composable () -> Unit)? = null) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-        action?.invoke()
-    }
-}
-
-@Composable
-fun CycloneStatusPill(label: String, positive: Boolean = true) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = if (positive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
-        contentColor = if (positive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
-    ) {
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            style = MaterialTheme.typography.labelMedium,
-        )
-    }
-}
-
-@Composable
-fun CycloneSimpleCard(
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
+private fun ProfileCard(
+    context: Context,
+    profile: Workspace,
+    waiting: Boolean,
+    task: com.cyclone.mobile.runtime.background.WorkspaceTaskUi?,
+    onOpen: () -> Unit,
 ) {
+    val stateLabel = profileStateLabel(profile, if (waiting) listOf(profile.id) else emptyList(), task)
     Card(
-        modifier = modifier,
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        Row(
+            Modifier.padding(15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                CycloneAppIcon(profile.appPackage, Modifier.padding(7.dp).size(31.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(profile.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    task?.title?.takeIf { it.isNotBlank() } ?: appLabel(context, profile.appPackage),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            ProfileStatePill(stateLabel, stateLabel !in setOf("Needs you", "Couldn't load"))
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
 @Composable
-fun CyclonePageIntro(eyebrow: String, title: String, body: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            eyebrow.uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(title, style = MaterialTheme.typography.headlineMedium)
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(2.dp))
+private fun ProfileStatePill(label: String, positive: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = when {
+            label == "Needs you" -> MaterialTheme.colorScheme.tertiaryContainer
+            label == "Working" -> MaterialTheme.colorScheme.primaryContainer
+            positive -> MaterialTheme.colorScheme.surfaceVariant
+            else -> MaterialTheme.colorScheme.errorContainer
+        },
+        contentColor = when {
+            label == "Needs you" -> MaterialTheme.colorScheme.onTertiaryContainer
+            label == "Working" -> MaterialTheme.colorScheme.primary
+            positive -> MaterialTheme.colorScheme.onSurfaceVariant
+            else -> MaterialTheme.colorScheme.onErrorContainer
+        },
+    ) {
+        Text(label, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
     }
 }
 
-@Composable
-fun CycloneV32Theme(content: @Composable () -> Unit) = CycloneTheme(content)
-
-object CycloneColors {
-    val Blue = Accent
-    val Cyan = Color(0xFF06A9C4)
-    val Success = Color(0xFF168653)
+private fun profileStateLabel(
+    profile: Workspace,
+    waiting: List<String>,
+    task: com.cyclone.mobile.runtime.background.WorkspaceTaskUi?,
+): String = when {
+    task != null && UiTask(task).active -> UiTask(task).consumerStatus
+    profile.state == WorkspaceState.gated -> "Needs you"
+    profile.state == WorkspaceState.running -> "Working"
+    profile.id in waiting -> "Waiting"
+    profile.state == WorkspaceState.paused -> "Paused"
+    else -> "Ready"
 }
-
-object CycloneSpacing {
-    val Tiny = 4.dp
-    val Small = 8.dp
-    val Content = 16.dp
-    val Page = 18.dp
-    val Section = 24.dp
-    val ComposerLift = 30.dp
-}
-
-@Composable
-fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        content = content,
-    )
-}
-
-@Composable
-fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(
-        modifier = modifier.animateContentSize(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        content = content,
-    )
-}
-
-@Composable
-fun CycloneStatus(label: String, positive: Boolean = true) = CycloneStatusPill(label, positive)
