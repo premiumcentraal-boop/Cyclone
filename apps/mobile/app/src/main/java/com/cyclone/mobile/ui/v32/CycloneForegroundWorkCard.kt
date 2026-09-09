@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.cyclone.mobile.ui.overlay.OverlayChromeSnapshot
@@ -108,6 +109,7 @@ fun CycloneForegroundWorkCard(
                     color = MaterialTheme.colorScheme.onPrimary,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
