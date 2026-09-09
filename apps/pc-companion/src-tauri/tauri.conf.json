@@ -39,7 +39,8 @@
       "binaries/CycloneLivePhone"
     ],
     "resources": [
-      "resources/mcp-tunnel"
+      "resources/mcp-tunnel",
+      "resources/live-phone"
     ],
     "windows": {
       "nsis": {

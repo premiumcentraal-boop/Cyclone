@@ -1,5 +1,6 @@
 mod mcp_tunnel;
 mod live_phone;
+mod live_phone_bridge;
 
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
@@ -221,6 +222,7 @@ pub fn run() {
     let parent_pid = std::process::id().to_string();
 
     tauri::Builder::default()
+        .manage(std::sync::Arc::new(live_phone_bridge::BridgeState::default()))
         .manage(GatewayState {
             token,
             http_base,
@@ -261,6 +263,10 @@ pub fn run() {
             gateway_session,
             live_phone::live_phone_status,
             live_phone::live_phone_control,
+            live_phone_bridge::live_bridge_connect,
+            live_phone_bridge::live_bridge_status,
+            live_phone_bridge::live_bridge_disconnect,
+            live_phone_bridge::live_bridge_token,
             diagnostics_folder,
             open_diagnostics_folder,
             connector_status,
@@ -276,6 +282,12 @@ pub fn run() {
             mcp_tunnel::mcp_tunnel_smoke,
             mcp_tunnel::mcp_tunnel_open_docs
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Cyclone PC Companion");
+        .build(tauri::generate_context!())
+        .expect("error while building Cyclone One")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let _ = live_phone::live_phone_control("stop".into());
+                live_phone_bridge::shutdown(app.state::<std::sync::Arc<live_phone_bridge::BridgeState>>().inner());
+            }
+        });
 }

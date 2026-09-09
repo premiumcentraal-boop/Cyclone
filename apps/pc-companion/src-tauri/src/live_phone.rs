@@ -33,5 +33,10 @@ pub fn live_phone_status() -> Result<Value, String> {
     let same_generation = state["generation"] == control["generation"];
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     let recent = now.saturating_sub(state["at"].as_u64().unwrap_or(0)) < 15;
-    Ok(json!({"connected": recent, "enabled": enabled, "stopped": stopped, "vision": recent && same_generation && !stopped && state["vision"].as_bool().unwrap_or(false), "control": recent && same_generation && enabled && !stopped && state["control"].as_bool().unwrap_or(false)}))
+    let fresh = |name: &str| -> bool {
+        std::fs::read(path.join(name)).ok().and_then(|v| serde_json::from_slice::<Value>(&v).ok())
+            .and_then(|v| v["at"].as_u64()).map(|at| now.saturating_sub(at) < 15).unwrap_or(false)
+    };
+    let broker_ready = fresh("broker-status.json");
+    Ok(json!({"live_phone_broker_ready": broker_ready, "gateway_ready": broker_ready && recent && state["gateway_ready"].as_bool().unwrap_or(false), "accessibility_ready": broker_ready && recent && same_generation && !stopped && state["accessibility_ready"].as_bool().unwrap_or(false), "cloud_connector_ready": broker_ready && fresh("connector-status.json"), "connected": recent, "enabled": enabled, "stopped": stopped, "vision": recent && same_generation && !stopped && state["vision"].as_bool().unwrap_or(false), "control": recent && same_generation && enabled && !stopped && state["control"].as_bool().unwrap_or(false)}))
 }

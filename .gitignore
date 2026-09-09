@@ -53,3 +53,5 @@ Thumbs.db
 playwright-report/
 test-results/
 .cyclone/agent-runs/
+
+apps/pc-companion/src-tauri/resources/live-phone/cloudflared.exe

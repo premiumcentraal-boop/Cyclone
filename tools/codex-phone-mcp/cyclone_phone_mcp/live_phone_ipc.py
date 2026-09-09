@@ -122,7 +122,7 @@ class Broker:
                         observation["screenshot_path"] = None
             self.engine.paused = latest_control.get("enabled") is not True
             vision = result.get("vision", result.get("after", {}).get("vision", {})).get("ready", False)
-            (root() / "status.json").write_text(json.dumps({"at": int(time.time()), "vision": vision, "control": not self.engine.paused and result.get("ok") is True, "generation": latest_control.get("generation")}))
+            (root() / "status.json").write_text(json.dumps({"at": int(time.time()), "vision": vision, "control": not self.engine.paused and result.get("ok") is True, "generation": latest_control.get("generation"), "gateway_ready": "error" not in result and (result.get("ok") is True or "devices" in result), "accessibility_ready": bool(result.get("ui", result.get("after", {}).get("ui", {})).get("elements"))}))
             return safe_result(result, self.typed_values)
 
 
@@ -147,5 +147,10 @@ def start():
     if os.name == "nt":
         broker = Broker()
         from .live_phone_bridge import start_bridge
-        start_bridge(broker)
+        for name in ("status.json", "connector-status.json", "broker-status.json", "latest.png", "latest.jpg"):
+            (root() / name).unlink(missing_ok=True)
+        try:
+            start_bridge(broker)
+        except OSError:
+            pass  # Native gateway and local IPC must remain available if direct port is occupied.
         threading.Thread(target=serve, args=(broker,), name="cyclone-live-phone", daemon=True).start()
