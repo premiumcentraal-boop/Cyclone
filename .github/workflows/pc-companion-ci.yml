@@ -12,7 +12,7 @@ on:
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   push:
-    branches: [main, 'codex/live-phone', 'release/cyclone-mobile-v*', 'release/cyclone-one-v1.2.0-direct-live-phone', 'release/cyclone-one-v1.3.0-onlyflow-redesign']
+    branches: [main, 'codex/live-phone', 'release/cyclone-mobile-v*', 'release/cyclone-one-v1.2.0-direct-live-phone', 'release/cyclone-one-v1.3.0-onlyflow-redesign', 'release/cyclone-one-v1.4.0-cip']
     paths:
       - 'apps/pc-companion/**'
       - 'apps/device-gateway/**'
