@@ -2,7 +2,6 @@ package com.cyclone.mobile.ui.v32
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,11 +10,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -35,7 +36,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,6 +49,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -83,15 +84,15 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
             V32TeachPage(context, refreshTick)
         }
         mode == "advanced" -> LazyColumn(
-            contentPadding = PaddingValues(18.dp),
+            contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { TextButton(onClick = { mode = "" }) { Text("‹ Routines") } }
-            item { CyclonePageIntro("Optional", "Advanced", "Use the builder or manual teaching tools when you need precise control.") }
+            item { CyclonePageIntro("Optional", "Advanced", "Build or inspect a routine when you need precise control.") }
             item {
                 CycloneSimpleCard(Modifier.fillMaxWidth()) {
                     RoutineCreateRow(Icons.Rounded.Tune, "Routine builder", "Build triggers and steps manually") { mode = "builder" }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
                     RoutineCreateRow(Icons.Rounded.School, "Manual teacher", "Inspect teaching history and low-level captures") { mode = "manual" }
                 }
             }
@@ -133,7 +134,7 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
             val visibleRoutines = if (group == null) filtered else groups[group].orEmpty()
 
             LazyColumn(
-                contentPadding = PaddingValues(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
@@ -141,35 +142,56 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text("Routines", style = MaterialTheme.typography.headlineMedium)
                             Text(
-                                "${all.size} saved ${if (all.size == 1) "automation" else "automations"}",
+                                "${all.size} ${if (all.size == 1) "routine" else "routines"} · organized your way",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        IconButton(
-                            onClick = { grouped = !grouped; group = null },
-                        ) {
+                        IconButton(onClick = { grouped = !grouped; group = null }, modifier = Modifier.size(44.dp)) {
                             Icon(
                                 if (grouped) Icons.Rounded.List else Icons.Rounded.GridView,
                                 if (grouped) "Show individual routines" else "Show grouped routines",
+                                modifier = Modifier.size(21.dp),
                             )
                         }
-                        FilledIconButton(onClick = { create = true }, modifier = Modifier.size(42.dp)) {
-                            Icon(Icons.Rounded.Add, "Create routine", modifier = Modifier.size(20.dp))
+                        FilledIconButton(onClick = { create = true }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Rounded.Add, "Create routine", modifier = Modifier.size(22.dp))
                         }
                     }
                 }
 
                 item {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
+                    Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
                         shape = RoundedCornerShape(18.dp),
-                        leadingIcon = { Icon(Icons.Rounded.Search, null, Modifier.size(20.dp)) },
-                        placeholder = { Text("Search routines") },
-                    )
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(Icons.Rounded.Search, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            BasicTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                decorationBox = { field ->
+                                    Box(contentAlignment = Alignment.CenterStart) {
+                                        if (query.isEmpty()) Text(
+                                            "Search routines",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        field()
+                                    }
+                                },
+                            )
+                        }
+                    }
                 }
 
                 item {
@@ -199,7 +221,7 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
                     item {
                         CycloneSimpleCard(Modifier.fillMaxWidth()) {
                             Text(
-                                if (query.isNotBlank()) "No routines match your search." else "No routines yet.",
+                                if (query.isNotBlank()) "No routines match your search" else "No routines yet",
                                 style = MaterialTheme.typography.titleSmall,
                             )
                             Text(
@@ -210,7 +232,15 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
                         }
                     }
                 } else if (showGrouped) {
-                    items(groups.keys.sortedBy { key -> if (grouping == 0 && key != "Other") appLabel(context, key).lowercase() else key.lowercase() }) { key ->
+                    val orderedKeys = groups.keys.sortedWith(compareBy<String> {
+                        when {
+                            it == "Other" || it == "Uncategorized" -> 1
+                            else -> 0
+                        }
+                    }.thenBy { key ->
+                        if (grouping == 0 && key != "Other") appLabel(context, key).lowercase() else key.lowercase()
+                    })
+                    items(orderedKeys) { key ->
                         val routines = groups.getValue(key)
                         val active = runs.count { run -> run.state == RunState.RUNNING && routines.any { it.id == run.automationId } }
                         RoutineGroupCard(
@@ -225,7 +255,6 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
                 } else {
                     items(visibleRoutines, key = { it.id }) { routine ->
                         RoutineListCard(
-                            context = context,
                             routine = routine,
                             onOpen = { selected = routine.id },
                             onRun = { AutomationRuntime.router.runManual(routine.id) },
@@ -275,11 +304,10 @@ private fun RoutineGroupCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Row(
-            Modifier.padding(15.dp),
+            Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -306,14 +334,13 @@ private fun RoutineGroupCard(
                     if (active > 0) CycloneStatus("$active active")
                 }
             }
-            Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .72f))
         }
     }
 }
 
 @Composable
 private fun RoutineListCard(
-    context: Context,
     routine: AutomationDefinition,
     onOpen: () -> Unit,
     onRun: () -> Unit,
@@ -323,11 +350,10 @@ private fun RoutineListCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Row(
-            Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
+            Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -354,7 +380,7 @@ private fun RoutineListCard(
                     Text("Run", style = MaterialTheme.typography.labelMedium)
                 }
             }
-            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .72f))
         }
     }
 }
@@ -380,6 +406,6 @@ private fun RoutineCreateRow(
             Text(title, style = MaterialTheme.typography.titleSmall)
             Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .72f))
     }
 }
