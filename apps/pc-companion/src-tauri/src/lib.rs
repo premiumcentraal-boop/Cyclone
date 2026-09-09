@@ -247,7 +247,9 @@ pub fn run() {
                     if let Ok((mut events, _child)) = command.spawn() {
                         // Drain output, then restart the owned runtime at the same private endpoint.
                         tauri::async_runtime::block_on(async move {
-                            while events.recv().await.is_some() {}
+                            while let Some(event) = events.recv().await {
+                                if matches!(event, tauri_plugin_shell::process::CommandEvent::Terminated(_)) { break; }
+                            }
                         });
                     }
                     std::thread::sleep(std::time::Duration::from_secs(2));
