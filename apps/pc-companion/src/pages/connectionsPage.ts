@@ -1,4 +1,5 @@
 import { livePhoneLabels, type LivePhoneStatus } from "../core/livePhone.js";
+import { DIRECT_LIVE_PHONE_AGENT_PROMPT, type DirectLiveBridgeStatus } from "../core/directLivePhone.js";
 import { invoke } from "@tauri-apps/api/core";
 import {
   formatSmokeLog,
@@ -29,7 +30,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const heading = el("div");
   heading.append(
     el("h1", "page-title", "Connections"),
-    el("p", "page-subtitle", "Choose a native PC AI, Live Phone through your PC connector, or a Remote MCP client."),
+    el("p", "page-subtitle", "Choose a native PC AI, direct Live Phone cloud control, or the separate Remote MCP client bridge."),
   );
   const refreshButton = button("Refresh", "button ghost compact");
   header.append(heading, refreshButton);
@@ -42,12 +43,17 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   );
   const grid = el("div", "connections-grid codex-connections-grid");
   grid.append(el("div", "loading-card", "Checking local AI connections…"));
-  const live = el("section", "settings-card");
-  live.append(el("h2", "connections-section-title", "LIVE PHONE · Control the phone I’m holding"),
-    el("p", "connections-section-copy", "Cloud ChatGPT through your PC connector. Controls the physical phone screen you are looking at. Start again after reopening One. Vision uses fresh screenshots per observation, not continuous video."));
+  const live = el("section", "settings-card direct-live-phone-card");
+  live.append(
+    el("h2", "connections-section-title", "LIVE PHONE · Control the phone I’m holding"),
+    el("p", "connections-section-copy", "Preferred path: connect Cloud ChatGPT directly to Cyclone's dedicated Live Phone MCP. The existing PC connector remains a fallback. Native Codex stays on CycloneAgentMCP."),
+  );
   const liveState = el("p", "connections-section-copy", "Waiting for a Live Phone request");
   const livePhone = el("p", "connections-section-copy", "Checking physical phone…");
-  const liveCloud = el("p", "connections-section-copy", "Cloud ChatGPT · PC connector route");
+  const liveCloud = el("p", "connections-section-copy", "Direct cloud connector · Waiting");
+  const liveBroker = el("p", "connections-section-copy", "Live Phone broker · Checking…");
+  const liveGateway = el("p", "connections-section-copy", "Gateway · Checking…");
+  const liveAccessibility = el("p", "connections-section-copy", "Accessibility · Checking…");
   const liveVision = el("p", "connections-section-copy", "Vision · Observe first");
   const liveControls = el("div", "button-row");
   for (const [label, action] of [["Start Live Phone", "enable"], ["Pause", "pause"], ["Stop", "stop"]]) {
@@ -55,12 +61,38 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
     control.addEventListener("click", async () => {
       try {
         await invoke("live_phone_control", { action });
-        liveState.textContent = action === "enable" ? "Ready for Cloud ChatGPT. Observe the phone first." : "Live Phone paused. New actions are blocked.";
+        liveState.textContent = action === "enable" ? "Live Phone authorized. Connect the direct cloud bridge or use the fallback PC connector." : action === "stop" ? "Live Phone stopped. Old observations and screenshots are invalid." : "Live Phone paused. New actions are blocked.";
       } catch { liveState.textContent = "Open the installed Cyclone One app to use Live Phone."; }
     });
     liveControls.append(control);
   }
-  live.append(livePhone, liveCloud, liveVision, liveState, liveControls);
+  const directTitle = el("h3", "connections-section-title", "Direct Cloud Connector");
+  const directCopy = el("p", "connections-section-copy", "Starts a dedicated HTTPS MCP endpoint containing only Cyclone Live Phone tools. No shell, ADB, PowerShell, background sessions, or native Codex routing is exposed.");
+  const directState = el("p", "connections-section-copy", "Direct bridge · Off");
+  const directUrl = el("p", "connections-section-copy", "MCP URL · Start the direct bridge first");
+  const directActions = el("div", "button-row");
+  const directConnect = button("Connect Direct Live Phone", "button primary compact");
+  const copyDirectUrl = button("Copy MCP URL", "button secondary compact");
+  const copyDirectToken = button("Copy token", "button secondary compact");
+  const copyDirectSetup = button("Copy setup", "button ghost compact");
+  const copyDirectPrompt = button("Copy agent prompt", "button ghost compact");
+  const directDisconnect = button("Disconnect direct bridge", "button ghost compact");
+  copyDirectUrl.disabled = true; copyDirectToken.disabled = true; copyDirectSetup.disabled = true; directDisconnect.disabled = true;
+  directActions.append(directConnect, copyDirectUrl, copyDirectToken, copyDirectSetup, copyDirectPrompt, directDisconnect);
+  live.append(livePhone, liveCloud, liveBroker, liveGateway, liveAccessibility, liveVision, liveState, liveControls, directTitle, directCopy, directState, directUrl, directActions);
+
+  let directStatus: DirectLiveBridgeStatus = { running: false, url: null };
+  let directBusy = false;
+  const refreshDirect = async (): Promise<void> => {
+    try {
+      directStatus = await invoke<DirectLiveBridgeStatus>("live_bridge_status");
+      directState.textContent = directStatus.running ? (directStatus.url ? "Direct bridge · Ready" : "Direct bridge · Starting secure URL…") : "Direct bridge · Off";
+      directUrl.textContent = directStatus.url ? `MCP URL · ${directStatus.url}` : "MCP URL · Start the direct bridge first";
+      copyDirectUrl.disabled = !directStatus.url; copyDirectToken.disabled = !directStatus.running; copyDirectSetup.disabled = !directStatus.url; directDisconnect.disabled = !directStatus.running;
+      directConnect.disabled = directBusy || directStatus.running;
+      directConnect.textContent = directStatus.running ? "Direct Live Phone connected" : "Connect Direct Live Phone";
+    } catch { directState.textContent = "Direct bridge · Unavailable. Reinstall this Cyclone One release."; }
+  };
   let liveRefreshing = false;
   const refreshLive = async (): Promise<void> => {
     if (liveRefreshing) return;
@@ -71,11 +103,43 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
       const labels = livePhoneLabels(state, devices);
       livePhone.textContent = labels.phone;
       liveCloud.textContent = labels.cloud;
+      liveBroker.textContent = labels.broker;
+      liveGateway.textContent = labels.gateway;
+      liveAccessibility.textContent = labels.accessibility;
       liveVision.textContent = labels.vision;
       liveState.textContent = labels.control;
+      await refreshDirect();
     } catch { liveState.textContent = "Live Phone status unavailable. Open the installed One app."; }
     finally { liveRefreshing = false; }
   };
+  directConnect.addEventListener("click", async () => {
+    if (directBusy) return;
+    directBusy = true; directConnect.disabled = true; directState.textContent = "Direct bridge · Starting…";
+    try {
+      await invoke("live_phone_control", { action: "enable" });
+      await invoke("live_bridge_connect");
+      liveState.textContent = "Live Phone authorized. Add the direct MCP URL and bearer token to your supported cloud AI connector.";
+    } catch (error) { directState.textContent = error instanceof Error ? error.message : "Direct bridge could not start."; }
+    finally { directBusy = false; await refreshDirect(); }
+  });
+  copyDirectUrl.addEventListener("click", () => { if (directStatus.url) void copyWithFeedback(directStatus.url, copyDirectUrl, "Copy MCP URL"); });
+  copyDirectToken.addEventListener("click", async () => {
+    try {
+      const secret = await invoke<{ token: string }>("live_bridge_token");
+      await copyWithFeedback(secret.token, copyDirectToken, "Copy token");
+      liveState.textContent = "Direct connector bearer token copied. Paste it only into the connector authentication field.";
+    } catch { liveState.textContent = "Could not copy the direct connector token yet. Wait for Cyclone runtime, then retry."; }
+  });
+  copyDirectSetup.addEventListener("click", () => {
+    if (!directStatus.url) return;
+    const setup = `Name: Cyclone Live Phone\nRemote MCP URL: ${directStatus.url}\nAuthentication: Bearer token\nToken: use Cyclone One > Connections > Direct Cloud Connector > Copy token and paste it only into the connector authentication field.\nAfter connecting, paste the Cyclone Live Phone agent prompt into a new AI chat/task.`;
+    void copyWithFeedback(setup, copyDirectSetup, "Copy setup");
+  });
+  copyDirectPrompt.addEventListener("click", () => { void copyWithFeedback(DIRECT_LIVE_PHONE_AGENT_PROMPT, copyDirectPrompt, "Copy agent prompt"); });
+  directDisconnect.addEventListener("click", async () => {
+    try { await invoke("live_bridge_disconnect"); liveState.textContent = "Direct Live Phone bridge disconnected and phone control stopped."; }
+    finally { await refreshDirect(); }
+  });
   const liveTimer = setInterval(() => { void refreshLive(); }, 3000);
   const background = el("section", "connections-section-heading");
   background.append(el("h2", "connections-section-title", "BACKGROUND PHONE · Advanced workspaces"), el("p", "connections-section-copy", "Existing session workspaces and app profiles. Separate from Live Phone."));
