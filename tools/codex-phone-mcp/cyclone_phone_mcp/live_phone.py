@@ -96,7 +96,7 @@ class LivePhone:
                 card = result.get("pageCard", {})
                 ident = card.get("observationScope", {}).get("id")
                 self.observations[args["device_id"]] = (ident, time.monotonic(), False)
-                return result
+                return {**result, "observation_id": ident}
             if op == "inspect":
                 return self.tools.phone_inspect_element({**args, "element_id": request.get("element", "")})
             return self.act(request)
@@ -125,6 +125,6 @@ class LivePhone:
         if not goal:
             raise ValueError("Describe the intended result with goal")
         self.observations.pop(device, None)  # Never retry an uncertain mutation.
-        result = self.tools.phone_act({**self._args(request), "tool": mapping[op], "params": params, "goal": goal, "user_authorized": request.get("user_authorized", False)})
+        result = self.tools.phone_act({**self._args(request), "tool": mapping[op], "params": params, "goal": goal, "request_ai_control": True, "user_authorized": request.get("user_authorized", False)})
         after = self.observe(request)
         return {"action": result, "after": after, "note": "Swipe uses the existing semantic scroll route" if op == "swipe" else "Inspect verification; a transport receipt is not task success"}

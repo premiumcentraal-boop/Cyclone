@@ -28,7 +28,7 @@ object LivePhoneMode {
         }
         val paused = prefs(context).getBoolean("paused", false)
         if (paused) throw GatewayProtocolException("LIVE_PHONE_PAUSED", "Resume Live Phone on the phone")
-        current.value = "Cloud ChatGPT · Connected"
+        current.value = "Cloud ChatGPT · Foreground access"
         runCatching {
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel("live_phone", "Live Phone", NotificationManager.IMPORTANCE_LOW))
@@ -39,6 +39,7 @@ object LivePhoneMode {
                 .setContentTitle("LIVE PHONE · Cloud ChatGPT")
                 .setContentText("Your visible phone screen. Pause or stop new phone actions.")
                 .setOngoing(true)
+                .setTimeoutAfter(30_000)
                 .setContentIntent(PendingIntent.getActivity(context, 42015, Intent(context, GatewaySettingsActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 .addAction(Notification.Action.Builder(null, "Pause", action("pause", 42016)).build())
                 .addAction(Notification.Action.Builder(null, "Stop", action("stop", 42017)).build())

@@ -78,7 +78,7 @@ def serve():
                         control = {}
                     engine.paused = control.get("enabled") is not True
                     try:
-                        result = engine.execute(request)
+                        result = ({"ok": False, "error": "LIVE_PHONE_STOPPED"} if control.get("stopped", True) and request.get("operation") not in {"status", "devices"} else engine.execute(request))
                     except ValueError:
                         result = {"ok": False, "error": "INVALID_LIVE_PHONE_REQUEST"}
                     except Exception:

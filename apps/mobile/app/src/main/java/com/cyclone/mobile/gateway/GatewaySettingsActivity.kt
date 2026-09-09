@@ -164,6 +164,19 @@ private fun GatewayControlCenter(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("LIVE PHONE · Cloud ChatGPT", style = MaterialTheme.typography.titleMedium)
+                    Text("Controls this visible screen. Resume here after using Pause or Stop.")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { LivePhoneMode.setPaused(context, false) }) { Text("Resume") }
+                        OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true) }) { Text("Pause") }
+                        OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true, true) }) { Text("Stop") }
+                    }
+                    Text("ON PC AI · Native Codex / Grok / Claude / Cursor")
+                    Text("BACKGROUND PHONE · Separate app profiles and task screens")
+                }
+            }
+            item {
                 GatewayHero(state = state, enabled = enabled) { turnOn ->
                     runCatching {
                         if (turnOn) GatewayRuntime.enable(context) else GatewayRuntime.disable(context)

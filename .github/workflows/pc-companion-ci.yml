@@ -12,7 +12,7 @@ on:
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   push:
-    branches: [main, 'release/cyclone-mobile-v*']
+    branches: [main, 'codex/live-phone', 'release/cyclone-mobile-v*']
     paths:
       - 'apps/pc-companion/**'
       - 'apps/device-gateway/**'
