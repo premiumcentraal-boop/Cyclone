@@ -261,8 +261,12 @@ object OverlayChromeRuntime {
                 .onFailure { android.widget.Toast.makeText(context, it.message, android.widget.Toast.LENGTH_LONG).show() }
             return
         }
-        // A named installed app is a suitable isolated task. Ambiguity is resolved by the user,
-        // never by guessing a target or falling back after a workspace failure.
+        // Only explicit intent selects isolation. Naming an app is ordinary foreground use.
+        val target = com.cyclone.mobile.runtime.background.ExecutionTargetResolver.resolve(request)
+        if (target is com.cyclone.mobile.runtime.background.ExecutionTarget.Profile) {
+            android.widget.Toast.makeText(context, "Open the requested profile in Profiles before continuing.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         val apps = context.packageManager.queryIntentActivities(
             android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
             .filter { it.activityInfo.packageName != context.packageName }.distinctBy { it.activityInfo.packageName }
@@ -270,10 +274,7 @@ object OverlayChromeRuntime {
             val label = app.loadLabel(context.packageManager).toString()
             label.length >= 3 && Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(label) + "(?![\\p{L}\\p{N}])").containsMatchIn(request)
         }
-        val share = com.cyclone.mobile.capture.LiveCaptureSessionManager.state.value
-        val explicitForeground = share.phase == com.cyclone.mobile.capture.ScreenSharePhase.LIVE &&
-            share.scope == com.cyclone.mobile.capture.CaptureScope.WHOLE_DISPLAY
-        if (!explicitForeground) {
+        if (target == com.cyclone.mobile.runtime.background.ExecutionTarget.BackgroundWorkspace) {
             synchronized(lock) { adaptiveAgent?.cancelActiveTask(); aiJob?.cancel() }
             if (matches.size == 1) {
                 val app = matches.single()
@@ -290,6 +291,9 @@ object OverlayChromeRuntime {
         val accepted = synchronized(lock) {
             pendingGateChallenge = null
             approvedGateChallenge = null
+            if (machine.state() !in setOf(OverlayChromeState.ANALYSIS, OverlayChromeState.WORKING, OverlayChromeState.LIVE)) {
+                machine.startAnalysis(java.util.UUID.randomUUID().toString())
+            }
             val before = machine.snapshot()
             machine.submitRequest(request)
             val changed = before.state == OverlayChromeState.ANALYSIS ||

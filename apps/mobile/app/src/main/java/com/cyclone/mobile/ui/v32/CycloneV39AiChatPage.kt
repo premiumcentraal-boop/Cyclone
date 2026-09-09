@@ -192,12 +192,8 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
 
         when (dispatch) {
             RequestDispatch.START_PHONE_TASK -> runCatching {
-                val target = WorkspaceTasks.resolveQueueTarget(
-                    context,
-                    com.cyclone.mobile.runtime.background.PendingWorkspaceRequest("preview", normalized, null),
-                )
-                if (target != null) WorkspaceTasks.start(context, normalized, target.packageName, target.appLabel)
-                else context.startActivity(Intent(context, WorkspaceActivity::class.java).putExtra("goal", normalized))
+                check(com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.isAttached()) { "Phone control needs repair. Open Phone control in Settings." }
+                com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.submitRequest(normalized)
             }.onSuccess {
                 composer = ""
             }.onFailure { message = it.message ?: "Couldn't open the phone-task setup." }

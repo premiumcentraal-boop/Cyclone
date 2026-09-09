@@ -152,6 +152,13 @@ object WorkspaceTasks {
             requests.blocked(pending.id, "This profile can't run as an isolated task yet. Choose Profile A or open Profiles.")
             return@synchronized false
         }
+        if (ExecutionTargetResolver.resolve(pending.goal) == ExecutionTarget.CurrentForeground) {
+            if (!com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.isAttached()) return@synchronized false
+            pending.attachment?.let(com.cyclone.mobile.ui.overlay.PendingTaskAttachment::set)
+            requests.remove(pending.id)
+            com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.submitRequest(pending.goal)
+            return@synchronized true
+        }
         val target = resolveQueueTarget(context, pending) ?: return@synchronized false
         if (pending.targetPackageName != target.packageName || pending.targetAppLabel != target.appLabel) {
             requests.bindTarget(pending.id, target.packageName, target.appLabel)
