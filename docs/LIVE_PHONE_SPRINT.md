@@ -35,3 +35,15 @@ ON PC AI retains CycloneAgentMCP and its native client configuration. This mode 
 Local: 157 native MCP tests passed (including 11 Live Phone tests); 64 generic adapter tests passed; 83 PC UI tests and production TypeScript/Vite build passed. Gateway suite and repository guards checked separately. Windows private-pipe restart test runs on Windows CI and skips on Linux. No physical phone acceptance is implied by these tests.
 
 Required actual-device checks remain: Chrome NS news search, Play Store Snapchat installation, Settings SIM information, supplied signup fields, and runtime restart through the typed adapter. Never invent signup details or claim a store installation succeeded from a transport response. SIM information and typed credentials must not be copied into this handoff or diagnostics. No release tag is created; publication remains false and baseline release tags stay unchanged.
+
+## Verified build handoff
+
+- Final implementation commit: `c494d86eee01baae07800d72291a662394cdcbc1`.
+- Mobile CI **34299766570** passed on that exact commit: repository guards, gateway/MCP contracts, Android JVM tests, lint, assembly and candidate upload. https://github.com/premiumcentraal-boop/Cyclone/actions/runs/34299766570
+- Windows CI **34299725847** passed on `bda79a24b0db44d58bfeb6f38c908a1c82e3058a`: gateway/MCP contracts, 158 native MCP tests including actual Windows named-pipe restart/DPAPI integration, frontend tests/build, frozen adapter/runtime builds, NSIS installer and candidate upload. https://github.com/premiumcentraal-boop/Cyclone/actions/runs/34299725847
+- The sole implementation change after the green Windows source makes an Android gateway function internal; PC source is identical.
+- All six requested checkpoints and subsequent fixes were pushed immediately. Publication remains disabled; no release tags were changed.
+
+The PC connector was reachable and read-only inspection confirmed the installed One has no CycloneLivePhone.exe yet. No phone mutation or acceptance scenario was attempted through raw ADB. Install the sprint Windows candidate and a properly versioned/signed matching mobile candidate before physical acceptance. The CI APK is unsigned and retains baseline 4.2.2/code 83; do not present it as a new published update.
+
+Remaining acceptance: Chrome search, Snapchat installation/signup using user-supplied fields, Settings SIM information, actual One/runtime restart while attached to the phone, and native Codex on the real PC. Windows IPC restart passed in CI; this is not physical-phone restart acceptance. Pause/Stop blocks subsequent Live Phone requests and invalidates cached observations; it cannot undo an action already dispatched. Swipe remains semantic scroll rather than an arbitrary gesture.
