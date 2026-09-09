@@ -41,12 +41,12 @@ A visual point uses normalized display coordinates:
 - `home`
 - `open_app`
 
-`tap`, `long_press`, `type`, and `clear` accept an element target; tap/long-press additionally accept a normalized point. `scroll` is semantic and accepts `direction` plus an optional bounded `amount`. `swipe` is a true visual gesture with normalized `from`, normalized `to`, and bounded `duration_ms`. `back` and `home` have no target. `open_app` accepts an Android package.
+`tap`, `long_press`, `type`, and `clear` accept an element target; tap/long-press additionally accept a normalized point. `scroll` is semantic and accepts `direction` (`forward`, `backward`, `up`, or `down`). `swipe` is a true visual gesture with normalized `from`, normalized `to`, and bounded `duration_ms`. `back` and `home` have no target. `open_app` accepts an Android package.
 
 CIP has no grammar or schema for shell, command, PowerShell, ADB, root, script, arbitrary executable, arbitrary filesystem path, or arbitrary network execution.
 
 ## Mutation identity and retry rule
-Every mutation carries a client-generated `request_id`. A request ID is an at-most-once idempotency key within the current Live Phone generation. Replaying the same ID returns the remembered outcome; it must never dispatch Android input twice. Reads are retryable.
+Every mutation carries a client-generated `request_id`. A request ID is an at-most-once idempotency key within the current Live Phone generation. Cyclone persists a PENDING tombstone before crossing the Android mutation boundary, so a runtime restart cannot redispatch an ambiguous mutation. Replaying the same ID returns the remembered outcome; it must never dispatch Android input twice. Reads are retryable.
 
 Before dispatch, Cyclone consumes the current observation authority. If transport becomes ambiguous, the mutation outcome is `UNCERTAIN`; Cyclone must not retry it automatically. The next step is a fresh `see`.
 
@@ -66,7 +66,7 @@ Cloud transports return the current screenshot as a bounded image block and may 
 Read-only physical-device discovery and readiness.
 
 ### `see`
-Inputs: optional `device`, optional `goal`, optional `detail=compact|full`. Returns the current observation and image. A goal may cause deterministic semantic ranking in the same call.
+Inputs: optional `device` and optional `goal`. Returns the current observation and image. A goal may cause deterministic semantic ranking in the same call.
 
 ### `find`
 Inputs: current `observation_id`, `query`, optional device. Returns ranked observation-scoped elements without mutating the phone.

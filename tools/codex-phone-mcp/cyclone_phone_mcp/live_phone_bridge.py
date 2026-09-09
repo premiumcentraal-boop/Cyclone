@@ -67,7 +67,6 @@ def _action_schema():
         "target": target,
         "text": _string("Text to enter into the selected editable element.", 4000),
         "direction": _string("Semantic scroll direction.", enum=["forward", "backward", "up", "down"]),
-        "amount": _string("Reserved semantic scroll amount.", enum=["small", "medium", "large"]),
         "from": _point_schema(), "to": _point_schema(),
         "duration_ms": {"type": "integer", "minimum": 100, "maximum": 3000},
         "package": _string("Android package to open."),
@@ -80,8 +79,7 @@ def catalog():
     tools = [
         ("cyclone_devices", "Cyclone Devices", "List ready physical USB/LAN phones. One phone is auto-selected.", _s()),
         ("cyclone_see", "Cyclone See", "Observe the visible physical screen. Returns semantic UI and the current screenshot image.",
-         _s({"device": device, "goal": _string("Optional visible goal for same-call semantic ranking.", 1000),
-             "detail": _string("Observation detail.", enum=["compact", "full"])})),
+         _s({"device": device, "goal": _string("Optional visible goal for same-call semantic ranking.", 1000)})),
         ("cyclone_find", "Cyclone Find", "Find a semantic element inside the current observation without mutating the phone.",
          _s({"device": device, "observation_id": observation, "query": _string("Visible UI text or goal to find.")}, ["observation_id", "query"])),
         ("cyclone_inspect", "Cyclone Inspect", "Inspect one current observation-scoped element.",
