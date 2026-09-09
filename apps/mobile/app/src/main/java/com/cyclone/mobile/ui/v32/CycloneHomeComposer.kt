@@ -94,10 +94,10 @@ fun CycloneHomeComposer(onSubmit: (String) -> Unit) {
                 )
 
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    CycloneIntelligenceControls()
+                    CycloneIntelligenceControls(showModelPill = false)
                     Box {
-                        IconButton(onClick = { tools = true }, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Rounded.Add, "Add attachment", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        IconButton(onClick = { tools = true }, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Rounded.Add, "Add attachment", modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         DropdownMenu(tools, { tools = false }) {
                             DropdownMenuItem(
@@ -136,16 +136,16 @@ fun CycloneHomeComposer(onSubmit: (String) -> Unit) {
                                 )
                             }.onFailure { error = "Voice is unavailable. You can type your request." }
                         },
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(44.dp),
                     ) {
-                        Icon(Icons.Rounded.Mic, "Dictate request", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Rounded.Mic, "Dictate request", modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     FilledIconButton(
                         onClick = { send() },
                         enabled = text.isNotBlank(),
-                        modifier = Modifier.size(42.dp),
+                        modifier = Modifier.size(46.dp),
                     ) {
-                        Icon(Icons.Rounded.ArrowUpward, "Send request", modifier = Modifier.size(20.dp))
+                        Icon(Icons.Rounded.ArrowUpward, "Send request", modifier = Modifier.size(22.dp))
                     }
                 }
             }
