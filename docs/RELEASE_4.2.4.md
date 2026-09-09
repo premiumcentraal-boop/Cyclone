@@ -21,6 +21,6 @@ This is the combined Android update. Live Phone additionally requires the Live P
 
 Secondary-profile isolated Ask execution remains unsupported and explicitly blocked, as documented in the repair checkpoint. This merge preserves both updates; it does not claim to add that missing execution route.
 
-Publication remains disabled pending approval review of the physical-evidence requirement. The intended publication workflow reuses the exact green Mobile CI artifact and the existing update-compatible development signing workflow. Signature equality with published 4.2.3, version identity, APK checksum and source provenance are required before publishing. This development signer is update-compatible, not production-secure.
+The user explicitly authorized publication on September 9, 2026, overriding the earlier physical-evidence prerequisite while retaining UNVERIFIED physical acceptance. The publication workflow reuses the exact green Mobile CI artifact and the existing update-compatible development signing workflow. Signature equality with published 4.2.3, version identity, APK checksum and source provenance are required before publishing. This development signer is update-compatible, not production-secure.
 
 Physical phone / Pixel / USB / ADB acceptance remains UNVERIFIED. No physical testing was performed. No release or build success is inferred from committing source; CI and publication results are recorded by their GitHub runs and release sidecars.
