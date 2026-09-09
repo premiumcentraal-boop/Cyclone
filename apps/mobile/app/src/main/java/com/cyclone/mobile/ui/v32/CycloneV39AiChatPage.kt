@@ -6,8 +6,20 @@ import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,13 +27,34 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -60,8 +93,11 @@ internal object V39AiChatSessionRuntime {
     var pendingRequest by mutableStateOf("")
     var busy by mutableStateOf(false)
     var status by mutableStateOf("")
+
     fun append(role: V39ChatRole, text: String, ok: Boolean? = null) {
-        text.trim().takeIf(String::isNotBlank)?.let { messages += V39ChatMessage(nextId.getAndIncrement(), role, it, ok) }
+        text.trim().takeIf(String::isNotBlank)?.let {
+            messages += V39ChatMessage(nextId.getAndIncrement(), role, it, ok)
+        }
     }
 }
 
@@ -69,11 +105,13 @@ internal object V39AiChatContract {
     const val PREFS = "cyclone_ai"
     const val MODEL_KEY = "openrouter_model"
     const val PLACEHOLDER = "Ask Cyclone…"
+
     fun normalizedRequest(value: String) = value.trim()
     fun modelForStored(stored: String?): OpenRouterModelPreset =
         OpenRouterModelPresets.byId(stored.orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id })
     fun storageId(model: OpenRouterModelPreset): String = ModelRegistry.profileForPreset(model)?.cycloneId ?: model.id
     fun models(): List<OpenRouterModelPreset> = OpenRouterModelPresets.all
+
     fun config(modelId: String, accessProfile: CycloneAiAccessProfile): QuickAgentConfig {
         val model = modelForStored(modelId)
         return QuickAgentConfig(
@@ -83,22 +121,25 @@ internal object V39AiChatContract {
             accessProfile = accessProfile,
         )
     }
+
     fun finalStatus(result: QuickAgentResult) = if (result.ok) "Completed and checked" else "Stopped safely"
 }
 
 internal class V39AiSubmitGate {
     private val active = AtomicBoolean(false)
+
     fun tryAccept(rawRequest: String, hasKey: Boolean): String? {
         val request = V39AiChatContract.normalizedRequest(rawRequest)
         if (request.isBlank() || !hasKey || !active.compareAndSet(false, true)) return null
         return request
     }
+
     fun complete() = active.set(false)
 }
 
 @Composable
 internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
-    val keyboardOpen = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val task by WorkspaceTasks.state.collectAsState()
     val queuedRequests by WorkspaceTasks.requests.state.collectAsState()
     val attached by PendingTaskAttachment.present.collectAsState()
@@ -118,6 +159,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
     val selectedModel = V39AiChatContract.modelForStored(selectedModelId)
     val hasKey = remember(refreshTick) { OpenRouterSecretStore.hasKey(context) }
     val previewRoute = remember(composer, attached) { RequestIntentRouter.route(composer, hasAttachment = attached) }
+
     val dictation = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let {
@@ -161,7 +203,10 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             }.onFailure { message = it.message ?: "Couldn't open the phone-task setup." }
 
             RequestDispatch.QUEUE_PHONE_TASK -> runCatching { WorkspaceTasks.queueRequest(normalized) }
-                .onSuccess { composer = ""; message = "Saved to Up next. Your current task continues." }
+                .onSuccess {
+                    composer = ""
+                    message = "Saved to Up next. Your current task continues."
+                }
                 .onFailure { message = it.message ?: "Couldn't save this task." }
 
             RequestDispatch.CHAT -> {
@@ -217,10 +262,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
 
     CycloneAlpineBackdrop {
         Column(
-            Modifier
-                .fillMaxSize()
-                .imePadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             LazyColumn(
@@ -228,42 +270,36 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(top = if (keyboardOpen) 2.dp else 8.dp, bottom = 4.dp),
             ) {
-                if (session.messages.isEmpty()) item {
-                    Column(
-                        Modifier.fillMaxWidth().padding(top = if (keyboardOpen) 0.dp else 10.dp, bottom = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (!keyboardOpen) {
-                            Text(
-                                greeting,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                "Let’s make\nprogress today.",
-                                style = MaterialTheme.typography.headlineLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(.78f).padding(top = 6.dp),
-                                shape = RoundedCornerShape(22.dp),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = .58f),
-                                contentColor = MaterialTheme.colorScheme.onSurface,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .22f)),
-                                tonalElevation = 0.dp,
-                                shadowElevation = 0.dp,
-                            ) {
-                                Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                                    Text(
-                                        "Ideas become real when you take the next step.",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                    )
-                                    Text(
-                                        "— Cyclone",
-                                        modifier = Modifier.padding(top = 5.dp),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
+                if (session.messages.isEmpty()) {
+                    item {
+                        Column(
+                            Modifier.fillMaxWidth().padding(top = if (keyboardOpen) 0.dp else 10.dp, bottom = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (!keyboardOpen) {
+                                Text(greeting, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    "Let’s make\nprogress today.",
+                                    style = MaterialTheme.typography.headlineLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(.78f).padding(top = 6.dp),
+                                    shape = RoundedCornerShape(22.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = .54f),
+                                    contentColor = MaterialTheme.colorScheme.onSurface,
+                                    tonalElevation = 0.dp,
+                                    shadowElevation = 1.dp,
+                                ) {
+                                    Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                                        Text("Ideas become real when you take the next step.", style = MaterialTheme.typography.bodyLarge)
+                                        Text(
+                                            "— Cyclone",
+                                            modifier = Modifier.padding(top = 5.dp),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -272,27 +308,28 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     items(session.messages, key = { it.id }) { V39ChatBubble(it) }
                 }
 
-                if (session.busy || session.status.isNotBlank()) item {
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = .70f),
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .25f)),
-                        tonalElevation = 0.dp,
-                        shadowElevation = 0.dp,
-                        modifier = Modifier.fillMaxWidth(.78f),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                if (session.busy || session.status.isNotBlank()) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = .58f),
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            tonalElevation = 0.dp,
+                            shadowElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth(.72f),
                         ) {
-                            if (session.busy) CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
-                            Text(
-                                if (session.busy) "Thinking…" else session.status,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
+                            Row(
+                                Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            ) {
+                                if (session.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Text(
+                                    if (session.busy) "Thinking…" else session.status,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
                         }
                     }
                 }
@@ -304,30 +341,41 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(vertical = 2.dp),
                 ) {
-                    task?.let { current -> item(key = "current-${current.taskId}") { CycloneAskTaskPanel(current) } }
-                    if (queuedRequests.isNotEmpty()) item(key = "queued") { CyclonePendingRequests() }
+                    task?.let { current ->
+                        item(key = "current-${current.taskId}") { CycloneAskTaskPanel(current) }
+                    }
+                    if (queuedRequests.isNotEmpty()) {
+                        item(key = "queued") { CyclonePendingRequests() }
+                    }
                 }
             }
 
-            if (!hasKey) Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .90f),
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+            if (!hasKey) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .90f),
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 1.dp,
                 ) {
-                    Icon(Icons.Rounded.Key, null, Modifier.size(18.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text("OpenRouter key required for chat", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = onSettings) { Text("Settings") }
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Key, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("OpenRouter key required for chat", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onSettings) { Text("Settings") }
+                    }
                 }
             }
-            if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            if (attached) Text("Attachment ready", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+
+            if (message.isNotBlank()) {
+                Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+            if (attached) {
+                Text("Attachment ready", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            }
 
             Column(
                 Modifier.fillMaxWidth().padding(bottom = 4.dp),
@@ -346,23 +394,25 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     shape = RoundedCornerShape(32.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = .90f),
                     contentColor = MaterialTheme.colorScheme.onSurface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .34f)),
                     tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
+                    shadowElevation = 5.dp,
                 ) {
                     Column(Modifier.padding(horizontal = 6.dp, vertical = 5.dp)) {
-                        if (session.busy) Row(
-                            Modifier.fillMaxWidth().padding(start = 8.dp, end = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Answering",
-                                Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                            TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
+                        if (session.busy) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(start = 8.dp, end = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "Answering",
+                                    Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
+                            }
                         }
+
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CycloneIntelligenceControls(
                                 enabled = !session.busy,
@@ -374,18 +424,22 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                                     reasoningEffort = prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium"
                                 },
                             )
+
                             Box {
                                 IconButton(onClick = { toolsOpen = true }, enabled = !session.busy, modifier = Modifier.size(44.dp)) {
                                     Icon(Icons.Rounded.Add, "Add attachment", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                DropdownMenu(toolsOpen, { toolsOpen = false }) {
+                                DropdownMenu(expanded = toolsOpen, onDismissRequest = { toolsOpen = false }) {
                                     DropdownMenuItem(text = { Text("File") }, onClick = {
                                         toolsOpen = false
                                         context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
                                     })
                                     DropdownMenuItem(text = { Text("Take photo") }, onClick = {
                                         toolsOpen = false
-                                        context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java).putExtra("camera", true))
+                                        context.startActivity(
+                                            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                                                .putExtra("camera", true),
+                                        )
                                     })
                                     DropdownMenuItem(text = { Text("Share screen") }, onClick = {
                                         toolsOpen = false
@@ -393,6 +447,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                                     })
                                 }
                             }
+
                             BasicTextField(
                                 value = composer,
                                 onValueChange = { composer = it },
@@ -408,16 +463,19 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                                 keyboardActions = KeyboardActions(onSend = { submit() }),
                                 decorationBox = { field ->
                                     Box(contentAlignment = Alignment.CenterStart) {
-                                        if (composer.isEmpty()) Text(
-                                            V39AiChatContract.PLACEHOLDER,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                        if (composer.isEmpty()) {
+                                            Text(
+                                                V39AiChatContract.PLACEHOLDER,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
                                         field()
                                     }
                                 },
                             )
+
                             IconButton(
                                 onClick = {
                                     runCatching {
@@ -431,6 +489,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                             ) {
                                 Icon(Icons.Rounded.Mic, "Dictate request", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+
                             val sendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
                                 RequestIntent.PHONE_TASK -> true
                                 RequestIntent.CHAT -> hasKey && !session.busy
@@ -456,25 +515,28 @@ private fun V39ChatBubble(message: V39ChatMessage) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
         Surface(
             shape = RoundedCornerShape(if (isUser) 20.dp else 18.dp),
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .88f)
-            else MaterialTheme.colorScheme.surface.copy(alpha = .66f),
+            color = if (isUser) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .86f)
+            else MaterialTheme.colorScheme.surface.copy(alpha = .48f),
             contentColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-            border = if (isUser) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .24f)),
             tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            shadowElevation = if (isUser) 1.dp else 0.dp,
             modifier = Modifier.fillMaxWidth(if (isUser) .82f else .88f),
         ) {
             Column(
                 Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                if (isUser) Text("You", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                if (isUser) {
+                    Text("You", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
                 Text(message.text, style = MaterialTheme.typography.bodyMedium)
-                if (!isUser && message.ok != null) Text(
-                    if (message.ok) "Checked" else "Stopped",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (message.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                )
+                if (!isUser && message.ok != null) {
+                    Text(
+                        if (message.ok) "Checked" else "Stopped",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (message.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         }
     }
