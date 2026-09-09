@@ -75,7 +75,8 @@ class LivePhoneTests(unittest.TestCase):
         folder = Path(self.temp.name) / 'runtime' / 'fleet-screenshots'
         folder.mkdir(parents=True)
         image = folder / 'pixel.png'
-        image.write_bytes(b'\x89PNG\r\n\x1a\n' + b'test')
+        from PIL import Image
+        Image.new('RGB', (16, 24), 'blue').save(image)
         raw = {'screenshot': {'available': True, 'artifact': {'reference': str(image)}}}
         result = self.engine._image(raw)
         self.assertTrue(result['ready'])
@@ -83,6 +84,16 @@ class LivePhoneTests(unittest.TestCase):
         raw['screenshot']['artifact']['reference'] = '/etc/passwd'
         self.assertFalse(self.engine._image(raw)['ready'])
         self.assertFalse(self.engine._image({})['ready'])
+
+    def test_truncated_image_is_not_vision_ready(self):
+        folder = Path(self.temp.name) / 'runtime' / 'fleet-screenshots'
+        folder.mkdir(parents=True)
+        image = folder / 'broken.png'
+        image.write_bytes(b'\x89PNG\r\n\x1a\n' + b'broken')
+        (self.engine.root / 'latest.jpg').write_bytes(b'old image')
+        result = self.engine._image({'screenshot': {'available': True, 'artifact': {'reference': str(image)}}})
+        self.assertFalse(result['ready'])
+        self.assertFalse((self.engine.root / 'latest.jpg').exists())
 
     def test_observation_has_ui_and_current_image_same_response(self):
         self.tools.gateway.device_observe.return_value = {'observation': {}}
