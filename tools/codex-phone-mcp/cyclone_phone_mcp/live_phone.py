@@ -99,4 +99,32 @@ class LivePhone:
                 return result
             if op == "inspect":
                 return self.tools.phone_inspect_element({**args, "element_id": request.get("element", "")})
-            raise ValueError("Action checkpoint not installed")
+            return self.act(request)
+
+    def act(self, request):
+        if self.paused:
+            return {"ok": False, "error": "LIVE_PHONE_PAUSED", "next": "Enable Live Phone in Cyclone One"}
+        device = request["device"]
+        current = self.observations.get(device)
+        if not current or not current[0] or request.get("observation_id") != current[0] or time.monotonic() - current[1] > 30:
+            return {"ok": False, "error": "STALE_OBSERVATION", "next": "Observe and locate again"}
+        op = request["operation"]
+        mapping = {"tap": "phone.click", "long-press": "phone.long_press", "type": "phone.type", "clear-text": "phone.type", "swipe": "phone.scroll", "scroll": "phone.scroll", "back": "phone.back", "home": "phone.home", "open-app": "phone.open_app"}
+        params = {}
+        if op in {"tap", "long-press", "type", "clear-text"}:
+            if not request.get("element"):
+                raise ValueError("Use a current element from locate")
+            params["elementId"] = request["element"]
+        if op in {"type", "clear-text"}:
+            params["text"] = "" if op == "clear-text" else request.get("text", "")
+        if op in {"scroll", "swipe"}:
+            params["direction"] = request.get("direction", "forward")
+        if op == "open-app":
+            params["packageName"] = request.get("package", "")
+        goal = request.get("goal")
+        if not goal:
+            raise ValueError("Describe the intended result with goal")
+        self.observations.pop(device, None)  # Never retry an uncertain mutation.
+        result = self.tools.phone_act({**self._args(request), "tool": mapping[op], "params": params, "goal": goal, "user_authorized": request.get("user_authorized", False)})
+        after = self.observe(request)
+        return {"action": result, "after": after, "note": "Swipe uses the existing semantic scroll route" if op == "swipe" else "Inspect verification; a transport receipt is not task success"}
