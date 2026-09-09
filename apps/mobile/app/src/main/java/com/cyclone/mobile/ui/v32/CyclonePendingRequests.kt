@@ -69,6 +69,7 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
                     destinations = WorkspaceTasks.queueDestinations(context),
                     onSelected = { destination ->
                         WorkspaceTasks.requests.steer(request.id, destination)
+                        WorkspaceTasks.tryPromoteNext(context)
                         steering = null
                     },
                     onDismiss = { steering = null },

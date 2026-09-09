@@ -111,7 +111,10 @@ object OverlayChromeRuntime {
                 cycloneState = cycloneState,
             )
         }
-        context?.let { AgentTaskNotificationRuntime.finish(it, false, "Task stopped.") }
+        context?.let {
+                    AgentTaskNotificationRuntime.finish(it, false, "Task stopped.")
+                    com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it)
+                }
     }
 
     fun clearBackgroundChrome() {
@@ -223,7 +226,10 @@ object OverlayChromeRuntime {
                     aiJob?.cancel()
                     aiJob = null
                 }
-                context?.let { AgentTaskNotificationRuntime.finish(it, false, "Task stopped.") }
+                context?.let {
+                    AgentTaskNotificationRuntime.finish(it, false, "Task stopped.")
+                    com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it)
+                }
             }
             OverlayUserAction.GATE_CONFIRM -> resumeSuspendedTask()
             OverlayUserAction.TAKE_CONTROL -> {
@@ -239,12 +245,16 @@ object OverlayChromeRuntime {
         mutate { it.updateComposer(text) }
     }
 
+    /** Composer animation is not execution ownership. Suspended/GATE tasks still own their slot. */
+    fun hasExecutingTask(): Boolean = synchronized(lock) {
+        aiJob?.isActive == true || suspendedTaskId != null || pendingGateChallenge != null
+    }
+
     fun submitRequest(text: String) {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
         val context = synchronized(lock) { service } ?: return
-        val busy = com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask() ||
-            snapshot().state in setOf(OverlayChromeState.ANALYSIS, OverlayChromeState.WORKING, OverlayChromeState.LIVE, OverlayChromeState.GATE)
+        val busy = !com.cyclone.mobile.runtime.background.WorkspaceTasks.canStartRequest()
         if (busy) {
             runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.queueRequest(request) }
                 .onSuccess { updateComposer("") }
@@ -421,6 +431,9 @@ object OverlayChromeRuntime {
                 synchronized(lock) { suspendedTaskId = null; adaptiveAgent = null }
                 mutate { it.finishStopped(result.message) }
             }
+        }
+        if (result.classification != "HUMAN_OR_GATE") {
+            context?.let { com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it) }
         }
     }
 

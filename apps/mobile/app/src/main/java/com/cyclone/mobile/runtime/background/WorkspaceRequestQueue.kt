@@ -17,6 +17,9 @@ data class PendingWorkspaceRequest(
 )
 
 internal object WorkspaceQueuePromotionPolicy {
+    fun canStart(currentPhase: TaskPhase?, foregroundTaskOwnsSlot: Boolean): Boolean =
+        canPromote(currentPhase) && !foregroundTaskOwnsSlot
+
     fun canPromote(currentPhase: TaskPhase?): Boolean =
         currentPhase == null || currentPhase in setOf(TaskPhase.STOPPED, TaskPhase.FAILED)
 }

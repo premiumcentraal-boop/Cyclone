@@ -79,12 +79,10 @@ object WorkspaceTasks {
     fun takeAttachment(taskId: String) = attachments.remove(taskId)
     fun queueRequest(goal: String, targetPackageName: String? = null, targetAppLabel: String? = null) =
         requests.add(goal, targetPackageName, targetAppLabel) { com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take() }
-    fun canStartRequest(): Boolean = !hasCurrentTask() &&
-        com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.snapshot().state !in setOf(
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.ANALYSIS,
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.WORKING,
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.LIVE,
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.GATE)
+    fun canStartRequest(): Boolean = WorkspaceQueuePromotionPolicy.canStart(
+        state.value?.phase,
+        com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask(),
+    )
     fun hasCurrentTask(): Boolean = !WorkspaceQueuePromotionPolicy.canPromote(state.value?.phase)
     const val PRODUCT_HOT_BACKGROUND_LIMIT = SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT
     private val mutable = MutableStateFlow<WorkspaceTaskUi?>(null)
@@ -160,6 +158,8 @@ object WorkspaceTasks {
         }
         runCatching {
             start(context.applicationContext, pending.goal, target.packageName, target.appLabel, pending.id)
+        }.onFailure { error ->
+            android.widget.Toast.makeText(context, error.message ?: "Check Background tasks setup.", android.widget.Toast.LENGTH_LONG).show()
         }.isSuccess
     }
 
