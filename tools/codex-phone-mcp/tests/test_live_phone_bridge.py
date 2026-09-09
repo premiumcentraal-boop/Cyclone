@@ -31,6 +31,7 @@ class DirectBridgeTests(unittest.TestCase):
         self.control(True)
         self.broker = Mock()
         self.broker.lock = threading.RLock()
+        self.broker.engine.root = root()
         self.broker.engine.observations = {"pixel": ("o1", 0, True)}
         self.broker.handle.return_value = {"ok": True, "device": "pixel"}
         self.bridge = Bridge(self.broker)
