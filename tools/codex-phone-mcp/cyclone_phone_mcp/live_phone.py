@@ -102,7 +102,7 @@ class LivePhone:
                 raw = self.tools.phone_devices({})
                 return {"devices": [{k: d[k] for k in ("device_id", "deviceId", "name", "model", "state") if k in d} for d in raw.get("devices", []) if d.get("source") in {"USB", "LAN"}]}
             if op == "status":
-                return {"mode": "LIVE PHONE", "control": "Paused" if self.paused else "Ready", "session_id": SESSION, "display_id": DISPLAY}
+                return {"mode": "LIVE PHONE", "control": "Paused" if self.paused else "Enabled — observe the selected phone first", "session_id": SESSION, "display_id": DISPLAY}
             if op in {"observe", "screenshot"}:
                 return self.observe(request)
             args = self._args(request)
@@ -142,4 +142,4 @@ class LivePhone:
         self.observations.pop(device, None)  # Never retry an uncertain mutation.
         result = self.tools.phone_act({**self._args(request), "tool": mapping[op], "params": params, "goal": goal, "request_ai_control": True, "user_authorized": request.get("user_authorized", False)})
         after = self.observe(request)
-        return {"action": result, "after": after, "note": "Swipe uses the existing semantic scroll route" if op == "swipe" else "Inspect verification; a transport receipt is not task success"}
+        return {"ok": result.get("ok") is True and after.get("ok") is True, "action": result, "after": after, "note": "Swipe uses the existing semantic scroll route" if op == "swipe" else "Inspect verification; a transport receipt is not task success"}

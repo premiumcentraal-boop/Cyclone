@@ -50,6 +50,7 @@ class LivePhoneTests(unittest.TestCase):
         self.assertEqual('phone.click', call['tool'])
         self.assertEqual({'elementId': 'e1'}, call['params'])
         self.assertFalse(result['action']['verified'])
+        self.assertFalse(result['ok'])
         self.engine.observe.assert_called_once()
         self.assertNotIn('pixel', self.engine.observations)
 
@@ -146,6 +147,12 @@ class WindowsLivePhoneIpcTests(unittest.TestCase):
             second = launch()
             try:
                 result = request_one({'operation': 'back', 'device': 'pixel', 'goal': 'Back', 'observation_id': 'before-restart'})
+                self.assertEqual('STALE_OBSERVATION', result['error'])
+                (root() / 'control.json').write_text('{"enabled":false,"stopped":true,"generation":"stop"}')
+                result = request_one({'operation': 'home', 'device': 'pixel', 'goal': 'Home', 'observation_id': 'old'})
+                self.assertEqual('LIVE_PHONE_STOPPED', result['error'])
+                (root() / 'control.json').write_text('{"enabled":true,"stopped":false,"generation":"resume"}')
+                result = request_one({'operation': 'home', 'device': 'pixel', 'goal': 'Home', 'observation_id': 'old'})
                 self.assertEqual('STALE_OBSERVATION', result['error'])
             finally:
                 second.terminate()

@@ -8,8 +8,10 @@ import secrets
 import threading
 import time
 from multiprocessing.connection import Client, Listener
+from multiprocessing import AuthenticationError
 from .live_phone import LivePhone, validate_request
-from .gateway import GatewayClient
+from .gateway import GatewayClient, GatewayError
+from .protocol import classify_failure
 from .tools import PhoneTools
 
 LIMIT = 2 * 1024 * 1024
@@ -72,7 +74,7 @@ def serve():
                 with listener.accept() as connection:
                     if not connection.poll(5):
                         continue
-                    request = json.loads(connection.recv_bytes(16 * 1024))
+                    request = validate_request(json.loads(connection.recv_bytes(16 * 1024)))
                     try:
                         control = json.loads((root() / "control.json").read_text())
                     except (OSError, ValueError):
@@ -83,19 +85,39 @@ def serve():
                     engine.paused = control.get("enabled") is not True
                     try:
                         result = ({"ok": False, "error": "LIVE_PHONE_STOPPED"} if control.get("stopped", True) and request.get("operation") not in {"status", "devices"} else engine.execute(request))
+                    except GatewayError as error:
+                        engine.observations.clear()
+                        failure = classify_failure(error.body)
+                        result = {"ok": False, "error": failure.code if failure else "PHONE_UNAVAILABLE", "next": "Check Live Phone on the phone, then observe again"}
                     except ValueError:
                         result = {"ok": False, "error": "INVALID_LIVE_PHONE_REQUEST"}
                     except Exception:
                         # No transport errors, tokens, URLs, or raw typed input leave the broker.
                         engine.observations.clear()
                         result = {"ok": False, "error": "PHONE_UNAVAILABLE", "next": "Observe again; an interrupted action must not be replayed"}
+                    try:
+                        latest_control = json.loads((root() / "control.json").read_text())
+                    except (OSError, ValueError):
+                        latest_control = {}
+                    if latest_control.get("generation") != generation:
+                        engine.observations.clear()
+                        result["control_changed"] = True
+                        result["ok"] = False
+                        if latest_control.get("stopped", True):
+                            for name in ("latest.png", "latest.jpg"):
+                                (root() / name).unlink(missing_ok=True)
+                        for observation in (result, result.get("after", {})):
+                            if "vision" in observation:
+                                observation["vision"] = {"ready": False, "reason": "CONTROL_CHANGED"}
+                                observation["screenshot_path"] = None
+                    engine.paused = latest_control.get("enabled") is not True
                     vision = result.get("vision", result.get("after", {}).get("vision", {})).get("ready", False)
-                    (root() / "status.json").write_text(json.dumps({"at": int(time.time()), "vision": vision, "control": not engine.paused}))
+                    (root() / "status.json").write_text(json.dumps({"at": int(time.time()), "vision": vision, "control": not engine.paused and result.get("ok") is True, "generation": latest_control.get("generation")}))
                     encoded = json.dumps(safe_result(result)).encode()
                     if len(encoded) > LIMIT:
                         encoded = b'{"ok":false,"error":"RESPONSE_TOO_LARGE"}'
                     connection.send_bytes(encoded)
-            except (OSError, EOFError, ValueError):
+            except (OSError, EOFError, ValueError, AuthenticationError):
                 # One caller cannot tear down the broker. No request is replayed.
                 continue
 
