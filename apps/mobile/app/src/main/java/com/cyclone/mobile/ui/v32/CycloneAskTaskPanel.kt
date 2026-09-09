@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -185,7 +186,7 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
 }
 
 @Composable
-private fun TaskSwipeBackground(offsetPx: Float, leftLabel: String, terminal: Boolean) {
+private fun BoxScope.TaskSwipeBackground(offsetPx: Float, leftLabel: String, terminal: Boolean) {
     val draggingRight = offsetPx > 0f
     val color = when {
         draggingRight -> MaterialTheme.colorScheme.primaryContainer
@@ -280,6 +281,7 @@ private fun ActiveTaskContent(
     presentation: TaskGlassCardModel,
     onOpen: () -> Unit,
 ) {
+    val context = LocalContext.current
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -337,7 +339,7 @@ private fun ActiveTaskContent(
             }
             if (task.working) {
                 FilledTonalIconButton(
-                    onClick = { WorkspaceTasks.command(LocalContext.current, task, "pause") },
+                    onClick = { WorkspaceTasks.command(context, task, "pause") },
                     modifier = Modifier.size(48.dp),
                 ) {
                     Icon(Icons.Rounded.Pause, "Pause task", Modifier.size(20.dp))
