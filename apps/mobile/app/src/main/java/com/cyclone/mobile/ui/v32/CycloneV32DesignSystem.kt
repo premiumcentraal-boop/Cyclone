@@ -1,6 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -22,6 +22,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextStyle
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -32,69 +34,86 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
-private val Ink = Color(0xFF182038)
-private val InkMuted = Color(0xFF69708A)
-private val Periwinkle = Color(0xFF1264FF)
-private val PeriwinkleSoft = Color(0xFFE4EEFF)
-private val WarmIce = Color(0xFFF6F8FD)
-private val SoftSurface = Color(0xFFEDF2FA)
+private val Ink = Color(0xFF171A24)
+private val InkMuted = Color(0xFF666C7D)
+private val Accent = Color(0xFF5F6EEA)
+private val AccentSoft = Color(0xFFE9EBFF)
+private val Canvas = Color(0xFFF7F8FC)
+private val SoftSurface = Color(0xFFF0F2F8)
 
 private val CycloneV32LightColors = lightColorScheme(
-    primary = Periwinkle,
+    primary = Accent,
     onPrimary = Color.White,
-    primaryContainer = PeriwinkleSoft,
-    onPrimaryContainer = Color(0xFF20295E),
-    secondary = Color(0xFF397B67),
+    primaryContainer = AccentSoft,
+    onPrimaryContainer = Color(0xFF222A61),
+    secondary = Color(0xFF28775F),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFCFF4DF),
-    onSecondaryContainer = Color(0xFF153B30),
-    tertiary = Color(0xFF805B15),
-    tertiaryContainer = Color(0xFFFFE6A7),
-    onTertiaryContainer = Color(0xFF3B2B08),
-    background = WarmIce,
+    secondaryContainer = Color(0xFFDDF4EA),
+    onSecondaryContainer = Color(0xFF123A2E),
+    tertiary = Color(0xFF85631B),
+    tertiaryContainer = Color(0xFFFFEDBE),
+    onTertiaryContainer = Color(0xFF40320B),
+    background = Canvas,
     onBackground = Ink,
     surface = Color.White,
     onSurface = Ink,
     surfaceVariant = SoftSurface,
     onSurfaceVariant = InkMuted,
-    outline = Color(0xFFB8BDD0),
-    outlineVariant = Color(0xFFDDE0EB),
-    error = Color(0xFFBA4052),
-    errorContainer = Color(0xFFFFD9DE),
-    onErrorContainer = Color(0xFF5B1420),
+    outline = Color(0xFFB7BCC9),
+    outlineVariant = Color(0xFFE2E5ED),
+    error = Color(0xFFB64050),
+    errorContainer = Color(0xFFFFE1E5),
+    onErrorContainer = Color(0xFF5A1620),
 )
 
 private val CycloneV32DarkColors = darkColorScheme(
-    primary = Color(0xFF89B4FF),
-    onPrimary = Color(0xFF182052),
-    primaryContainer = Color(0xFF303C70),
-    onPrimaryContainer = Color(0xFFE3E6FF),
-    secondary = Color(0xFF8AD8BE),
-    secondaryContainer = Color(0xFF264E43),
-    onSecondaryContainer = Color(0xFFD8FFEF),
-    tertiary = Color(0xFFFFD178),
-    tertiaryContainer = Color(0xFF53552E),
-    onTertiaryContainer = Color(0xFFFFF3B7),
-    background = Color(0xFF080F1D),
-    onBackground = Color(0xFFF5F6FF),
-    surface = Color(0xFF111D30),
-    onSurface = Color(0xFFF5F6FF),
-    surfaceVariant = Color(0xFF242D49),
-    onSurfaceVariant = Color(0xFFB9C0D9),
-    outline = Color(0xFF7C849D),
-    outlineVariant = Color(0xFF38425F),
-    error = Color(0xFFFFB2BD),
-    errorContainer = Color(0xFF652D3A),
-    onErrorContainer = Color(0xFFFFD9DE),
+    primary = Color(0xFFB9C1FF),
+    onPrimary = Color(0xFF1F285D),
+    primaryContainer = Color(0xFF303866),
+    onPrimaryContainer = Color(0xFFE6E8FF),
+    secondary = Color(0xFF91D9C0),
+    secondaryContainer = Color(0xFF21483C),
+    onSecondaryContainer = Color(0xFFD9FFF1),
+    tertiary = Color(0xFFFFD98A),
+    tertiaryContainer = Color(0xFF4A4027),
+    onTertiaryContainer = Color(0xFFFFF2CB),
+    background = Color(0xFF0D0F14),
+    onBackground = Color(0xFFF3F4F8),
+    surface = Color(0xFF151820),
+    onSurface = Color(0xFFF3F4F8),
+    surfaceVariant = Color(0xFF20242E),
+    onSurfaceVariant = Color(0xFFB8BDCA),
+    outline = Color(0xFF7A8090),
+    outlineVariant = Color(0xFF303540),
+    error = Color(0xFFFFB4BF),
+    errorContainer = Color(0xFF632D38),
+    onErrorContainer = Color(0xFFFFDFE3),
 )
 
 private val CycloneV32Shapes = Shapes(
-    extraSmall = RoundedCornerShape(12.dp),
-    small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(26.dp),
-    extraLarge = RoundedCornerShape(32.dp),
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+val CycloneTypography = Typography(
+    displaySmall = TextStyle(fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold),
+    headlineLarge = TextStyle(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold),
+    headlineMedium = TextStyle(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold),
+    headlineSmall = TextStyle(fontSize = 21.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Normal),
+    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Normal),
+    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+    labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold),
+    labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
 )
 
 @Composable
@@ -114,7 +133,7 @@ data class CyclonePastelColors(val container: Color, val content: Color)
 
 @Composable
 fun cyclonePastel(tone: CyclonePastel): CyclonePastelColors {
-    // Legacy callers share the same neutral surface; app icons provide identity.
+    // Legacy tone callers intentionally collapse into the shared neutral system.
     return CyclonePastelColors(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)
 }
 
@@ -130,16 +149,24 @@ fun CycloneHeroCard(
     val colors = cyclonePastel(tone)
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = colors.container, contentColor = colors.content),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Surface(shape = CircleShape, color = colors.content.copy(alpha = 0.12f), contentColor = colors.content) {
-                Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) { Icon(icon, null, modifier = Modifier.size(27.dp)) }
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.primary,
+            ) {
+                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                    Icon(icon, null, modifier = Modifier.size(22.dp))
+                }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(body, style = MaterialTheme.typography.bodyMedium, color = colors.content.copy(alpha = 0.78f))
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(title, style = MaterialTheme.typography.titleLarge)
+                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             action?.invoke()
         }
@@ -148,8 +175,12 @@ fun CycloneHeroCard(
 
 @Composable
 fun CycloneSectionTitle(title: String, action: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         action?.invoke()
     }
 }
@@ -161,7 +192,11 @@ fun CycloneStatusPill(label: String, positive: Boolean = true) {
         color = if (positive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
         contentColor = if (positive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
     ) {
-        Text(label, modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 
@@ -172,18 +207,24 @@ fun CycloneSimpleCard(
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
     }
 }
 
 @Composable
 fun CyclonePageIntro(eyebrow: String, title: String, body: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(eyebrow.uppercase(), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            eyebrow.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(title, style = MaterialTheme.typography.headlineMedium)
         Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(2.dp))
     }
@@ -192,25 +233,46 @@ fun CyclonePageIntro(eyebrow: String, title: String, body: String) {
 @Composable
 fun CycloneV32Theme(content: @Composable () -> Unit) = CycloneTheme(content)
 
-val CycloneTypography = androidx.compose.material3.Typography()
 object CycloneColors {
-    val Blue = Color(0xFF1264FF)
-    val Cyan = Color(0xFF06B6D4)
+    val Blue = Accent
+    val Cyan = Color(0xFF06A9C4)
     val Success = Color(0xFF168653)
 }
+
 object CycloneSpacing {
+    val Tiny = 4.dp
     val Small = 8.dp
     val Content = 16.dp
+    val Page = 18.dp
     val Section = 24.dp
     val ComposerLift = 30.dp
 }
+
 @Composable
 fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(modifier, shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface, content = content)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        content = content,
+    )
 }
+
 @Composable
 fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(modifier.animateContentSize(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f), tonalElevation = 0.dp, shadowElevation = 0.dp, content = content)
+    Surface(
+        modifier = modifier.animateContentSize(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .72f)),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        content = content,
+    )
 }
+
 @Composable
 fun CycloneStatus(label: String, positive: Boolean = true) = CycloneStatusPill(label, positive)
