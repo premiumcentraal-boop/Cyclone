@@ -187,10 +187,10 @@ class VideoStreamController:
                 "media": media,
             }
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, fresh: bool = False) -> dict[str, Any]:
         """Return one bounded image for evidence/degraded preview, never the primary live path."""
         with self._lock:
-            meta = self._last_frame_meta
+            meta = None if fresh else self._last_frame_meta
             sequence = self._sequence
         if meta is None:
             try:

@@ -20,3 +20,83 @@ def validate_request(request):
         elif not isinstance(value, str) or len(value) > (4000 if key == "text" else 240):
             raise ValueError("Invalid bounded parameter")
     return dict(request)
+
+import os
+import threading
+import time
+from pathlib import Path
+from .tools import PhoneTools
+from .protocol import classify_failure
+
+
+class LivePhone:
+    def __init__(self, tools=None, root=None):
+        self.tools = tools or PhoneTools()
+        self.root = Path(root or Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "Cyclone One" / "live-phone")
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.Lock()
+        self.observations = {}
+        self.paused = True  # One's user must explicitly enable cloud control.
+        self.last_seen = 0.0
+
+    def _args(self, request):
+        if not request.get("device"):
+            raise ValueError("Choose a device from devices first")
+        return {"device_id": request["device"], "session_id": SESSION, "display_id": DISPLAY}
+
+    def _image(self, raw):
+        screenshot = raw.get("screenshot") or {}
+        artifact = screenshot.get("artifact") or {}
+        reference = artifact.get("reference")
+        if screenshot.get("available") is not True or not reference:
+            return {"ready": False, "reason": "CURRENT_SCREENSHOT_UNAVAILABLE"}
+        source = Path(reference).resolve()
+        runtime = Path(os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", str(self.root.parent / "runtime"))).resolve()
+        if not source.is_relative_to(runtime / "fleet-screenshots") or not source.is_file() or source.stat().st_size > 8 * 1024 * 1024:
+            return {"ready": False, "reason": "INVALID_SCREENSHOT_ARTIFACT"}
+        data = source.read_bytes()
+        suffix = ".png" if data.startswith(b"\x89PNG\r\n\x1a\n") else ".jpg" if data.startswith(b"\xff\xd8\xff") else None
+        if not suffix:
+            return {"ready": False, "reason": "INVALID_IMAGE"}
+        target = self.root / ("latest" + suffix)
+        temp = target.with_suffix(".tmp")
+        temp.write_bytes(data)
+        temp.replace(target)
+        return {"ready": True, "path": str(target), "captured_at": artifact.get("timestampMs"), "width": artifact.get("width"), "height": artifact.get("height")}
+
+    def observe(self, request):
+        args = self._args(request)
+        raw = self.tools.gateway.device_observe(args["device_id"], include_screenshot=True, mode="compact", session_id=SESSION, display_id=DISPLAY)
+        failure = classify_failure(raw)
+        if failure:
+            self.observations.pop(args["device_id"], None)
+            return {"ok": False, "error": failure.code}
+        card = self.tools._remember_page_card(args["device_id"], raw, session_id=SESSION)
+        observation_id = card.get("observationScope", {}).get("id")
+        image = self._image(raw)
+        if observation_id:
+            self.observations[args["device_id"]] = (observation_id, time.monotonic(), image["ready"])
+        return {"ok": bool(observation_id), "mode": "LIVE PHONE", "session_id": SESSION, "display_id": DISPLAY, "observation_id": observation_id, "ui": card, "vision": image, "screenshot_path": image.get("path")}
+
+    def execute(self, request):
+        request = validate_request(request)
+        with self.lock:
+            self.last_seen = time.monotonic()
+            op = request["operation"]
+            if op == "devices":
+                raw = self.tools.phone_devices({})
+                return {"devices": [{k: d[k] for k in ("device_id", "deviceId", "label", "state") if k in d} for d in raw.get("devices", [])]}
+            if op == "status":
+                return {"mode": "LIVE PHONE", "control": "Paused" if self.paused else "Ready", "session_id": SESSION, "display_id": DISPLAY}
+            if op in {"observe", "screenshot"}:
+                return self.observe(request)
+            args = self._args(request)
+            if op == "locate":
+                result = self.tools.phone_locate({**args, "goal": request.get("goal", "")})
+                card = result.get("pageCard", {})
+                ident = card.get("observationScope", {}).get("id")
+                self.observations[args["device_id"]] = (ident, time.monotonic(), False)
+                return result
+            if op == "inspect":
+                return self.tools.phone_inspect_element({**args, "element_id": request.get("element", "")})
+            raise ValueError("Action checkpoint not installed")

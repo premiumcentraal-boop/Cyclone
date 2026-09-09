@@ -214,7 +214,7 @@ class DesktopAgentService:
             "screenshot": None,
         }
         if include_screenshot:
-            response["screenshot"] = self.screenshot(device_id, profile="thumbnail")["screenshot"]
+            response["screenshot"] = self.screenshot(device_id, profile="live-phone")["screenshot"]
         return response
 
     def ui_search(self, device_id: str, query: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -621,7 +621,7 @@ class DesktopAgentService:
     def screenshot(self, device_id: str, *, profile: str = "thumbnail") -> dict[str, Any]:
         """Return a bounded per-device artifact reference, never frame bytes or a hidden default phone."""
         session = self.fleet.get(device_id)
-        if profile not in {"thumbnail", "focus"}:
+        if profile not in {"thumbnail", "focus", "live-phone"}:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unknown screenshot profile.")
         if str(getattr(getattr(session, "adb_device", None), "state", "") or "") != "device":
             return self._screenshot_unavailable(session, device_id, "SCREENSHOT_USB_UNAVAILABLE", "USB authorization is required for screenshots.")
