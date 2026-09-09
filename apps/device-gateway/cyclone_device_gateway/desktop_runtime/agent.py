@@ -217,7 +217,7 @@ class DesktopAgentService:
             "screenshot": None,
         }
         if include_screenshot:
-            response["screenshot"] = self.screenshot(device_id, profile="live-phone")["screenshot"]
+            response["screenshot"] = self.screenshot(device_id, profile="live-phone" if (payload or {}).get("livePhone") is True else "thumbnail")["screenshot"]
         return response
 
     def ui_search(self, device_id: str, query: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

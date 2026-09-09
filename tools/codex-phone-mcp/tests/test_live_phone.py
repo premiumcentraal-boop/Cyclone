@@ -106,3 +106,36 @@ class LivePhoneTests(unittest.TestCase):
             self.assertTrue(call.call_args.args[2]['livePhone'])
 
 if __name__ == '__main__': unittest.main()
+
+@unittest.skipUnless(__import__('os').name == 'nt', 'Windows named-pipe/DPAPI integration')
+class WindowsLivePhoneIpcTests(unittest.TestCase):
+    def test_broker_restart_preserves_private_address_but_revokes_observations(self):
+        import multiprocessing
+        import os
+        from cyclone_phone_mcp.live_phone_ipc import serve, request_one, root
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'LOCALAPPDATA': folder, 'CYCLONE_DEVICE_GATEWAY_TOKEN': 'test-only', 'CYCLONE_DEVICE_GATEWAY_URL': 'http://127.0.0.1:1'}):
+            root().mkdir(parents=True)
+            (root() / 'control.json').write_text('{"enabled":true,"stopped":false}')
+            def launch():
+                process = multiprocessing.get_context('spawn').Process(target=serve, daemon=True)
+                process.start()
+                for _ in range(100):
+                    try:
+                        result = request_one({'operation': 'status'})
+                        self.assertEqual('LIVE PHONE', result['mode'])
+                        return process
+                    except (OSError, FileNotFoundError):
+                        time.sleep(.1)
+                process.terminate()
+                process.join(5)
+                self.fail('Private IPC did not start')
+            first = launch()
+            first.terminate()
+            first.join(5)
+            second = launch()
+            try:
+                result = request_one({'operation': 'back', 'device': 'pixel', 'goal': 'Back', 'observation_id': 'before-restart'})
+                self.assertEqual('STALE_OBSERVATION', result['error'])
+            finally:
+                second.terminate()
+                second.join(5)
