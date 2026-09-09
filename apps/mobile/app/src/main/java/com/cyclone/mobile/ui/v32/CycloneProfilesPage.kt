@@ -2,13 +2,11 @@ package com.cyclone.mobile.ui.v32
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -114,13 +112,11 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
                         )
                     } else switched
                 }
-                if (!result.ok) {
-                    error = "Couldn't hand control to you safely. Review the current task or check profile setup."
-                }
+                if (!result.ok) error = "Couldn't hand control to you safely. Check the task or profile setup."
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                error = "Profile opening was interrupted. You can try again."
+                error = "Profile opening was interrupted. Try again."
             } finally {
                 busy = false
             }
@@ -144,65 +140,16 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
 
     if (selected != null) {
         val exactTask = task?.takeIf { UiTask(it).belongsToProfile(selected.id) }
-        val stateLabel = profileStateLabel(selected, waiting, exactTask)
-        LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { TextButton(onClick = { selectedId = null }) { Text("‹ Profiles") } }
-            item {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        CycloneAppIcon(selected.appPackage, Modifier.padding(8.dp).size(36.dp))
-                    }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(selected.label, style = MaterialTheme.typography.headlineSmall)
-                        Text(appLabel(context, selected.appPackage), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    ProfileStatePill(stateLabel, stateLabel !in setOf("Needs you", "Couldn't load"))
-                }
-            }
-
-            if (exactTask != null) {
-                item { CycloneTaskProgress(exactTask) }
-                if (exactTask.steps.isNotEmpty()) {
-                    item { CycloneSectionTitle("Recent activity") }
-                    items(exactTask.steps.takeLast(6)) { step ->
-                        CycloneSimpleCard(Modifier.fillMaxWidth()) {
-                            Text(step, style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                }
-            } else {
-                item {
-                    CycloneSimpleCard(Modifier.fillMaxWidth()) {
-                        Text(
-                            if (selected.id in waiting) "Waiting for Cyclone" else "No active task",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        Text(
-                            if (selected.id in waiting) "Cyclone will rotate into this profile when it is ready." else "This profile is ready for a new task.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            item {
-                Button(
-                    enabled = !busy,
-                    onClick = { openForHuman(selected) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(if (busy) "Opening…" else "Take control")
-                }
-            }
-            if (error.isNotBlank()) {
-                item { Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            }
-        }
+        ProfileDetail(
+            context = context,
+            profile = selected,
+            waiting = selected.id in waiting,
+            task = exactTask,
+            busy = busy,
+            error = error,
+            onBack = { selectedId = null },
+            onTakeControl = { openForHuman(selected) },
+        )
         return
     }
 
@@ -210,8 +157,12 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
         destination.androidUserId != Layer2Workspaces.currentAndroidUserId() &&
             profiles.none { it.androidUserId == destination.androidUserId }
     }
+    val totalVisibleProfiles = profiles.size + incompleteInventory.size
 
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(
+        contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -222,8 +173,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                FilledIconButton(onClick = { setup = true }, modifier = Modifier.size(42.dp)) {
-                    Icon(Icons.Rounded.Add, "Add profile", modifier = Modifier.size(20.dp))
+                FilledIconButton(onClick = { setup = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Rounded.Add, "Add profile", modifier = Modifier.size(22.dp))
                 }
             }
         }
@@ -235,9 +186,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
                         Text(issue.headline, style = MaterialTheme.typography.titleMedium)
                         Text(issue.reason, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (issue.retryUseful) {
-                            Button(onClick = { setup = true }, modifier = Modifier.fillMaxWidth()) {
-                                Text(issue.action)
-                            }
+                            Button(onClick = { setup = true }, modifier = Modifier.fillMaxWidth()) { Text(issue.action) }
                         } else {
                             Text(issue.action, style = MaterialTheme.typography.bodyMedium)
                         }
@@ -246,21 +195,48 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             }
         }
 
+        if (activeProfiles.size > 1) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .65f),
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Rounded.Sync, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "${activeProfiles.size} tasks active · Cyclone is rotating between profiles",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            CycloneSegmentedControl(
+                listOf("All ($totalVisibleProfiles)", "Active (${activeProfiles.size})"),
+                if (activeOnly) 1 else 0,
+                { activeOnly = it == 1 },
+            )
+        }
+
         task?.takeIf { UiTask(it).active }?.let { active ->
             item { CycloneSectionTitle("Active now") }
             item { CycloneTaskProgress(active) }
         }
 
-        if (activeProfiles.size > 1) {
+        if (activeOnly && activeProfiles.isEmpty()) {
             item {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(Icons.Rounded.Sync, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
+                CycloneSimpleCard(Modifier.fillMaxWidth()) {
+                    Text("Nothing active right now", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Cyclone rotates between ${activeProfiles.size} active profiles.",
+                        "Profiles with running or queued work will appear here automatically.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -268,26 +244,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             }
         }
 
-        item {
-            CycloneSegmentedControl(
-                listOf("All (${profiles.size})", "Active (${activeProfiles.size})"),
-                if (activeOnly) 1 else 0,
-                { activeOnly = it == 1 },
-            )
-        }
-
-        if (activeOnly && activeProfiles.isEmpty()) {
-            item {
-                CycloneSimpleCard(Modifier.fillMaxWidth()) {
-                    Text("Nothing active right now", style = MaterialTheme.typography.titleSmall)
-                    Text("Profiles with running or queued work will pin here automatically.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-
-        if (error.isNotEmpty()) {
-            item { Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        }
+        if (error.isNotEmpty()) item { Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 
         items(visibleProfiles, key = { it.id }) { profile ->
             val exactTask = task?.takeIf { UiTask(it).belongsToProfile(profile.id) }
@@ -303,39 +260,19 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
         if (!activeOnly && incompleteInventory.isNotEmpty()) {
             item { CycloneSectionTitle("Finish setup") }
             items(incompleteInventory, key = { "profile-${it.androidUserId}" }) { profile ->
-                Card(
-                    onClick = { setup = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                ) {
-                    Row(
-                        Modifier.padding(15.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Surface(shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.Person, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(profile.label, style = MaterialTheme.typography.titleSmall)
-                            Text("Choose apps to finish this profile", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                IncompleteProfileCard(profile.label) { setup = true }
             }
         }
 
-        if (!activeOnly && profiles.isEmpty() && incompleteInventory.isEmpty() && profileSetup.issue == null) {
+        if (!activeOnly && totalVisibleProfiles == 0 && profileSetup.issue == null) {
             item {
                 CycloneSimpleCard(Modifier.fillMaxWidth()) {
                     Text("Add your first profile", style = MaterialTheme.typography.titleMedium)
-                    Text("Keep another account or app setup ready for Cyclone without mixing its app data with your main profile.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Keep another account or app setup ready for Cyclone without mixing its app data with your main profile.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Button(onClick = { setup = true }, modifier = Modifier.fillMaxWidth()) { Text("Add profile") }
                 }
             }
@@ -343,6 +280,81 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     }
 
     if (setup) ProfileSetupPage { setup = false }
+}
+
+@Composable
+private fun ProfileDetail(
+    context: Context,
+    profile: Workspace,
+    waiting: Boolean,
+    task: com.cyclone.mobile.runtime.background.WorkspaceTaskUi?,
+    busy: Boolean,
+    error: String,
+    onBack: () -> Unit,
+    onTakeControl: () -> Unit,
+) {
+    val stateLabel = profileStateLabel(profile, if (waiting) listOf(profile.id) else emptyList(), task)
+    LazyColumn(
+        contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item { TextButton(onClick = onBack) { Text("‹ Profiles") } }
+        item {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    CycloneAppIcon(profile.appPackage, Modifier.padding(8.dp).size(36.dp))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(profile.label, style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        appLabel(context, profile.appPackage),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                ProfileStatePill(stateLabel)
+            }
+        }
+
+        if (task != null) {
+            item { CycloneTaskProgress(task) }
+            if (task.steps.isNotEmpty()) {
+                item { CycloneSectionTitle("Recent activity") }
+                items(task.steps.takeLast(6)) { step ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 1.dp,
+                    ) {
+                        Text(step, Modifier.padding(horizontal = 14.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        } else {
+            item {
+                CycloneSimpleCard(Modifier.fillMaxWidth()) {
+                    Text(if (waiting) "Waiting for Cyclone" else "Ready for work", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (waiting) "Cyclone will rotate into this profile when it is ready." else "No task is using this profile right now.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        item {
+            Button(enabled = !busy, onClick = onTakeControl, modifier = Modifier.fillMaxWidth()) {
+                Text(if (busy) "Opening…" else "Take control")
+            }
+        }
+        if (error.isNotBlank()) item { Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    }
 }
 
 @Composable
@@ -359,11 +371,10 @@ private fun ProfileCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Row(
-            Modifier.padding(15.dp),
+            Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -373,37 +384,64 @@ private fun ProfileCard(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(profile.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    task?.title?.takeIf { it.isNotBlank() } ?: appLabel(context, profile.appPackage),
+                    task?.subtitle?.takeIf { it.isNotBlank() } ?: appLabel(context, profile.appPackage),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            ProfileStatePill(stateLabel, stateLabel !in setOf("Needs you", "Couldn't load"))
-            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            ProfileStatePill(stateLabel)
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .72f))
         }
     }
 }
 
 @Composable
-private fun ProfileStatePill(label: String, positive: Boolean) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = when {
-            label == "Needs you" -> MaterialTheme.colorScheme.tertiaryContainer
-            label == "Working" -> MaterialTheme.colorScheme.primaryContainer
-            positive -> MaterialTheme.colorScheme.surfaceVariant
-            else -> MaterialTheme.colorScheme.errorContainer
-        },
-        contentColor = when {
-            label == "Needs you" -> MaterialTheme.colorScheme.onTertiaryContainer
-            label == "Working" -> MaterialTheme.colorScheme.primary
-            positive -> MaterialTheme.colorScheme.onSurfaceVariant
-            else -> MaterialTheme.colorScheme.onErrorContainer
-        },
+private fun IncompleteProfileCard(label: String, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
-        Text(label, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+        Row(
+            Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Person, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, style = MaterialTheme.typography.titleSmall)
+                Text("Choose apps to finish this profile", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("Setup", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .72f))
+        }
+    }
+}
+
+@Composable
+private fun ProfileStatePill(label: String) {
+    val (container, content) = when (label) {
+        "Needs you" -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        "Working" -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
+        "Ready" -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+        "Couldn't load" -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(shape = RoundedCornerShape(999.dp), color = container, contentColor = content) {
+        Text(
+            label,
+            Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
