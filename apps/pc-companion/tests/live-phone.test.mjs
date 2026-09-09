@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { livePhoneLabels } from "../.test-dist/core/livePhone.js";
-import { DIRECT_LIVE_PHONE_AGENT_PROMPT } from "../.test-dist/core/directLivePhone.js";
+import { DIRECT_LIVE_PHONE_AGENT_PROMPT, directLivePhoneHandoff } from "../.test-dist/core/directLivePhone.js";
 
 test("Live Phone excludes virtual devices and does not invent readiness", () => {
   const labels = livePhoneLabels(
@@ -22,6 +22,7 @@ test("Direct connector readiness is distinct from fallback PC activity", () => {
   assert.match(labels.accessibility,/Ready/);
   assert.equal(labels.control,"Control · Ready");
 });
+
 test("Stop overrides old ready status", () => {
   const labels=livePhoneLabels({connected:true,vision:false,control:true,enabled:false,stopped:true},[]);
   assert.equal(labels.control,"Control · Stopped");
@@ -34,4 +35,13 @@ test("Direct Live Phone prompt teaches typed foreground MCP without routing Code
   assert.match(DIRECT_LIVE_PHONE_AGENT_PROMPT,/default-foreground/);
   assert.match(DIRECT_LIVE_PHONE_AGENT_PROMPT,/Never retry an uncertain mutation/);
   assert.doesNotMatch(DIRECT_LIVE_PHONE_AGENT_PROMPT,/CycloneAgentMCP/);
+});
+
+test("one-step cloud handoff carries one connector bundle with an explicit privacy warning", () => {
+  const handoff = directLivePhoneHandoff("https://example.test/mcp", "private-bearer-value");
+  assert.match(handoff,/CONNECTION HANDOFF/);
+  assert.match(handoff,/https:\/\/example\.test\/mcp/);
+  assert.match(handoff,/private-bearer-value/);
+  assert.match(handoff,/Do not paste it into a normal AI chat/);
+  assert.match(handoff,/cyclone_phone_devices/);
 });
