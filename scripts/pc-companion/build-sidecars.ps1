@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $Lock = Get-Content (Join-Path $Repo 'packaging\pc-companion\sidecar-build.lock.json') -Raw | ConvertFrom-Json
 $BuildVenv = Join-Path $Repo 'build\pc-sidecar-venv'

@@ -111,6 +111,14 @@ class LivePhoneTests(unittest.TestCase):
         self.assertNotIn('23456', json.dumps(result))
         self.assertEqual('Settings', result['ui'])
 
+    def test_typed_password_otp_and_key_never_return_in_response(self):
+        secrets = ('Password-123!', '654321', 'api-key-example')
+        response = {'after': {'ui': {'text': 'Password-123! api-key-example', 'otp': 654321}}, 'status': {'control': True}}
+        encoded = json.dumps(safe_result(response, secrets))
+        for secret in secrets:
+            self.assertNotIn(secret, encoded)
+        self.assertTrue(safe_result(response, secrets)['status']['control'])
+
     def test_live_marker_does_not_change_native_client(self):
         with patch('cyclone_phone_mcp.live_phone_ipc.GatewayClient._request', return_value={}) as call:
             gateway = LiveGateway(base_url='http://127.0.0.1:1234', token='test')

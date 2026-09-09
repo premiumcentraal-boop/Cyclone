@@ -54,13 +54,20 @@ class LiveGateway(GatewayClient):
         return super()._request(method, path, payload)
 
 
-def safe_result(value):
+def safe_result(value, typed_values=()):
     import re
     if isinstance(value, dict):
-        return {k: safe_result(v) for k, v in value.items() if not any(word in k.lower() for word in ("token", "bearer", "authorization", "base_url", "http_base", "ws_base"))}
+        return {k: safe_result(v, typed_values) for k, v in value.items() if not any(word in k.lower() for word in ("token", "bearer", "authorization", "base_url", "http_base", "ws_base"))}
     if isinstance(value, list):
-        return [safe_result(v) for v in value]
-    if isinstance(value, str):
+        return [safe_result(v, typed_values) for v in value]
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        text = str(value)
+        for secret in typed_values:
+            if secret and secret in text:
+                text = text.replace(secret, "[typed value redacted]")
+        if not isinstance(value, str) and text == str(value):
+            return value
+        value = text
         return re.sub(r"(?:https?|wss?)://(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?[^\s\"']*", "[private runtime]", value)
     return value
 
@@ -68,6 +75,7 @@ def safe_result(value):
 def serve():
     engine = LivePhone(PhoneTools(gateway=LiveGateway()))
     generation = None
+    typed_values = []
     with Listener(address(), family="AF_PIPE", authkey=key(create=True)) as listener:
         while True:
             try:
@@ -75,6 +83,9 @@ def serve():
                     if not connection.poll(5):
                         continue
                     request = validate_request(json.loads(connection.recv_bytes(16 * 1024)))
+                    if request.get("operation") == "type" and request.get("text"):
+                        typed_values.append(request["text"])
+                        typed_values = typed_values[-32:]
                     try:
                         control = json.loads((root() / "control.json").read_text())
                     except (OSError, ValueError):
@@ -113,7 +124,7 @@ def serve():
                     engine.paused = latest_control.get("enabled") is not True
                     vision = result.get("vision", result.get("after", {}).get("vision", {})).get("ready", False)
                     (root() / "status.json").write_text(json.dumps({"at": int(time.time()), "vision": vision, "control": not engine.paused and result.get("ok") is True, "generation": latest_control.get("generation")}))
-                    encoded = json.dumps(safe_result(result)).encode()
+                    encoded = json.dumps(safe_result(result, typed_values)).encode()
                     if len(encoded) > LIMIT:
                         encoded = b'{"ok":false,"error":"RESPONSE_TOO_LARGE"}'
                     connection.send_bytes(encoded)

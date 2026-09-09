@@ -37,14 +37,14 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const remoteMount = el("div", "remote-mcp-mount");
   const localHeading = el("div", "connections-section-heading local-ai-heading");
   localHeading.append(
-    el("h2", "connections-section-title", "ON PC AI"),
+    el("h2", "connections-section-title", "ON PC AI · Use AI on this PC"),
     el("p", "connections-section-copy", "These connect directly to Cyclone on this PC. They do not need the public Remote MCP URL."),
   );
   const grid = el("div", "connections-grid codex-connections-grid");
   grid.append(el("div", "loading-card", "Checking local AI connections…"));
   const live = el("section", "settings-card");
-  live.append(el("h2", "connections-section-title", "LIVE PHONE"),
-    el("p", "connections-section-copy", "Cloud ChatGPT through your PC connector. Controls the physical phone screen you are looking at."));
+  live.append(el("h2", "connections-section-title", "LIVE PHONE · Control the phone I’m holding"),
+    el("p", "connections-section-copy", "Cloud ChatGPT through your PC connector. Controls the physical phone screen you are looking at. Start again after reopening One. Vision uses fresh screenshots per observation, not continuous video."));
   const liveState = el("p", "connections-section-copy", "Waiting for a Live Phone request");
   const livePhone = el("p", "connections-section-copy", "Checking physical phone…");
   const liveCloud = el("p", "connections-section-copy", "Cloud ChatGPT · PC connector route");
@@ -78,7 +78,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   };
   const liveTimer = setInterval(() => { void refreshLive(); }, 3000);
   const background = el("section", "connections-section-heading");
-  background.append(el("h2", "connections-section-title", "BACKGROUND PHONE"), el("p", "connections-section-copy", "Existing session workspaces and app profiles. Separate from Live Phone."));
+  background.append(el("h2", "connections-section-title", "BACKGROUND PHONE · Advanced workspaces"), el("p", "connections-section-copy", "Existing session workspaces and app profiles. Separate from Live Phone."));
   page.append(header, localHeading, grid, live, remoteMount, background);
 
   let active = true;
