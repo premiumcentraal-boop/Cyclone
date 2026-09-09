@@ -126,7 +126,7 @@ object OverlayChromeRuntime {
         synchronized(lock) {
             OverlayExternalInteraction.active.value = false
             // Task presentation ends; the accessibility-owned entry point does not.
-            machine.resetIdle(idleChipVisible = true)
+            if (!hasExecutingTask()) machine.resetIdle(idleChipVisible = true)
             mutableActivity.value = machine.state()
             controller?.background(null)
             controller?.render(machine.snapshot())
@@ -134,6 +134,7 @@ object OverlayChromeRuntime {
     }
     /** Device hook: task cleanup retains the launcher; only service detach removes all windows. */
     fun overlayWindowCount(): Int = synchronized(lock) { controller?.attachedWindowCount() ?: 0 }
+    fun overlayLauncherCount(): Int = synchronized(lock) { controller?.attachedLauncherCount() ?: 0 }
 
     fun startAnalysis(
         sessionId: String,

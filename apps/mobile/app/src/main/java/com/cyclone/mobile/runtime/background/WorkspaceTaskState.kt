@@ -87,6 +87,10 @@ object WorkspaceTasks {
     const val PRODUCT_HOT_BACKGROUND_LIMIT = SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT
     private val mutable = MutableStateFlow<WorkspaceTaskUi?>(null)
     val state = mutable.asStateFlow()
+    internal fun publishStart(task: WorkspaceTaskUi) {
+        check(WorkspaceQueuePromotionPolicy.canPromote(mutable.value?.phase)) { "A task already owns the slot." }
+        mutable.value = task
+    }
     fun update(taskId: String, change: (WorkspaceTaskUi) -> WorkspaceTaskUi) {
         mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let(change) ?: it }
     }
@@ -215,7 +219,7 @@ object WorkspaceTasks {
         val task = WorkspaceTaskUi(UUID.randomUUID().toString(), app = label, packageName = packageName, goal = goal)
         val attachment = if (pending != null) pending.attachment else com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take()
         attachment?.let { attachments[task.taskId] = it }
-        mutable.value = task
+        publishStart(task)
         try { context.startForegroundService(Intent(context, WorkspaceTaskService::class.java)
             .putExtra("task", task.taskId).putExtra("goal", goal).putExtra("package", packageName).putExtra("label", label))
             pendingRequestId?.let(requests::remove) }
