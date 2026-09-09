@@ -61,7 +61,7 @@ class CycloneV39AiPageContractTest {
         assertTrue(page.contains("shadowElevation = 0.dp"))
         assertTrue(page.contains("outlineVariant.copy"))
         assertTrue(nav.contains("indicatorColor = if (isAi) Color.Transparent"))
-        assertTrue(nav.contains(".size(48.dp)"))
-        assertTrue(nav.contains("if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent"))
+        assertTrue(nav.contains(".size(44.dp)"))
+        assertTrue(nav.contains("if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant"))
     }
 }

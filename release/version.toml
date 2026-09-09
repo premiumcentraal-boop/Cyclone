@@ -1,17 +1,17 @@
 schema = 1
-product_version = "4.2.4"
+product_version = "4.2.5"
 channel = "development"
-android_version_code = 85
+android_version_code = 86
 python_version = "4.1.0"
 
 [components]
-mobile = "4.2.4"
+mobile = "4.2.5"
 pc_companion = "1.1.3"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.2.3"
+previous_mobile_version = "4.2.4"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"

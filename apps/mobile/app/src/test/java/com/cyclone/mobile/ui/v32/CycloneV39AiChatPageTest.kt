@@ -97,8 +97,8 @@ class CycloneV39AiChatPageTest {
         assertTrue(page.contains("const val PREFS = \"cyclone_ai\""))
         assertTrue(page.contains("const val MODEL_KEY = \"openrouter_model\""))
         val controls = source("CycloneIntelligenceControls.kt")
-        assertTrue(controls.contains("putString(\"openrouter_model\", id)"))
-        assertTrue(controls.contains("putString(\"openrouter_reasoning_effort\", effort)"))
+        assertTrue(controls.contains("putString(V39AiChatContract.MODEL_KEY, V39AiChatContract.storageId(next))"))
+        assertTrue(controls.contains("putString(\"openrouter_reasoning_effort\", level)"))
         assertTrue(page.contains("CycloneIntelligenceControls(enabled = !session.busy, onChanged"))
         assertTrue(page.contains("prefs.getString(V39AiChatContract.MODEL_KEY, null)"))
     }
