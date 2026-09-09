@@ -184,7 +184,10 @@ class DesktopAgentService:
     ) -> dict[str, Any]:
         session = self._paired(device_id)  # USB/trust pairing, not execution sessionId.
         identity = self._execution_identity(payload)
-        raw_observation = self._request(session, "observe.semantic", dict(identity or {}))
+        observe_args = dict(identity or {})
+        if (payload or {}).get("livePhone") is True:
+            observe_args["livePhone"] = True
+        raw_observation = self._request(session, "observe.semantic", observe_args)
         if identity:
             raw_observation.setdefault("sessionId", identity["sessionId"])
             raw_observation.setdefault("displayId", identity["displayId"])
@@ -288,6 +291,8 @@ class DesktopAgentService:
         if identity:
             args["sessionId"] = identity["sessionId"]
             args["displayId"] = identity["displayId"]
+        if payload.get("livePhone") is True:
+            args["livePhone"] = True
         if expected:
             args["currentObservationId"] = expected
         execution = self._request(session, "action.execute", args)

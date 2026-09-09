@@ -33,7 +33,8 @@
     "targets": ["nsis"],
     "externalBin": [
       "binaries/CyclonePCRuntime",
-      "binaries/CycloneAgentMCP"
+      "binaries/CycloneAgentMCP",
+      "binaries/CycloneLivePhone"
     ],
     "resources": [
       "resources/mcp-tunnel"

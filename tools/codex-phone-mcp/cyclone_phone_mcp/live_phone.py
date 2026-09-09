@@ -120,7 +120,7 @@ class LivePhone:
         if op in {"scroll", "swipe"}:
             params["direction"] = request.get("direction", "forward")
         if op == "open-app":
-            params["packageName"] = request.get("package", "")
+            params["package"] = request.get("package", "")
         goal = request.get("goal")
         if not goal:
             raise ValueError("Describe the intended result with goal")

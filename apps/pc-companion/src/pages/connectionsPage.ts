@@ -235,6 +235,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   return {
     element: page,
     destroy: () => {
+      clearInterval(liveTimer);
       active = false;
       window.clearInterval(remoteTimer);
       window.clearInterval(localTimer);

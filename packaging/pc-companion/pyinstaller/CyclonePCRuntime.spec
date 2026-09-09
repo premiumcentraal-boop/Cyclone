@@ -5,7 +5,7 @@ entrypoints = repo / "scripts" / "pc-companion" / "entrypoints"
 scrcpy = repo / "apps" / "device-gateway" / "third_party" / "scrcpy"
 a = Analysis(
     [str(entrypoints / "pc_runtime.py")],
-    pathex=[str(repo / "apps" / "device-gateway"), str(entrypoints)],
+    pathex=[str(repo / "tools" / "codex-phone-mcp"), str(repo / "apps" / "device-gateway"), str(entrypoints)],
     binaries=[],
     datas=[
         (str(scrcpy / "scrcpy-server-v4.0"), "third_party/scrcpy"),
@@ -13,7 +13,7 @@ a = Analysis(
         (str(scrcpy / "LICENSE"), "third_party/scrcpy"),
         (str(scrcpy / "NOTICE.md"), "third_party/scrcpy"),
     ],
-    hiddenimports=["secure_gateway_token", "cyclone_device_gateway.tooling_seam"],
+    hiddenimports=["cyclone_phone_mcp.live_phone_ipc", "secure_gateway_token", "cyclone_device_gateway.tooling_seam"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

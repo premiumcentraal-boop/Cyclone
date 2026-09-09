@@ -230,24 +230,28 @@ pub fn run() {
         .setup(move |app| {
             let runtime_dir = app.path().app_local_data_dir()?.join("runtime");
             std::fs::create_dir_all(&runtime_dir)?;
-            let command = app
-                .shell()
-                .sidecar("CyclonePCRuntime")?
-                .arg("serve")
-                .env("CYCLONE_DEVICE_GATEWAY_TOKEN", &runtime_token)
-                .env("CYCLONE_DEVICE_GATEWAY_URL", &runtime_http_base)
-                .env("CYCLONE_DEVICE_GATEWAY_PORT", &runtime_port)
-                .env(
-                    "CYCLONE_DEVICE_GATEWAY_RUNTIME",
-                    runtime_dir.to_string_lossy().to_string(),
-                )
-                .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1")
-                .env("CYCLONE_PC_PARENT_PID", &parent_pid);
-            let (mut events, _child) = command.spawn()?;
-            tauri::async_runtime::spawn(async move {
-                // Drain sidecar output so pipes can never fill and stall the Gateway. The Python
-                // runtime also watches the parent PID and exits if this Companion process ends.
-                while events.recv().await.is_some() {}
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    let command = match handle.shell().sidecar("CyclonePCRuntime") {
+                        Ok(command) => command,
+                        Err(_) => break,
+                    };
+                    let command = command.arg("serve")
+                        .env("CYCLONE_DEVICE_GATEWAY_TOKEN", &runtime_token)
+                        .env("CYCLONE_DEVICE_GATEWAY_URL", &runtime_http_base)
+                        .env("CYCLONE_DEVICE_GATEWAY_PORT", &runtime_port)
+                        .env("CYCLONE_DEVICE_GATEWAY_RUNTIME", runtime_dir.to_string_lossy().to_string())
+                        .env("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP", "1")
+                        .env("CYCLONE_PC_PARENT_PID", &parent_pid);
+                    if let Ok((mut events, _child)) = command.spawn() {
+                        // Drain output, then restart the owned runtime at the same private endpoint.
+                        tauri::async_runtime::block_on(async move {
+                            while events.recv().await.is_some() {}
+                        });
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
             });
             Ok(())
         })
