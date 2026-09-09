@@ -22,7 +22,8 @@ data class RequestIntentResult(
  * Cheap, deterministic first-pass router for Ask Cyclone.
  *
  * It never observes Android, never mutates Android, and never performs a provider request.
- * Uncertain consequential requests deliberately fall back to CHAT so the model can clarify.
+ * Explanatory questions remain chat. Imperative browse/search assignments are phone work because
+ * Ask Cyclone is the phone assistant surface; they must not bounce the user into a hidden mode.
  */
 object RequestIntentRouter {
     fun dispatch(result: RequestIntentResult, canStartPhoneTask: Boolean): RequestDispatch =
@@ -88,6 +89,10 @@ object RequestIntentRouter {
 
     private val directAppCommand = Regex(
         "^${politeCommandPrefix}(?:open|launch|start|go to|check|search|tap|scroll|post|upload|play|pause|send|message|call|navigate|prepare)\\b",
+    )
+
+    private val directBrowseAssignment = Regex(
+        "^${politeCommandPrefix}(?:search(?:\\s+(?:for|on))?|look\\s+up|browse(?:\\s+for)?)\\b",
     )
 
     private val explicitThroughAppAction = Regex(
@@ -164,6 +169,15 @@ object RequestIntentRouter {
             return phone(
                 confidence = RequestIntentConfidence.HIGH,
                 reason = "The request explicitly asks Cyclone to open or launch Android content.",
+                hasAttachment = hasAttachment,
+                appHint = appHint,
+            )
+        }
+
+        if (directBrowseAssignment.containsMatchIn(normalized)) {
+            return phone(
+                confidence = RequestIntentConfidence.HIGH,
+                reason = "The request assigns Cyclone an active search/browse task on the phone.",
                 hasAttachment = hasAttachment,
                 appHint = appHint,
             )
