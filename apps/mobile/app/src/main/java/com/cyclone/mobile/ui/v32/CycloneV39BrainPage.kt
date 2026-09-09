@@ -284,7 +284,7 @@ private fun V39RunCard(run: V39RunRow, onOpen: () -> Unit) {
                 }
             }
             Text(
-                "${run.session.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }} Â· ${formatDuration(duration)} Â· ${formatRunClock(run.session.startedAt)}",
+                "${run.session.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }} · ${formatDuration(duration)} · ${formatRunClock(run.session.startedAt)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

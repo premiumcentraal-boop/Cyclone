@@ -146,7 +146,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
         val exactTask = task?.takeIf { UiTask(it).belongsToProfile(selected.id) }
         val stateLabel = profileStateLabel(selected, waiting, exactTask)
         LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { TextButton(onClick = { selectedId = null }) { Text("â€¹ Profiles") } }
+            item { TextButton(onClick = { selectedId = null }) { Text("‹ Profiles") } }
             item {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -196,7 +196,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
                     onClick = { openForHuman(selected) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (busy) "Openingâ€¦" else "Take control")
+                    Text(if (busy) "Opening…" else "Take control")
                 }
             }
             if (error.isNotBlank()) {
