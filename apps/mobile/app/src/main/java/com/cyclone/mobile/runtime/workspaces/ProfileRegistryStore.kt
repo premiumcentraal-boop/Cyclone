@@ -63,11 +63,27 @@ object ProfileRegistryStore {
     }
 }
 
-/** Root is supplied by the host su daemon. No root-manager APK is required in another user. */
+/**
+ * Packages Cyclone may automatically make visible in a secondary user. This is deliberately an
+ * allowlist: a model cannot add arbitrary privileged apps, and no package data is copied.
+ */
 object ProfileRequiredPackages {
-    fun resolve(cyclonePackage: String, selected: Set<String>): Set<String> {
+    val supportAllowlist: Set<String> = setOf(
+        "moe.shizuku.privileged.api", // Shizuku
+        "com.topjohnwu.magisk",      // Magisk
+        "me.weishu.kernelsu",        // KernelSU
+        "com.rifsxd.ksunext",        // KernelSU Next
+        "me.bmax.apatch",            // APatch
+    )
+
+    fun resolve(
+        cyclonePackage: String,
+        selected: Set<String>,
+        installedSupportPackages: Set<String> = emptySet(),
+    ): Set<String> {
         require(ProfileSetupPlan.validPackageName(cyclonePackage))
         require(selected.all(ProfileSetupPlan::validPackageName))
-        return selected + cyclonePackage
+        require(installedSupportPackages.all { it in supportAllowlist })
+        return selected + cyclonePackage + installedSupportPackages
     }
 }

@@ -184,7 +184,12 @@ object ProfileSetupRuntime {
                     val store = prefs(ctx)
                     val parentUserId = Layer2Workspaces.currentAndroidUserId()
                     val selectedPackages = requested.map { it.packageName }.toSet()
-                    val requestedPackages = ProfileRequiredPackages.resolve(ctx.packageName, selectedPackages)
+                    val installedSupportPackages = installedSourcePackages(ctx, ProfileRequiredPackages.supportAllowlist)
+                    val requestedPackages = ProfileRequiredPackages.resolve(
+                        ctx.packageName,
+                        selectedPackages,
+                        installedSupportPackages,
+                    )
                     val existingName = store.getString(KEY_NAME, null)
                     val profileName = existingName ?: newProfileName().also { name ->
                         commitOrStorageFailure(store.edit().putString(KEY_NAME, name))

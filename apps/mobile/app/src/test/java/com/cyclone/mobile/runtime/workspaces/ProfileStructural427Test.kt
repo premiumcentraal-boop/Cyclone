@@ -26,9 +26,20 @@ class ProfileStructural427Test {
         val user = ProfileUserRecord(12, token, true, true, 0, false, false)
         assertFalse(ProfileRecovery.validOwned(user, 0, true))
     }
-    @Test fun cycloneAutomaticallyIncludedWithoutRootManagerCloning() {
+    @Test fun cycloneAndInstalledSupportAppsAreAutomaticallyIncluded() {
         assertEquals(setOf("com.cyclone.mobile", "com.android.chrome", "com.instagram.android"),
             ProfileRequiredPackages.resolve("com.cyclone.mobile", setOf("com.android.chrome", "com.instagram.android")))
+        assertEquals(
+            setOf("com.cyclone.mobile", "com.android.chrome", "moe.shizuku.privileged.api", "me.weishu.kernelsu"),
+            ProfileRequiredPackages.resolve(
+                "com.cyclone.mobile",
+                setOf("com.android.chrome"),
+                setOf("moe.shizuku.privileged.api", "me.weishu.kernelsu"),
+            ),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileRequiredPackages.resolve("com.cyclone.mobile", emptySet(), setOf("com.example.randomroot"))
+        }
     }
     @Test fun secondaryUserLimitIsTyped() {
         assertEquals(ProfileSetupFailureKind.MAX_USERS_REACHED,
