@@ -1,114 +1,503 @@
 package com.cyclone.mobile.runtime.workspaces
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.os.Process
-import kotlinx.coroutines.*
+import android.os.UserManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import rikka.shizuku.Shizuku
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class ProfileApp(val label: String, val packageName: String)
-data class ProfileSetupStatus(val busy: Boolean = false, val message: String = "", val completed: Int = 0,
-    val total: Int = 1, val ready: Boolean = false, val userId: Int? = null)
+
+data class ProfileSetupStatus(
+    val busy: Boolean = false,
+    val message: String = "",
+    val completed: Int = 0,
+    val total: Int = 1,
+    val ready: Boolean = false,
+    val userId: Int? = null,
+    val issue: ProfileSetupFailure? = null,
+    val capabilities: ProfileProvisioningCapabilities? = null,
+)
 
 /** User-initiated local setup only; no exported service, no model root interface, no deletion. */
 object ProfileSetupRuntime {
+    private const val PREFS = "cyclone_profile_setup"
+    private const val KEY_PLAN_APPS = "plan_apps"
+    private const val KEY_APPS = "apps"
+    private const val KEY_NAME = "name"
+    private const val KEY_PARENT_USER = "parent_user"
+    private const val KEY_USER = "user"
+    private const val KEY_STAGE = "stage"
+    private const val KEY_READY = "ready"
+    private const val OUTPUT_LIMIT = 8_192
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow(ProfileSetupStatus())
     val state = _state.asStateFlow()
     private val cancel = AtomicBoolean(false)
     private var job: Job? = null
-    private fun prefs(context: Context) = context.getSharedPreferences("cyclone_profile_setup", Context.MODE_PRIVATE)
-    fun selectedPackages(context: Context): Set<String> = prefs(context).getStringSet("plan_apps", emptySet()).orEmpty().toSet()
-    fun existingUser(context: Context): Int? = prefs(context).getInt("user", -1).takeIf { it > 0 }
+
+    @Volatile
+    internal var lastCommandResult: ProfileCommandResult? = null
+        private set
+
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    fun selectedPackages(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_PLAN_APPS, emptySet()).orEmpty().filter(ProfileSetupPlan::validPackageName).toSet()
+
+    fun existingUser(context: Context): Int? = prefs(context).getInt(KEY_USER, -1).takeIf { it > 0 }
+
     fun apps(context: Context): List<ProfileApp> = context.packageManager.queryIntentActivities(
-        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), PackageManager.MATCH_ALL)
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
+        PackageManager.MATCH_ALL,
+    )
         .filter { it.activityInfo.packageName != context.packageName }
         .map { ProfileApp(it.loadLabel(context.packageManager).toString(), it.activityInfo.packageName) }
-        .distinctBy { it.packageName }.sortedBy { it.label.lowercase() }
-    fun stop() { cancel.set(true) }
-    private fun boundary() {
-        check(!cancel.get()) { "Paused. Your progress is saved. You can finish setting up this profile later." }
-        check(!Layer2Workspaces.gated()) { "Finish the request waiting for your approval, then continue." }
+        .distinctBy { it.packageName }
+        .sortedBy { it.label.lowercase() }
+
+    fun stop() {
+        cancel.set(true)
     }
-    @Synchronized fun create(context: Context, selected: List<ProfileApp>) {
+
+    private class SetupFailure(val failure: ProfileSetupFailure) : Exception(failure.reason)
+    private class SetupPaused(message: String) : Exception(message)
+
+    private fun boundary() {
+        if (cancel.get()) throw SetupPaused("Setup paused. Your progress is saved. You can finish Profile B later.")
+        if (Layer2Workspaces.gated()) throw SetupPaused("Finish the request waiting for your approval, then continue Profile B setup.")
+    }
+
+    @Synchronized
+    fun create(context: Context, selected: List<ProfileApp>) {
         if (job?.isActive == true) return
         val ctx = context.applicationContext
-        val choices = selected.distinctBy { it.packageName }.toList()
-        require(choices.isNotEmpty() && choices.size <= 50)
+        val requested = selected.distinctBy { it.packageName }.filter { ProfileSetupPlan.validPackageName(it.packageName) }
+        require(requested.isNotEmpty() && requested.size <= 50)
         cancel.set(false)
-        _state.value = ProfileSetupStatus(busy = true, message = "Preparing your second profile…", total = choices.size + 3)
+        _state.value = ProfileSetupStatus(
+            busy = true,
+            message = "Checking Profile B requirements…",
+            total = requested.size + 5,
+        )
+
         job = scope.launch {
-            try { synchronized(Layer2Workspaces.engine.mutationLock) {
-                Layer2Workspaces.initialize(ctx)
-                boundary(); Layer2Workspaces.engine.clearSelection()
-                check(RootProbe.check() == RootStatus.ROOTED) { "Your phone hasn’t allowed extra profiles. Allow Cyclone in your root manager, then try again." }
-                val available = apps(ctx).associateBy { it.packageName }
-                check(choices.all { available.containsKey(it.packageName) }) { "One of these apps is no longer installed. Choose your apps again." }
-                val store = prefs(ctx)
-                check(store.edit().putStringSet("plan_apps", choices.map { it.packageName }.toSet()).commit()) { "Free some space, then try again." }
-                val name = store.getString("name", null) ?: ("Cyclone_" + UUID.randomUUID().toString().replace("-", "").take(16)).also {
-                    check(store.edit().putString("name", it).commit()) { "Free some space, then try again." }
-                }
-                boundary()
-                val before = root(listOf("/system/bin/pm", "list", "users"))
-                val storedUser = existingUser(ctx)
-                var user = ProfileSetupPlan.ownedUser(before, name)
-                if (storedUser != null) check(user == storedUser) { "This saved profile is no longer available. Your other profiles were left unchanged." }
-                if (user == null) {
-                    val created = root(ProfileSetupPlan.create(Layer2Workspaces.currentAndroidUserId(), name))
-                    user = ProfileSetupPlan.createdUser(created)
-                        ?: error("Android couldn’t create another profile. Your phone may already have its maximum number of profiles.")
-                    // Journal before any further command: retry never creates a duplicate profile.
-                    check(store.edit().putInt("user", user).commit()) { "Profile created. Reopen setup to recover it." }
-                } else check(store.edit().putInt("user", user).commit())
-                val id = user
-                check(id != Layer2Workspaces.currentAndroidUserId())
-                check(ProfileSetupPlan.ownedUser(root(listOf("/system/bin/pm", "list", "users")), name) == id) { "Android couldn’t confirm the new profile." }
-                boundary()
-                _state.value = _state.value.copy(message = "Starting Profile B…", completed = 1, userId = id)
-                root(listOf("/system/bin/am", "start-user", "-w", id.toString()))
-                check(root(listOf("/system/bin/am", "get-started-user-state", id.toString())).contains("RUNNING_UNLOCKED")) { "Unlock your phone and turn on Profile B, then try again." }
-                boundary()
-                choices.forEachIndexed { index, app ->
+            try {
+                synchronized(Layer2Workspaces.engine.mutationLock) {
+                    Layer2Workspaces.initialize(ctx)
                     boundary()
-                    _state.value = _state.value.copy(message = "Adding ${app.label}…", completed = index + 2)
-                    root(ProfileSetupPlan.install(id, app.packageName))
-                    val installed = ProfileSetupPlan.packages(root(listOf("/system/bin/pm", "list", "packages", "--user", id.toString(), app.packageName)))
-                    check(app.packageName in installed) { "${app.label} couldn’t be added. Tap Try again to continue." }
-                    Layer2Workspaces.engine.register(Workspace("profileB-$id-${UUID.nameUUIDFromBytes(app.packageName.toByteArray())}", app.label.take(80), app.packageName, id))
+                    Layer2Workspaces.engine.clearSelection()
+
+                    val store = prefs(ctx)
+                    val parentUserId = Layer2Workspaces.currentAndroidUserId()
+                    val requestedPackages = requested.map { it.packageName }.toSet()
+                    val existingName = store.getString(KEY_NAME, null)
+                    val profileName = existingName ?: newProfileName().also { name ->
+                        commitOrStorageFailure(store.edit().putString(KEY_NAME, name))
+                    }
+                    if (!ProfileSetupPlan.validProfileName(profileName)) {
+                        fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "The saved Profile B identity is invalid.")
+                    }
+                    val priorParent = store.getInt(KEY_PARENT_USER, -1).takeIf { it >= 0 }
+                    if (priorParent != null && priorParent != parentUserId) {
+                        fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                            "The saved Profile B belongs to a different Profile A user.")
+                    }
+                    commitOrStorageFailure(
+                        store.edit()
+                            .putInt(KEY_PARENT_USER, parentUserId)
+                            .putStringSet(KEY_PLAN_APPS, requestedPackages)
+                            .putBoolean(KEY_READY, false),
+                    )
+
+                    val sourcePackages = installedSourcePackages(ctx, requestedPackages)
+                    ProfileSelectionVerifier.failure(requestedPackages, sourcePackages)?.let { throw SetupFailure(it) }
+
+                    val shizukuAuthorized = shizukuAuthorized()
+                    val userManager = ctx.getSystemService(UserManager::class.java)
+                    val activityManager = ctx.getSystemService(ActivityManager::class.java)
+                    val managedUsersFeature = ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_MANAGED_USERS)
+                    val addManagedProfileRestricted = userManager?.hasUserRestriction(UserManager.DISALLOW_ADD_MANAGED_PROFILE) == true
+                    val lowRamDevice = activityManager?.isLowRamDevice == true
+
+                    val rootExecution = executeRoot(ProfileSetupPlan.verifyRoot())
+                    if (!rootExecution.result.successful) {
+                        _state.value = _state.value.copy(capabilities = ProfileProvisioningCapabilities(
+                            rootUsable = false,
+                            shizukuAuthorized = shizukuAuthorized,
+                            shizukuProfileProbeVerified = false,
+                            parentUserId = parentUserId,
+                            parentCanHostManagedProfile = false,
+                            maxUsersReported = null,
+                            existingUserCount = 0,
+                            existingManagedProfilesForParent = 0,
+                            managedUsersFeature = managedUsersFeature,
+                            addManagedProfileRestricted = addManagedProfileRestricted,
+                            lowRamDevice = lowRamDevice,
+                        ))
+                        throw SetupFailure(rootExecution.failure ?: ProfileFailureClassifier.local(ProfileSetupFailureKind.ROOT_COMMAND_FAILED))
+                    }
+                    // Keep the shared workspace runtime's root status synchronized after the stronger typed probe.
+                    if (RootProbe.check() != RootStatus.ROOTED) {
+                        fail(ProfileSetupFailureKind.ROOT_COMMAND_FAILED, "Root stopped responding after the profile preflight.")
+                    }
+                    val reportedCurrentUser = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser()))
+                        ?: fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                            "Android did not report the current user id.")
+                    var users = listUsersRequired()
+                    val maxUsers = runBestEffort(ProfileSetupPlan.getMaxUsers())?.let(ProfileSetupParser::maxUsers)
+                    val evaluated = ProfileCapabilityEvaluator.evaluate(
+                        rootUsable = true,
+                        shizukuAuthorized = shizukuAuthorized,
+                        // 4.2.2 deliberately has no generic Shizuku shell fallback. Authorization alone is not readiness.
+                        shizukuProfileProbeVerified = false,
+                        appUserId = parentUserId,
+                        reportedCurrentUserId = reportedCurrentUser,
+                        users = users,
+                        maxUsersReported = maxUsers,
+                        managedUsersFeature = managedUsersFeature,
+                        addManagedProfileRestricted = addManagedProfileRestricted,
+                        lowRamDevice = lowRamDevice,
+                    )
+                    _state.value = _state.value.copy(capabilities = evaluated.capabilities)
+                    evaluated.failure?.let { throw SetupFailure(it) }
+
+                    val journal = journalSnapshot(store, profileName, parentUserId, requestedPackages)
+                    val profileUserId = when (val recovery = ProfileRecovery.resolve(journal, parentUserId, users)) {
+                        ProfileRecoveryDecision.Create -> {
+                            boundary()
+                            _state.value = _state.value.copy(message = "Creating Profile B…", completed = 1)
+                            val execution = executeRoot(ProfileSetupPlan.createManagedProfile(parentUserId, profileName))
+                            if (!execution.result.successful) {
+                                if (execution.failure?.kind == ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS) {
+                                    users = listUsersRequired()
+                                    when (val raced = ProfileRecovery.resolve(journal, parentUserId, users)) {
+                                        is ProfileRecoveryDecision.Resume -> raced.user.id
+                                        is ProfileRecoveryDecision.Fail -> throw SetupFailure(raced.failure)
+                                        ProfileRecoveryDecision.Create -> throw SetupFailure(execution.failure)
+                                    }
+                                } else {
+                                    throw SetupFailure(execution.failure ?: ProfileFailureClassifier.local(
+                                        ProfileSetupFailureKind.PROFILE_CREATION_REJECTED))
+                                }
+                            } else {
+                                val created = ProfileSetupParser.createdUser(execution.result.output)
+                                    ?: fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                                        "Android did not return the new Profile B user id.")
+                                // Journal immediately: even if verification/start fails, retry will not create Profile C.
+                                commitOrStorageFailure(
+                                    store.edit()
+                                        .putInt(KEY_USER, created)
+                                        .putString(KEY_STAGE, ProfileSetupStage.PROFILE_CREATED.name),
+                                )
+                                users = listUsersRequired()
+                                ProfileRecovery.verifyCreated(created, profileName, parentUserId, users)?.let { throw SetupFailure(it) }
+                                created
+                            }
+                        }
+                        is ProfileRecoveryDecision.Resume -> recovery.user.id
+                        is ProfileRecoveryDecision.Fail -> throw SetupFailure(recovery.failure)
+                    }
+
+                    if (profileUserId <= 0 || profileUserId == parentUserId) {
+                        fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                            "Profile B resolved to an unsafe Android user id.")
+                    }
+                    commitOrStorageFailure(
+                        store.edit()
+                            .putInt(KEY_USER, profileUserId)
+                            .putString(KEY_STAGE, ProfileSetupStage.PROFILE_CREATED.name),
+                    )
+
+                    users = listUsersRequired()
+                    val exactOwned = ProfileSetupParser.ownedUser(users, profileName, parentUserId)
+                    if (exactOwned?.id != profileUserId) {
+                        fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                            "Android did not re-list the exact saved Profile B.")
+                    }
+
+                    boundary()
+                    _state.value = _state.value.copy(message = "Starting Profile B…", completed = 2, userId = profileUserId)
+                    runRequired(ProfileSetupPlan.startProfile(profileUserId))
+                    val stateOutput = runRequired(ProfileSetupPlan.profileState(profileUserId))
+                    if (!stateOutput.contains("RUNNING_UNLOCKED", ignoreCase = true)) {
+                        throw SetupFailure(ProfileFailureClassifier.local(
+                            ProfileSetupFailureKind.PROFILE_NOT_UNLOCKED,
+                            stateOutput,
+                        ))
+                    }
+                    commitOrStorageFailure(store.edit().putString(KEY_STAGE, ProfileSetupStage.PROFILE_STARTED.name))
+
+                    val labels = requested.associateBy { it.packageName }
+                    requestedPackages.sorted().forEachIndexed { index, packageName ->
+                        boundary()
+                        if (packageName !in installedSourcePackages(ctx, setOf(packageName))) {
+                            throw SetupFailure(ProfileFailureClassifier.local(
+                                ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED,
+                                "A selected app is no longer installed in Profile A: $packageName",
+                            ))
+                        }
+                        val label = labels[packageName]?.label ?: appLabel(ctx, packageName)
+                        _state.value = _state.value.copy(
+                            message = "Adding $label…",
+                            completed = index + 3,
+                            userId = profileUserId,
+                        )
+                        var installed = profilePackages(profileUserId, packageName)
+                        if (packageName !in installed) {
+                            runRequired(ProfileSetupPlan.installExisting(profileUserId, packageName))
+                            installed = profilePackages(profileUserId, packageName)
+                        }
+                        if (packageName !in installed) {
+                            throw SetupFailure(ProfileFailureClassifier.local(
+                                ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED,
+                                "$label is not installed in Profile B after Android reported the install step complete.",
+                            ))
+                        }
+                        Layer2Workspaces.engine.register(
+                            Workspace(
+                                workspaceId(profileUserId, packageName),
+                                label.take(80).ifBlank { packageName.take(80) },
+                                packageName,
+                                profileUserId,
+                            ),
+                        )
+                    }
+                    commitOrStorageFailure(store.edit().putString(KEY_STAGE, ProfileSetupStage.APPS_INSTALLED.name))
+
+                    boundary()
+                    _state.value = _state.value.copy(message = "Finishing Profile B…", completed = requestedPackages.size + 3)
+                    runRequired(ProfileSetupPlan.markSetupComplete(profileUserId))
+                    val setupComplete = runRequired(ProfileSetupPlan.readSetupComplete(profileUserId)).trim() == "1"
+                    if (!setupComplete) {
+                        fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                            "Android did not confirm Profile B setup completion.")
+                    }
+                    commitOrStorageFailure(store.edit().putString(KEY_STAGE, ProfileSetupStage.SETUP_COMPLETE.name))
+
+                    boundary()
+                    users = listUsersRequired()
+                    val finalUser = users.singleOrNull { it.id == profileUserId && it.name == profileName }
+                    val finalState = runRequired(ProfileSetupPlan.profileState(profileUserId))
+                    val finalInstalled = requestedPackages.flatMapTo(linkedSetOf()) { pkg -> profilePackages(profileUserId, pkg) }
+                    val expectedWorkspaceIds = requestedPackages.associateWith { workspaceId(profileUserId, it) }
+                    val workspaceUsers = Layer2Workspaces.engine.snapshot()
+                        .filter { workspace -> workspace.id in expectedWorkspaceIds.values }
+                        .groupBy { it.appPackage }
+                        .mapValues { (_, workspaces) -> workspaces.map { it.androidUserId }.toSet() }
+                    val finalSetupComplete = runRequired(ProfileSetupPlan.readSetupComplete(profileUserId)).trim() == "1"
+                    val evidence = ProfileReadyEvidence(
+                        user = finalUser,
+                        parentUserId = parentUserId,
+                        runningUnlocked = finalState.contains("RUNNING_UNLOCKED", ignoreCase = true),
+                        selectedPackages = requestedPackages,
+                        installedPackages = finalInstalled,
+                        workspaceUserIdsByPackage = workspaceUsers,
+                        setupComplete = finalSetupComplete,
+                        journalUserId = store.getInt(KEY_USER, -1).takeIf { it > 0 },
+                    )
+                    ProfileReadyVerifier.failure(evidence)?.let { throw SetupFailure(it) }
+
+                    commitOrStorageFailure(
+                        store.edit()
+                            .putBoolean(KEY_READY, true)
+                            .putStringSet(KEY_APPS, requestedPackages)
+                            .putString(KEY_STAGE, ProfileSetupStage.READY.name),
+                    )
+                    _state.value = ProfileSetupStatus(
+                        message = "Profile B is ready",
+                        completed = requestedPackages.size + 5,
+                        total = requestedPackages.size + 5,
+                        ready = true,
+                        userId = profileUserId,
+                        capabilities = evaluated.capabilities,
+                    )
                 }
-                boundary()
-                // This is the newly created profile only. Existing phone settings/data are untouched.
-                root(listOf("/system/bin/settings", "--user", id.toString(), "put", "secure", "user_setup_complete", "1"))
-                check(root(listOf("/system/bin/settings", "--user", id.toString(), "get", "secure", "user_setup_complete")).trim() == "1") { "Profile setup is not complete yet. Please retry." }
-                check(store.edit().putBoolean("ready", true).putStringSet("apps", choices.map { it.packageName }.toSet()).commit())
-                _state.value = ProfileSetupStatus(message = "Profile B is ready", completed = choices.size + 3,
-                    total = choices.size + 3, ready = true, userId = id)
-            } } catch (error: Exception) {
-                _state.value = _state.value.copy(busy = false, ready = false,
-                    message = error.message?.take(220) ?: "Setup paused. Please try again.")
+            } catch (paused: SetupPaused) {
+                _state.value = _state.value.copy(
+                    busy = false,
+                    ready = false,
+                    issue = null,
+                    message = paused.message.orEmpty().take(220),
+                )
+            } catch (error: SetupFailure) {
+                _state.value = _state.value.copy(
+                    busy = false,
+                    ready = false,
+                    issue = error.failure,
+                    message = error.failure.compactMessage().take(440),
+                )
+            } catch (error: Exception) {
+                val failure = ProfileFailureClassifier.local(
+                    ProfileSetupFailureKind.UNKNOWN_PLATFORM_FAILURE,
+                    error.message?.take(180),
+                )
+                _state.value = _state.value.copy(
+                    busy = false,
+                    ready = false,
+                    issue = failure,
+                    message = failure.compactMessage().take(440),
+                )
             }
         }
     }
-    private fun root(args: List<String>): String {
-        val process = ProcessBuilder("su", "-c", ProfileSetupPlan.shell(args)).redirectErrorStream(true).start()
+
+    private data class Execution(
+        val result: ProfileCommandResult,
+        val failure: ProfileSetupFailure?,
+    )
+
+    private fun executeRoot(command: ProfileSetupCommand): Execution {
+        val shell = ProfileSetupPlan.shell(command)
+        val process = try {
+            ProcessBuilder("su", "-c", shell).redirectErrorStream(true).start()
+        } catch (error: IOException) {
+            val failure = ProfileFailureClassifier.fromCommand(
+                command.operation,
+                -127,
+                error.message.orEmpty(),
+                unavailable = true,
+            ) ?: ProfileFailureClassifier.local(ProfileSetupFailureKind.ROOT_UNAVAILABLE)
+            return execution(command, -127, "", failure)
+        }
+
         val output = StringBuilder()
-        val reader = Thread { runCatching { process.inputStream.bufferedReader().useLines { lines ->
-            lines.forEach { synchronized(output) { if (output.length < 64_000) output.appendLine(it) } }
-        } } }.apply { isDaemon = true; start() }
-        try {
-            check(process.waitFor(30, TimeUnit.SECONDS)) { "Android is taking too long. Your progress is saved; try again." }
-            reader.join(500)
-            val text = synchronized(output) { output.toString() }
-            check(process.exitValue() == 0 && !text.contains("Error:", true) && !text.contains("Exception")) {
-                "Android couldn’t complete this step. Check that extra profiles are allowed and try again."
+        val reader = Thread {
+            runCatching {
+                process.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { line ->
+                        synchronized(output) {
+                            if (output.length < OUTPUT_LIMIT) output.appendLine(line)
+                        }
+                    }
+                }
             }
-            return text
-        } finally { process.destroyForcibly(); runCatching { process.inputStream.close() } }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+        return try {
+            val timeoutSeconds = if (command.operation == ProfileSetupOperation.VERIFY_ROOT) 8L else 30L
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                reader.join(500)
+                val text = synchronized(output) { output.toString() }
+                val failure = ProfileFailureClassifier.fromCommand(
+                    command.operation,
+                    null,
+                    text,
+                    timedOut = true,
+                ) ?: ProfileFailureClassifier.local(ProfileSetupFailureKind.ROOT_COMMAND_FAILED)
+                execution(command, null, text, failure)
+            } else {
+                reader.join(500)
+                val text = synchronized(output) { output.toString() }
+                val exit = process.exitValue()
+                val failure = ProfileFailureClassifier.fromCommand(command.operation, exit, text)
+                execution(command, exit, text, failure)
+            }
+        } finally {
+            process.destroyForcibly()
+            runCatching { process.inputStream.close() }
+        }
     }
+
+    private fun execution(
+        command: ProfileSetupCommand,
+        exitCode: Int?,
+        output: String,
+        failure: ProfileSetupFailure?,
+    ): Execution {
+        val result = ProfileCommandResult(
+            operation = command.operation,
+            exitCode = exitCode,
+            output = output.take(OUTPUT_LIMIT),
+            classifiedResult = failure?.kind,
+            sanitizedPlatformMessage = failure?.platformMessage,
+            retryUseful = failure?.retryUseful ?: false,
+        )
+        lastCommandResult = result
+        return Execution(result, failure)
+    }
+
+    private fun runRequired(command: ProfileSetupCommand): String {
+        val execution = executeRoot(command)
+        execution.failure?.let { throw SetupFailure(it) }
+        return execution.result.output
+    }
+
+    private fun runBestEffort(command: ProfileSetupCommand): String? {
+        val execution = executeRoot(command)
+        return execution.result.output.takeIf { execution.failure == null }
+    }
+
+    private fun listUsersRequired(): List<ProfileUserRecord> {
+        val users = ProfileSetupParser.users(runRequired(ProfileSetupPlan.listUsers()))
+        if (users.isEmpty()) {
+            fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                "Android's user list could not be parsed safely.")
+        }
+        return users
+    }
+
+    private fun profilePackages(userId: Int, packageName: String): Set<String> =
+        ProfileSetupParser.packages(runRequired(ProfileSetupPlan.listProfilePackage(userId, packageName)))
+
+    private fun journalSnapshot(
+        store: SharedPreferences,
+        name: String,
+        parentUserId: Int,
+        selectedPackages: Set<String>,
+    ): ProfileJournalSnapshot = ProfileJournalSnapshot(
+        profileName = name,
+        parentUserId = store.getInt(KEY_PARENT_USER, parentUserId),
+        profileUserId = store.getInt(KEY_USER, -1).takeIf { it > 0 },
+        selectedPackages = selectedPackages,
+        stage = runCatching {
+            ProfileSetupStage.valueOf(store.getString(KEY_STAGE, ProfileSetupStage.PLANNED.name).orEmpty())
+        }.getOrDefault(ProfileSetupStage.PLANNED),
+    )
+
+    private fun installedSourcePackages(context: Context, packages: Set<String>): Set<String> =
+        packages.filterTo(linkedSetOf()) { packageName ->
+            runCatching { context.packageManager.getApplicationInfo(packageName, 0); true }.getOrDefault(false)
+        }
+
+    private fun appLabel(context: Context, packageName: String): String = runCatching {
+        val info = context.packageManager.getApplicationInfo(packageName, 0)
+        context.packageManager.getApplicationLabel(info).toString()
+    }.getOrDefault(packageName)
+
+    private fun workspaceId(userId: Int, packageName: String): String =
+        "profileB-$userId-${UUID.nameUUIDFromBytes(packageName.toByteArray())}"
+
+    private fun shizukuAuthorized(): Boolean = runCatching {
+        Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+    }.getOrDefault(false)
+
+    private fun newProfileName(): String =
+        "Cyclone_" + UUID.randomUUID().toString().replace("-", "").take(16)
+
+    private fun commitOrStorageFailure(editor: SharedPreferences.Editor) {
+        if (!editor.commit()) {
+            fail(ProfileSetupFailureKind.STORAGE_FAILURE, "Cyclone couldn't save Profile B progress.")
+        }
+    }
+
+    private fun fail(kind: ProfileSetupFailureKind, detail: String? = null): Nothing =
+        throw SetupFailure(ProfileFailureClassifier.local(kind, detail))
 }

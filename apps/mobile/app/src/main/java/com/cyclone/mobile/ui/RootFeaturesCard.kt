@@ -45,7 +45,7 @@ fun RootFeaturesCard() {
 }
 
 @Composable
-private fun ProfileSetupPage(onClose: () -> Unit) {
+fun ProfileSetupPage(onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val progress by ProfileSetupRuntime.state.collectAsState()

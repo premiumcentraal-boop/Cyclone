@@ -37,6 +37,8 @@ object OverlayChromeRuntime {
         emit = OverlayChromeBus::publish,
         cycloneState = cycloneState,
     )
+    private val mutableActivity = kotlinx.coroutines.flow.MutableStateFlow(machine.state())
+    val activity: kotlinx.coroutines.flow.StateFlow<OverlayChromeState> = mutableActivity
     private var controller: OverlayChromeController? = null
     private var service: CycloneAccessibilityService? = null
     private var aiJob: Job? = null
@@ -120,6 +122,7 @@ object OverlayChromeRuntime {
             controller?.dismiss()
         }
     }
+    /** Device hook: after cancel / failed start / tearDown, this must be 0. JVM regressions use OverlayWindowRegistry. */
     fun overlayWindowCount(): Int = synchronized(lock) { controller?.attachedWindowCount() ?: 0 }
 
     fun startAnalysis(
@@ -240,12 +243,12 @@ object OverlayChromeRuntime {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
         val context = synchronized(lock) { service } ?: return
-        val backgroundTask = com.cyclone.mobile.runtime.background.WorkspaceTasks.state.value
-        if (backgroundTask != null && backgroundTask.phase !in setOf(
-                com.cyclone.mobile.runtime.background.TaskPhase.STOPPED,
-                com.cyclone.mobile.runtime.background.TaskPhase.FAILED)) {
-            com.cyclone.mobile.runtime.background.WorkspaceTasks.update(backgroundTask.taskId) { it.copy(queued = request) }
-            updateComposer("")
+        val busy = com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask() ||
+            snapshot().state in setOf(OverlayChromeState.ANALYSIS, OverlayChromeState.WORKING, OverlayChromeState.LIVE, OverlayChromeState.GATE)
+        if (busy) {
+            runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.queueRequest(request) }
+                .onSuccess { updateComposer("") }
+                .onFailure { android.widget.Toast.makeText(context, it.message, android.widget.Toast.LENGTH_LONG).show() }
             return
         }
         // A named installed app is a suitable isolated task. Ambiguity is resolved by the user,
@@ -282,6 +285,7 @@ object OverlayChromeRuntime {
             val changed = before.state == OverlayChromeState.ANALYSIS ||
                 before.state == OverlayChromeState.WORKING ||
                 before.state == OverlayChromeState.LIVE
+            mutableActivity.value = machine.state()
             controller?.render(machine.snapshot())
             changed
         }
@@ -423,6 +427,7 @@ object OverlayChromeRuntime {
     private fun mutate(block: (OverlayChromeMachine) -> Unit) {
         synchronized(lock) {
             block(machine)
+            mutableActivity.value = machine.state()
             controller?.render(machine.snapshot())
         }
     }
@@ -463,7 +468,7 @@ object OverlayChromeRuntime {
     private fun readAiSettings(context: Context): OverlayAiSettings {
         val prefs = context.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE)
         val savedModel = prefs.getString(MODEL_KEY, OpenRouterModelPresets.DEFAULT.id).orEmpty()
-        val modelId = savedModel.takeIf { id -> OpenRouterModelPresets.all.any { it.id == id } }
+        val modelId = com.cyclone.mobile.ai.model.ModelRegistry.resolve(savedModel)?.let(com.cyclone.mobile.ai.model.ModelRegistry::preset)?.id
             ?: OpenRouterModelPresets.DEFAULT.id
         val effort = prefs.getString(EFFORT_KEY, "medium").orEmpty()
             .takeIf { it in REASONING_LEVELS } ?: "medium"

@@ -2,19 +2,19 @@
 # publication_authorized=false; GitHub tag one-1.1.1 already exists. This cut is one-1.1.2.
 # Mobile stays 4.0.4 / android_version_code 75.
 schema = 1
-product_version = "4.0.4"
+product_version = "4.2.2"
 channel = "development"
-android_version_code = 75
+android_version_code = 83
 python_version = "4.1.0"
 
 [components]
-mobile = "4.0.4"
+mobile = "4.2.2"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.0.3"
+previous_mobile_version = "4.2.1"
 publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"

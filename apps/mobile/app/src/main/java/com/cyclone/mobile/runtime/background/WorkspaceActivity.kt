@@ -90,7 +90,7 @@ class WorkspaceActivity : ComponentActivity() {
                             }
                             startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
                             WorkspaceTasks.start(this@WorkspaceActivity, goal, app.activityInfo.packageName,
-                                app.loadLabel(packageManager).toString())
+                                app.loadLabel(packageManager).toString(), intent.getStringExtra("pendingRequestId"))
                             finish()
                         }.onFailure { status = it.message ?: "Couldn't start this task. Please try again." }
                     }, enabled = apps.isNotEmpty() && goal.isNotBlank() && readiness.setupFailure == null,
