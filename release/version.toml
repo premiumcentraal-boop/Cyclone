@@ -1,21 +1,21 @@
 schema = 1
-product_version = "4.2.3"
+product_version = "4.2.4"
 channel = "development"
-android_version_code = 84
+android_version_code = 85
 python_version = "4.1.0"
 
 [components]
-mobile = "4.2.3"
+mobile = "4.2.4"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.2.2"
-publication_authorized = true
+previous_mobile_version = "4.2.3"
+publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.2.3-live-phone"
+candidate_generation = "cyclone-4.2.4-live-phone-and-ui"

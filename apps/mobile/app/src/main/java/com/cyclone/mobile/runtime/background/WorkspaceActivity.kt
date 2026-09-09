@@ -35,7 +35,9 @@ class WorkspaceActivity : ComponentActivity() {
             .sortedBy { it.loadLabel(packageManager).toString() }
         setContent {
             CycloneIntelligenceTheme {
-                var selected by rememberSaveable { mutableIntStateOf(0) }
+                val requested = WorkspaceTasks.resolveQueueTarget(this@WorkspaceActivity,
+                    PendingWorkspaceRequest("preview", intent.getStringExtra("goal").orEmpty(), null))
+                var selected by rememberSaveable { mutableIntStateOf(apps.indexOfFirst { it.activityInfo.packageName == requested?.packageName }.coerceAtLeast(0)) }
                 var menu by remember { mutableStateOf(false) }
                 var goal by rememberSaveable { mutableStateOf(intent.getStringExtra("goal").orEmpty()) }
                 var status by remember { mutableStateOf("") }

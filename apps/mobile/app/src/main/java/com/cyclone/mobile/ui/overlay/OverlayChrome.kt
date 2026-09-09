@@ -433,12 +433,6 @@ private fun ComposerPanel(
             CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
         }
 
-        Text(
-            "New phone task",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp),
-        )
         if (sharing.phase != ScreenSharePhase.OFF) {
             ScreenSharePill(sharing) { LiveCaptureService.stop(context) }
         }
@@ -454,53 +448,13 @@ private fun ComposerPanel(
                         TextButton(enabled = !sharing.active, onClick = {
                             launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
                         }) { Text("Share screen") }
+                        TextButton(enabled = !sharing.active, onClick = {
+                            launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
+                        }) { Text("Cross-app") }
                     }
-                    ComposerAccessory.MODEL -> Column(
-                        Modifier.heightIn(max = 310.dp).padding(12.dp).verticalScroll(rememberScrollState()),
-                    ) {
-                        Text("Intelligence", style = MaterialTheme.typography.titleSmall)
-                        val levels = listOf("low", "medium", "high")
-                        Slider(
-                            value = (if (aiSettings.reasoningEffort == "max") 2 else levels.indexOf(aiSettings.reasoningEffort).coerceAtLeast(0)).toFloat(),
-                            valueRange = 0f..2f,
-                            steps = 1,
-                            onValueChange = {
-                                onAiSettingsChanged(aiSettings.copy(reasoningEffort = levels[kotlin.math.round(it).toInt().coerceIn(0, 2)]))
-                            },
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            listOf("Low", "Medium", "High").forEach { Text(it, style = MaterialTheme.typography.labelSmall) }
-                        }
-                        Text("Phone autonomy", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-                        var autonomy by remember { mutableStateOf(com.cyclone.mobile.ai.CycloneAiAccessProfileStore.read(context)) }
-                        Row {
-                            listOf(
-                                com.cyclone.mobile.ai.CycloneAiAccessProfile.GUIDED to "Ask often",
-                                com.cyclone.mobile.ai.CycloneAiAccessProfile.BALANCED to "Balanced",
-                                com.cyclone.mobile.ai.CycloneAiAccessProfile.FULL to "Independent",
-                            ).forEach { (profile, label) ->
-                                TextButton(onClick = {
-                                    autonomy = profile
-                                    com.cyclone.mobile.ai.CycloneAiAccessProfileStore.write(context, profile)
-                                }) { Text((if (autonomy == profile) "✓ " else "") + label, style = MaterialTheme.typography.labelSmall) }
-                            }
-                        }
-                        Text("Sensitive actions always ask.", style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = { modelsExpanded = !modelsExpanded }) {
-                            Text(OpenRouterModelPresets.byId(aiSettings.modelId).label + if (modelsExpanded) " ▴" else " ▾")
-                        }
-                        if (modelsExpanded) {
-                            OpenRouterModelPresets.all.forEach { model ->
-                                TextButton(onClick = {
-                                    onAiSettingsChanged(aiSettings.copy(modelId = model.id))
-                                    modelsExpanded = false
-                                }) { Text((if (model.id == aiSettings.modelId) "✓ " else "") + model.label) }
-                            }
-                            TextButton(enabled = !sharing.active, onClick = {
-                                launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
-                            }) { Text("Share for cross-app control") }
-                        }
-                    }
+                    ComposerAccessory.MODEL -> com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel(
+                        aiSettings.modelId, aiSettings.reasoningEffort,
+                    ) { model, effort -> onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort)) }
                     ComposerAccessory.NONE -> Unit
                 }
             }
@@ -530,7 +484,7 @@ private fun ComposerPanel(
                     onClick = { accessory = accessory.toggle(ComposerAccessory.MODEL) },
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                 ) {
-                    Icon(Icons.Rounded.Tune, "Choose model", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Rounded.Tune, "Choose model", tint = if (accessory == ComposerAccessory.MODEL) AuroraBlue else MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
                 }
                 IconButton(
                     onClick = { accessory = accessory.toggle(ComposerAccessory.ATTACHMENTS) },

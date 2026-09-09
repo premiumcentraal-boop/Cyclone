@@ -18,8 +18,8 @@ class TaskComposerSeparationTest {
         assertFalse(chat.contains("Text(\"New request\""))
         assertFalse(chat.contains("listOf(\"Chat\", \"Phone task\")"))
         assertTrue(chat.contains("TextButton(onClick = { chatJob?.cancel() })"))
-        // Agent 2 formats the label on its own line; test the semantic copy rather than Compose whitespace.
-        assertTrue(overlay.contains("\"New phone task\""))
+        // The composer does not need a redundant task-mode header.
+        assertFalse(overlay.contains("\"New phone task\""))
     }
 
     @Test fun ordinaryConversationHasNoPhoneActionCapability() {

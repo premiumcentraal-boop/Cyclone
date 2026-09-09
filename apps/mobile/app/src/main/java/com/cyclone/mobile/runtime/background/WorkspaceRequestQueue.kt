@@ -7,6 +7,16 @@ import java.util.UUID
 
 data class WorkspaceDestinationHint(val label: String, val androidUserId: Int)
 
+/** Android inventory is independent of registered app jobs. No synthetic workspace is created. */
+internal object ProfileDestinationPresentation {
+    fun from(currentUser: Int, visibleUsers: List<Int>): List<WorkspaceDestinationHint> =
+        listOf(WorkspaceDestinationHint("Profile A", currentUser)) + visibleUsers.distinct()
+            .filter { it >= 0 && it != currentUser }.sorted().mapIndexed { index, user ->
+                WorkspaceDestinationHint("Profile ${('B'.code + index).toChar()}", user)
+            }
+}
+
+
 data class PendingWorkspaceRequest(
     val id: String,
     val goal: String,
@@ -14,9 +24,13 @@ data class PendingWorkspaceRequest(
     val targetPackageName: String? = null,
     val targetAppLabel: String? = null,
     val preferredDestination: WorkspaceDestinationHint? = null,
+    val blockedReason: String? = null,
 )
 
 internal object WorkspaceQueuePromotionPolicy {
+    fun canStart(currentPhase: TaskPhase?, foregroundTaskOwnsSlot: Boolean): Boolean =
+        canPromote(currentPhase) && !foregroundTaskOwnsSlot
+
     fun canPromote(currentPhase: TaskPhase?): Boolean =
         currentPhase == null || currentPhase in setOf(TaskPhase.STOPPED, TaskPhase.FAILED)
 }
@@ -69,10 +83,15 @@ class WorkspaceRequestQueue(private val capacity: Int = 8) {
     fun steer(id: String, destination: WorkspaceDestinationHint): PendingWorkspaceRequest? {
         var changed: PendingWorkspaceRequest? = null
         mutable.value = mutable.value.map { request ->
-            if (request.id == id) request.copy(preferredDestination = destination).also { changed = it }
+            if (request.id == id) request.copy(preferredDestination = destination, blockedReason = null).also { changed = it }
             else request
         }
         return changed
+    }
+
+    @Synchronized
+    fun blocked(id: String, reason: String) {
+        mutable.value = mutable.value.map { if (it.id == id) it.copy(blockedReason = reason.take(240)) else it }
     }
 
     @Synchronized

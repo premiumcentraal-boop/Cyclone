@@ -79,12 +79,10 @@ object WorkspaceTasks {
     fun takeAttachment(taskId: String) = attachments.remove(taskId)
     fun queueRequest(goal: String, targetPackageName: String? = null, targetAppLabel: String? = null) =
         requests.add(goal, targetPackageName, targetAppLabel) { com.cyclone.mobile.ui.overlay.PendingTaskAttachment.take() }
-    fun canStartRequest(): Boolean = !hasCurrentTask() &&
-        com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.snapshot().state !in setOf(
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.ANALYSIS,
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.WORKING,
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.LIVE,
-            com.cyclone.mobile.ui.overlay.OverlayChromeState.GATE)
+    fun canStartRequest(): Boolean = WorkspaceQueuePromotionPolicy.canStart(
+        state.value?.phase,
+        com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask(),
+    )
     fun hasCurrentTask(): Boolean = !WorkspaceQueuePromotionPolicy.canPromote(state.value?.phase)
     const val PRODUCT_HOT_BACKGROUND_LIMIT = SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT
     private val mutable = MutableStateFlow<WorkspaceTaskUi?>(null)
@@ -96,16 +94,12 @@ object WorkspaceTasks {
     /** Read-only profile inventory for queue steering. No Android profile state is mutated here. */
     fun queueDestinations(context: Context): List<WorkspaceDestinationHint> {
         val own = Layer2Workspaces.currentAndroidUserId()
-        val result = mutableListOf(WorkspaceDestinationHint("Profile A", own))
         val secondaryIds = runCatching {
-            Layer2Workspaces.initialize(context.applicationContext)
-            Layer2Workspaces.engine.snapshot()
-                .map { it.androidUserId }
-                .distinct()
-                .filter { it != own && Layer2Workspaces.visibleProfile(context, it) != null }
+            context.getSystemService(android.os.UserManager::class.java).userProfiles
+                .mapNotNull { Layer2Workspaces.profileUserId(context, it) }
+                .distinct().filter { it != own }.sorted()
         }.getOrDefault(emptyList())
-        secondaryIds.take(1).forEach { result += WorkspaceDestinationHint("Profile B", it) }
-        return result
+        return ProfileDestinationPresentation.from(own, secondaryIds)
     }
 
     /** Deterministic app resolution mirrors the existing explicit-target rule: exactly one label match. */
@@ -133,6 +127,7 @@ object WorkspaceTasks {
     }
 
     fun queuePresentationStatus(context: Context, request: PendingWorkspaceRequest): String {
+        request.blockedReason?.let { return it }
         val destinations = queueDestinations(context)
         val preferred = request.preferredDestination
         if (preferred != null && destinations.none { it.androidUserId == preferred.androidUserId }) return "Choose destination"
@@ -153,13 +148,19 @@ object WorkspaceTasks {
         val preferred = pending.preferredDestination
         if (preferred != null && destinations.none { it.androidUserId == preferred.androidUserId }) return@synchronized false
         val own = Layer2Workspaces.currentAndroidUserId()
-        if (preferred != null && preferred.androidUserId != own) return@synchronized false
+        if (preferred != null && preferred.androidUserId != own) {
+            requests.blocked(pending.id, "This profile can't run as an isolated task yet. Choose Profile A or open Profiles.")
+            return@synchronized false
+        }
         val target = resolveQueueTarget(context, pending) ?: return@synchronized false
         if (pending.targetPackageName != target.packageName || pending.targetAppLabel != target.appLabel) {
             requests.bindTarget(pending.id, target.packageName, target.appLabel)
         }
         runCatching {
             start(context.applicationContext, pending.goal, target.packageName, target.appLabel, pending.id)
+        }.onFailure { error ->
+            requests.blocked(pending.id, error.message ?: "Check Background tasks setup.")
+            android.widget.Toast.makeText(context, error.message ?: "Check Background tasks setup.", android.widget.Toast.LENGTH_LONG).show()
         }.isSuccess
     }
 

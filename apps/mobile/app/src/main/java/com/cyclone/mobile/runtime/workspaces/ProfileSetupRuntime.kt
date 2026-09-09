@@ -61,6 +61,26 @@ object ProfileSetupRuntime {
 
     fun existingUser(context: Context): Int? = prefs(context).getInt(KEY_USER, -1).takeIf { it > 0 }
 
+    /** Resume discovery precedes creation; only the exact journaled identity can be adopted. */
+    fun refreshExisting(context: Context): Int? {
+        val store = prefs(context)
+        val name = store.getString(KEY_NAME, null) ?: return existingUser(context)
+        if (!ProfileSetupPlan.validProfileName(name)) return null
+        val parent = Layer2Workspaces.currentAndroidUserId()
+        val execution = executeRoot(ProfileSetupPlan.listUsers())
+        if (!execution.result.successful) return existingUser(context)
+        val users = ProfileSetupParser.users(execution.result.output)
+        val journal = journalSnapshot(store, name, parent, selectedPackages(context))
+        val recovered = ProfileRecovery.resolve(journal, parent, users)
+        if (recovered is ProfileRecoveryDecision.Resume) {
+            commitOrStorageFailure(store.edit().putInt(KEY_USER, recovered.user.id))
+            _state.value = _state.value.copy(userId = recovered.user.id, issue = null,
+                message = "Your saved profile was found. Continue adding apps.")
+            return recovered.user.id
+        }
+        return null
+    }
+
     fun apps(context: Context): List<ProfileApp> = context.packageManager.queryIntentActivities(
         Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
         PackageManager.MATCH_ALL,
@@ -179,6 +199,15 @@ object ProfileSetupRuntime {
                     val journal = journalSnapshot(store, profileName, parentUserId, requestedPackages)
                     val profileUserId = when (val recovery = ProfileRecovery.resolve(journal, parentUserId, users)) {
                         ProfileRecoveryDecision.Create -> {
+                            if (users.any { it.managed && it.parentId == parentUserId && !it.partial }) {
+                                throw SetupFailure(ProfileSetupFailure(
+                                    ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                                    "Review your existing work profile",
+                                    "Android already has a work profile that does not match Cyclone's saved setup. Cyclone will not replace it or access its accounts.",
+                                    "Review the work profile in Android settings before creating another.",
+                                    false,
+                                ))
+                            }
                             boundary()
                             _state.value = _state.value.copy(message = "Creating Profile B…", completed = 1)
                             val execution = executeRoot(ProfileSetupPlan.createManagedProfile(parentUserId, profileName))

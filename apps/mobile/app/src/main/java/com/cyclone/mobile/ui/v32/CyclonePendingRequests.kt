@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,7 +58,7 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
             QueuedTaskCard(
                 request = request,
                 compact = keyboardOpen,
-                onSteer = { steering = request },
+                onSteer = { steering = if (steering?.id == request.id) null else request },
                 onStop = {
                     if (steering?.id == request.id) steering = null
                     WorkspaceTasks.requests.remove(request.id)
@@ -69,9 +70,14 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
                     destinations = WorkspaceTasks.queueDestinations(context),
                     onSelected = { destination ->
                         WorkspaceTasks.requests.steer(request.id, destination)
+                        if (destination.androidUserId == com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.currentAndroidUserId() &&
+                            WorkspaceTasks.resolveQueueTarget(context, request) == null) {
+                            context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
+                                .putExtra("goal", request.goal).putExtra("pendingRequestId", request.id)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        } else WorkspaceTasks.tryPromoteNext(context)
                         steering = null
                     },
-                    onDismiss = { steering = null },
                 )
             }
         }
@@ -140,7 +146,7 @@ private fun QueuedTaskCard(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedButton(
+                TextButton(
                     onClick = onSteer,
                     modifier = Modifier
                         .weight(1f)
@@ -148,7 +154,7 @@ private fun QueuedTaskCard(
                         .semantics { contentDescription = model.steerContentDescription },
                     shape = RoundedCornerShape(18.dp),
                 ) { Text("Steer") }
-                OutlinedButton(
+                TextButton(
                     onClick = onStop,
                     modifier = Modifier
                         .weight(1f)
@@ -167,46 +173,18 @@ private fun SteerDestinationSheet(
     request: PendingWorkspaceRequest,
     destinations: List<WorkspaceDestinationHint>,
     onSelected: (WorkspaceDestinationHint) -> Unit,
-    onDismiss: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .70f)),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(
-            Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Steer task", style = MaterialTheme.typography.labelLarge)
-            Text(
-                TaskHumanizer.humanize(request.goal, request.targetAppLabel),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+        destinations.forEach { destination ->
+            androidx.compose.material3.FilterChip(
+                selected = request.preferredDestination?.androidUserId == destination.androidUserId,
+                onClick = { onSelected(destination) },
+                label = { Text(destination.label) },
+                modifier = Modifier.semantics { contentDescription = "Steer to ${destination.label}" },
             )
-            destinations.forEach { destination ->
-                val selected = request.preferredDestination?.androidUserId == destination.androidUserId
-                OutlinedButton(
-                    onClick = { onSelected(destination) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .semantics { contentDescription = "Steer to ${destination.label}" },
-                    shape = RoundedCornerShape(18.dp),
-                ) {
-                    Text((if (selected) "✓ " else "") + destination.label)
-                }
-            }
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text("Cancel") }
         }
     }
 }
