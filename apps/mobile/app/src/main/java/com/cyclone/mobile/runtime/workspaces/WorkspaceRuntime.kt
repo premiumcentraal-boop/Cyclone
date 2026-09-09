@@ -200,6 +200,12 @@ object Layer2Workspaces {
                 "workspace.list" -> status(ctx)
                 "workspace.register" -> { check(!gated()) { "GATE: review required" }; engine.register(fromJson(p)); status(ctx) }
                 "workspace.switch", "phone.workspace_switch" -> switch(ctx, p.getString("id"))
+                "workspace.close_task" -> {
+                    val id = p.getString("workspaceId")
+                    engine.closeTask(id, p.getLong("workspaceGeneration"))
+                    goals.remove(id)
+                    status(ctx)
+                }
                 "workspace.pause" -> { engine.pause(); status(ctx) }
                 "workspace.release" -> { check(!gated()) { "GATE: resolve review before clearing selection" }; engine.clearSelection(); goals.clear(); status(ctx) }
                 "workspace.arm" -> { check(!gated()) { "GATE: review required" }; val id = p.getString("id"); engine.arm(id); goals[id] = p.optString("goal").take(500); status(ctx) }

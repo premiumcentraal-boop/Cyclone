@@ -45,6 +45,17 @@ class WorkspaceEngine(private val persist: (List<Workspace>) -> Unit = {}) {
     private fun revoke() { lease = null; generation++; changed() }
     fun pause() = synchronized(mutationLock) { revoke(); selected?.let { state(it, WorkspaceState.paused) } }
     fun clearSelection() = synchronized(mutationLock) { pause(); selected = null; armed.clear() }
+    /** Close exactly one task and invalidate its lease without dropping other armed jobs. */
+    fun closeTask(id: String, expectedGeneration: Long) = synchronized(mutationLock) {
+        if (selected == id) {
+            check(lease == null || lease?.generation == expectedGeneration) { "STALE_WORKSPACE: task identity changed" }
+            revoke()
+            selected = null
+            state(id, WorkspaceState.idle)
+        }
+        armed.remove(id)
+        changed()
+    }
     fun arm(id: String) = synchronized(mutationLock) {
         check(registry.containsKey(id)) { "Unknown workspace" }
         if (id !in armed) { armed.addLast(id); changed() }

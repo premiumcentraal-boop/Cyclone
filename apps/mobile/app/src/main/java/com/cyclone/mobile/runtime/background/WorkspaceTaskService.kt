@@ -226,7 +226,15 @@ class WorkspaceTaskService : Service() {
             try {
                 // Join creation too: its NonCancellable block releases any display created late.
                 running?.cancelAndJoin()
+                if (closing.workspaceId != null) {
+                    val released = withContext(Dispatchers.IO) {
+                        com.cyclone.mobile.PhoneToolExecutor.execute(applicationContext, com.cyclone.mobile.PhoneToolRequest(
+                            java.util.UUID.randomUUID().toString(), "workspace.close_task", closing.identityJson()))
+                    }
+                    check(released.ok) { released.error?.message ?: "Couldn't release this workspace." }
+                } else {
                 sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it) } }
+                }
                 sessionId = null
                 WorkspaceTasks.clearClosedTask(closing.taskId, closing.sessionId)
                 stopForeground(STOP_FOREGROUND_REMOVE)
