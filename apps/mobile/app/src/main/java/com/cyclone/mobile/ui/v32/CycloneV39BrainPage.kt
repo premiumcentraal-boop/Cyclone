@@ -2,8 +2,8 @@ package com.cyclone.mobile.ui.v32
 
 import android.content.Context
 import android.content.Intent
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -68,25 +69,26 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
         }
     }
     val verified = skills.filter { it.successCount > 0 }
+    val learnedApps = apps.filter { it.openSuccessCount > 0 }
     val averageConfidence = if (verified.isEmpty()) 0 else {
         (verified.map { it.confidence.coerceIn(0.0, 1.0) }.average() * 100).toInt()
     }
 
     var tab by remember { mutableIntStateOf(0) }
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(
+        contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text("Brain", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    "What Cyclone knows",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Text("What Cyclone knows and trusts", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         task?.takeIf { UiTask(it).active }?.let { active ->
             item {
+                val taskLabel = TaskGlassPresentation.current(active, appLabel(context, active.packageName))?.taskLabel ?: active.title
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
@@ -94,19 +96,14 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 ) {
                     Row(
-                        Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Icon(Icons.Rounded.SmartToy, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Text("Current context", style = MaterialTheme.typography.labelMedium)
-                            Text(
-                                active.title,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Text("Learning from current task", style = MaterialTheme.typography.labelMedium)
+                            Text(taskLabel, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Text(UiTask(active).consumerStatus, style = MaterialTheme.typography.labelSmall)
                     }
@@ -116,9 +113,19 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
 
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BrainMetric("Verified", verified.size.toString(), Modifier.weight(1f))
-                BrainMetric("Apps", apps.size.toString(), Modifier.weight(1f))
+                BrainMetric("Verified skills", verified.size.toString(), Modifier.weight(1f))
+                BrainMetric("Learned apps", learnedApps.size.toString(), Modifier.weight(1f))
                 BrainMetric("Confidence", "$averageConfidence%", Modifier.weight(1f))
+            }
+        }
+
+        if (apps.size > learnedApps.size) {
+            item {
+                Text(
+                    "${apps.size} apps discovered · ${learnedApps.size} with successful learned use",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
@@ -128,27 +135,17 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
             0 -> {
                 item { CycloneSectionTitle("Verified skills") }
                 if (verified.isEmpty()) {
-                    item {
-                        CycloneSimpleCard(Modifier.fillMaxWidth()) {
-                            Text("No verified skills yet", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "Complete a task or teach Cyclone by doing. Reusable skills will appear here after successful use.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    item { BrainEmptyState("No verified skills yet", "Complete a task or teach Cyclone by doing. Skills appear after successful use.") }
                 }
                 items(verified, key = { it.signature }) { skill ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                     ) {
                         Row(
-                            Modifier.padding(15.dp),
+                            Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
@@ -163,7 +160,18 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            CycloneStatus("${(skill.confidence.coerceIn(0.0, 1.0) * 100).toInt()}%")
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ) {
+                                Text(
+                                    "${(skill.confidence.coerceIn(0.0, 1.0) * 100).toInt()}%",
+                                    Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
                         }
                     }
                 }
@@ -171,7 +179,7 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Icon(Icons.Rounded.Memory, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${paths.size} learned paths available", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${paths.size} learned paths ready for reuse", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -179,24 +187,18 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
 
             1 -> {
                 item { CycloneSectionTitle("Learned apps") }
-                if (apps.isEmpty()) {
-                    item {
-                        CycloneSimpleCard(Modifier.fillMaxWidth()) {
-                            Text("No learned apps yet", style = MaterialTheme.typography.titleSmall)
-                            Text("Apps Cyclone successfully navigates will appear here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
+                if (learnedApps.isEmpty()) {
+                    item { BrainEmptyState("No learned apps yet", "Apps move here after Cyclone successfully navigates them.") }
                 }
-                items(apps, key = { it.packageName }) { app ->
+                items(learnedApps, key = { it.packageName }) { app ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                     ) {
                         Row(
-                            Modifier.padding(15.dp),
+                            Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
@@ -211,7 +213,7 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            Icon(Icons.Rounded.CheckCircle, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.secondary)
+                            Icon(Icons.Rounded.CheckCircle, "Learned", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.secondary)
                         }
                     }
                 }
@@ -220,12 +222,7 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
             else -> {
                 item { CycloneSectionTitle("Recent outcomes") }
                 if (runs.isEmpty()) {
-                    item {
-                        CycloneSimpleCard(Modifier.fillMaxWidth()) {
-                            Text("No task outcomes yet", style = MaterialTheme.typography.titleSmall)
-                            Text("Completed Cyclone tasks will appear here with a concise result and details when you need them.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
+                    item { BrainEmptyState("No outcomes yet", "Completed Cyclone tasks will appear here with concise results.") }
                 }
                 items(runs, key = { it.session.id }) { run ->
                     V39RunCard(run) {
@@ -239,14 +236,49 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                 if (notes.isNotEmpty()) {
                     item { CycloneSectionTitle("Recent learning") }
                     items(notes, key = { it.id }) { note ->
-                        CycloneSimpleCard(Modifier.fillMaxWidth()) {
-                            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            shadowElevation = 1.dp,
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                            ) {
                                 Icon(Icons.Rounded.History, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                                 Text(note.text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BrainEmptyState(title: String, body: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Psychology, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -261,8 +293,7 @@ private fun V39RunCard(run: V39RunRow, onOpen: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -295,15 +326,10 @@ private fun V39RunCard(run: V39RunRow, onOpen: () -> Unit) {
 
 @Composable
 private fun BrainMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
-    ) {
+    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .72f)) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
     }
 }

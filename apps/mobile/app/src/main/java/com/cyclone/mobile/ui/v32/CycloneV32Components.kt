@@ -1,17 +1,27 @@
 package com.cyclone.mobile.ui.v32
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,23 +32,21 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,9 +88,7 @@ fun CycloneV32TopBar(
                     color = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.primary,
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        CycloneOrbitMark(Modifier.size(24.dp))
-                    }
+                    Box(contentAlignment = Alignment.Center) { CycloneOrbitMark(Modifier.size(24.dp)) }
                 }
             }
             Text(
@@ -111,8 +117,6 @@ fun CycloneV32TopBar(
                         Text(if (ready) "Ready" else "Setup", style = MaterialTheme.typography.labelMedium)
                     }
                 }
-            } else {
-                Icon(Icons.Rounded.Settings, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -120,55 +124,84 @@ fun CycloneV32TopBar(
 
 @Composable
 fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> Unit) {
-    NavigationBar(
-        modifier = Modifier.height(74.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    if (imeVisible) return
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .97f),
         tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
-        V32Destination.entries.forEach { destination ->
-            val isSelected = selected == destination
-            val isAi = destination == V32Destination.AI
-            NavigationBarItem(
-                selected = isSelected,
-                onClick = { onSelect(destination) },
-                alwaysShowLabel = true,
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = if (isAi) Color.Transparent else MaterialTheme.colorScheme.primaryContainer.copy(alpha = .72f),
-                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
-                icon = {
-                    if (isAi) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
+            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(66.dp)
+                    .padding(horizontal = 6.dp)
+                    .selectableGroup(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                V32Destination.entries.forEach { destination ->
+                    val isSelected = selected == destination
+                    val isAi = destination == V32Destination.AI
+                    val itemTint = when {
+                        isAi && isSelected -> MaterialTheme.colorScheme.onPrimary
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(destination) }),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Surface(
-                            modifier = Modifier.size(44.dp),
-                            shape = CircleShape,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = if (isAi) Modifier.size(48.dp) else Modifier.size(width = 38.dp, height = 30.dp),
+                            shape = if (isAi) CircleShape else RoundedCornerShape(12.dp),
+                            color = when {
+                                isAi && isSelected -> MaterialTheme.colorScheme.primary
+                                isAi -> MaterialTheme.colorScheme.surfaceVariant
+                                isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .78f)
+                                else -> Color.Transparent
+                            },
+                            contentColor = itemTint,
+                            shadowElevation = if (isAi && isSelected) 3.dp else 0.dp,
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(destination.icon, destination.label, modifier = Modifier.size(22.dp))
+                                Icon(
+                                    painter = androidx.compose.ui.res.painterResource(
+                                        when (destination) {
+                                            V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
+                                            V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
+                                            V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
+                                            V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
+                                            V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
+                                        },
+                                    ),
+                                    contentDescription = destination.label,
+                                    modifier = Modifier.size(if (isAi) 25.dp else 23.dp),
+                                    tint = itemTint,
+                                )
                             }
                         }
-                    } else {
-                        Icon(
-                            painter = androidx.compose.ui.res.painterResource(
-                                when (destination) {
-                                    V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
-                                    V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
-                                    V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
-                                    V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
-                                    V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
-                                },
-                            ),
-                            contentDescription = destination.label,
-                            modifier = Modifier.size(25.dp),
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(if (isAi) 0.dp else 4.dp))
+                        Text(
+                            destination.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
                         )
                     }
-                },
-                label = { Text(destination.label, style = MaterialTheme.typography.labelSmall) },
-            )
+                }
+            }
         }
     }
 }
@@ -180,27 +213,44 @@ fun CycloneSegmentedControl(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Row(Modifier.fillMaxWidth().padding(3.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            options.forEachIndexed { index, label ->
-                val active = selected == index
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .selectable(selected = active, role = Role.Tab, onClick = { onSelect(index) }),
-                    shape = RoundedCornerShape(13.dp),
-                    color = if (active) MaterialTheme.colorScheme.surface else Color.Transparent,
-                    contentColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
-                ) {
-                    Box(Modifier.padding(vertical = 9.dp, horizontal = 6.dp), contentAlignment = Alignment.Center) {
-                        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium)
+    if (options.isEmpty()) return
+    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+        BoxWithConstraints(Modifier.fillMaxWidth().height(44.dp).padding(3.dp)) {
+            val gap = 3.dp
+            val segmentWidth = (maxWidth - gap * (options.size - 1).toFloat()) / options.size.toFloat()
+            val targetOffset by animateDpAsState(
+                targetValue = (segmentWidth + gap) * selected.coerceIn(options.indices).toFloat(),
+                animationSpec = tween(durationMillis = 210),
+                label = "Cyclone segment position",
+            )
+            Surface(
+                modifier = Modifier.offset(x = targetOffset).width(segmentWidth).fillMaxHeight(),
+                shape = RoundedCornerShape(13.dp),
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shadowElevation = 1.dp,
+            ) {}
+            Row(Modifier.fillMaxWidth().fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                options.forEachIndexed { index, label ->
+                    val active = selected == index
+                    val textColor by animateColorAsState(
+                        targetValue = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        animationSpec = tween(durationMillis = 170),
+                        label = "Cyclone segment text",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(segmentWidth)
+                            .fillMaxHeight()
+                            .selectable(selected = active, role = Role.Tab, onClick = { onSelect(index) }),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = textColor,
+                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                        )
                     }
                 }
             }
@@ -219,7 +269,6 @@ fun CycloneRoutineCard(
         onClick = onOpen,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .68f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -287,9 +336,6 @@ fun CyclonePermissionRow(
     actionLabel: String = if (ready) "Ready" else "Enable",
     onClick: () -> Unit,
 ) {
-    // V3.2 beta.3 collapses the old second Accessibility permission into Cyclone's canonical
-    // service. Keep the large Settings source binary-compatible while no longer rendering the
-    // legacy duplicate row to users.
     if (title == LEGACY_ENHANCED_CONTROL_ROW) return
 
     Row(

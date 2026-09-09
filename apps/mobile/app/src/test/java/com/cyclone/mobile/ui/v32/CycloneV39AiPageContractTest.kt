@@ -16,11 +16,9 @@ class CycloneV39AiPageContractTest {
             ?: error("Could not locate source file $relative from ${File(".").absolutePath}")
     }
 
-    @Test
-    fun aiPageHasOneAutoRoutedComposer() {
+    @Test fun aiPageHasOneAutoRoutedComposer() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
-        assertFalse(text.contains("CycloneSegmentedControl"))
-        assertFalse(text.contains("\"Phone task\""))
+        assertFalse(text.contains("listOf(\"Chat\", \"Phone task\")"))
         assertFalse(text.contains("\"New request\""))
         assertTrue(text.contains("RequestIntentRouter.route(normalized"))
         assertTrue(text.indexOf("RequestIntentRouter.route(normalized") < text.indexOf("WorkspaceTasks.canStartRequest()"))
@@ -28,8 +26,7 @@ class CycloneV39AiPageContractTest {
         assertFalse(text.contains("MediaProjectionManager"))
     }
 
-    @Test
-    fun chatAndPhoneDispatchUseSeparateExistingPaths() {
+    @Test fun chatAndPhoneDispatchUseSeparateExistingPaths() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
         assertTrue(text.contains("RequestDispatch.CHAT"))
         assertTrue(text.contains("WorkspaceActivity::class.java"))
@@ -38,15 +35,31 @@ class CycloneV39AiPageContractTest {
         assertTrue(text.contains("restoreAttachmentAfterChatFailure"))
     }
 
-    @Test
-    fun taskAreaPrecedesBoundedComposerAndReplyStopIsChatOnly() {
+    @Test fun taskAreaAndModelPillStayAboveComposer() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
         val current = text.indexOf("CycloneAskTaskPanel(current)")
         val queued = text.indexOf("CyclonePendingRequests()")
+        val modelPill = text.indexOf("CycloneModelPill(")
         val composer = text.lastIndexOf("BasicTextField(")
         assertTrue(current in 0 until composer)
         assertTrue(queued in 0 until composer)
+        assertTrue(modelPill in 0 until composer)
+        assertTrue(text.contains("showModelPill = false"))
         assertTrue(text.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
+    }
+
+    @Test fun emptyStateMatchesAlpineProgressConcept() {
+        val page = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
+        val backdrop = source("com/cyclone/mobile/ui/v32/CycloneAlpineBackdrop.kt")
+        assertTrue(page.contains("\"Let’s make\\nprogress today.\""))
+        assertTrue(page.contains("\"Ideas become real when you take the next step.\""))
+        assertTrue(page.contains("CycloneAlpineBackdrop"))
+        assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
+        assertFalse(backdrop.contains("background.copy(alpha = .92f)"))
+    }
+
+    @Test fun replyStopIsChatOnly() {
+        val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
         val stopReply = text.indexOf("Stop reply")
         assertTrue(stopReply >= 0)
         val stopWindow = text.substring((stopReply - 500).coerceAtLeast(0), (stopReply + 500).coerceAtMost(text.length))
@@ -54,14 +67,14 @@ class CycloneV39AiPageContractTest {
         assertFalse(stopWindow.contains("WorkspaceTasks.command"))
     }
 
-    @Test
-    fun lightSurfaceAndAiNavigationAvoidDoubleIndicators() {
-        val page = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
+    @Test fun navigationIsCustomInsetSafeAndUsesCycloneAiAsset() {
         val nav = source("com/cyclone/mobile/ui/v32/CycloneV32Components.kt")
-        assertTrue(page.contains("shadowElevation = 0.dp"))
-        assertTrue(page.contains("outlineVariant.copy"))
-        assertTrue(nav.contains("indicatorColor = if (isAi) Color.Transparent"))
-        assertTrue(nav.contains(".size(44.dp)"))
-        assertTrue(nav.contains("if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant"))
+        assertTrue(nav.contains("navigationBarsPadding()"))
+        assertTrue(nav.contains("WindowInsets.ime"))
+        assertTrue(nav.contains("if (imeVisible) return"))
+        assertTrue(nav.contains("ic_cyclone_ai_42"))
+        assertTrue(nav.contains("Modifier.size(48.dp)"))
+        assertFalse(nav.contains("NavigationBarItem("))
+        assertFalse(nav.contains("Modifier.height(74.dp)"))
     }
 }

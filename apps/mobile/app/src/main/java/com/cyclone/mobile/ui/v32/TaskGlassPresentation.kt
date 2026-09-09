@@ -28,13 +28,17 @@ internal object TaskGlassPresentation {
         val status = when (task.phase) {
             TaskPhase.STARTING, TaskPhase.WORKING -> "Working on this task"
             TaskPhase.PAUSED -> "Paused"
-            TaskPhase.REVIEW -> "Review required"
-            TaskPhase.HUMAN -> "Waiting for you"
-            TaskPhase.DONE, TaskPhase.FAILED -> "Finished"
+            TaskPhase.REVIEW -> "Needs your review"
+            TaskPhase.HUMAN -> "You're in control"
+            TaskPhase.DONE -> "Finished"
+            TaskPhase.FAILED -> "Couldn't finish"
             TaskPhase.STOPPED -> return null
         }
-        val review = task.confirmation != null || task.phase == TaskPhase.REVIEW
-        val action = if (review) "Review" else "View progress"
+        val action = when {
+            task.phase == TaskPhase.DONE -> "Open"
+            task.phase == TaskPhase.FAILED || task.phase == TaskPhase.REVIEW || task.confirmation != null -> "Review"
+            else -> "View progress"
+        }
         return TaskGlassCardModel(
             status = status,
             taskLabel = label,

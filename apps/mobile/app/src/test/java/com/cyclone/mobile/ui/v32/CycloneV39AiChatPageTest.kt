@@ -57,7 +57,7 @@ class CycloneV39AiChatPageTest {
 
     @Test fun productionAiDestinationRoutesToV39Page() {
         val app = source("CycloneV32App.kt")
-        assertTrue(app.contains("V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }"))
+        assertTrue(app.contains("V32Destination.AI -> V39AiChatPage(context, refreshTick)"))
         assertFalse(app.contains("V32Destination.AI -> V32AiPage("))
     }
 
@@ -77,9 +77,21 @@ class CycloneV39AiChatPageTest {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("BasicTextField("))
         assertTrue(page.contains("contentDescription = \"Ask Cyclone composer\""))
-        assertTrue(page.contains("maxLines = 5"))
+        assertTrue(page.contains("maxLines = 4"))
         assertTrue(page.contains("ImeAction.Send"))
         assertEquals(1, Regex("FilledIconButton\\(").findAll(page).count())
+    }
+
+    @Test fun modelPillCannotStealComposerWidth() {
+        val page = source("CycloneV39AiChatPage.kt")
+        val pill = page.indexOf("CycloneModelPill(")
+        val askSurface = page.indexOf("shape = RoundedCornerShape(32.dp)", pill)
+        val composer = page.indexOf("BasicTextField(", askSurface)
+        assertTrue(pill >= 0)
+        assertTrue(askSurface > pill)
+        assertTrue(composer > askSurface)
+        assertTrue(page.contains("showModelPill = false"))
+        assertFalse(page.contains("CycloneIntelligenceControls(enabled = !session.busy, onChanged"))
     }
 
     @Test fun chatAndPhoneDispatchUseSeparateExistingPaths() {
@@ -92,14 +104,14 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("MediaProjectionManager"))
     }
 
-    @Test fun modelSelectionPersistsOnlyExpectedPreference() {
+    @Test fun modelAndReasoningPreferencesStayCanonical() {
         val page = source("CycloneV39AiChatPage.kt")
+        val controls = source("CycloneIntelligenceControls.kt")
         assertTrue(page.contains("const val PREFS = \"cyclone_ai\""))
         assertTrue(page.contains("const val MODEL_KEY = \"openrouter_model\""))
-        val controls = source("CycloneIntelligenceControls.kt")
-        assertTrue(controls.contains("putString(V39AiChatContract.MODEL_KEY, V39AiChatContract.storageId(next))"))
+        assertTrue(controls.contains("putString(V39AiChatContract.MODEL_KEY, V39AiChatContract.storageId(model))"))
         assertTrue(controls.contains("putString(\"openrouter_reasoning_effort\", level)"))
-        assertTrue(page.contains("CycloneIntelligenceControls(enabled = !session.busy, onChanged"))
+        assertTrue(page.contains("showModelPill = false"))
         assertTrue(page.contains("prefs.getString(V39AiChatContract.MODEL_KEY, null)"))
     }
 
@@ -137,6 +149,14 @@ class CycloneV39AiChatPageTest {
         assertTrue(task in 0 until composer)
         assertTrue(queued in 0 until composer)
         assertTrue(page.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
+    }
+
+    @Test fun alpineEmptyStateUsesPreferredProgressComposition() {
+        val page = source("CycloneV39AiChatPage.kt")
+        assertTrue(page.contains("CycloneAlpineBackdrop"))
+        assertTrue(page.contains("\"Let’s make\\nprogress today.\""))
+        assertTrue(page.contains("\"Ideas become real when you take the next step.\""))
+        assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
     }
 
     @Test fun routineBuilderHasNoCallSurfaceFromChatPage() {

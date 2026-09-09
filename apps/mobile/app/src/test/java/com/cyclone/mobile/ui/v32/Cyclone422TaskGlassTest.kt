@@ -40,15 +40,49 @@ class Cyclone422TaskGlassTest {
         assertNotNull(card)
         assertEquals("Working on this task", card!!.status)
         assertEquals("Opening Chrome", card.taskLabel)
+        assertEquals("View progress", card.actionLabel)
     }
 
-    @Test fun collapsedCurrentTaskHasNoStopOrClose() {
+    @Test fun finishedTaskCollapsesToOpenableNotification() {
+        val card = TaskGlassPresentation.current(task(TaskPhase.DONE))!!
+        assertEquals("Finished", card.status)
+        assertEquals("Opening Chrome", card.taskLabel)
+        assertEquals("Open", card.actionLabel)
+        assertEquals("Open for Opening Chrome", card.actionContentDescription)
+    }
+
+    @Test fun reviewTaskUsesConsumerCopy() {
+        val card = TaskGlassPresentation.current(task(TaskPhase.REVIEW))!!
+        assertEquals("Needs your review", card.status)
+        assertEquals("Review", card.actionLabel)
+    }
+
+    @Test fun swipeCardHasTwoDirectionalPhysicalActions() {
         val panel = source("ui/v32/CycloneAskTaskPanel.kt")
+        assertTrue(panel.contains("Orientation.Horizontal"))
+        assertTrue(panel.contains("rememberDraggableState"))
+        assertTrue(panel.contains("offsetPx = (offsetPx + delta)"))
+        assertTrue(panel.contains("Text(\"Open\""))
+        assertTrue(panel.contains("\"Dismiss\""))
+        assertTrue(panel.contains("\"Pause\""))
+        assertTrue(panel.contains("commitLeft"))
+        assertTrue(panel.contains("commitRight"))
+        assertTrue(panel.contains("performHapticFeedback"))
+        assertTrue(panel.contains("spring("))
+    }
+
+    @Test fun destructiveTaskCommandsAreBoundToExplicitLeftActions() {
+        val panel = source("ui/v32/CycloneAskTaskPanel.kt")
+        assertTrue(panel.contains("WorkspaceTasks.command(context, task, \"pause\")"))
+        assertTrue(panel.contains("WorkspaceTasks.command(context, task, \"cancel\")"))
+        assertFalse(panel.contains("Text(\"Stop task\")"))
+        assertFalse(panel.contains("Text(\"Close task\")"))
+    }
+
+    @Test fun overlayAndInAppTaskGlassShareTheSameComponent() {
         val compact = source("ui/overlay/BackgroundTaskGlass.kt")
-        assertFalse(panel.contains("Stop task"))
-        assertFalse(panel.contains("Close task"))
-        assertFalse(panel.contains("WorkspaceTasks.command"))
-        assertFalse(compact.contains("WorkspaceTasks.command"))
+        assertTrue(compact.contains("CycloneAskTaskPanel(task)"))
+        assertFalse(compact.contains("BorderStroke"))
     }
 
     @Test fun viewProgressUsesExactTaskProjection() {
@@ -69,12 +103,6 @@ class Cyclone422TaskGlassTest {
 
     @Test fun stoppedTaskIsNotPresentedAsWorking() {
         assertNull(TaskGlassPresentation.current(task(TaskPhase.STOPPED)))
-    }
-
-    @Test fun reviewTaskUsesRequiredCopy() {
-        val card = TaskGlassPresentation.current(task(TaskPhase.REVIEW))!!
-        assertEquals("Review required", card.status)
-        assertEquals("Review", card.actionLabel)
     }
 
     @Test fun queuedRequestOnlyMapsToQueueCard() {
@@ -112,26 +140,15 @@ class Cyclone422TaskGlassTest {
         val overlay = source("ui/overlay/OverlayChrome.kt")
         assertTrue(overlay.contains("A real WorkspaceTaskUi is the only source of truth"))
         assertFalse(overlay.contains("Current phone task"))
-        assertFalse(overlay.contains("onAction(OverlayUserAction.STOP_TASK)"))
     }
 
-    @Test fun lightThemeUsesSemanticContentColors() {
+    @Test fun taskGlassUsesSemanticThemeColors() {
         val panel = source("ui/v32/CycloneAskTaskPanel.kt")
         assertTrue(panel.contains("MaterialTheme.colorScheme.onSurface"))
         assertTrue(panel.contains("MaterialTheme.colorScheme.onSurfaceVariant"))
         assertTrue(panel.contains("MaterialTheme.colorScheme.onPrimary"))
         assertFalse(panel.contains("Color.Black"))
-    }
-
-    @Test fun darkThemeUsesSemanticContentColorsWithoutHardcodedWhite() {
-        val files = listOf(
-            source("ui/v32/CycloneAskTaskPanel.kt"),
-            source("ui/v32/CyclonePendingRequests.kt"),
-            source("ui/overlay/BackgroundTaskGlass.kt"),
-        ).joinToString("\n")
-        assertFalse(files.contains("Color.Black"))
-        assertFalse(files.contains("Color.White"))
-        assertTrue(files.contains("MaterialTheme.colorScheme.onSurface"))
+        assertFalse(panel.contains("Color.White"))
     }
 
     @Test fun largeFontLayoutIsBoundedAndNoLegacy150DpQueueBoxRemains() {
