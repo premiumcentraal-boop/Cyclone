@@ -1,23 +1,23 @@
-# Combined source checkpoint: 51008be0c1ff9c0a7d77f7c5883358ef4e48bed8
-# User explicitly waived physical-evidence prerequisite for this development publication.
+# Visual Run 2 source checkpoint: 7f8d40c8258caa140b70623f25c548470d2d773f
+# User explicitly authorized 4.2.5 publication for physical screenshot review.
 schema = 1
-product_version = "4.2.4"
+product_version = "4.2.5"
 channel = "development"
-android_version_code = 85
+android_version_code = 86
 python_version = "4.1.0"
 
 [components]
-mobile = "4.2.4"
+mobile = "4.2.5"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.2.3"
+previous_mobile_version = "4.2.4"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.2.4-live-phone-and-ui"
+candidate_generation = "cyclone-4.2.5-visual-run-02"
