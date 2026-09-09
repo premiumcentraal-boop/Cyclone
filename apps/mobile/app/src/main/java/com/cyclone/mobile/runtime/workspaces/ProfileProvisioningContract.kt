@@ -336,7 +336,7 @@ object SecondaryUserProvisioningPolicy {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
                 "Android's current user does not match the user running Cyclone.")
         }
-        if (parent.profile || parent.partial) {
+        if (parent.profile || parent.partial || ProfileSetupParser.mainUserId(users) != appUserId) {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
                 "Cyclone must create new profiles from your main Android user.")
         }

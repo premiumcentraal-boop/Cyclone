@@ -44,6 +44,8 @@ class ProfileStructural427Test {
         val secondary = ProfileUserRecord(12, token, false, false, null, true, false, "android.os.usertype.full.SECONDARY")
         val owner = ProfileUserRecord(0, "Owner", false, false, null, true, false, "android.os.usertype.full.SYSTEM")
         assertEquals(0, ProfileSetupParser.mainUserId(listOf(secondary, owner)))
+        assertEquals(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+            SecondaryUserProvisioningPolicy.failure(12, 12, listOf(secondary, owner), 4)?.kind)
     }
     @Test fun requiredCyclonePackageDoesNotNeedWorkspaceRegistration() {
         val user = ProfileUserRecord(12, token, false, false, null, true, false)
