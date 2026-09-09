@@ -72,67 +72,80 @@ def safe_result(value, typed_values=()):
     return value
 
 
-def serve():
-    engine = LivePhone(PhoneTools(gateway=LiveGateway()))
-    generation = None
-    typed_values = []
+class Broker:
+    def __init__(self):
+        self.engine = LivePhone(PhoneTools(gateway=LiveGateway()))
+        self.generation = None
+        self.typed_values = []
+        self.lock = threading.RLock()
+
+    def handle(self, request):
+        request = validate_request(request)
+        with self.lock:
+            if request.get("operation") == "type" and request.get("text"):
+                self.typed_values.append(request["text"])
+                self.typed_values = self.typed_values[-32:]
+            try:
+                control = json.loads((root() / "control.json").read_text())
+            except (OSError, ValueError):
+                control = {}
+            if self.generation != control.get("generation"):
+                self.engine.observations.clear()
+                self.generation = control.get("generation")
+            self.engine.paused = control.get("enabled") is not True
+            try:
+                result = ({"ok": False, "error": "LIVE_PHONE_STOPPED"} if control.get("stopped", True) and request.get("operation") not in {"status", "devices"} else self.engine.execute(request))
+            except GatewayError as error:
+                self.engine.observations.clear()
+                failure = classify_failure(error.body)
+                result = {"ok": False, "error": failure.code if failure else "PHONE_UNAVAILABLE", "next": "Check Live Phone on the phone, then observe again"}
+            except ValueError:
+                result = {"ok": False, "error": "INVALID_LIVE_PHONE_REQUEST"}
+            except Exception:
+                # No transport errors, tokens, URLs, or raw typed input leave the broker.
+                self.engine.observations.clear()
+                result = {"ok": False, "error": "PHONE_UNAVAILABLE", "next": "Observe again; an interrupted action must not be replayed"}
+            try:
+                latest_control = json.loads((root() / "control.json").read_text())
+            except (OSError, ValueError):
+                latest_control = {}
+            if latest_control.get("generation") != self.generation:
+                self.engine.observations.clear()
+                result["control_changed"] = True
+                result["ok"] = False
+                if latest_control.get("stopped", True):
+                    for name in ("latest.png", "latest.jpg"):
+                        (root() / name).unlink(missing_ok=True)
+                for observation in (result, result.get("after", {})):
+                    if "vision" in observation:
+                        observation["vision"] = {"ready": False, "reason": "CONTROL_CHANGED"}
+                        observation["screenshot_path"] = None
+            self.engine.paused = latest_control.get("enabled") is not True
+            vision = result.get("vision", result.get("after", {}).get("vision", {})).get("ready", False)
+            (root() / "status.json").write_text(json.dumps({"at": int(time.time()), "vision": vision, "control": not self.engine.paused and result.get("ok") is True, "generation": latest_control.get("generation")}))
+            return safe_result(result, self.typed_values)
+
+
+def serve(broker=None):
+    broker = broker or Broker()
     with Listener(address(), family="AF_PIPE", authkey=key(create=True)) as listener:
         while True:
             try:
                 with listener.accept() as connection:
                     if not connection.poll(5):
                         continue
-                    request = validate_request(json.loads(connection.recv_bytes(16 * 1024)))
-                    if request.get("operation") == "type" and request.get("text"):
-                        typed_values.append(request["text"])
-                        typed_values = typed_values[-32:]
-                    try:
-                        control = json.loads((root() / "control.json").read_text())
-                    except (OSError, ValueError):
-                        control = {}
-                    if generation != control.get("generation"):
-                        engine.observations.clear()
-                        generation = control.get("generation")
-                    engine.paused = control.get("enabled") is not True
-                    try:
-                        result = ({"ok": False, "error": "LIVE_PHONE_STOPPED"} if control.get("stopped", True) and request.get("operation") not in {"status", "devices"} else engine.execute(request))
-                    except GatewayError as error:
-                        engine.observations.clear()
-                        failure = classify_failure(error.body)
-                        result = {"ok": False, "error": failure.code if failure else "PHONE_UNAVAILABLE", "next": "Check Live Phone on the phone, then observe again"}
-                    except ValueError:
-                        result = {"ok": False, "error": "INVALID_LIVE_PHONE_REQUEST"}
-                    except Exception:
-                        # No transport errors, tokens, URLs, or raw typed input leave the broker.
-                        engine.observations.clear()
-                        result = {"ok": False, "error": "PHONE_UNAVAILABLE", "next": "Observe again; an interrupted action must not be replayed"}
-                    try:
-                        latest_control = json.loads((root() / "control.json").read_text())
-                    except (OSError, ValueError):
-                        latest_control = {}
-                    if latest_control.get("generation") != generation:
-                        engine.observations.clear()
-                        result["control_changed"] = True
-                        result["ok"] = False
-                        if latest_control.get("stopped", True):
-                            for name in ("latest.png", "latest.jpg"):
-                                (root() / name).unlink(missing_ok=True)
-                        for observation in (result, result.get("after", {})):
-                            if "vision" in observation:
-                                observation["vision"] = {"ready": False, "reason": "CONTROL_CHANGED"}
-                                observation["screenshot_path"] = None
-                    engine.paused = latest_control.get("enabled") is not True
-                    vision = result.get("vision", result.get("after", {}).get("vision", {})).get("ready", False)
-                    (root() / "status.json").write_text(json.dumps({"at": int(time.time()), "vision": vision, "control": not engine.paused and result.get("ok") is True, "generation": latest_control.get("generation")}))
-                    encoded = json.dumps(safe_result(result, typed_values)).encode()
+                    request = json.loads(connection.recv_bytes(16 * 1024))
+                    encoded = json.dumps(broker.handle(request)).encode()
                     if len(encoded) > LIMIT:
                         encoded = b'{"ok":false,"error":"RESPONSE_TOO_LARGE"}'
                     connection.send_bytes(encoded)
             except (OSError, EOFError, ValueError, AuthenticationError):
-                # One caller cannot tear down the broker. No request is replayed.
                 continue
 
 
 def start():
     if os.name == "nt":
-        threading.Thread(target=serve, name="cyclone-live-phone", daemon=True).start()
+        broker = Broker()
+        from .live_phone_bridge import start_bridge
+        start_bridge(broker)
+        threading.Thread(target=serve, args=(broker,), name="cyclone-live-phone", daemon=True).start()
