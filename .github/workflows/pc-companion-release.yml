@@ -2,7 +2,7 @@ name: Cyclone PC Companion Release Candidate
 
 on:
   push:
-    branches: ['release/cyclone-one-v1.1.3-live-phone']
+    branches: ['release/cyclone-one-v1.1.3-live-phone', 'release/cyclone-one-v1.2.0-direct-live-phone']
   workflow_dispatch:
     inputs:
       publish_github_release:
@@ -81,7 +81,9 @@ jobs:
         run: ./scripts/pc-companion/sign-artifacts.ps1 -ArtifactDirectory dist/pc-companion
       - name: Verify installed candidate binaries
         shell: pwsh
-        run: ./scripts/pc-companion/test-installed-candidate.ps1 -Installer dist/pc-companion/Cyclone-PC-Companion-1.1.3-Setup.exe -Output dist/pc-companion/installer-acceptance.json
+        run: |
+          $PcVersion = (Get-Content 'apps/pc-companion/package.json' | ConvertFrom-Json).version
+          ./scripts/pc-companion/test-installed-candidate.ps1 -Installer "dist/pc-companion/Cyclone-PC-Companion-$PcVersion-Setup.exe" -Output dist/pc-companion/installer-acceptance.json
       - name: Generate notices and provenance
         shell: pwsh
         run: |
@@ -90,7 +92,8 @@ jobs:
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
           python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
           '${{ github.run_id }}' | Set-Content -Encoding utf8 dist/pc-companion/run-id.txt
-          $Signature = Get-AuthenticodeSignature dist/pc-companion/Cyclone-PC-Companion-1.1.3-Setup.exe
+          $PcVersion = (Get-Content 'apps/pc-companion/package.json' | ConvertFrom-Json).version
+          $Signature = Get-AuthenticodeSignature "dist/pc-companion/Cyclone-PC-Companion-$PcVersion-Setup.exe"
           $Signature.Status.ToString() | Set-Content -Encoding utf8 dist/pc-companion/signing-state.txt
       - uses: actions/upload-artifact@v4
         with:
