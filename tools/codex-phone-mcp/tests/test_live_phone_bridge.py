@@ -14,6 +14,7 @@ from cyclone_phone_mcp.live_phone_bridge import (
     LATEST_PROTOCOL,
     SUPPORTED_PROTOCOLS,
     Server,
+    _legacy_catalog,
     catalog,
 )
 from cyclone_phone_mcp.live_phone_ipc import root
@@ -64,10 +65,20 @@ class DirectBridgeTests(unittest.TestCase):
 
     def test_exact_typed_cloud_catalog_and_no_native_route(self):
         names = {tool["name"] for tool in catalog()}
-        self.assertEqual(16, len(names))
-        self.assertIn("cyclone_phone_search_ui", names)
-        self.assertIn("cyclone_phone_swipe", names)
+        self.assertEqual(
+            {
+                "cyclone_devices",
+                "cyclone_see",
+                "cyclone_find",
+                "cyclone_inspect",
+                "cyclone_act",
+                "cyclone_session",
+            },
+            names,
+        )
+        self.assertEqual(6, len(names))
         self.assertNotIn("phone_act", names)
+        self.assertFalse(any(name.startswith("cyclone_phone_") for name in names))
         for tool in catalog():
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
             self.assertFalse(
@@ -81,13 +92,16 @@ class DirectBridgeTests(unittest.TestCase):
                 }
                 & set(tool["inputSchema"]["properties"])
             )
-            self.assertTrue(tool["title"].startswith("Cyclone Phone "))
+            self.assertTrue(tool["title"].startswith("Cyclone "))
         self.assertNotIn(
             "CycloneLivePhone",
             Path("scripts/pc-companion/entrypoints/agent_mcp.py").read_text(),
         )
 
-    def test_typed_actions_reuse_broker_and_require_current_authority(self):
+    def test_legacy_typed_actions_remain_accepted_but_hidden(self):
+        legacy = {tool["name"]: tool["inputSchema"] for tool in _legacy_catalog()}
+        self.assertEqual(16, len(legacy))
+        self.assertNotIn("cyclone_phone_home", {tool["name"] for tool in catalog()})
         for op in (
             "tap",
             "long_press",
@@ -99,11 +113,7 @@ class DirectBridgeTests(unittest.TestCase):
             "home",
             "open_app",
         ):
-            schema = next(
-                tool["inputSchema"]
-                for tool in catalog()
-                if tool["name"] == "cyclone_phone_" + op
-            )
+            schema = legacy["cyclone_phone_" + op]
             args = {key: "test" for key in schema["required"]}
             args.update(device="pixel", observation_id="o1")
             if "direction" in args:
@@ -248,7 +258,7 @@ class DirectBridgeTests(unittest.TestCase):
             )
         )
         self.assertEqual([1, 2], [item["id"] for item in response])
-        self.assertEqual(16, len(response[0]["result"]["tools"]))
+        self.assertEqual(6, len(response[0]["result"]["tools"]))
 
         notification = {
             "jsonrpc": "2.0",
