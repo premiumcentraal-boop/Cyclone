@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -44,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -121,6 +124,9 @@ fun CycloneV32TopBar(
 
 @Composable
 fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> Unit) {
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    if (imeVisible) return
+
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = .97f),
         tonalElevation = 0.dp,
@@ -211,9 +217,9 @@ fun CycloneSegmentedControl(
     Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         BoxWithConstraints(Modifier.fillMaxWidth().height(44.dp).padding(3.dp)) {
             val gap = 3.dp
-            val segmentWidth = (maxWidth - gap * (options.size - 1)) / options.size
+            val segmentWidth = (maxWidth - gap * (options.size - 1).toFloat()) / options.size.toFloat()
             val targetOffset by animateDpAsState(
-                targetValue = (segmentWidth + gap) * selected.coerceIn(options.indices),
+                targetValue = (segmentWidth + gap) * selected.coerceIn(options.indices).toFloat(),
                 animationSpec = tween(durationMillis = 210),
                 label = "Cyclone segment position",
             )
@@ -297,7 +303,17 @@ fun CycloneRoutineCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                CycloneStatusPill(if (automation.enabled) "On" else "Off", automation.enabled)
+                if (automation.enabled) {
+                    CycloneStatusPill("On")
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) {
+                        Text("Off", Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }
