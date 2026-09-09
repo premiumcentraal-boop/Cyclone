@@ -1,23 +1,23 @@
-# Cyclone Mobile 4.2.7 structural reliability release
-# User explicitly authorized 4.2.7 publication for physical testing on September 9, 2026.
+# Cyclone Mobile 4.2.8 visual hotfix release
+# User explicitly authorized 4.2.8 publication on September 10, 2026.
 schema = 1
-product_version = "4.2.7"
+product_version = "4.2.8"
 channel = "development"
-android_version_code = 88
+android_version_code = 89
 python_version = "4.1.0"
 
 [components]
-mobile = "4.2.7"
+mobile = "4.2.8"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.2.6"
+previous_mobile_version = "4.2.7"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.2.7-structural-reliability"
+candidate_generation = "cyclone-4.2.8-visual-hotfix"
