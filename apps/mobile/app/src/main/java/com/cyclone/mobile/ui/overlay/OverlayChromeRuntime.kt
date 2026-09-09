@@ -310,7 +310,13 @@ object OverlayChromeRuntime {
             controller?.render(machine.snapshot())
             changed
         }
-        if (accepted) runAiRequest(request)
+        if (accepted) {
+            val launch = matches.singleOrNull()?.takeIf {
+                !PendingTaskAttachment.present.value && com.cyclone.mobile.runtime.background.ExecutionTargetResolver.isSimpleLaunch(
+                    request, it.loadLabel(context.packageManager).toString())
+            }?.activityInfo?.packageName
+            runAiRequest(request, launch)
+        }
     }
 
     fun updateVoice(listening: Boolean, transcript: String? = null, message: String? = null) {
@@ -321,7 +327,7 @@ object OverlayChromeRuntime {
         synchronized(lock) { controller?.beginVoiceInput() }
     }
 
-    private fun runAiRequest(request: String) {
+    private fun runAiRequest(request: String, launchPackage: String? = null) {
         val context = synchronized(lock) { service } ?: return
         synchronized(lock) {
             aiJob?.cancel()
@@ -340,6 +346,28 @@ object OverlayChromeRuntime {
                 // Progress belongs in the task notification/run log, not the request composer.
                 it.dispatch(OverlayUserAction.MINIMIZE)
                 it.updateStatus("Starting…")
+            }
+            if (launchPackage != null) {
+                val outcome = runCatching {
+                    val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+                            java.util.UUID.randomUUID().toString(), "phone.open_app",
+                            org.json.JSONObject().put("package", launchPackage)
+                                .put("sessionId", "default-foreground").put("displayId", 0)))
+                    }
+                    check(result.ok) { result.error?.message ?: "Couldn't open the app." }
+                    var observed = false
+                    repeat(10) {
+                        if (com.cyclone.mobile.runtime.background.BackgroundSetup.foregroundPackage() == launchPackage) observed = true
+                        if (!observed) kotlinx.coroutines.delay(150)
+                    }
+                    check(observed) { "Couldn't verify the app opened." }
+                }
+                outcome.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
+                handleAgentResult(QuickAgentResult(outcome.isSuccess,
+                    if (outcome.isSuccess) "App opened." else outcome.exceptionOrNull()?.message ?: "Couldn't open the app.",
+                    1, "", classification = if (outcome.isSuccess) "COMPLETE" else "FAILED"))
+                return@launch
             }
             val settings = readAiSettings(context)
             val accessProfile = CycloneAiAccessProfileStore.read(context)

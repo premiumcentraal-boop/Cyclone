@@ -99,7 +99,7 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("agent.execute("))
         assertTrue(page.contains("CycloneTextChat.answer(context"))
         assertTrue(page.contains("WorkspaceTasks.queueRequest(normalized)"))
-        assertTrue(page.contains("WorkspaceActivity::class.java"))
+        assertTrue(page.contains("OverlayChromeRuntime.submitRequest(normalized)"))
         assertFalse(page.contains("AccessibilityService"))
         assertFalse(page.contains("MediaProjectionManager"))
     }

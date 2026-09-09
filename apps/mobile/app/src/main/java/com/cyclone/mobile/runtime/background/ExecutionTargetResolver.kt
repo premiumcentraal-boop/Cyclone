@@ -8,6 +8,10 @@ sealed interface ExecutionTarget {
 }
 
 object ExecutionTargetResolver {
+    fun isSimpleLaunch(request: String, appLabel: String): Boolean =
+        Regex("(?i)^(?:please\\s+)?(?:open|launch)\\s+" + Regex.escape(appLabel) + "[.!]?$")
+            .matches(request.trim())
+
     fun resolve(request: String): ExecutionTarget {
         val profile = Regex("(?i)\\b(?:use|in|on|switch to)\\s+(?:my\\s+)?(profile\\s+[\\p{L}\\p{N}_-]+)")
             .find(request)?.groupValues?.get(1)

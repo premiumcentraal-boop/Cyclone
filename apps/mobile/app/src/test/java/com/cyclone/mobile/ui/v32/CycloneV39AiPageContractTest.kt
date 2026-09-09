@@ -29,7 +29,7 @@ class CycloneV39AiPageContractTest {
     @Test fun chatAndPhoneDispatchUseSeparateExistingPaths() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
         assertTrue(text.contains("RequestDispatch.CHAT"))
-        assertTrue(text.contains("WorkspaceActivity::class.java"))
+        assertTrue(text.contains("OverlayChromeRuntime.submitRequest(normalized)"))
         assertTrue(text.contains("WorkspaceTasks.queueRequest(normalized)"))
         assertTrue(text.contains("PendingTaskAttachment.take()"))
         assertTrue(text.contains("restoreAttachmentAfterChatFailure"))
