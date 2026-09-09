@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -147,7 +146,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
         val exactTask = task?.takeIf { UiTask(it).belongsToProfile(selected.id) }
         val stateLabel = profileStateLabel(selected, waiting, exactTask)
         LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { TextButton(onClick = { selectedId = null }) { Text("‹ Profiles") } }
+            item { TextButton(onClick = { selectedId = null }) { Text("â€¹ Profiles") } }
             item {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -197,7 +196,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
                     onClick = { openForHuman(selected) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (busy) "Opening…" else "Take control")
+                    Text(if (busy) "Openingâ€¦" else "Take control")
                 }
             }
             if (error.isNotBlank()) {

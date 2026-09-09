@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -80,14 +79,14 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
     when {
         mode == "teach" -> CycloneFollowMePage(context, refreshTick) { mode = "" }
         mode == "manual" -> Column {
-            TextButton(onClick = { mode = "advanced" }) { Text("‹ Advanced") }
+            TextButton(onClick = { mode = "advanced" }) { Text("â€¹ Advanced") }
             V32TeachPage(context, refreshTick)
         }
         mode == "advanced" -> LazyColumn(
             contentPadding = PaddingValues(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { TextButton(onClick = { mode = "" }) { Text("‹ Routines") } }
+            item { TextButton(onClick = { mode = "" }) { Text("â€¹ Routines") } }
             item { CyclonePageIntro("Optional", "Advanced", "Use the builder or manual teaching tools when you need precise control.") }
             item {
                 CycloneSimpleCard(Modifier.fillMaxWidth()) {
@@ -187,7 +186,7 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
                 group?.let { activeGroup ->
                     item {
                         TextButton(onClick = { group = null }) {
-                            Text("‹ ${if (grouping == 0 && activeGroup != "Other") appLabel(context, activeGroup) else activeGroup}")
+                            Text("â€¹ ${if (grouping == 0 && activeGroup != "Other") appLabel(context, activeGroup) else activeGroup}")
                         }
                     }
                 }

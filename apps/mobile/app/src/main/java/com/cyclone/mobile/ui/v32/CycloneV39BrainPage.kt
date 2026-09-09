@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -285,7 +284,7 @@ private fun V39RunCard(run: V39RunRow, onOpen: () -> Unit) {
                 }
             }
             Text(
-                "${run.session.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }} · ${formatDuration(duration)} · ${formatRunClock(run.session.startedAt)}",
+                "${run.session.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }} Â· ${formatDuration(duration)} Â· ${formatRunClock(run.session.startedAt)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
