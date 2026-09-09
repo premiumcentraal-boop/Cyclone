@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,7 +35,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,9 +92,7 @@ fun CycloneModelIntelligencePanel(
             intelligenceLevels.forEach { level ->
                 val active = currentEffort == level
                 Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onChange(modelId, level) },
+                    modifier = Modifier.weight(1f).clickable { onChange(modelId, level) },
                     shape = RoundedCornerShape(12.dp),
                     color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -110,7 +108,7 @@ fun CycloneModelIntelligencePanel(
             }
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
 
         TextButton(
             onClick = { autonomyOpen = !autonomyOpen },
@@ -159,8 +157,100 @@ fun CycloneModelIntelligencePanel(
     }
 }
 
+/**
+ * The model control is intentionally separate from the composer row. It floats above the Ask bar,
+ * so even long model names can never squeeze the text field into an unusable width.
+ */
 @Composable
-fun CycloneIntelligenceControls(enabled: Boolean = true, onChanged: () -> Unit = {}) {
+fun CycloneModelPill(
+    modelId: String,
+    effort: String,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    onChange: (String, String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val currentModel = V39AiChatContract.modelForStored(modelId)
+    val currentEffort = normalizedEffort(effort)
+
+    Box(modifier) {
+        Surface(
+            modifier = Modifier
+                .widthIn(max = 210.dp)
+                .clickable(enabled = enabled) { open = true },
+            shape = RoundedCornerShape(999.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .90f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .42f)),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    "${currentModel.label} ${effortLabel(currentEffort)}",
+                    modifier = Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.widthIn(min = 260.dp, max = 300.dp),
+        ) {
+            Text(
+                "Select model",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            OpenRouterModelPresets.all.forEach { option ->
+                val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            com.cyclone.mobile.ai.model.ModelRegistry.profileForPreset(option)
+                                ?.description
+                                ?.takeIf(String::isNotBlank)
+                                ?.let { description ->
+                                    Text(
+                                        description,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                        }
+                    },
+                    onClick = {
+                        onChange(V39AiChatContract.storageId(option), currentEffort)
+                        open = false
+                    },
+                    leadingIcon = {
+                        if (selected) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        else Spacer(Modifier.size(18.dp))
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CycloneIntelligenceControls(
+    enabled: Boolean = true,
+    showModelPill: Boolean = true,
+    onChanged: () -> Unit = {},
+) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(V39AiChatContract.PREFS, android.content.Context.MODE_PRIVATE) }
     var intelligenceOpen by remember { mutableStateOf(false) }
@@ -183,7 +273,7 @@ fun CycloneIntelligenceControls(enabled: Boolean = true, onChanged: () -> Unit =
             IconButton(
                 onClick = { intelligenceOpen = !intelligenceOpen },
                 enabled = enabled,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(44.dp),
             ) {
                 Icon(
                     Icons.Rounded.Tune,
@@ -201,7 +291,7 @@ fun CycloneIntelligenceControls(enabled: Boolean = true, onChanged: () -> Unit =
             }
         }
 
-        Box {
+        if (showModelPill) Box {
             TextButton(
                 onClick = { modelOpen = true },
                 enabled = enabled,
@@ -239,11 +329,8 @@ fun CycloneIntelligenceControls(enabled: Boolean = true, onChanged: () -> Unit =
                             modelOpen = false
                         },
                         leadingIcon = {
-                            if (selected) {
-                                Icon(Icons.Rounded.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                            } else {
-                                Spacer(Modifier.size(18.dp))
-                            }
+                            if (selected) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            else Spacer(Modifier.size(18.dp))
                         },
                     )
                 }
