@@ -1,13 +1,20 @@
 package com.cyclone.mobile.ai.vision.live
 
+import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
+import android.graphics.ColorSpace
+import android.os.Build
 import android.os.SystemClock
+import android.view.accessibility.AccessibilityWindowInfo
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.UiBounds
 import com.cyclone.mobile.runtime.session.ExecutionSession
 import com.cyclone.mobile.runtime.session.ExecutionSessionStore
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Short operational pixel buffer; disk output is created only when a consumer requests evidence. */
 object LiveVisionRuntime {
@@ -18,6 +25,7 @@ object LiveVisionRuntime {
     private val boundaries = mutableMapOf<String, ActionFrameBoundary>()
     private val sources = mutableMapOf<String, FrameSourceType>()
     private val revisions = mutableMapOf<String, Long>()
+    private val screenshotExecutor = Executors.newSingleThreadExecutor()
 
     fun startSource(sessionId: String, displayId: Int, source: FrameSourceType): Long = synchronized(lock) {
         sessions.requireSessionDisplay(sessionId, displayId)
@@ -86,26 +94,38 @@ object LiveVisionRuntime {
     fun capture(cacheDir: File, crop: UiBounds? = null,
                 sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID,
                 waitMs: Long = 800): CycloneAccessibilityService.ScreenshotArtifact? {
-        val selected: Pair<LiveFrame, Bitmap> = synchronized(lock) {
+        val selected: Pair<LiveFrame, Bitmap>? = synchronized(lock) {
             val session = sessions.lookup(sessionId)
-            if (!sources.containsKey(sessionId)) return null
-            val revision = revisions[sessionId]
-            val deadline = SystemClock.uptimeMillis() + waitMs.coerceIn(0, 2_000)
-            var candidate: LiveFrame?
-            while (true) {
-                if (revisions[sessionId] != revision) return null
-                candidate = broker.framesSince(sessionId, 0).lastOrNull {
-                    FrameSelection.eligible(it, sessionId, session.displayId, SystemClock.uptimeMillis(), 750, boundaries[sessionId])
+            if (!sources.containsKey(sessionId)) {
+                null
+            } else {
+                val revision = revisions[sessionId]
+                val deadline = SystemClock.uptimeMillis() + waitMs.coerceIn(0, 2_000)
+                var selectedFrame: Pair<LiveFrame, Bitmap>? = null
+                while (selectedFrame == null && revisions[sessionId] == revision) {
+                    val candidate = broker.framesSince(sessionId, 0).lastOrNull {
+                        FrameSelection.eligible(it, sessionId, session.displayId, SystemClock.uptimeMillis(), 750, boundaries[sessionId])
+                    }
+                    if (candidate != null) {
+                        val bitmap = pixels[candidate.payloadHandle]
+                        if (bitmap != null) selectedFrame = candidate to (bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: break)
+                    }
+                    if (selectedFrame == null) {
+                        val remaining = deadline - SystemClock.uptimeMillis()
+                        if (remaining <= 0) break
+                        lock.wait(remaining)
+                    }
                 }
-                if (candidate != null) break
-                val remaining = deadline - SystemClock.uptimeMillis()
-                if (remaining <= 0) return null
-                lock.wait(remaining)
+                selectedFrame
             }
-            val frame = candidate ?: return null
-            val bitmap = pixels[frame.payloadHandle] ?: return null
-            frame to (bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return null)
         }
+
+        if (selected == null) {
+            return if (sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID && crop == null) {
+                captureForegroundWindowBelowOverlay(cacheDir)
+            } else null
+        }
+
         val (frame, bitmap) = selected
         try {
             val bounds = crop?.let {
@@ -122,5 +142,62 @@ object LiveVisionRuntime {
                     System.currentTimeMillis(), frame)
             } finally { if (output !== bitmap) output.recycle() }
         } finally { bitmap.recycle() }
+    }
+
+    /**
+     * API 34+ can capture the actual application window even while Cyclone's accessibility overlay
+     * is visually above it. Android explicitly provides takeScreenshotOfWindow for this case, so
+     * foreground agents no longer need the overlay to disappear before they can see the host app.
+     */
+    private fun captureForegroundWindowBelowOverlay(cacheDir: File): CycloneAccessibilityService.ScreenshotArtifact? {
+        if (Build.VERSION.SDK_INT < 34) return null
+        val service = CycloneAccessibilityService.instance ?: return null
+        val target = service.windows.orEmpty()
+            .asSequence()
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root != null }
+            .sortedWith(
+                compareByDescending<AccessibilityWindowInfo> { it.isFocused }
+                    .thenByDescending { it.isActive }
+                    .thenByDescending { it.layer },
+            )
+            .firstOrNull() ?: return null
+
+        val latch = CountDownLatch(1)
+        var captured: CycloneAccessibilityService.ScreenshotArtifact? = null
+        service.takeScreenshotOfWindow(target.id, screenshotExecutor, object : AccessibilityService.TakeScreenshotCallback {
+            override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                try {
+                    val wrapped = Bitmap.wrapHardwareBuffer(
+                        result.hardwareBuffer,
+                        result.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB),
+                    ) ?: return
+                    val bitmap = wrapped.copy(Bitmap.Config.ARGB_8888, false) ?: wrapped
+                    try {
+                        val directory = File(cacheDir, "live-evidence").apply { mkdirs() }
+                        val file = File(directory, "${UUID.randomUUID()}.png")
+                        file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                        directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
+                        captured = CycloneAccessibilityService.ScreenshotArtifact(
+                            file = file,
+                            width = bitmap.width,
+                            height = bitmap.height,
+                            crop = null,
+                            timestampMs = System.currentTimeMillis(),
+                        )
+                    } finally {
+                        if (bitmap !== wrapped) bitmap.recycle()
+                    }
+                } finally {
+                    result.hardwareBuffer.close()
+                    latch.countDown()
+                }
+            }
+
+            override fun onFailure(errorCode: Int) {
+                latch.countDown()
+            }
+        })
+        if (!latch.await(2, TimeUnit.SECONDS)) return null
+        return captured
     }
 }
