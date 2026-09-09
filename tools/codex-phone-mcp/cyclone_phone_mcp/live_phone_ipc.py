@@ -65,6 +65,7 @@ def safe_result(value):
 
 def serve():
     engine = LivePhone(PhoneTools(gateway=LiveGateway()))
+    generation = None
     with Listener(address(), family="AF_PIPE", authkey=key(create=True)) as listener:
         while True:
             try:
@@ -76,6 +77,9 @@ def serve():
                         control = json.loads((root() / "control.json").read_text())
                     except (OSError, ValueError):
                         control = {}
+                    if generation != control.get("generation"):
+                        engine.observations.clear()
+                        generation = control.get("generation")
                     engine.paused = control.get("enabled") is not True
                     try:
                         result = ({"ok": False, "error": "LIVE_PHONE_STOPPED"} if control.get("stopped", True) and request.get("operation") not in {"status", "devices"} else engine.execute(request))

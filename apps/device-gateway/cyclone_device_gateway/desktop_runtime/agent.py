@@ -174,6 +174,13 @@ class DesktopAgentService:
             "gateway_health": {"state": "READY" if allowed else "UNAVAILABLE"},
         }
 
+    @staticmethod
+    def _check_live_phone(session, payload, identity):
+        if (payload or {}).get("livePhone") is not True:
+            return
+        if getattr(session, "source", None) not in {"USB", "LAN"} or identity != {"sessionId": "default-foreground", "displayId": 0}:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Live Phone requires a physical foreground phone.")
+
     def observe(
         self,
         device_id: str,
@@ -184,6 +191,7 @@ class DesktopAgentService:
     ) -> dict[str, Any]:
         session = self._paired(device_id)  # USB/trust pairing, not execution sessionId.
         identity = self._execution_identity(payload)
+        self._check_live_phone(session, payload, identity)
         observe_args = dict(identity or {})
         if (payload or {}).get("livePhone") is True:
             observe_args["livePhone"] = True
@@ -264,6 +272,7 @@ class DesktopAgentService:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "params must be an object.")
         params = dict(params)
         identity = self._execution_identity(payload)
+        self._check_live_phone(session, payload, identity)
         self._reject_mixed_planes(params, identity)
         self._enforce_layer2_mutate_lock(device_id, tool, params, identity)
         if identity:

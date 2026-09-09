@@ -85,7 +85,7 @@ class LivePhone:
             op = request["operation"]
             if op == "devices":
                 raw = self.tools.phone_devices({})
-                return {"devices": [{k: d[k] for k in ("device_id", "deviceId", "label", "state") if k in d} for d in raw.get("devices", [])]}
+                return {"devices": [{k: d[k] for k in ("device_id", "deviceId", "name", "model", "state") if k in d} for d in raw.get("devices", []) if d.get("source") in {"USB", "LAN"}]}
             if op == "status":
                 return {"mode": "LIVE PHONE", "control": "Paused" if self.paused else "Ready", "session_id": SESSION, "display_id": DISPLAY}
             if op in {"observe", "screenshot"}:

@@ -12,7 +12,8 @@ fn root() -> Result<PathBuf, String> {
 pub fn live_phone_control(action: String) -> Result<Value, String> {
     if !["enable", "pause", "stop"].contains(&action.as_str()) { return Err("Unknown Live Phone control".into()); }
     let path = root()?;
-    let state = json!({"enabled": action == "enable", "stopped": action == "stop"});
+    let generation = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos().to_string();
+    let state = json!({"enabled": action == "enable", "stopped": action == "stop", "generation": generation});
     std::fs::write(path.join("control.json"), state.to_string()).map_err(|_| "Could not change Live Phone control")?;
     if action == "stop" {
         for name in ["latest.png", "latest.jpg"] { let _ = std::fs::remove_file(path.join(name)); }
