@@ -1,6 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -254,16 +256,20 @@ fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Uni
     )
 }
 
+/**
+ * Translucent glass is rendered directly into a clipped layer. Material shadow/elevation on
+ * transparent Surfaces can rasterize as a rectangular band on some Android renderers.
+ */
 @Composable
 fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(
-        modifier = modifier.animateContentSize(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = .90f),
-        tonalElevation = 0.dp,
-        shadowElevation = 4.dp,
-        content = content,
-    )
+    Box(
+        modifier = modifier
+            .animateContentSize()
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = .88f)),
+    ) {
+        content()
+    }
 }
 
 @Composable
