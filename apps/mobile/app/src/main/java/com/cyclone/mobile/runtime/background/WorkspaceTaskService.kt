@@ -30,6 +30,15 @@ class WorkspaceTaskService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
         if (intent.action != null) {
+            // Commands can create a fresh service after the original failed and stopped itself.
+            // Bind only the exact store identity carried by the command, never instance defaults.
+            if (taskId == null && intent.action == "cancel") {
+                val saved = WorkspaceTasks.state.value
+                if (WorkspaceTasks.matches(saved, intent.getStringExtra("task"), intent.getStringExtra("session"))) {
+                    taskId = saved!!.taskId
+                    sessionId = saved.sessionId
+                }
+            }
             if (!WorkspaceTasks.matches(current, intent.getStringExtra("task"), intent.getStringExtra("session"))) {
                 if (taskId == null) stopSelf()
                 return START_NOT_STICKY
@@ -209,18 +218,30 @@ class WorkspaceTaskService : Service() {
     }
     private fun stopTask() {
         if (stopped) return
+        val closing = current ?: return
         stopped = true
         agent?.cancelActiveTask()
-        update { it.copy(phase = TaskPhase.STOPPED, message = "Stopped. You're in control.", resumable = false) }
+        observer?.cancel()
         scope.launch {
-            // Creation may still be running: its post-create check will close its own display.
-            sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it) } }
-            running?.cancelAndJoin()
-            sessionId = null
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            try {
+                // Join creation too: its NonCancellable block releases any display created late.
+                running?.cancelAndJoin()
+                sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it) } }
+                sessionId = null
+                WorkspaceTasks.clearClosedTask(closing.taskId, closing.sessionId)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                getSystemService(NotificationManager::class.java).cancel(NOTIFICATION)
+                com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.clearBackgroundChrome()
+                WorkspaceTasks.scheduleQueuePromotion(applicationContext)
+                stopSelf()
+            } catch (error: Exception) {
+                stopped = false
+                update { it.copy(phase = TaskPhase.FAILED, confirmation = null, resumable = false,
+                    message = "Couldn't finish closing this task. Try Close task again.") }
+            }
         }
     }
+
     private fun progress(text: String) {
         val step = TaskGlassStep.fromProgress(text) ?: return
         update {

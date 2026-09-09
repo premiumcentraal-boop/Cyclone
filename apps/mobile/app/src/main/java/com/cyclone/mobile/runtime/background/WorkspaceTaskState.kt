@@ -91,6 +91,23 @@ object WorkspaceTasks {
         mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let(change) ?: it }
     }
 
+    private val closedHistory = MutableStateFlow<List<WorkspaceTaskUi>>(emptyList())
+    val history = closedHistory.asStateFlow()
+
+    /** Called only after execution cancellation and exact-session release. Stale callbacks cannot
+     * resurrect an entry because update() only transforms the currently matching task. */
+    fun clearClosedTask(taskId: String, sessionId: String?): Boolean {
+        while (true) {
+            val task = mutable.value ?: return false
+            if (!matches(task, taskId, sessionId)) return false
+            if (mutable.compareAndSet(task, null)) {
+                attachments.remove(taskId)
+                closedHistory.update { (it + task.copy(confirmation = null, resumable = false)).takeLast(50) }
+                return true
+            }
+        }
+    }
+
     /** Read-only profile inventory for queue steering. No Android profile state is mutated here. */
     fun queueDestinations(context: Context): List<WorkspaceDestinationHint> {
         val own = Layer2Workspaces.currentAndroidUserId()

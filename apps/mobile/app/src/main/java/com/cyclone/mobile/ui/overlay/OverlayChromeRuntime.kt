@@ -63,7 +63,12 @@ object OverlayChromeRuntime {
 
     fun attach(service: CycloneAccessibilityService) {
         synchronized(lock) {
-            if (controller != null) return
+            if (controller != null && this.service === service) {
+                controller?.render(machine.snapshot())
+                return
+            }
+            workspaceJob?.cancel()
+            controller?.dismiss()
             this.service = service
             val next = OverlayChromeController(
                 service = service,
@@ -81,7 +86,7 @@ object OverlayChromeRuntime {
             workspaceJob = aiScope.launch {
                 var previousTask: String? = null
                 com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collect { task ->
-                    if (BackgroundGlassPolicy.tearDown(task)) clearBackgroundChrome()
+                    if (BackgroundGlassPolicy.tearDown(task) || (task == null && previousTask != null)) clearBackgroundChrome()
                     else if (BackgroundGlassPolicy.visible(task)) {
                         if (previousTask != task?.taskId) mutate { it.resetIdle() }
                         controller?.background(task)
@@ -120,12 +125,14 @@ object OverlayChromeRuntime {
     fun clearBackgroundChrome() {
         synchronized(lock) {
             OverlayExternalInteraction.active.value = false
-            machine.resetIdle(idleChipVisible = false)
+            // Task presentation ends; the accessibility-owned entry point does not.
+            machine.resetIdle(idleChipVisible = true)
+            mutableActivity.value = machine.state()
             controller?.background(null)
-            controller?.dismiss()
+            controller?.render(machine.snapshot())
         }
     }
-    /** Device hook: after cancel / failed start / tearDown, this must be 0. JVM regressions use OverlayWindowRegistry. */
+    /** Device hook: task cleanup retains the launcher; only service detach removes all windows. */
     fun overlayWindowCount(): Int = synchronized(lock) { controller?.attachedWindowCount() ?: 0 }
 
     fun startAnalysis(
