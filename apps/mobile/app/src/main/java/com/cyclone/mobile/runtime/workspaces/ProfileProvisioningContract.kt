@@ -276,12 +276,15 @@ data class ProfileReadyEvidence(
     val user: ProfileUserRecord?,
     val parentUserId: Int,
     val runningUnlocked: Boolean,
+    /** Every package Cyclone must verify in the target user, including Cyclone itself. */
     val selectedPackages: Set<String>,
     val installedPackages: Set<String>,
     val workspaceUserIdsByPackage: Map<String, Set<Int>>,
     val setupComplete: Boolean,
     val journalUserId: Int?,
     val secondaryUser: Boolean = false,
+    /** Only ordinary user-selected target apps need Layer 2 workspace registrations. */
+    val workspacePackages: Set<String> = selectedPackages,
 )
 
 object ProfileReadyVerifier {
@@ -294,7 +297,7 @@ object ProfileReadyVerifier {
         if (!evidence.installedPackages.containsAll(evidence.selectedPackages)) {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED)
         }
-        if (evidence.selectedPackages.any { evidence.workspaceUserIdsByPackage[it] != setOf(user.id) }) {
+        if (evidence.workspacePackages.any { evidence.workspaceUserIdsByPackage[it] != setOf(user.id) }) {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED)
         }
         if (!evidence.setupComplete || evidence.journalUserId != user.id) {
@@ -316,6 +319,32 @@ object ProfileSelectionVerifier {
             ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED,
             "A selected app is no longer installed in Profile A: ${missing.first()}",
         )
+    }
+}
+
+object SecondaryUserProvisioningPolicy {
+    fun failure(
+        appUserId: Int,
+        reportedCurrentUserId: Int?,
+        users: List<ProfileUserRecord>,
+        maxUsersReported: Int?,
+    ): ProfileSetupFailure? {
+        val parent = users.singleOrNull { it.id == appUserId }
+            ?: return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                "Android did not re-list the user running Cyclone.")
+        if (reportedCurrentUserId != null && reportedCurrentUserId != appUserId) {
+            return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                "Android's current user does not match the user running Cyclone.")
+        }
+        if (parent.profile || parent.partial) {
+            return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                "Cyclone must create new profiles from your main Android user.")
+        }
+        val fullUsers = users.count { !it.profile && !it.partial }
+        if (maxUsersReported != null && fullUsers >= maxUsersReported) {
+            return ProfileFailureClassifier.local(ProfileSetupFailureKind.MAX_USERS_REACHED)
+        }
+        return null
     }
 }
 

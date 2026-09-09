@@ -32,8 +32,29 @@ object ProfileRegistryStore {
             journal.getInt("user", -1).takeIf { it > 0 }, journal.getInt("parent_user", 0),
             journal.getBoolean("secondary", false), journal.getStringSet("plan_apps", emptySet()).orEmpty().toSet(),
             journal.getString("stage", "PLANNED").orEmpty(), journal.getBoolean("ready", false))
+        save(context, existing.filterNot { it.id == id } + row)
+    }
+
+    @Synchronized fun findByLabel(context: Context, label: String): CycloneProfileRecord? {
+        val wanted = label.trim()
+        if (wanted.isBlank()) return null
+        return records(context).singleOrNull {
+            it.label.equals(wanted, ignoreCase = true) || it.id.equals(wanted, ignoreCase = true)
+        }
+    }
+
+    @Synchronized fun rename(context: Context, id: String, label: String) {
+        val clean = label.trim().replace(Regex("\\s+"), " ").take(40)
+        require(clean.isNotBlank())
+        val entries = records(context)
+        check(entries.none { it.id != id && it.label.equals(clean, ignoreCase = true) }) { "Another profile already uses that name." }
+        check(entries.any { it.id == id }) { "Profile not found." }
+        save(context, entries.map { if (it.id == id) it.copy(label = clean) else it })
+    }
+
+    private fun save(context: Context, entries: List<CycloneProfileRecord>) {
         val array = JSONArray()
-        (existing.filterNot { it.id == id } + row).forEach { record ->
+        entries.forEach { record ->
             array.put(JSONObject().put("id", record.id).put("label", record.label).put("user", record.androidUserId ?: -1)
                 .put("parent", record.parentUserId).put("secondary", record.secondaryUser)
                 .put("packages", JSONArray(record.packages.sorted())).put("stage", record.stage).put("ready", record.ready))

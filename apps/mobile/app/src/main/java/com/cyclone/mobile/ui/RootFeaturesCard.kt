@@ -56,6 +56,7 @@ fun ProfileSetupPage(onClose: () -> Unit) {
     var selected by remember { mutableStateOf(ProfileSetupRuntime.selectedPackages(context)) }
     var query by rememberSaveable { mutableStateOf("") }
     var registered by remember { mutableStateOf(emptyList<Workspace>()) }
+    var onProfileA by remember { mutableStateOf<Boolean?>(null) }
     fun refresh() { scope.launch {
         withContext(Dispatchers.IO) { runCatching { Layer2Workspaces.initialize(context); Layer2Workspaces.engine.snapshot() }.getOrDefault(emptyList()) }
             .also { registered = it }
@@ -76,7 +77,12 @@ fun ProfileSetupPage(onClose: () -> Unit) {
         }
     }
     LaunchedEffect(progress.ready) { if (progress.ready) { page = 3; refresh() } }
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(Unit) {
+        onProfileA = withContext(Dispatchers.IO) {
+            runCatching { ProfileSetupRuntime.currentUserId() == ProfileSetupRuntime.profileAUserId() }.getOrNull()
+        }
+        refresh()
+    }
     Dialog(onDismissRequest = { if (progress.busy) ProfileSetupRuntime.stop(); onClose() },
         properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -91,8 +97,8 @@ fun ProfileSetupPage(onClose: () -> Unit) {
                         Surface(shape = RoundedCornerShape(30.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                             Column(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface))).padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text(if (page == 0) "YOUR EVERYDAY SPACE" else "A FRESH START", style = MaterialTheme.typography.labelMedium)
-                                Text(when { progress.busy -> "Making room for you"; page == 1 -> "Which apps?"; page == 2 -> "Ready to create?"; page == 3 -> "Two spaces. One phone."; else -> "You’re in Profile A" }, style = MaterialTheme.typography.headlineLarge)
-                                Text(when { progress.busy -> "We’ll take care of the setup."; page == 1 -> "Pick the apps you want in Profile B."; page == 2 -> "Your selected apps will start fresh in Profile B. You’ll sign in there separately."; page == 3 -> "Choose an app from your second profile below."; else -> "Want a second space for different accounts? Your current apps and photos stay right here." })
+                                Text(when { progress.busy -> "Making room for you"; page == 1 -> "Which apps?"; page == 2 -> "Ready to create?"; page == 3 -> "Two spaces. One phone."; onProfileA == false -> "You’re in another profile"; else -> "You’re in Profile A" }, style = MaterialTheme.typography.headlineLarge)
+                                Text(when { progress.busy -> "We’ll take care of the setup."; page == 1 -> "Pick the apps you want in Profile B."; page == 2 -> "Your selected apps will start fresh in Profile B. You’ll sign in there separately."; page == 3 -> "Choose an app from your second profile below."; onProfileA == false -> "Return to your everyday phone space with one tap."; else -> "Want a second space for different accounts? Your current apps and photos stay right here." })
                             }
                         }
                     }
@@ -105,8 +111,19 @@ fun ProfileSetupPage(onClose: () -> Unit) {
                     } else when (page) {
                         0 -> item {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Button(onClick = { chooseApps() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) { Text("Yes, create Profile B") }
-                                OutlinedButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Keep one profile") }
+                                if (onProfileA == false) {
+                                    Button(onClick = {
+                                        scope.launch {
+                                            message = withContext(Dispatchers.IO) {
+                                                runCatching { ProfileSetupRuntime.openProfile(context, null); "Returning to Profile A…" }
+                                                    .getOrElse { it.message ?: "Couldn't return to Profile A." }
+                                            }
+                                        }
+                                    }, modifier = Modifier.fillMaxWidth()) { Text("Return to Profile A") }
+                                } else {
+                                    Button(onClick = { chooseApps() }, enabled = !checking && onProfileA != false, modifier = Modifier.fillMaxWidth()) { Text("Yes, create Profile B") }
+                                    OutlinedButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Keep one profile") }
+                                }
                             }
                         }
                         1 -> {
@@ -179,11 +196,10 @@ fun ProfileSetupPage(onClose: () -> Unit) {
                                 OutlinedButton(onClick = { chooseApps() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) { Text("Add apps / finish setup") }
                                 TextButton(onClick = {
                                     scope.launch {
-                                        val result = withContext(Dispatchers.IO) {
-                                            com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
-                                                "profile-home-${System.nanoTime()}", "workspace.release"))
+                                        message = withContext(Dispatchers.IO) {
+                                            runCatching { ProfileSetupRuntime.openProfile(context, null); "Returning to Profile A…" }
+                                                .getOrElse { it.message ?: "Couldn't return to Profile A." }
                                         }
-                                        if (result.ok) onClose() else message = "Finish the request waiting for your approval, then return to Profile A."
                                     }
                                 }) { Text("Return to Profile A") }
                                 TextButton(onClick = onClose) { Text("Done") }

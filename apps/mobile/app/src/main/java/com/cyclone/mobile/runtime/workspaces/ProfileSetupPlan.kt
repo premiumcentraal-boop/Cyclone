@@ -178,6 +178,7 @@ data class ProfileUserRecord(
     val parentId: Int?,
     val running: Boolean,
     val partial: Boolean,
+    val userType: String = "",
 )
 
 object ProfileSetupParser {
@@ -197,8 +198,15 @@ object ProfileSetupParser {
             parentId = parentId,
             running = line.contains("(running)", ignoreCase = true),
             partial = line.contains("(partial)", ignoreCase = true),
+            userType = type,
         )
     }.toList()
+
+    fun mainUserId(users: List<ProfileUserRecord>): Int? {
+        val system = users.filter { !it.profile && !it.partial && it.userType.endsWith("full.SYSTEM", ignoreCase = true) }
+        if (system.size == 1) return system.single().id
+        return users.singleOrNull { it.id == 0 && !it.profile && !it.partial }?.id
+    }
 
     fun currentUserId(output: String): Int? = output.lineSequence()
         .map { it.trim() }

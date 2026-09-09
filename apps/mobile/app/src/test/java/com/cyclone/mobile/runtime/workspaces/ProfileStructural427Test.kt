@@ -35,4 +35,26 @@ class ProfileStructural427Test {
             ProfileFailureClassifier.fromCommand(ProfileSetupOperation.CREATE_SECONDARY_USER, 1,
                 "Error: maximum number of users")?.kind)
     }
+    @Test fun existingManagedProfileDoesNotBlockFullSecondaryUser() {
+        val owner = ProfileUserRecord(0, "Owner", false, false, null, true, false, "android.os.usertype.full.SYSTEM")
+        val work = ProfileUserRecord(11, "Rooted Clone", true, true, 0, true, false, "android.os.usertype.profile.MANAGED")
+        assertNull(SecondaryUserProvisioningPolicy.failure(0, 0, listOf(owner, work), 4))
+    }
+    @Test fun mainUserParserPrefersSystemFullUser() {
+        val secondary = ProfileUserRecord(12, token, false, false, null, true, false, "android.os.usertype.full.SECONDARY")
+        val owner = ProfileUserRecord(0, "Owner", false, false, null, true, false, "android.os.usertype.full.SYSTEM")
+        assertEquals(0, ProfileSetupParser.mainUserId(listOf(secondary, owner)))
+    }
+    @Test fun requiredCyclonePackageDoesNotNeedWorkspaceRegistration() {
+        val user = ProfileUserRecord(12, token, false, false, null, true, false)
+        val evidence = ProfileReadyEvidence(
+            user, 0, true,
+            selectedPackages = setOf("com.cyclone.mobile", "com.android.chrome"),
+            installedPackages = setOf("com.cyclone.mobile", "com.android.chrome"),
+            workspaceUserIdsByPackage = mapOf("com.android.chrome" to setOf(12)),
+            setupComplete = true, journalUserId = 12, secondaryUser = true,
+            workspacePackages = setOf("com.android.chrome"),
+        )
+        assertNull(ProfileReadyVerifier.failure(evidence))
+    }
 }

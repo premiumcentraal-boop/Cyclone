@@ -105,25 +105,37 @@ object ProfileSetupRuntime {
         _state.value = ProfileSetupStatus(ready = record.ready, userId = record.androidUserId)
     }
 
+    fun profileAUserId(): Int {
+        runRequired(ProfileSetupPlan.verifyRoot())
+        return ProfileSetupParser.mainUserId(listUsersRequired())
+            ?: fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android did not identify the main phone user.")
+    }
+
+    fun currentUserId(): Int = Layer2Workspaces.currentAndroidUserId()
+
     /** Trusted local UI action. This is not a model tool and cannot bypass an active task. */
     fun openProfile(context: Context, profileId: String?) {
         synchronized(Layer2Workspaces.engine.mutationLock) {
             check(!Layer2Workspaces.gated() && !com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask() &&
                 !com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask()) { "Finish the current task before switching profiles." }
-            ProfileRegistryStore.checkpoint(context, prefs(context))
-            val records = ProfileRegistryStore.records(context)
-            val record = profileId?.let { id -> records.single { it.id == id } }
-            val user = record?.androidUserId ?: records.map { it.parentUserId }.distinct().single()
             runRequired(ProfileSetupPlan.verifyRoot())
-            if (record != null) {
-                check(record.ready && record.secondaryUser) { "Open an app in this profile to use its separate account." }
-                val exact = listUsersRequired().singleOrNull { it.id == user && it.name == record.id }
-                check(exact != null && ProfileRecovery.validOwned(exact, record.parentUserId, true)) { "Profile identity needs repair." }
+            val users = listUsersRequired()
+            val user = if (profileId == null) {
+                ProfileSetupParser.mainUserId(users)
+                    ?: fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android did not identify Profile A.")
             } else {
-                check(listUsersRequired().any { it.id == user && !it.profile && !it.partial }) { "Your everyday profile couldn't be verified." }
+                ProfileRegistryStore.checkpoint(context, prefs(context))
+                val record = ProfileRegistryStore.records(context).single { it.id == profileId }
+                val target = record.androidUserId ?: error("This profile still needs setup.")
+                check(record.ready && record.secondaryUser) { "This profile still needs setup." }
+                val exact = users.singleOrNull { it.id == target && it.name == record.id }
+                check(exact != null && ProfileRecovery.validOwned(exact, record.parentUserId, true)) { "Profile identity needs repair." }
+                target
             }
             Layer2Workspaces.engine.clearSelection()
-            runRequired(ProfileSetupPlan.switchUser(user))
+            if (ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) != user) {
+                runRequired(ProfileSetupPlan.switchUser(user))
+            }
             check(ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) == user) { "Android hasn't completed switching profiles yet." }
         }
     }
@@ -171,7 +183,8 @@ object ProfileSetupRuntime {
 
                     val store = prefs(ctx)
                     val parentUserId = Layer2Workspaces.currentAndroidUserId()
-                    val requestedPackages = ProfileRequiredPackages.resolve(ctx.packageName, requested.map { it.packageName }.toSet())
+                    val selectedPackages = requested.map { it.packageName }.toSet()
+                    val requestedPackages = ProfileRequiredPackages.resolve(ctx.packageName, selectedPackages)
                     val existingName = store.getString(KEY_NAME, null)
                     val profileName = existingName ?: newProfileName().also { name ->
                         commitOrStorageFailure(store.edit().putString(KEY_NAME, name))
@@ -187,7 +200,7 @@ object ProfileSetupRuntime {
                     commitOrStorageFailure(
                         store.edit()
                             .putInt(KEY_PARENT_USER, parentUserId)
-                            .putStringSet(KEY_PLAN_APPS, requestedPackages)
+                            .putStringSet(KEY_PLAN_APPS, selectedPackages)
                             .putBoolean(KEY_READY, false),
                     )
 
@@ -241,19 +254,19 @@ object ProfileSetupRuntime {
                         lowRamDevice = lowRamDevice,
                     )
                     _state.value = _state.value.copy(capabilities = evaluated.capabilities)
-                    evaluated.failure?.let {
-                        val safeFullUserParent = users.singleOrNull { user -> user.id == parentUserId }
-                            ?.let { user -> !user.profile && !user.partial } == true && reportedCurrentUser == parentUserId
-                        if (it.kind != ProfileSetupFailureKind.MANAGED_PROFILE_UNSUPPORTED || !safeFullUserParent) throw SetupFailure(it)
-                    }
+                    // 4.2.7 profiles are full secondary Android users. Existing work-profile limits,
+                    // policies or stale managed profiles must not block this separate provisioning plane.
+                    SecondaryUserProvisioningPolicy.failure(
+                        appUserId = parentUserId,
+                        reportedCurrentUserId = reportedCurrentUser,
+                        users = users,
+                        maxUsersReported = maxUsers,
+                    )?.let { throw SetupFailure(it) }
 
-                    val journal = journalSnapshot(store, profileName, parentUserId, requestedPackages)
+                    val journal = journalSnapshot(store, profileName, parentUserId, selectedPackages)
                     val profileUserId = when (val recovery = ProfileRecovery.resolve(journal, parentUserId, users)) {
                         ProfileRecoveryDecision.Create -> {
                             val secondary = true // Rooted consumer profiles must support whole-user switching.
-                            if (secondary && maxUsers != null && users.count { !it.profile } >= maxUsers) {
-                                fail(ProfileSetupFailureKind.MAX_USERS_REACHED)
-                            }
                             commitOrStorageFailure(store.edit().putBoolean("secondary", secondary))
                             boundary()
                             _state.value = _state.value.copy(message = "Creating Profile B…", completed = 1)
@@ -346,14 +359,16 @@ object ProfileSetupRuntime {
                                 "$label is not installed in Profile B after Android reported the install step complete.",
                             ))
                         }
-                        Layer2Workspaces.engine.register(
-                            Workspace(
-                                workspaceId(profileUserId, packageName),
-                                label.take(80).ifBlank { packageName.take(80) },
-                                packageName,
-                                profileUserId,
-                            ),
-                        )
+                        if (packageName in selectedPackages) {
+                            Layer2Workspaces.engine.register(
+                                Workspace(
+                                    workspaceId(profileUserId, packageName),
+                                    label.take(80).ifBlank { packageName.take(80) },
+                                    packageName,
+                                    profileUserId,
+                                ),
+                            )
+                        }
                     }
                     commitOrStorageFailure(store.edit().putString(KEY_STAGE, ProfileSetupStage.APPS_INSTALLED.name))
 
@@ -372,7 +387,7 @@ object ProfileSetupRuntime {
                     val finalUser = users.singleOrNull { it.id == profileUserId && it.name == profileName }
                     val finalState = runRequired(ProfileSetupPlan.profileState(profileUserId))
                     val finalInstalled = requestedPackages.flatMapTo(linkedSetOf()) { pkg -> profilePackages(profileUserId, pkg) }
-                    val expectedWorkspaceIds = requestedPackages.associateWith { workspaceId(profileUserId, it) }
+                    val expectedWorkspaceIds = selectedPackages.associateWith { workspaceId(profileUserId, it) }
                     val workspaceUsers = Layer2Workspaces.engine.snapshot()
                         .filter { workspace -> workspace.id in expectedWorkspaceIds.values }
                         .groupBy { it.appPackage }
@@ -388,13 +403,14 @@ object ProfileSetupRuntime {
                         setupComplete = finalSetupComplete,
                         journalUserId = store.getInt(KEY_USER, -1).takeIf { it > 0 },
                         secondaryUser = store.getBoolean("secondary", false),
+                        workspacePackages = selectedPackages,
                     )
                     ProfileReadyVerifier.failure(evidence)?.let { throw SetupFailure(it) }
 
                     commitOrStorageFailure(
                         store.edit()
                             .putBoolean(KEY_READY, true)
-                            .putStringSet(KEY_APPS, requestedPackages)
+                            .putStringSet(KEY_APPS, selectedPackages)
                             .putString(KEY_STAGE, ProfileSetupStage.READY.name),
                     )
                     ProfileRegistryStore.checkpoint(ctx, store)
