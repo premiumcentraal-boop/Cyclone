@@ -82,15 +82,17 @@ class CycloneV39AiChatPageTest {
         assertEquals(1, Regex("FilledIconButton\\(").findAll(page).count())
     }
 
-    @Test fun modelPillCannotStealComposerWidth() {
+    @Test fun modelPillCannotStealComposerWidthAndKeyboardDoesNotDoubleInset() {
         val page = source("CycloneV39AiChatPage.kt")
         val pill = page.indexOf("CycloneModelPill(")
-        val askSurface = page.indexOf("shape = RoundedCornerShape(32.dp)", pill)
-        val composer = page.indexOf("BasicTextField(", askSurface)
+        val askGlass = page.indexOf(".clip(RoundedCornerShape(32.dp))", pill)
+        val composer = page.indexOf("BasicTextField(", askGlass)
         assertTrue(pill >= 0)
-        assertTrue(askSurface > pill)
-        assertTrue(composer > askSurface)
+        assertTrue(askGlass > pill)
+        assertTrue(composer > askGlass)
         assertTrue(page.contains("showModelPill = false"))
+        assertTrue(page.contains("if (!keyboardOpen)"))
+        assertFalse(page.contains(".imePadding()"))
         assertFalse(page.contains("CycloneIntelligenceControls(enabled = !session.busy, onChanged"))
     }
 
@@ -141,14 +143,25 @@ class CycloneV39AiChatPageTest {
         assertFalse(window.contains("WorkspaceTasks.command"))
     }
 
-    @Test fun taskAndQueueAreaIsBoundedAboveComposer() {
+    @Test fun taskAndForegroundWorkAreaIsBoundedAboveComposer() {
         val page = source("CycloneV39AiChatPage.kt")
         val task = page.indexOf("CycloneAskTaskPanel(current)")
+        val foreground = page.indexOf("CycloneForegroundWorkCard(foregroundSnapshot)")
         val queued = page.indexOf("CyclonePendingRequests()")
         val composer = page.lastIndexOf("BasicTextField(")
         assertTrue(task in 0 until composer)
+        assertTrue(foreground in 0 until composer)
         assertTrue(queued in 0 until composer)
         assertTrue(page.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
+    }
+
+    @Test fun translucentChatUsesClippedBackgroundsWithoutElevatedGhostBands() {
+        val page = source("CycloneV39AiChatPage.kt")
+        val design = source("CycloneV32DesignSystem.kt")
+        assertTrue(page.contains(".background(MaterialTheme.colorScheme.surface.copy(alpha = .56f))"))
+        assertTrue(page.contains(".background(color)"))
+        assertFalse(page.contains("shadowElevation = 5.dp"))
+        assertFalse(design.substringAfter("fun CycloneGlassSurface").contains("shadowElevation = 4.dp"))
     }
 
     @Test fun alpineEmptyStateUsesPreferredProgressComposition() {
