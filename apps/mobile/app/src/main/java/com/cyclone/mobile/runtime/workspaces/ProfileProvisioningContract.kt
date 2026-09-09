@@ -105,7 +105,7 @@ object ProfileFailureClassifier {
         val platform = sanitize(text)
         if (rootDenied(lower)) return failure(ProfileSetupFailureKind.ROOT_DENIED, platform)
 
-        if (operation == ProfileSetupOperation.CREATE_MANAGED_PROFILE) {
+        if (operation in setOf(ProfileSetupOperation.CREATE_MANAGED_PROFILE, ProfileSetupOperation.CREATE_SECONDARY_USER)) {
             if (lower.contains("already exists")) return failure(ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS, platform)
             if (lower.contains("add more profiles") || lower.contains("maximum profiles") ||
                 lower.contains("max profiles") || lower.contains("profile limit") ||
@@ -135,7 +135,7 @@ object ProfileFailureClassifier {
         }
 
         return when (operation) {
-            ProfileSetupOperation.START_PROFILE -> failure(ProfileSetupFailureKind.PROFILE_START_FAILED, platform)
+            ProfileSetupOperation.START_PROFILE, ProfileSetupOperation.SWITCH_USER -> failure(ProfileSetupFailureKind.PROFILE_START_FAILED, platform)
             ProfileSetupOperation.PROFILE_STATE -> failure(ProfileSetupFailureKind.PROFILE_NOT_UNLOCKED, platform)
             ProfileSetupOperation.INSTALL_EXISTING_PACKAGE, ProfileSetupOperation.LIST_PROFILE_PACKAGE ->
                 failure(ProfileSetupFailureKind.PACKAGE_INSTALL_FAILED, platform)
@@ -144,7 +144,7 @@ object ProfileFailureClassifier {
                 failure(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, platform)
             ProfileSetupOperation.GET_MAX_USERS -> failure(ProfileSetupFailureKind.ROOT_COMMAND_FAILED, platform)
             ProfileSetupOperation.VERIFY_ROOT -> error("handled above")
-            ProfileSetupOperation.CREATE_MANAGED_PROFILE -> error("handled above")
+            ProfileSetupOperation.CREATE_MANAGED_PROFILE, ProfileSetupOperation.CREATE_SECONDARY_USER -> error("handled above")
         }
     }
 
@@ -179,9 +179,9 @@ object ProfileFailureClassifier {
             ProfileSetupFailureKind.MANAGED_PROFILE_UNSUPPORTED -> ProfileSetupFailure(kind, "Profile B isn't supported",
                 "This phone isn't allowing a managed work profile under your current Profile A.", "Keep using Profile A on this phone.", false)
             ProfileSetupFailureKind.MAX_USERS_REACHED -> ProfileSetupFailure(kind, "User limit reached",
-                "Android reports this phone has reached its user limit.", "Retry after removing an unused Android user in Settings.", true)
+                "Android reports this phone has reached its user limit.", "This phone has reached Android's profile limit.", true)
             ProfileSetupFailureKind.MAX_PROFILES_REACHED -> ProfileSetupFailure(kind, "Profile limit reached",
-                "This phone isn't allowing another work profile because its profile limit is reached.", "Retry after removing an unused work profile in Android settings.", true)
+                "This phone isn't allowing another work profile because its profile limit is reached.", "This phone has reached Android's profile limit.", true)
             ProfileSetupFailureKind.PROFILE_CREATION_REJECTED -> ProfileSetupFailure(kind, "Profile B couldn't be added",
                 "Android rejected creation of the isolated Profile B identity.", "Retry after checking Android's user/profile settings.", true)
             ProfileSetupFailureKind.PROFILE_ALREADY_EXISTS -> ProfileSetupFailure(kind, "Profile B already exists",
@@ -213,6 +213,7 @@ data class ProfileJournalSnapshot(
     val profileUserId: Int?,
     val selectedPackages: Set<String>,
     val stage: ProfileSetupStage,
+    val secondaryUser: Boolean = false,
 )
 
 sealed class ProfileRecoveryDecision {
@@ -238,7 +239,7 @@ object ProfileRecovery {
         val sameName = users.filter { it.name == journal.profileName }
         if (journal.profileUserId != null) {
             val exactId = sameName.singleOrNull { it.id == journal.profileUserId }
-            if (sameName.size != 1 || exactId == null || !validOwned(exactId, currentParentUserId)) {
+            if (sameName.size != 1 || exactId == null || !validOwned(exactId, currentParentUserId, journal.secondaryUser)) {
                 return ProfileRecoveryDecision.Fail(ProfileFailureClassifier.local(
                     ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "The journaled Profile B identity no longer matches Android."))
             }
@@ -246,7 +247,7 @@ object ProfileRecovery {
         }
         if (sameName.isEmpty()) return ProfileRecoveryDecision.Create
         val existing = sameName.singleOrNull()
-        return if (existing != null && validOwned(existing, currentParentUserId)) ProfileRecoveryDecision.Resume(existing)
+        return if (existing != null && validOwned(existing, currentParentUserId, journal.secondaryUser)) ProfileRecoveryDecision.Resume(existing)
         else ProfileRecoveryDecision.Fail(ProfileFailureClassifier.local(
             ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Cyclone found an ambiguous or invalid partial Profile B identity."))
     }
@@ -256,17 +257,19 @@ object ProfileRecovery {
         profileName: String,
         parentUserId: Int,
         usersAfterCreate: List<ProfileUserRecord>,
+        secondaryUser: Boolean = false,
     ): ProfileSetupFailure? {
         if (createdUserId <= 0 || createdUserId == parentUserId) {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android returned an invalid Profile B user id.")
         }
         val exact = usersAfterCreate.singleOrNull { it.id == createdUserId && it.name == profileName }
-        return if (exact != null && validOwned(exact, parentUserId)) null
+        return if (exact != null && validOwned(exact, parentUserId, secondaryUser)) null
         else ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, "Android did not re-list the exact managed Profile B after creation.")
     }
 
-    internal fun validOwned(user: ProfileUserRecord, parent: Int): Boolean =
-        user.id > 0 && user.id != parent && user.managed && user.parentId == parent && !user.partial
+    internal fun validOwned(user: ProfileUserRecord, parent: Int, secondaryUser: Boolean = false): Boolean =
+        user.id > 0 && user.id != parent && !user.partial &&
+            (if (secondaryUser) !user.profile && user.parentId == null else user.managed && user.parentId == parent)
 }
 
 data class ProfileReadyEvidence(
@@ -278,12 +281,13 @@ data class ProfileReadyEvidence(
     val workspaceUserIdsByPackage: Map<String, Set<Int>>,
     val setupComplete: Boolean,
     val journalUserId: Int?,
+    val secondaryUser: Boolean = false,
 )
 
 object ProfileReadyVerifier {
     internal fun failure(evidence: ProfileReadyEvidence): ProfileSetupFailure? {
         val user = evidence.user ?: return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED)
-        if (!ProfileRecovery.validOwned(user, evidence.parentUserId)) {
+        if (!ProfileRecovery.validOwned(user, evidence.parentUserId, evidence.secondaryUser)) {
             return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED)
         }
         if (!evidence.runningUnlocked) return ProfileFailureClassifier.local(ProfileSetupFailureKind.PROFILE_NOT_UNLOCKED)

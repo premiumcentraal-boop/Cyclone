@@ -152,6 +152,30 @@ fun ProfileSetupPage(onClose: () -> Unit) {
                                 }, modifier = Modifier.fillMaxWidth()) { Text("Open ${workspace.label}") }
                             }
                             item {
+                                val savedProfiles = com.cyclone.mobile.runtime.workspaces.ProfileRegistryStore.records(context)
+                                savedProfiles.forEach { saved ->
+                                    Text(saved.label)
+                                    TextButton(onClick = {
+                                        ProfileSetupRuntime.selectProfile(context, saved.id)
+                                        selected = ProfileSetupRuntime.selectedPackages(context)
+                                        chooseApps()
+                                    }) { Text("Manage apps / repair") }
+                                    if (saved.secondaryUser && saved.ready) TextButton(onClick = {
+                                        scope.launch {
+                                            message = withContext(Dispatchers.IO) {
+                                                runCatching { ProfileSetupRuntime.openProfile(context, saved.id); "Profile opened" }
+                                                    .getOrElse { it.message ?: "Couldn't open profile." }
+                                            }
+                                        }
+                                    }) { Text("Open profile") }
+                                }
+                                OutlinedButton(onClick = {
+                                    runCatching { ProfileSetupRuntime.beginAnotherProfile(context) }
+                                        .onSuccess { selected = emptySet(); chooseApps() }
+                                        .onFailure { message = it.message.orEmpty() }
+                                }, enabled = !checking) { Text("Add profile") }
+                            }
+                            item {
                                 OutlinedButton(onClick = { chooseApps() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) { Text("Add apps / finish setup") }
                                 TextButton(onClick = {
                                     scope.launch {

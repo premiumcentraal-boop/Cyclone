@@ -6,6 +6,8 @@ enum class ProfileSetupOperation {
     LIST_USERS,
     GET_MAX_USERS,
     CREATE_MANAGED_PROFILE,
+    CREATE_SECONDARY_USER,
+    SWITCH_USER,
     START_PROFILE,
     PROFILE_STATE,
     INSTALL_EXISTING_PACKAGE,
@@ -65,6 +67,18 @@ object ProfileSetupPlan {
             ProfileSetupOperation.CREATE_MANAGED_PROFILE,
             "/system/bin/pm", "create-user", "--profileOf", parentUserId.toString(), "--managed", name,
         )
+    }
+
+    fun createSecondaryUser(name: String): ProfileSetupCommand {
+        require(validProfileName(name))
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.CREATE_SECONDARY_USER,
+            "/system/bin/pm", "create-user", name)
+    }
+
+    fun switchUser(userId: Int): ProfileSetupCommand {
+        require(userId >= 0)
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.SWITCH_USER,
+            "/system/bin/am", "switch-user", userId.toString())
     }
 
     fun startProfile(userId: Int): ProfileSetupCommand {
@@ -133,6 +147,10 @@ object ProfileSetupPlan {
         ProfileSetupOperation.CREATE_MANAGED_PROFILE -> tokens.size == 6 && tokens[0] == "/system/bin/pm" &&
             tokens[1] == "create-user" && tokens[2] == "--profileOf" && tokens[3].toIntOrNull()?.let { it >= 0 } == true &&
             tokens[4] == "--managed" && validProfileName(tokens[5])
+        ProfileSetupOperation.CREATE_SECONDARY_USER -> tokens.size == 3 &&
+            tokens.take(2) == listOf("/system/bin/pm", "create-user") && validProfileName(tokens[2])
+        ProfileSetupOperation.SWITCH_USER -> tokens.size == 3 &&
+            tokens.take(2) == listOf("/system/bin/am", "switch-user") && tokens[2].toIntOrNull()?.let { it >= 0 } == true
         ProfileSetupOperation.START_PROFILE -> tokens.size == 4 && tokens[0] == "/system/bin/am" &&
             tokens[1] == "start-user" && tokens[2] == "-w" && tokens[3].toIntOrNull()?.let { it > 0 } == true
         ProfileSetupOperation.PROFILE_STATE -> tokens.size == 3 && tokens[0] == "/system/bin/am" &&

@@ -18,3 +18,15 @@ Background panel cleanup restores the compact launcher; repeated attachment rend
 through the existing controller instead of creating another stack.
 
 Validation pending CI; local Gradle distribution download is network-blocked.
+
+Checkpoint 3 source: a persistent profile collection preserves the singleton journal;
+completed setups can be archived before planning another. Rooted new profiles use
+full secondary users, with typed creation/switch commands and exact journal recovery.
+Cyclone is automatically included and verified using the same package-install checks.
+No extra root-manager APK is required: su is provided by the device daemon.
+Minimal setup wiring exposes saved profiles, repair, Add profile and full-user Open.
+
+Still incomplete: automatic recovery of renamed legacy Rooted Clone without a matching
+journal, registry transfer/return navigation from a freshly installed secondary user,
+explicit profile Ask execution, injectable root runner and exhaustive lifecycle tests.
+Do not release this partial lane. Existing managed profiles remain app-based spaces.
