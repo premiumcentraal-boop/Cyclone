@@ -1,20 +1,13 @@
-import { livePhoneLabels, type LivePhoneStatus } from "../core/livePhone.js";
-import { DIRECT_LIVE_PHONE_AGENT_PROMPT, type DirectLiveBridgeStatus } from "../core/directLivePhone.js";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  formatSmokeLog,
-  friendlyTunnelState,
-  MCP_TUNNEL_FULL_WARNING,
-  stoppedTunnelStatus,
-  type McpTunnelMode,
-  type McpTunnelStatus,
-} from "../core/mcpTunnel.js";
-import {
-  remoteMcpConnectorInstructions,
-  UNIVERSAL_CLOUD_AGENT_PROMPT,
-} from "../core/cloudAgent.js";
-import { CODEX_MCP_PROMPT, MCP_FOREGROUND_SESSION_COPY } from "../core/sessionTiles.js";
-import type { ConnectorActionResult, ConnectorCard, DesktopService } from "../services/types.js";
+  DIRECT_LIVE_PHONE_AGENT_PROMPT,
+  directLivePhoneHandoff,
+  type DirectLiveBridgeStatus,
+} from "../core/directLivePhone.js";
+import type { LivePhoneStatus } from "../core/livePhone.js";
+import { stoppedTunnelStatus, type McpTunnelMode, type McpTunnelStatus } from "../core/mcpTunnel.js";
+import { CODEX_MCP_PROMPT } from "../core/sessionTiles.js";
+import type { ConnectorCard, DesktopDevice, DesktopService } from "../services/types.js";
 import { button, el } from "../ui/dom.js";
 
 export interface ConnectionsPageHandle {
@@ -25,578 +18,362 @@ export interface ConnectionsPageHandle {
 export const CODEX_PROMPT = CODEX_MCP_PROMPT;
 
 export function createConnectionsPage(service: DesktopService): ConnectionsPageHandle {
-  const page = el("section", "page content-page connections-page");
-  const header = el("header", "page-header");
+  const page = el("section", "page content-page connections-page simple-connections-page");
+  const header = el("header", "simple-connections-header");
   const heading = el("div");
   heading.append(
     el("h1", "page-title", "Connections"),
-    el("p", "page-subtitle", "Choose a native PC AI, direct Live Phone cloud control, or the separate Remote MCP client bridge."),
+    el("p", "page-subtitle", "Choose what you want to connect. Cyclone keeps the technical setup out of the way."),
   );
-  const refreshButton = button("Refresh", "button ghost compact");
+  const refreshButton = button("Refresh", "button secondary compact");
   header.append(heading, refreshButton);
 
-  const remoteMount = el("div", "remote-mcp-mount");
-  const localHeading = el("div", "connections-section-heading local-ai-heading");
-  localHeading.append(
-    el("h2", "connections-section-title", "ON PC AI · Use AI on this PC"),
-    el("p", "connections-section-copy", "These connect directly to Cyclone on this PC. They do not need the public Remote MCP URL."),
-  );
-  const grid = el("div", "connections-grid codex-connections-grid");
-  grid.append(el("div", "loading-card", "Checking local AI connections…"));
-  const live = el("section", "settings-card direct-live-phone-card");
-  live.append(
-    el("h2", "connections-section-title", "LIVE PHONE · Control the phone I’m holding"),
-    el("p", "connections-section-copy", "Preferred path: connect Cloud ChatGPT directly to Cyclone's dedicated Live Phone MCP. The existing PC connector remains a fallback. Native Codex stays on CycloneAgentMCP."),
-  );
-  const liveState = el("p", "connections-section-copy", "Waiting for a Live Phone request");
-  const livePhone = el("p", "connections-section-copy", "Checking physical phone…");
-  const liveCloud = el("p", "connections-section-copy", "Direct cloud connector · Waiting");
-  const liveBroker = el("p", "connections-section-copy", "Live Phone broker · Checking…");
-  const liveGateway = el("p", "connections-section-copy", "Gateway · Checking…");
-  const liveAccessibility = el("p", "connections-section-copy", "Accessibility · Checking…");
-  const liveVision = el("p", "connections-section-copy", "Vision · Observe first");
-  const liveControls = el("div", "button-row");
-  for (const [label, action] of [["Start Live Phone", "enable"], ["Pause", "pause"], ["Stop", "stop"]]) {
-    const control = button(label, "button ghost compact");
-    control.addEventListener("click", async () => {
-      try {
-        await invoke("live_phone_control", { action });
-        liveState.textContent = action === "enable" ? "Live Phone authorized. Connect the direct cloud bridge or use the fallback PC connector." : action === "stop" ? "Live Phone stopped. Old observations and screenshots are invalid." : "Live Phone paused. New actions are blocked.";
-      } catch { liveState.textContent = "Open the installed Cyclone One app to use Live Phone."; }
-    });
-    liveControls.append(control);
-  }
-  const directTitle = el("h3", "connections-section-title", "Direct Cloud Connector");
-  const directCopy = el("p", "connections-section-copy", "Starts a dedicated HTTPS MCP endpoint containing only Cyclone Live Phone tools. No shell, ADB, PowerShell, background sessions, or native Codex routing is exposed.");
-  const directState = el("p", "connections-section-copy", "Direct bridge · Off");
-  const directUrl = el("p", "connections-section-copy", "MCP URL · Start the direct bridge first");
-  const directActions = el("div", "button-row");
-  const directConnect = button("Connect Direct Live Phone", "button primary compact");
-  const copyDirectUrl = button("Copy MCP URL", "button secondary compact");
-  const copyDirectToken = button("Copy token", "button secondary compact");
-  const copyDirectSetup = button("Copy setup", "button ghost compact");
-  const copyDirectPrompt = button("Copy agent prompt", "button ghost compact");
-  const directDisconnect = button("Disconnect direct bridge", "button ghost compact");
-  copyDirectUrl.disabled = true; copyDirectToken.disabled = true; copyDirectSetup.disabled = true; directDisconnect.disabled = true;
-  directActions.append(directConnect, copyDirectUrl, copyDirectToken, copyDirectSetup, copyDirectPrompt, directDisconnect);
-  live.append(livePhone, liveCloud, liveBroker, liveGateway, liveAccessibility, liveVision, liveState, liveControls, directTitle, directCopy, directState, directUrl, directActions);
+  const cards = el("div", "simple-connection-grid");
 
-  let directStatus: DirectLiveBridgeStatus = { running: false, url: null };
-  let directBusy = false;
-  const refreshDirect = async (): Promise<void> => {
-    try {
-      directStatus = await invoke<DirectLiveBridgeStatus>("live_bridge_status");
-      directState.textContent = directStatus.running ? (directStatus.url ? "Direct bridge · Ready" : "Direct bridge · Starting secure URL…") : "Direct bridge · Off";
-      directUrl.textContent = directStatus.url ? `MCP URL · ${directStatus.url}` : "MCP URL · Start the direct bridge first";
-      copyDirectUrl.disabled = !directStatus.url; copyDirectToken.disabled = !directStatus.running; copyDirectSetup.disabled = !directStatus.url; directDisconnect.disabled = !directStatus.running;
-      directConnect.disabled = directBusy || directStatus.running;
-      directConnect.textContent = directStatus.running ? "Direct Live Phone connected" : "Connect Direct Live Phone";
-    } catch { directState.textContent = "Direct bridge · Unavailable. Reinstall this Cyclone One release."; }
-  };
-  let liveRefreshing = false;
-  const refreshLive = async (): Promise<void> => {
-    if (liveRefreshing) return;
-    liveRefreshing = true;
-    try {
-      const [state, devices] = await Promise.all([invoke<LivePhoneStatus>("live_phone_status"), service.listDevices()]);
-      if (!active) return;
-      const labels = livePhoneLabels(state, devices);
-      livePhone.textContent = labels.phone;
-      liveCloud.textContent = labels.cloud;
-      liveBroker.textContent = labels.broker;
-      liveGateway.textContent = labels.gateway;
-      liveAccessibility.textContent = labels.accessibility;
-      liveVision.textContent = labels.vision;
-      liveState.textContent = labels.control;
-      await refreshDirect();
-    } catch { liveState.textContent = "Live Phone status unavailable. Open the installed One app."; }
-    finally { liveRefreshing = false; }
-  };
-  directConnect.addEventListener("click", async () => {
-    if (directBusy) return;
-    directBusy = true; directConnect.disabled = true; directState.textContent = "Direct bridge · Starting…";
-    try {
-      await invoke("live_phone_control", { action: "enable" });
-      await invoke("live_bridge_connect");
-      liveState.textContent = "Live Phone authorized. Add the direct MCP URL and bearer token to your supported cloud AI connector.";
-    } catch (error) { directState.textContent = error instanceof Error ? error.message : "Direct bridge could not start."; }
-    finally { directBusy = false; await refreshDirect(); }
-  });
-  copyDirectUrl.addEventListener("click", () => { if (directStatus.url) void copyWithFeedback(directStatus.url, copyDirectUrl, "Copy MCP URL"); });
-  copyDirectToken.addEventListener("click", async () => {
-    try {
-      const secret = await invoke<{ token: string }>("live_bridge_token");
-      await copyWithFeedback(secret.token, copyDirectToken, "Copy token");
-      liveState.textContent = "Direct connector bearer token copied. Paste it only into the connector authentication field.";
-    } catch { liveState.textContent = "Could not copy the direct connector token yet. Wait for Cyclone runtime, then retry."; }
-  });
-  copyDirectSetup.addEventListener("click", () => {
-    if (!directStatus.url) return;
-    const setup = `Name: Cyclone Live Phone\nRemote MCP URL: ${directStatus.url}\nAuthentication: Bearer token\nToken: use Cyclone One > Connections > Direct Cloud Connector > Copy token and paste it only into the connector authentication field.\nAfter connecting, paste the Cyclone Live Phone agent prompt into a new AI chat/task.`;
-    void copyWithFeedback(setup, copyDirectSetup, "Copy setup");
-  });
-  copyDirectPrompt.addEventListener("click", () => { void copyWithFeedback(DIRECT_LIVE_PHONE_AGENT_PROMPT, copyDirectPrompt, "Copy agent prompt"); });
-  directDisconnect.addEventListener("click", async () => {
-    try { await invoke("live_bridge_disconnect"); liveState.textContent = "Direct Live Phone bridge disconnected and phone control stopped."; }
-    finally { await refreshDirect(); }
-  });
-  const liveTimer = setInterval(() => { void refreshLive(); }, 3000);
-  const background = el("section", "connections-section-heading");
-  background.append(el("h2", "connections-section-title", "BACKGROUND PHONE · Advanced workspaces"), el("p", "connections-section-copy", "Existing session workspaces and app profiles. Separate from Live Phone."));
-  page.append(header, localHeading, grid, live, remoteMount, background);
+  // Cloud agents — this is the default path for ChatGPT/Grok/etc.
+  const cloudCard = el("article", "simple-connection-card featured");
+  const cloudTop = el("div", "simple-connection-top");
+  const cloudIdentity = el("div", "simple-connection-identity");
+  cloudIdentity.append(
+    el("div", "simple-connection-icon", "AI"),
+    el("div", "simple-connection-heading"),
+  );
+  const cloudHeading = cloudIdentity.lastElementChild as HTMLElement;
+  cloudHeading.append(
+    el("h2", "simple-connection-title", "Connect your phone to cloud agents?"),
+    el("p", "simple-connection-copy", "Use ChatGPT, Grok or another cloud agent to see and control the phone you are holding."),
+  );
+  const cloudPill = el("span", "simple-status neutral", "Off");
+  cloudTop.append(cloudIdentity, cloudPill);
+  const cloudFacts = el("div", "simple-facts");
+  const cloudPhone = fact("Phone", "Checking…");
+  const cloudVision = fact("Vision", "Waiting");
+  const cloudControl = fact("Control", "Waiting");
+  cloudFacts.append(cloudPhone, cloudVision, cloudControl);
+  const cloudMessage = el("div", "simple-connection-message", "Nothing is shared until you choose Yes.");
+  const cloudActions = el("div", "simple-choice-row");
+  const cloudYes = button("Yes, connect", "button primary");
+  const cloudNo = button("No, not now", "button secondary");
+  cloudActions.append(cloudYes, cloudNo);
+  const cloudHelper = el("div", "simple-helper", "When connected, Cyclone gives you one private handoff to paste into the connector setup. No separate URL, token and prompt steps.");
+  cloudCard.append(cloudTop, cloudFacts, cloudMessage, cloudActions, cloudHelper);
+
+  // Local Codex remains intentionally separate from cloud Live Phone.
+  const codexCard = el("article", "simple-connection-card");
+  const codexTop = el("div", "simple-connection-top");
+  const codexIdentity = el("div", "simple-connection-identity");
+  codexIdentity.append(
+    el("div", "simple-connection-icon codex", "C"),
+    el("div", "simple-connection-heading"),
+  );
+  const codexHeading = codexIdentity.lastElementChild as HTMLElement;
+  codexHeading.append(
+    el("h2", "simple-connection-title", "Use Codex on this PC?"),
+    el("p", "simple-connection-copy", "Connect local Codex directly to Cyclone. It stays separate from cloud Live Phone."),
+  );
+  const codexPill = el("span", "simple-status neutral", "Checking");
+  codexTop.append(codexIdentity, codexPill);
+  const codexMessage = el("div", "simple-connection-message", "Cyclone will configure the local connection for you.");
+  const codexActions = el("div", "simple-choice-row");
+  const codexYes = button("Yes, connect", "button primary");
+  const codexNo = button("No, not now", "button secondary");
+  codexActions.append(codexYes, codexNo);
+  codexCard.append(codexTop, codexMessage, codexActions);
+
+  cards.append(cloudCard, codexCard);
+
+  // Everything technical is still available, but closed by default.
+  const advanced = el("details", "simple-advanced") as HTMLDetailsElement;
+  const advancedSummary = el("summary", "simple-advanced-summary");
+  advancedSummary.append(
+    el("span", "simple-advanced-title", "Advanced connections"),
+    el("span", "simple-advanced-copy", "Remote MCP, generic MCP clients and diagnostics"),
+  );
+  const advancedBody = el("div", "simple-advanced-body");
+
+  const remote = el("article", "advanced-connection-block");
+  const remoteHead = el("div", "advanced-block-head");
+  const remoteTitle = el("div");
+  remoteTitle.append(el("h3", "advanced-block-title", "Legacy Remote MCP"), el("p", "advanced-block-copy", "Keep this only for cloud clients that need the older general Cyclone MCP surface."));
+  const remotePill = el("span", "simple-status neutral", "Off");
+  remoteHead.append(remoteTitle, remotePill);
+  const remoteInfo = el("div", "advanced-inline-info", "Off");
+  const remoteActions = el("div", "advanced-action-row");
+  const remoteStart = button("Start", "button secondary compact");
+  const remoteView = button("View only", "button ghost compact");
+  const remoteControl = button("Control phone", "button ghost compact");
+  const remoteCopyUrl = button("Copy URL", "button ghost compact");
+  const remoteCopyToken = button("Copy token", "button ghost compact");
+  remoteActions.append(remoteStart, remoteView, remoteControl, remoteCopyUrl, remoteCopyToken);
+  remote.append(remoteHead, remoteInfo, remoteActions);
+
+  const local = el("article", "advanced-connection-block");
+  const localHead = el("div", "advanced-block-head");
+  localHead.append(
+    el("div", "advanced-block-heading-wrap"),
+    el("span", "simple-status neutral", "Optional"),
+  );
+  const localTitle = localHead.firstElementChild as HTMLElement;
+  localTitle.append(el("h3", "advanced-block-title", "Other local MCP clients"), el("p", "advanced-block-copy", "DeepSeek harnesses and generic local MCP clients can use Cyclone's typed local transport."));
+  const localList = el("div", "advanced-local-list");
+  local.append(localHead, localList);
+
+  const promptBlock = el("article", "advanced-connection-block prompt-block");
+  const promptHead = el("div", "advanced-block-head");
+  promptHead.append(el("div", "advanced-block-title", "Agent prompts"));
+  const promptActions = el("div", "advanced-action-row");
+  const copyLivePrompt = button("Copy Live Phone prompt", "button ghost compact");
+  const copyCodexPrompt = button("Copy Codex prompt", "button ghost compact");
+  promptActions.append(copyLivePrompt, copyCodexPrompt);
+  promptBlock.append(promptHead, promptActions);
+
+  advancedBody.append(remote, local, promptBlock);
+  advanced.append(advancedSummary, advancedBody);
+  page.append(header, cards, advanced);
 
   let active = true;
-  void refreshLive();
-  let refreshing = false;
-  let remoteBusy = false;
-  let remoteStatus: McpTunnelStatus = stoppedTunnelStatus("Checking Remote MCP…");
-  let remoteMessage = "Remote MCP is off. Start it when you want a cloud AI to reach Cyclone.";
-  let actionResult: ConnectorActionResult | null = null;
+  let busy = false;
+  let directStatus: DirectLiveBridgeStatus = { running: false, url: null };
+  let liveStatus: LivePhoneStatus = { connected: false, vision: false, control: false, enabled: false, stopped: false };
+  let devices: DesktopDevice[] = [];
+  let connectors: ConnectorCard[] = [];
+  let remoteStatus: McpTunnelStatus = stoppedTunnelStatus();
 
-  const renderRemote = (): void => {
+  const render = (): void => {
     if (!active) return;
-    remoteMount.replaceChildren(renderRemoteMcpCard({
-      status: remoteStatus,
-      busy: remoteBusy,
-      message: remoteMessage,
-      onStart: () => {
-        const work = remoteStatus.state === "degraded"
-          ? () => service.restartMcpTunnel()
-          : () => service.startMcpTunnel(remoteStatus.mode);
-        void runRemote(remoteStatus.state === "degraded" ? "Repairing Remote MCP…" : "Starting secure Remote MCP…", work);
-      },
-      onMode: (mode) => {
-        if (mode === remoteStatus.mode) return;
-        if (mode === "full") {
-          const confirmed = window.confirm(
-            "Control phone lets the connected cloud AI tap, type, swipe and navigate this phone. Only continue if you trust the AI account and keep your bearer token private.\n\nEnable phone control?",
-          );
-          if (!confirmed) return;
-        }
-        void runRemote(mode === "full" ? "Enabling phone control…" : "Switching to view only…", () => service.setMcpTunnelMode(mode));
-      },
-      onCopyUrl: (control) => {
-        if (remoteStatus.mcpUrl) void copyWithFeedback(remoteStatus.mcpUrl, control, "Copy MCP URL");
-      },
-      onCopyToken: async (control) => {
-        try {
-          const secret = await service.copyMcpTunnelToken();
-          await copyWithFeedback(secret.token, control, "Copy token");
-          remoteMessage = `Bearer token copied (last 4 ${secret.last4}). Paste it only into the connector authentication field.`;
-          renderRemote();
-        } catch (error) {
-          remoteMessage = error instanceof Error ? error.message : "Could not copy the bearer token.";
-          renderRemote();
-        }
-      },
-      onCopySetup: (control) => {
-        void copyWithFeedback(remoteMcpConnectorInstructions(remoteStatus.mcpUrl), control, "Copy setup");
-      },
-      onCopyPrompt: (control) => {
-        void copyWithFeedback(UNIVERSAL_CLOUD_AGENT_PROMPT, control, "Copy agent prompt");
-      },
-      onRestart: () => {
-        void runRemote("Restarting Remote MCP…", () => service.restartMcpTunnel());
-      },
-      onStop: () => {
-        void runRemote("Stopping Remote MCP…", () => service.stopMcpTunnel());
-      },
-      onRotate: () => {
-        const confirmed = window.confirm("Rotate the bearer token? Any cloud AI using the old token will disconnect until you update it.");
-        if (!confirmed) return;
-        void runRemote("Rotating bearer token…", () => service.rotateMcpTunnelToken());
-      },
-      onSmoke: () => {
-        void runSmoke();
-      },
-      onDocs: async () => {
-        try {
-          const path = await service.openMcpTunnelDocs();
-          remoteMessage = `Opened advanced connector notes: ${path}`;
-        } catch {
-          remoteMessage = "Could not open the connector notes. The three-step setup above is still complete.";
-        }
-        renderRemote();
-      },
-    }));
+    const physical = devices.filter((device) => device.source !== "VIRTUAL");
+    const readyPhone = physical.find((device) => device.state === "READY");
+    const cloudReady = directStatus.running && Boolean(directStatus.url);
+    setStatus(cloudPill, cloudReady ? "Ready" : directStatus.running ? "Starting" : "Off", cloudReady ? "ready" : directStatus.running ? "busy" : "neutral");
+    setFactValue(cloudPhone, readyPhone ? readyPhone.name : physical.length ? "Needs attention" : "Not connected");
+    setFactValue(cloudVision, liveStatus.vision ? "Ready" : "Waiting");
+    setFactValue(cloudControl, liveStatus.control ? "Ready" : liveStatus.enabled ? "Waiting" : "Off");
+    cloudYes.disabled = busy;
+    cloudYes.textContent = cloudReady ? "Copy handoff" : "Yes, connect";
+    cloudNo.disabled = busy;
+    cloudNo.textContent = cloudReady || directStatus.running ? "Disconnect" : "No, not now";
+    cloudMessage.textContent = cloudReady
+      ? readyPhone
+        ? "Connected. Use the handoff once in your cloud AI connector, then start asking it to use your phone."
+        : "Cloud connection is ready. Connect a phone in Control before asking the agent to act."
+      : "Nothing is shared until you choose Yes.";
+
+    const codex = connectors.find((item) => item.id === "codex");
+    const codexConnected = codex?.state === "CONNECTED";
+    const codexAttention = codex?.state === "NEEDS_ATTENTION";
+    setStatus(codexPill, codexConnected ? "Connected" : codexAttention ? "Needs attention" : codex?.state === "NOT_INSTALLED" ? "Not installed" : "Off", codexConnected ? "ready" : codexAttention ? "attention" : "neutral");
+    codexYes.disabled = busy || codexConnected;
+    codexYes.textContent = codexConnected ? "Connected" : codexAttention ? "Repair" : codex?.state === "NOT_INSTALLED" ? "Install & connect" : "Yes, connect";
+    codexNo.disabled = busy;
+    codexMessage.textContent = codexConnected ? "Codex is connected locally. No public URL or bearer token is involved." : "Cyclone will configure the local connection for you.";
+
+    setStatus(remotePill, remoteStatus.state === "running" ? "Running" : remoteStatus.state === "degraded" ? "Needs repair" : "Off", remoteStatus.state === "running" ? "ready" : remoteStatus.state === "degraded" ? "attention" : "neutral");
+    remoteInfo.textContent = remoteStatus.state === "running"
+      ? `${remoteStatus.mode === "full" ? "Phone control" : "View only"} · public bridge ready`
+      : remoteStatus.error || remoteStatus.message || "Off";
+    remoteStart.textContent = remoteStatus.state === "running" ? "Stop" : remoteStatus.state === "degraded" ? "Repair" : "Start";
+    remoteView.classList.toggle("selected", remoteStatus.mode === "readonly");
+    remoteControl.classList.toggle("selected", remoteStatus.mode === "full");
+    remoteCopyUrl.disabled = !remoteStatus.mcpUrl;
+    remoteCopyToken.disabled = remoteStatus.state !== "running";
+
+    renderLocalConnectors();
   };
 
-  const refreshRemote = async (): Promise<void> => {
-    if (!active || remoteBusy) return;
+  const refresh = async (): Promise<void> => {
+    if (busy) return;
+    const results = await Promise.allSettled([
+      service.listDevices(),
+      service.listConnectors(),
+      service.getMcpTunnelStatus(),
+      invoke<DirectLiveBridgeStatus>("live_bridge_status"),
+      invoke<LivePhoneStatus>("live_phone_status"),
+    ]);
+    if (!active) return;
+    if (results[0].status === "fulfilled") devices = results[0].value;
+    if (results[1].status === "fulfilled") connectors = results[1].value;
+    if (results[2].status === "fulfilled") remoteStatus = results[2].value;
+    if (results[3].status === "fulfilled") directStatus = results[3].value;
+    if (results[4].status === "fulfilled") liveStatus = results[4].value;
+    render();
+  };
+
+  const copyCloudHandoff = async (): Promise<void> => {
+    if (!directStatus.url) throw new Error("Direct Live Phone URL is not ready yet.");
+    const secret = await invoke<{ token: string }>("live_bridge_token");
+    await navigator.clipboard.writeText(directLivePhoneHandoff(directStatus.url, secret.token));
+    cloudMessage.textContent = "Private handoff copied. Paste it only into your connector setup/import flow — not into an ordinary chat message.";
+    flashButton(cloudYes, "Handoff copied");
+  };
+
+  cloudYes.addEventListener("click", async () => {
+    if (busy) return;
+    busy = true;
     try {
-      remoteStatus = await service.getMcpTunnelStatus();
-      if (remoteStatus.state === "running") {
-        remoteMessage = remoteStatus.mode === "full"
-          ? "Remote MCP is ready with phone control enabled."
-          : "Remote MCP is ready in view-only mode.";
-      } else if (remoteStatus.state === "degraded") {
-        remoteMessage = remoteStatus.error || remoteStatus.message || "Remote MCP needs attention.";
+      if (!(directStatus.running && directStatus.url)) {
+        cloudMessage.textContent = "Connecting securely…";
+        await invoke("live_phone_control", { action: "enable" });
+        directStatus = await invoke<DirectLiveBridgeStatus>("live_bridge_connect");
       }
-    } catch {
-      remoteStatus = stoppedTunnelStatus("Could not read Remote MCP status.");
-      remoteMessage = "Cyclone could not read Remote MCP. Keep Cyclone One open and press Refresh.";
-    }
-    renderRemote();
-  };
-
-  const runRemote = async (label: string, work: () => Promise<McpTunnelStatus>): Promise<void> => {
-    if (remoteBusy) return;
-    remoteBusy = true;
-    remoteMessage = label;
-    renderRemote();
-    try {
-      remoteStatus = await work();
-      remoteMessage = remoteStatus.error || remoteStatus.message;
+      render();
+      await copyCloudHandoff();
     } catch (error) {
-      remoteMessage = error instanceof Error ? error.message : "Remote MCP command failed.";
+      cloudMessage.textContent = friendlyError(error, "Cyclone could not start the cloud connection.");
     } finally {
-      remoteBusy = false;
-      renderRemote();
+      busy = false;
+      await refresh();
     }
-  };
-
-  const runSmoke = async (): Promise<void> => {
-    if (remoteBusy) return;
-    remoteBusy = true;
-    remoteMessage = "Checking Remote MCP connection…";
-    renderRemote();
-    try {
-      const result = await service.smokeMcpTunnel();
-      remoteMessage = formatSmokeLog(result);
-    } catch (error) {
-      remoteMessage = error instanceof Error ? error.message : "Remote MCP connection check failed.";
-    } finally {
-      remoteBusy = false;
-      renderRemote();
-    }
-  };
-
-  const refreshLocal = async (): Promise<void> => {
-    if (!active || refreshing) return;
-    refreshing = true;
-    refreshButton.disabled = true;
-    try {
-      const connectors = await service.listConnectors();
-      if (!active) return;
-      const codex = connectors.find((candidate) => candidate.id === "codex");
-      const others = connectors.filter((candidate) => candidate.id !== "codex");
-      const nodes: HTMLElement[] = [];
-      if (codex) nodes.push(renderCodexConnector(service, codex, actionResult, refreshLocal, (result) => { actionResult = result; }));
-      if (others.length) {
-        const divider = el("div", "connections-section-heading");
-        divider.append(
-          el("h2", "connections-section-title", "Other local MCP clients"),
-          el("p", "connections-section-copy", "Compatible local agents can use the same typed Cyclone tools over the local MCP transport."),
-        );
-        nodes.push(divider, ...others.map((connector) => renderConnector(service, connector, refreshLocal)));
-      }
-      if (!nodes.length) nodes.push(el("div", "loading-card", "No local AI clients detected. Remote MCP above still works with supported cloud AI platforms."));
-      grid.replaceChildren(...nodes);
-    } catch {
-      if (active) grid.replaceChildren(el("div", "friendly-error", "Cyclone could not check local AI connections. Keep Cyclone One open and try Refresh."));
-    } finally {
-      refreshing = false;
-      refreshButton.disabled = false;
-    }
-  };
-
-  refreshButton.addEventListener("click", () => {
-    void refreshRemote();
-    void refreshLocal();
   });
 
-  renderRemote();
-  void refreshRemote();
-  void refreshLocal();
-  const remoteTimer = window.setInterval(() => { void refreshRemote(); }, 4_000);
-  const localTimer = window.setInterval(() => { void refreshLocal(); }, 15_000);
+  cloudNo.addEventListener("click", async () => {
+    if (busy) return;
+    if (!(directStatus.running || directStatus.url)) {
+      cloudMessage.textContent = "Nothing changed. Cloud agents remain disconnected.";
+      return;
+    }
+    busy = true;
+    try {
+      await invoke("live_bridge_disconnect");
+      cloudMessage.textContent = "Cloud agents disconnected.";
+    } catch (error) {
+      cloudMessage.textContent = friendlyError(error, "Could not disconnect the cloud bridge.");
+    } finally {
+      busy = false;
+      await refresh();
+    }
+  });
 
+  codexYes.addEventListener("click", async () => {
+    if (busy) return;
+    const codex = connectors.find((item) => item.id === "codex");
+    if (!codex) {
+      codexMessage.textContent = "Codex was not detected on this PC.";
+      return;
+    }
+    busy = true;
+    try {
+      const action = codex.state === "NOT_INSTALLED" ? "install" : codex.state === "NEEDS_ATTENTION" ? "repair" : "connect";
+      const result = await service.runConnectorAction(codex.id, action);
+      codexMessage.textContent = result.message || "Codex connection updated.";
+    } catch (error) {
+      codexMessage.textContent = friendlyError(error, "Cyclone could not update the Codex connection.");
+    } finally {
+      busy = false;
+      await refresh();
+    }
+  });
+
+  codexNo.addEventListener("click", () => {
+    codexMessage.textContent = "Nothing changed. You can connect Codex later.";
+  });
+
+  remoteStart.addEventListener("click", async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      remoteStatus = remoteStatus.state === "running"
+        ? await service.stopMcpTunnel()
+        : remoteStatus.state === "degraded"
+          ? await service.restartMcpTunnel()
+          : await service.startMcpTunnel(remoteStatus.mode);
+    } catch (error) {
+      remoteInfo.textContent = friendlyError(error, "Remote MCP command failed.");
+    } finally {
+      busy = false;
+      await refresh();
+    }
+  });
+
+  for (const [control, mode] of [[remoteView, "readonly"], [remoteControl, "full"]] as Array<[HTMLButtonElement, McpTunnelMode]>) {
+    control.addEventListener("click", async () => {
+      if (busy || mode === remoteStatus.mode) return;
+      if (mode === "full" && !window.confirm("Control phone allows this legacy Remote MCP client to perform phone actions. Enable it?")) return;
+      busy = true;
+      try { remoteStatus = await service.setMcpTunnelMode(mode); }
+      finally { busy = false; await refresh(); }
+    });
+  }
+
+  remoteCopyUrl.addEventListener("click", () => {
+    if (remoteStatus.mcpUrl) void copyText(remoteStatus.mcpUrl, remoteCopyUrl, "URL copied");
+  });
+  remoteCopyToken.addEventListener("click", async () => {
+    try {
+      const secret = await service.copyMcpTunnelToken();
+      await copyText(secret.token, remoteCopyToken, "Token copied");
+    } catch (error) {
+      remoteInfo.textContent = friendlyError(error, "Could not copy token.");
+    }
+  });
+  copyLivePrompt.addEventListener("click", () => void copyText(DIRECT_LIVE_PHONE_AGENT_PROMPT, copyLivePrompt, "Prompt copied"));
+  copyCodexPrompt.addEventListener("click", () => void copyText(CODEX_PROMPT, copyCodexPrompt, "Prompt copied"));
+  refreshButton.addEventListener("click", () => void refresh());
+
+  const renderLocalConnectors = (): void => {
+    const others = connectors.filter((item) => item.id !== "codex");
+    localList.replaceChildren();
+    if (!others.length) {
+      localList.append(el("div", "advanced-empty", "No other local MCP clients detected."));
+      return;
+    }
+    for (const connector of others) {
+      const row = el("div", "advanced-local-row");
+      const copy = el("div");
+      copy.append(
+        el("div", "advanced-local-name", connector.name),
+        el("div", "advanced-local-state", connector.state === "CONNECTED" ? "Connected" : connector.state === "NEEDS_ATTENTION" ? "Needs attention" : "Not connected"),
+      );
+      const action = button(connector.state === "CONNECTED" ? "Connected" : connector.state === "NEEDS_ATTENTION" ? "Repair" : "Prepare", "button ghost compact");
+      action.disabled = connector.state === "CONNECTED";
+      action.addEventListener("click", async () => {
+        const kind = connector.state === "NEEDS_ATTENTION" ? "repair" : connector.state === "NOT_INSTALLED" ? "install" : "connect";
+        try { await service.runConnectorAction(connector.id, kind); }
+        finally { await refresh(); }
+      });
+      row.append(copy, action);
+      localList.append(row);
+    }
+  };
+
+  void refresh();
+  const timer = window.setInterval(() => { void refresh(); }, 5_000);
   return {
     element: page,
     destroy: () => {
-      clearInterval(liveTimer);
       active = false;
-      window.clearInterval(remoteTimer);
-      window.clearInterval(localTimer);
+      window.clearInterval(timer);
     },
   };
 }
 
-interface RemoteMcpCardOptions {
-  status: McpTunnelStatus;
-  busy: boolean;
-  message: string;
-  onStart(): void;
-  onMode(mode: McpTunnelMode): void;
-  onCopyUrl(control: HTMLButtonElement): void;
-  onCopyToken(control: HTMLButtonElement): void;
-  onCopySetup(control: HTMLButtonElement): void;
-  onCopyPrompt(control: HTMLButtonElement): void;
-  onRestart(): void;
-  onStop(): void;
-  onRotate(): void;
-  onSmoke(): void;
-  onDocs(): void;
-}
-
-function renderRemoteMcpCard(options: RemoteMcpCardOptions): HTMLElement {
-  const { status, busy } = options;
-  const card = el("article", "codex-connect-card remote-mcp-card");
-  const top = el("div", "codex-connect-top remote-mcp-top");
-  const identity = el("div", "codex-connect-identity");
-  identity.append(
-    el("div", "codex-wordmark", "REMOTE MCP · CLOUD AI"),
-    el("h2", "codex-connect-title", status.state === "running" ? "Your phone is ready for cloud AI" : "Connect any cloud AI to Cyclone"),
-    el("p", "codex-connect-copy", "Works with ChatGPT, Grok and other cloud AI clients that support Remote MCP. Cyclone creates the secure public bridge for you."),
-  );
-  const state = el("span", `mcp-tunnel-state state-${status.state}`, friendlyTunnelState(status.state));
-  top.append(identity, state);
-
-  const readiness = el("div", "codex-readiness-grid remote-readiness-grid");
-  readiness.append(
-    readinessItem("Secure bridge", status.state === "running", status.state === "running" ? "Online" : status.state === "degraded" ? "Needs repair" : "Off"),
-    readinessItem("MCP health", status.healthOk, status.healthOk ? "Healthy" : "Waiting"),
-    readinessItem("Access", status.mode === "full", status.mode === "full" ? "Control phone" : "View only"),
-    readinessItem("Public URL", Boolean(status.mcpUrl), status.mcpUrl ? "Ready to copy" : "Created on Start"),
-  );
-
-  const wizard = el("div", "remote-mcp-wizard");
-
-  const step1 = wizardStep("1", "Start Remote MCP", "Cyclone opens an HTTPS bridge. Choose whether the cloud AI may only see the phone or may also control it.");
-  const modeRow = el("div", "remote-mode-row");
-  const viewOnly = button("View only", status.mode === "readonly" ? "button primary compact" : "button secondary compact");
-  const controlPhone = button("Control phone", status.mode === "full" ? "button primary compact" : "button secondary compact");
-  viewOnly.disabled = busy;
-  controlPhone.disabled = busy;
-  viewOnly.addEventListener("click", () => options.onMode("readonly"));
-  controlPhone.addEventListener("click", () => options.onMode("full"));
-  modeRow.append(viewOnly, controlPhone);
-  const start = button(
-    status.state === "running" ? "Remote MCP is on" : status.state === "degraded" ? "Repair connection" : "Start secure connection",
-    "button primary remote-primary-action",
-  );
-  start.disabled = busy || status.state === "running";
-  start.addEventListener("click", options.onStart);
-  step1.body.append(modeRow, start, el("p", "remote-step-note", status.mode === "full" ? MCP_TUNNEL_FULL_WARNING : "View only is the safest default. Switch to Control phone when you want the AI to tap, type, swipe and navigate."));
-
-  const step2 = wizardStep("2", "Add Cyclone to your cloud AI", "Create a custom Remote MCP / connector in the AI platform. You only need the URL and bearer token below.");
-  const providerRow = el("div", "remote-provider-row");
-  for (const provider of ["ChatGPT", "Grok", "Other Remote MCP"]) providerRow.append(el("span", "codex-capability-pill", provider));
-  const serverField = el("div", "remote-copy-field");
-  const serverMeta = el("div", "remote-copy-meta");
-  serverMeta.append(el("span", "remote-copy-label", "MCP server URL"), el("span", "remote-copy-value", status.mcpUrl || "Start Remote MCP first"));
-  const copyUrl = button("Copy MCP URL", "button secondary compact");
-  copyUrl.disabled = busy || !status.mcpUrl;
-  copyUrl.addEventListener("click", () => options.onCopyUrl(copyUrl));
-  serverField.append(serverMeta, copyUrl);
-  const tokenField = el("div", "remote-copy-field");
-  const tokenMeta = el("div", "remote-copy-meta");
-  tokenMeta.append(
-    el("span", "remote-copy-label", "Authentication"),
-    el("span", "remote-copy-value", status.tokenLast4 ? `Bearer token · ends ${status.tokenLast4}` : "Bearer token · created on Start"),
-  );
-  const copyToken = button("Copy token", "button secondary compact");
-  copyToken.disabled = busy || !status.tokenLast4;
-  copyToken.addEventListener("click", () => { void options.onCopyToken(copyToken); });
-  tokenField.append(tokenMeta, copyToken);
-  const copySetup = button("Copy setup instructions", "button ghost compact");
-  copySetup.disabled = busy || !status.mcpUrl;
-  copySetup.addEventListener("click", () => options.onCopySetup(copySetup));
-  step2.body.append(
-    providerRow,
-    serverField,
-    tokenField,
-    copySetup,
-    el("p", "remote-step-note", "Paste the token only into the connector's Bearer/Authorization field — never into the AI chat itself. A new URL is created after Start/Restart."),
-  );
-
-  const step3 = wizardStep("3", "Give the AI the Cyclone agent prompt", "After the connector is attached, paste this once into the AI chat so it immediately knows how to observe, navigate and verify your phone.");
-  const prompt = el("pre", "remote-agent-prompt", UNIVERSAL_CLOUD_AGENT_PROMPT);
-  const copyPrompt = button("Copy agent prompt", "button primary compact");
-  copyPrompt.disabled = busy;
-  copyPrompt.addEventListener("click", () => options.onCopyPrompt(copyPrompt));
-  step3.body.append(copyPrompt, prompt);
-
-  wizard.append(step1.wrap, step2.wrap, step3.wrap);
-
-  const advanced = el("details", "remote-advanced");
-  const advancedSummary = el("summary", "", "Advanced · diagnostics and security");
-  const advancedCopy = el("p", "setting-copy", `Health: ${status.healthUrl || status.localHealthUrl}`);
-  const advancedActions = el("div", "mcp-tunnel-actions");
-  const smoke = button("Check connection", "button secondary compact");
-  const restart = button("Restart", "button ghost compact");
-  const rotate = button("Rotate token", "button ghost compact");
-  const stop = button("Stop Remote MCP", "button secondary compact");
-  const docs = button("Open technical docs", "button ghost compact");
-  for (const action of [smoke, restart, rotate, stop, docs]) action.disabled = busy;
-  restart.disabled = restart.disabled || status.state === "stopped";
-  stop.disabled = stop.disabled || status.state === "stopped";
-  rotate.disabled = rotate.disabled || !status.tokenLast4;
-  smoke.addEventListener("click", options.onSmoke);
-  restart.addEventListener("click", options.onRestart);
-  rotate.addEventListener("click", options.onRotate);
-  stop.addEventListener("click", options.onStop);
-  docs.addEventListener("click", options.onDocs);
-  advancedActions.append(smoke, restart, rotate, stop, docs);
-  const log = el("pre", "mcp-tunnel-log remote-mcp-log", options.message);
-  advanced.append(advancedSummary, advancedCopy, advancedActions, log);
-
-  card.append(top, readiness, wizard, advanced);
-  return card;
-}
-
-function wizardStep(number: string, title: string, copy: string): { wrap: HTMLElement; body: HTMLElement } {
-  const wrap = el("section", "remote-wizard-step");
-  const head = el("div", "remote-step-head");
-  head.append(el("span", "remote-step-number", number), el("div", "remote-step-heading", title));
-  const body = el("div", "remote-step-body");
-  body.append(el("p", "remote-step-copy", copy));
-  wrap.append(head, body);
-  return { wrap, body };
-}
-
-function readinessItem(label: string, ok: boolean, value: string): HTMLElement {
-  const item = el("div", "codex-readiness-item");
-  item.append(el("span", `readiness-dot ${ok ? "ok" : "pending"}`), el("div", "readiness-copy", label), el("div", "readiness-value", value));
+function fact(label: string, value: string): HTMLElement {
+  const item = el("div", "simple-fact");
+  item.append(el("div", "simple-fact-label", label), el("div", "simple-fact-value", value));
   return item;
 }
 
-async function copyWithFeedback(value: string, control: HTMLButtonElement, restored: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(value);
-    control.textContent = "Copied";
-  } catch {
-    control.textContent = "Copy failed";
-  }
-  window.setTimeout(() => {
-    if (control.isConnected) control.textContent = restored;
-  }, 1500);
+function setFactValue(item: HTMLElement, value: string): void {
+  const node = item.querySelector<HTMLElement>(".simple-fact-value");
+  if (node) node.textContent = value;
 }
 
-function renderCodexConnector(
-  service: DesktopService,
-  connector: ConnectorCard,
-  result: ConnectorActionResult | null,
-  refresh: () => Promise<void>,
-  setResult: (result: ConnectorActionResult | null) => void,
-): HTMLElement {
-  const card = el("article", "codex-connect-card local-codex-card");
-  const top = el("div", "codex-connect-top");
-  const identity = el("div", "codex-connect-identity");
-  identity.append(
-    el("div", "codex-wordmark", "CODEX × CYCLONE · LOCAL"),
-    el("h2", "codex-connect-title", connector.state === "CONNECTED" ? "Codex phone control is connected" : "Connect Codex on this PC"),
-    el("p", "codex-connect-copy", "One click adds Cyclone's local multi-phone MCP server to Codex. No public URL or bearer token is needed for this local connection."),
-  );
-  const state = el("span", `codex-connect-state state-${connector.state.toLowerCase().replaceAll("_", "-")}`, friendlyState(connector.state));
-  top.append(identity, state);
-
-  const checks = el("div", "codex-readiness-grid");
-  checks.append(
-    readiness("Cyclone Gateway", connector.gatewayReachable === true, connector.gatewayReachable === false ? "Offline" : "Local and secure"),
-    readiness("Codex configuration", connector.configured === true, connector.configured ? "Installed" : "One click away"),
-    readiness("Ready phones", (connector.readyDeviceCount ?? 0) > 0, `${connector.readyDeviceCount ?? 0} of ${connector.deviceCount ?? 0} ready`),
-    readiness("Phone tools", (connector.toolCount ?? 0) > 0, `${connector.toolCount ?? 14} available`),
-  );
-
-  const capabilities = el("div", "codex-capability-row");
-  for (const label of ["Multi-phone", "Observe", "Screenshots", "Tap · type · swipe", "App navigation", "Teach routines", "Verify changes"]) {
-    capabilities.append(el("span", "codex-capability-pill", label));
-  }
-
-  const actions = el("div", "codex-connect-actions");
-  const connect = button(connector.state === "CONNECTED" ? "Verify connection" : "Connect Codex now", "button primary codex-connect-button");
-  connect.addEventListener("click", async () => {
-    connect.disabled = true;
-    connect.textContent = connector.state === "CONNECTED" ? "Verifying…" : "Connecting…";
-    setResult(null);
-    try {
-      const response = await service.runConnectorAction(connector.id, connector.state === "NEEDS_ATTENTION" ? "repair" : "connect");
-      setResult(response);
-      await refresh();
-    } catch {
-      setResult({ ok: false, message: "Cyclone could not update Codex yet. Keep Cyclone One open, then try again." });
-      await refresh();
-    }
-  });
-  const safety = el("div", "codex-safety-note", "Read-only phone inspection runs immediately. Codex asks before write tools, and Cyclone's Android policy remains authoritative.");
-  actions.append(connect, safety);
-
-  const handoff = el("div", "codex-handoff");
-  const handoffText = el("div");
-  handoffText.append(
-    el("div", "codex-handoff-label", "Try this in a new Codex task"),
-    el("p", "codex-connect-copy", MCP_FOREGROUND_SESSION_COPY),
-    el("div", "codex-prompt", CODEX_PROMPT),
-  );
-  const copy = button("Copy prompt", "button secondary compact");
-  copy.addEventListener("click", () => { void copyWithFeedback(CODEX_PROMPT, copy, "Copy prompt"); });
-  handoff.append(handoffText, copy);
-
-  card.append(top, checks, capabilities, actions);
-  const feedback = result ? renderFeedback(result) : renderConnectionHint(connector);
-  if (feedback) card.append(feedback);
-  card.append(handoff);
-  return card;
+function setStatus(node: HTMLElement, text: string, tone: "ready" | "attention" | "busy" | "neutral"): void {
+  node.textContent = text;
+  node.className = `simple-status ${tone}`;
 }
 
-function readiness(label: string, ok: boolean, value: string): HTMLElement {
-  return readinessItem(label, ok, value);
+async function copyText(text: string, control: HTMLButtonElement, success: string): Promise<void> {
+  await navigator.clipboard.writeText(text);
+  flashButton(control, success);
 }
 
-function renderFeedback(result: ConnectorActionResult): HTMLElement {
-  const feedback = el("div", `codex-connect-feedback ${result.ok ? "success" : "error"}`);
-  feedback.append(el("strong", "feedback-title", result.ok ? "Connection updated" : "Connection needs attention"), el("span", "feedback-copy", result.message));
-  if (result.restartRequired) feedback.append(el("span", "feedback-next", "Restart Codex once so its current session loads the new MCP server."));
-  return feedback;
+function flashButton(control: HTMLButtonElement, label: string): void {
+  const original = control.textContent || "Copy";
+  control.textContent = label;
+  window.setTimeout(() => { control.textContent = original; }, 1_500);
 }
 
-function renderConnectionHint(connector: ConnectorCard): HTMLElement | null {
-  if (connector.gatewayReachable === false) {
-    return renderFeedback({ ok: false, message: "The local Gateway is offline. Leave Cyclone One open while using Codex." });
-  }
-  if (connector.configured && (connector.readyDeviceCount ?? 0) < 1) {
-    return renderFeedback({ ok: true, message: "Codex is configured. Pair at least one phone in Control to start using phone tools." });
-  }
-  if (connector.configured) {
-    return renderFeedback({ ok: true, message: "Cyclone is configured for Codex. If this is a new connection, restart Codex once, then open a new task." });
-  }
-  return null;
-}
-
-function renderConnector(service: DesktopService, connector: ConnectorCard, refresh: () => Promise<void>): HTMLElement {
-  const card = el("article", "connection-card");
-  const top = el("div", "connection-card-top");
-  const logo = el("div", "connector-mark", connector.name.slice(0, 1).toUpperCase());
-  const identity = el("div");
-  identity.append(el("h2", "connection-name", connector.name), el("p", "connection-description", connector.description));
-  top.append(logo, identity);
-  const footer = el("div", "connection-card-footer");
-  const status = el("span", `connection-state state-${connector.state.toLowerCase().replaceAll("_", "-")}`, friendlyState(connector.state));
-  footer.append(status);
-  if (connector.actionLabel) {
-    const action = button(connector.actionLabel, "button secondary compact");
-    action.addEventListener("click", async () => {
-      action.disabled = true;
-      try {
-        await service.runConnectorAction(connector.id, connector.state === "NEEDS_ATTENTION" ? "repair" : "connect");
-        await refresh();
-      } catch {
-        action.textContent = "Try again";
-        action.disabled = false;
-      }
-    });
-    footer.append(action);
-  }
-  card.append(top, footer);
-  return card;
-}
-
-function friendlyState(state: ConnectorCard["state"]): string {
-  switch (state) {
-    case "CONNECTED": return "Connected";
-    case "READY_TO_CONNECT": return "Ready to connect";
-    case "NOT_INSTALLED": return "Not detected";
-    case "NEEDS_ATTENTION": return "Needs attention";
-  }
+function friendlyError(error: unknown, fallback: string): string {
+  const text = error instanceof Error ? error.message.trim() : "";
+  return text || fallback;
 }

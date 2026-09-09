@@ -17,3 +17,24 @@ Use the cyclone_phone_* tools directly instead of telling me what to tap.
 8. Never retry an uncertain mutation. Observe again first.
 
 Complete the requested phone task, verify the final state, then briefly report what was done.`;
+
+/**
+ * One clipboard handoff for connector setup. It deliberately carries the bearer
+ * credential because the user asked for one setup step; the warning makes the
+ * destination explicit so it is never pasted into an ordinary AI message.
+ */
+export function directLivePhoneHandoff(url: string, token: string): string {
+  return `CYCLONE LIVE PHONE — CONNECTION HANDOFF
+
+PRIVATE SETUP BUNDLE
+Paste this only into a connector / Remote MCP setup flow. Do not paste it into a normal AI chat.
+
+Name: Cyclone Live Phone
+Remote MCP URL: ${url}
+Authentication: Bearer token
+Bearer token: ${token}
+
+After the connector is added, use these agent instructions:
+
+${DIRECT_LIVE_PHONE_AGENT_PROMPT}`;
+}

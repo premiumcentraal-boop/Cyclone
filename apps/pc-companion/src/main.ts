@@ -3,6 +3,7 @@ import "./scan.css";
 import "./tasks.css";
 import "./connections.css";
 import "./redesign.css";
+import "./connections-redesign.css";
 import { CyclonePcCompanionApp } from "./app.js";
 import { createDesktopService } from "./services/serviceFactory.js";
 
