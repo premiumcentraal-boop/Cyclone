@@ -25,7 +25,8 @@ jobs:
           assert m['components']['mobile']=='4.2.5' and m['android_version_code']==86
           assert m['release']['publication_authorized'] is True
           assert Path('docs/RELEASE_ONE_1.4.0.md').is_file()
-          PY      - name: Wait for exact green Windows candidate
+          PY
+      - name: Wait for exact green Windows candidate
         id: candidate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,7 +52,8 @@ jobs:
           import os,json,hashlib
           from pathlib import Path
           root=Path('candidate')
-          p=json.loads((root/'release-provenance.json').read_text(encoding='utf-8-sig'))          assert p['source_sha']==os.environ['GITHUB_SHA'] and p['version']=='1.4.0'
+          p=json.loads((root/'release-provenance.json').read_text(encoding='utf-8-sig'))
+          assert p['source_sha']==os.environ['GITHUB_SHA'] and p['version']=='1.4.0'
           assert (root/'source-sha.txt').read_text(encoding='utf-8-sig').strip()==os.environ['GITHUB_SHA']
           assert (root/'run-id.txt').read_text(encoding='utf-8-sig').strip()==os.environ['CANDIDATE_RUN']
           names=set()
