@@ -21,7 +21,7 @@ object LivePhoneMode {
         current.value = if (stopped) "Stopped" else if (paused) "Paused" else "Waiting for Cloud ChatGPT"
         if (stopped) context.getSystemService(NotificationManager::class.java).cancel(ID)
     }
-    fun check(context: Context, request: GatewayRequest) {
+    internal fun check(context: Context, request: GatewayRequest) {
         if (!request.args.optBoolean("livePhone")) return
         if (request.args.optString("sessionId") != "default-foreground" || request.args.optInt("displayId", -1) != 0) {
             throw GatewayProtocolException("PLANE_MISMATCH", "Live Phone requires the physical foreground screen")
