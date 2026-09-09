@@ -77,7 +77,7 @@ class CycloneV39AiChatPageTest {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("BasicTextField("))
         assertTrue(page.contains("contentDescription = \"Ask Cyclone composer\""))
-        assertTrue(page.contains("maxLines = 5"))
+        assertTrue(page.contains("maxLines = 4"))
         assertTrue(page.contains("ImeAction.Send"))
         assertEquals(1, Regex("FilledIconButton\\(").findAll(page).count())
     }
