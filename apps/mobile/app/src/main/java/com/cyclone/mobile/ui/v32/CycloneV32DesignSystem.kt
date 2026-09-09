@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -33,10 +35,10 @@ import androidx.compose.ui.unit.dp
 
 private val Ink = Color(0xFF182038)
 private val InkMuted = Color(0xFF69708A)
-private val Periwinkle = Color(0xFF6675E8)
-private val PeriwinkleSoft = Color(0xFFDDE3FF)
-private val WarmIce = Color(0xFFF5F6FC)
-private val SoftSurface = Color(0xFFEEF0FA)
+private val Periwinkle = Color(0xFF1264FF)
+private val PeriwinkleSoft = Color(0xFFE4EEFF)
+private val WarmIce = Color(0xFFF6F8FD)
+private val SoftSurface = Color(0xFFEDF2FA)
 
 private val CycloneV32LightColors = lightColorScheme(
     primary = Periwinkle,
@@ -64,7 +66,7 @@ private val CycloneV32LightColors = lightColorScheme(
 )
 
 private val CycloneV32DarkColors = darkColorScheme(
-    primary = Color(0xFF9EA9FF),
+    primary = Color(0xFF89B4FF),
     onPrimary = Color(0xFF182052),
     primaryContainer = Color(0xFF303C70),
     onPrimaryContainer = Color(0xFFE3E6FF),
@@ -74,9 +76,9 @@ private val CycloneV32DarkColors = darkColorScheme(
     tertiary = Color(0xFFFFD178),
     tertiaryContainer = Color(0xFF53552E),
     onTertiaryContainer = Color(0xFFFFF3B7),
-    background = Color(0xFF11172B),
+    background = Color(0xFF080F1D),
     onBackground = Color(0xFFF5F6FF),
-    surface = Color(0xFF1A223A),
+    surface = Color(0xFF111D30),
     onSurface = Color(0xFFF5F6FF),
     surfaceVariant = Color(0xFF242D49),
     onSurfaceVariant = Color(0xFFB9C0D9),
@@ -96,10 +98,11 @@ private val CycloneV32Shapes = Shapes(
 )
 
 @Composable
-fun CycloneV32Theme(content: @Composable () -> Unit) {
+fun CycloneTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (isSystemInDarkTheme()) CycloneV32DarkColors else CycloneV32LightColors,
         shapes = CycloneV32Shapes,
+        typography = CycloneTypography,
         content = content,
     )
 }
@@ -111,15 +114,8 @@ data class CyclonePastelColors(val container: Color, val content: Color)
 
 @Composable
 fun cyclonePastel(tone: CyclonePastel): CyclonePastelColors {
-    val dark = isSystemInDarkTheme()
-    return when (tone) {
-        CyclonePastel.PRIMARY -> CyclonePastelColors(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
-        CyclonePastel.LILAC -> if (dark) CyclonePastelColors(Color(0xFF563D69), Color(0xFFF8DCFF)) else CyclonePastelColors(Color(0xFFEFCBFF), Color(0xFF3A1848))
-        CyclonePastel.MINT -> if (dark) CyclonePastelColors(Color(0xFF264E43), Color(0xFFD8FFEF)) else CyclonePastelColors(Color(0xFFCFF4DF), Color(0xFF153B30))
-        CyclonePastel.LEMON -> if (dark) CyclonePastelColors(Color(0xFF53552E), Color(0xFFFFF8C5)) else CyclonePastelColors(Color(0xFFF4F7B2), Color(0xFF353708))
-        CyclonePastel.PEACH -> if (dark) CyclonePastelColors(Color(0xFF5B4034), Color(0xFFFFE2D0)) else CyclonePastelColors(Color(0xFFFFD8BC), Color(0xFF482411))
-        CyclonePastel.SKY -> if (dark) CyclonePastelColors(Color(0xFF294D64), Color(0xFFD5F0FF)) else CyclonePastelColors(Color(0xFFCDEAFF), Color(0xFF14364B))
-    }
+    // Legacy callers share the same neutral surface; app icons provide identity.
+    return CyclonePastelColors(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)
 }
 
 @Composable
@@ -153,7 +149,7 @@ fun CycloneHeroCard(
 @Composable
 fun CycloneSectionTitle(title: String, action: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         action?.invoke()
     }
 }
@@ -192,3 +188,29 @@ fun CyclonePageIntro(eyebrow: String, title: String, body: String) {
         Spacer(Modifier.height(2.dp))
     }
 }
+
+@Composable
+fun CycloneV32Theme(content: @Composable () -> Unit) = CycloneTheme(content)
+
+val CycloneTypography = androidx.compose.material3.Typography()
+object CycloneColors {
+    val Blue = Color(0xFF1264FF)
+    val Cyan = Color(0xFF06B6D4)
+    val Success = Color(0xFF168653)
+}
+object CycloneSpacing {
+    val Small = 8.dp
+    val Content = 16.dp
+    val Section = 24.dp
+    val ComposerLift = 30.dp
+}
+@Composable
+fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(modifier, shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface, content = content)
+}
+@Composable
+fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(modifier.animateContentSize(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f), tonalElevation = 0.dp, shadowElevation = 0.dp, content = content)
+}
+@Composable
+fun CycloneStatus(label: String, positive: Boolean = true) = CycloneStatusPill(label, positive)

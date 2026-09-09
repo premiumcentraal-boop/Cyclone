@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,20 +31,33 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.cyclone.mobile.gateway.LivePhoneMode
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.CycloneRelease
+import com.cyclone.mobile.gateway.GatewayReadyDoctor
 import com.cyclone.mobile.gateway.GatewayRuntime
 import com.cyclone.mobile.gateway.GatewaySettingsActivity
 
 /** Prominent, user-friendly entry to the full PC/Codex gateway from Cyclone AI. */
 @Composable
 internal fun GatewayAiCard(context: Context, refreshTick: Int) {
+    val liveState by LivePhoneMode.state.collectAsState()
     val status = remember(refreshTick) { GatewayRuntime.status(context) }
     val enabled = status.optBoolean("gatewayEnabled")
     val accessibilityReady = status.optBoolean("accessibilityConnected")
+    val phoneControlReady = if (status.has("phoneControlReady")) {
+        status.optBoolean("phoneControlReady")
+    } else {
+        accessibilityReady
+    }
+    val phoneControlNeedsRepair = status.optBoolean("phoneControlNeedsRepair")
+    val nextAction = status.optJSONObject("nextAction")
+    val nextActionCode = nextAction?.optString("code").orEmpty()
     val session = status.optJSONObject("connectedSession")
     val pcConnected = session?.optBoolean("connected") == true
     val token = if (enabled) GatewayRuntime.tokenForUser(context).orEmpty() else ""
@@ -61,11 +75,21 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Text("LIVE PHONE", style = MaterialTheme.typography.titleMedium)
+            Text("Cloud ChatGPT · your visible phone screen")
+            Text(liveState)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { LivePhoneMode.setPaused(context, false) }) { Text("Resume") }
+                OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true) }) { Text("Pause") }
+                OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true, true) }) { Text("Stop") }
+            }
+            Text("BACKGROUND PHONE", style = MaterialTheme.typography.titleMedium)
+            Text("App profiles and separate task screens stay in Profiles.")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("CYCLONE AI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text("ON PC AI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text("Full PC + Codex Gateway", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(state, style = MaterialTheme.typography.labelLarge, color = if (healthy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                 }
@@ -87,21 +111,49 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
             )
 
             GatewayStatusRow("Gateway", enabled, if (enabled) "On" else "Off")
-            GatewayStatusRow("Phone control", accessibilityReady, if (accessibilityReady) "Ready" else "Accessibility off")
+            GatewayStatusRow(
+                "Phone control",
+                phoneControlReady,
+                when {
+                    phoneControlReady -> "Ready"
+                    phoneControlNeedsRepair -> "Needs repair"
+                    else -> "Accessibility off"
+                },
+            )
             GatewayStatusRow("USB / PC session", pcConnected, if (pcConnected) "Connected" else if (enabled) "Waiting for PC" else "Off")
             GatewayStatusRow("PC Gateway health", pcConnected, if (pcConnected) "Session active" else "Known after PC connects")
+
+            if (nextAction != null) {
+                Text(nextAction.optString("title"), fontWeight = FontWeight.Bold)
+                Text(nextAction.optString("body"), style = MaterialTheme.typography.bodyMedium)
+            }
 
             status.optString("lastSafeError").takeIf { it.isNotBlank() && it != "null" }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
 
             Button(
-                onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java)) },
+                onClick = {
+                    when (nextActionCode) {
+                        GatewayReadyDoctor.ENABLE_PHONE_CONTROL,
+                        GatewayReadyDoctor.REPAIR_PHONE_CONTROL,
+                        -> context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        else -> context.startActivity(Intent(context, GatewaySettingsActivity::class.java))
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Rounded.Link, null)
                 Spacer(Modifier.width(7.dp))
-                Text(if (enabled) "Open Gateway control center" else "Set up Full Gateway")
+                Text(
+                    when (nextActionCode) {
+                        GatewayReadyDoctor.TURN_ON_GATEWAY,
+                        GatewayReadyDoctor.ENABLE_PHONE_CONTROL,
+                        GatewayReadyDoctor.REPAIR_PHONE_CONTROL,
+                        -> nextAction?.optString("actionLabel").orEmpty().ifBlank { "Open Gateway control center" }
+                        else -> if (enabled) "Open Gateway control center" else "Set up Full Gateway"
+                    },
+                )
             }
 
             if (enabled && token.isNotBlank()) {

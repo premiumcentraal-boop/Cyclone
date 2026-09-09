@@ -72,9 +72,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.NotificationManagerCompat
 import com.cyclone.mobile.BridgeClient
-import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.MobilerunEmbedded
+import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.SetupNeed
 import com.cyclone.mobile.SetupReminderState
 import com.mobilerun.portal.service.MobilerunAccessibilityService
@@ -365,12 +365,13 @@ private fun PhoneControlSetupCard(context: Context, status: SetupStatus) {
         title = "Let Cyclone understand your screen",
         body = "Accessibility is the main non-root control path. It gives Cyclone structured UI elements and safe gesture actions. The embedded Mobilerun engine can provide an additional runtime path.",
     ) {
+        val phoneControl = CyclonePermissionSetup.phoneControlSnapshot(context)
         SetupActionRow(
             title = "Cyclone phone control",
-            detail = if (status.cycloneAccessibility) "Ready" else "Required for phone actions",
-            ok = status.cycloneAccessibility,
-            action = if (status.cycloneAccessibility) "Manage" else "Enable",
-        ) { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            detail = phoneControl.detail,
+            ok = phoneControl.ready,
+            action = phoneControl.actionLabel,
+        ) { context.startActivity(CyclonePermissionSetup.accessibilitySettings()) }
         SetupActionRow(
             title = "Mobilerun enhanced engine",
             detail = if (status.mobilerunAccessibility) "Ready" else "Optional enhanced Accessibility backend",
@@ -487,7 +488,7 @@ private fun ReadySetupCard(status: SetupStatus) {
         title = if (status.aiReady) "Cyclone is ready" else "You can start now",
         body = "Setup reminders will appear later only when a feature needs access that is still missing. You can reopen every setting from the Settings tab.",
     ) {
-        SetupSummaryRow("Phone control", status.cycloneAccessibility, if (status.cycloneAccessibility) "Ready" else "Enable before phone actions")
+        SetupSummaryRow("Phone control", status.cycloneAccessibility, if (status.cycloneAccessibility) "Ready" else "Enable or repair Accessibility after force-stop")
         SetupSummaryRow("Notifications", status.notifications, if (status.notifications) "Ready" else "Needed for notification triggers")
         SetupSummaryRow("Calendar", status.calendar, if (status.calendar) "Ready" else "Optional")
         SetupSummaryRow("Cyclone Core", status.coreConnected, if (status.coreConnected) "Connected" else "Optional for local automations; required for Hermes")
@@ -626,7 +627,7 @@ private fun SetupSuccess(text: String) {
 private fun readSetupStatus(context: Context): SetupStatus {
     val prefs = context.getSharedPreferences("cyclone", Context.MODE_PRIVATE)
     return SetupStatus(
-        cycloneAccessibility = accessibilityServiceEnabled(context, CycloneAccessibilityService::class.java.name),
+        cycloneAccessibility = CyclonePermissionSetup.phoneControlReady(context),
         mobilerunAccessibility = accessibilityServiceEnabled(context, MobilerunAccessibilityService::class.java.name),
         notifications = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName),
         calendar = context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED,

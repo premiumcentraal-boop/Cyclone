@@ -20,7 +20,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,12 +29,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,7 +50,7 @@ private const val LEGACY_ENHANCED_CONTROL_ROW = "Enhanced control engine"
 
 enum class V32Destination(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Rounded.Home),
-    TEACH("Teach", Icons.Rounded.School),
+    PROFILES("Profiles", Icons.Rounded.Person),
     AI("AI", Icons.Rounded.AutoAwesome),
     ROUTINES("Routines", Icons.Rounded.Bolt),
     BRAIN("Brain", Icons.Rounded.AccountTree),
@@ -80,10 +84,10 @@ fun CycloneV32TopBar(
             }
             Column(Modifier.weight(1f)) {
                 Text(if (settingsOpen) "Settings" else title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(CycloneRelease.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (!settingsOpen) {
                 Surface(
+                    modifier = Modifier.clickable(onClick = onSettings),
                     shape = RoundedCornerShape(999.dp),
                     color = if (ready) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.tertiaryContainer,
                     contentColor = if (ready) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
@@ -104,16 +108,42 @@ fun CycloneV32TopBar(
 fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         V32Destination.entries.forEach { destination ->
+            val isSelected = selected == destination
+            val isAi = destination == V32Destination.AI
             NavigationBarItem(
-                selected = selected == destination,
+                selected = isSelected,
                 onClick = { onSelect(destination) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = if (isAi) Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
                 icon = {
-                    if (destination == V32Destination.AI) {
+                    if (isAi) {
                         Box(
-                            Modifier.size(48.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+                            Modifier.size(48.dp).background(
+                                if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                CircleShape,
+                            ),
                             contentAlignment = Alignment.Center,
-                        ) { Icon(destination.icon, destination.label, tint = MaterialTheme.colorScheme.onPrimary) }
-                    } else Icon(destination.icon, destination.label)
+                        ) {
+                            Icon(
+                                destination.icon,
+                                destination.label,
+                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else Icon(
+                        painter = androidx.compose.ui.res.painterResource(when (destination) {
+                            V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
+                            V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
+                            V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
+                            V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
+                            V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
+                        }), contentDescription = destination.label, modifier = Modifier.size(28.dp),
+                    )
                 },
                 label = { Text(destination.label, style = MaterialTheme.typography.labelSmall) },
             )
@@ -132,7 +162,7 @@ fun CycloneSegmentedControl(
         Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             options.forEachIndexed { index, label ->
                 Surface(
-                    modifier = Modifier.weight(1f).clickable { onSelect(index) },
+                    modifier = Modifier.weight(1f).selectable(selected = selected == index, role = Role.Tab, onClick = { onSelect(index) }),
                     shape = RoundedCornerShape(15.dp),
                     color = if (selected == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = if (selected == index) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,

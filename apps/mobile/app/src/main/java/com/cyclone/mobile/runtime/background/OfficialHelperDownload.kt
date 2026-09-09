@@ -3,13 +3,12 @@ package com.cyclone.mobile.runtime.background
 import android.content.Context
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.URL
 import java.security.MessageDigest
 
 /** Version-pinned upstream APK. Neither a Play listing nor an unverified third-party mirror. */
 object OfficialHelperDownload {
-    const val URL = "https://github.com/RikkaApps/Shizuku/releases/download/v13.6.0/shizuku-v13.6.0.r1086.2650830c-release.apk"
-    const val SHA256 = "6e273ab0e991c4e79bc8b1bbb9b9dd739ccac1a8712a541a214078886b7b790f"
+    const val URL = OfficialHelperInstallPolicy.URL
+    const val SHA256 = OfficialHelperInstallPolicy.SHA256
     private const val MAX_BYTES = 8 * 1024 * 1024
     fun file(context: Context) = File(context.cacheDir, "setup-helper/shizuku.apk")
     private fun digest(file: File): String {
@@ -21,6 +20,9 @@ object OfficialHelperDownload {
         return hash.digest().joinToString("") { "%02x".format(it) }
     }
     @Synchronized fun download(context: Context): File {
+        check(OfficialHelperInstallPolicy.isPinnedOfficialUrl(URL))
+        check(!OfficialHelperInstallPolicy.isForbiddenStoreUrl(URL))
+        check(OfficialHelperInstallPolicy.PACKAGE == BackgroundSetup.SHIZUKU_PACKAGE)
         val final = file(context)
         if (final.exists() && digest(final) == SHA256) return final
         final.parentFile!!.mkdirs()

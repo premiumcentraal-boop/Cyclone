@@ -11,6 +11,9 @@ import com.cyclone.mobile.fastpath.FastPathLoop
 import com.cyclone.mobile.fastpath.FastPathSettleResult
 import com.cyclone.mobile.fastpath.FastPathTimings
 import com.cyclone.mobile.gateway.GatewayObservationStore
+import com.cyclone.mobile.runtime.session.SessionContract
+import com.cyclone.mobile.runtime.session.SessionPlane
+import com.cyclone.mobile.runtime.session.SessionPlaneKind
 import com.cyclone.mobile.ui.overlay.GateBlockedException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,41 +46,57 @@ object PhoneToolExecutor {
         val management = request.tool.startsWith("workspace.") || request.tool == "phone.workspace_switch"
         if (management || request.tool in mutatingTools) return synchronized(mutationLock) {
             try {
-                val scope = com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(request.params)
+                val plane = SessionContract.classify(request.params)
                 if (management) {
-                    check(scope.sessionId == "default-foreground" && scope.displayId == 0) { "Layer 2 requires default-foreground / display 0" }
+                    check(plane.kind == SessionPlaneKind.FOREGROUND || plane.kind == SessionPlaneKind.LAYER2_WORKSPACE) {
+                        "Layer 2 requires default-foreground / display 0"
+                    }
                     if (request.tool != "workspace.list") {
                         synchronized(resultCache) { resultCache.clear() }
                         recentActions.clear()
                     }
-                    return@synchronized layer2.command(context, request)
+                    return@synchronized withPlane(layer2.command(context, request), plane)
                 }
                 layer2.requireMutation(context, request)
                 if (layer2.engine.selectedId() != null) {
-                    check(scope.sessionId == "default-foreground" && scope.displayId == 0) { "MUTATE_LOCK: display-0 workspace owns input" }
+                    check(plane.kind == SessionPlaneKind.FOREGROUND || plane.kind == SessionPlaneKind.LAYER2_WORKSPACE) {
+                        "MUTATE_LOCK: display-0 workspace owns input"
+                    }
                 }
-                executeScoped(context, request)
+                executeScoped(context, request, plane)
             } catch (error: Exception) { scopeFailure(request, error) }
         }
         return executeScoped(context, request)
     }
 
-    private fun executeScoped(context: Context, request: PhoneToolRequest): PhoneToolResult {
+    private fun executeScoped(context: Context, request: PhoneToolRequest, plane: SessionPlane? = null): PhoneToolResult {
         // Validate before cache lookup AND before observing the human display.
-        val scope = try { com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(request.params) }
+        val resolved = try { plane ?: SessionContract.classify(request.params) }
         catch (error: IllegalArgumentException) { return scopeFailure(request, error) }
+        val scope = com.cyclone.mobile.runtime.session.ExecutionContext(resolved.sessionId, resolved.displayId)
         if (scope.sessionId != "default-foreground") {
-            return synchronized(mutationLock) { executeWorkspace(context, request, scope) }
+            return synchronized(mutationLock) { withPlane(executeWorkspace(context, request, scope), resolved) }
         }
         if (scope.displayId != 0) return scopeFailure(request, IllegalArgumentException("Display/session mismatch"))
-        cached(request.commandId)?.let { return it }
-        return if (request.tool in mutatingTools) {
+        cached(request.commandId)?.let { return withPlane(it, resolved) }
+        val result = if (request.tool in mutatingTools) {
             synchronized(mutationLock) {
                 cached(request.commandId) ?: executeInternal(context, request, mutating = true)
             }
         } else {
             executeInternal(context, request, mutating = false)
         }
+        return withPlane(result, resolved)
+    }
+
+    private fun withPlane(result: PhoneToolResult, plane: SessionPlane): PhoneToolResult {
+        val payload = result.payload
+        if (!result.ok || payload !is JSONObject) return result
+        if (payload.optJSONObject("plane") != null) return result
+        if (result.tool != "phone.observe" && !result.tool.startsWith("workspace.") && result.tool != "phone.workspace_switch") {
+            return result
+        }
+        return result.copy(payload = SessionContract.attach(payload, plane))
     }
 
     private fun scopeFailure(request: PhoneToolRequest, error: Exception): PhoneToolResult {

@@ -199,7 +199,7 @@ class DesktopRuntime:
         session = self.fleet.get(device_id)
         if session.video is None:
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture is unavailable.")
-        capture = session.video.snapshot()
+        capture = session.video.snapshot(fresh=True) if profile == "live-phone" else session.video.snapshot()
         data = capture.get("data")
         if not isinstance(data, bytes):
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture returned no image.")
@@ -207,7 +207,7 @@ class DesktopRuntime:
         suffix = ".png" if codec == "image/png" else ".jpg"
         root = self.settings.runtime_dir / "fleet-screenshots"
         root.mkdir(parents=True, exist_ok=True)
-        path = root / f"{device_id}-{int(time.time() * 1000)}{suffix}"
+        path = root / (f"{device_id}-live-phone{suffix}" if profile == "live-phone" else f"{device_id}-{int(time.time() * 1000)}{suffix}")
         path.write_bytes(data)
         return {
             "deviceId": device_id, "filePath": str(path.resolve()), "codec": codec,
