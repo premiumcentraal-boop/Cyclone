@@ -138,7 +138,9 @@ class Cyclone422TaskGlassTest {
 
     @Test fun overlayVisualStateCannotManufactureCurrentTask() {
         val overlay = source("ui/overlay/OverlayChrome.kt")
-        assertTrue(overlay.contains("A real WorkspaceTaskUi is the only source of truth"))
+        assertTrue(overlay.contains("val task = workspace?.takeIf"))
+        assertTrue(overlay.contains("foregroundWorking -> CycloneForegroundWorkCard(snapshot)"))
+        assertFalse(overlay.contains("WorkspaceTaskUi("))
         assertFalse(overlay.contains("Current phone task"))
     }
 
