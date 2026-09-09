@@ -54,6 +54,22 @@ class RequestIntentRouterTest {
     }
 
     @Test
+    fun explicitSearchAssignmentsRouteToPhoneTask() {
+        listOf(
+            "search for ganamstyle popularity today",
+            "search on google",
+            "Search for cool sneakers",
+            "Look up Gangnam Style popularity today",
+            "browse for new running shoes",
+            "Can you search for coffee shops?",
+        ).forEach { prompt ->
+            val result = RequestIntentRouter.route(prompt)
+            assertEquals(prompt, RequestIntent.PHONE_TASK, result.intent)
+            assertTrue(prompt, result.requiresAndroidAccess)
+        }
+    }
+
+    @Test
     fun attachmentAloneNeverForcesPhoneTask() {
         val result = RequestIntentRouter.route("", hasAttachment = true)
         assertEquals(RequestIntent.CHAT, result.intent)
