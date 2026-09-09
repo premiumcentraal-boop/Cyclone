@@ -1,8 +1,8 @@
 package com.cyclone.mobile.ui.v32
 
 import android.content.Context
-import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,31 +11,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.PlusOne
-import androidx.compose.material.icons.rounded.School
-import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -44,9 +31,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -59,7 +47,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.CycloneRelease
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.TaskResultNotifierV292
 import com.cyclone.mobile.applearner.AppLearnerRuntime
@@ -71,7 +61,6 @@ import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.permissions.CyclonePermissionSetup
-import kotlinx.coroutines.delay
 import java.time.LocalTime
 
 @Composable
@@ -94,10 +83,11 @@ fun CycloneMobileV32App() {
         val task by com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collectAsState()
         val routinesRevision by AutomationRuntime.store.revision.collectAsState()
         LaunchedEffect(destination, settingsOpen, task?.taskId, task?.phase, routinesRevision) { refreshTick++ }
-        androidx.compose.runtime.DisposableEffect(context) {
-            val lifecycle = (context as? androidx.lifecycle.LifecycleOwner)?.lifecycle
-            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refreshTick++
+
+        DisposableEffect(context) {
+            val lifecycle = (context as? LifecycleOwner)?.lifecycle
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) refreshTick++
             }
             lifecycle?.addObserver(observer)
             onDispose { lifecycle?.removeObserver(observer) }
@@ -107,13 +97,15 @@ fun CycloneMobileV32App() {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                if (settingsOpen) CycloneV32TopBar(
-                    title = destination.label,
-                    settingsOpen = settingsOpen,
-                    ready = phoneReady,
-                    onSettings = { settingsOpen = true },
-                    onBack = { settingsOpen = false },
-                )
+                if (settingsOpen) {
+                    CycloneV32TopBar(
+                        title = destination.label,
+                        settingsOpen = true,
+                        ready = phoneReady,
+                        onSettings = {},
+                        onBack = { settingsOpen = false },
+                    )
+                }
             },
             bottomBar = {
                 if (!settingsOpen) CycloneV32BottomBar(destination) { destination = it }
@@ -121,20 +113,23 @@ fun CycloneMobileV32App() {
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 if (settingsOpen) {
-                    V32SettingsPage(context, refreshTick) { refreshTick++ }
+                    CycloneSettingsPage426(context, refreshTick) { refreshTick++ }
                 } else {
                     when (destination) {
                         V32Destination.HOME -> V32HomePage(
                             context = context,
                             refreshTick = refreshTick,
                             onAi = { destination = V32Destination.AI },
-                            onTeach = { destination = V32Destination.PROFILES },
                             onRoutines = { destination = V32Destination.ROUTINES },
                             onSettings = { settingsOpen = true },
                         )
                         V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick)
                         V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }
-                        V32Destination.ROUTINES -> CycloneRoutinesPage(context, refreshTick, { destination = V32Destination.AI }) { refreshTick++ }
+                        V32Destination.ROUTINES -> CycloneRoutinesPage(
+                            context,
+                            refreshTick,
+                            { destination = V32Destination.AI },
+                        ) { refreshTick++ }
                         V32Destination.BRAIN -> CycloneV39BrainPage(context, refreshTick)
                     }
                 }
@@ -148,147 +143,205 @@ private fun V32HomePage(
     context: Context,
     refreshTick: Int,
     onAi: () -> Unit,
-    onTeach: () -> Unit,
     onRoutines: () -> Unit,
     onSettings: () -> Unit,
 ) {
     val ready = CyclonePermissionSetup.phoneControlSnapshot(context)
     val task by com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collectAsState()
     val routines = remember(refreshTick) { AutomationRuntime.store.listAutomations() }
-    val greeting = when (LocalTime.now().hour) { in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; else -> "Good evening" }
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    val greeting = when (LocalTime.now().hour) {
+        in 5..11 -> "Good morning"
+        in 12..17 -> "Good afternoon"
+        else -> "Good evening"
+    }
+
+    LazyColumn(
+        contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(greeting, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                TextButton(onClick = onSettings) { CycloneStatus(if (ready.ready) "Ready" else if (ready.needsRepair) "Repair" else "Setup needed", ready.ready) }
-            }
-        }
-        item { CycloneHomeComposer { request -> V39AiChatSessionRuntime.pendingRequest = request; onAi() } }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onAi, modifier = Modifier.weight(1f)) { Text("Ask Cyclone") }
-            OutlinedButton(onClick = onRoutines, modifier = Modifier.weight(1f)) { Text("Routines") }
-        } }
-        task?.takeIf { UiTask(it).active }?.let { active ->
-            item { CycloneSectionTitle("Active now") }
-            item { CycloneTaskProgress(active) }
-        }
-        item { CycloneSectionTitle("Your routines") { TextButton(onClick = onRoutines) { Text("See all") } } }
-        if (routines.isEmpty()) item { Text("Your saved routines will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        items(routines.take(6), key = { it.id }) { routine ->
-            TextButton(onClick = onRoutines, modifier = Modifier.fillMaxWidth()) { CycloneAppIcon(routine.appPackages.firstOrNull()); Text(routine.name, modifier = Modifier.weight(1f).padding(12.dp)); Text("›") }
-        }
-    }
-}
-
-@Composable
-private fun V32RoutineMiniCard(automation: AutomationDefinition, index: Int, onOpen: () -> Unit) {
-    val tone = listOf(CyclonePastel.MINT, CyclonePastel.SKY, CyclonePastel.LEMON, CyclonePastel.PEACH, CyclonePastel.LILAC)[index % 5]
-    val colors = cyclonePastel(tone)
-    Card(
-        onClick = onOpen,
-        modifier = Modifier.size(width = 190.dp, height = 146.dp),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.container, contentColor = colors.content),
-    ) {
-        Column(Modifier.fillMaxSize().padding(17.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Surface(shape = CircleShape, color = colors.content.copy(alpha = 0.12f)) {
-                Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, modifier = Modifier.size(19.dp)) }
-            }
-            Column {
-                Text(automation.name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text("${automation.steps.size} ${if (automation.steps.size == 1) "action" else "actions"}", style = MaterialTheme.typography.labelSmall, color = colors.content.copy(alpha = .72f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun V32RoutinesPage(context: Context, refreshTick: Int, refresh: () -> Unit) {
-    var segment by rememberSaveable { mutableIntStateOf(0) }
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    var builderOpen by rememberSaveable { mutableStateOf(false) }
-    val all = remember(refreshTick) { AutomationRuntime.store.listAutomations() }
-    val selected = selectedId?.let { id -> all.firstOrNull { it.id == id } }
-
-    when {
-        builderOpen -> V32RoutineBuilder(
-            onBack = { builderOpen = false },
-            onSave = { draft ->
-                val automation = draft.toAutomationForDevice(notificationAccess = v32NotificationListenerEnabled(context))
-                AutomationRuntime.store.saveAutomation(automation)
-                if (automation.trigger.type == TriggerType.SCHEDULE) AutomationRuntime.registerSchedule(context, automation)
-                refresh()
-                builderOpen = false
-                Toast.makeText(context, if (automation.enabled) "${automation.name} saved" else "${automation.name} saved off — enable notification access first", Toast.LENGTH_LONG).show()
-            },
-        )
-        selected != null -> V32RoutineDetail(context, selected, { selectedId = null }, refresh)
-        else -> {
-            val visible = if (segment == 0) all.filter { it.trigger.type != TriggerType.MANUAL } else all.filter { it.trigger.type == TriggerType.MANUAL }
-            Box(Modifier.fillMaxSize()) {
-                LazyColumn(contentPadding = PaddingValues(start = 18.dp, top = 10.dp, end = 18.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    item { CyclonePageIntro("When → Then → Check", "Routines", "Build phone automations that remain easy to read, review and stop.") }
-                    item { CycloneSegmentedControl(listOf("Automations", "One tap"), segment, { segment = it }) }
-                    if (visible.isEmpty()) {
-                        item {
-                            CycloneHeroCard(
-                                title = if (segment == 0) "Automate a moment" else "Make a one-tap shortcut",
-                                body = if (segment == 0) "Start from a notification, time, app or Cyclone connection." else "Put a useful phone sequence behind one clear button.",
-                                icon = Icons.Rounded.Bolt,
-                                tone = CyclonePastel.SKY,
-                            ) {
-                                Button(onClick = { builderOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("Create routine") }
-                            }
-                        }
-                    } else {
-                        items(visible, key = { it.id }) { automation ->
-                            val index = all.indexOfFirst { it.id == automation.id }.coerceAtLeast(0)
-                            CycloneRoutineCard(
-                                automation = automation,
-                                tone = listOf(CyclonePastel.MINT, CyclonePastel.SKY, CyclonePastel.LEMON, CyclonePastel.PEACH, CyclonePastel.LILAC)[index % 5],
-                                onOpen = { selectedId = automation.id },
-                                onEnabledChange = { enabled ->
-                                    val updated = automation.copy(enabled = enabled)
-                                    AutomationRuntime.store.saveAutomation(updated)
-                                    if (updated.trigger.type == TriggerType.SCHEDULE) {
-                                        if (enabled) AutomationRuntime.registerSchedule(context, updated) else AutomationRuntime.cancelSchedule(context, updated.id)
-                                    }
-                                    refresh()
-                                },
-                            )
-                        }
+                Surface(
+                    modifier = Modifier.clickable(onClick = onSettings),
+                    shape = RoundedCornerShape(999.dp),
+                    color = when {
+                        ready.ready -> MaterialTheme.colorScheme.secondaryContainer
+                        ready.needsRepair -> MaterialTheme.colorScheme.errorContainer
+                        else -> MaterialTheme.colorScheme.tertiaryContainer
+                    },
+                    contentColor = when {
+                        ready.ready -> MaterialTheme.colorScheme.onSecondaryContainer
+                        ready.needsRepair -> MaterialTheme.colorScheme.onErrorContainer
+                        else -> MaterialTheme.colorScheme.onTertiaryContainer
+                    },
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = when {
+                                ready.ready -> MaterialTheme.colorScheme.secondary
+                                ready.needsRepair -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.tertiary
+                            },
+                            modifier = Modifier.size(6.dp),
+                        ) {}
+                        Text(
+                            when {
+                                ready.ready -> "Ready"
+                                ready.needsRepair -> "Repair"
+                                else -> "Setup"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                     }
                 }
-                FloatingActionButton(onClick = { builderOpen = true }, modifier = Modifier.align(Alignment.BottomEnd).padding(22.dp), shape = CircleShape) {
-                    Icon(Icons.Rounded.PlusOne, "Create routine")
+            }
+        }
+
+        item {
+            CycloneHomeComposer { request ->
+                V39AiChatSessionRuntime.pendingRequest = request
+                onAi()
+            }
+        }
+
+        task?.takeIf { UiTask(it).active }?.let { active ->
+            item { CycloneSectionTitle("Active now") }
+            item { CycloneAskTaskPanel(active) }
+        }
+
+        item {
+            CycloneSectionTitle("Your routines") {
+                TextButton(onClick = onRoutines) { Text("See all") }
+            }
+        }
+
+        if (routines.isEmpty()) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 1.dp,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(onClick = onRoutines).padding(15.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Surface(shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                            Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.Bolt, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Create your first routine", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Describe it to Cyclone or teach it by doing.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f))
+                    }
                 }
+            }
+        } else {
+            items(routines.take(5), key = { it.id }) { routine ->
+                HomeRoutineRow(routine, onRoutines)
             }
         }
     }
 }
 
 @Composable
-internal fun V32RoutineDetail(context: Context, automation: AutomationDefinition, onBack: () -> Unit, refresh: () -> Unit) {
-    var enabled by remember(automation.id, automation.enabled) { mutableStateOf(automation.enabled) }
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { OutlinedButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null); Spacer(Modifier.size(6.dp)); Text("All routines") } }
-        item { CyclonePageIntro("Routine", automation.name, "${automation.steps.size} steps · ${automation.v32TriggerSummary()}") }
-        item {
-            CycloneHeroCard(automation.v32TriggerSummary(), "This is when Cyclone starts.", Icons.Rounded.Bolt, tone = CyclonePastel.SKY)
+private fun HomeRoutineRow(routine: AutomationDefinition, onOpen: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                CycloneAppIcon(routine.appPackages.firstOrNull(), Modifier.padding(6.dp).size(31.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(routine.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    routine.v32TriggerSummary(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (routine.enabled) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Box(Modifier.size(8.dp))
+                }
+            }
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f))
         }
+    }
+}
+
+@Composable
+internal fun V32RoutineDetail(
+    context: Context,
+    automation: AutomationDefinition,
+    onBack: () -> Unit,
+    refresh: () -> Unit,
+) {
+    var enabled by remember(automation.id, automation.enabled) { mutableStateOf(automation.enabled) }
+    LazyColumn(
+        contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 72.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item {
+            OutlinedButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, null)
+                Spacer(Modifier.size(6.dp))
+                Text("All routines")
+            }
+        }
+        item { CyclonePageIntro("Routine", automation.name, "${automation.steps.size} steps · ${automation.v32TriggerSummary()}") }
         item { CycloneRoutineAssociations(automation, refresh) }
-        item { CycloneSectionTitle("Then") }
+        item { CycloneSectionTitle("Steps") }
         items(automation.steps.withIndex().toList(), key = { it.value.id }) { (index, step) ->
             CycloneSimpleCard {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-                        Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) { Text("${index + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+                        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                            Text("${index + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                     Column(Modifier.weight(1f)) {
-                        Text(step.v32ReadableName(), fontWeight = FontWeight.Bold)
-                        Text(step.type.name.lowercase().replace('_', ' '), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(step.v32ReadableName(), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            step.type.name.lowercase().replace('_', ' '),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    if (step.confirmationRequired) CycloneStatusPill("Asks you", false)
+                    if (step.confirmationRequired) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        ) {
+                            Text("Asks you", Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
                 }
             }
         }
@@ -296,33 +349,37 @@ internal fun V32RoutineDetail(context: Context, automation: AutomationDefinition
             CycloneSimpleCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Routine is ${if (enabled) "on" else "off"}", fontWeight = FontWeight.Bold)
-                        Text("Turn it off at any time without deleting it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Routine is ${if (enabled) "on" else "off"}", style = MaterialTheme.typography.titleSmall)
+                        Text("Turn it off without deleting it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(enabled, { value ->
                         enabled = value
                         val updated = automation.copy(enabled = value)
                         AutomationRuntime.store.saveAutomation(updated)
                         if (updated.trigger.type == TriggerType.SCHEDULE) {
-                            if (value) AutomationRuntime.registerSchedule(context, updated) else AutomationRuntime.cancelSchedule(context, updated.id)
+                            if (value) AutomationRuntime.registerSchedule(context, updated)
+                            else AutomationRuntime.cancelSchedule(context, updated.id)
                         }
                         refresh()
                     })
                 }
                 Button(
                     enabled = enabled,
-                    onClick = { AutomationRuntime.router.runManual(automation.id); Toast.makeText(context, "Routine started", Toast.LENGTH_SHORT).show() },
+                    onClick = {
+                        AutomationRuntime.router.runManual(automation.id)
+                        Toast.makeText(context, "Routine started", Toast.LENGTH_SHORT).show()
+                    },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.size(6.dp)); Text("Run now") }
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, null)
+                    Spacer(Modifier.size(6.dp))
+                    Text("Run now")
+                }
             }
         }
     }
 }
 
-internal fun v32AccessibilityEnabled(context: Context): Boolean {
-    return CyclonePermissionSetup.phoneControlReady(context)
-}
-
+internal fun v32AccessibilityEnabled(context: Context): Boolean = CyclonePermissionSetup.phoneControlReady(context)
 internal fun v32NotificationListenerEnabled(context: Context): Boolean = CyclonePermissionSetup.notificationAccessEnabled(context)
-
 internal fun v32ResultNotificationsEnabled(context: Context): Boolean = CyclonePermissionSetup.resultNotificationsEnabled(context)
