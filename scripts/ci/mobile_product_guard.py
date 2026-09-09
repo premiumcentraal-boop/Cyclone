@@ -41,7 +41,7 @@ REQUIRED_BRAIN_V39 = (
     "internal fun CycloneV39BrainPage",
     'CycloneSectionTitle("Recent outcomes")',
     "TaskResultActivityV292",
-    '"Tap to inspect and download .txt"',
+    '"View details"',
 )
 REQUIRED_MANIFEST = (
     'android:name=".MainActivity"',
