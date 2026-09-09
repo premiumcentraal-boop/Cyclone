@@ -70,6 +70,9 @@ object Layer2Workspaces {
 
     fun profileUserId(ctx: Context, user: UserHandle): Int? {
         if (user == Process.myUserHandle()) return currentAndroidUserId()
+        ProfileSetupRuntime.existingUser(ctx)?.let { saved ->
+            if (android.os.UserHandle.getUserHandleForUid(saved * ANDROID_UIDS_PER_USER) == user) return saved
+        }
         val launcher = ctx.getSystemService(LauncherApps::class.java)
         return runCatching {
             launcher.getActivityList(null, user).firstOrNull()?.applicationInfo?.uid

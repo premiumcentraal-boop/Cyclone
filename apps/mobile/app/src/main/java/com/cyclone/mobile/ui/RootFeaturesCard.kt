@@ -65,6 +65,7 @@ fun ProfileSetupPage(onClose: () -> Unit) {
         scope.launch {
             val root = withContext(Dispatchers.IO) { RootProbe.check() }
             if (root == RootStatus.ROOTED) {
+                withContext(Dispatchers.IO) { ProfileSetupRuntime.refreshExisting(context) }
                 apps = withContext(Dispatchers.IO) { ProfileSetupRuntime.apps(context) }
                 selected = selected.intersect(apps.map { it.packageName }.toSet())
                 page = 1; message = ""
@@ -126,7 +127,7 @@ fun ProfileSetupPage(onClose: () -> Unit) {
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Text("${selected.size} apps · separate accounts · fresh app data", style = MaterialTheme.typography.titleMedium)
                                 Text("Your existing apps and their data stay in Profile A. Creating another profile uses extra storage. Android may limit how many profiles this phone can have.")
-                                Button(onClick = { message = ""; ProfileSetupRuntime.create(context, apps.filter { it.packageName in selected }) }, modifier = Modifier.fillMaxWidth()) { Text("Create Profile B") }
+                                Button(onClick = { message = ""; ProfileSetupRuntime.create(context, apps.filter { it.packageName in selected }) }, modifier = Modifier.fillMaxWidth()) { Text(if (ProfileSetupRuntime.existingUser(context) != null) "Continue setup" else "Create Profile B") }
                                 TextButton(onClick = { page = 1 }) { Text("Change apps") }
                             }
                         }

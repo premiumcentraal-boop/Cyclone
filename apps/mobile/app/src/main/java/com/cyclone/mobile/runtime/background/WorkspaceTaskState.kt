@@ -96,13 +96,13 @@ object WorkspaceTasks {
         val own = Layer2Workspaces.currentAndroidUserId()
         val result = mutableListOf(WorkspaceDestinationHint("Profile A", own))
         val secondaryIds = runCatching {
-            Layer2Workspaces.initialize(context.applicationContext)
-            Layer2Workspaces.engine.snapshot()
-                .map { it.androidUserId }
-                .distinct()
-                .filter { it != own && Layer2Workspaces.visibleProfile(context, it) != null }
+            context.getSystemService(android.os.UserManager::class.java).userProfiles
+                .mapNotNull { Layer2Workspaces.profileUserId(context, it) }
+                .distinct().filter { it != own }.sorted()
         }.getOrDefault(emptyList())
-        secondaryIds.take(1).forEach { result += WorkspaceDestinationHint("Profile B", it) }
+        secondaryIds.forEachIndexed { index, id ->
+            result += WorkspaceDestinationHint("Profile ${('B'.code + index).toChar()}", id)
+        }
         return result
     }
 
@@ -151,7 +151,10 @@ object WorkspaceTasks {
         val preferred = pending.preferredDestination
         if (preferred != null && destinations.none { it.androidUserId == preferred.androidUserId }) return@synchronized false
         val own = Layer2Workspaces.currentAndroidUserId()
-        if (preferred != null && preferred.androidUserId != own) return@synchronized false
+        if (preferred != null && preferred.androidUserId != own) {
+            android.widget.Toast.makeText(context, "This profile needs a profile workspace task. Open Profiles to continue; it cannot run on the isolated background display.", android.widget.Toast.LENGTH_LONG).show()
+            return@synchronized false
+        }
         val target = resolveQueueTarget(context, pending) ?: return@synchronized false
         if (pending.targetPackageName != target.packageName || pending.targetAppLabel != target.appLabel) {
             requests.bindTarget(pending.id, target.packageName, target.appLabel)

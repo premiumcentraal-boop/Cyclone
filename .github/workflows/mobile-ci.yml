@@ -2,7 +2,7 @@ name: Cyclone Mobile CI
 
 on:
   push:
-    branches: [main, 'codex/cyclone-4.1-visual', 'codex/cyclone-4.2.1-task-composer', 'codex/cyclone-4.0.4-simple-setup', 'codex/cyclone-4.0.1-bg-task-glass', 'release/cyclone-mobile-v*', 'agent/397-v4-live-background-completion', 'agent/398-runtime-and-task-ui', 'agent/399-composer-and-model-compat', 'agent/3912-background-intelligence']
+    branches: [main, 'codex/cyclone-4.2.2-queue-profile-polish', 'codex/cyclone-4.1-visual', 'codex/cyclone-4.2.1-task-composer', 'codex/cyclone-4.0.4-simple-setup', 'codex/cyclone-4.0.1-bg-task-glass', 'release/cyclone-mobile-v*', 'agent/397-v4-live-background-completion', 'agent/398-runtime-and-task-ui', 'agent/399-composer-and-model-compat', 'agent/3912-background-intelligence']
     paths:
       - 'apps/mobile/**'
       - 'apps/device-gateway/**'

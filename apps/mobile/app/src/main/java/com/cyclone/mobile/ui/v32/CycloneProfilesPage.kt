@@ -58,6 +58,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
         }
     }
 
+    val inventory = remember(refreshTick, revision, profileSetup) { WorkspaceTasks.queueDestinations(context) }
     val activeProfiles = profiles.filter { it.state != WorkspaceState.idle || it.id in waiting }
     val visibleProfiles = (if (activeOnly) activeProfiles else profiles).sortedWith(
         compareBy<Workspace> { when (it.state) { WorkspaceState.gated -> 0; WorkspaceState.running -> 1; WorkspaceState.paused -> 2; else -> 3 } }.thenBy { it.label.lowercase() },
@@ -107,10 +108,22 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             item { CycloneSectionTitle("Active now") }
             item { CycloneTaskProgress(active) }
         }
-        item { CycloneSegmentedControl(listOf("All (${profiles.size})", "Active (${activeProfiles.size})"), if (activeOnly) 1 else 0, { activeOnly = it == 1 }) }
+        item { CycloneSegmentedControl(listOf("All (${inventory.size})", "Active (${activeProfiles.size})"), if (activeOnly) 1 else 0, { activeOnly = it == 1 }) }
         if (activeOnly && activeProfiles.isEmpty()) item { Text("No profiles are active right now.") }
         if (error.isNotEmpty()) item { Text(error) }
-        if (profiles.isEmpty()) item { Text("Add a profile to keep another app account separate.") }
+        if (!activeOnly) items(inventory, key = { "profile-${it.androidUserId}" }) { profile ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(profile.label, style = MaterialTheme.typography.titleMedium)
+                    Text(if (profile.androidUserId == Layer2Workspaces.currentAndroidUserId()) "Your current phone profile"
+                        else if (profiles.none { it.androidUserId == profile.androidUserId }) "Finish adding apps"
+                        else "${profiles.count { it.androidUserId == profile.androidUserId }} apps", style = MaterialTheme.typography.bodySmall)
+                }
+                if (profile.androidUserId != Layer2Workspaces.currentAndroidUserId()) {
+                    TextButton(onClick = { setup = true }) { Text("Manage") }
+                }
+            }
+        }
         items(visibleProfiles, key = { it.id }) { profile ->
             CycloneSurface(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CycloneAppIcon(profile.appPackage)
