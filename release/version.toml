@@ -1,3 +1,5 @@
+# Combined source checkpoint: 51008be0c1ff9c0a7d77f7c5883358ef4e48bed8
+# User explicitly waived physical-evidence prerequisite for this development publication.
 schema = 1
 product_version = "4.2.4"
 channel = "development"
