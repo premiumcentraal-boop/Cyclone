@@ -6,7 +6,7 @@ python_version = "4.1.0"
 
 [components]
 mobile = "4.2.5"
-pc_companion = "1.2.0"
+pc_companion = "1.3.0"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
@@ -18,4 +18,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-one-1.2.0-direct-live-phone"
+candidate_generation = "cyclone-one-1.3.0-onlyflow-redesign"

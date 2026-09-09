@@ -2,7 +2,7 @@ name: Cyclone PC Companion Release Candidate
 
 on:
   push:
-    branches: ['release/cyclone-one-v1.1.3-live-phone', 'release/cyclone-one-v1.2.0-direct-live-phone']
+    branches: ['release/cyclone-one-v1.1.3-live-phone', 'release/cyclone-one-v1.2.0-direct-live-phone', 'release/cyclone-one-v1.3.0-onlyflow-redesign']
   workflow_dispatch:
     inputs:
       publish_github_release:
@@ -92,7 +92,6 @@ jobs:
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
           python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
           '${{ github.run_id }}' | Set-Content -Encoding utf8 dist/pc-companion/run-id.txt
-          $PcVersion = (Get-Content 'apps/pc-companion/package.json' | ConvertFrom-Json).version
           $Signature = Get-AuthenticodeSignature "dist/pc-companion/Cyclone-PC-Companion-$PcVersion-Setup.exe"
           $Signature.Status.ToString() | Set-Content -Encoding utf8 dist/pc-companion/signing-state.txt
       - uses: actions/upload-artifact@v4
