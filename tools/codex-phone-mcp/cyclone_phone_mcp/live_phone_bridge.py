@@ -76,6 +76,8 @@ class Bridge:
         except (OSError, ValueError): return {}
 
     def dispatch(self, method, params):
+        self.last_cloud = int(time.time())
+        (root() / 'connector-status.json').write_text(json.dumps({'at': self.last_cloud}))
         if method == 'initialize':
             return {'protocolVersion': '2025-03-26', 'capabilities': {'tools': {}, 'resources': {}}, 'serverInfo': {'name': 'Cyclone Live Phone', 'version': '1.2.0'},
                     'instructions': 'Use cyclone_phone tools directly. Foreground only. Observe and locate before acting. Every action needs a fresh observation_id. Inspect verification and the returned image. Never retry an uncertain action.'}
@@ -100,15 +102,49 @@ class Bridge:
             return self.response(result)
 
     def response(self, result):
-        # Vision transport is added separately; paths never cross this boundary.
+        images = []
+        control = self.control()
+        for observation in (result, result.get('after', {})):
+            image = observation.get('vision', {})
+            if not image.get('ready') or control.get('stopped', True) or result.get('control_changed'):
+                continue
+            # This reads exactly the broker's bounded latest image, never a caller path.
+            path = Path(image.get('path', '')).resolve()
+            if path not in {(root() / 'latest.png').resolve(), (root() / 'latest.jpg').resolve()}:
+                continue
+            data = path.read_bytes()
+            if len(data) > 8 * 1024 * 1024: continue
+            uri = 'cyclone-image://' + secrets.token_urlsafe(24)
+            mime = image['mime']
+            self.frames[uri] = (time.monotonic() + 30, control.get('generation'), observation.get('device'), observation.get('observation_id'), mime, data)
+            observation['screenshot'] = {'available': True, 'mime': mime, 'width': image['width'], 'height': image['height'], 'reference': uri, 'expires_in_seconds': 30}
+            images.append({'type': 'image', 'mimeType': mime, 'data': base64.b64encode(data).decode()})
+        while len(self.frames) > 4: self.frames.pop(next(iter(self.frames)))
         def clean(value):
-            if isinstance(value, dict): return {k: clean(v) for k,v in value.items() if k not in {'screenshot_path', 'path', 'reference'}}
+            if isinstance(value, dict):
+                return {k: clean(v) for k,v in value.items() if k not in {'screenshot_path', 'path', 'artifact', 'reference'} or (k == 'reference' and isinstance(v, str) and v.startswith('cyclone-image://'))}
             if isinstance(value, list): return [clean(v) for v in value]
             return value
-        return {'content': [{'type': 'text', 'text': json.dumps(clean(result))}], 'isError': result.get('ok') is False}
+        clean_result = clean(result)
+        encoded = json.dumps(clean_result)
+        if len(encoded.encode()) > 2 * 1024 * 1024:
+            self.frames.clear()
+            return {'content': [{'type': 'text', 'text': '{"ok":false,"error":"RESPONSE_TOO_LARGE"}'}], 'isError': True}
+        return {'content': [{'type': 'text', 'text': encoded}, *images], 'structuredContent': clean_result, 'isError': result.get('ok') is False}
 
     def read_frame(self, params):
-        raise ValueError('No current image resource')
+        with self.lock:
+            frame = self.frames.get(params.get('uri'))
+            control = self.control()
+            if not frame or control.get('stopped', True) or control.get('enabled') is not True:
+                self.frames.clear()
+                raise ValueError('Image expired')
+            expires, generation, device, observation, mime, data = frame
+            current = self.broker.engine.observations.get(device)
+            if time.monotonic() >= expires or generation != control.get('generation') or not current or current[0] != observation:
+                self.frames.pop(params.get('uri'), None)
+                raise ValueError('Image expired')
+            return {'contents': [{'uri': params['uri'], 'mimeType': mime, 'blob': base64.b64encode(data).decode()}]}
 
 
 class Server(ThreadingHTTPServer):
@@ -167,3 +203,8 @@ class Handler(BaseHTTPRequestHandler):
 def start_bridge(broker):
     server = Server(('127.0.0.1', PORT), Bridge(broker), cloud_key())
     threading.Thread(target=server.serve_forever, name='cyclone-live-phone-mcp', daemon=True).start()
+    def heartbeat():
+        while True:
+            (root() / 'broker-status.json').write_text(json.dumps({'at': int(time.time())}))
+            time.sleep(3)
+    threading.Thread(target=heartbeat, name='cyclone-live-health', daemon=True).start()

@@ -77,7 +77,7 @@ class LivePhone:
         temp = target.with_suffix(".tmp")
         temp.write_bytes(data)
         temp.replace(target)
-        return {"ready": True, "path": str(target), "captured_at": artifact.get("timestampMs"), "width": width, "height": height}
+        return {"ready": True, "path": str(target), "captured_at": artifact.get("timestampMs"), "width": width, "height": height, "mime": "image/png" if suffix == ".png" else "image/jpeg"}
 
     def observe(self, request):
         args = self._args(request)
@@ -91,7 +91,7 @@ class LivePhone:
         image = self._image(raw)
         if observation_id:
             self.observations[args["device_id"]] = (observation_id, time.monotonic(), image["ready"])
-        return {"ok": bool(observation_id), "mode": "LIVE PHONE", "session_id": SESSION, "display_id": DISPLAY, "observation_id": observation_id, "ui": card, "vision": image, "screenshot_path": image.get("path")}
+        return {"ok": bool(observation_id), "mode": "LIVE PHONE", "session_id": SESSION, "display_id": DISPLAY, "observation_id": observation_id, "device": args["device_id"], "package": card.get("package", card.get("appPackage")), "screenshot": {"available": image["ready"], "mime": image.get("mime"), "width": image.get("width"), "height": image.get("height"), "reference": image.get("path")}, "ui": card, "vision": image, "screenshot_path": image.get("path")}
 
     def execute(self, request):
         request = validate_request(request)
