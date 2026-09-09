@@ -1,23 +1,23 @@
-# Cyclone Mobile 4.2.6 visual architecture source checkpoint: 5bee951d2140773ed0026e17bbe1b855c1da5112
-# User explicitly authorized 4.2.6 publication for physical visual review on September 9, 2026.
+# Cyclone Mobile 4.2.7 structural reliability release
+# User explicitly authorized 4.2.7 publication for physical testing on September 9, 2026.
 schema = 1
-product_version = "4.2.6"
+product_version = "4.2.7"
 channel = "development"
-android_version_code = 87
+android_version_code = 88
 python_version = "4.1.0"
 
 [components]
-mobile = "4.2.6"
+mobile = "4.2.7"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.2.5"
+previous_mobile_version = "4.2.6"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.2.6-visual-architecture"
+candidate_generation = "cyclone-4.2.7-structural-reliability"
