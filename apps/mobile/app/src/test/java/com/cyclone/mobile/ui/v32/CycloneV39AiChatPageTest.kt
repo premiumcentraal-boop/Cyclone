@@ -96,8 +96,11 @@ class CycloneV39AiChatPageTest {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("const val PREFS = \"cyclone_ai\""))
         assertTrue(page.contains("const val MODEL_KEY = \"openrouter_model\""))
-        assertTrue(page.contains("selectedModelId = V39AiChatContract.storageId(model)"))
-        assertTrue(page.contains("prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()"))
+        val controls = source("CycloneIntelligenceControls.kt")
+        assertTrue(controls.contains("putString(\"openrouter_model\", id)"))
+        assertTrue(controls.contains("putString(\"openrouter_reasoning_effort\", effort)"))
+        assertTrue(page.contains("CycloneIntelligenceControls(enabled = !session.busy, onChanged"))
+        assertTrue(page.contains("prefs.getString(V39AiChatContract.MODEL_KEY, null)"))
     }
 
     @Test fun missingKeyBlocksChatButNotPhoneRoutingContract() {
