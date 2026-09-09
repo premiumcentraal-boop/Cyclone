@@ -26,7 +26,12 @@ pub fn live_phone_status() -> Result<Value, String> {
     let path = root()?;
     let state = std::fs::read(path.join("status.json")).ok()
         .and_then(|v| serde_json::from_slice::<Value>(&v).ok()).unwrap_or(json!({}));
+    let control = std::fs::read(path.join("control.json")).ok()
+        .and_then(|v| serde_json::from_slice::<Value>(&v).ok()).unwrap_or(json!({}));
+    let enabled = control["enabled"].as_bool().unwrap_or(false);
+    let stopped = control["stopped"].as_bool().unwrap_or(true);
+    let same_generation = state["generation"] == control["generation"];
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
     let recent = now.saturating_sub(state["at"].as_u64().unwrap_or(0)) < 15;
-    Ok(json!({"connected": recent, "vision": recent && state["vision"].as_bool().unwrap_or(false), "control": recent && state["control"].as_bool().unwrap_or(false)}))
+    Ok(json!({"connected": recent, "enabled": enabled, "stopped": stopped, "vision": recent && same_generation && !stopped && state["vision"].as_bool().unwrap_or(false), "control": recent && same_generation && enabled && !stopped && state["control"].as_bool().unwrap_or(false)}))
 }

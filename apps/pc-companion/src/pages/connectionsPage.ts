@@ -1,3 +1,4 @@
+import { livePhoneLabels, type LivePhoneStatus } from "../core/livePhone.js";
 import { invoke } from "@tauri-apps/api/core";
 import {
   formatSmokeLog,
@@ -28,7 +29,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const heading = el("div");
   heading.append(
     el("h1", "page-title", "Connections"),
-    el("p", "page-subtitle", "Connect cloud AI to your phone in three steps, or link a local AI app directly on this PC."),
+    el("p", "page-subtitle", "Choose a native PC AI, Live Phone through your PC connector, or a Remote MCP client."),
   );
   const refreshButton = button("Refresh", "button ghost compact");
   header.append(heading, refreshButton);
@@ -45,8 +46,11 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   live.append(el("h2", "connections-section-title", "LIVE PHONE"),
     el("p", "connections-section-copy", "Cloud ChatGPT through your PC connector. Controls the physical phone screen you are looking at."));
   const liveState = el("p", "connections-section-copy", "Waiting for a Live Phone request");
+  const livePhone = el("p", "connections-section-copy", "Checking physical phone…");
+  const liveCloud = el("p", "connections-section-copy", "Cloud ChatGPT · PC connector route");
+  const liveVision = el("p", "connections-section-copy", "Vision · Observe first");
   const liveControls = el("div", "button-row");
-  for (const [label, action] of [["Enable", "enable"], ["Pause", "pause"], ["Stop", "stop"]]) {
+  for (const [label, action] of [["Start Live Phone", "enable"], ["Pause", "pause"], ["Stop", "stop"]]) {
     const control = button(label, "button ghost compact");
     control.addEventListener("click", async () => {
       try {
@@ -56,18 +60,29 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
     });
     liveControls.append(control);
   }
-  live.append(liveState, liveControls);
-  const liveTimer = setInterval(async () => {
+  live.append(livePhone, liveCloud, liveVision, liveState, liveControls);
+  let liveRefreshing = false;
+  const refreshLive = async (): Promise<void> => {
+    if (liveRefreshing) return;
+    liveRefreshing = true;
     try {
-      const state = await invoke<{ connected: boolean; vision: boolean; control: boolean }>("live_phone_status");
-      liveState.textContent = `Cloud ChatGPT · ${state.connected ? "Recent request" : "Waiting"} / Vision · ${state.vision ? "Ready" : "Observe first"} / Control · ${state.control ? "Ready" : "Paused"}`;
-    } catch { /* Browser previews have no native connector. */ }
-  }, 3000);
+      const [state, devices] = await Promise.all([invoke<LivePhoneStatus>("live_phone_status"), service.listDevices()]);
+      if (!active) return;
+      const labels = livePhoneLabels(state, devices);
+      livePhone.textContent = labels.phone;
+      liveCloud.textContent = labels.cloud;
+      liveVision.textContent = labels.vision;
+      liveState.textContent = labels.control;
+    } catch { liveState.textContent = "Live Phone status unavailable. Open the installed One app."; }
+    finally { liveRefreshing = false; }
+  };
+  const liveTimer = setInterval(() => { void refreshLive(); }, 3000);
   const background = el("section", "connections-section-heading");
   background.append(el("h2", "connections-section-title", "BACKGROUND PHONE"), el("p", "connections-section-copy", "Existing session workspaces and app profiles. Separate from Live Phone."));
-  page.append(header, live, background, remoteMount, localHeading, grid);
+  page.append(header, localHeading, grid, live, remoteMount, background);
 
   let active = true;
+  void refreshLive();
   let refreshing = false;
   let remoteBusy = false;
   let remoteStatus: McpTunnelStatus = stoppedTunnelStatus("Checking Remote MCP…");
