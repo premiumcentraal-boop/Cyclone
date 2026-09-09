@@ -74,6 +74,8 @@ object ProfileSetupRuntime {
         val recovered = ProfileRecovery.resolve(journal, parent, users)
         if (recovered is ProfileRecoveryDecision.Resume) {
             commitOrStorageFailure(store.edit().putInt(KEY_USER, recovered.user.id))
+            _state.value = _state.value.copy(userId = recovered.user.id, issue = null,
+                message = "Your saved profile was found. Continue adding apps.")
             return recovered.user.id
         }
         return null
@@ -198,8 +200,13 @@ object ProfileSetupRuntime {
                     val profileUserId = when (val recovery = ProfileRecovery.resolve(journal, parentUserId, users)) {
                         ProfileRecoveryDecision.Create -> {
                             if (users.any { it.managed && it.parentId == parentUserId && !it.partial }) {
-                                fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
-                                    "Android already has another work profile. It does not match Cyclone's saved setup, so Cyclone will not replace or claim it. Open Android's work-profile settings to review it.")
+                                throw SetupFailure(ProfileSetupFailure(
+                                    ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,
+                                    "Review your existing work profile",
+                                    "Android already has a work profile that does not match Cyclone's saved setup. Cyclone will not replace it or access its accounts.",
+                                    "Review the work profile in Android settings before creating another.",
+                                    false,
+                                ))
                             }
                             boundary()
                             _state.value = _state.value.copy(message = "Creating Profile B…", completed = 1)

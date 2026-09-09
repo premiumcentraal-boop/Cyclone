@@ -170,6 +170,10 @@ fun ProfileSetupPage(onClose: () -> Unit) {
                     if (message.isNotBlank()) item { Text(message, style = MaterialTheme.typography.bodyMedium) }
                     if (!progress.busy && !progress.ready && progress.message.isNotBlank()) item {
                         Text(progress.message, color = MaterialTheme.colorScheme.error)
+                        if (progress.issue?.retryUseful == false) TextButton(onClick = {
+                            runCatching { context.startActivity(Intent("android.settings.USER_SETTINGS")) }
+                                .onFailure { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+                        }) { Text("Open Android profile settings") }
                     }
                 }
                 if (page == 1 && !progress.busy) Button(onClick = { page = 2 }, enabled = selected.isNotEmpty() && selected.size <= 50,
