@@ -196,7 +196,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
 
     CycloneAlpineBackdrop {
         Column(
-            Modifier.fillMaxSize().imePadding().padding(horizontal = 20.dp, vertical = 12.dp),
+            Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (!keyboardOpen) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -206,32 +206,16 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
 
-            Box {
-                TextButton(onClick = { modelOpen = true }, enabled = !session.busy,
-                    modifier = Modifier.semantics { contentDescription = "AI model selector" }) {
-                    Text(selectedModel.label, maxLines = 1, overflow = TextOverflow.Ellipsis); Icon(Icons.Rounded.ArrowDropDown, null)
-                }
-                DropdownMenu(modelOpen, { modelOpen = false }, modifier = Modifier.heightIn(max = 320.dp)) {
-                    Text("Select model", Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall)
-                    V39AiChatContract.models().forEach { model ->
-                        DropdownMenuItem(text = { Text(model.label) }, onClick = {
-                            selectedModelId = V39AiChatContract.storageId(model)
-                            prefs.edit().putString(V39AiChatContract.MODEL_KEY, selectedModelId).apply()
-                            modelOpen = false
-                        })
-                    }
-                }
-            }
+            // Model and intelligence share the composer popover below.
             if (selectedProfile?.isContributor == true) Text(
                 "Contributor · prompts and responses may be used for training.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
 
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (session.messages.isEmpty()) item {
-                    Column(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        CycloneOrbitMark(Modifier.size(64.dp))
-                        Text("Ask Cyclone", fontSize = 32.sp, lineHeight = 39.sp, color = MaterialTheme.colorScheme.onSurface)
-                        Text("Ask a question or tell Cyclone what you want done. It will choose the right path.",
+                    Column(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Ask Cyclone", fontSize = 24.sp, lineHeight = 30.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text("What can I help you with?",
                             color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge)
                     }
                 } else items(session.messages, key = { it.id }) { V39ChatBubble(it) }
@@ -290,7 +274,9 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CycloneIntelligenceControls(enabled = !session.busy)
+                        CycloneIntelligenceControls(enabled = !session.busy, onChanged = {
+                            selectedModelId = V39AiChatContract.storageId(V39AiChatContract.modelForStored(prefs.getString(V39AiChatContract.MODEL_KEY, null)))
+                        })
                         Box {
                             IconButton(onClick = { toolsOpen = true }, enabled = !session.busy) {
                                 Icon(Icons.Rounded.Add, "Add attachment", tint = MaterialTheme.colorScheme.onSurfaceVariant)
