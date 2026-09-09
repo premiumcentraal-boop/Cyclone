@@ -70,10 +70,14 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
                     destinations = WorkspaceTasks.queueDestinations(context),
                     onSelected = { destination ->
                         WorkspaceTasks.requests.steer(request.id, destination)
-                        WorkspaceTasks.tryPromoteNext(context)
+                        if (destination.androidUserId == com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.currentAndroidUserId() &&
+                            WorkspaceTasks.resolveQueueTarget(context, request) == null) {
+                            context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
+                                .putExtra("goal", request.goal).putExtra("pendingRequestId", request.id)
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        } else WorkspaceTasks.tryPromoteNext(context)
                         steering = null
                     },
-                    onDismiss = { steering = null },
                 )
             }
         }
@@ -169,7 +173,6 @@ private fun SteerDestinationSheet(
     request: PendingWorkspaceRequest,
     destinations: List<WorkspaceDestinationHint>,
     onSelected: (WorkspaceDestinationHint) -> Unit,
-    onDismiss: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()),

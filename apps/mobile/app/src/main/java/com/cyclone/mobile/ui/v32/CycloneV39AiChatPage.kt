@@ -141,10 +141,12 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
 
         when (dispatch) {
             RequestDispatch.START_PHONE_TASK -> runCatching {
-                context.startActivity(Intent(context, WorkspaceActivity::class.java).putExtra("goal", normalized))
+                val target = WorkspaceTasks.resolveQueueTarget(context,
+                    com.cyclone.mobile.runtime.background.PendingWorkspaceRequest("preview", normalized, null))
+                if (target != null) WorkspaceTasks.start(context, normalized, target.packageName, target.appLabel)
+                else context.startActivity(Intent(context, WorkspaceActivity::class.java).putExtra("goal", normalized))
             }.onSuccess {
                 composer = ""
-                message = "Choose the app Cyclone should work in."
             }.onFailure { message = it.message ?: "Couldn't open the phone-task setup." }
 
             RequestDispatch.QUEUE_PHONE_TASK -> runCatching { WorkspaceTasks.queueRequest(normalized) }

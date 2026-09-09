@@ -1,22 +1,22 @@
-# Cyclone Mobile 4.2.2. Publication authorized; physical acceptance remains unverified.
+# Cyclone Mobile 4.2.3 candidate. Physical acceptance remains unverified.
 schema = 1
-product_version = "4.2.2"
+product_version = "4.2.3"
 channel = "development"
-android_version_code = 83
+android_version_code = 84
 python_version = "4.0.0"
 
 [components]
-mobile = "4.2.2"
+mobile = "4.2.3"
 pc_companion = "1.0.0"
 device_gateway = "4.0.0"
 mcp = "4.0.0"
 
 [release]
-previous_mobile_version = "4.2.1"
-publication_authorized = true
+previous_mobile_version = "4.2.2"
+publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.2.2-repair-integration"
+candidate_generation = "cyclone-4.2.3-queue-profile-polish"

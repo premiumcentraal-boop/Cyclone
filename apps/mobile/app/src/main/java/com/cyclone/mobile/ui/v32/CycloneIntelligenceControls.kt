@@ -20,8 +20,12 @@ fun CycloneModelIntelligencePanel(modelId: String, effort: String, onChange: (St
     var autonomyOpen by remember { mutableStateOf(false) }
     var autonomy by remember { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
     Column(Modifier.widthIn(max = 300.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        TextButton(onClick = { models = !models }) {
-            Text(OpenRouterModelPresets.byId(modelId).label + " ▾", style = MaterialTheme.typography.titleSmall)
+        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
+            TextButton(onClick = { models = !models }) {
+                Text(OpenRouterModelPresets.byId(modelId).label + " · " + effort.replaceFirstChar { it.uppercase() } + " ▾",
+                    style = MaterialTheme.typography.titleSmall)
+            }
         }
         if (models) Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
             OpenRouterModelPresets.all.forEach { model ->

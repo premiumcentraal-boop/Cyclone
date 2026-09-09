@@ -14,6 +14,15 @@ class WorkspaceAdmissionTest {
             assertFalse(WorkspaceQueuePromotionPolicy.canStart(it, false))
         }
     }
+    @Test fun failedPromotionExplainsBlockWithoutLosingRequest() {
+        val queue = WorkspaceRequestQueue()
+        val request = queue.add("open Chrome")
+        queue.blocked(request.id, "Enable Accessibility")
+        assertEquals("Enable Accessibility", queue.peek()?.blockedReason)
+        queue.steer(request.id, WorkspaceDestinationHint("Profile A", 0))
+        assertNull(queue.peek()?.blockedReason)
+        assertEquals(request.goal, queue.peek()?.goal)
+    }
     @Test fun stoppedAndFailedTasksReleaseTheirSlot() {
         listOf(TaskPhase.STOPPED, TaskPhase.FAILED).forEach {
             assertTrue(WorkspaceQueuePromotionPolicy.canStart(it, false))

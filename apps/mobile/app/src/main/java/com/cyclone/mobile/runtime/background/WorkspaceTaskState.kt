@@ -94,16 +94,12 @@ object WorkspaceTasks {
     /** Read-only profile inventory for queue steering. No Android profile state is mutated here. */
     fun queueDestinations(context: Context): List<WorkspaceDestinationHint> {
         val own = Layer2Workspaces.currentAndroidUserId()
-        val result = mutableListOf(WorkspaceDestinationHint("Profile A", own))
         val secondaryIds = runCatching {
             context.getSystemService(android.os.UserManager::class.java).userProfiles
                 .mapNotNull { Layer2Workspaces.profileUserId(context, it) }
                 .distinct().filter { it != own }.sorted()
         }.getOrDefault(emptyList())
-        secondaryIds.forEachIndexed { index, id ->
-            result += WorkspaceDestinationHint("Profile ${('B'.code + index).toChar()}", id)
-        }
-        return result
+        return ProfileDestinationPresentation.from(own, secondaryIds)
     }
 
     /** Deterministic app resolution mirrors the existing explicit-target rule: exactly one label match. */
@@ -131,6 +127,7 @@ object WorkspaceTasks {
     }
 
     fun queuePresentationStatus(context: Context, request: PendingWorkspaceRequest): String {
+        request.blockedReason?.let { return it }
         val destinations = queueDestinations(context)
         val preferred = request.preferredDestination
         if (preferred != null && destinations.none { it.androidUserId == preferred.androidUserId }) return "Choose destination"
@@ -152,7 +149,7 @@ object WorkspaceTasks {
         if (preferred != null && destinations.none { it.androidUserId == preferred.androidUserId }) return@synchronized false
         val own = Layer2Workspaces.currentAndroidUserId()
         if (preferred != null && preferred.androidUserId != own) {
-            android.widget.Toast.makeText(context, "This profile needs a profile workspace task. Open Profiles to continue; it cannot run on the isolated background display.", android.widget.Toast.LENGTH_LONG).show()
+            requests.blocked(pending.id, "This profile can't run as an isolated task yet. Choose Profile A or open Profiles.")
             return@synchronized false
         }
         val target = resolveQueueTarget(context, pending) ?: return@synchronized false
@@ -162,6 +159,7 @@ object WorkspaceTasks {
         runCatching {
             start(context.applicationContext, pending.goal, target.packageName, target.appLabel, pending.id)
         }.onFailure { error ->
+            requests.blocked(pending.id, error.message ?: "Check Background tasks setup.")
             android.widget.Toast.makeText(context, error.message ?: "Check Background tasks setup.", android.widget.Toast.LENGTH_LONG).show()
         }.isSuccess
     }
