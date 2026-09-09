@@ -1,4 +1,5 @@
 mod mcp_tunnel;
+mod live_phone;
 
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
@@ -206,6 +207,7 @@ fn cleanup_legacy_gateway_processes() {}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cleanup_legacy_gateway_processes();
+    let _ = live_phone::live_phone_control("stop".into());
 
     let token = strong_token();
     let gateway_port =
@@ -251,6 +253,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             gateway_session,
+            live_phone::live_phone_status,
+            live_phone::live_phone_control,
             diagnostics_folder,
             open_diagnostics_folder,
             connector_status,

@@ -339,6 +339,7 @@ internal object GatewayDispatcher {
     private fun dispatch(context: Context, request: GatewayRequest): Any {
         // Trust-session IDs belong to authentication. Only execution operations use this scope.
         val bound = bindDispatchIdentity(request)
+        LivePhoneMode.check(context, request)
         return when (request.op) {
         "trust.negotiate" -> GatewayV33TrustManager.negotiate(context, request.args)
         "trust.begin" -> GatewayV33TrustManager.beginTrust(context, request.args)

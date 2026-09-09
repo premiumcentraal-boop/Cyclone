@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
   formatSmokeLog,
   friendlyTunnelState,
@@ -35,12 +36,36 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const remoteMount = el("div", "remote-mcp-mount");
   const localHeading = el("div", "connections-section-heading local-ai-heading");
   localHeading.append(
-    el("h2", "connections-section-title", "Local AI apps"),
+    el("h2", "connections-section-title", "ON PC AI"),
     el("p", "connections-section-copy", "These connect directly to Cyclone on this PC. They do not need the public Remote MCP URL."),
   );
   const grid = el("div", "connections-grid codex-connections-grid");
   grid.append(el("div", "loading-card", "Checking local AI connections…"));
-  page.append(header, remoteMount, localHeading, grid);
+  const live = el("section", "settings-card");
+  live.append(el("h2", "connections-section-title", "LIVE PHONE"),
+    el("p", "connections-section-copy", "Cloud ChatGPT through your PC connector. Controls the physical phone screen you are looking at."));
+  const liveState = el("p", "connections-section-copy", "Waiting for a Live Phone request");
+  const liveControls = el("div", "button-row");
+  for (const [label, action] of [["Enable", "enable"], ["Pause", "pause"], ["Stop", "stop"]]) {
+    const control = button(label, "button ghost compact");
+    control.addEventListener("click", async () => {
+      try {
+        await invoke("live_phone_control", { action });
+        liveState.textContent = action === "enable" ? "Ready for Cloud ChatGPT. Observe the phone first." : "Live Phone paused. New actions are blocked.";
+      } catch { liveState.textContent = "Open the installed Cyclone One app to use Live Phone."; }
+    });
+    liveControls.append(control);
+  }
+  live.append(liveState, liveControls);
+  const liveTimer = setInterval(async () => {
+    try {
+      const state = await invoke<{ connected: boolean; vision: boolean; control: boolean }>("live_phone_status");
+      liveState.textContent = `Cloud ChatGPT · ${state.connected ? "Recent request" : "Waiting"} / Vision · ${state.vision ? "Ready" : "Observe first"} / Control · ${state.control ? "Ready" : "Paused"}`;
+    } catch { /* Browser previews have no native connector. */ }
+  }, 3000);
+  const background = el("section", "connections-section-heading");
+  background.append(el("h2", "connections-section-title", "BACKGROUND PHONE"), el("p", "connections-section-copy", "Existing session workspaces and app profiles. Separate from Live Phone."));
+  page.append(header, live, background, remoteMount, localHeading, grid);
 
   let active = true;
   let refreshing = false;

@@ -31,6 +31,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.cyclone.mobile.gateway.LivePhoneMode
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +46,7 @@ import com.cyclone.mobile.gateway.GatewaySettingsActivity
 /** Prominent, user-friendly entry to the full PC/Codex gateway from Cyclone AI. */
 @Composable
 internal fun GatewayAiCard(context: Context, refreshTick: Int) {
+    val liveState by LivePhoneMode.state.collectAsState()
     val status = remember(refreshTick) { GatewayRuntime.status(context) }
     val enabled = status.optBoolean("gatewayEnabled")
     val accessibilityReady = status.optBoolean("accessibilityConnected")
@@ -71,11 +75,21 @@ internal fun GatewayAiCard(context: Context, refreshTick: Int) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Text("LIVE PHONE", style = MaterialTheme.typography.titleMedium)
+            Text("Cloud ChatGPT · your visible phone screen")
+            Text(liveState)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { LivePhoneMode.setPaused(context, false) }) { Text("Resume") }
+                OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true) }) { Text("Pause") }
+                OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true, true) }) { Text("Stop") }
+            }
+            Text("BACKGROUND PHONE", style = MaterialTheme.typography.titleMedium)
+            Text("App profiles and separate task screens stay in Profiles.")
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.AutoAwesome, null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("CYCLONE AI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text("ON PC AI", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text("Full PC + Codex Gateway", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(state, style = MaterialTheme.typography.labelLarge, color = if (healthy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
                 }
