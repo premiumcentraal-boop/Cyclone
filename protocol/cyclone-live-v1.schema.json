@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyclone.local/protocol/cyclone-live-v1.schema.json",
+  "title": "Cyclone Interaction Protocol v1",
+  "type": "object",
+  "required": ["protocol", "operation"],
+  "properties": {
+    "protocol": {"const": "cyclone.live.v1"},
+    "operation": {"enum": ["devices", "see", "find", "inspect", "act", "session"]},
+    "device": {"type": "string", "minLength": 1, "maxLength": 240, "default": "auto"},
+    "observation_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "request_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "goal": {"type": "string", "maxLength": 1000},
+    "query": {"type": "string", "minLength": 1, "maxLength": 240},
+    "element_id": {"type": "string", "minLength": 1, "maxLength": 240},
+    "detail": {"enum": ["compact", "full"]},
+    "session_operation": {"enum": ["status", "enable", "pause", "stop"]},
+    "user_authorized": {"type": "boolean", "default": false},
+    "action": {"$ref": "#/$defs/action"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "number", "minimum": 0, "maximum": 1},
+        "y": {"type": "number", "minimum": 0, "maximum": 1},
+        "space": {"const": "display_norm", "default": "display_norm"}
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["element_id"],
+          "properties": {"element_id": {"type": "string", "minLength": 1, "maxLength": 240}},
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["point"],
+          "properties": {"point": {"$ref": "#/$defs/point"}},
+          "additionalProperties": false
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["tap", "long_press", "type", "clear", "scroll", "swipe", "back", "home", "open_app"]},
+        "target": {"$ref": "#/$defs/target"},
+        "text": {"type": "string", "maxLength": 4000},
+        "direction": {"enum": ["forward", "backward", "up", "down", "left", "right"]},
+        "amount": {"enum": ["small", "medium", "large"]},
+        "from": {"$ref": "#/$defs/point"},
+        "to": {"$ref": "#/$defs/point"},
+        "duration_ms": {"type": "integer", "minimum": 100, "maximum": 3000},
+        "package": {"type": "string", "minLength": 1, "maxLength": 240}
+      },
+      "additionalProperties": false
+    }
+  }
+}
