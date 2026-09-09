@@ -1,5 +1,6 @@
 # Cyclone Mobile 4.2.8 visual hotfix release
 # User explicitly authorized 4.2.8 publication on September 10, 2026.
+# Finalized on release/cyclone-mobile-v4.2.8; exact-source CI and publication guards are mandatory.
 schema = 1
 product_version = "4.2.8"
 channel = "development"
