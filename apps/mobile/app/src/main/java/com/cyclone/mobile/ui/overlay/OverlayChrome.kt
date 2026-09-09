@@ -10,7 +10,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
@@ -60,8 +59,9 @@ import com.cyclone.mobile.capture.LiveCaptureSessionManager
 import com.cyclone.mobile.capture.ScreenSharePhase
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
-import com.cyclone.mobile.ui.v32.CyclonePendingRequests
 import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
+import com.cyclone.mobile.ui.v32.CycloneForegroundWorkCard
+import com.cyclone.mobile.ui.v32.CyclonePendingRequests
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
 import kotlinx.coroutines.launch
 
@@ -319,17 +319,22 @@ private fun ComposerPanel(
     var restoreEditor by remember { mutableStateOf(false) }
     val workspace by WorkspaceTasks.state.collectAsState()
     val task = workspace?.takeIf { it.phase != TaskPhase.STOPPED }
-    val compactRunning = task?.working == true && !editorFocused
+    val foregroundWorking = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
+    val activeWork = task?.working == true || foregroundWorking
+    var taskCollapsed by remember(snapshot.sessionId, task?.taskId) { mutableStateOf(false) }
+    val compactRunning = activeWork && !editorFocused
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val taskAreaMax = if (keyboardOpen) {
         OverlayChromeContract.TASK_AREA_KEYBOARD_MAX_HEIGHT_DP
     } else {
         OverlayChromeContract.TASK_AREA_MAX_HEIGHT_DP
     }
-    LaunchedEffect(task?.taskId, task?.working) {
-        if (task?.working == true) {
+    LaunchedEffect(task?.taskId, task?.working, foregroundWorking) {
+        if (activeWork) {
             focusManager.clearFocus()
             accessory = ComposerAccessory.NONE
+        } else {
+            taskCollapsed = false
         }
     }
     DisposableEffect(view) {
@@ -375,7 +380,9 @@ private fun ComposerPanel(
             animate(dragOffset, if (dismiss) sheetHeight else 0f, animationSpec = tween(180)) { value, _ ->
                 dragOffset = value
             }
-            if (dismiss) onAction(OverlayUserAction.MINIMIZE)
+            if (dismiss) {
+                if (activeWork) taskCollapsed = true else onAction(OverlayUserAction.MINIMIZE)
+            }
             dragOffset = 0f
         }
     }
@@ -385,13 +392,11 @@ private fun ComposerPanel(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .imePadding()
             .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp)
             .graphicsLayer { translationY = dragOffset }
             .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) }
             .clip(glassShape)
             .background(MaterialTheme.colorScheme.surface.copy(alpha = OverlayChromeContract.EXPANDED_GLASS_ALPHA))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .58f), glassShape)
             .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
@@ -420,8 +425,15 @@ private fun ComposerPanel(
             )
         }
 
-        // A real WorkspaceTaskUi is the only source of truth for the current card. Visual overlay
-        // state never manufactures a task, even when ANALYSIS/WORKING/LIVE/GATE is animating.
+        if (taskCollapsed && activeWork) {
+            CycloneForegroundWorkCard(
+                snapshot = snapshot,
+                compact = true,
+                onExpand = { taskCollapsed = false },
+            )
+            return@Column
+        }
+
         Column(
             Modifier
                 .fillMaxWidth()
@@ -429,7 +441,10 @@ private fun ComposerPanel(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (task != null) CycloneAskTaskPanel(task)
+            when {
+                task != null -> CycloneAskTaskPanel(task)
+                foregroundWorking -> CycloneForegroundWorkCard(snapshot)
+            }
             CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
         }
 
@@ -465,13 +480,11 @@ private fun ComposerPanel(
             }
         }
 
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(34.dp),
-            color = ComposerInk,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f)),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(34.dp))
+                .background(ComposerInk.copy(alpha = .94f)),
         ) {
             Row(
                 Modifier
@@ -512,7 +525,7 @@ private fun ComposerPanel(
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (snapshot.composerText.isEmpty()) {
                                 Text(
-                                    if (snapshot.voiceListening) OverlayCopy.LISTENING else OverlayCopy.COMPOSER,
+                                    if (foregroundWorking) "Working on it…" else if (snapshot.voiceListening) OverlayCopy.LISTENING else OverlayCopy.COMPOSER,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = .68f),
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
@@ -535,8 +548,10 @@ private fun ComposerPanel(
                 }
 
                 FilledIconButton(
-                    onClick = { submit() },
-                    enabled = snapshot.composerText.isNotBlank(),
+                    onClick = {
+                        if (foregroundWorking) onAction(OverlayUserAction.STOP_TASK) else submit()
+                    },
+                    enabled = if (foregroundWorking) true else snapshot.composerText.isNotBlank(),
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = AuroraBlue,
@@ -545,7 +560,13 @@ private fun ComposerPanel(
                         disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .30f),
                     ),
                 ) {
-                    Icon(Icons.Rounded.ArrowUpward, "Send new task", modifier = Modifier.size(23.dp))
+                    if (foregroundWorking) {
+                        Box(
+                            Modifier.size(15.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.onPrimary),
+                        )
+                    } else {
+                        Icon(Icons.Rounded.ArrowUpward, "Send new task", modifier = Modifier.size(23.dp))
+                    }
                 }
             }
         }
@@ -562,7 +583,6 @@ private fun GatePanel(
         modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .imePadding()
             .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp),
     ) {
         Surface(
