@@ -2,8 +2,8 @@ package com.cyclone.mobile.ui.v32
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
@@ -43,12 +43,12 @@ fun CycloneTaskStatusPill(
     val container = when (state) {
         CycloneTaskVisualState.WORKING -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .60f)
         CycloneTaskVisualState.ACTION_NEEDED -> MaterialTheme.colorScheme.tertiaryContainer
-        CycloneTaskVisualState.DONE -> CycloneColors.Success.copy(alpha = .12f)
+        CycloneTaskVisualState.DONE -> MaterialTheme.colorScheme.secondary.copy(alpha = .12f)
     }
     val content = when (state) {
         CycloneTaskVisualState.WORKING,
         CycloneTaskVisualState.ACTION_NEEDED -> MaterialTheme.colorScheme.onTertiaryContainer
-        CycloneTaskVisualState.DONE -> CycloneColors.Success
+        CycloneTaskVisualState.DONE -> MaterialTheme.colorScheme.secondary
     }
     val label = when (state) {
         CycloneTaskVisualState.WORKING -> "Working"
