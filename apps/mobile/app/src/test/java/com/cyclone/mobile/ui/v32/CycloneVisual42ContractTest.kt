@@ -32,9 +32,9 @@ class CycloneVisual42ContractTest {
         assertTrue(panel.contains("TaskGlassPresentation.current(task, resolvedApp)"))
         assertTrue(panel.contains("CycloneAppIcon(presentation.packageName"))
         assertTrue(panel.contains("UiTask(task).open(context)"))
-        assertTrue(panel.contains("Orientation.Horizontal"))
-        assertTrue(panel.contains("commitLeft"))
-        assertTrue(panel.contains("commitRight"))
+        assertTrue(panel.contains("TaskStatusMark(task.phase, actionNeeded)"))
+        assertTrue(panel.contains("task.interruption?.canTakeOver == true"))
+        assertTrue(panel.contains("task.interruption?.canResumeAfterHuman == true"))
         assertFalse(panel.contains("BorderStroke"))
         assertFalse(panel.contains("WorkspaceTaskUi("))
     }
