@@ -19,11 +19,40 @@ internal object ProfileBootstrapRuntime {
     private const val SHIZUKU_PERMISSION = "moe.shizuku.manager.permission.API_V23"
     private const val MAX_OUTPUT = 262144
 
-    fun prepare(context: Context, target: Int, profile: String) {
+    fun prepare(context: Context, target: Int, profile: String) = prepareInternal(context, target, profile, false)
+
+    fun requestRepair(context: Context) {
+        val target = ProfileSetupRuntime.currentUserId()
+        require(target > 0)
+        val owner = ProfileSetupRuntime.profileAUserId()
+        check(owner != target) { "You are already in the main profile." }
+        run("/system/bin/am", "start-user", "-w", "$owner")
+        run("/system/bin/am", "start-foreground-service", "--user", "$owner", "-n", SERVICE,
+            "-a", "com.cyclone.PROFILE_REPAIR", "--ei", "target", "$target")
+    }
+
+    fun reportRepairFailure(target: Int) {
+        if (target > 0 && run("/system/bin/am", "get-current-user").trim() == target.toString()) {
+            run("/system/bin/am", "start", "--user", "$target", "-n", "$PKG/.ui.ProfileRescueActivity", "--ez", "repair_failed", "true")
+        }
+    }
+
+    fun repairFromOwner(context: Context, target: Int) {
+        check(!com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask() &&
+            !com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask() && !Layer2Workspaces.gated()) { "Finish the current task first." }
+        val source = ProfileSetupRuntime.currentUserId()
+        val record = ProfileRegistryStore.records(context).single { it.androidUserId == target && it.parentUserId == source }
+        val users = ProfileSetupParser.users(run("/system/bin/cmd", "user", "list", "--all", "--verbose"))
+        check(users.any { it.id == target && it.name == record.id && ProfileRecovery.validOwned(it, source, true) })
+        synchronized(Layer2Workspaces.engine.mutationLock) { prepareInternal(context, target, record.id, true) }
+        run("/system/bin/am", "start", "--user", "$target", "-n", "$PKG/.MainActivity")
+    }
+
+    private fun prepareInternal(context: Context, target: Int, profile: String, repairingActiveTarget: Boolean) {
         require(context.packageName == PKG && ProfileSetupPlan.validProfileName(profile))
         val source = ProfileSetupRuntime.currentUserId()
         require(target > 0 && target != source)
-        check(run("/system/bin/am", "get-current-user").trim() == source.toString()) { "Open Cyclone in your active phone profile before preparing another." }
+        check(run("/system/bin/am", "get-current-user").trim() == (if (repairingActiveTarget) target else source).toString()) { "Open Cyclone in your active phone profile before preparing another." }
         val installedSupport = ProfileRequiredPackages.supportAllowlist.filter { pkg ->
             runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.isSuccess
         }.toSet()
@@ -47,7 +76,7 @@ internal object ProfileBootstrapRuntime {
         run("/system/bin/am", "force-stop", "--user", "$target", PKG)
         run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/profile-bootstrap-result.json", "$folder/profile-bootstrap.json")
         mirrorGrants(context, target)
-        run("/system/bin/am", "startservice", "--user", "$target", "-n", SERVICE)
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
         val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
         val nonce = UUID.randomUUID().toString()
         val preferences = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).all
@@ -62,13 +91,11 @@ internal object ProfileBootstrapRuntime {
         payload.put("listener", containsCyclone(Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners").orEmpty(), "CycloneNotificationListener"))
         val apiKey = OpenRouterSecretStore.read(context)
         if (apiKey.isNotBlank()) {
-            val key = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(Base64.decode(publicKey, Base64.NO_WRAP)))
-            val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
-            cipher.init(Cipher.ENCRYPT_MODE, key, ProfileBootstrapService.OAEP)
-            payload.put("key", Base64.encodeToString(cipher.doFinal(apiKey.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP))
+            val bytes = apiKey.toByteArray(Charsets.UTF_8)
+            try { payload.put("key", ProfileTransferCipher.encrypt(publicKey, bytes)) } finally { bytes.fill(0) }
         }
         writePrivate("$folder/profile-bootstrap.json", targetUid, payload.toString())
-        run("/system/bin/am", "startservice", "--user", "$target", "-n", SERVICE)
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
         poll {
             val ack = runCatching { JSONObject(run("/system/bin/cat", "$folder/profile-bootstrap-result.json")) }.getOrNull()
             if (ack?.optString("nonce") == nonce && ack.optInt("user") == target && ack.optBoolean("ok")) "ready" else null

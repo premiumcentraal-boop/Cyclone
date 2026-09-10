@@ -8,6 +8,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.cyclone.mobile.ai.OpenRouterSecretStore
 import org.json.JSONObject
+import kotlinx.coroutines.*
 import java.io.File
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -18,8 +19,31 @@ import java.security.spec.MGF1ParameterSpec
 
 /** Non-exported, short-lived receiver started by the trusted root profile manager. */
 class ProfileBootstrapService : Service() {
+    private val repairScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var repairJob: Job? = null
+    override fun onDestroy() { repairScope.cancel(); super.onDestroy() }
+    override fun onCreate() {
+        super.onCreate()
+        val manager = getSystemService(android.app.NotificationManager::class.java)
+        manager.createNotificationChannel(android.app.NotificationChannel("cyclone-profile-setup", "Profile setup", android.app.NotificationManager.IMPORTANCE_LOW))
+        val notification = android.app.Notification.Builder(this, "cyclone-profile-setup")
+            .setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle("Preparing Cyclone profile")
+            .setContentText("Transferring your settings securely").setOngoing(true).build()
+        if (android.os.Build.VERSION.SDK_INT >= 34) startForeground(903, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        else startForeground(903, notification)
+    }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "com.cyclone.PROFILE_REPAIR") {
+            if (repairJob?.isActive != true) repairJob = repairScope.launch {
+                try { ProfileBootstrapRuntime.repairFromOwner(this@ProfileBootstrapService, intent.getIntExtra("target", -1)) }
+                catch (_: Exception) {
+                    runCatching { ProfileBootstrapRuntime.reportRepairFailure(intent.getIntExtra("target", -1)) }
+                }
+                finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
+            }
+            return START_NOT_STICKY
+        }
         val folder = createDeviceProtectedStorageContext().filesDir
         val input = File(folder, "profile-bootstrap.json")
         val result = File(folder, "profile-bootstrap-result.json")
@@ -49,9 +73,7 @@ class ProfileBootstrapService : Service() {
                 check(createDeviceProtectedStorageContext().getSharedPreferences("cyclone_profile_origin", MODE_PRIVATE).edit()
                     .putInt("source", transfer.getInt("source")).putString("profile", transfer.getString("profile")).commit())
                 if (transfer.has("key")) {
-                    val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
-                    cipher.init(Cipher.DECRYPT_MODE, store.getKey(ALIAS, null), OAEP)
-                    val bytes = cipher.doFinal(Base64.decode(transfer.getString("key"), Base64.NO_WRAP))
+                    val bytes = ProfileTransferCipher.decrypt(store.getKey(ALIAS, null) as java.security.PrivateKey, transfer.getString("key"))
                     try { OpenRouterSecretStore.save(this, String(bytes, Charsets.UTF_8)) } finally { bytes.fill(0) }
                     check(OpenRouterSecretStore.hasKey(this))
                 }
@@ -77,12 +99,12 @@ class ProfileBootstrapService : Service() {
             // Never log preference contents, encrypted payloads, or credential failures with values.
             result.writeText("{\"ok\":false}")
         } finally {
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)
         }
         return START_NOT_STICKY
     }
     companion object {
         private const val ALIAS = "cyclone.profile.bootstrap.v1"
-        val OAEP = OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT)
     }
 }

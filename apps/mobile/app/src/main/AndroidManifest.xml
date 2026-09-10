@@ -50,8 +50,11 @@
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
-        <service android:name=".runtime.workspaces.ProfileBootstrapService" android:exported="false" />
+        <service android:name=".runtime.workspaces.ProfileBootstrapService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-requested secure profile configuration transfer" />
+        </service>
 
+        <activity android:name=".ui.ProfileRescueActivity" android:exported="false" />
         <activity android:name=".ui.overlay.OverlayAttachmentActivity" android:exported="false" />
         <activity android:name=".ui.overlay.CycloneAiSettingsActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
