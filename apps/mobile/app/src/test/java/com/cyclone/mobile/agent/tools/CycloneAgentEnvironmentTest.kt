@@ -160,7 +160,7 @@ class CycloneAgentEnvironmentTest {
             expectedPackage = "",
             goalLabel = "Continue",
             beforeObservation = unchanged,
-            afterObservation = unchanged,
+            afterObservation = observation("obs-expect-after", "home", "fp-expect"),
             androidExecutionOk = true,
             executorAssertionFailed = false,
             explicitExpectation = true,
@@ -168,6 +168,17 @@ class CycloneAgentEnvironmentTest {
         assertFalse(result.passed)
         assertEquals(AgentVerificationStatus.OBSERVED, result.status)
         assertEquals("NO_SEMANTIC_PROGRESS", result.basis)
+    }
+
+    @Test fun reusedObservationCannotVerifyBack() {
+        val same = observation("same", "home", "fp")
+        val result = GatewayV33ActionAdapter.verifyAfterState(
+            tool = "phone.back", expectedPackage = "", goalLabel = "Back",
+            beforeObservation = same, afterObservation = same, androidExecutionOk = true,
+            executorAssertionFailed = false, explicitExpectation = false)
+        assertFalse(result.passed)
+        assertEquals(AgentVerificationStatus.FAILED, result.status)
+        assertEquals("OBSERVATION_IDENTITY_MISMATCH", result.basis)
     }
 
     @Test fun pcFacingVerifierRejectsIdentityChurnAndAcceptsSemanticWitness() {

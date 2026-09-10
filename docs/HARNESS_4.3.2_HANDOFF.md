@@ -15,8 +15,10 @@ Candidate: 4.3.2 /93. The release artifact's `source-sha.txt` identifies its exa
 - `9a5934e3cc8931f10ecc4adc6b18ced3ee699e92` — feat(mobile): add working done and action-needed task card
 - `a2e40b2a4826ba51ef59fd1b0dee196d7d51d751` — fix(mobile): bind task controls to interruption capabilities and align frontend tests
 - `1d82201300aeae163f0c4fd6882c751410d8ed37` — fix(mobile): verify compiled routine outcomes and classify execution scope failures
+- `7a4e057690a4f6129418b83fee047a2f07b8c941` — fix(mobile): unify legacy takeover commands and document 4.3.2 validation
+- `69730f9fd95096346598bc0cd5fad8317d75e579` — test(mobile): align visual contract guard with integrated task card
 
-Later cleanup and release-authorization checkpoints are in this branch's history; no prior milestone was amended.
+The final metadata authorization commit follows these milestones; its SHA is embedded in the published APK provenance.
 
 ## Actual reliability seams
 
@@ -92,6 +94,7 @@ No physical phone or emulator acceptance run was performed. Pixel 8 execution an
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/skills/CompiledSkillReplayTest.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/ui/v32/Cyclone422TaskGlassTest.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/ui/v32/CycloneTaskPresentationTest.kt`
-- `release/version.toml`
-- `docs/RELEASE_4.3.2.md`
+- `apps/mobile/app/src/test/java/com/cyclone/mobile/ui/v32/CycloneVisual42ContractTest.kt`
 - `docs/HARNESS_4.3.2_HANDOFF.md`
+- `docs/RELEASE_4.3.2.md`
+- `release/version.toml`
