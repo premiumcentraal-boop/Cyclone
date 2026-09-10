@@ -1,31 +1,14 @@
 package com.cyclone.mobile.ui.v32
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,15 +57,207 @@ private fun modelSubtitle(model: OpenRouterModelPreset): String = when (model.id
     else -> "Cyclone model"
 }
 
+private enum class OverlaySettingsStep { MODEL, INTELLIGENCE, AUTONOMY }
+
 /**
- * Compact intelligence surface shared by the in-app composer and the system overlay. In the
- * overlay we include the model pill at the top so model choice is never hidden behind autonomy.
+ * Intelligence surface shared by the in-app composer and the system overlay.
+ *
+ * The overlay path intentionally behaves as one small transforming pill: model -> intelligence ->
+ * phone autonomy -> model. This keeps settings out of the composer body and prevents nested cards.
  */
 @Composable
 fun CycloneModelIntelligencePanel(
     modelId: String,
     effort: String,
     showModelSelector: Boolean = true,
+    onChange: (String, String) -> Unit,
+) {
+    if (showModelSelector) {
+        OverlaySettingsWizard(modelId = modelId, effort = effort, onChange = onChange)
+    } else {
+        StandardIntelligencePanel(modelId = modelId, effort = effort, onChange = onChange)
+    }
+}
+
+@Composable
+private fun OverlaySettingsWizard(
+    modelId: String,
+    effort: String,
+    onChange: (String, String) -> Unit,
+) {
+    val context = LocalContext.current
+    var step by remember { mutableStateOf(OverlaySettingsStep.MODEL) }
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    var autonomy by remember { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
+    val currentModel = V39AiChatContract.modelForStored(modelId)
+    val currentEffort = normalizedEffort(effort)
+
+    Column(
+        modifier = Modifier
+            .widthIn(min = 278.dp, max = 344.dp)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        when (step) {
+            OverlaySettingsStep.MODEL -> {
+                Box(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { modelMenuOpen = true }
+                            .padding(horizontal = 7.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            currentModel.label,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Icon(
+                            Icons.Rounded.KeyboardArrowDown,
+                            contentDescription = "Choose model",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = modelMenuOpen,
+                        onDismissRequest = { modelMenuOpen = false },
+                        modifier = Modifier.widthIn(min = 276.dp, max = 316.dp),
+                    ) {
+                        Text(
+                            "Select model",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        OpenRouterModelPresets.all.forEach { option ->
+                            val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
+                            DropdownMenuItem(
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                        Text(
+                                            option.label,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            modelSubtitle(option),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onChange(V39AiChatContract.storageId(option), currentEffort)
+                                    modelMenuOpen = false
+                                    step = OverlaySettingsStep.INTELLIGENCE
+                                },
+                                leadingIcon = {
+                                    if (selected) {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            null,
+                                            Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    } else {
+                                        Spacer(Modifier.size(18.dp))
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
+            OverlaySettingsStep.INTELLIGENCE -> {
+                Text(
+                    "Intelligence",
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    intelligenceLevels.forEach { level ->
+                        CompactChoice(
+                            label = effortLabel(level),
+                            selected = currentEffort == level,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            onChange(modelId, level)
+                            step = OverlaySettingsStep.AUTONOMY
+                        }
+                    }
+                }
+            }
+
+            OverlaySettingsStep.AUTONOMY -> {
+                Text(
+                    "Phone autonomy",
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 1.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    listOf(
+                        CycloneAiAccessProfile.GUIDED to "Ask often",
+                        CycloneAiAccessProfile.BALANCED to "Balanced",
+                        CycloneAiAccessProfile.FULL to "Independent",
+                    ).forEach { (profile, label) ->
+                        CompactChoice(
+                            label = label,
+                            selected = autonomy == profile,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            autonomy = profile
+                            CycloneAiAccessProfileStore.write(context, profile)
+                            step = OverlaySettingsStep.MODEL
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactChoice(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StandardIntelligencePanel(
+    modelId: String,
+    effort: String,
     onChange: (String, String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -94,17 +269,6 @@ fun CycloneModelIntelligencePanel(
         Modifier.widthIn(min = 252.dp, max = 292.dp).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (showModelSelector) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CycloneModelPill(
-                    modelId = modelId,
-                    effort = currentEffort,
-                    onChange = onChange,
-                )
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f))
-        }
-
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Intelligence", style = MaterialTheme.typography.titleSmall)
             Text(
