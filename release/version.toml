@@ -1,24 +1,22 @@
-# Cyclone Mobile 4.2.9 profile redesign release
-# User explicitly authorized 4.2.9 publication on September 10, 2026.
-# Finalized on release/cyclone-mobile-v4.2.9; exact-source CI and publication guards are mandatory.
+# Cyclone Mobile 4.3.0 profile rescue candidate; publication waits for exact-source CI.
 schema = 1
-product_version = "4.2.9"
+product_version = "4.3.0"
 channel = "development"
-android_version_code = 90
+android_version_code = 91
 python_version = "4.1.0"
 
 [components]
-mobile = "4.2.9"
+mobile = "4.3.0"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.2.8"
-publication_authorized = true
+previous_mobile_version = "4.2.9"
+publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.2.9-profile-redesign"
+candidate_generation = "cyclone-4.3.0-profile-continuity"

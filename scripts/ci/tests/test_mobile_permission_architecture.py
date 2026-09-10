@@ -25,6 +25,7 @@ INFRASTRUCTURE_PERMISSIONS = {
 # Every permission in this set must appear in the Cyclone setup UI as a row that maps to the
 # capability it backs. Add new permissions here only together with a real setup row.
 SETUP_ROW_PERMISSIONS = {
+    "moe.shizuku.manager.permission.API_V23",  # Existing Background tasks → Authorize Shizuku row
     "android.permission.REQUEST_INSTALL_PACKAGES",  # User-requested, pinned helper installer in Background setup
 
     "android.permission.POST_NOTIFICATIONS",  # Result notifications
@@ -229,6 +230,12 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
                 receiver_names(manifest),
                 manifest.name,
             )
+
+    def test_shizuku_runtime_permission_has_existing_authorization_row(self):
+        source = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/background/BackgroundSetupActivity.kt").read_text()
+        self.assertIn("InstallStep.AUTHORIZE_SHIZUKU", source)
+        self.assertIn("Shizuku.requestPermission", source)
+        self.assertIn("moe.shizuku.manager.permission.API_V23", declared_permissions(self.app_manifest))
 
     def test_every_declared_permission_is_infrastructure_or_has_a_setup_row(self):
         declared = declared_permissions(self.app_manifest) | declared_permissions(self.diagnostics_manifest)

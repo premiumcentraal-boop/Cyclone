@@ -131,6 +131,12 @@ internal object ProfileBootstrapRuntime {
             }
         }
         if (Settings.canDrawOverlays(context)) run("/system/bin/cmd", "appops", "set", "--user", "$target", PKG, "SYSTEM_ALERT_WINDOW", "allow")
+        if (context.getSystemService(android.app.AlarmManager::class.java).canScheduleExactAlarms())
+            run("/system/bin/cmd", "appops", "set", "--user", "$target", PKG, "SCHEDULE_EXACT_ALARM", "allow")
+        if (context.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(PKG))
+            run("/system/bin/cmd", "deviceidle", "whitelist", "+$PKG")
+        if (context.getSystemService(android.app.role.RoleManager::class.java).isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT))
+            run("/system/bin/cmd", "role", "add-role-holder", "--user", "$target", android.app.role.RoleManager.ROLE_ASSISTANT, PKG)
         val ownAccessibility = Settings.Secure.getString(context.contentResolver, "enabled_accessibility_services").orEmpty()
         if (containsCyclone(ownAccessibility, "CycloneAccessibilityService")) {
             val existing = run("/system/bin/settings", "--user", "$target", "get", "secure", "enabled_accessibility_services").trim()
