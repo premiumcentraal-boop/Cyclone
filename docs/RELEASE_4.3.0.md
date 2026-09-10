@@ -3,6 +3,11 @@
 Base: published v4.2.9, ae52303b834d88e9e40983a7415c1b3bc1558896.
 Mobile version 4.3.0 / versionCode 91. Other component versions unchanged.
 
+Publication authorized by the user on September 10, 2026. Candidate checkpoint
+40e7ab3e passed Android unit tests, lint and release assembly in Mobile CI run
+34472901345. The final release source must independently pass the same pipeline,
+then verify APK identity, checksum and signing continuity with published 4.2.9.
+
 ## Rescue an existing unconfigured profile
 
 A secondary user without transferred settings opens a dedicated recovery screen before

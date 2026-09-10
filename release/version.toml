@@ -1,4 +1,5 @@
-# Cyclone Mobile 4.3.0 profile rescue candidate; publication waits for exact-source CI.
+# Cyclone Mobile 4.3.0 profile rescue release.
+# User authorized publication on September 10, 2026; exact-source CI remains mandatory.
 schema = 1
 product_version = "4.3.0"
 channel = "development"
@@ -13,7 +14,7 @@ mcp = "4.1.0"
 
 [release]
 previous_mobile_version = "4.2.9"
-publication_authorized = false
+publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
