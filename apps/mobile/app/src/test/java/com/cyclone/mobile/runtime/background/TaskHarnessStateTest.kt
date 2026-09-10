@@ -31,6 +31,13 @@ class TaskHarnessStateTest {
         assertFalse(TaskHarnessState.interruption(t.copy(phase = TaskPhase.REVIEW))!!.canResumeAfterHuman)
         assertFalse(TaskHarnessState.interruption(human.copy(resumable = false))!!.canResumeAfterHuman)
     }
+    @Test fun terminalTaskCannotKeepClaimingAnActiveOperation() {
+        val t = task()
+        val terminal = TaskHarnessState.normalize(t, t.copy(phase = TaskPhase.FAILED))
+        assertEquals(SemanticStepState.FAILED, terminal.semanticSteps.last().state)
+        assertEquals("The task could not finish.", terminal.subtitle)
+        assertTrue(terminal.steps.isEmpty())
+    }
     @Test fun secretOrRawActionValuesAreNeverUsedAsLabels() {
         for (tool in listOf("phone.type", "password=abc123", "Tap x=421 y=782", "sk-or-secret")) {
             val label = TaskHarnessState.operationLabel(tool, "secret@example.com")

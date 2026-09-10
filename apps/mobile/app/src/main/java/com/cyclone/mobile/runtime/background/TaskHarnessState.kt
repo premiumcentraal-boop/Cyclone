@@ -71,6 +71,8 @@ object TaskHarnessState {
         val revision = if (interrupted) previous.controlRevision + 1 else next.controlRevision
         val steps = if (interrupted) next.semanticSteps.map {
             if (it.state == SemanticStepState.ACTIVE) it.copy(state = SemanticStepState.ACTION_NEEDED) else it
+        } else if (!next.working) next.semanticSteps.map {
+            if (it.state == SemanticStepState.ACTIVE) it.copy(state = SemanticStepState.FAILED, evidence = "UNVERIFIED") else it
         } else next.semanticSteps
         return next.copy(controlRevision = revision, semanticSteps = steps, interruption = interruption(next))
     }

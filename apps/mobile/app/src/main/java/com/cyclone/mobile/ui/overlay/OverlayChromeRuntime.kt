@@ -230,6 +230,12 @@ object OverlayChromeRuntime {
 
     fun dispatch(action: OverlayUserAction) {
         val before = snapshot()
+        if (action == OverlayUserAction.TAKE_CONTROL) {
+            WorkspaceTasks.state.value?.takeIf { it.foreground && it.taskId == foregroundTaskId }?.let { task ->
+                commandForegroundTask(task.taskId, if (before.userPaused) "resume" else "handoff")
+                return
+            }
+        }
         if (action == OverlayUserAction.GATE_CONFIRM) approvePendingGateChallenge(before)
         mutate { it.dispatch(action) }
         when (action) {
@@ -429,9 +435,9 @@ object OverlayChromeRuntime {
         when (command) {
             "handoff", "pause" -> {
                 if (!task.working && task.interruption?.canTakeOver != true && task.phase != TaskPhase.DONE) return
+                WorkspaceTasks.update(id) { it.copy(phase = TaskPhase.HUMAN) }
                 DeviceState.setController(DeviceState.Controller.HUMAN)
                 if (!snapshot().userPaused) mutate { it.dispatch(OverlayUserAction.TAKE_CONTROL) }
-                WorkspaceTasks.update(id) { it.copy(phase = TaskPhase.HUMAN) }
             }
             "resume" -> {
                 if (task.interruption?.canResumeAfterHuman != true) return
