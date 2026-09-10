@@ -31,7 +31,9 @@ class CycloneProfile429ContractTest {
         assertTrue(source.contains("\"\$app · \${profile.label}\""))
         assertTrue(source.contains("Text(\"View progress\")"))
         assertTrue(source.contains("Text(\"Open profile\")"))
-        assertTrue(source.contains("ProfileSetupRuntime.openProfile(context, recordId)"))
+        assertTrue(source.contains("val openingMain = profile.androidUserId == 0"))
+        assertTrue(source.contains("ProfileSetupRuntime.openProfile(context, if (openingMain) null else recordId)"))
+        assertFalse(source.contains("it.id in emptySet<String>()"))
     }
 
     @Test fun allProfilesAreIdentityCardsWithAppCountsAndIcons() {

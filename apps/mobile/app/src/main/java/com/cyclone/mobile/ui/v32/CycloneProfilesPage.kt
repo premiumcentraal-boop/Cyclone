@@ -190,8 +190,9 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     }
 
     fun openProfile(profile: ProfileCluster) {
+        val openingMain = profile.androidUserId == 0
         val recordId = profile.recordId
-        if (!profile.ready || recordId == null) {
+        if (!profile.ready || (!openingMain && recordId == null)) {
             error = "Finish setting up ${profile.label} before opening it."
             setup = true
             return
@@ -200,7 +201,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
         error = ""
         scope.launch {
             try {
-                withContext(Dispatchers.IO) { ProfileSetupRuntime.openProfile(context, recordId) }
+                withContext(Dispatchers.IO) { ProfileSetupRuntime.openProfile(context, if (openingMain) null else recordId) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -397,7 +398,6 @@ private fun ActiveProfileCard429(
 ) {
     val activeWorkspace = profile.workspaces.firstOrNull { it.id == task?.workspaceId }
         ?: profile.workspaces.firstOrNull { it.state == WorkspaceState.running || it.state == WorkspaceState.gated }
-        ?: profile.workspaces.firstOrNull { it.id in emptySet<String>() }
         ?: profile.workspaces.firstOrNull()
     val packageName = task?.packageName ?: activeWorkspace?.appPackage ?: profile.packages.firstOrNull()
     val app = packageName?.let { appLabel(context, it) } ?: "Profile"
