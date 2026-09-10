@@ -46,9 +46,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,13 +60,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.ui.CycloneTheme
+import com.cyclone.mobile.ui.v32.CycloneTheme
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import kotlinx.coroutines.delay
 
-/** Polished in-app control center for Cyclone's USB-only PC/Codex bridge. */
+/** Current Cyclone control center for the USB-only PC bridge. */
 class GatewaySettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,13 +82,6 @@ class GatewaySettingsActivity : ComponentActivity() {
     }
 }
 
-private enum class GatewayUiState(val label: String, val subtitle: String) {
-    OFF("Gateway off", "Connect USB when you are ready. Cyclone can still receive a first-time trust request."),
-    WAITING("Waiting for PC", "Cyclone is ready for your trusted PC to connect over USB."),
-    CONNECTED("Connected", "Your trusted PC can use Cyclone's approved phone controls."),
-    ATTENTION("Needs attention", "One part of the connection needs to be fixed before PC control is ready."),
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GatewayControlCenter(
@@ -95,6 +90,7 @@ private fun GatewayControlCenter(
 ) {
     var refreshTick by remember { mutableIntStateOf(0) }
     var technicalOpen by remember { mutableStateOf(false) }
+    val livePhoneState by LivePhoneMode.state.collectAsState()
 
     BackHandler(onBack = onClose)
     LaunchedEffect(Unit) {
@@ -124,6 +120,7 @@ private fun GatewayControlCenter(
     }
     val session = status.optJSONObject("connectedSession")
     val connected = session?.optBoolean("connected") == true
+    val clientCount = session?.optInt("clientCount", 0) ?: 0
     val bootstrapReady = status.optBoolean("pairingBootstrapListening")
     val productionAuthority = status.optBoolean("productionActionAuthorityBound")
     val trust = status.optJSONObject("trust")
@@ -134,20 +131,46 @@ private fun GatewayControlCenter(
     val pairingCode = remember(refreshTick) { GatewayDesktopPairingManager.codeForUser() }
     val pairingExpiresAt = remember(refreshTick) { GatewayDesktopPairingManager.expiresAtForUser() }
     val clipboardEnabled = remember(refreshTick) { GatewayDesktopPreferences.clipboardEnabled(context) }
-    val state = when (status.optString("gatewayState")) {
-        "CONNECTED" -> GatewayUiState.CONNECTED
-        "WAITING_FOR_PC" -> GatewayUiState.WAITING
-        "ATTENTION_NEEDED" -> GatewayUiState.ATTENTION
-        else -> GatewayUiState.OFF
+    val pcPresent = connected || pendingTrust != null || clientCount > 0
+    val trustReady = connected || trustedPcCount > 0
+
+    val heroTitle = when {
+        connected -> "Connected"
+        pendingTrust != null || (pcPresent && !trustReady) -> "USB connected · approval needed"
+        !phoneControlReady -> "Phone control needed"
+        enabled && bootstrapReady -> "Ready for PC"
+        enabled -> "Starting PC Gateway"
+        else -> "PC Gateway off"
+    }
+    val heroSubtitle = when {
+        connected -> "This PC can use Cyclone's approved phone controls."
+        pendingTrust != null -> "Approve the trust request below to finish this connection."
+        pcPresent && !trustReady -> "The phone sees your PC. Approve Cyclone AI trust when the request appears."
+        !phoneControlReady -> "Turn on phone control before the PC can operate this screen."
+        enabled && bootstrapReady -> "Connect Cyclone One over USB when you want PC control."
+        enabled -> "Preparing the local USB bridge."
+        else -> "Turn it on when you want to use Cyclone from your PC."
+    }
+
+    val localRepairAction = nextAction?.takeIf {
+        it.code == GatewayReadyDoctor.TURN_ON_GATEWAY ||
+            it.code == GatewayReadyDoctor.FIX_USB_BRIDGE ||
+            it.code == GatewayReadyDoctor.REPAIR_PHONE_CONTROL ||
+            it.code == GatewayReadyDoctor.ENABLE_PHONE_CONTROL
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                         Text("PC Gateway", fontWeight = FontWeight.SemiBold)
-                        Text("USB trust + control", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "USB trust + phone control",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 },
                 navigationIcon = {
@@ -160,24 +183,17 @@ private fun GatewayControlCenter(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("LIVE PHONE · Cloud ChatGPT", style = MaterialTheme.typography.titleMedium)
-                    Text("Controls this visible screen. Resume here after using Pause or Stop.")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { LivePhoneMode.setPaused(context, false) }) { Text("Resume") }
-                        OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true) }) { Text("Pause") }
-                        OutlinedButton(onClick = { LivePhoneMode.setPaused(context, true, true) }) { Text("Stop") }
-                    }
-                    Text("ON PC AI · Native Codex / Grok / Claude / Cursor")
-                    Text("BACKGROUND PHONE · Separate app profiles and task screens")
-                }
-            }
-            item {
-                GatewayHero(state = state, enabled = enabled) { turnOn ->
+                GatewayHero(
+                    title = heroTitle,
+                    subtitle = heroSubtitle,
+                    enabled = enabled,
+                    connected = connected,
+                    attention = pendingTrust != null || phoneControlNeedsRepair,
+                ) { turnOn ->
                     runCatching {
                         if (turnOn) GatewayRuntime.enable(context) else GatewayRuntime.disable(context)
                     }.onFailure {
@@ -187,10 +203,67 @@ private fun GatewayControlCenter(
                 }
             }
 
-            if (nextAction != null) {
+            if (pendingTrust != null) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+                                    Icon(
+                                        Icons.Rounded.Security,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.padding(8.dp).size(20.dp),
+                                    )
+                                }
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    Text("Allow this PC?", style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        pendingTrust.pcLabel,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                }
+                            }
+                            Text(
+                                "Approve this PC for short-lived Cyclone sessions. Sensitive actions still require confirmation.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        val accepted = GatewayV33TrustManager.decideTrust(context, pendingTrust.challengeId, true)
+                                        Toast.makeText(
+                                            context,
+                                            if (accepted) "PC approved" else "Trust request expired. Request it again on the PC.",
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                        refreshTick++
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Allow this PC") }
+                                TextButton(
+                                    onClick = {
+                                        GatewayV33TrustManager.decideTrust(context, pendingTrust.challengeId, false)
+                                        refreshTick++
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Not now") }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (localRepairAction != null && pendingTrust == null) {
                 item {
                     GatewayNextActionCard(
-                        action = nextAction,
+                        action = localRepairAction,
                         gatewayEnabled = enabled,
                         onTurnOnGateway = {
                             runCatching { GatewayRuntime.enable(context) }.onFailure {
@@ -205,85 +278,26 @@ private fun GatewayControlCenter(
                 }
             }
 
-            if (pendingTrust != null) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(26.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                    ) {
-                        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                                    Icon(
-                                        Icons.Rounded.Security,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.padding(9.dp).size(22.dp),
-                                    )
-                                }
-                                Spacer(Modifier.width(11.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("Allow this PC?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                    Text(
-                                        pendingTrust.pcLabel,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    )
-                                }
-                            }
-                            Text(
-                                "This creates revocable, device-bound Cyclone AI trust. It does not raise the AI permission profile or bypass confirmations for payments, credentials, final sends, destructive changes, or security settings.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            Text(
-                                "PC fingerprint ${pendingTrust.pcId.take(16)}… · expires shortly",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Button(
-                                onClick = {
-                                    val accepted = GatewayV33TrustManager.decideTrust(context, pendingTrust.challengeId, true)
-                                    Toast.makeText(
-                                        context,
-                                        if (accepted) "PC approved. Cyclone Desktop can finish trust now." else "Trust request expired. Request it again on the PC.",
-                                        Toast.LENGTH_LONG,
-                                    ).show()
-                                    refreshTick++
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Allow this PC") }
-                            OutlinedButton(
-                                onClick = {
-                                    GatewayV33TrustManager.decideTrust(context, pendingTrust.challengeId, false)
-                                    Toast.makeText(context, "PC trust rejected", Toast.LENGTH_SHORT).show()
-                                    refreshTick++
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Reject") }
-                        }
-                    }
-                }
-            }
-
             item {
                 Card(
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(13.dp),
                     ) {
-                        Text("Connection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Connection", style = MaterialTheme.typography.titleMedium)
                         GatewayStatusLine(
                             icon = Icons.Rounded.Link,
                             title = "USB bridge",
                             value = when {
-                                !bootstrapReady -> "Starting"
-                                enabled -> "Ready"
-                                else -> "Trust bootstrap"
+                                pcPresent -> "Connected"
+                                bootstrapReady -> "Ready"
+                                else -> "Starting"
                             },
-                            ready = bootstrapReady,
+                            ready = pcPresent || bootstrapReady,
                         )
                         GatewayStatusLine(
                             icon = Icons.Rounded.PhoneAndroid,
@@ -291,7 +305,7 @@ private fun GatewayControlCenter(
                             value = when {
                                 phoneControlReady -> "Ready"
                                 phoneControlNeedsRepair -> "Needs repair"
-                                else -> "Accessibility off"
+                                else -> "Off"
                             },
                             ready = phoneControlReady,
                         )
@@ -299,19 +313,19 @@ private fun GatewayControlCenter(
                             icon = Icons.Rounded.Computer,
                             title = "Cyclone AI trust",
                             value = when {
-                                pendingTrust != null -> "Confirm on phone"
+                                pendingTrust != null -> "Approve"
                                 connected -> "Session active"
                                 trustedPcCount > 0 -> "Trusted"
                                 else -> "Not trusted"
                             },
-                            ready = trustedPcCount > 0 && pendingTrust == null,
+                            ready = trustReady && pendingTrust == null,
                         )
-                        HorizontalDivider()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Clipboard paste", fontWeight = FontWeight.Medium)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("Clipboard paste", style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    "Opt in to PC → phone clipboard. Password, OTP and token-like values are blocked.",
+                                    "PC → phone paste; password, OTP and token-like values stay blocked.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -328,152 +342,104 @@ private fun GatewayControlCenter(
                 }
             }
 
+            if (livePhoneState != "Not connected") {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(Icons.Rounded.PhoneAndroid, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text("Live phone", style = MaterialTheme.typography.titleSmall)
+                                Text(livePhoneState, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (livePhoneState == "Paused" || livePhoneState == "Stopped") {
+                                FilledTonalButton(onClick = { LivePhoneMode.setPaused(context, false) }) { Text("Resume") }
+                            } else {
+                                TextButton(onClick = { LivePhoneMode.setPaused(context, true) }) { Text("Pause") }
+                                TextButton(onClick = { LivePhoneMode.setPaused(context, true, true) }) { Text("Stop") }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (trustedPcCount > 0 || connected) {
                 item {
                     Card(
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     ) {
-                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                                    Icon(
-                                        Icons.Rounded.Lock,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.padding(9.dp).size(22.dp),
-                                    )
-                                }
-                                Spacer(Modifier.width(11.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("Trusted PCs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Icon(Icons.Rounded.Lock, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    Text("Trusted PCs", style = MaterialTheme.typography.titleSmall)
                                     Text(
-                                        "$trustedPcCount trusted · $trustedSessionCount active session${if (trustedSessionCount == 1) "" else "s"}. No reusable secret is shown or copied.",
+                                        "$trustedPcCount trusted · $trustedSessionCount active session${if (trustedSessionCount == 1) "" else "s"}",
                                         style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
-                            if (connected) {
-                                OutlinedButton(
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (connected) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            GatewayRuntime.disconnect()
+                                            refreshTick++
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("Disconnect") }
+                                }
+                                TextButton(
                                     onClick = {
+                                        val count = GatewayV33TrustManager.revokeAllLocal(context)
                                         GatewayRuntime.disconnect()
+                                        Toast.makeText(
+                                            context,
+                                            if (count > 0) "Revoked $count trusted PC${if (count == 1) "" else "s"}" else "No trusted PCs to revoke",
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
                                         refreshTick++
                                     },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("Disconnect current PC session") }
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Revoke trust") }
                             }
-                            OutlinedButton(
-                                onClick = {
-                                    val count = GatewayV33TrustManager.revokeAllLocal(context)
-                                    GatewayRuntime.disconnect()
-                                    Toast.makeText(
-                                        context,
-                                        if (count > 0) "Revoked $count trusted PC${if (count == 1) "" else "s"}" else "No trusted PCs to revoke",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                    refreshTick++
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Revoke trusted PCs") }
                         }
                     }
                 }
             }
 
-            if (pairingCode != null) {
+            if (!connected && trustedPcCount == 0 && pendingTrust == null) {
                 item {
-                    Card(
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text("Legacy fallback pairing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(
-                                "Only use this with a transition PC Companion or non-USB fallback. Normal USB setup uses Allow this PC above.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            Button(
-                                onClick = { scanDesktopPairingQr(context) },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Icon(Icons.Rounded.QrCodeScanner, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Scan fallback QR")
-                            }
-                            Text("Or enter this compatibility code on the PC", style = MaterialTheme.typography.labelMedium)
-                            Text(
-                                pairingCode,
-                                style = MaterialTheme.typography.displaySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            val seconds = (((pairingExpiresAt ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L) / 1000L)
-                            Text(
-                                "Expires in about ${seconds}s. Credentials from this transition path are read-only.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (!phoneControlReady && nextAction == null) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(22.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    ) {
-                        Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.Security, null, tint = MaterialTheme.colorScheme.onErrorContainer)
-                                Spacer(Modifier.width(9.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("Enable phone control", fontWeight = FontWeight.Bold)
-                                    Text(
-                                        "Cyclone Accessibility must be on before semantic observation and approved PC actions are ready.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                            Button(
-                                onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Open Accessibility settings") }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Card(shape = RoundedCornerShape(24.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-                        Text("Connect your PC", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        GatewayStep("1", "Connect USB", "Plug this phone into your Windows PC and allow Android USB debugging once.")
-                        GatewayStep("2", "Choose this phone", "Cyclone Desktop discovers the ADB-authorized phone and requests Cyclone AI trust.")
-                        GatewayStep("3", "Allow this PC", "Confirm the visible request on this phone once. Future connections open fresh short-lived sessions automatically.")
-                    }
+                    GatewayConnectGuide(
+                        pcPresent = pcPresent,
+                        usbReady = bootstrapReady,
+                        phoneReady = phoneControlReady,
+                    )
                 }
             }
 
             status.optString("lastSafeError").takeIf { it.isNotBlank() && it != "null" }?.let { safeError ->
                 item {
                     Card(
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                     ) {
-                        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.Top) {
                             Icon(Icons.Rounded.Error, null, tint = MaterialTheme.colorScheme.onErrorContainer)
                             Spacer(Modifier.width(9.dp))
-                            Column {
-                                Text("Connection needs attention", fontWeight = FontWeight.Bold)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("Connection needs attention", style = MaterialTheme.typography.titleSmall)
                                 Text(safeError, style = MaterialTheme.typography.bodySmall)
-                                status.optString("lastSafeErrorCode").takeIf { it.isNotBlank() && it != "null" }?.let {
-                                    Text(it, style = MaterialTheme.typography.labelSmall)
-                                }
                             }
                         }
                     }
@@ -481,7 +447,7 @@ private fun GatewayControlCenter(
             }
 
             item {
-                FilledTonalButton(
+                TextButton(
                     onClick = { technicalOpen = !technicalOpen },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -491,27 +457,188 @@ private fun GatewayControlCenter(
 
             if (technicalOpen) {
                 item {
-                    Card(shape = RoundedCornerShape(20.dp)) {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    ) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Bridge diagnostics", fontWeight = FontWeight.Bold)
+                            Text("Bridge diagnostics", style = MaterialTheme.typography.titleSmall)
                             DiagnosticLine("Socket", status.optString("socketLifecycleState").ifBlank { "UNKNOWN" })
                             DiagnosticLine("Gateway authority", if (enabled) "ENABLED" else "DISABLED")
-                            DiagnosticLine("ADB clients", (session?.optInt("clientCount") ?: 0).toString())
+                            DiagnosticLine("ADB clients", clientCount.toString())
                             DiagnosticLine("AI trust", trustState.ifBlank { "UNKNOWN" })
                             DiagnosticLine("Semantic", status.optString("semanticObservationState").ifBlank { "UNKNOWN" })
                             DiagnosticLine("Action authority", status.optString("actionAuthorityState").ifBlank { if (productionAuthority) "READY" else "DEGRADED" })
                             DiagnosticLine("Clipboard", if (clipboardEnabled) "PC → PHONE" else "OFF")
                             DiagnosticLine("Protocol", status.optString("protocolVersion").ifBlank { "Unknown" })
-                            HorizontalDivider()
-                            Text(
-                                "USB localabstract only · no phone LAN listener · no arbitrary shell/root tools · trust/session secrets, clipboard content and typed values are excluded from Gateway diagnostics.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+
+                            if (pairingCode != null) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
+                                Text("Fallback pairing", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "Only for transition clients that cannot use normal USB trust.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Button(onClick = { scanDesktopPairingQr(context) }, modifier = Modifier.fillMaxWidth()) {
+                                    Icon(Icons.Rounded.QrCodeScanner, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Scan fallback QR")
+                                }
+                                Text(pairingCode, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                                val seconds = (((pairingExpiresAt ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L) / 1000L)
+                                Text("Expires in about ${seconds}s", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GatewayHero(
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    connected: Boolean,
+    attention: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Card(
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = when {
+                    connected -> MaterialTheme.colorScheme.secondaryContainer
+                    attention -> MaterialTheme.colorScheme.tertiaryContainer
+                    else -> MaterialTheme.colorScheme.primaryContainer
+                },
+            ) {
+                Icon(
+                    if (connected) Icons.Rounded.CheckCircle else Icons.Rounded.Usb,
+                    null,
+                    modifier = Modifier.padding(10.dp).size(23.dp),
+                    tint = when {
+                        connected -> MaterialTheme.colorScheme.secondary
+                        attention -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onEnabledChange)
+        }
+    }
+}
+
+@Composable
+private fun GatewayNextActionCard(
+    action: GatewayReadyNextAction,
+    gatewayEnabled: Boolean,
+    onTurnOnGateway: () -> Unit,
+    onOpenAccessibility: () -> Unit,
+) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(action.title, style = MaterialTheme.typography.titleMedium)
+            Text(action.body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(
+                onClick = {
+                    when (action.code) {
+                        GatewayReadyDoctor.TURN_ON_GATEWAY -> onTurnOnGateway()
+                        GatewayReadyDoctor.FIX_USB_BRIDGE -> if (!gatewayEnabled) onTurnOnGateway()
+                        GatewayReadyDoctor.REPAIR_PHONE_CONTROL,
+                        GatewayReadyDoctor.ENABLE_PHONE_CONTROL,
+                        -> onOpenAccessibility()
+                    }
+                },
+            ) { Text(action.actionLabel) }
+        }
+    }
+}
+
+@Composable
+private fun GatewayStatusLine(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    value: String,
+    ready: Boolean,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, modifier = Modifier.size(21.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(10.dp))
+        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+        Icon(
+            if (ready) Icons.Rounded.CheckCircle else Icons.Rounded.Error,
+            null,
+            modifier = Modifier.size(17.dp),
+            tint = if (ready) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(5.dp))
+        Text(value, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun GatewayConnectGuide(pcPresent: Boolean, usbReady: Boolean, phoneReady: Boolean) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Text(if (pcPresent) "Finish connecting" else "Connect your PC", style = MaterialTheme.typography.titleMedium)
+            if (pcPresent) {
+                Text(
+                    "Your PC is visible over USB. Open Cyclone One and approve the trust request on this phone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                GatewayStep("1", if (usbReady) "Connect USB" else "Start with USB", "Plug this phone into your Windows PC.")
+                if (!phoneReady) GatewayStep("2", "Enable phone control", "Cyclone needs phone control before PC actions can run.")
+                GatewayStep(if (phoneReady) "2" else "3", "Choose this phone", "Open Cyclone One and select this device.")
+                GatewayStep(if (phoneReady) "3" else "4", "Approve trust", "Allow the request that appears on this phone.")
+            }
+        }
+    }
+}
+
+@Composable
+private fun GatewayStep(number: String, title: String, body: String) {
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+            Text(
+                number,
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -535,103 +662,6 @@ private fun scanDesktopPairingQr(context: Context) {
         .addOnFailureListener {
             Toast.makeText(context, "QR scanner unavailable. Use the fallback code below.", Toast.LENGTH_LONG).show()
         }
-}
-
-@Composable
-private fun GatewayNextActionCard(
-    action: GatewayReadyNextAction,
-    gatewayEnabled: Boolean,
-    onTurnOnGateway: () -> Unit,
-    onOpenAccessibility: () -> Unit,
-) {
-    Card(
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(action.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(action.body, style = MaterialTheme.typography.bodyMedium)
-            Button(
-                onClick = {
-                    when (action.code) {
-                        GatewayReadyDoctor.TURN_ON_GATEWAY -> onTurnOnGateway()
-                        GatewayReadyDoctor.FIX_USB_BRIDGE -> if (!gatewayEnabled) onTurnOnGateway()
-                        GatewayReadyDoctor.REPAIR_PHONE_CONTROL,
-                        GatewayReadyDoctor.ENABLE_PHONE_CONTROL,
-                        -> onOpenAccessibility()
-                        else -> Unit
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(action.actionLabel) }
-        }
-    }
-}
-
-@Composable
-private fun GatewayHero(
-    state: GatewayUiState,
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-) {
-    Card(
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-    ) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Usb, null, modifier = Modifier.size(38.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(state.label, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(state.subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("PC Gateway", fontWeight = FontWeight.SemiBold)
-                    Text("Trust is separate from your AI permission profile.", style = MaterialTheme.typography.bodySmall)
-                }
-                Switch(checked = enabled, onCheckedChange = onEnabledChange)
-            }
-        }
-    }
-}
-
-@Composable
-private fun GatewayStatusLine(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    value: String,
-    ready: Boolean,
-) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(10.dp))
-        Text(title, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
-        Icon(
-            if (ready) Icons.Rounded.CheckCircle else Icons.Rounded.Error,
-            null,
-            modifier = Modifier.size(18.dp),
-            tint = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(value, style = MaterialTheme.typography.labelMedium)
-    }
-}
-
-@Composable
-private fun GatewayStep(number: String, title: String, body: String) {
-    Row(verticalAlignment = Alignment.Top) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-            Text(number, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(title, fontWeight = FontWeight.SemiBold)
-            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
 }
 
 @Composable

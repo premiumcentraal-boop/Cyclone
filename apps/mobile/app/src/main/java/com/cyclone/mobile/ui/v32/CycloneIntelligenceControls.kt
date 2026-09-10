@@ -1,5 +1,10 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -34,6 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,8 +83,8 @@ private fun modelSubtitle(model: OpenRouterModelPreset): String = when (model.id
 }
 
 /**
- * Compact intelligence surface shared by the in-app composer and the system overlay. In the
- * overlay we include the model pill at the top so model choice is never hidden behind autonomy.
+ * Compact intelligence surface used by in-app settings. The system overlay uses the staged
+ * quick-settings pill below so it never turns into a large stacked settings sheet.
  */
 @Composable
 fun CycloneModelIntelligencePanel(
@@ -189,7 +197,7 @@ fun CycloneModelIntelligencePanel(
     }
 }
 
-/** Model selection floats above the composer and never steals typing width. */
+/** Model selection floats above the in-app composer and never steals typing width. */
 @Composable
 fun CycloneModelPill(
     modelId: String,
@@ -257,6 +265,169 @@ fun CycloneModelPill(
                         else Spacer(Modifier.size(18.dp))
                     },
                 )
+            }
+        }
+    }
+}
+
+private enum class OverlayQuickSettingsStage { MODEL, INTELLIGENCE, AUTONOMY }
+
+/**
+ * Overlay-only settings flow. One detached pill changes purpose in-place:
+ * model -> intelligence -> phone autonomy. It deliberately never renders three stacked panels.
+ */
+@Composable
+fun CycloneOverlayQuickSettingsPill(
+    modelId: String,
+    effort: String,
+    modifier: Modifier = Modifier,
+    onChange: (String, String) -> Unit,
+    onDone: () -> Unit,
+) {
+    val context = LocalContext.current
+    var stage by remember { mutableStateOf(OverlayQuickSettingsStage.MODEL) }
+    var modelMenuOpen by remember { mutableStateOf(false) }
+    var autonomy by remember { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
+    val currentEffort = normalizedEffort(effort)
+    val currentModel = V39AiChatContract.modelForStored(modelId)
+
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Surface(
+            modifier = Modifier.widthIn(min = 272.dp, max = 340.dp).heightIn(min = 52.dp),
+            shape = RoundedCornerShape(999.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .97f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            shadowElevation = 4.dp,
+        ) {
+            AnimatedContent(
+                targetState = stage,
+                transitionSpec = { fadeIn(tween(140)).togetherWith(fadeOut(tween(100))) },
+                label = "Overlay AI setting stage",
+            ) { currentStage ->
+                when (currentStage) {
+                    OverlayQuickSettingsStage.MODEL -> Box {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { modelMenuOpen = true }
+                                .padding(start = 17.dp, end = 13.dp, top = 13.dp, bottom = 13.dp)
+                                .semantics { contentDescription = "Model. ${currentModel.label}. Choose model." },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                currentModel.label,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Icon(
+                                Icons.Rounded.KeyboardArrowDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = modelMenuOpen,
+                            onDismissRequest = { modelMenuOpen = false },
+                            modifier = Modifier.widthIn(min = 280.dp, max = 320.dp),
+                        ) {
+                            OpenRouterModelPresets.all.forEach { option ->
+                                val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
+                                DropdownMenuItem(
+                                    text = {
+                                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                            Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(
+                                                modelSubtitle(option),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        onChange(V39AiChatContract.storageId(option), currentEffort)
+                                        modelMenuOpen = false
+                                        stage = OverlayQuickSettingsStage.INTELLIGENCE
+                                    },
+                                    leadingIcon = {
+                                        if (selected) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                        else Spacer(Modifier.size(18.dp))
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    OverlayQuickSettingsStage.INTELLIGENCE -> Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp)
+                            .semantics { contentDescription = "Intelligence. Choose Low, Medium, or High." },
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        intelligenceLevels.forEach { level ->
+                            val active = currentEffort == level
+                            Surface(
+                                modifier = Modifier.weight(1f).clickable {
+                                    onChange(modelId, level)
+                                    stage = OverlayQuickSettingsStage.AUTONOMY
+                                },
+                                shape = RoundedCornerShape(999.dp),
+                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            ) {
+                                Text(
+                                    effortLabel(level),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+
+                    OverlayQuickSettingsStage.AUTONOMY -> Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp)
+                            .semantics { contentDescription = "Phone autonomy. Choose Ask often, Balanced, or Independent." },
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        listOf(
+                            CycloneAiAccessProfile.GUIDED to "Ask",
+                            CycloneAiAccessProfile.BALANCED to "Balanced",
+                            CycloneAiAccessProfile.FULL to "Independent",
+                        ).forEach { (profile, label) ->
+                            val active = autonomy == profile
+                            Surface(
+                                modifier = Modifier.weight(1f).clickable {
+                                    autonomy = profile
+                                    CycloneAiAccessProfileStore.write(context, profile)
+                                    onDone()
+                                },
+                                shape = RoundedCornerShape(999.dp),
+                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            ) {
+                                Text(
+                                    label,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

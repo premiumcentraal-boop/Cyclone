@@ -274,7 +274,11 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
 
         item {
             CycloneSegmentedControl(
-                listOf("Active (${activeProfiles.size})", "All profiles", "Groups"),
+                listOf(
+                    "Active (${activeProfiles.size})",
+                    "All (${allProfiles.size})",
+                    "Groups (${appGroups.size})",
+                ),
                 tab.ordinal,
                 { tab = ProfilesTab.entries[it] },
             )

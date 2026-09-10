@@ -15,7 +15,9 @@ class CycloneProfile429ContractTest {
         val source = source("ui/v32/CycloneProfilesPage.kt")
         assertTrue(source.contains("private enum class ProfilesTab { ACTIVE, ALL, GROUPS }"))
         assertTrue(source.contains("mutableStateOf(ProfilesTab.ACTIVE)"))
-        assertTrue(source.contains("\"Active (\${activeProfiles.size})\", \"All profiles\", \"Groups\""))
+        assertTrue(source.contains("\"Active (\${activeProfiles.size})\""))
+        assertTrue(source.contains("\"All (\${allProfiles.size})\""))
+        assertTrue(source.contains("\"Groups (\${appGroups.size})\""))
     }
 
     @Test fun profilesAggregateWorkspacesByAndroidIdentityNotByApp() {
@@ -28,7 +30,7 @@ class CycloneProfile429ContractTest {
     @Test fun activeProfilesShowRealAppTaskStateAndWholeProfileAction() {
         val source = source("ui/v32/CycloneProfilesPage.kt")
         assertTrue(source.contains("CycloneAppIcon(packageName"))
-        assertTrue(source.contains("\"\$app · \${profile.label}\""))
+        assertTrue(source.contains("\"$app · \${profile.label}\""))
         assertTrue(source.contains("Text(\"View progress\")"))
         assertTrue(source.contains("Text(\"Open profile\")"))
         assertTrue(source.contains("val openingMain = profile.androidUserId == 0"))
@@ -84,13 +86,33 @@ class CycloneProfile429ContractTest {
         assertTrue(source.contains("fun rename(context: Context, id: String, label: String)"))
     }
 
-    @Test fun overlayModelControlIncludesCompactModelSelector() {
+    @Test fun overlayUsesOneDetachedThreeStageSettingsPill() {
         val controls = source("ui/v32/CycloneIntelligenceControls.kt")
         val overlay = source("ui/overlay/OverlayChrome.kt")
-        assertTrue(controls.contains("fun CycloneModelPill"))
-        assertTrue(controls.contains("showModelSelector: Boolean = true"))
+        assertTrue(controls.contains("fun CycloneOverlayQuickSettingsPill"))
+        assertTrue(controls.contains("OverlayQuickSettingsStage { MODEL, INTELLIGENCE, AUTONOMY }"))
+        assertTrue(controls.contains("stage = OverlayQuickSettingsStage.INTELLIGENCE"))
+        assertTrue(controls.contains("stage = OverlayQuickSettingsStage.AUTONOMY"))
         assertTrue(controls.contains("OpenRouterModelPresets.all.forEach"))
-        assertTrue(overlay.contains("CycloneModelIntelligencePanel("))
+        assertTrue(overlay.contains("CycloneOverlayQuickSettingsPill("))
+        assertFalse(overlay.contains("ComposerAccessory.MODEL -> com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel("))
+    }
+
+    @Test fun idleOverlayDoesNotReserveAnEmptySheetAboveComposer() {
+        val overlay = source("ui/overlay/OverlayChrome.kt")
+        assertTrue(overlay.contains("val groupedSheet = activeWork || task != null"))
+        assertTrue(overlay.contains("if (!groupedSheet)"))
+        assertTrue(overlay.contains(".align(Alignment.TopCenter)"))
+    }
+
+    @Test fun gatewayUsesCurrentThemeAndTruthfulConnectionHierarchy() {
+        val gateway = source("gateway/GatewaySettingsActivity.kt")
+        assertTrue(gateway.contains("import com.cyclone.mobile.ui.v32.CycloneTheme"))
+        assertTrue(gateway.contains("val pcPresent = connected || pendingTrust != null || clientCount > 0"))
+        assertTrue(gateway.contains("\"USB connected · approval needed\""))
+        assertTrue(gateway.contains("if (livePhoneState != \"Not connected\")"))
+        assertFalse(gateway.contains("Text(\"LIVE PHONE · Cloud ChatGPT\""))
+        assertFalse(gateway.contains("Text(\"BACKGROUND PHONE · Separate app profiles and task screens\")"))
     }
 
     @Test fun inAppComposerDoesNotDuplicateTheModelPillInsideSettings() {

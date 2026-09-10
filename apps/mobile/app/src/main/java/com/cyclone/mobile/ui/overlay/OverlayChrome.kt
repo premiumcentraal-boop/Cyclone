@@ -61,6 +61,7 @@ import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
 import com.cyclone.mobile.ui.v32.CycloneForegroundWorkCard
+import com.cyclone.mobile.ui.v32.CycloneOverlayQuickSettingsPill
 import com.cyclone.mobile.ui.v32.CyclonePendingRequests
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
 import kotlinx.coroutines.launch
@@ -309,7 +310,6 @@ private fun ComposerPanel(
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
     var accessory by remember { mutableStateOf<ComposerAccessory>(ComposerAccessory.NONE) }
-    var modelsExpanded by remember { mutableStateOf(false) }
     val sharing by LiveCaptureSessionManager.state.collectAsState()
     val attached by PendingTaskAttachment.present.collectAsState()
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -387,7 +387,18 @@ private fun ComposerPanel(
         }
     }
 
+    val groupedSheet = activeWork || task != null || sharing.phase != ScreenSharePhase.OFF ||
+        accessory == ComposerAccessory.ATTACHMENTS || attached
     val glassShape = RoundedCornerShape(32.dp)
+    val groupedModifier = if (groupedSheet) {
+        Modifier
+            .clip(glassShape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = OverlayChromeContract.EXPANDED_GLASS_ALPHA))
+            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp)
+    } else {
+        Modifier
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -395,34 +406,34 @@ private fun ComposerPanel(
             .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp)
             .graphicsLayer { translationY = dragOffset }
             .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) }
-            .clip(glassShape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = OverlayChromeContract.EXPANDED_GLASS_ALPHA))
-            .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+            .then(groupedModifier),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(18.dp)
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragStart = { settleJob?.cancel() },
-                        onVerticalDrag = { change, amount ->
-                            change.consume()
-                            dragOffset = (dragOffset + amount).coerceAtLeast(0f)
-                        },
-                        onDragCancel = { settle(false) },
-                        onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) },
-                    )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
+        if (groupedSheet) {
             Box(
                 Modifier
-                    .size(34.dp, 4.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .36f)),
-            )
+                    .fillMaxWidth()
+                    .height(18.dp)
+                    .pointerInput(Unit) {
+                        detectVerticalDragGestures(
+                            onDragStart = { settleJob?.cancel() },
+                            onVerticalDrag = { change, amount ->
+                                change.consume()
+                                dragOffset = (dragOffset + amount).coerceAtLeast(0f)
+                            },
+                            onDragCancel = { settle(false) },
+                            onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(34.dp, 4.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .36f)),
+                )
+            }
         }
 
         if (taskCollapsed && activeWork) {
@@ -451,29 +462,36 @@ private fun ComposerPanel(
         if (sharing.phase != ScreenSharePhase.OFF) {
             ScreenSharePill(sharing) { LiveCaptureService.stop(context) }
         }
-        if (accessory != ComposerAccessory.NONE) {
+
+        if (accessory == ComposerAccessory.MODEL) {
+            CycloneOverlayQuickSettingsPill(
+                modelId = aiSettings.modelId,
+                effort = aiSettings.reasoningEffort,
+                onChange = { model, effort ->
+                    onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort))
+                },
+                onDone = { accessory = ComposerAccessory.NONE },
+            )
+        }
+
+        if (accessory == ComposerAccessory.ATTACHMENTS) {
             Surface(shape = RoundedCornerShape(26.dp), color = ComposerInk, tonalElevation = 0.dp, shadowElevation = 0.dp) {
-                when (accessory) {
-                    ComposerAccessory.ATTACHMENTS -> Row(
-                        Modifier.heightIn(min = 52.dp).padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java)) }) { Text("File") }
-                        TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("camera", true)) }) { Text("Photo") }
-                        TextButton(enabled = !sharing.active, onClick = {
-                            launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
-                        }) { Text("Share screen") }
-                        TextButton(enabled = !sharing.active, onClick = {
-                            launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
-                        }) { Text("Cross-app") }
-                    }
-                    ComposerAccessory.MODEL -> com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel(
-                        aiSettings.modelId, aiSettings.reasoningEffort,
-                    ) { model, effort -> onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort)) }
-                    ComposerAccessory.NONE -> Unit
+                Row(
+                    Modifier.heightIn(min = 52.dp).padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java)) }) { Text("File") }
+                    TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("camera", true)) }) { Text("Photo") }
+                    TextButton(enabled = !sharing.active, onClick = {
+                        launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
+                    }) { Text("Share screen") }
+                    TextButton(enabled = !sharing.active, onClick = {
+                        launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
+                    }) { Text("Cross-app") }
                 }
             }
         }
+
         if (attached) {
             Surface(shape = RoundedCornerShape(24.dp), color = ComposerInk, tonalElevation = 0.dp) {
                 TextButton(onClick = { PendingTaskAttachment.take() }) { Text("Reference attached · Remove") }
@@ -497,7 +515,12 @@ private fun ComposerPanel(
                     onClick = { accessory = accessory.toggle(ComposerAccessory.MODEL) },
                     modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
                 ) {
-                    Icon(Icons.Rounded.Tune, "Choose model", tint = if (accessory == ComposerAccessory.MODEL) AuroraBlue else MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+                    Icon(
+                        Icons.Rounded.Tune,
+                        "Model, intelligence and phone autonomy",
+                        tint = if (accessory == ComposerAccessory.MODEL) AuroraBlue else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(24.dp),
+                    )
                 }
                 IconButton(
                     onClick = { accessory = accessory.toggle(ComposerAccessory.ATTACHMENTS) },
@@ -567,6 +590,35 @@ private fun ComposerPanel(
                     } else {
                         Icon(Icons.Rounded.ArrowUpward, "Send new task", modifier = Modifier.size(23.dp))
                     }
+                }
+            }
+
+            if (!groupedSheet) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .width(72.dp)
+                        .height(16.dp)
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onDragStart = { settleJob?.cancel() },
+                                onVerticalDrag = { change, amount ->
+                                    change.consume()
+                                    dragOffset = (dragOffset + amount).coerceAtLeast(0f)
+                                },
+                                onDragCancel = { settle(false) },
+                                onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) },
+                            )
+                        },
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    Box(
+                        Modifier
+                            .padding(top = 4.dp)
+                            .size(30.dp, 3.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .24f)),
+                    )
                 }
             }
         }
