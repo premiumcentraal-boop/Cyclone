@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.widget.ImageView
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -229,85 +229,19 @@ internal fun ProfileSetup429(onClose: () -> Unit) {
                     },
                 )
 
-                if (progress.busy) {
-                    CreatingProfileState(profileName, progress.message, progress.completed, progress.total) {
-                        ProfileSetupRuntime.stop()
-                    }
-                } else {
-                    when (page) {
-                        0 -> NameProfileStep(
-                            name = profileName,
-                            onName = { profileName = it },
-                            onSuggestion = { profileName = it },
-                            onContinue = ::chooseApps,
-                            onMainProfile = onMainProfile,
-                            onReturnMain = {
-                                scope.launch {
-                                    message = withContext(Dispatchers.IO) {
-                                        runCatching {
-                                            ProfileSetupRuntime.openProfile(context, null)
-                                            "Returned to Main"
-                                        }.getOrElse { it.message ?: "Couldn't return to Main." }
-                                    }
-                                }
-                            },
-                        )
-
-                        1 -> ChooseAppsStep(
-                            apps = apps,
-                            selected = selected,
-                            query = query,
-                            onQuery = { query = it },
-                            onToggle = { pkg, checked -> selected = if (checked) selected + pkg else selected - pkg },
-                        )
-
-                        2 -> ReviewProfileStep(
-                            context = context,
-                            name = profileName,
-                            apps = apps.filter { it.packageName in selected },
-                            onCreate = {
-                                if (persistFriendlyName()) {
-                                    message = ""
-                                    ProfileSetupRuntime.create(context, apps.filter { it.packageName in selected })
-                                }
-                            },
-                            onChangeApps = { page = 1 },
-                        )
-
-                        else -> {
-                            val currentUser = ProfileSetupRuntime.existingUser(context)
-                            val record = records.firstOrNull { it.androidUserId == currentUser }
-                                ?: records.firstOrNull { it.label == profileName }
-                            val spaces = registered.filter { it.androidUserId == currentUser }
-                            ReadyProfileStep(
-                                context = context,
-                                record = record,
-                                profileName = profileName,
-                                workspaces = spaces,
-                                packageNames = record?.packages.orEmpty(),
-                                renaming = renaming,
-                                onRenaming = { renaming = it },
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (progress.busy) {
+                        CreatingProfileState(profileName, progress.message, progress.completed, progress.total) {
+                            ProfileSetupRuntime.stop()
+                        }
+                    } else {
+                        when (page) {
+                            0 -> NameProfileStep(
+                                name = profileName,
                                 onName = { profileName = it },
-                                onSaveName = {
-                                    if (persistFriendlyName()) {
-                                        renaming = false
-                                        refresh()
-                                    }
-                                },
-                                onOpenProfile = { record?.let(::openWholeProfile) },
-                                onOpenWorkspace = ::openWorkspace,
-                                onManageApps = ::chooseApps,
-                                onAddProfile = {
-                                    runCatching { ProfileSetupRuntime.beginAnotherProfile(context) }
-                                        .onSuccess {
-                                            selected = emptySet()
-                                            profileName = suggestedProfileName(ProfileRegistryStore.records(context).size)
-                                            page = 0
-                                            message = ""
-                                            refresh()
-                                        }
-                                        .onFailure { message = it.message.orEmpty() }
-                                },
+                                onSuggestion = { profileName = it },
+                                onContinue = ::chooseApps,
+                                onMainProfile = onMainProfile,
                                 onReturnMain = {
                                     scope.launch {
                                         message = withContext(Dispatchers.IO) {
@@ -319,19 +253,79 @@ internal fun ProfileSetup429(onClose: () -> Unit) {
                                     }
                                 },
                             )
+
+                            1 -> ChooseAppsStep(
+                                apps = apps,
+                                selected = selected,
+                                query = query,
+                                onQuery = { query = it },
+                                onToggle = { pkg, checked -> selected = if (checked) selected + pkg else selected - pkg },
+                                onContinue = { if (selected.isNotEmpty()) page = 2 },
+                            )
+
+                            2 -> ReviewProfileStep(
+                                context = context,
+                                name = profileName,
+                                apps = apps.filter { it.packageName in selected },
+                                onCreate = {
+                                    if (persistFriendlyName()) {
+                                        message = ""
+                                        ProfileSetupRuntime.create(context, apps.filter { it.packageName in selected })
+                                    }
+                                },
+                                onChangeApps = { page = 1 },
+                            )
+
+                            else -> {
+                                val currentUser = ProfileSetupRuntime.existingUser(context)
+                                val record = records.firstOrNull { it.androidUserId == currentUser }
+                                    ?: records.firstOrNull { it.label == profileName }
+                                val spaces = registered.filter { it.androidUserId == currentUser }
+                                ReadyProfileStep(
+                                    context = context,
+                                    record = record,
+                                    profileName = profileName,
+                                    workspaces = spaces,
+                                    packageNames = record?.packages.orEmpty(),
+                                    renaming = renaming,
+                                    onRenaming = { renaming = it },
+                                    onName = { profileName = it },
+                                    onSaveName = {
+                                        if (persistFriendlyName()) {
+                                            renaming = false
+                                            refresh()
+                                        }
+                                    },
+                                    onOpenProfile = { record?.let(::openWholeProfile) },
+                                    onOpenWorkspace = ::openWorkspace,
+                                    onManageApps = ::chooseApps,
+                                    onAddProfile = {
+                                        runCatching { ProfileSetupRuntime.beginAnotherProfile(context) }
+                                            .onSuccess {
+                                                selected = emptySet()
+                                                profileName = suggestedProfileName(ProfileRegistryStore.records(context).size)
+                                                page = 0
+                                                message = ""
+                                                refresh()
+                                            }
+                                            .onFailure { message = it.message.orEmpty() }
+                                    },
+                                    onReturnMain = {
+                                        scope.launch {
+                                            message = withContext(Dispatchers.IO) {
+                                                runCatching {
+                                                    ProfileSetupRuntime.openProfile(context, null)
+                                                    "Returned to Main"
+                                                }.getOrElse { it.message ?: "Couldn't return to Main." }
+                                            }
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
 
-                if (page == 1 && !progress.busy) {
-                    Button(
-                        onClick = { if (selected.isNotEmpty()) page = 2 },
-                        enabled = selected.isNotEmpty() && selected.size <= 50,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
-                    ) {
-                        Text("Continue with ${selected.size} ${if (selected.size == 1) "app" else "apps"}")
-                    }
-                }
                 if (checking) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp))
                 if (message.isNotBlank()) {
                     Text(
@@ -379,7 +373,7 @@ private fun NameProfileStep(
     onReturnMain: () -> Unit,
 ) {
     LazyColumn(
-        Modifier.weightSafe(),
+        Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -453,9 +447,10 @@ private fun ChooseAppsStep(
     query: String,
     onQuery: (String) -> Unit,
     onToggle: (String, Boolean) -> Unit,
+    onContinue: () -> Unit,
 ) {
     LazyColumn(
-        Modifier.weightSafe(),
+        Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -486,6 +481,17 @@ private fun ChooseAppsStep(
         }
         items(filtered, key = { it.packageName }) { app ->
             AppPickerRow429(app, app.packageName in selected) { checked -> onToggle(app.packageName, checked) }
+        }
+        item {
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = onContinue,
+                enabled = selected.isNotEmpty() && selected.size <= 50,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Text("Continue with ${selected.size} ${if (selected.size == 1) "app" else "apps"}")
+            }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -520,7 +526,7 @@ private fun ReviewProfileStep(
     onChangeApps: () -> Unit,
 ) {
     LazyColumn(
-        Modifier.weightSafe(),
+        Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -584,7 +590,7 @@ private fun ReadyProfileStep(
     onReturnMain: () -> Unit,
 ) {
     LazyColumn(
-        Modifier.weightSafe(),
+        Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -731,6 +737,3 @@ private fun suggestedProfileName(existingCount: Int): String = when (existingCou
     2 -> "Profile D"
     else -> "Profile ${existingCount + 2}"
 }
-
-/** Keep the setup content as the single weighted child without leaking layout details into each step. */
-private fun Modifier.weightSafe(): Modifier = this.fillMaxSize()
