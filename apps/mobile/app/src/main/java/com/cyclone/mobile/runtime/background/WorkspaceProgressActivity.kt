@@ -196,7 +196,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 320.dp),
                         onAvailability = onAvailability,
                     )
-                    else -> onAvailability(false)
+                    else -> Unit
                 }
 
                 SemanticProgress(task, visualState)
