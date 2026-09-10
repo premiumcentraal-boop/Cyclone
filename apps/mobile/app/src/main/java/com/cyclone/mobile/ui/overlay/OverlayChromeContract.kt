@@ -15,12 +15,14 @@ object OverlayChromeContract {
     const val IDLE_TOUCH_BOTTOM_MARGIN_DP = 28
     const val IDLE_VISUAL_BOTTOM_MARGIN_DP = 16
 
-    const val COMPOSER_HEIGHT_DP = 64
+    // Keep the resting Ask Cyclone composer visually tight. The individual composer/accessory
+    // pills own their surfaces; the containing sheet stays transparent to avoid a box-in-box look.
+    const val COMPOSER_HEIGHT_DP = 58
     const val COMPOSER_TOUCH_TARGET_DP = 48
     const val COMPOSER_BOTTOM_GAP_DP = 30
     const val TASK_AREA_MAX_HEIGHT_DP = 430
     const val TASK_AREA_KEYBOARD_MAX_HEIGHT_DP = 210
-    const val EXPANDED_GLASS_ALPHA = 0.92f
+    const val EXPANDED_GLASS_ALPHA = 0.0f
 
     const val IDLE_TAP_MAX_GAP_MS = 700L
     const val IDLE_TAP_MAX_SEQUENCE_MS = 1_400L
