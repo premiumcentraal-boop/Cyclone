@@ -130,6 +130,7 @@ object ProfileSetupRuntime {
                 check(record.ready && record.secondaryUser) { "This profile still needs setup." }
                 val exact = users.singleOrNull { it.id == target && it.name == record.id }
                 check(exact != null && ProfileRecovery.validOwned(exact, record.parentUserId, true)) { "Profile identity needs repair." }
+                if (target != currentUserId()) ProfileBootstrapRuntime.prepare(context, target, record.id)
                 target
             }
             Layer2Workspaces.engine.clearSelection()
