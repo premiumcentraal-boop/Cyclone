@@ -14,7 +14,7 @@ mcp = "4.1.0"
 
 [release]
 previous_mobile_version = "4.3.1"
-publication_authorized = false
+publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"

@@ -17,8 +17,9 @@ Candidate: 4.3.2 /93. The release artifact's `source-sha.txt` identifies its exa
 - `1d82201300aeae163f0c4fd6882c751410d8ed37` — fix(mobile): verify compiled routine outcomes and classify execution scope failures
 - `7a4e057690a4f6129418b83fee047a2f07b8c941` — fix(mobile): unify legacy takeover commands and document 4.3.2 validation
 - `69730f9fd95096346598bc0cd5fad8317d75e579` — test(mobile): align visual contract guard with integrated task card
+- `645561322327a926526da3e045ae0dce515c90bc` — test(mobile): distinguish fresh unchanged pages from reused verification evidence
 
-The final metadata authorization commit follows these milestones; its SHA is embedded in the published APK provenance.
+The metadata authorization commit follows these milestones; its exact SHA is embedded in published provenance.
 
 ## Actual reliability seams
 
@@ -50,7 +51,7 @@ Compatibility changes bind Take Over/I'm Done/Autofill to backend capabilities, 
 - `python scripts/ci/mobile_product_guard.py`: passed.
 - `git diff --check`: passed at checkpoints.
 - Local `./gradlew :app:testDebugUnitTest`: attempted, but Gradle distribution download failed due local Java network access. Android compilation, unit tests, lint, and APK assembly are therefore validated by repository CI instead.
-- Initial CI identified outdated Python verification fixtures and a missing JUnit import. Those were fixed in subsequent checkpoints. Final CI status is recorded below after completion.
+- Initial CI identified outdated Python verification fixtures and a missing JUnit import. Those were fixed in subsequent checkpoints. A later full Android run completed 933 tests with one outdated reused-observation fixture failing; the fixture was corrected and a separate reused-evidence regression added. The release workflow requires the final exact-source run to pass all unit tests, lint, assembly, provenance checks, and signing continuity before publication. Final run links and outcomes accompany the release handoff.
 
 ## Device validation and remaining limits
 
@@ -87,6 +88,7 @@ No physical phone or emulator acceptance run was performed. Pixel 8 execution an
 - `apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneAskTaskPanel.kt`
 - `apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/TaskGlassPresentation.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/agent/CycloneLocalAgentTest.kt`
+- `apps/mobile/app/src/test/java/com/cyclone/mobile/agent/tools/CycloneAgentEnvironmentTest.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/fastpath/MutationGroundingTest.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/runtime/background/TaskGlassObservabilityTest.kt`
 - `apps/mobile/app/src/test/java/com/cyclone/mobile/runtime/background/TaskHarnessStateTest.kt`
