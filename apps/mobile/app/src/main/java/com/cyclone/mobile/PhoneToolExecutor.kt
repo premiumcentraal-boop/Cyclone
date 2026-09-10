@@ -99,10 +99,21 @@ object PhoneToolExecutor {
         return result.copy(payload = SessionContract.attach(payload, plane))
     }
 
+    private fun scopeErrorCode(error: Exception): PhoneToolErrorCode {
+        val reason = error.message.orEmpty().uppercase()
+        return when {
+            "HUMAN" in reason -> PhoneToolErrorCode.HUMAN_HAS_CONTROL
+            "POLICY" in reason || "GATE" in reason -> PhoneToolErrorCode.POLICY_DENIED
+            "STALE" in reason || "GENERATION" in reason || "EXPIRED" in reason -> PhoneToolErrorCode.FRESH_OBSERVATION_REQUIRED
+            "MISMATCH" in reason -> PhoneToolErrorCode.INVALID_REQUEST
+            else -> PhoneToolErrorCode.CAPABILITY_UNAVAILABLE
+        }
+    }
+
     private fun scopeFailure(request: PhoneToolRequest, error: Exception): PhoneToolResult {
         val now = System.currentTimeMillis()
         return PhoneToolResult(request.commandId, request.tool, false, now, now,
-            error = PhoneToolError(PhoneToolErrorCode.CAPABILITY_UNAVAILABLE, error.message.orEmpty()))
+            error = PhoneToolError(scopeErrorCode(error), "Execution scope unavailable; observe the current session again."))
     }
 
     private fun executeWorkspace(context: Context, request: PhoneToolRequest,
@@ -216,8 +227,7 @@ object PhoneToolExecutor {
         } catch (error: Exception) {
             if (request.tool in mutatingTools) runCatching { GatewayObservationStore.clear(scope.sessionId) }
             PhoneToolResult(request.commandId, request.tool, false, started, System.currentTimeMillis(),
-                error = PhoneToolError(if (error.message?.contains("POLICY_DENIED") == true) PhoneToolErrorCode.POLICY_DENIED else PhoneToolErrorCode.CAPABILITY_UNAVAILABLE,
-                    error.message?.take(240) ?: "Workspace operation failed"))
+                error = PhoneToolError(scopeErrorCode(error), "Workspace operation could not complete in its current scope."))
         }
     }
 

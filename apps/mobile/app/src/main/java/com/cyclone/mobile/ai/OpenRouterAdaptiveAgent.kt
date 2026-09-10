@@ -19,7 +19,7 @@ import com.cyclone.mobile.agent.CycloneTaskState
 import com.cyclone.mobile.agent.CycloneToolResult
 import com.cyclone.mobile.agent.CycloneTraceEventType
 import com.cyclone.mobile.agent.CycloneVerificationResult
-import com.cyclone.mobile.agent.contract.AgentFailureClass
+import com.cyclone.mobile.agent.contract.*
 import com.cyclone.mobile.agent.integration.CyclonePcParityBridge
 import com.cyclone.mobile.agent.recovery.ProgressClassification
 import com.cyclone.mobile.agent.recovery.RecoverableCause
@@ -905,6 +905,8 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             before, false, false, cycloneObservation(before).evidenceIdentity,
             message = "Compiled skill replay needs PhoneToolExecutor.",
         )
+        val beforeCard = session.bridge.currentPage()
+        onOperation?.invoke("compiled_skill", null)
         val result = CompiledSkillReplay.replay(
             route = route,
             page = page,
@@ -920,8 +922,28 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         session.state = after
         session.bridge.observe(session.goal)
         val evidenceIdentity = session.bridge.observation()?.evidenceIdentity ?: cycloneObservation(after).evidenceIdentity
+        val afterCard = session.bridge.currentPage()
+        val verified = result is SkillReplayResult.Hit && beforeCard != null && afterCard != null &&
+            afterCard.observationId != beforeCard.observationId &&
+            afterCard.sessionId == execution.sessionId && afterCard.displayId == execution.displayId &&
+            afterCard.pageKey == route.steps.lastOrNull()?.afterPageKey
+        onOperation?.invoke("compiled_skill", AgentActionEnvelope(
+            tool = "compiled_skill", goal = session.goal,
+            androidExecutionOk = result is SkillReplayResult.Hit, executorReportedOk = result is SkillReplayResult.Hit,
+            verification = AgentSemanticVerification(if (verified) AgentVerificationStatus.PASSED else AgentVerificationStatus.FAILED,
+                verified, verified, "COMPILED_ROUTE_AFTER_STATE"),
+            before = beforeCard, after = afterCard, pageChanged = beforeCard?.pageKey != afterCard?.pageKey,
+            delta = AgentStateDelta(beforeCard?.pageKey != afterCard?.pageKey, beforeCard?.packageName != afterCard?.packageName,
+                false, emptyList(), false, "Compiled route checked"),
+            errorClass = if (verified) AgentFailureClass.NONE else AgentFailureClass.VERIFICATION_FAILED,
+            failureLayer = if (verified) AgentFailureLayer.NONE else AgentFailureLayer.VERIFICATION,
+            retryable = false, semanticSuccessClaimed = verified,
+            beforeObservationId = beforeCard?.observationId, afterObservationId = afterCard?.observationId,
+            observationGeneration = afterCard?.generation, learning = AgentLearningResult(false, "Existing skill route")))
         return when (result) {
             is SkillReplayResult.Hit -> {
+                if (!verified) return LocalExecution(after, false, false, evidenceIdentity,
+                    message = "The routine's final page could not be verified.")
                 session.bridge.markVerifiedProgress()
                 session.successfulActions += "compiled-skill:${route.id}"
                 session.consecutiveNoProgressFailures = 0

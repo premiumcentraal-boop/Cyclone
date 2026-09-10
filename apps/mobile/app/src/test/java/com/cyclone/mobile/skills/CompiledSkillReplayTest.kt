@@ -11,6 +11,16 @@ import org.junit.Test
 
 class CompiledSkillReplayTest {
     @Test
+    fun rejectedExecutorCannotCompleteRoutineEvenWhenFingerprintsChanged() {
+        val act = RecordingPhoneToolPort(successOutcome("settings.apps").copy(ok = false))
+        val result = CompiledSkillReplay.replay(compileSettings(),
+            page("settings.home", SemanticSelector(text = "Apps")),
+            FOREGROUND_SESSION, FOREGROUND_DISPLAY, act)
+        assertTrue(result is SkillReplayResult.Miss)
+        assertEquals(1, act.actCount)
+    }
+
+    @Test
     fun hitReplaysCompiledTwoStepSettingsRouteWithoutLlmOrVision() {
         val route = compileSettings()
         val act = RecordingPhoneToolPort(
