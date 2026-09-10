@@ -11,10 +11,10 @@ class CycloneProfile429ContractTest {
         File("apps/mobile/app/src/main/java/com/cyclone/mobile/$path"),
     ).first { it.isFile }.readText()
 
-    @Test fun profilesDefaultToActiveThenAllThenAppGroups() {
+    @Test fun profilesDefaultToAllAndRetainActiveAndAppGroups() {
         val source = source("ui/v32/CycloneProfilesPage.kt")
         assertTrue(source.contains("private enum class ProfilesTab { ACTIVE, ALL, GROUPS }"))
-        assertTrue(source.contains("mutableStateOf(ProfilesTab.ACTIVE)"))
+        assertTrue(source.contains("mutableStateOf(ProfilesTab.ALL)"))
         assertTrue(source.contains("\"Active (\${activeProfiles.size})\", \"All profiles\", \"Groups\""))
     }
 
@@ -31,8 +31,11 @@ class CycloneProfile429ContractTest {
         assertTrue(source.contains("\"\$app · \${profile.label}\""))
         assertTrue(source.contains("Text(\"View progress\")"))
         assertTrue(source.contains("Text(\"Open profile\")"))
-        assertTrue(source.contains("val openingMain = profile.androidUserId == 0"))
+        assertTrue(source.contains("val openingMain = profile.owner"))
         assertTrue(source.contains("ProfileSetupRuntime.openProfile(context, if (openingMain) null else recordId)"))
+        assertTrue(source.contains("ProfilePresentationPolicy.isCurrent(userId, verifiedCurrentUser)"))
+        assertTrue(source.contains("ProfilePresentationPolicy.canStartTask("))
+        assertTrue(source.contains("CyclonePendingRequests()"))
         assertFalse(source.contains("it.id in emptySet<String>()"))
     }
 

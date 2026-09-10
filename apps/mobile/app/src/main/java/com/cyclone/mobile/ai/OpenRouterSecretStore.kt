@@ -50,7 +50,7 @@ object OpenRouterSecretStore {
     }
 
     fun clear(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(PREF_BLOB).apply()
+        check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(PREF_BLOB).commit()) { "Could not clear encrypted API settings." }
     }
 
     private fun getOrCreateKey(): SecretKey {
