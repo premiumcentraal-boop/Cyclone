@@ -20,6 +20,8 @@ from .profiles import (
     cursor_mcp_path,
     cursor_profile,
     generic_profile,
+    grok_config_path,
+    grok_profile,
     opencode_config_path,
     opencode_profile,
 )
@@ -90,6 +92,15 @@ def resolve_server_command(explicit: str | None = None) -> ServerCommand:
 
 
 def connect(host: str, *, dry_run: bool = False, executable: str | None = None) -> dict[str, Any]:
+    from .adapters import get_adapter
+
+    adapter = get_adapter(host)
+    adapter.detect()
+    result = adapter.connect(dry_run=dry_run, executable=executable)
+    return result
+
+
+def apply_connect(host: str, *, dry_run: bool = False, executable: str | None = None) -> dict[str, Any]:
     server = resolve_server_command(executable)
     if host == "codex":
         path = codex_config_path()
@@ -131,12 +142,32 @@ def connect(host: str, *, dry_run: bool = False, executable: str | None = None) 
             "dry_run": dry_run,
             "configuration": profile,
         }
+    if host == "grok":
+        path = grok_config_path()
+        server = _prefer_one_command(server.command, server.args)
+        profile = grok_profile(server.command, server.args)
+        if not dry_run:
+            _merge_cursor_profile(path, profile)
+        return {
+            "host": host,
+            "installed": host_installed(host),
+            "path": str(path),
+            "dry_run": dry_run,
+            "configuration": profile,
+        }
     if host == "generic":
         return {"host": host, "path": None, "dry_run": True, "configuration": generic_profile(server.command, server.args)}
     raise ValueError(f"Unsupported connector host: {host}")
 
 
 def disconnect(host: str, *, dry_run: bool = False) -> dict[str, Any]:
+    from .adapters import get_adapter
+
+    adapter = get_adapter(host)
+    return adapter.disconnect(dry_run=dry_run)
+
+
+def apply_disconnect(host: str, *, dry_run: bool = False) -> dict[str, Any]:
     if host == "codex":
         path = codex_config_path()
         before = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -154,6 +185,8 @@ def disconnect(host: str, *, dry_run: bool = False) -> dict[str, Any]:
         return _disconnect_json(host, copilot_config_path(), ("mcpServers", SERVER_KEY), dry_run)
     if host == "cursor":
         return _disconnect_json(host, cursor_mcp_path(), ("mcpServers", SERVER_KEY), dry_run)
+    if host == "grok":
+        return _disconnect_json(host, grok_config_path(), ("mcpServers", SERVER_KEY), dry_run)
     if host == "generic":
         return {"host": host, "path": None, "dry_run": True, "changed": False}
     raise ValueError(f"Unsupported connector host: {host}")
@@ -164,6 +197,15 @@ def host_installed(host: str) -> bool:
         if (Path.home() / ".cursor").exists():
             return True
         return shutil.which("cursor") is not None or shutil.which("cursor.exe") is not None
+    if host == "grok":
+        if (Path.home() / ".grok").exists():
+            return True
+        if shutil.which("grok") is not None or shutil.which("grok.exe") is not None:
+            return True
+        local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+        if local_app_data and (Path(local_app_data) / "Grok").exists():
+            return True
+        return False
     executable = {"codex": "codex", "opencode": "opencode", "copilot": "copilot"}.get(host)
     if host == "codex":
         if shutil.which("codex") is not None or codex_config_path().parent.exists():

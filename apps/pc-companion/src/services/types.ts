@@ -346,10 +346,11 @@ export type ConnectorState =
   | "NEEDS_ATTENTION";
 
 export interface ConnectorCard {
-  id: "codex" | "deepseek-mcp" | "generic-mcp" | string;
+  id: "codex" | "grok" | "cursor" | "opencode" | "copilot" | "deepseek-mcp" | "generic-mcp" | string;
   name: string;
   description: string;
   state: ConnectorState;
+  aiState?: "UNKNOWN" | "DETECTED" | "CONFIGURED" | "CONNECTED" | "FAILED";
   actionLabel?: string;
   detected?: boolean;
   configured?: boolean;
@@ -361,6 +362,7 @@ export interface ConnectorCard {
   toolCount?: number;
   transport?: string;
   approvalMode?: string;
+  phoneState?: "UNKNOWN" | "CONNECTED" | "READY" | "DISCONNECTED";
 }
 
 export interface ConnectorActionResult {

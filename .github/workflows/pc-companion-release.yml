@@ -2,7 +2,7 @@ name: Cyclone PC Companion Release Candidate
 
 on:
   push:
-    branches: ['release/cyclone-one-v1.1.3-live-phone', 'release/cyclone-one-v1.2.0-direct-live-phone', 'release/cyclone-one-v1.3.0-onlyflow-redesign', 'release/cyclone-one-v1.4.0-cip']
+    branches: ['release/cyclone-one-v1.1.3-live-phone', 'release/cyclone-one-v1.2.0-direct-live-phone', 'release/cyclone-one-v1.3.0-onlyflow-redesign', 'release/cyclone-one-v1.4.0-cip', 'release/cyclone-one-v1.5.0-local-ai']
   workflow_dispatch:
     inputs:
       publish_github_release:

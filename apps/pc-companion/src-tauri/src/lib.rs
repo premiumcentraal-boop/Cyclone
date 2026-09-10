@@ -71,11 +71,25 @@ fn open_diagnostics_folder(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn connector_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["status", "--probe-gateway"]).await
+}
+
+#[tauri::command]
+async fn local_ai_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["status", "--probe-gateway"]).await
+}
+
+#[tauri::command]
+async fn local_ai_adapters(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["adapters"]).await
+}
+
+async fn sidecar_json(app: tauri::AppHandle, args: &[&str]) -> Result<serde_json::Value, String> {
     let output = app
         .shell()
         .sidecar("CycloneAgentMCP")
         .map_err(|error| error.to_string())?
-        .args(["status", "--probe-gateway"])
+        .args(args)
         .output()
         .await
         .map_err(|error| error.to_string())?;
@@ -114,8 +128,11 @@ async fn connector_action(
 ) -> Result<serde_json::Value, String> {
     let host = match connector_id.as_str() {
         "codex" => "codex",
-        "deepseek-mcp" => "opencode",
-        "generic-mcp" => "generic",
+        "grok" => "grok",
+        "cursor" => "cursor",
+        "opencode" | "deepseek-mcp" => "opencode",
+        "copilot" => "copilot",
+        "generic" | "generic-mcp" => "generic",
         _ => return Err("Unknown Cyclone connector".into()),
     };
     if action == "install" && host != "generic" {
@@ -270,6 +287,8 @@ pub fn run() {
             diagnostics_folder,
             open_diagnostics_folder,
             connector_status,
+            local_ai_status,
+            local_ai_adapters,
             connector_action,
             legacy_companion_warning,
             mcp_tunnel::mcp_tunnel_status,

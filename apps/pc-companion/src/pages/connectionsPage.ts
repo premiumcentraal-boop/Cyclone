@@ -5,6 +5,20 @@ import {
   type DirectLiveBridgeStatus,
 } from "../core/directLivePhone.js";
 import type { LivePhoneStatus } from "../core/livePhone.js";
+import {
+  adapterLabel,
+  adapterRowLabel,
+  aiStatusLabel,
+  overallAiState,
+  phoneDoesNotFailAi,
+  phoneHealthState,
+  phoneStatusLabel,
+  repairActions,
+  type AiState,
+  type LocalAiAdapterHealth,
+  type LocalAiHealth,
+  type PhoneHealth,
+} from "../core/localAiHealth.js";
 import { stoppedTunnelStatus, type McpTunnelMode, type McpTunnelStatus } from "../core/mcpTunnel.js";
 import { CODEX_MCP_PROMPT } from "../core/sessionTiles.js";
 import type { ConnectorCard, DesktopDevice, DesktopService } from "../services/types.js";
@@ -23,14 +37,13 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const heading = el("div");
   heading.append(
     el("h1", "page-title", "Connections"),
-    el("p", "page-subtitle", "Choose what you want to connect. Cyclone keeps the technical setup out of the way."),
+    el("p", "page-subtitle", "Choose Cloud AI or Local AI. Cyclone keeps MCP, ports and tokens out of the way."),
   );
   const refreshButton = button("Refresh", "button secondary compact");
   header.append(heading, refreshButton);
 
   const cards = el("div", "simple-connection-grid");
 
-  // Cloud agents — this is the default path for ChatGPT/Grok/etc.
   const cloudCard = el("article", "simple-connection-card featured");
   const cloudTop = el("div", "simple-connection-top");
   const cloudIdentity = el("div", "simple-connection-identity");
@@ -40,8 +53,8 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   );
   const cloudHeading = cloudIdentity.lastElementChild as HTMLElement;
   cloudHeading.append(
-    el("h2", "simple-connection-title", "Connect your phone to cloud agents?"),
-    el("p", "simple-connection-copy", "Use ChatGPT, Grok or another cloud agent to see and control the phone you are holding."),
+    el("h2", "simple-connection-title", "Cloud AI"),
+    el("p", "simple-connection-copy", "ChatGPT / Grok cloud"),
   );
   const cloudPill = el("span", "simple-status neutral", "Off");
   cloudTop.append(cloudIdentity, cloudPill);
@@ -50,44 +63,55 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const cloudVision = fact("Vision", "Waiting");
   const cloudControl = fact("Control", "Waiting");
   cloudFacts.append(cloudPhone, cloudVision, cloudControl);
-  const cloudMessage = el("div", "simple-connection-message", "Nothing is shared until you choose Yes.");
+  const cloudMessage = el("div", "simple-connection-message", "Nothing is shared until you connect.");
   const cloudActions = el("div", "simple-choice-row");
-  const cloudYes = button("Yes, connect", "button primary");
-  const cloudNo = button("No, not now", "button secondary");
+  const cloudYes = button("Connect", "button primary");
+  const cloudNo = button("Disconnect", "button secondary");
   cloudActions.append(cloudYes, cloudNo);
-  const cloudHelper = el("div", "simple-helper", "When connected, Cyclone gives you one private handoff to paste into the connector setup. No separate URL, token and prompt steps.");
+  const cloudHelper = el("div", "simple-helper", "Cyclone gives you one private handoff to paste into the connector setup.");
   cloudCard.append(cloudTop, cloudFacts, cloudMessage, cloudActions, cloudHelper);
 
-  // Local AI remains separate from cloud Live Phone.
-  const codexCard = el("article", "simple-connection-card");
-  const codexTop = el("div", "simple-connection-top");
-  const codexIdentity = el("div", "simple-connection-identity");
-  codexIdentity.append(
-    el("div", "simple-connection-icon codex", "C"),
+  const localCard = el("article", "simple-connection-card");
+  const localTop = el("div", "simple-connection-top");
+  const localIdentity = el("div", "simple-connection-identity");
+  localIdentity.append(
+    el("div", "simple-connection-icon local-ai", "PC"),
     el("div", "simple-connection-heading"),
   );
-  const codexHeading = codexIdentity.lastElementChild as HTMLElement;
-  codexHeading.append(
-    el("h2", "simple-connection-title", "Use Local AI on this PC?"),
-    el("p", "simple-connection-copy", "Connect local AI apps directly to Cyclone. Supports Codex, Grok, Cursor, OpenCode, Copilot and compatible MCP hosts."),
+  const localHeading = localIdentity.lastElementChild as HTMLElement;
+  localHeading.append(
+    el("h2", "simple-connection-title", "Local AI"),
+    el("p", "simple-connection-copy", "Apps on this PC"),
   );
-  const codexPill = el("span", "simple-status neutral", "Checking");
-  codexTop.append(codexIdentity, codexPill);
-  const codexMessage = el("div", "simple-connection-message", "Cyclone will configure the local connection for you.");
-  const codexActions = el("div", "simple-choice-row");
-  const codexYes = button("Yes, connect", "button primary");
-  const codexNo = button("No, not now", "button secondary");
-  codexActions.append(codexYes, codexNo);
-  codexCard.append(codexTop, codexMessage, codexActions);
+  const localPill = el("span", "simple-status neutral", "Checking");
+  localTop.append(localIdentity, localPill);
+  const localProviders = el("div", "local-ai-providers");
+  const localMessage = el("div", "simple-connection-message", "Cyclone will configure the local connection for you.");
+  const localActions = el("div", "simple-choice-row");
+  const localConnect = button("Connect apps", "button primary");
+  localActions.append(localConnect);
+  localCard.append(localTop, localProviders, localMessage, localActions);
 
-  cards.append(cloudCard, codexCard);
+  cards.append(cloudCard, localCard);
 
-  // Everything technical is still available, but closed by default.
+  const health = el("section", "connection-health-split");
+  const aiHealth = el("article", "health-layer");
+  const aiHealthTitle = el("h3", "health-layer-title", "Local AI");
+  const aiHealthState = el("div", "health-layer-state", "Checking…");
+  const aiHealthAction = button("Configure", "button secondary compact");
+  aiHealth.append(aiHealthTitle, aiHealthState, aiHealthAction);
+  const phoneHealthCard = el("article", "health-layer");
+  const phoneHealthTitle = el("h3", "health-layer-title", "Phone");
+  const phoneHealthStateNode = el("div", "health-layer-state", "Checking…");
+  const phoneHealthAction = button("Connect phone", "button secondary compact");
+  phoneHealthCard.append(phoneHealthTitle, phoneHealthStateNode, phoneHealthAction);
+  health.append(aiHealth, phoneHealthCard);
+
   const advanced = el("details", "simple-advanced") as HTMLDetailsElement;
   const advancedSummary = el("summary", "simple-advanced-summary");
   advancedSummary.append(
-    el("span", "simple-advanced-title", "Advanced connections"),
-    el("span", "simple-advanced-copy", "Remote MCP, generic MCP clients and diagnostics"),
+    el("span", "simple-advanced-title", "Advanced"),
+    el("span", "simple-advanced-copy", "URLs, tokens, MCP details and diagnostics"),
   );
   const advancedBody = el("div", "simple-advanced-body");
 
@@ -107,7 +131,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   remoteActions.append(remoteStart, remoteView, remoteControl, remoteCopyUrl, remoteCopyToken);
   remote.append(remoteHead, remoteInfo, remoteActions);
 
-  const local = el("article", "advanced-connection-block");
+  const localAdvanced = el("article", "advanced-connection-block");
   const localHead = el("div", "advanced-block-head");
   localHead.append(
     el("div", "advanced-block-heading-wrap"),
@@ -116,7 +140,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const localTitle = localHead.firstElementChild as HTMLElement;
   localTitle.append(el("h3", "advanced-block-title", "Other local MCP clients"), el("p", "advanced-block-copy", "DeepSeek harnesses and generic local MCP clients can use Cyclone's typed local transport."));
   const localList = el("div", "advanced-local-list");
-  local.append(localHead, localList);
+  localAdvanced.append(localHead, localList);
 
   const promptBlock = el("article", "advanced-connection-block prompt-block");
   const promptHead = el("div", "advanced-block-head");
@@ -127,9 +151,9 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   promptActions.append(copyLivePrompt, copyCodexPrompt);
   promptBlock.append(promptHead, promptActions);
 
-  advancedBody.append(remote, local, promptBlock);
+  advancedBody.append(remote, localAdvanced, promptBlock);
   advanced.append(advancedSummary, advancedBody);
-  page.append(header, cards, advanced);
+  page.append(header, cards, health, advanced);
 
   let active = true;
   let busy = false;
@@ -139,33 +163,82 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   let connectors: ConnectorCard[] = [];
   let remoteStatus: McpTunnelStatus = stoppedTunnelStatus();
 
+  const localHealth = (): LocalAiHealth => {
+    const adapters: LocalAiAdapterHealth[] = connectors
+      .filter((item) => item.id !== "deepseek-mcp")
+      .map((item) => ({
+        id: item.id,
+        name: item.name || adapterLabel(item.id),
+        state: (item.aiState ?? (item.state === "CONNECTED" ? "CONNECTED" : item.state === "NOT_INSTALLED" ? "UNKNOWN" : item.state === "NEEDS_ATTENTION" ? "FAILED" : "DETECTED")) as AiState,
+        detected: Boolean(item.detected ?? item.state !== "NOT_INSTALLED"),
+        configured: Boolean(item.configured ?? item.state === "CONNECTED"),
+        detail: item.description,
+      }));
+    return { state: overallAiState(adapters.map((item) => item.state)), adapters };
+  };
+
+  const phoneHealth = (): PhoneHealth => {
+    const physical = devices.filter((device) => device.source !== "VIRTUAL");
+    const ready = physical.filter((device) => device.state === "READY").length;
+    const fromConnectors = connectors[0];
+    return {
+      state: phoneHealthState({
+        reachable: fromConnectors?.gatewayReachable ?? physical.length > 0,
+        deviceCount: fromConnectors?.deviceCount ?? physical.length,
+        readyDeviceCount: fromConnectors?.readyDeviceCount ?? ready,
+      }),
+      reachable: fromConnectors?.gatewayReachable ?? physical.length > 0,
+      readyDeviceCount: fromConnectors?.readyDeviceCount ?? ready,
+    };
+  };
+
   const render = (): void => {
     if (!active) return;
     const physical = devices.filter((device) => device.source !== "VIRTUAL");
     const readyPhone = physical.find((device) => device.state === "READY");
     const cloudReady = directStatus.running && Boolean(directStatus.url);
     setStatus(cloudPill, cloudReady ? "Ready" : directStatus.running ? "Starting" : "Off", cloudReady ? "ready" : directStatus.running ? "busy" : "neutral");
-    setFactValue(cloudPhone, readyPhone ? readyPhone.name : physical.length ? "Needs attention" : "Not connected");
+    setFactValue(cloudPhone, readyPhone ? readyPhone.name : physical.length ? "Connected" : "Not connected");
     setFactValue(cloudVision, liveStatus.vision ? "Ready" : "Waiting");
     setFactValue(cloudControl, liveStatus.control ? "Ready" : liveStatus.enabled ? "Waiting" : "Off");
     cloudYes.disabled = busy;
-    cloudYes.textContent = cloudReady ? "Copy handoff" : "Yes, connect";
-    cloudNo.disabled = busy;
-    cloudNo.textContent = cloudReady || directStatus.running ? "Disconnect" : "No, not now";
+    cloudYes.textContent = cloudReady ? "Copy handoff" : "Connect";
+    cloudNo.disabled = busy || !(cloudReady || directStatus.running);
     cloudMessage.textContent = cloudReady
       ? readyPhone
         ? "Connected. Use the handoff once in your cloud AI connector, then start asking it to use your phone."
-        : "Cloud connection is ready. Connect a phone in Control before asking the agent to act."
-      : "Nothing is shared until you choose Yes.";
+        : "Cloud AI is ready. Connect a phone in Control before asking the agent to act."
+      : "Nothing is shared until you connect.";
 
-    const codex = connectors.find((item) => item.id === "codex");
-    const codexConnected = codex?.state === "CONNECTED";
-    const codexAttention = codex?.state === "NEEDS_ATTENTION";
-    setStatus(codexPill, codexConnected ? "Connected" : codexAttention ? "Needs attention" : codex?.state === "NOT_INSTALLED" ? "Not installed" : "Off", codexConnected ? "ready" : codexAttention ? "attention" : "neutral");
-    codexYes.disabled = busy || codexConnected;
-    codexYes.textContent = codexConnected ? "Connected" : codexAttention ? "Repair" : codex?.state === "NOT_INSTALLED" ? "Install & connect" : "Yes, connect";
-    codexNo.disabled = busy;
-    codexMessage.textContent = codexConnected ? "Codex is connected locally. No public URL or bearer token is involved." : "Cyclone will configure the local connection for you.";
+    const ai = localHealth();
+    const phone = phoneHealth();
+    const engineReady = connectors.some((item) => (item.toolCount ?? 0) > 0) || ai.state === "CONNECTED" || ai.state === "CONFIGURED";
+    void phoneDoesNotFailAi(ai, phone);
+    setStatus(
+      localPill,
+      aiStatusLabel(ai.state),
+      ai.state === "CONNECTED" || ai.state === "CONFIGURED" ? "ready" : ai.state === "FAILED" ? "attention" : "neutral",
+    );
+    localProviders.replaceChildren();
+    for (const adapter of ai.adapters.filter((item) => item.id !== "generic")) {
+      localProviders.append(el("div", "local-ai-provider", adapterRowLabel(adapter)));
+    }
+    const pending = ai.adapters.filter((item) => item.detected && item.state !== "CONNECTED" && item.state !== "CONFIGURED" && item.id !== "generic");
+    localConnect.disabled = busy || pending.length === 0;
+    localConnect.textContent = pending.length ? "Connect apps" : ai.state === "CONNECTED" || ai.state === "CONFIGURED" ? "Connected" : "Connect apps";
+    localMessage.textContent = ai.state === "CONNECTED" || ai.state === "CONFIGURED"
+      ? "Local AI is configured. Phone readiness is tracked separately below."
+      : "Cyclone will configure supported local AI apps for you.";
+
+    aiHealthState.textContent = `${aiStatusLabel(ai.state)}${ai.state === "CONNECTED" || ai.state === "CONFIGURED" ? " ✓" : ""}`;
+    phoneHealthStateNode.textContent = `${phoneStatusLabel(phone.state)}${phone.state === "READY" ? " ✓" : phone.state === "DISCONNECTED" ? " ✕" : ""}`;
+    const repairs = repairActions({ ai, phone, engineReady });
+    const aiRepair = repairs.find((item) => item.layer === "local_ai");
+    const phoneRepair = repairs.find((item) => item.layer === "phone");
+    aiHealthAction.hidden = !aiRepair;
+    aiHealthAction.textContent = aiRepair?.label ?? "Configure";
+    phoneHealthAction.hidden = !phoneRepair;
+    phoneHealthAction.textContent = phoneRepair?.label ?? "Connect phone";
 
     setStatus(remotePill, remoteStatus.state === "running" ? "Running" : remoteStatus.state === "degraded" ? "Needs repair" : "Off", remoteStatus.state === "running" ? "ready" : remoteStatus.state === "degraded" ? "attention" : "neutral");
     remoteInfo.textContent = remoteStatus.state === "running"
@@ -243,28 +316,30 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
     }
   });
 
-  codexYes.addEventListener("click", async () => {
+  localConnect.addEventListener("click", async () => {
     if (busy) return;
-    const codex = connectors.find((item) => item.id === "codex");
-    if (!codex) {
-      codexMessage.textContent = "Codex was not detected on this PC.";
+    const pending = localHealth().adapters.filter((item) => item.detected && item.state !== "CONNECTED" && item.state !== "CONFIGURED" && item.id !== "generic");
+    if (!pending.length) {
+      localMessage.textContent = "No local AI apps need configuration.";
       return;
     }
     busy = true;
     try {
-      const action = codex.state === "NOT_INSTALLED" ? "install" : codex.state === "NEEDS_ATTENTION" ? "repair" : "connect";
-      const result = await service.runConnectorAction(codex.id, action);
-      codexMessage.textContent = result.message || "Codex connection updated.";
+      for (const adapter of pending) {
+        const result = await service.runConnectorAction(adapter.id, adapter.state === "FAILED" ? "repair" : "connect");
+        localMessage.textContent = result.message || `${adapter.name} updated.`;
+      }
     } catch (error) {
-      codexMessage.textContent = friendlyError(error, "Cyclone could not update the Codex connection.");
+      localMessage.textContent = friendlyError(error, "Cyclone could not update the Local AI connection.");
     } finally {
       busy = false;
       await refresh();
     }
   });
 
-  codexNo.addEventListener("click", () => {
-    codexMessage.textContent = "Nothing changed. You can connect Codex later.";
+  aiHealthAction.addEventListener("click", () => localConnect.click());
+  phoneHealthAction.addEventListener("click", () => {
+    phoneHealthStateNode.textContent = "Connect a phone from Control.";
   });
 
   remoteStart.addEventListener("click", async () => {
@@ -310,7 +385,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   refreshButton.addEventListener("click", () => void refresh());
 
   const renderLocalConnectors = (): void => {
-    const others = connectors.filter((item) => item.id !== "codex");
+    const others = connectors.filter((item) => item.id !== "codex" && item.id !== "grok");
     localList.replaceChildren();
     if (!others.length) {
       localList.append(el("div", "advanced-empty", "No other local MCP clients detected."));
@@ -321,9 +396,9 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
       const copy = el("div");
       copy.append(
         el("div", "advanced-local-name", connector.name),
-        el("div", "advanced-local-state", connector.state === "CONNECTED" ? "Connected" : connector.state === "NEEDS_ATTENTION" ? "Needs attention" : "Not connected"),
+        el("div", "advanced-local-state", connector.state === "CONNECTED" ? "Connected" : connector.state === "NEEDS_ATTENTION" ? "Configure" : connector.state === "NOT_INSTALLED" ? "Not installed" : "Available"),
       );
-      const action = button(connector.state === "CONNECTED" ? "Connected" : connector.state === "NEEDS_ATTENTION" ? "Repair" : "Prepare", "button ghost compact");
+      const action = button(connector.state === "CONNECTED" ? "Connected" : connector.state === "NEEDS_ATTENTION" ? "Configure" : "Prepare", "button ghost compact");
       action.disabled = connector.state === "CONNECTED";
       action.addEventListener("click", async () => {
         const kind = connector.state === "NEEDS_ATTENTION" ? "repair" : connector.state === "NOT_INSTALLED" ? "install" : "connect";
