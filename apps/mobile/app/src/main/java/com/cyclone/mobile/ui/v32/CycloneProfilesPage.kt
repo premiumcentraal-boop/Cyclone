@@ -55,6 +55,8 @@ import com.cyclone.mobile.runtime.session.SessionKernel
 import com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord
 import com.cyclone.mobile.runtime.workspaces.Layer2Workspaces
 import com.cyclone.mobile.runtime.workspaces.ProfileRegistryStore
+import com.cyclone.mobile.runtime.workspaces.ProfilePresentationPolicy
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime
 import com.cyclone.mobile.runtime.workspaces.Workspace
 import com.cyclone.mobile.runtime.workspaces.WorkspaceState
@@ -76,6 +78,8 @@ private data class ProfileCluster(
     val packages: Set<String>,
     val active: Boolean,
     val waiting: Boolean,
+    val current: Boolean = false,
+    val owner: Boolean = false,
 )
 
 private data class AppProfileGroup(
@@ -90,26 +94,33 @@ private fun buildProfileClusters(
     records: List<CycloneProfileRecord>,
     waiting: Set<String>,
     activeWorkspaceId: String?,
+    processUser: Int,
+    ownerUser: Int?,
+    verifiedCurrentUser: Int?,
+    foregroundExecuting: Boolean,
 ): List<ProfileCluster> {
     val recordByUser = records.mapNotNull { record -> record.androidUserId?.let { it to record } }.toMap()
     val workspacesByUser = workspaces.groupBy { it.androidUserId }
-    val userIds = (workspacesByUser.keys + recordByUser.keys).distinct()
+    val userIds = ProfilePresentationPolicy.visibleUsers(workspacesByUser.keys, recordByUser.keys,
+        records.map { it.parentUserId }.toSet(), processUser, ownerUser)
     val clusters = userIds.map { userId ->
         val record = recordByUser[userId]
         val spaces = workspacesByUser[userId].orEmpty().sortedBy { it.label.lowercase() }
         val isWaiting = spaces.any { it.id in waiting }
-        val isActive = isWaiting || spaces.any { it.state == WorkspaceState.running || it.state == WorkspaceState.gated } ||
+        val isActive = ProfilePresentationPolicy.foregroundActive(userId, processUser, foregroundExecuting) || isWaiting || spaces.any { it.state == WorkspaceState.running || it.state == WorkspaceState.gated } ||
             spaces.any { it.id == activeWorkspaceId }
         ProfileCluster(
             key = record?.id ?: "android-user-$userId",
             recordId = record?.id,
-            label = record?.label ?: if (userId == 0) "Main" else "Profile ${userId}",
+            label = record?.label ?: if (userId == ownerUser || (ownerUser == null && userId == 0)) "Profile A" else "Phone profile",
             androidUserId = userId,
-            ready = record?.ready ?: spaces.isNotEmpty(),
+            ready = record?.ready ?: (userId == processUser || userId == ownerUser || spaces.isNotEmpty()),
             workspaces = spaces,
             packages = (record?.packages.orEmpty() + spaces.map { it.appPackage }).toSet(),
             active = isActive,
             waiting = isWaiting,
+            current = ProfilePresentationPolicy.isCurrent(userId, verifiedCurrentUser),
+            owner = userId == ownerUser,
         )
     }.toMutableList()
 
@@ -143,10 +154,22 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     var selectedGroupPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var waiting by remember { mutableStateOf(emptySet<String>()) }
     var busy by remember { mutableStateOf(false) }
+    var switchMessage by remember { mutableStateOf("") }
     var setup by remember { mutableStateOf(false) }
     var workspaces by remember { mutableStateOf(emptyList<Workspace>()) }
     var records by remember { mutableStateOf(emptyList<CycloneProfileRecord>()) }
     var error by remember { mutableStateOf("") }
+
+    var ownerUser by remember { mutableStateOf<Int?>(null) }
+    var verifiedCurrentUser by remember { mutableStateOf<Int?>(null) }
+    val processUser = ProfileSetupRuntime.currentUserId()
+    val overlayActivity by OverlayChromeRuntime.activity.collectAsState()
+    val foregroundExecuting = remember(overlayActivity) { OverlayChromeRuntime.hasExecutingTask() }
+    LaunchedEffect(refreshTick) {
+        verifiedCurrentUser = null
+        withContext(Dispatchers.IO) { runCatching { ProfileSetupRuntime.visibleProfileIdentity() } }
+            .onSuccess { (owner, current) -> ownerUser = owner; verifiedCurrentUser = current }
+    }
 
     val task by WorkspaceTasks.state.collectAsState()
     val profileSetup by ProfileSetupRuntime.state.collectAsState()
@@ -177,8 +200,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
 
     LaunchedEffect(refreshTick, revision, profileSetup.ready, setup) { refreshProfiles() }
 
-    val clusters = remember(workspaces, records, waiting, task?.workspaceId) {
-        buildProfileClusters(workspaces, records, waiting, task?.workspaceId)
+    val clusters = remember(workspaces, records, waiting, task?.workspaceId, ownerUser, verifiedCurrentUser, foregroundExecuting) {
+        buildProfileClusters(workspaces, records, waiting, task?.workspaceId, processUser, ownerUser, verifiedCurrentUser, foregroundExecuting)
     }
     val activeProfiles = clusters.filter { it.active }.sortedBy { it.label.lowercase() }
     val allProfiles = clusters.sortedWith(compareByDescending<ProfileCluster> { it.active }.thenBy { it.label.lowercase() })
@@ -190,7 +213,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
     }
 
     fun openProfile(profile: ProfileCluster) {
-        val openingMain = profile.androidUserId == 0
+        if (busy) return
+        val openingMain = profile.owner
         val recordId = profile.recordId
         if (!profile.ready || (!openingMain && recordId == null)) {
             error = "Finish setting up ${profile.label} before opening it."
@@ -198,10 +222,15 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             return
         }
         busy = true
+        switchMessage = "Checking profile access…"
         error = ""
         scope.launch {
             try {
-                withContext(Dispatchers.IO) { ProfileSetupRuntime.openProfile(context, if (openingMain) null else recordId) }
+                withContext(Dispatchers.IO) {
+                    ProfileSetupRuntime.openProfile(context, if (openingMain) null else recordId) { message ->
+                        scope.launch { switchMessage = message }
+                    }
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -228,6 +257,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             profile = selectedProfile,
             task = exactTask,
             busy = busy,
+            switchMessage = switchMessage,
             error = error,
             onBack = { selectedProfileKey = null },
             onOpenProfile = { openProfile(selectedProfile) },
@@ -261,7 +291,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Profiles", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        "Multiple identities. Always within reach.",
+                        clusters.firstOrNull { it.current }?.let { "Current profile: ${it.label}" } ?: "Current profile not verified",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -318,6 +348,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             }
         }
 
+        if (busy) item { Text(switchMessage, style = MaterialTheme.typography.bodySmall) }
         if (error.isNotBlank()) item {
             Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
@@ -479,7 +510,7 @@ private fun ProfileIdentityCard429(profile: ProfileCluster, onOpen: () -> Unit) 
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                ProfileStatePill429(if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
+                ProfileStatePill429(if (profile.current) "Current" else if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
                 Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))
             }
             if (profile.packages.isNotEmpty()) {
@@ -585,6 +616,7 @@ private fun ProfileDetail429(
     profile: ProfileCluster,
     task: WorkspaceTaskUi?,
     busy: Boolean,
+    switchMessage: String,
     error: String,
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
@@ -612,7 +644,7 @@ private fun ProfileDetail429(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                ProfileStatePill429(if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
+                ProfileStatePill429(if (profile.current) "Current" else if (!profile.ready) "Setup" else if (profile.active) "Live" else "Ready")
             }
         }
 
@@ -620,7 +652,7 @@ private fun ProfileDetail429(
 
         item {
             Button(enabled = profile.ready && !busy, onClick = onOpenProfile, modifier = Modifier.fillMaxWidth()) {
-                Text(if (busy) "Opening…" else "Open profile")
+                Text(if (busy) switchMessage else "Open profile")
             }
         }
 

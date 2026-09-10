@@ -61,6 +61,7 @@ class ProfileBootstrapService : Service() {
                 ProfileBootstrapContract.validateTransfer(transfer.getInt("source"), transfer.getInt("target"), ProfileSetupRuntime.currentUserId())
                 val ai = transfer.getJSONObject("ai")
                 val edit = getSharedPreferences("cyclone_ai", MODE_PRIVATE).edit()
+                ProfileBootstrapContract.aiKeys.forEach(edit::remove)
                 ProfileBootstrapContract.aiKeys.forEach { key ->
                     if (ai.has(key)) when (val value = ai.get(key)) {
                         is Boolean -> edit.putBoolean(key, value)
@@ -70,13 +71,11 @@ class ProfileBootstrapService : Service() {
                 check(edit.commit())
                 check(getSharedPreferences("cyclone_profile_registry", MODE_PRIVATE).edit()
                     .putString("profiles", transfer.getString("profiles")).commit())
-                check(createDeviceProtectedStorageContext().getSharedPreferences("cyclone_profile_origin", MODE_PRIVATE).edit()
-                    .putInt("source", transfer.getInt("source")).putString("profile", transfer.getString("profile")).commit())
                 if (transfer.has("key")) {
                     val bytes = ProfileTransferCipher.decrypt(store.getKey(ALIAS, null) as java.security.PrivateKey, transfer.getString("key"))
                     try { OpenRouterSecretStore.save(this, String(bytes, Charsets.UTF_8)) } finally { bytes.fill(0) }
                     check(OpenRouterSecretStore.hasKey(this))
-                }
+                } else OpenRouterSecretStore.clear(this)
                 val permissions = transfer.getJSONArray("permissions")
                 for (index in 0 until permissions.length()) {
                     val permission = permissions.getString(index)
@@ -90,6 +89,8 @@ class ProfileBootstrapService : Service() {
                     val components = android.provider.Settings.Secure.getString(contentResolver, "enabled_notification_listeners").orEmpty().split(':')
                     check(components.any { it == ProfileBootstrapContract.LISTENER || it == "com.cyclone.mobile/com.cyclone.mobile.CycloneNotificationListener" })
                 }
+                check(createDeviceProtectedStorageContext().getSharedPreferences("cyclone_profile_origin", MODE_PRIVATE).edit()
+                    .putInt("source", transfer.getInt("source")).putString("profile", transfer.getString("profile")).commit())
                 result.writeText(JSONObject().put("nonce", transfer.getString("nonce")).put("user", ProfileSetupRuntime.currentUserId()).put("ok", true).toString())
             }
             input.delete()

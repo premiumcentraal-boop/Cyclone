@@ -113,11 +113,21 @@ object ProfileSetupRuntime {
 
     fun currentUserId(): Int = Layer2Workspaces.currentAndroidUserId()
 
+    /** Root-observed human user, distinct from this process's Android user. Read-only. */
+    fun visibleProfileIdentity(): Pair<Int, Int> {
+        val owner = ProfileSetupParser.mainUserId(listUsersRequired())
+            ?: error("Android did not identify the main profile.")
+        val current = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser()))
+            ?: error("Android did not identify the current profile.")
+        return owner to current
+    }
+
     /** Trusted local UI action. This is not a model tool and cannot bypass an active task. */
-    fun openProfile(context: Context, profileId: String?) {
+    fun openProfile(context: Context, profileId: String?, onProgress: (String) -> Unit = {}) {
         synchronized(Layer2Workspaces.engine.mutationLock) {
             check(!Layer2Workspaces.gated() && !com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask() &&
                 !com.cyclone.mobile.runtime.background.WorkspaceTasks.hasCurrentTask()) { "Finish the current task before switching profiles." }
+            onProgress("Checking profile access…")
             runRequired(ProfileSetupPlan.verifyRoot())
             val users = listUsersRequired()
             val user = if (profileId == null) {
@@ -130,13 +140,21 @@ object ProfileSetupRuntime {
                 check(record.ready && record.secondaryUser) { "This profile still needs setup." }
                 val exact = users.singleOrNull { it.id == target && it.name == record.id }
                 check(exact != null && ProfileRecovery.validOwned(exact, record.parentUserId, true)) { "Profile identity needs repair." }
-                if (target != currentUserId()) ProfileBootstrapRuntime.prepare(context, target, record.id)
+                if (target != currentUserId()) {
+                    onProgress("Preparing ${record.label} settings and permissions…")
+                    ProfileBootstrapRuntime.prepare(context, target, record.id)
+                }
                 target
             }
+            val activeUser = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser()))
+            check(activeUser == currentUserId() || activeUser == user) { "Your active profile changed. The switch was cancelled." }
+            check(!Layer2Workspaces.gated()) { "Resolve the pending review before switching." }
             Layer2Workspaces.engine.clearSelection()
-            if (ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) != user) {
+            if (activeUser != user) {
+                onProgress("Asking Android to open the profile…")
                 runRequired(ProfileSetupPlan.switchUser(user))
             }
+            onProgress("Waiting for Android to confirm the switch…")
             var verified = false
             repeat(20) {
                 if (!verified) {
