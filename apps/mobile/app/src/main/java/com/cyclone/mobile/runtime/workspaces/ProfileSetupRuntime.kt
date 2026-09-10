@@ -136,7 +136,14 @@ object ProfileSetupRuntime {
             if (ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) != user) {
                 runRequired(ProfileSetupPlan.switchUser(user))
             }
-            check(ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) == user) { "Android hasn't completed switching profiles yet." }
+            var verified = false
+            repeat(20) {
+                if (!verified) {
+                    verified = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser())) == user
+                    if (!verified) Thread.sleep(150)
+                }
+            }
+            check(verified) { "Android hasn't completed switching profiles yet." }
         }
     }
 

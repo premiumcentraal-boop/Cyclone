@@ -42,7 +42,10 @@ class MainActivity : ComponentActivity() {
             // Android 15 enforces edge-to-edge for targetSdk 35. Keep Cyclone's interactive shell
             // inside the status-bar safe area so the top controls never compete with Wi-Fi/battery.
             Box(Modifier.fillMaxSize().statusBarsPadding()) {
-                CycloneMobileV32App()
+                androidx.compose.foundation.layout.Column {
+                    com.cyclone.mobile.ui.ProfileRescueBar()
+                    CycloneMobileV32App()
+                }
             }
         }
         handlePairingIntent(intent)
