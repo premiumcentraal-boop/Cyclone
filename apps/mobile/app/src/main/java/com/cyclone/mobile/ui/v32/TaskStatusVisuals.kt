@@ -22,11 +22,14 @@ import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 
 enum class CycloneTaskVisualState { WORKING, ACTION_NEEDED, DONE }
 
-fun WorkspaceTaskUi.taskVisualState(): CycloneTaskVisualState = when (phase) {
-    TaskPhase.STARTING, TaskPhase.WORKING -> CycloneTaskVisualState.WORKING
-    TaskPhase.DONE -> CycloneTaskVisualState.DONE
-    TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED -> CycloneTaskVisualState.ACTION_NEEDED
-    TaskPhase.STOPPED -> CycloneTaskVisualState.ACTION_NEEDED
+fun WorkspaceTaskUi.taskVisualState(): CycloneTaskVisualState {
+    if (confirmation != null) return CycloneTaskVisualState.ACTION_NEEDED
+    return when (phase) {
+        TaskPhase.STARTING, TaskPhase.WORKING -> CycloneTaskVisualState.WORKING
+        TaskPhase.DONE -> CycloneTaskVisualState.DONE
+        TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED -> CycloneTaskVisualState.ACTION_NEEDED
+        TaskPhase.STOPPED -> CycloneTaskVisualState.ACTION_NEEDED
+    }
 }
 
 fun WorkspaceTaskUi.canTakeOverFromUi(): Boolean =
