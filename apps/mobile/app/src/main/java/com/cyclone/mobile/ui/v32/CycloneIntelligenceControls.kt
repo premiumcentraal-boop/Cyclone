@@ -8,10 +8,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,11 +74,15 @@ private fun modelSubtitle(model: OpenRouterModelPreset): String = when (model.id
     else -> "Cyclone model"
 }
 
-/** Compact first-stage menu: intelligence first, phone autonomy second. */
+/**
+ * Compact intelligence surface shared by the in-app composer and the system overlay. In the
+ * overlay we include the model pill at the top so model choice is never hidden behind autonomy.
+ */
 @Composable
 fun CycloneModelIntelligencePanel(
     modelId: String,
     effort: String,
+    showModelSelector: Boolean = true,
     onChange: (String, String) -> Unit,
 ) {
     val context = LocalContext.current
@@ -89,9 +91,20 @@ fun CycloneModelIntelligencePanel(
     val currentEffort = normalizedEffort(effort)
 
     Column(
-        Modifier.widthIn(min = 248.dp, max = 286.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+        Modifier.widthIn(min = 252.dp, max = 292.dp).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        if (showModelSelector) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CycloneModelPill(
+                    modelId = modelId,
+                    effort = currentEffort,
+                    onChange = onChange,
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f))
+        }
+
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Intelligence", style = MaterialTheme.typography.titleSmall)
             Text(
@@ -109,7 +122,7 @@ fun CycloneModelIntelligencePanel(
                     shape = RoundedCornerShape(12.dp),
                     color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    shadowElevation = if (active) 1.dp else 0.dp,
+                    shadowElevation = 0.dp,
                 ) {
                     Column(
                         Modifier.padding(vertical = 8.dp),
@@ -117,7 +130,7 @@ fun CycloneModelIntelligencePanel(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Surface(
-                            modifier = Modifier.size(7.dp),
+                            modifier = Modifier.size(6.dp),
                             shape = CircleShape,
                             color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.outline,
                         ) {}
@@ -131,7 +144,7 @@ fun CycloneModelIntelligencePanel(
             }
         }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f))
 
         TextButton(
             onClick = { autonomyOpen = !autonomyOpen },
@@ -176,10 +189,7 @@ fun CycloneModelIntelligencePanel(
     }
 }
 
-/**
- * Model selection deliberately floats outside the composer row. Long model names therefore never
- * steal typing width from Ask Cyclone.
- */
+/** Model selection floats above the composer and never steals typing width. */
 @Composable
 fun CycloneModelPill(
     modelId: String,
@@ -194,12 +204,12 @@ fun CycloneModelPill(
 
     Box(modifier) {
         Surface(
-            modifier = Modifier.widthIn(max = 206.dp).clickable(enabled = enabled) { open = true },
+            modifier = Modifier.widthIn(max = 210.dp).clickable(enabled = enabled) { open = true },
             shape = RoundedCornerShape(999.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = .91f),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .94f),
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
-            shadowElevation = 3.dp,
+            shadowElevation = 2.dp,
         ) {
             Row(
                 Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -293,9 +303,12 @@ fun CycloneIntelligenceControls(
                 )
             }
             DropdownMenu(expanded = intelligenceOpen, onDismissRequest = { intelligenceOpen = false }) {
-                CycloneModelIntelligencePanel(V39AiChatContract.storageId(model), level) { modelId, effort ->
-                    persist(modelId, effort)
-                }
+                CycloneModelIntelligencePanel(
+                    modelId = V39AiChatContract.storageId(model),
+                    effort = level,
+                    showModelSelector = false,
+                    onChange = ::persist,
+                )
             }
         }
 
