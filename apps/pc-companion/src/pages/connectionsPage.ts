@@ -58,7 +58,7 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   const cloudHelper = el("div", "simple-helper", "When connected, Cyclone gives you one private handoff to paste into the connector setup. No separate URL, token and prompt steps.");
   cloudCard.append(cloudTop, cloudFacts, cloudMessage, cloudActions, cloudHelper);
 
-  // Local Codex remains intentionally separate from cloud Live Phone.
+  // Local AI remains separate from cloud Live Phone.
   const codexCard = el("article", "simple-connection-card");
   const codexTop = el("div", "simple-connection-top");
   const codexIdentity = el("div", "simple-connection-identity");
@@ -68,8 +68,8 @@ export function createConnectionsPage(service: DesktopService): ConnectionsPageH
   );
   const codexHeading = codexIdentity.lastElementChild as HTMLElement;
   codexHeading.append(
-    el("h2", "simple-connection-title", "Use Codex on this PC?"),
-    el("p", "simple-connection-copy", "Connect local Codex directly to Cyclone. It stays separate from cloud Live Phone."),
+    el("h2", "simple-connection-title", "Use Local AI on this PC?"),
+    el("p", "simple-connection-copy", "Connect local AI apps directly to Cyclone. Supports Codex, Grok, Cursor, OpenCode, Copilot and compatible MCP hosts."),
   );
   const codexPill = el("span", "simple-status neutral", "Checking");
   codexTop.append(codexIdentity, codexPill);
