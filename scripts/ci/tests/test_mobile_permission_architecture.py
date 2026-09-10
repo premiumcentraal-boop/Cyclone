@@ -207,16 +207,18 @@ class MobilePermissionArchitectureGuards(unittest.TestCase):
             ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/workspaces",
         ]
         files = [path for root in roots for path in root.rglob("*.kt")]
-        files.append(ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/RootFeaturesCard.kt")
+        profile_surfaces = [
+            ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/RootFeaturesCard.kt",
+            ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/ProfileSetup429.kt",
+        ]
+        files.extend(profile_surfaces)
         self.assertTrue(files)
         for path in files:
             text = path.read_text(encoding="utf-8")
             self.assertNotIn("market://", text, f"{path}: helper/profile setup must not open Play")
             self.assertNotIn("play.google.com", text, f"{path}: helper/profile setup must not open Play")
-        profile = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/RootFeaturesCard.kt").read_text(
-            encoding="utf-8",
-        )
-        self.assertIn('Text("Back")', profile)
+        profile = "\n".join(path.read_text(encoding="utf-8") for path in profile_surfaces)
+        self.assertIn('Icon(Icons.Rounded.ArrowBack, "Back"', profile)
         self.assertNotIn("Shelter", profile)
         self.assertNotIn("Island", profile)
 
