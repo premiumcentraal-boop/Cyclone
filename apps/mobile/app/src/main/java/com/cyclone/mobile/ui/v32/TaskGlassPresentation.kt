@@ -25,12 +25,7 @@ internal object TaskGlassPresentation {
     fun current(task: WorkspaceTaskUi?, resolvedApp: String? = task?.app): TaskGlassCardModel? {
         if (task == null || task.phase == TaskPhase.STOPPED) return null
         val label = TaskHumanizer.humanize(task.goal, resolvedApp)
-        val status = when (task.phase) {
-            TaskPhase.STARTING, TaskPhase.WORKING -> "Working"
-            TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED -> "Action Needed"
-            TaskPhase.DONE -> "Done"
-            TaskPhase.STOPPED -> return null
-        }
+        val status = task.title
         val action = when {
             task.phase == TaskPhase.DONE -> "View result"
             task.phase in setOf(TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED) || task.confirmation != null -> "View options"
@@ -94,11 +89,8 @@ internal object TaskHumanizer {
             return "Searching $app"
         }
 
-        val stripped = clean
-            .replace(Regex("^(please\\s+|can you\\s+|could you\\s+|would you\\s+|i want you to\\s+)+", RegexOption.IGNORE_CASE), "")
-            .trim()
-            .ifBlank { clean }
-        return sentenceCase(shorten(stripped, 64))
+        // Unknown requests may contain typed values or credentials. Never echo them into status.
+        return if (app != null) "Task in $app" else "Phone task"
     }
 
     private fun shorten(value: String, limit: Int): String {

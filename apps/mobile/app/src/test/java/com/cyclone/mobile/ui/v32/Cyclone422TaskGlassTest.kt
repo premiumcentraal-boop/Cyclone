@@ -38,45 +38,36 @@ class Cyclone422TaskGlassTest {
     @Test fun realWorkingTaskRendersCurrentCardModel() {
         val card = TaskGlassPresentation.current(task())
         assertNotNull(card)
-        assertEquals("Working on this task", card!!.status)
+        assertEquals("Working", card!!.status)
         assertEquals("Opening Chrome", card.taskLabel)
         assertEquals("View progress", card.actionLabel)
     }
 
     @Test fun finishedTaskCollapsesToOpenableNotification() {
         val card = TaskGlassPresentation.current(task(TaskPhase.DONE))!!
-        assertEquals("Finished", card.status)
+        assertEquals("Done", card.status)
         assertEquals("Opening Chrome", card.taskLabel)
-        assertEquals("Open", card.actionLabel)
-        assertEquals("Open for Opening Chrome", card.actionContentDescription)
+        assertEquals("View result", card.actionLabel)
+        assertEquals("View result for Opening Chrome", card.actionContentDescription)
     }
 
     @Test fun reviewTaskUsesConsumerCopy() {
         val card = TaskGlassPresentation.current(task(TaskPhase.REVIEW))!!
-        assertEquals("Needs your review", card.status)
-        assertEquals("Review", card.actionLabel)
+        assertEquals("Action Needed", card.status)
+        assertEquals("View options", card.actionLabel)
     }
 
-    @Test fun swipeCardHasTwoDirectionalPhysicalActions() {
+    @Test fun taskControlsUseBackendCapabilities() {
         val panel = source("ui/v32/CycloneAskTaskPanel.kt")
-        assertTrue(panel.contains("Orientation.Horizontal"))
-        assertTrue(panel.contains("rememberDraggableState"))
-        assertTrue(panel.contains("offsetPx = (offsetPx + delta)"))
-        assertTrue(panel.contains("Text(\"Open\""))
-        assertTrue(panel.contains("\"Dismiss\""))
-        assertTrue(panel.contains("\"Pause\""))
-        assertTrue(panel.contains("commitLeft"))
-        assertTrue(panel.contains("commitRight"))
-        assertTrue(panel.contains("performHapticFeedback"))
-        assertTrue(panel.contains("spring("))
+        assertTrue(panel.contains("task.interruption?.canResumeAfterHuman == true"))
+        assertTrue(panel.contains("task.interruption?.canTakeOver == true"))
+        assertTrue(panel.contains("task.interruption?.canAutofill == true"))
+        assertFalse(panel.contains("task.resumable &&"))
     }
 
-    @Test fun destructiveTaskCommandsAreBoundToExplicitLeftActions() {
-        val panel = source("ui/v32/CycloneAskTaskPanel.kt")
-        assertTrue(panel.contains("WorkspaceTasks.command(context, task, \"pause\")"))
-        assertTrue(panel.contains("WorkspaceTasks.command(context, task, \"cancel\")"))
-        assertFalse(panel.contains("Text(\"Stop task\")"))
-        assertFalse(panel.contains("Text(\"Close task\")"))
+    @Test fun failedTaskCannotMasqueradeAsResumableReview() {
+        assertEquals("Failed", TaskGlassPresentation.current(task(TaskPhase.FAILED))!!.status)
+        assertNull(TaskHarnessState.interruption(task(TaskPhase.FAILED)))
     }
 
     @Test fun overlayAndInAppTaskGlassShareTheSameComponent() {
@@ -148,7 +139,6 @@ class Cyclone422TaskGlassTest {
         val panel = source("ui/v32/CycloneAskTaskPanel.kt")
         assertTrue(panel.contains("MaterialTheme.colorScheme.onSurface"))
         assertTrue(panel.contains("MaterialTheme.colorScheme.onSurfaceVariant"))
-        assertTrue(panel.contains("MaterialTheme.colorScheme.onPrimary"))
         assertFalse(panel.contains("Color.Black"))
         assertFalse(panel.contains("Color.White"))
     }

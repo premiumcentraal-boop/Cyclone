@@ -45,8 +45,8 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
     val context = LocalContext.current
     val resolvedApp = remember(task.packageName) { appLabel(context, task.packageName) }
     val presentation = TaskGlassPresentation.current(task, resolvedApp) ?: return
-    val actionNeeded = task.phase in setOf(TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED) || task.confirmation != null
-    val canResume = task.resumable && task.confirmation == null && task.phase in setOf(TaskPhase.HUMAN, TaskPhase.PAUSED, TaskPhase.REVIEW)
+    val actionNeeded = task.interruption != null
+    val canResume = task.interruption?.canResumeAfterHuman == true
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -126,7 +126,7 @@ private fun TaskStatusMark(phase: TaskPhase, actionNeeded: Boolean) {
                 }
             }
         }
-        actionNeeded -> {
+        actionNeeded || phase == TaskPhase.FAILED || phase == TaskPhase.STOPPED -> {
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.tertiaryContainer) {
                 Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                     Text(
@@ -202,7 +202,7 @@ private fun ActionNeededActions(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Button(
                 onClick = onTakeOver,
-                enabled = task.sessionId != null,
+                enabled = task.interruption?.canTakeOver == true,
                 modifier = Modifier.weight(1f).heightIn(min = 46.dp),
                 shape = RoundedCornerShape(15.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
@@ -217,7 +217,7 @@ private fun ActionNeededActions(
         }
         OutlinedButton(
             onClick = {},
-            enabled = false,
+            enabled = task.interruption?.canAutofill == true,
             modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
             shape = RoundedCornerShape(15.dp),
         ) { Text("Autofill · Soon") }

@@ -191,15 +191,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
 
     @Composable
     private fun ProgressStateCard(task: WorkspaceTaskUi) {
-        val title = when (task.phase) {
-            TaskPhase.STARTING, TaskPhase.WORKING -> "Cyclone is working"
-            TaskPhase.PAUSED -> "Task paused"
-            TaskPhase.REVIEW -> "Ready for your review"
-            TaskPhase.HUMAN -> "You're in control"
-            TaskPhase.DONE -> "Finished"
-            TaskPhase.FAILED -> "Cyclone needs your help"
-            TaskPhase.STOPPED -> "Task stopped"
-        }
+        val title = task.title
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
@@ -225,10 +217,15 @@ class WorkspaceProgressActivity : ComponentActivity() {
                     Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
                 Text(task.subtitle, style = MaterialTheme.typography.bodyMedium)
-                if (task.phase == TaskPhase.DONE && task.steps.isNotEmpty()) {
-                    task.steps.distinct().takeLast(3).forEach { step ->
-                        Text("✓  $step", style = MaterialTheme.typography.bodySmall)
+                task.semanticSteps.takeLast(8).forEach { step ->
+                    val status = when (step.state) {
+                        SemanticStepState.DONE -> "✓"
+                        SemanticStepState.ACTIVE -> "Working"
+                        SemanticStepState.PENDING -> "Pending"
+                        SemanticStepState.ACTION_NEEDED -> "Action Needed"
+                        SemanticStepState.FAILED -> "Not verified"
                     }
+                    Text("$status · ${step.label}", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -306,8 +303,8 @@ class WorkspaceProgressActivity : ComponentActivity() {
                 ) { Text("Open ${task.app}") }
 
                 task.sessionId != null -> {
-                    val human = task.phase == TaskPhase.HUMAN || task.phase == TaskPhase.PAUSED
-                    if (!human || task.resumable) {
+                    val human = task.interruption?.canResumeAfterHuman == true
+                    if (human || task.interruption?.canTakeOver == true || task.working) {
                         Button(
                             onClick = {
                                 WorkspaceTasks.command(this@WorkspaceProgressActivity, task, if (human) "resume" else "handoff")

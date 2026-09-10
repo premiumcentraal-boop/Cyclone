@@ -46,6 +46,7 @@ object OverlayChromeRuntime {
     private var workspaceJob: Job? = null
     private var adaptiveAgent: OpenRouterAdaptiveAgent? = null
     private var foregroundTaskId: String? = null
+    private var foregroundResuming = false
     private var suspendedTaskId: String? = null
 
     private data class GateChallenge(
@@ -434,13 +435,23 @@ object OverlayChromeRuntime {
             }
             "resume" -> {
                 if (task.interruption?.canResumeAfterHuman != true) return
-                val prior = synchronized(lock) { aiJob }
+                val prior = synchronized(lock) {
+                    if (foregroundResuming) return
+                    foregroundResuming = true
+                    aiJob
+                }
                 aiScope.launch {
-                    prior?.join()
-                    if (WorkspaceTasks.state.value?.taskId != id) return@launch
-                    DeviceState.setController(DeviceState.Controller.AGENT)
-                    if (snapshot().userPaused) mutate { it.dispatch(OverlayUserAction.TAKE_CONTROL) }
-                    resumeSuspendedTask()
+                    try {
+                        prior?.join()
+                        val current = WorkspaceTasks.state.value
+                        if (current?.taskId != id || current.controlRevision != task.controlRevision ||
+                            current.interruption?.canResumeAfterHuman != true) return@launch
+                        DeviceState.setController(DeviceState.Controller.AGENT)
+                        if (snapshot().userPaused) mutate { it.dispatch(OverlayUserAction.TAKE_CONTROL) }
+                        resumeSuspendedTask()
+                    } finally {
+                        synchronized(lock) { foregroundResuming = false }
+                    }
                 }
             }
             "cancel" -> {

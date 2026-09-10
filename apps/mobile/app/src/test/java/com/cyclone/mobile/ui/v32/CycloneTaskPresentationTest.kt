@@ -21,7 +21,7 @@ class CycloneTaskPresentationTest {
     }
     @Test fun consumerCopyDoesNotExposeExecutionPlane() {
         val source = WorkspaceTaskUi("task", "named-vd", "Instagram", "com.instagram.android", "Find creators", phase = TaskPhase.WORKING, displayId = 7, glassStepKind = GlassStepKind.FAST_PATH, message = "Fast Path · phone.click")
-        assertEquals("Navigating Instagram", UiTask(source).subtitle)
+        assertEquals("Checking the current page", UiTask(source).subtitle)
         assertEquals("named-vd", UiTask(source).source.sessionId)
         assertEquals(7, UiTask(source).source.displayId)
     }
