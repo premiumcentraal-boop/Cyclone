@@ -28,7 +28,7 @@ class CycloneProfile429ContractTest {
     @Test fun activeProfilesShowRealAppTaskStateAndWholeProfileAction() {
         val source = source("ui/v32/CycloneProfilesPage.kt")
         assertTrue(source.contains("CycloneAppIcon(packageName"))
-        assertTrue(source.contains("\"$app · \${profile.label}\""))
+        assertTrue(source.contains("\"\$app · \${profile.label}\""))
         assertTrue(source.contains("Text(\"View progress\")"))
         assertTrue(source.contains("Text(\"Open profile\")"))
         assertTrue(source.contains("ProfileSetupRuntime.openProfile(context, recordId)"))
