@@ -1,24 +1,25 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -36,20 +37,19 @@ import com.cyclone.mobile.runtime.background.WorkspaceTasks
 /**
  * Ask Cyclone's single task-status surface.
  *
- * It intentionally shows semantic task state only: Working, Done, or Action Needed. Raw gestures,
- * coordinates, model traces and transport details remain in execution logs rather than leaking into
- * the user-facing progress surface.
+ * The card mirrors the grounded runtime with three consumer states only: Working, Action needed,
+ * and Done. Execution details stay in diagnostics; the card shows semantic work and truthful
+ * human-control actions.
  */
 @Composable
 fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
     val context = LocalContext.current
     val resolvedApp = remember(task.packageName) { appLabel(context, task.packageName) }
     val presentation = TaskGlassPresentation.current(task, resolvedApp) ?: return
-    val actionNeeded = task.phase in setOf(TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED) || task.confirmation != null
-    val canResume = task.resumable && task.confirmation == null && task.phase in setOf(TaskPhase.HUMAN, TaskPhase.PAUSED, TaskPhase.REVIEW)
+    val visualState = task.taskVisualState()
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -58,172 +58,188 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
     ) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
-            verticalArrangement = Arrangement.spacedBy(13.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                TaskStatusMark(task.phase, actionNeeded)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        presentation.status,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                Text(
+                    resolvedApp.takeIf { it.isNotBlank() && it != "Other" } ?: "Cyclone",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                CycloneTaskStatusPill(visualState)
+            }
+
+            Text(
+                presentation.taskLabel,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            AnimatedContent(
+                targetState = visualState,
+                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                label = "Cyclone task state",
+            ) { state ->
+                when (state) {
+                    CycloneTaskVisualState.WORKING -> WorkingBody(task) {
+                        UiTask(task).open(context)
+                    }
+                    CycloneTaskVisualState.ACTION_NEEDED -> ActionNeededBody(
+                        task = task,
+                        onTakeOver = {
+                            WorkspaceTasks.command(context, task, "handoff")
+                        },
+                        onDone = {
+                            WorkspaceTasks.command(context, task, "resume")
+                        },
+                        onProgress = { UiTask(task).open(context) },
                     )
+                    CycloneTaskVisualState.DONE -> DoneBody(task) {
+                        UiTask(task).open(context)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkingBody(task: WorkspaceTaskUi, onProgress: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SupportingLine(task)
+        val recent = task.steps.distinct().takeLast(2)
+        if (recent.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                recent.forEach { step ->
                     Text(
-                        presentation.taskLabel,
-                        style = MaterialTheme.typography.bodyMedium,
+                        step,
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Surface(shape = RoundedCornerShape(11.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                    CycloneAppIcon(presentation.packageName, Modifier.padding(5.dp).size(30.dp))
-                }
-            }
-
-            val semanticLine = task.subtitle.trim().takeIf { it.isNotBlank() && it != presentation.taskLabel }
-            if (semanticLine != null) {
-                Text(
-                    semanticLine,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            when {
-                task.phase == TaskPhase.DONE -> DoneActions(task)
-                actionNeeded -> ActionNeededActions(
-                    task = task,
-                    canResume = canResume,
-                    onTakeOver = { WorkspaceTasks.command(context, task, "handoff") },
-                    onDone = { WorkspaceTasks.command(context, task, "resume") },
-                    onProgress = { UiTask(task).open(context) },
-                )
-                else -> WorkingActions(task, onProgress = { UiTask(task).open(context) })
             }
         }
+        TextButton(
+            onClick = onProgress,
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
+        ) { Text("View progress") }
     }
 }
 
 @Composable
-private fun TaskStatusMark(phase: TaskPhase, actionNeeded: Boolean) {
-    when {
-        phase == TaskPhase.DONE -> {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
-                Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                    androidx.compose.material3.Icon(
-                        Icons.Rounded.Check,
-                        "Done",
-                        Modifier.size(20.dp),
-                        tint = CycloneColors.Success,
-                    )
-                }
-            }
-        }
-        actionNeeded -> {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.tertiaryContainer) {
-                Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "!",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    )
-                }
-            }
-        }
-        else -> {
-            Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    Modifier.size(24.dp).semantics { contentDescription = "Working" },
-                    strokeWidth = 2.5.dp,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WorkingActions(task: WorkspaceTaskUi, onProgress: () -> Unit) {
-    if (task.steps.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            task.steps.distinct().takeLast(3).forEach { step ->
-                Text(
-                    "✓  $step",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-    Button(
-        onClick = onProgress,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-        shape = RoundedCornerShape(16.dp),
-    ) { Text("View Progress") }
-}
-
-@Composable
-private fun DoneActions(task: WorkspaceTaskUi) {
-    val context = LocalContext.current
-    if (task.steps.isNotEmpty()) {
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            task.steps.distinct().takeLast(3).forEach { step ->
-                Text(
-                    "✓  $step",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-    Button(
-        onClick = { UiTask(task).open(context) },
-        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-        shape = RoundedCornerShape(16.dp),
-    ) { Text("View Result") }
-}
-
-@Composable
-private fun ActionNeededActions(
+private fun ActionNeededBody(
     task: WorkspaceTaskUi,
-    canResume: Boolean,
     onTakeOver: () -> Unit,
     onDone: () -> Unit,
     onProgress: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    val prompt = when {
+        task.confirmation != null -> task.confirmation.explanation
+        task.phase == TaskPhase.HUMAN -> "Finish this step in ${task.app}, then tell Cyclone when you're done."
+        task.phase == TaskPhase.PAUSED -> "Your place is saved. Take over or continue when you're ready."
+        task.phase == TaskPhase.FAILED -> task.subtitle
+        else -> task.subtitle
+    }.trim()
+
+    Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        if (prompt.isNotBlank()) {
+            Text(
+                prompt,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Button(
                 onClick = onTakeOver,
-                enabled = task.sessionId != null,
-                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                enabled = task.canTakeOverFromUi(),
+                modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
+                    contentDescription = "Take over ${task.app}"
+                },
                 shape = RoundedCornerShape(15.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-            ) { Text("Take Over") }
+            ) { Text(if (task.phase == TaskPhase.HUMAN) "In control" else "Take Over") }
+
             OutlinedButton(
                 onClick = onDone,
-                enabled = canResume,
-                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                enabled = task.canContinueAfterHumanFromUi(),
+                modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
+                    contentDescription = "I'm done, continue with Cyclone"
+                },
                 shape = RoundedCornerShape(15.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             ) { Text("I'm Done") }
         }
+
         OutlinedButton(
             onClick = {},
             enabled = false,
             modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
             shape = RoundedCornerShape(15.dp),
-        ) { Text("Autofill · Soon") }
-        androidx.compose.material3.TextButton(
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Autofill")
+                Text("Soon", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        TextButton(
             onClick = onProgress,
             modifier = Modifier.align(Alignment.CenterHorizontally),
-        ) { Text("View Progress") }
+        ) { Text(if (task.confirmation != null) "Review details" else "View progress") }
+    }
+}
+
+@Composable
+private fun DoneBody(task: WorkspaceTaskUi, onOpen: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SupportingLine(task)
+        val completed = task.steps.distinct().takeLast(3)
+        if (completed.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                completed.forEach { step ->
+                    Text(
+                        "✓  $step",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Button(
+            onClick = onOpen,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) { Text("View Result") }
+    }
+}
+
+@Composable
+private fun SupportingLine(task: WorkspaceTaskUi) {
+    val line = task.subtitle.trim().takeIf { it.isNotBlank() }
+    if (line != null) {
+        Text(
+            line,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
