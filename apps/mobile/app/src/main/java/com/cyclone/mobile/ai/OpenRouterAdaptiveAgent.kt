@@ -232,6 +232,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             )
         }
         session.context.pendingGateClass = null
+        session.context.bridge.invalidateAfterHandoff()
         if (!session.agent.resume()) {
             return@withContext QuickAgentResult(
                 false,

@@ -238,9 +238,12 @@ object WorkspaceTasks {
         Intent(context, WorkspaceTaskService::class.java).setAction(action)
             .setData(Uri.parse("cyclone://task/${task.taskId}/$action"))
             .putExtra("task", task.taskId).putExtra("session", task.sessionId)
+            .putExtra("display", task.displayId ?: -1)
+            .putExtra("workspace", task.workspaceId)
+            .putExtra("generation", task.workspaceGeneration ?: -1L)
     fun progressIntent(context: Context, task: WorkspaceTaskUi) = ViewProgressRouter.intent(context, task)
     fun matches(task: WorkspaceTaskUi?, taskId: String?, sessionId: String?) =
-        task != null && task.taskId == taskId && (sessionId == null || task.sessionId == sessionId)
+        task != null && task.taskId == taskId && task.sessionId == sessionId
 
     /**
      * Queue observability only. Does not start a Session Kernel VD and never replaces an in-flight

@@ -78,6 +78,16 @@ class CyclonePcParityBridge internal constructor(
         return fresh
     }
 
+    fun invalidateAfterHandoff() {
+        environment.invalidateObservation()
+        page = null
+        searchEvidence = emptyList()
+        inspectionEvidence = emptyList()
+        memory = RecoveryMemory()
+        lastRecovery = null
+        forceVision = false
+    }
+
     fun currentPage(): AgentPageCard? = page
 
     fun observation(): CycloneObservation? = page?.let { card ->

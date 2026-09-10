@@ -43,6 +43,10 @@ class WorkspaceTaskService : Service() {
                 if (taskId == null) stopSelf()
                 return START_NOT_STICKY
             }
+            val target = current ?: return START_NOT_STICKY
+            if (intent.getIntExtra("display", -1) != (target.displayId ?: -1) ||
+                intent.getStringExtra("workspace") != target.workspaceId ||
+                intent.getLongExtra("generation", -1) != (target.workspaceGeneration ?: -1L)) return START_NOT_STICKY
             when (intent.action) {
                 "cancel" -> stopTask()
                 "handoff" -> transferToHuman()
@@ -52,7 +56,7 @@ class WorkspaceTaskService : Service() {
                     if (token != null && token == current?.confirmation?.token && current?.phase == TaskPhase.REVIEW) {
                         scope.launch {
                             runCatching { withContext(Dispatchers.IO) { sessionId?.let { WorkspaceRuntime.approveConfirmation(it, token) } } }
-                                .onSuccess { update { it.copy(confirmation = null) }; continueTask() }
+                                .onSuccess { update { it.copy(confirmation = null) }; continueTask(confirmed = true) }
                         }
                     }
                 }
@@ -166,6 +170,7 @@ class WorkspaceTaskService : Service() {
         val id = sessionId ?: return
         if (switching || current?.working != true) return
         switching = true
+        update { it.copy(phase = TaskPhase.PAUSED, message = "Pausing your task") }
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { WorkspaceRuntime.pause(id) }
@@ -177,8 +182,9 @@ class WorkspaceTaskService : Service() {
     }
     private fun transferToHuman() {
         val id = sessionId ?: return
-        if (switching || current?.phase == TaskPhase.HUMAN) return
+        if (switching || current?.interruption?.canTakeOver != true && current?.phase != TaskPhase.DONE && current?.working != true) return
         switching = true
+        update { it.copy(phase = TaskPhase.PAUSED, message = "Transferring control to you") }
         scope.launch {
             try {
                 // Revoke before moving; the agent suspends at its next normal execution boundary.
@@ -189,10 +195,10 @@ class WorkspaceTaskService : Service() {
             } finally { switching = false }
         }
     }
-    private fun continueTask() {
+    private fun continueTask(confirmed: Boolean = false) {
         val id = sessionId ?: return
         val task = current ?: return
-        if (switching || !task.resumable || task.phase !in setOf(TaskPhase.HUMAN, TaskPhase.PAUSED, TaskPhase.REVIEW)) return
+        if (switching || !task.resumable || (!confirmed && task.interruption?.canResumeAfterHuman != true)) return
         switching = true
         val previousRun = running
         running = scope.launch {
@@ -201,11 +207,16 @@ class WorkspaceTaskService : Service() {
                 previousRun?.join()
                 if (stopped) return@launch
                 withContext(Dispatchers.IO) { WorkspaceRuntime.resume(id) }
-                awaitWorkspace(id, ExecutionContext(id, com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions.lookup(id).displayId))
+                val exact = ExecutionContext(id, task.displayId ?: error("Missing task display"))
+                awaitWorkspace(id, exact)
+                val fresh = withContext(Dispatchers.IO) {
+                    com.cyclone.mobile.gateway.GatewayObservationAdapter.capture(applicationContext, task.identityJson())
+                }
+                check(fresh.execution == exact && fresh.id.isNotBlank()) { "Fresh session evidence is required" }
                 update {
                     it.copy(
                         phase = TaskPhase.WORKING,
-                        message = TaskGlassStep.subtitle(GlassStepKind.FAST_PATH, "Continuing in ${it.app}"),
+                        message = "Continuing from the current page",
                         glassStepKind = GlassStepKind.FAST_PATH,
                     )
                 }

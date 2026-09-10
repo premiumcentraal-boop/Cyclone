@@ -119,7 +119,7 @@ def test_existing_goal_label_does_not_verify_unchanged_click():
     assert result["execution"]["androidExecution"]["ok"] is True
     assert result["verification"]["passed"] is False
     assert result["ok"] is False
-    assert result["verification"]["basis"] != "ALREADY_ON_PAGE"
+    assert result["verification"].get("basis") != "ALREADY_ON_PAGE"
     assert result["verification"]["authority"] == "ANDROID_CANONICAL"
     assert result["afterState"]["pageKey"] == "HOME" or result["verification"]["after_page_key"] == "HOME"
 
@@ -142,7 +142,7 @@ def test_explicit_negative_verification_cannot_be_overridden_by_existing_label()
     assert result["execution"]["androidExecution"]["ok"] is True
     assert result["verification"]["passed"] is False
     assert result["ok"] is False
-    assert result["verification"]["basis"] != "ALREADY_ON_PAGE"
+    assert result["verification"].get("basis") != "ALREADY_ON_PAGE"
 
 
 class FailingHomeExecutionBridge(AndroidBridge):

@@ -141,7 +141,7 @@ class CycloneLocalAgent(
         if (!state.gateSuspended || state.finalClassification != CycloneTaskClassification.HUMAN_OR_GATE) return false
         val pausedDuration = suspendedAt?.let { (now() - it).coerceAtLeast(0) } ?: 0
         suspendedAt = null
-        state = state.copy(taskStartTimeMs = state.taskStartTimeMs + pausedDuration, currentStage = CycloneAgentStage.OBSERVE, gateSuspended = false, requireFreshObservation = true, finalClassification = null, consecutiveRecoveryCyclesWithoutNewEvidence = 0, repeatedIdenticalActionWithoutProgress = 0)
+        state = state.copy(taskStartTimeMs = state.taskStartTimeMs + pausedDuration, currentStage = CycloneAgentStage.OBSERVE, latestObservationIdentity = null, latestPageIdentity = null, lastActionSignature = null, gateSuspended = false, requireFreshObservation = true, finalClassification = null, consecutiveRecoveryCyclesWithoutNewEvidence = 0, repeatedIdenticalActionWithoutProgress = 0)
         repeatedUnverifiedDone = 0
         emit(CycloneTraceEventType.GATE_RESUME); checkpoint(); return true
     }

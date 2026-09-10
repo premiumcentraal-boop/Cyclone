@@ -279,6 +279,9 @@ class CycloneLocalAgentTest {
         assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Suspended)
         assertTrue(agent.resume())
         assertTrue(agent.snapshot().requireFreshObservation)
+        assertNull(agent.snapshot().latestObservationIdentity)
+        assertNull(agent.snapshot().latestPageIdentity)
+        assertNull(agent.snapshot().lastActionSignature)
         assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Completed)
         assertEquals(listOf(true, true), observedRequireFresh)
     }

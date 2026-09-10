@@ -52,6 +52,7 @@ interface CycloneAgentEnvironmentApi {
     fun act(tool: String, params: JSONObject = JSONObject(), goal: String = ""): AgentActionEnvelope
     /** Oldest to newest. takeLast(n) always returns the most recent outcomes. */
     fun history(): List<AgentActionEnvelope>
+    fun invalidateObservation() {}
     fun photoEffect(): PhotoEffectLedger.State = PhotoEffectLedger.State.NOT_ATTEMPTED
     fun brainRecall(goal: String): AgentKnowledgeResult
     fun knownRoutes(goal: String): AgentKnowledgeResult
@@ -400,6 +401,11 @@ class CycloneAgentEnvironment internal constructor(
         )
         remember(envelope)
         envelope
+    }
+
+    override fun invalidateObservation() = synchronized(this) {
+        scope.expire()
+        actionHistory.clear() // Previous after-states cannot satisfy post-handoff completion.
     }
 
     override fun history(): List<AgentActionEnvelope> = synchronized(this) { actionHistory.toList() }
