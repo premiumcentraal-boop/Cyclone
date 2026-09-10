@@ -147,9 +147,9 @@ private fun buildAppGroups(profiles: List<ProfileCluster>): List<AppProfileGroup
         .sortedWith(compareByDescending<AppProfileGroup> { it.activeCount }.thenByDescending { it.profiles.size }.thenBy { it.packageName })
 
 @Composable
-fun CycloneProfilesPage(context: Context, refreshTick: Int) {
+fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var tab by rememberSaveable { mutableStateOf(ProfilesTab.ACTIVE) }
+    var tab by rememberSaveable { mutableStateOf(ProfilesTab.ALL) }
     var selectedProfileKey by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedGroupPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var waiting by remember { mutableStateOf(emptySet<String>()) }
@@ -204,7 +204,7 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
         buildProfileClusters(workspaces, records, waiting, task?.workspaceId, processUser, ownerUser, verifiedCurrentUser, foregroundExecuting)
     }
     val activeProfiles = clusters.filter { it.active }.sortedBy { it.label.lowercase() }
-    val allProfiles = clusters.sortedWith(compareByDescending<ProfileCluster> { it.active }.thenBy { it.label.lowercase() })
+    val allProfiles = clusters.sortedWith(compareByDescending<ProfileCluster> { it.current }.thenByDescending { it.active }.thenBy { it.label.lowercase() })
     val appGroups = remember(clusters) { buildAppGroups(clusters) }
     val selectedProfile = clusters.firstOrNull { it.key == selectedProfileKey }
 
@@ -262,6 +262,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             onBack = { selectedProfileKey = null },
             onOpenProfile = { openProfile(selectedProfile) },
             onManage = { manageProfile(selectedProfile) },
+            canStartTask = ProfilePresentationPolicy.canStartTask(selectedProfile.androidUserId, processUser, verifiedCurrentUser, busy),
+            onAsk = onAsk,
         )
         if (setup) ProfileSetupPage { setup = false; refreshProfiles() }
         return
@@ -302,6 +304,14 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int) {
             }
         }
 
+        item {
+            Button(
+                onClick = onAsk,
+                enabled = ProfilePresentationPolicy.canStartTask(processUser, processUser, verifiedCurrentUser, busy),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("New task in current profile") }
+        }
+        item { CyclonePendingRequests() }
         item {
             CycloneSegmentedControl(
                 listOf("Active (${activeProfiles.size})", "All profiles", "Groups"),
@@ -621,6 +631,8 @@ private fun ProfileDetail429(
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
     onManage: () -> Unit,
+    canStartTask: Boolean,
+    onAsk: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var localMessage by remember { mutableStateOf("") }
@@ -656,9 +668,15 @@ private fun ProfileDetail429(
             }
         }
 
+        item {
+            OutlinedButton(onClick = onAsk, enabled = canStartTask, modifier = Modifier.fillMaxWidth()) {
+                Text("New task in ${profile.label}")
+            }
+            if (!canStartTask) Text("Open this profile first to start a task here.", style = MaterialTheme.typography.bodySmall)
+        }
         item { CycloneSectionTitle("Apps") }
         if (profile.workspaces.isEmpty() && profile.packages.isEmpty()) {
-            item { Text("Choose apps to finish this profile.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item { Text(if (profile.owner) "Your installed apps are available through Ask Cyclone." else "Choose apps to finish this profile.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         items(profile.workspaces, key = { "profile-app-${it.id}" }) { workspace ->
             Card(

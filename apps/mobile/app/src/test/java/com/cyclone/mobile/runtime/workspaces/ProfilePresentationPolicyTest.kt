@@ -20,6 +20,13 @@ class ProfilePresentationPolicyTest {
         assertFalse(ProfilePresentationPolicy.foregroundActive(12, 0, true))
         assertFalse(ProfilePresentationPolicy.foregroundActive(0, 0, false))
     }
+    @Test fun taskEntryRequiresVerifiedCurrentProcessAndNoSwitch() {
+        assertTrue(ProfilePresentationPolicy.canStartTask(12, 12, 12, false))
+        assertFalse(ProfilePresentationPolicy.canStartTask(12, 0, 0, false))
+        assertFalse(ProfilePresentationPolicy.canStartTask(0, 0, null, false))
+        assertFalse(ProfilePresentationPolicy.canStartTask(0, 0, 12, false))
+        assertFalse(ProfilePresentationPolicy.canStartTask(0, 0, 0, true))
+    }
     @Test fun nonzeroMainUserIsPreserved() {
         assertEquals(setOf(10, 12), ProfilePresentationPolicy.visibleUsers(emptySet(), setOf(12), setOf(10), 10, 10))
     }

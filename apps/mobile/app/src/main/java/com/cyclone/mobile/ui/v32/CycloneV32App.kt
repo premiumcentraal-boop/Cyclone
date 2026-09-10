@@ -123,7 +123,7 @@ fun CycloneMobileV32App() {
                             onRoutines = { destination = V32Destination.ROUTINES },
                             onSettings = { settingsOpen = true },
                         )
-                        V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick)
+                        V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick) { destination = V32Destination.AI }
                         V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }
                         V32Destination.ROUTINES -> CycloneRoutinesPage(
                             context,

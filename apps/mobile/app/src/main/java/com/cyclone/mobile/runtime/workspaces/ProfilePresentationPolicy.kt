@@ -8,5 +8,8 @@ object ProfilePresentationPolicy {
 
     fun isCurrent(user: Int, verifiedCurrent: Int?): Boolean = verifiedCurrent != null && user == verifiedCurrent
 
+    fun canStartTask(user: Int, processUser: Int, verifiedCurrent: Int?, switching: Boolean): Boolean =
+        !switching && user == processUser && isCurrent(user, verifiedCurrent)
+
     fun foregroundActive(user: Int, processUser: Int, executing: Boolean): Boolean = executing && user == processUser
 }

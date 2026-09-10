@@ -35,3 +35,11 @@ Open profile now reports access checks, destination preparation, switch dispatch
 Added five ProfilePresentationPolicyTest cases for absent owner records, alternate process, unknown current identity, foreground activity association and nonzero owner. Android JVM execution remains BLOCKED locally: Gradle 8.9 distribution download fails with Network is unreachable. Existing Python CI guard suite: 72 passed. git diff --check passed. No phone testing performed.
 
 Next: expose the USB-connected Windows host/Cyclone One as a callable connection, then read installed version/current user/user inventory and reproduce Open profile while collecting only switch-stage diagnostics. Do not claim root toast establishes switch success. Push local commits when the GitHub usage-limit approval block is resolved; no release was published here.
+
+## Pushed recovery and profile hub follow-up
+
+GitHub access recovered on the next user request. Remote checkpoint 151a73a1dffe98442cab962cf59cdb7f1ee9072a preserves local b1183367, e7a2cfe7 and fb4d3520 together without losing their source or diagnosis.
+
+Profiles now opens All profiles by default, sorts the verified current profile first, exposes the existing pending-request queue with Steer/Stop, and offers New task in current profile. Profile details offer New task only when the selected user is both the process user and Android's verified current user, and no switch is underway. The action opens the existing AI composer; it does not create another task engine or silently retarget another profile. Alternate-profile task creation still requires opening that profile first. Existing Add profile and Manage apps/profile continue through the canonical setup runtime.
+
+Added task-entry policy regression assertions for mismatched profile, unknown current user, stale process and switch-in-progress. Physical profile switching and bootstrap remain unverified. CI must validate this exact remote head before beta distribution.
