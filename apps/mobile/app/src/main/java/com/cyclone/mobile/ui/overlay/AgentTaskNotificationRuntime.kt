@@ -40,35 +40,22 @@ internal object AgentTaskNotificationCopy {
 internal object AgentTaskNotificationRuntime {
     private const val CHANNEL = "cyclone-agent-task"
     private const val NOTIFICATION_ID = 903
-    private val active = AtomicBoolean(false)
-
-    fun start(context: Context) {
-        active.set(true)
-        post(context, AgentTaskNotificationState.WORKING, "Starting your task…", ongoing = true)
+    fun start(context: Context) = renderCurrent(context)
+    fun progress(context: Context, message: String) = renderCurrent(context)
+    fun waiting(context: Context, message: String?) = renderCurrent(context)
+    fun finish(context: Context, success: Boolean, message: String?) = renderCurrent(context)
+    fun cancel(context: Context) { context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID) }
+    private fun renderCurrent(context: Context) {
+        com.cyclone.mobile.runtime.background.WorkspaceTasks.state.value?.takeIf { it.foreground }?.let { renderTask(context, it) }
+    }
+    fun renderTask(context: Context, task: com.cyclone.mobile.runtime.background.WorkspaceTaskUi) {
+        if (!task.foreground) return
+        post(context, task)
     }
 
-    fun progress(context: Context, message: String) {
-        if (!active.get()) return
-        post(context, AgentTaskNotificationState.WORKING,
-            AgentTaskNotificationCopy.text(message, "Cyclone is working…"), ongoing = true)
-    }
-
-    fun waiting(context: Context, message: String?) {
-        if (!active.get()) return
-        post(context, AgentTaskNotificationState.WAITING,
-            AgentTaskNotificationCopy.text(message, "Open Cyclone to continue."), ongoing = false)
-    }
-
-    fun finish(context: Context, success: Boolean, message: String?) {
-        if (!active.compareAndSet(true, false)) return
-        val state = if (success) AgentTaskNotificationState.COMPLETED else AgentTaskNotificationState.STOPPED
-        post(context, state,
-            AgentTaskNotificationCopy.text(message, if (success) "Cyclone finished and checked the task." else "Cyclone stopped safely."),
-            ongoing = false,
-        )
-    }
-
-    private fun post(context: Context, state: AgentTaskNotificationState, message: String, ongoing: Boolean) {
+    private fun post(context: Context, task: com.cyclone.mobile.runtime.background.WorkspaceTaskUi) {
+        val ongoing = task.working
+        val message = task.subtitle
         if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(
@@ -90,7 +77,7 @@ internal object AgentTaskNotificationRuntime {
         val builder = Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_cyclone_status)
             .setColor(Color.rgb(141, 227, 210))
-            .setContentTitle(AgentTaskNotificationCopy.title(state))
+            .setContentTitle(com.cyclone.mobile.runtime.background.TaskNotificationProjection.title(task))
             .setContentText(message)
             .setStyle(Notification.BigTextStyle().bigText(message))
             .setSubText("Cyclone")
@@ -102,6 +89,12 @@ internal object AgentTaskNotificationRuntime {
             .setAutoCancel(!ongoing)
             .setOnlyAlertOnce(ongoing)
         if (ongoing) builder.setProgress(0, 0, true)
+        com.cyclone.mobile.runtime.background.TaskNotificationProjection.actions(task).forEach { (command, label) ->
+            val pending = PendingIntent.getService(context, 0,
+                com.cyclone.mobile.runtime.background.WorkspaceTasks.commandIntent(context, task, command),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            builder.addAction(Notification.Action.Builder(null, label, pending).build())
+        }
         manager.notify(NOTIFICATION_ID, builder.build())
     }
 }

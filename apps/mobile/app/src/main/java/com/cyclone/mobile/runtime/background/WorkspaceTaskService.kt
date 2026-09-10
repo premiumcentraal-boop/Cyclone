@@ -30,6 +30,16 @@ class WorkspaceTaskService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
         if (intent.action != null) {
+            val shared = WorkspaceTasks.state.value
+            if (shared?.foreground == true) {
+                if (WorkspaceTasks.matches(shared, intent.getStringExtra("task"), intent.getStringExtra("session")) &&
+                    intent.getIntExtra("display", -1) == shared.displayId && intent.getStringExtra("workspace") == null &&
+                    intent.getLongExtra("generation", -1) == -1L) {
+                    com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.commandForegroundTask(shared.taskId, intent.action!!)
+                }
+                if (taskId == null) stopSelf()
+                return START_NOT_STICKY
+            }
             // Commands can create a fresh service after the original failed and stopped itself.
             // Bind only the exact store identity carried by the command, never instance defaults.
             if (taskId == null && intent.action == "cancel") {
@@ -160,7 +170,7 @@ class WorkspaceTaskService : Service() {
                     message = WorkspaceCopy.result(result.message), steps = it.steps + "Checked the result")
                 result.classification == "HUMAN_OR_GATE" -> it.copy(phase = TaskPhase.REVIEW,
                     message = "Review the prepared page in ${it.app} before continuing.")
-                else -> it.copy(phase = TaskPhase.REVIEW, resumable = false,
+                else -> it.copy(phase = TaskPhase.FAILED, resumable = false,
                     message = "I couldn't finish. Your place in ${it.app} is saved for you.")
             }
         }
@@ -282,21 +292,15 @@ class WorkspaceTaskService : Service() {
         val progress = PendingIntent.getActivity(this, 0, WorkspaceTasks.progressIntent(this, task),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val builder = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)
-            .setContentTitle(when (task.phase) {
-                TaskPhase.WORKING, TaskPhase.STARTING -> "Cyclone is working"
-                TaskPhase.REVIEW -> "Finish your task"
-                else -> task.title
-            }).setContentText(task.subtitle).setOnlyAlertOnce(true).setShowWhen(false)
-            .setOngoing(task.phase !in setOf(TaskPhase.FAILED, TaskPhase.STOPPED))
+            .setContentTitle(TaskNotificationProjection.title(task)).setContentText(task.subtitle).setOnlyAlertOnce(true).setShowWhen(false)
+            .setOngoing(task.working)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(progress)
             .setPublicVersion(Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)
                 .setContentTitle("Cyclone task").setContentText("Unlock to view progress").build())
         builder.addAction(Notification.Action.Builder(null, "View progress", progress).build())
-        if (task.phase in setOf(TaskPhase.REVIEW, TaskPhase.DONE))
-            builder.addAction(Notification.Action.Builder(null, "Open ${task.app}", action("handoff")).build())
-        else if (task.phase == TaskPhase.HUMAN && task.resumable)
-            builder.addAction(Notification.Action.Builder(null, "Continue with Cyclone", action("resume")).build())
-        if (task.working) builder.addAction(Notification.Action.Builder(null, "Stop task", action("cancel")).build())
+        TaskNotificationProjection.actions(task).forEach { (command, label) ->
+            builder.addAction(Notification.Action.Builder(null, label, action(command)).build())
+        }
         return builder.build()
     }
     override fun onDestroy() {

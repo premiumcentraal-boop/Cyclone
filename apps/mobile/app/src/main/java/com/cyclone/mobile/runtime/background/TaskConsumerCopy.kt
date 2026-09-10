@@ -1,24 +1,19 @@
 package com.cyclone.mobile.runtime.background
 
-import com.cyclone.mobile.ui.overlay.GlassStepKind
-
-/** Consumer wording only. The executor's original message and identity remain on the task. */
+/** Provider prose is never used as consumer status. */
 object TaskConsumerCopy {
     fun subtitle(task: WorkspaceTaskUi): String {
-        if (!task.working) return task.message
-        val app = task.app.ifBlank { "your app" }
-        return when (task.glassStepKind) {
-            GlassStepKind.SKILL -> "Using your $app routine"
-            GlassStepKind.LAYER2_SLICE -> {
-                val label = task.message.removePrefix("Layer 2 slice · ").substringBefore(" · ").takeIf { it != "Layer 2 slice" && it.isNotBlank() }
-                if (label != null) "Working in $label" else "Working in $app"
-            }
-            GlassStepKind.FAST_PATH -> when {
-                task.message.contains("checking the result", true) -> "Checking the result in $app"
-                task.message.contains("checking the page", true) -> "Reading $app"
-                else -> "Navigating $app"
-            }
-            null -> task.message
+        task.interruption?.let { return it.prompt }
+        task.semanticSteps.lastOrNull()?.takeIf { it.state == SemanticStepState.ACTIVE }?.let { return it.label }
+        return when (task.phase) {
+            TaskPhase.STARTING -> "Getting your task ready"
+            TaskPhase.WORKING -> "Checking the current page"
+            TaskPhase.HUMAN -> "Finish your changes, then select I'm Done."
+            TaskPhase.PAUSED -> "Your task is paused."
+            TaskPhase.REVIEW -> "Review the current page to continue."
+            TaskPhase.DONE -> "The requested result was checked."
+            TaskPhase.FAILED -> "The task could not finish."
+            TaskPhase.STOPPED -> "The task was stopped."
         }
     }
 }

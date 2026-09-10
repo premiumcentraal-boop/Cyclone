@@ -39,16 +39,9 @@ data class WorkspaceTaskUi(
     val workspaceGeneration: Long? = null,
     val glassStepKind: GlassStepKind? = null,
 ) {
+    val foreground get() = sessionId == "default-foreground" && workspaceId == null
     val working get() = phase == TaskPhase.STARTING || phase == TaskPhase.WORKING
-    val title get() = when (phase) {
-        TaskPhase.STARTING, TaskPhase.WORKING -> "Working on this task"
-        TaskPhase.PAUSED -> "Task paused"
-        TaskPhase.REVIEW -> "Ready for your review"
-        TaskPhase.HUMAN -> "You're in control"
-        TaskPhase.DONE -> "Task done"
-        TaskPhase.FAILED -> "Couldn't finish this task"
-        TaskPhase.STOPPED -> "Task stopped"
-    }
+    val title get() = TaskHarnessState.category(this)
     /** Collapsed glass subtitle: real Fast Path / skill / Layer 2 slice, not a generic placeholder. */
     val subtitle: String get() = TaskConsumerCopy.subtitle(this)
 
@@ -241,6 +234,7 @@ object WorkspaceTasks {
             .putExtra("display", task.displayId ?: -1)
             .putExtra("workspace", task.workspaceId)
             .putExtra("generation", task.workspaceGeneration ?: -1L)
+            .apply { if (action == "confirm") putExtra("confirmation", task.confirmation?.token) }
     fun progressIntent(context: Context, task: WorkspaceTaskUi) = ViewProgressRouter.intent(context, task)
     fun matches(task: WorkspaceTaskUi?, taskId: String?, sessionId: String?) =
         task != null && task.taskId == taskId && task.sessionId == sessionId

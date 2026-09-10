@@ -9,6 +9,7 @@ import com.cyclone.mobile.ai.OverlayChromeController
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.QuickAgentConfig
 import com.cyclone.mobile.ai.QuickAgentResult
+import com.cyclone.mobile.runtime.background.*
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,7 @@ object OverlayChromeRuntime {
     private var aiJob: Job? = null
     private var workspaceJob: Job? = null
     private var adaptiveAgent: OpenRouterAdaptiveAgent? = null
+    private var foregroundTaskId: String? = null
     private var suspendedTaskId: String? = null
 
     private data class GateChallenge(
@@ -86,6 +88,12 @@ object OverlayChromeRuntime {
             workspaceJob = aiScope.launch {
                 var previousTask: String? = null
                 com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collect { task ->
+                    if (task?.foreground == true) {
+                        controller?.background(task)
+                        service?.let { AgentTaskNotificationRuntime.renderTask(it, task) }
+                        previousTask = task.taskId
+                        return@collect
+                    }
                     if (BackgroundGlassPolicy.tearDown(task) || (task == null && previousTask != null)) clearBackgroundChrome()
                     else if (BackgroundGlassPolicy.visible(task)) {
                         if (previousTask != task?.taskId) mutate { it.resetIdle() }
@@ -117,6 +125,7 @@ object OverlayChromeRuntime {
             )
         }
         context?.let {
+                    foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task -> task.copy(phase = TaskPhase.STOPPED, resumable = false) } }
                     AgentTaskNotificationRuntime.finish(it, false, "Task stopped.")
                     com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it)
                 }
@@ -235,6 +244,7 @@ object OverlayChromeRuntime {
                     aiJob = null
                 }
                 context?.let {
+                    foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task -> task.copy(phase = TaskPhase.STOPPED, resumable = false) } }
                     AgentTaskNotificationRuntime.finish(it, false, "Task stopped.")
                     com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it)
                 }
@@ -334,8 +344,24 @@ object OverlayChromeRuntime {
             aiJob?.cancel()
             adaptiveAgent?.cancelActiveTask()
         }
+        val shared = WorkspaceTaskUi("foreground-${java.util.UUID.randomUUID()}", "default-foreground",
+            "your app", launchPackage ?: "", request, phase = TaskPhase.WORKING, displayId = 0)
+        WorkspaceTasks.publishStart(shared)
+        foregroundTaskId = shared.taskId
         AgentTaskNotificationRuntime.start(context)
-        val agent = OpenRouterAdaptiveAgent(context)
+        val agent = OpenRouterAdaptiveAgent(context).also { agent ->
+            var revision = 0L
+            agent.onOperation = { tool, result ->
+                WorkspaceTasks.update(shared.taskId) { task ->
+                    if (result == null) { revision = task.controlRevision; TaskHarnessState.begin(task, tool) }
+                    else TaskHarnessState.finish(task, TaskOperationEvidence("default-foreground", 0, revision,
+                        result.androidExecutionOk, result.verification.passed,
+                        result.afterObservationId != null && result.afterObservationId != result.beforeObservationId &&
+                            result.after?.sessionId == "default-foreground" && result.after?.displayId == 0,
+                        result.verification.basis))
+                }
+            }
+        }
         synchronized(lock) {
             adaptiveAgent = agent
             suspendedTaskId = null
@@ -388,12 +414,42 @@ object OverlayChromeRuntime {
                 // state; the trace already records the successful local Brain write.
                 if (!clean.equals(INTERNAL_BRAIN_UPDATED, ignoreCase = true)) {
                     AgentTaskNotificationRuntime.progress(context, clean)
-                    mutate { it.updateStatus(clean) }
+                    mutate { it.updateStatus("Checking the current page") }
                 }
             }
             handleAgentResult(result)
         }
         synchronized(lock) { aiJob = job }
+    }
+
+    /** Exact-task service command; retains the original foreground agent and controller machinery. */
+    fun commandForegroundTask(id: String, command: String) {
+        val task = WorkspaceTasks.state.value?.takeIf { it.foreground && it.taskId == id && id == foregroundTaskId } ?: return
+        when (command) {
+            "handoff", "pause" -> {
+                if (!task.working && task.interruption?.canTakeOver != true && task.phase != TaskPhase.DONE) return
+                DeviceState.setController(DeviceState.Controller.HUMAN)
+                if (!snapshot().userPaused) mutate { it.dispatch(OverlayUserAction.TAKE_CONTROL) }
+                WorkspaceTasks.update(id) { it.copy(phase = TaskPhase.HUMAN) }
+            }
+            "resume" -> {
+                if (task.interruption?.canResumeAfterHuman != true) return
+                val prior = synchronized(lock) { aiJob }
+                aiScope.launch {
+                    prior?.join()
+                    if (WorkspaceTasks.state.value?.taskId != id) return@launch
+                    DeviceState.setController(DeviceState.Controller.AGENT)
+                    if (snapshot().userPaused) mutate { it.dispatch(OverlayUserAction.TAKE_CONTROL) }
+                    resumeSuspendedTask()
+                }
+            }
+            "cancel" -> {
+                dispatch(OverlayUserAction.STOP_TASK)
+                WorkspaceTasks.clearClosedTask(id, task.sessionId)
+                service?.let { AgentTaskNotificationRuntime.cancel(it) }
+                foregroundTaskId = null
+            }
+        }
     }
 
     private fun resumeSuspendedTask() {
@@ -413,12 +469,13 @@ object OverlayChromeRuntime {
                 }
                 machine.updateStatus("Re-observing after handoff…")
             }
-            AgentTaskNotificationRuntime.progress(context, "Re-observing after handoff…")
+            foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { it.copy(phase = TaskPhase.WORKING, message = "Checking the current page") } }
+            AgentTaskNotificationRuntime.progress(context, "Checking the current page")
             val result = agent.resume { progress ->
                 val clean = progress.trim()
                 if (!clean.equals(INTERNAL_BRAIN_UPDATED, ignoreCase = true)) {
                     AgentTaskNotificationRuntime.progress(context, clean)
-                    mutate { it.updateStatus(clean) }
+                    mutate { it.updateStatus("Checking the current page") }
                 }
             }
             handleAgentResult(result)
@@ -428,6 +485,15 @@ object OverlayChromeRuntime {
 
     private fun handleAgentResult(result: QuickAgentResult) {
         val context = synchronized(lock) { service }
+        foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task ->
+            if (!task.working && result.classification == "HUMAN_OR_GATE") task.copy(resumable = true)
+            else task.copy(phase = when (result.classification) {
+                "COMPLETE" -> TaskPhase.DONE
+                "HUMAN_OR_GATE" -> TaskPhase.REVIEW
+                "CANCELLED" -> TaskPhase.STOPPED
+                else -> TaskPhase.FAILED
+            }, resumable = result.classification == "HUMAN_OR_GATE")
+        } }
         when (result.classification) {
             "HUMAN_OR_GATE" -> {
                 context?.let { AgentTaskNotificationRuntime.waiting(it, result.message) }
