@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
@@ -33,7 +34,7 @@ import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
 /** Overlay sibling of the in-app task glass. Both surfaces intentionally share one task identity. */
 @Composable
 fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
-    val compact = CycloneAccessibilityServiceForeground.isOutsideCyclone()
+    val outsideCyclone = DeviceState.currentPackage != "com.cyclone.mobile"
     Column(
         Modifier
             .fillMaxWidth()
@@ -42,7 +43,7 @@ fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
             .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (compact && task.phase == TaskPhase.HUMAN) {
+        if (outsideCyclone && task.phase == TaskPhase.HUMAN) {
             HumanTakeoverRibbon(task)
         } else {
             CycloneAskTaskPanel(task)
@@ -111,12 +112,4 @@ private fun HumanTakeoverRibbon(task: WorkspaceTaskUi) {
             ) { Text("I'm Done") }
         }
     }
-}
-
-/** Avoid importing the accessibility service into presentation logic just to answer one UI question. */
-private object CycloneAccessibilityServiceForeground {
-    fun isOutsideCyclone(): Boolean =
-        com.cyclone.mobile.CycloneAccessibilityService.instance
-            ?.observe(markFresh = false)
-            ?.packageName != "com.cyclone.mobile"
 }
