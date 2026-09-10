@@ -354,18 +354,8 @@ class DesktopAgentService:
             else False
         )
         page_changed_status = verification_status in {"PAGE_CHANGED", "PAGECHANGED"}
-        already_on_page = (
-            execution_ok
-            and bool(after_id)
-            and tool in {"phone.click", "phone.long_press", "phone.type"}
-            and isinstance(android_verification, dict)
-            and verification_status not in {"FAILED"}
-            and (
-                verification_status == "OBSERVED"
-                or android_verification.get("ok") is not False
-            )
-            and _goal_label_present(after_raw, after, goal)
-        )
+        # Seeing a goal label that was already present cannot prove the click did anything.
+        already_on_page = False
         already_on_home = (
             execution_ok
             and bool(after_id)

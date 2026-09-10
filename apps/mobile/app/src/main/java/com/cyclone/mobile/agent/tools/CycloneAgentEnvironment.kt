@@ -326,7 +326,8 @@ class CycloneAgentEnvironment internal constructor(
             after = after,
             androidExecutionOk = androidExecutionOk,
             executorAssertionFailed = executorAssertionFailed,
-            explicitExpectation = normalizedParams.optJSONObject("expect") != null,
+            explicitExpectation = normalizedParams.optJSONObject("expect") != null &&
+                (result.payload as? JSONObject)?.optBoolean("expectationVerified") == true,
         )
 
         val executionFailure = if (!androidExecutionOk) failureFromPhoneResult(result) else null
@@ -502,6 +503,8 @@ class CycloneAgentEnvironment internal constructor(
             nextHopHints = copyArray(observation.payload.optJSONArray("nextHopHints")),
             perceptionMode = observation.payload.optString("perceptionMode", "a11y").ifBlank { "a11y" },
             treeUseful = observation.payload.optBoolean("treeUseful", true),
+            sessionId = observation.execution.sessionId,
+            displayId = observation.execution.displayId,
         )
     }
 
@@ -610,7 +613,7 @@ class CycloneAgentEnvironment internal constructor(
     private fun failureFromPhoneResult(result: PhoneToolResult): AgentFailure {
         val error = result.error
         val code = error?.code
-        val message = error?.message ?: "Canonical phone executor did not accept the action."
+        val message = com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(code?.name)
         return when (code) {
             PhoneToolErrorCode.FRESH_OBSERVATION_REQUIRED,
             PhoneToolErrorCode.STALE_ELEMENT,
@@ -688,55 +691,55 @@ class CycloneAgentEnvironment internal constructor(
         if (error is GatewayProtocolException) {
             return when (error.code) {
                 "STALE_OBSERVATION", "STALE_ELEMENT" -> staleFailure(
-                    error.message ?: "Observation is stale.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                 )
                 "ELEMENT_NOT_FOUND" -> AgentFailure(
                     AgentFailureClass.TARGET_NOT_FOUND,
                     AgentFailureLayer.OBSERVATION,
                     true,
-                    error.message ?: "Target not found.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "POLICY_DENIED" -> AgentFailure(
                     AgentFailureClass.POLICY_DENIED,
                     AgentFailureLayer.POLICY,
                     false,
-                    error.message ?: "Policy denied action.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "ACCESSIBILITY_NOT_CONNECTED" -> AgentFailure(
                     AgentFailureClass.ACCESSIBILITY_UNAVAILABLE,
                     AgentFailureLayer.DEVICE,
                     true,
-                    error.message ?: "Accessibility is unavailable.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "CAPABILITY_UNAVAILABLE" -> AgentFailure(
                     AgentFailureClass.CAPABILITY_UNAVAILABLE,
                     AgentFailureLayer.CAPABILITY,
                     false,
-                    error.message ?: "Capability unavailable.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "AUTH_REJECTED" -> AgentFailure(
                     AgentFailureClass.AUTH_REQUIRED,
                     AgentFailureLayer.POLICY,
                     true,
-                    error.message ?: "Authorization required.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "TIMEOUT" -> AgentFailure(
                     AgentFailureClass.TIMEOUT,
                     defaultLayer,
                     true,
-                    error.message ?: "Operation timed out.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 else -> AgentFailure(
                     AgentFailureClass.EXECUTION_FAILED,
                     defaultLayer,
                     true,
-                    error.message ?: "Operation failed safely.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
             }
@@ -745,7 +748,7 @@ class CycloneAgentEnvironment internal constructor(
             AgentFailureClass.EXECUTION_FAILED,
             defaultLayer,
             true,
-            error.message ?: error.javaClass.simpleName,
+            com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(null),
         )
     }
 

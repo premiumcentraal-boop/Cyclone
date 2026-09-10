@@ -101,7 +101,7 @@ class GoalAwareBridge(AndroidBridge):
         return super().request(op, args, request_id)
 
 
-def test_already_on_page_click_is_verified_even_if_page_key_unchanged():
+def test_existing_goal_label_does_not_verify_unchanged_click():
     service = DesktopAgentService(
         OneDeviceFleet(
             GoalAwareBridge({"ok": True, "status": "OBSERVED", "semanticSuccessClaimed": False})
@@ -117,14 +117,14 @@ def test_already_on_page_click_is_verified_even_if_page_key_unchanged():
         },
     )
     assert result["execution"]["androidExecution"]["ok"] is True
-    assert result["verification"]["passed"] is True
-    assert result["ok"] is True
-    assert result["verification"]["basis"] == "ALREADY_ON_PAGE"
+    assert result["verification"]["passed"] is False
+    assert result["ok"] is False
+    assert result["verification"]["basis"] != "ALREADY_ON_PAGE"
     assert result["verification"]["authority"] == "ANDROID_CANONICAL"
     assert result["afterState"]["pageKey"] == "HOME" or result["verification"]["after_page_key"] == "HOME"
 
 
-def test_observed_execution_ok_same_page_is_not_verification_failed():
+def test_explicit_negative_verification_cannot_be_overridden_by_existing_label():
     service = DesktopAgentService(
         OneDeviceFleet(
             GoalAwareBridge({"ok": False, "status": "OBSERVED", "code": "VERIFICATION_FAILED", "semanticSuccessClaimed": False})
@@ -140,9 +140,9 @@ def test_observed_execution_ok_same_page_is_not_verification_failed():
         },
     )
     assert result["execution"]["androidExecution"]["ok"] is True
-    assert result["verification"]["passed"] is True
-    assert result["ok"] is True
-    assert result["verification"]["basis"] == "ALREADY_ON_PAGE"
+    assert result["verification"]["passed"] is False
+    assert result["ok"] is False
+    assert result["verification"]["basis"] != "ALREADY_ON_PAGE"
 
 
 class FailingHomeExecutionBridge(AndroidBridge):

@@ -120,7 +120,8 @@ class WorkspaceTaskService : Service() {
                         if (result == null) { revision = current?.controlRevision ?: -1; update { TaskHarnessState.begin(it, tool) } }
                         else update { TaskHarnessState.finish(it, TaskOperationEvidence(session.sessionId, session.displayId,
                             revision, result.androidExecutionOk, result.verification.passed,
-                            result.afterObservationId != null && result.afterObservationId != result.beforeObservationId,
+                            result.afterObservationId != null && result.afterObservationId != result.beforeObservationId &&
+                                result.after?.sessionId == session.sessionId && result.after?.displayId == session.displayId,
                             result.verification.basis)) }
                     }
                 }

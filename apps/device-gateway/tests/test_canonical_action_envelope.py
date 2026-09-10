@@ -337,3 +337,25 @@ def test_capability_service_maps_stale_element_to_stale_observation():
     assert result.ok is False
     assert result.error.code == GatewayErrorCode.STALE_OBSERVATION
     assert result.error.layer.value == "PROTOCOL"
+
+@pytest.mark.parametrize("verification", [
+    {"ok": True, "status": "OBSERVED", "semanticSuccessClaimed": False},
+    {"ok": False, "status": "FAILED"},
+    None,
+])
+def test_back_dispatch_and_changed_page_cannot_override_missing_or_negative_verification(tmp_path, verification):
+    payload = {"execution": {"ok": True, "beforeFingerprint": "before", "afterFingerprint": "after"}}
+    if verification is not None:
+        payload["verification"] = verification
+    bridge = PixelOpenAppBridge(payload)
+    router, _ = make_router(tmp_path, bridge)
+    result = router.execute(tool="phone.back", params={}, goal="Go back")
+    assert bridge.last_action["tool"] == "phone.back"
+    assert result["execution_ok"] is True
+    assert result["verification_ok"] is False
+    assert result["success"] is False
+
+
+def test_back_with_authoritative_android_postcondition_succeeds(tmp_path):
+    router, _ = make_router(tmp_path, PixelOpenAppBridge(PIXEL_OPEN_APP_SUCCESS))
+    assert router.execute(tool="phone.back", params={}, goal="Go back")["success"] is True

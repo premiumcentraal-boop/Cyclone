@@ -71,6 +71,8 @@ data class AgentPageCard(
     val nextHopHints: JSONArray,
     val perceptionMode: String = "a11y",
     val treeUseful: Boolean = true,
+    val sessionId: String = "default-foreground",
+    val displayId: Int = 0,
 )
 
 data class AgentObservationResult(

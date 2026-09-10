@@ -101,6 +101,10 @@ internal object GatewayV33ActionAdapter {
             JSONObject((args.optJSONObject("params") ?: JSONObject()).toString()),
             bound,
         )
+        if (beforeObservation != null && tool in mutatingTools) {
+            normalizedParams.put("observationId", beforeObservation.id)
+            if (bound.sessionId != "default-foreground") normalizedParams.put("executionGeneration", beforeObservation.payload.optLong("executionGeneration", -1))
+        }
         normalizedArgs.put("params", normalizedParams)
 
         val baseResult = when (tool) {
@@ -181,7 +185,7 @@ internal object GatewayV33ActionAdapter {
             afterObservation = afterObservation,
             androidExecutionOk = androidExecutionOk,
             executorAssertionFailed = verificationFailedInExecutor,
-            explicitExpectation = expect != null,
+            explicitExpectation = expect != null && execution.optJSONObject("payload")?.optBoolean("expectationVerified") == true,
         )
         val afterStateVerified = sharedVerification.passed
         val verification = when {
@@ -215,9 +219,10 @@ internal object GatewayV33ActionAdapter {
                 .put("semanticSuccessClaimed", true)
                 .put("basis", sharedVerification.basis ?: "FRESH_AFTER_STATE_CHANGED")
             else -> JSONObject()
-                .put("ok", true)
+                .put("ok", false)
                 .put("status", "OBSERVED")
-                .put("code", JSONObject.NULL)
+                .put("code", "NO_SEMANTIC_PROGRESS")
+                .put("message", "The action was dispatched, but the observed page did not prove the intended transition. Re-observe; do not repeat the same mutation blindly.")
                 .put("semanticSuccessClaimed", false)
         }
 
@@ -286,7 +291,14 @@ internal object GatewayV33ActionAdapter {
         androidExecutionOk: Boolean,
         executorAssertionFailed: Boolean = false,
         explicitExpectation: Boolean = false,
-    ): AgentSemanticVerification = AgentSemanticVerifier.verify(
+    ): AgentSemanticVerification {
+        if (beforeObservation != null && afterObservation != null &&
+            (beforeObservation.execution != afterObservation.execution || beforeObservation.id == afterObservation.id ||
+                afterObservation.capturedAt < beforeObservation.capturedAt)) {
+            return AgentSemanticVerification(com.cyclone.mobile.agent.contract.AgentVerificationStatus.FAILED,
+                false, false, "OBSERVATION_IDENTITY_MISMATCH", "A different or stale execution surface cannot verify this action.")
+        }
+        return AgentSemanticVerifier.verify(
         tool = tool,
         androidExecutionOk = androidExecutionOk,
         executorAssertionFailed = executorAssertionFailed,
@@ -296,6 +308,7 @@ internal object GatewayV33ActionAdapter {
         before = beforeObservation?.let(::semanticState),
         after = afterObservation?.let(::semanticState),
     )
+    }
 
     internal fun verifiedByAfterState(
         tool: String,

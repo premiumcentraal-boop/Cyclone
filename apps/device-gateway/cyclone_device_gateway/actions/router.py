@@ -330,6 +330,9 @@ class ActionRouter:
             raise ActionValidationError(str(exc), code="INVALID_REQUEST") from exc
         if identity:
             resolved_params = attach_execution_identity(resolved_params, identity)
+        if identity and identity["sessionId"] != "default-foreground":
+            # This router's legacy observer is foreground-only. Never let its evidence verify a VD action.
+            raise ActionValidationError("Use the exact-session desktop agent route for a named display", code="INVALID_REQUEST")
         before = self.observe()
         started = time.perf_counter()
         error_class: str | None = None
@@ -343,6 +346,7 @@ class ActionRouter:
                 "source": source,
                 "requestId": request_id,
                 "correlationId": request_id,
+                "currentObservationId": _witness(before)["observation_id"],
             }
             if identity:
                 execute_args["sessionId"] = identity["sessionId"]
@@ -415,18 +419,22 @@ class ActionRouter:
                 )
             else:
                 verification_error_class = "VERIFICATION_FAILED"
-        elif isinstance(explicit_verification, dict) and explicit_verification.get("ok") is True:
-            verification = "android_verified"
-            verification_ok = True
-        elif before.get("page_key") != after.get("page_key"):
-            verification = "page_changed"
-            verification_ok = True
-        elif before_fingerprint and after_fingerprint and before_fingerprint != after_fingerprint:
-            verification = "ui_changed"
-            verification_ok = True
+        elif isinstance(explicit_verification, dict):
+            # OBSERVED/semanticSuccessClaimed=false is not navigation success, even if ok=true
+            # from an older Android bridge. Explicit negative evidence always beats hash churn.
+            verification_ok = (
+                explicit_verification.get("ok") is True
+                and explicit_verification.get("semanticSuccessClaimed") is not False
+                and explicit_verification.get("status") not in {"OBSERVED", "FAILED", "DEGRADED", "NOT_RUN"}
+            )
+            verification = "android_verified" if verification_ok else "android_verification_failed"
+            if not verification_ok:
+                verification_error_class = "NO_SEMANTIC_PROGRESS"
         else:
-            verification = "page_stable"
+            # Legacy execution acceptance/fingerprint change is not an Android postcondition.
+            verification = "verification_missing"
             verification_ok = False
+            verification_error_class = "VERIFICATION_REQUIRED"
 
         if tool in NON_MUTATING_TOOLS and success:
             verification = "not_required"
