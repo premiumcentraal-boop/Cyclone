@@ -71,6 +71,7 @@ import java.util.concurrent.TimeUnit
  */
 class OpenRouterAdaptiveAgent(private val context: Context,
     private val execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT) {
+    var onOperation: ((String, com.cyclone.mobile.agent.contract.AgentActionEnvelope?) -> Unit)? = null
     private val background get() = execution.sessionId != "default-foreground"
     private fun ownsInput(): Boolean = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.ownsInput(execution.sessionId)
         else DeviceState.controller == DeviceState.Controller.AGENT
@@ -268,7 +269,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             traceId = traceId,
             goal = goal,
             config = config,
-            bridge = CyclonePcParityBridge(context, execution, goal),
+            bridge = CyclonePcParityBridge(context, execution, goal).also { it.onOperation = { tool, result -> onOperation?.invoke(tool, result) } },
             apiKey = OpenRouterSecretStore.read(context),
             reliability = reliability,
             skillSignatures = skillSignatures,

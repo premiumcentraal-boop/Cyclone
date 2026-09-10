@@ -28,6 +28,9 @@ data class WorkspaceTaskUi(
     val phase: TaskPhase = TaskPhase.STARTING,
     val message: String = "I'm on it. You can keep using your phone.",
     val steps: List<String> = emptyList(),
+    val semanticSteps: List<SemanticTaskStep> = emptyList(),
+    val interruption: TaskInterruption? = null,
+    val controlRevision: Long = 0,
     val queued: String? = null,
     val resumable: Boolean = true,
     val confirmation: WorkspaceConfirmation? = null,
@@ -92,7 +95,7 @@ object WorkspaceTasks {
         mutable.value = task
     }
     fun update(taskId: String, change: (WorkspaceTaskUi) -> WorkspaceTaskUi) {
-        mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let(change) ?: it }
+        mutable.update { it?.takeIf { task -> task.taskId == taskId }?.let { task -> TaskHarnessState.normalize(task, change(task)) } ?: it }
     }
 
     private val closedHistory = MutableStateFlow<List<WorkspaceTaskUi>>(emptyList())

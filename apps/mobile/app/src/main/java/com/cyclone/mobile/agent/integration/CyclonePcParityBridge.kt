@@ -45,6 +45,7 @@ class CyclonePcParityBridge internal constructor(
     constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
         this(CycloneAgentEnvironment(context.applicationContext, execution, userTaskGoal), execution = execution)
 
+    var onOperation: ((String, AgentActionEnvelope?) -> Unit)? = null
     private var page: AgentPageCard? = null
     private var memory: RecoveryMemory = RecoveryMemory()
     private var lastRecovery: RecoveryDecision? = null
@@ -193,7 +194,9 @@ class CyclonePcParityBridge internal constructor(
             val elementId = resolveElementId(action.controlId, legacyPage, goal)
             if (elementId != null) params.put("elementId", elementId)
         }
+        onOperation?.invoke(action.tool, null)
         return environment.act(action.tool, params, goal).also { envelope ->
+            onOperation?.invoke(action.tool, envelope)
             page = envelope.after ?: page
         }
     }
@@ -203,7 +206,9 @@ class CyclonePcParityBridge internal constructor(
         val candidate = search(query, goal).firstOrNull()
         val params = JSONObject()
         if (candidate != null) params.put("elementId", candidate.elementId)
+        onOperation?.invoke("phone.click", null)
         return environment.act("phone.click", params, goal).also { envelope ->
+            onOperation?.invoke("phone.click", envelope)
             page = envelope.after ?: page
         }
     }

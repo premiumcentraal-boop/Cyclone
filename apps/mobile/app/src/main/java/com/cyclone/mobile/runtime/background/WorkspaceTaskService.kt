@@ -102,9 +102,9 @@ class WorkspaceTaskService : Service() {
                     sessionId = session.sessionId,
                     displayId = session.displayId,
                     phase = TaskPhase.WORKING,
-                    message = TaskGlassStep.subtitle(GlassStepKind.FAST_PATH, "Opened ${it.app}"),
+                    message = "Opening ${it.app}",
                     glassStepKind = GlassStepKind.FAST_PATH,
-                    steps = listOf("Opened ${it.app}"),
+                    steps = emptyList(),
                 ) }
                 val settings = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
                 val profile = CycloneAiAccessProfileStore.read(applicationContext)
@@ -114,7 +114,16 @@ class WorkspaceTaskService : Service() {
                     safeMode = profile != CycloneAiAccessProfile.FULL, accessProfile = profile,
                     attachment = WorkspaceTasks.takeAttachment(task.taskId))
                 awaitWorkspace(session.sessionId, ExecutionContext.from(session))
-                agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session))
+                agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session)).also { agent ->
+                    var revision = 0L
+                    agent.onOperation = { tool, result ->
+                        if (result == null) { revision = current?.controlRevision ?: -1; update { TaskHarnessState.begin(it, tool) } }
+                        else update { TaskHarnessState.finish(it, TaskOperationEvidence(session.sessionId, session.displayId,
+                            revision, result.androidExecutionOk, result.verification.passed,
+                            result.afterObservationId != null && result.afterObservationId != result.beforeObservationId,
+                            result.verification.basis)) }
+                    }
+                }
                 finishTask(agent!!.execute(task.goal, config) { text -> progress(text) })
             } catch (error: Exception) {
                 WorkspaceTasks.takeAttachment(task.taskId)
@@ -251,10 +260,8 @@ class WorkspaceTaskService : Service() {
     }
 
     private fun progress(text: String) {
-        val step = TaskGlassStep.fromProgress(text) ?: return
-        update {
-            if (it.working) it.copy(message = step.label, glassStepKind = step.kind) else it
-        }
+        // Raw provider summaries can contain user-entered data. Harness operation callbacks own progress.
+        update { if (it.working && it.semanticSteps.isEmpty()) it.copy(message = "Checking the current page") else it }
     }
     private fun update(change: (WorkspaceTaskUi) -> WorkspaceTaskUi) { taskId?.let { WorkspaceTasks.update(it, change) } }
     private fun notification(task: WorkspaceTaskUi): Notification {
