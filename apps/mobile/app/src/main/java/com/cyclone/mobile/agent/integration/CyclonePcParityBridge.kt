@@ -60,7 +60,7 @@ class CyclonePcParityBridge internal constructor(
         val result = environment.locate(goal)
         val fresh = result.page ?: return null
         page = fresh
-        if (previousKey == null || previousKey != fresh.pageKey) {
+        if (previousKey == null) {
             memory = RecoveryMemory(
                 attemptedLevels = setOf(RecoveryLevel.CURRENT_SEMANTIC_PAGE),
                 attemptedEvidence = setOf(EvidenceSource.CURRENT_SEMANTIC_PAGE),
@@ -237,7 +237,7 @@ class CyclonePcParityBridge internal constructor(
      * Selects and performs only read-only recovery escalation. Mutation recovery (scroll/back/backtrack)
      * remains an explicit next model/tool decision so GATE/policy and user intent stay authoritative.
      */
-    fun recover(cause: RecoverableCause, goal: String): RecoveryDecision? {
+    fun recover(cause: RecoverableCause, goal: String, failuresWithoutProgress: Int = 0): RecoveryDecision? {
         val card = page ?: observe(goal) ?: return null
         val request = RecoveryRequest(
             observation = observationEvidence(card),
@@ -256,7 +256,15 @@ class CyclonePcParityBridge internal constructor(
             boundedExplorationAvailable = true,
             backtrackOrAlternateBranchAvailable = true,
         )
-        val decision = recovery.selectRecovery(request)
+        // A second grounding failure after semantic search needs pixels, even on a populated tree.
+        val groundingFailure = cause in setOf(RecoverableCause.STALE_SELECTOR,
+            RecoverableCause.TARGET_MISSING_FROM_COMPACT_CONTROLS, RecoverableCause.VERIFICATION_FAILED,
+            RecoverableCause.AFTER_STATE_MISSING, RecoverableCause.AMBIGUOUS_SEMANTICS,
+            RecoverableCause.SAME_PAGE_NO_EFFECT)
+        val decision = if (failuresWithoutProgress >= 2 && groundingFailure &&
+            RecoveryLevel.GOAL_RANKED_SEARCH in memory.attemptedLevels && memory.capturesForSemanticState == 0) {
+            RecoveryDecision(RecoveryLevel.SILENT_SCREENSHOT_VISION, "grounding_failed_after_semantic_search")
+        } else recovery.selectRecovery(request.copy(knownVerifiedRouteAvailable = request.knownVerifiedRouteAvailable && failuresWithoutProgress == 0))
         lastRecovery = decision
         when (decision.level) {
             RecoveryLevel.KNOWN_VERIFIED_ROUTE -> loadKnowledge(goal)

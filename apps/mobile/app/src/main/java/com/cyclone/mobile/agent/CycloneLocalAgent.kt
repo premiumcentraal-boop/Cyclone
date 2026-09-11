@@ -63,6 +63,7 @@ fun interface CycloneAgentTraceSink { fun emit(event: CycloneTraceEvent); object
 interface CycloneTaskCheckpointStore { fun save(state: CycloneTaskState); object NoOp : CycloneTaskCheckpointStore { override fun save(state: CycloneTaskState) = Unit } }
 interface CycloneAgentModel { fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult }
 interface CycloneAgentTools {
+    fun onRecovery(state: CycloneTaskState, kind: CycloneRecoveryKind, code: String) {}
     fun observe(state: CycloneTaskState): CycloneObservation?
     fun execute(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn): CycloneToolResult
     fun verify(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn, toolResult: CycloneToolResult): CycloneVerificationResult
@@ -331,6 +332,7 @@ class CycloneLocalAgent(
         emit(CycloneTraceEventType.RECOVERY_CLASSIFIED, code); checkpoint()
         if (kind == CycloneRecoveryKind.MALFORMED_MODEL && attempts > convergence.maxMalformedModelResponses) return nonConvergence("convergence.malformed_model")
         if (consecutive > convergence.maxConsecutiveRecoveryCyclesWithoutNewEvidence) return nonConvergence("convergence.recovery_without_evidence")
+        tools.onRecovery(state, kind, code)
         state = state.copy(currentStage = CycloneAgentStage.PLAN_OR_RECALL); emit(CycloneTraceEventType.REPLAN, code); checkpoint(); return null
     }
 

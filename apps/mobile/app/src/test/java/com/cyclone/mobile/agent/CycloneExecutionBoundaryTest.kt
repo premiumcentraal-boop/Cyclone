@@ -32,12 +32,29 @@ class CycloneExecutionBoundaryTest {
 
     private class Tools : CycloneAgentTools {
         var executions = 0
+        var recoveries = 0
+        override fun onRecovery(state: CycloneTaskState, kind: CycloneRecoveryKind, code: String) { recoveries++ }
         override fun observe(state: CycloneTaskState) = CycloneObservation("same", "same")
         override fun execute(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn): CycloneToolResult {
             executions++
             return CycloneToolResult(ok = false)
         }
         override fun verify(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn, toolResult: CycloneToolResult) = CycloneVerificationResult(false, false)
+    }
+
+    @Test fun earlyToolRejectionReachesRecoveryBeforeAnotherPlan() {
+        val tools = Tools()
+        var plans = 0
+        val model = object : CycloneAgentModel {
+            override fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
+                assertEquals(plans, tools.recoveries)
+                plans++
+                return CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.ACT, "click"))
+            }
+        }
+        CycloneLocalAgent("reject cookies", model, tools).runUntilBoundary()
+        assertEquals(2, tools.executions)
+        assertEquals(2, tools.recoveries)
     }
 
     @Test fun cancellationDuringPlanningCannotExecuteReturnedAction() {

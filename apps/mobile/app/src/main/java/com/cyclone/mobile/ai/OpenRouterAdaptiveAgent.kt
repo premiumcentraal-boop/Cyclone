@@ -11,6 +11,7 @@ import com.cyclone.mobile.agent.CycloneConvergencePolicy
 import com.cyclone.mobile.agent.CycloneLocalAgent
 import com.cyclone.mobile.agent.CycloneModelDirective
 import com.cyclone.mobile.agent.CycloneModelTurn
+import com.cyclone.mobile.agent.CycloneRecoveryKind
 import com.cyclone.mobile.agent.CycloneObservation
 import com.cyclone.mobile.agent.CyclonePlanResult
 import com.cyclone.mobile.agent.CycloneTaskCheckpointStore
@@ -120,6 +121,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         var checkpoint: CycloneTaskState? = null,
         var adaptiveMode: String = "STRUCTURED",
         var consecutiveNoProgressFailures: Int = 0,
+        var pendingRecoveryCause: RecoverableCause? = null,
         var cancelled: () -> Boolean = { false },
         @Volatile var stopRequested: Boolean = false,
         val playbookSteps: MutableList<PlaybookHintStep> = mutableListOf(),
@@ -398,7 +400,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                         agentContext = agentContext,
                     )
                 } ?: run {
-                    session.bridge.recover(RecoverableCause.MALFORMED_MODEL_OUTPUT, goal)
+                    session.pendingRecoveryCause = RecoverableCause.MALFORMED_MODEL_OUTPUT
                     return CyclonePlanResult.Malformed("model.invalid_page_decision")
                 }
 
@@ -408,6 +410,25 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         }
 
         val tools = object : CycloneAgentTools {
+            override fun onRecovery(taskState: CycloneTaskState, kind: CycloneRecoveryKind, code: String) {
+                session.consecutiveNoProgressFailures = taskState.consecutiveRecoveryCyclesWithoutNewEvidence
+                if (session.consecutiveNoProgressFailures >= 2 && session.adaptiveMode != "FREE") {
+                    session.adaptiveMode = "FREE"
+                    AgentTraceRuntime.event(context, traceId, "FREE_MODE_ENTER", "Trying a different way…",
+                        code = "adaptive.free.enter", ok = true, detail = "cause=$code")
+                }
+                val cause = session.pendingRecoveryCause ?: when (kind) {
+                    CycloneRecoveryKind.STALE_TARGET -> RecoverableCause.STALE_SELECTOR
+                    CycloneRecoveryKind.VERIFICATION_FAILURE -> RecoverableCause.VERIFICATION_FAILED
+                    CycloneRecoveryKind.MALFORMED_MODEL -> RecoverableCause.MALFORMED_MODEL_OUTPUT
+                    else -> RecoverableCause.AMBIGUOUS_SEMANTICS
+                }
+                session.pendingRecoveryCause = null
+                val recovery = session.bridge.recover(cause, goal, session.consecutiveNoProgressFailures)
+                recovery?.let { AgentTraceRuntime.event(context, traceId, "RECOVERY_SELECTED", it.reason,
+                    code = it.level?.name ?: "NON_CONVERGENCE", ok = it.level != null) }
+            }
+
             override fun observe(taskState: CycloneTaskState): CycloneObservation? {
                 // Keep the legacy semantic PageContext fresh for learned graph compatibility, then
                 // publish the PC-quality observation last so its element IDs remain authoritative.
@@ -524,7 +545,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                     session.pendingGateClass = deterministicGateClass(session.state.page)
                     return CycloneTaskClassification.HUMAN_OR_GATE
                 }
-                session.bridge.recover(RecoverableCause.AMBIGUOUS_SEMANTICS, goal)
+                session.pendingRecoveryCause = RecoverableCause.AMBIGUOUS_SEMANTICS
                 return CycloneTaskClassification.RECOVERABLE
             }
 
@@ -712,7 +733,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             }
             if (PhoneToolRegistry.definition(action.tool) == null) {
                 session.failedActions += "unknown_tool:${action.tool}"
-                session.bridge.recover(RecoverableCause.RETRYABLE_TOOL_OR_TRANSPORT_ERROR, session.goal)
+                session.pendingRecoveryCause = RecoverableCause.RETRYABLE_TOOL_OR_TRANSPORT_ERROR
                 return LocalExecution(
                     state, false, verifiedProgress, session.bridge.observation()?.evidenceIdentity ?: cycloneObservation(state).evidenceIdentity,
                     message = "The model requested an unsupported phone action.",
@@ -784,8 +805,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             } else {
                 val failureCode = if (verified) "NO_VERIFIED_PROGRESS" else envelope.errorClass.name
                 session.failedActions += "${action.tool}:${action.controlId.orEmpty()}:$failureCode"
-                session.consecutiveNoProgressFailures += 1
-                if (session.consecutiveNoProgressFailures >= 2) session.adaptiveMode = "FREE"
+
             }
             if (previousMode != session.adaptiveMode) {
                 val entering = session.adaptiveMode == "FREE"
@@ -821,21 +841,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             val stale = envelope.errorClass == AgentFailureClass.STALE_OBSERVATION
 
             if (!verified) {
-                if (envelope.retryable || envelope.errorClass in setOf(
-                        AgentFailureClass.INVALID_REQUEST,
-                        AgentFailureClass.TARGET_NOT_FOUND,
-                        AgentFailureClass.VERIFICATION_FAILED,
-                    )
-                ) {
-                    val recovery = session.bridge.recover(session.bridge.causeFor(envelope), session.goal)
-                    recovery?.let {
-                        onProgress("Recovering · ${it.level?.name?.replace('_', ' ')?.lowercase() ?: it.reason}")
-                        AgentTraceRuntime.event(
-                            context, session.traceId, "RECOVERY_SELECTED",
-                            it.reason, code = it.level?.name ?: "NON_CONVERGENCE", ok = it.level != null,
-                        )
-                    }
-                }
+                session.pendingRecoveryCause = session.bridge.causeFor(envelope)
                 return LocalExecution(
                     state = state,
                     ok = false,
@@ -931,11 +937,10 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             }
             is SkillReplayResult.Miss -> {
                 session.failedActions += "compiled-skill:${route.id}:${result.reason.name}"
-                session.consecutiveNoProgressFailures += 1
                 if (result.escalateTo == SkillEscalateTo.VISION) {
-                    session.bridge.recover(RecoverableCause.AMBIGUOUS_SEMANTICS, session.goal)
+                    session.pendingRecoveryCause = RecoverableCause.AMBIGUOUS_SEMANTICS
                 } else {
-                    session.bridge.recover(RecoverableCause.VERIFICATION_FAILED, session.goal)
+                    session.pendingRecoveryCause = RecoverableCause.VERIFICATION_FAILED
                 }
                 AgentTraceRuntime.event(
                     context, session.traceId, "COMPILED_SKILL",
@@ -1044,9 +1049,8 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             if (before.page.pageKey != after.page.pageKey) announceNewPage(session.traceId, after, onProgress)
         } else {
             session.failedActions += "phone.click:${graphAction.label}:${envelope.errorClass.name}"
-            session.consecutiveNoProgressFailures += 1
-            if (session.consecutiveNoProgressFailures >= 2) session.adaptiveMode = "FREE"
-            session.bridge.recover(session.bridge.causeFor(envelope), session.goal)
+
+            session.pendingRecoveryCause = session.bridge.causeFor(envelope)
         }
         if (previousMode != session.adaptiveMode) {
             val entering = session.adaptiveMode == "FREE"
