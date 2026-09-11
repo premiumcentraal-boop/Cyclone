@@ -450,6 +450,8 @@ class CyclonePcParityBridge internal constructor(
     }
 
     private fun pageCardJson(card: AgentPageCard): JSONObject = JSONObject()
+        .put("sessionId", card.sessionId)
+        .put("displayId", card.displayId)
         .put("observationId", card.observationId)
         .put("generation", card.generation)
         .put("package", card.packageName)
@@ -567,6 +569,9 @@ class CyclonePcParityBridge internal constructor(
         .put("risk", candidate.evidence.optString("risk"))
         .put("expectedEffect", candidate.evidence.opt("expectedEffect") ?: JSONObject.NULL)
         .put("clickable", candidate.evidence.optBoolean("clickable"))
+        .put("enabled", candidate.evidence.optBoolean("enabled", true))
+        .put("visibleToUser", candidate.evidence.optBoolean("visibleToUser", true))
+        .put("bounds", candidate.evidence.optJSONObject("bounds") ?: JSONObject.NULL)
         .put("editable", candidate.evidence.optBoolean("editable"))
         .put("scrollable", candidate.evidence.optBoolean("scrollable"))
         .put("selected", candidate.evidence.optBoolean("selected"))

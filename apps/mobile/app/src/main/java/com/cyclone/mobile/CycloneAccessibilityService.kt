@@ -36,6 +36,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         val crop: UiBounds?,
         val timestampMs: Long,
         val liveFrame: com.cyclone.mobile.ai.vision.live.LiveFrame? = null,
+        val displayBounds: UiBounds? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("filePath", file.absolutePath)
@@ -44,6 +45,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             .put("height", height)
             .put("timestampMs", timestampMs)
             .put("crop", crop?.toJson() ?: JSONObject.NULL)
+            .put("displayBounds", (displayBounds ?: crop)?.toJson() ?: JSONObject.NULL)
             .put("sessionId", liveFrame?.sessionId ?: "default-foreground")
             .put("displayId", liveFrame?.displayId ?: 0)
             .put("frameId", liveFrame?.frameId ?: JSONObject.NULL)

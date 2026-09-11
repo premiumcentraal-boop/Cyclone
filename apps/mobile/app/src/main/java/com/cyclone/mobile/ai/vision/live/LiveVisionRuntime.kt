@@ -94,6 +94,10 @@ object LiveVisionRuntime {
     fun capture(cacheDir: File, crop: UiBounds? = null,
                 sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID,
                 waitMs: Long = 800): CycloneAccessibilityService.ScreenshotArtifact? {
+        // Window capture excludes Cyclone's own overlay even when full-display live capture is active.
+        if (sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID && crop == null) {
+            captureForegroundWindowBelowOverlay(cacheDir)?.let { return it }
+        }
         val selected: Pair<LiveFrame, Bitmap>? = synchronized(lock) {
             val session = sessions.lookup(sessionId)
             if (!sources.containsKey(sessionId)) {
@@ -139,7 +143,7 @@ object LiveVisionRuntime {
                 file.outputStream().use { check(output.compress(Bitmap.CompressFormat.PNG, 100, it)) }
                 directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
                 return CycloneAccessibilityService.ScreenshotArtifact(file, output.width, output.height, bounds,
-                    System.currentTimeMillis(), frame)
+                    System.currentTimeMillis(), frame, bounds ?: UiBounds(0, 0, output.width, output.height))
             } finally { if (output !== bitmap) output.recycle() }
         } finally { bitmap.recycle() }
     }
@@ -162,6 +166,7 @@ object LiveVisionRuntime {
             )
             .firstOrNull() ?: return null
 
+        val rect = android.graphics.Rect().also { target.getBoundsInScreen(it) }
         val latch = CountDownLatch(1)
         var captured: CycloneAccessibilityService.ScreenshotArtifact? = null
         service.takeScreenshotOfWindow(target.id, screenshotExecutor, object : AccessibilityService.TakeScreenshotCallback {
@@ -183,6 +188,7 @@ object LiveVisionRuntime {
                             height = bitmap.height,
                             crop = null,
                             timestampMs = System.currentTimeMillis(),
+                            displayBounds = UiBounds(rect.left, rect.top, rect.right, rect.bottom),
                         )
                     } finally {
                         if (bitmap !== wrapped) bitmap.recycle()

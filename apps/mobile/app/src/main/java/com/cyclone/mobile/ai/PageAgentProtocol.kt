@@ -14,6 +14,8 @@ data class PageAgentAction(
     val params: JSONObject,
     val expectedPageChange: Boolean,
     val displaySummary: String,
+    // Runtime-only provenance; JSON parsing never accepts a model assertion of visual grounding.
+    val visualGrounded: Boolean = false,
 )
 
 data class PageAgentDecision(
@@ -151,7 +153,7 @@ Schema:
     fun actionSignature(decision: PageAgentDecision, pageKey: String): String? {
         if (decision.status != "act" || decision.actions.isEmpty()) return null
         return decision.actions.joinToString("|") { action ->
-            when (action.tool) {
+            (if (action.visualGrounded) "vision:" else "") + when (action.tool) {
                 "phone.open_app" -> "phone.open_app:package=${inferAppPackage(action).orEmpty()}"
                 "phone.launch_intent" -> "phone.launch_intent:uri=${safeUriForTrace(action.params.optString("uri"))}"
                 "phone.type", "phone.replace_text" -> "${action.tool}:control=${stableTargetId(action.controlId)}"
