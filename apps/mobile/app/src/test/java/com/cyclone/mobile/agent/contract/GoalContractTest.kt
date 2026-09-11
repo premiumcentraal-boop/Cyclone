@@ -166,6 +166,18 @@ class GoalContractTest {
         )
     }
 
+    @Test
+    fun hiddenLogoutCannotProveAuthenticatedSession() {
+        val hidden = control("Log out", "button").copy(
+            evidence = JSONObject().put("visibleToUser", false).put("enabled", true),
+        )
+        val current = page("com.android.chrome", "reddit.com", listOf(hidden))
+        val result = GoalContractCompiler.evaluate(
+            GoalContractCompiler.compile("open reddit.com on Chrome and login for me"), current, emptyList(),
+        )
+        assertFalse(result.satisfied)
+    }
+
     private fun outcome(
         tool: String,
         goal: String,

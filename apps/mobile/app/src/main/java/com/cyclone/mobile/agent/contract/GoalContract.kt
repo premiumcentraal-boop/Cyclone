@@ -189,6 +189,7 @@ object GoalContractCompiler {
                 val labels = currentPage?.controls.orEmpty().filter {
                     it.role.lowercase() in setOf("button", "link", "menuitem") &&
                         it.evidence.optBoolean("enabled", true) && it.evidence.optBoolean("visible", true) &&
+                        it.evidence.optBoolean("visibleToUser", true) &&
                         !it.evidence.optString("resourceId").startsWith("com.android.chrome:")
                 }.map { it.label.trim().lowercase() }
                 val hostMatches = requirement.value?.let { host -> currentPage?.let { pageShowsHost(it, host) } } ?: true
