@@ -8,6 +8,8 @@ object VisualControlGrounding {
 
     fun bind(decision: PageAgentDecision, frameId: String, shot: JSONObject, card: JSONObject,
              nowMs: Long): PageAgentDecision? {
+        // A boundary has no mutation to ground; never lose a human handoff to frame expiry.
+        if (decision.status != "act") return decision.copy(actions = emptyList())
         val age = nowMs - shot.optLong("timestampMs", 0)
         if (age !in 0..MAX_AGE_MS || shot.optString("sessionId") != card.optString("sessionId") ||
             shot.optInt("displayId", -1) != card.optInt("displayId", -2)) return null

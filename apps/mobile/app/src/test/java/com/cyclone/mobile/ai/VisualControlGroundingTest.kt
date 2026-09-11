@@ -6,6 +6,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualControlGroundingTest {
+    @Test fun expiredImageCannotEraseHumanHandoff() {
+        val boundary = decision().copy(status = "need_human", reason = "authentication required")
+        val result = VisualControlGrounding.bind(boundary, "frame", shot(), card(), 100000)!!
+        assertEquals("need_human", result.status)
+        assertEquals("authentication required", result.reason)
+        assertTrue(result.actions.isEmpty())
+    }
+
     @Test fun screenshotPointUsesWindowOffsetAndBecomesScopedCanonicalClick() {
         val bound = VisualControlGrounding.bind(decision(), "frame", shot(), card(), 2000)!!
         assertEquals("phone.click", bound.actions.single().tool)
