@@ -331,7 +331,6 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
     var section by rememberSaveable { mutableStateOf("") }
     androidx.activity.compose.BackHandler(section.isNotEmpty()) { section = "" }
     val aiPrefs = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
-    var keyDraft by rememberSaveable { mutableStateOf("") }
     var hasKey by remember(refreshTick) { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
     var selectedModel by rememberSaveable { mutableStateOf(aiPrefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }) }
     var accessProfile by rememberSaveable { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
@@ -470,15 +469,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
         if (section == "Model & API") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("AI model & key")
-                if (hasKey) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.secondary); Spacer(Modifier.size(8.dp)); Column(Modifier.weight(1f)) { Text("OpenRouter key secured", fontWeight = FontWeight.Bold); Text("Protected by Android Keystore", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        OutlinedButton(onClick = { OpenRouterSecretStore.clear(context); hasKey = false; refresh() }) { Text("Remove") }
-                    }
-                } else {
-                    OutlinedTextField(keyDraft, { keyDraft = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("OpenRouter API key") }, visualTransformation = PasswordVisualTransformation())
-                    Button(onClick = { OpenRouterSecretStore.save(context, keyDraft.trim()); keyDraft = ""; hasKey = true; refresh() }, enabled = keyDraft.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Key, null); Spacer(Modifier.size(5.dp)); Text("Secure key") }
-                }
+                CycloneApiKeyEditor(context, onChanged = refresh)
                 Text("Model", fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OpenRouterModelPresets.all.forEach { model -> FilterChip(selected = selectedModel == model.id, onClick = { selectedModel = model.id; aiPrefs.edit().putString("openrouter_model", model.id).apply() }, label = { Text(model.label) }) }

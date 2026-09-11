@@ -421,42 +421,9 @@ private fun ModelApi426Card(
     effort: String,
     onChanged: (String, String) -> Unit,
 ) {
-    var hasKey by remember { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
-    var keyDraft by rememberSaveable { mutableStateOf("") }
     Settings426Surface {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(
-                    if (hasKey) Icons.Rounded.CheckCircle else Icons.Rounded.Key,
-                    null,
-                    Modifier.size(20.dp),
-                    tint = if (hasKey) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(if (hasKey) "API key secured" else "Add your OpenRouter key", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        if (hasKey) "Protected by Android Keystore" else "Required for model-backed chat and tasks.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (hasKey) OutlinedButton(onClick = { OpenRouterSecretStore.clear(context); hasKey = false }) { Text("Remove") }
-            }
-            if (!hasKey) {
-                OutlinedTextField(
-                    value = keyDraft,
-                    onValueChange = { keyDraft = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("OpenRouter API key") },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-                Button(
-                    onClick = { OpenRouterSecretStore.save(context, keyDraft.trim()); keyDraft = ""; hasKey = true },
-                    enabled = keyDraft.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Secure key") }
-            }
+            CycloneApiKeyEditor(context)
             Text("Model", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             CycloneModelPill(modelId, effort, modifier = Modifier.align(Alignment.Start), onChange = onChanged)
         }
