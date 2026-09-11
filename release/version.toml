@@ -1,23 +1,23 @@
-# Cyclone Mobile 4.3.4 — three-update integration release.
+# Cyclone Mobile 4.3.5 — agent-reliability tip after 4.3.4.
 # User authorized publication on September 11, 2026; exact-source CI remains mandatory.
 schema = 1
-product_version = "4.3.4"
+product_version = "4.3.5"
 channel = "development"
-android_version_code = 95
+android_version_code = 96
 python_version = "4.1.0"
 
 [components]
-mobile = "4.3.4"
+mobile = "4.3.5"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.3.3"
+previous_mobile_version = "4.3.4"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.3.4-three-update-integration"
+candidate_generation = "cyclone-4.3.5-agent-reliability"

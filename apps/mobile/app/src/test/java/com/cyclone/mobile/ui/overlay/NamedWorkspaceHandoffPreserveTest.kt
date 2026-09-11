@@ -11,7 +11,7 @@ import java.io.File
 
 /**
  * Named-VD Fast Path / skills must not bypass GATE, Take control, or Continue.
- * Legacy overlay controls remain stable; progress-page labels follow the 4.3.4 consumer UI.
+ * Legacy overlay controls remain stable; progress-page labels follow the 4.3.5 consumer UI.
  */
 class NamedWorkspaceHandoffPreserveTest {
     @Test
