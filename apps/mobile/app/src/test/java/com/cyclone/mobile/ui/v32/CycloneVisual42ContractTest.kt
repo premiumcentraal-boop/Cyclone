@@ -72,7 +72,7 @@ class CycloneVisual42ContractTest {
     @Test fun productionSettingsUsesUtilityFirst426Surface() {
         val app = source("CycloneV32App.kt")
         val settings = source("CycloneSettings426.kt")
-        assertTrue(app.contains("CycloneSettingsPage426(context, refreshTick)"))
+        assertTrue(app.contains("CycloneSettingsPage426(context, refreshTick,"))
         assertTrue(settings.contains("Settings426Row(\"Model & API\""))
         assertTrue(settings.contains("Settings426Row(\"Phone control\""))
         assertTrue(settings.contains("Settings426Row(\"Profile engine\""))

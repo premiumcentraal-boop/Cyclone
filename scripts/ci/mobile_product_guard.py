@@ -20,7 +20,7 @@ REQUIRED_APP = (
     "V32Destination.AI -> V39AiChatPage",
     "V32Destination.ROUTINES -> CycloneRoutinesPage",
     "V32Destination.BRAIN -> CycloneV39BrainPage",
-    "CycloneSettingsPage426(context, refreshTick)",
+    "CycloneSettingsPage426(context, refreshTick,",
 )
 REQUIRED_FEATURES = (
     "internal fun V32TeachPage",

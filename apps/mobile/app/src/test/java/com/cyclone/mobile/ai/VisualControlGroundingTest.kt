@@ -35,6 +35,14 @@ class VisualControlGroundingTest {
         assertNull(VisualControlGrounding.bind(decision(), "frame", shot(), card().put("observationId", "new"), 2000))
     }
 
+    @Test fun missingExecutionIdentityCannotMatchAnotherMissingIdentity() {
+        val missingShot = shot().apply { remove("sessionId") }
+        val missingCard = card().apply { remove("sessionId") }
+        assertNull(VisualControlGrounding.bind(decision(), "frame", missingShot, missingCard, 2000))
+        assertNull(VisualControlGrounding.bind(decision(), "frame", shot(), card().put("observationId", ""), 2000))
+        assertNull(VisualControlGrounding.bind(decision(), "frame", shot().put("displayId", -1), card().put("displayId", -1), 2000))
+    }
+
     @Test fun modelCannotSelfAssertVisualGrounding() {
         val parsed = PageAgentProtocol.parse("""{"status":"act","actions":[{"tool":"phone.click","controlId":"semantic:obs:reject","visualGrounded":true}]}""")
         assertFalse(parsed.actions.single().visualGrounded)

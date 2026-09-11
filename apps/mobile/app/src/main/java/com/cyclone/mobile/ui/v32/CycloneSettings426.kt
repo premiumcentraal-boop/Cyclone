@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.CalendarMonth
@@ -84,9 +85,8 @@ private data class Settings426Row(
 )
 
 @Composable
-internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh: () -> Unit) {
-    var section by rememberSaveable { mutableStateOf("") }
-    BackHandler(section.isNotEmpty()) { section = "" }
+internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh: () -> Unit,
+    section: String, onSection: (String) -> Unit) {
 
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     var selectedModel by rememberSaveable(refreshTick) {
@@ -125,6 +125,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                     Settings426Row("Phone autonomy", "Phone autonomy", Icons.Rounded.PhoneAndroid, accessProfile.displayName),
                 ),
                 "Phone" to listOf(
+                    Settings426Row("Quick setup", "Quick setup", Icons.Rounded.Bolt, "With root"),
                     Settings426Row("Phone control", "Phone control", Icons.Rounded.Smartphone, phoneValue()),
                     Settings426Row("Notifications", "Notifications", Icons.Rounded.Notifications, if (resultNotifications) "On" else "Off"),
                     Settings426Row("Background work", "Background work", Icons.Rounded.CloudQueue, backgroundValue()),
@@ -144,7 +145,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                     Settings426Row("About", "Cyclone", Icons.Rounded.Info, CycloneRelease.label),
                 ),
             ),
-            onOpen = { section = it },
+            onOpen = onSection,
         )
         return
     }
@@ -153,9 +154,6 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
         contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
-            TextButton(onClick = { section = "" }) { Text("‹ Settings") }
-        }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(section, style = MaterialTheme.typography.headlineSmall)
@@ -166,6 +164,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
         }
 
         when (section) {
+            "Quick setup" -> item { CycloneQuickSetup(context, refresh) { onSection("Permissions") } }
             "Model & API" -> item {
                 ModelApi426Card(
                     context = context,
@@ -421,42 +420,9 @@ private fun ModelApi426Card(
     effort: String,
     onChanged: (String, String) -> Unit,
 ) {
-    var hasKey by remember { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
-    var keyDraft by rememberSaveable { mutableStateOf("") }
     Settings426Surface {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(
-                    if (hasKey) Icons.Rounded.CheckCircle else Icons.Rounded.Key,
-                    null,
-                    Modifier.size(20.dp),
-                    tint = if (hasKey) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(if (hasKey) "API key secured" else "Add your OpenRouter key", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        if (hasKey) "Protected by Android Keystore" else "Required for model-backed chat and tasks.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (hasKey) OutlinedButton(onClick = { OpenRouterSecretStore.clear(context); hasKey = false }) { Text("Remove") }
-            }
-            if (!hasKey) {
-                OutlinedTextField(
-                    value = keyDraft,
-                    onValueChange = { keyDraft = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("OpenRouter API key") },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-                Button(
-                    onClick = { OpenRouterSecretStore.save(context, keyDraft.trim()); keyDraft = ""; hasKey = true },
-                    enabled = keyDraft.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Secure key") }
-            }
+            CycloneApiKeyEditor(context)
             Text("Model", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             CycloneModelPill(modelId, effort, modifier = Modifier.align(Alignment.Start), onChange = onChanged)
         }

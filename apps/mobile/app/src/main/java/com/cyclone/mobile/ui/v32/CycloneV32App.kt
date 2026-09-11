@@ -70,6 +70,11 @@ fun CycloneMobileV32App() {
         val context = LocalContext.current
         var destination by rememberSaveable { mutableStateOf(V32Destination.HOME) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
+        var settingsSection by rememberSaveable { mutableStateOf("") }
+        fun backFromSettings() {
+            if (settingsSection.isNotEmpty()) settingsSection = "" else settingsOpen = false
+        }
+        androidx.activity.compose.BackHandler(settingsOpen) { backFromSettings() }
         var refreshTick by remember { mutableIntStateOf(0) }
 
         AutomationRuntime.initialize(context)
@@ -104,7 +109,7 @@ fun CycloneMobileV32App() {
                         settingsOpen = true,
                         ready = phoneReady,
                         onSettings = {},
-                        onBack = { settingsOpen = false },
+                        onBack = { backFromSettings() },
                     )
                 }
             },
@@ -114,7 +119,7 @@ fun CycloneMobileV32App() {
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 if (settingsOpen) {
-                    CycloneSettingsPage426(context, refreshTick) { refreshTick++ }
+                    CycloneSettingsPage426(context, refreshTick, { refreshTick++ }, settingsSection) { settingsSection = it }
                 } else {
                     when (destination) {
                         V32Destination.HOME -> V32HomePage(
@@ -163,6 +168,7 @@ private fun V32HomePage(
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(greeting, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = onSettings) { Text("Settings") }
                 Surface(
                     modifier = Modifier.clickable(onClick = onSettings),
                     shape = RoundedCornerShape(999.dp),
