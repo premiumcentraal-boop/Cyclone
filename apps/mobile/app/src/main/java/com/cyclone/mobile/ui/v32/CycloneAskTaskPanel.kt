@@ -113,21 +113,7 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
 @Composable
 private fun WorkingBody(task: WorkspaceTaskUi, onProgress: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SupportingLine(task)
-        val recent = task.steps.distinct().takeLast(2)
-        if (recent.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                recent.forEach { step ->
-                    Text(
-                        step,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
+        CycloneTaskCheckpoints(task)
         TextButton(
             onClick = onProgress,
             contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
@@ -142,7 +128,7 @@ private fun ActionNeededBody(
     onDone: () -> Unit,
     onProgress: () -> Unit,
 ) {
-    val prompt = when {
+    val prompt = task.interruption?.prompt ?: when {
         task.confirmation != null -> task.confirmation.explanation
         task.phase == TaskPhase.HUMAN -> "Finish this step in ${task.app}, then tell Cyclone when you're done."
         task.phase == TaskPhase.PAUSED -> "Your place is saved. Take over or continue when you're ready."
@@ -208,20 +194,7 @@ private fun ActionNeededBody(
 private fun DoneBody(task: WorkspaceTaskUi, onOpen: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SupportingLine(task)
-        val completed = task.steps.distinct().takeLast(3)
-        if (completed.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                completed.forEach { step ->
-                    Text(
-                        "✓  $step",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
+        CycloneTaskCheckpoints(task)
         Button(
             onClick = onOpen,
             modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),

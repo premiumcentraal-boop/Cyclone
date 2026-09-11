@@ -75,11 +75,7 @@ fun CycloneTaskStatusPill(
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             when (state) {
-                CycloneTaskVisualState.WORKING -> CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 1.8.dp,
-                    color = content,
-                )
+                CycloneTaskVisualState.WORKING -> CycloneNineDotSpinner()
                 CycloneTaskVisualState.ACTION_NEEDED -> Text(
                     "✦",
                     style = MaterialTheme.typography.labelSmall,

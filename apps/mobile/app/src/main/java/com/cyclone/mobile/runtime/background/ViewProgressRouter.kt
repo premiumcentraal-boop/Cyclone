@@ -93,8 +93,14 @@ object ViewProgressRouter {
             }
             is ViewProgressTarget.VdSessionFrames ->
                 detail.putExtra(EXTRA_PLANE, PLANE_VD)
-            is ViewProgressTarget.ProgressDetail ->
-                detail.putExtra(EXTRA_PLANE, PLANE_PENDING)
+            is ViewProgressTarget.ProgressDetail -> {
+                // A normal live task is already in the human window. Open that app, not a log page.
+                if (task.working && task.confirmation == null && task.sessionId == "default-foreground" && task.displayId == 0) {
+                    context.packageManager.getLaunchIntentForPackage(task.packageName)
+                        ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        ?: detail.putExtra(EXTRA_PLANE, PLANE_PENDING)
+                } else detail.putExtra(EXTRA_PLANE, PLANE_PENDING)
+            }
         }
     }
 

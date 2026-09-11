@@ -193,13 +193,12 @@ class WorkspaceProgressActivity : ComponentActivity() {
                     task.phase == TaskPhase.HUMAN -> HumanControlHint(task)
                     showsVdPreview(task) && task.sessionId != null -> WorkspacePreview(
                         sessionId = task.sessionId,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 320.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 380.dp, max = 560.dp),
                         onAvailability = onAvailability,
                     )
                     else -> Unit
                 }
 
-                SemanticProgress(task, visualState)
                 TaskActions(task, visualState, layer2, liveAvailable)
             }
         }
@@ -218,31 +217,6 @@ class WorkspaceProgressActivity : ComponentActivity() {
                 Text(
                     "Finish the step in ${task.app}, then come back and tap I'm Done.",
                     style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-    }
-
-    @Composable
-    private fun SemanticProgress(task: WorkspaceTaskUi, visualState: CycloneTaskVisualState) {
-        val steps = task.semanticSteps.takeLast(4).map { step ->
-            when (step.state) {
-                SemanticStepState.DONE -> "✓  ${step.label}"
-                SemanticStepState.ACTIVE -> step.label
-                SemanticStepState.PENDING -> "Next: ${step.label}"
-                SemanticStepState.ACTION_NEEDED -> "Needs you: ${step.label}"
-                SemanticStepState.FAILED -> "Not completed: ${step.label}"
-            }
-        }
-        if (steps.isEmpty()) return
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            steps.forEach { step ->
-                Text(
-                    step,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -426,7 +400,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
         isLayer2(task) -> "App profile"
         task.phase == TaskPhase.HUMAN -> "You have control"
         ViewProgressRouter.showsVdFrames(task) -> "Live workspace"
-        else -> "Phone task"
+        else -> "Working in current window"
     }
 
     @Composable
