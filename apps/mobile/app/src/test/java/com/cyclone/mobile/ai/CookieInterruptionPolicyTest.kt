@@ -36,7 +36,10 @@ class CookieInterruptionPolicyTest {
     @Test fun genericRejectRequiresCookieScene() {
         val card = page().let { it.copy(pageText = JSONObject(), controls = listOf(it.controls.single().copy(label = "Reject all"))) }
         assertNull(CookieInterruptionPolicy().next(card, "log in"))
-        assertNotNull(CookieInterruptionPolicy().next(card.copy(pageText = JSONObject().put("text", "We use cookies")), "log in"))
+        val cookieScene = card.copy(pageText = JSONObject().put("text", "We use cookies"))
+        assertNull(CookieInterruptionPolicy().next(cookieScene, "log in"))
+        assertNotNull(CookieInterruptionPolicy().next(cookieScene.copy(controls = cookieScene.controls +
+            cookieScene.controls.single().copy(elementId = "semantic:obs:accept", label = "Accept all")), "log in"))
     }
 
     private fun page(obs: String = "obs") = AgentPageCard(

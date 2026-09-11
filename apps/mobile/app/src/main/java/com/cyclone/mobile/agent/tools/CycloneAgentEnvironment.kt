@@ -473,8 +473,9 @@ class CycloneAgentEnvironment internal constructor(
 
         val semantic = observation.payload.optJSONArray("semanticControls") ?: JSONArray()
         for (index in 0 until semantic.length()) {
-            if (byId.size >= PAGE_CARD_CONTROL_LIMIT) break
             val evidence = semantic.optJSONObject(index) ?: continue
+            if (byId.size >= PAGE_CARD_CONTROL_LIMIT &&
+                !com.cyclone.mobile.ai.CookieInterruptionPolicy.isRejectLabel(evidence.optString("label"))) continue
             val id = evidence.optString("elementId")
             if (id.isBlank() || id in byId) continue
             byId[id] = AgentElementCandidate(
@@ -506,7 +507,8 @@ class CycloneAgentEnvironment internal constructor(
             pageSummary = copyObject(observation.payload.optJSONObject("pageSummary")),
             pageText = copyObject(observation.payload.optJSONObject("pageText")),
             pageEvidence = copyObject(observation.payload.optJSONObject("pageEvidence")),
-            controls = byId.values.toList(),
+            controls = byId.values.sortedByDescending { com.cyclone.mobile.ai.CookieInterruptionPolicy.isRejectLabel(it.label) }
+                .take(PAGE_CARD_CONTROL_LIMIT),
             nextHopHints = copyArray(observation.payload.optJSONArray("nextHopHints")),
             perceptionMode = observation.payload.optString("perceptionMode", "a11y").ifBlank { "a11y" },
             treeUseful = observation.payload.optBoolean("treeUseful", true),

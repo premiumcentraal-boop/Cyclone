@@ -11,11 +11,13 @@ class CookieInterruptionPolicy {
         if (page == null || !page.actionable || explicitAlternative(goal)) return null
         val scene = "${page.pageSummary} ${page.pageText} ${page.controls.joinToString { it.label }}".lowercase()
         if (!Regex("\\bcookies?\\b").containsMatchIn(scene)) return null
+        val consentChoices = page.controls.any { normalize(it.label) in setOf("accept all", "accept all cookies", "accept cookies", "cookie settings", "manage cookies") }
         val candidates = page.controls.filter { control ->
             control.observationId == page.observationId && control.elementId.isNotBlank() &&
-                control.evidence.optBoolean("enabled", true) && control.evidence.optBoolean("visible", true) &&
+                control.evidence.optBoolean("enabled", true) && control.evidence.optBoolean("visibleToUser", true) &&
                 (control.evidence.optBoolean("clickable") || control.role.lowercase() in setOf("button", "link")) &&
-                normalize(control.label) in rejectLabels
+                isRejectLabel(control.label) &&
+                (normalize(control.label).contains("cookie") || consentChoices)
         }.distinctBy { it.elementId }
         // Ambiguity belongs to semantic/visual recovery, never an arbitrary first match.
         val target = candidates.singleOrNull() ?: return null
@@ -30,12 +32,16 @@ class CookieInterruptionPolicy {
             .containsMatchIn(goal)
     }
 
-    private fun normalize(label: String) = label.trim().lowercase().replace(Regex("\\s+"), " ")
+    companion object {
+        private fun normalize(label: String) = label.trim().lowercase().replace(Regex("\\s+"), " ")
+        fun isRejectLabel(label: String): Boolean = normalize(label) in rejectLabels
 
-    private val rejectLabels = setOf(
-        "reject optional cookies", "reject non-essential cookies", "reject nonessential cookies",
-        "reject all cookies", "decline optional cookies", "only necessary cookies",
-        "necessary cookies only", "essential cookies only", "use necessary cookies only",
-        "continue without accepting", "reject all", "decline all",
-    )
+        private val rejectLabels = setOf(
+            "reject optional cookies", "reject non-essential cookies", "reject nonessential cookies",
+            "reject all cookies", "decline optional cookies", "only necessary cookies",
+            "necessary cookies only", "essential cookies only", "use necessary cookies only",
+            "continue without accepting", "reject all", "decline all",
+        )
+
+    }
 }
