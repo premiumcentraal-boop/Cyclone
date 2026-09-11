@@ -124,11 +124,7 @@ object LiveVisionRuntime {
             }
         }
 
-        if (selected == null) {
-            return if (sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID && crop == null) {
-                captureForegroundWindowBelowOverlay(cacheDir)
-            } else null
-        }
+        if (selected == null) return null
 
         val (frame, bitmap) = selected
         try {
@@ -156,15 +152,8 @@ object LiveVisionRuntime {
     private fun captureForegroundWindowBelowOverlay(cacheDir: File): CycloneAccessibilityService.ScreenshotArtifact? {
         if (Build.VERSION.SDK_INT < 34) return null
         val service = CycloneAccessibilityService.instance ?: return null
-        val target = service.windows.orEmpty()
-            .asSequence()
-            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root != null }
-            .sortedWith(
-                compareByDescending<AccessibilityWindowInfo> { it.isFocused }
-                    .thenByDescending { it.isActive }
-                    .thenByDescending { it.layer },
-            )
-            .firstOrNull() ?: return null
+        val targetId = service.foregroundTaskWindowId() ?: return null
+        val target = service.windowsOnAllDisplays.get(0).orEmpty().firstOrNull { it.id == targetId } ?: return null
 
         val rect = android.graphics.Rect().also { target.getBoundsInScreen(it) }
         val latch = CountDownLatch(1)

@@ -387,8 +387,10 @@ class CycloneAccessibilityService : AccessibilityService() {
         }, active?.windowId)
         if (selected != null) return listed.firstOrNull { it.id == selected.id }?.root
         // OEM fallback only when enumeration is unavailable. Never use Cyclone's untyped overlay root.
-        return active?.takeIf { listed.isEmpty() && it.packageName?.toString() !in setOf("com.cyclone.mobile", "com.android.systemui") }
+        return active?.takeIf { listed.isEmpty() && !it.packageName.isNullOrBlank() && it.packageName?.toString() !in setOf("com.cyclone.mobile", "com.android.systemui") }
     }
+
+    internal fun foregroundTaskWindowId(): Int? = preferredForegroundRoot()?.windowId
 
     /**
      * V2.9 replay optimization: a human may demonstrate a two-second hold, but if Android exposes
@@ -426,14 +428,8 @@ class CycloneAccessibilityService : AccessibilityService() {
     private inner class AccessibilityTypeLive : PhoneTypeEngine.LiveHost {
 
         override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
-            val roots = ArrayList<AccessibilityNodeInfo>()
-            rootInActiveWindow?.let(roots::add)
-            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
-            for (root in roots) {
-                val node = nodeAtPath(root, plan.path) ?: continue
-                if (node.isEditable) return AccessibilityTypeHandle(plan.path, node, plan.rawNodeId)
-            }
-            return null
+            val node = nodeAtTaskPath(plan.path) ?: return null
+            return if (node.isEditable) AccessibilityTypeHandle(plan.path, node, plan.rawNodeId) else null
         }
 
         override fun view(handle: Any): PhoneTypeEngine.LiveView? {
@@ -472,20 +468,14 @@ class CycloneAccessibilityService : AccessibilityService() {
 
         override fun refresh(handle: Any): Any? {
             val target = handle as? AccessibilityTypeHandle ?: return null
-            val roots = ArrayList<AccessibilityNodeInfo>()
-            rootInActiveWindow?.let(roots::add)
-            windows.orEmpty().forEach { window -> window.root?.let(roots::add) }
-            for (root in roots) {
-                val node = nodeAtPath(root, target.path) ?: continue
-                if (node.isEditable) return AccessibilityTypeHandle(target.path, node, target.rawNodeId)
-            }
-            return null
+            val node = nodeAtTaskPath(target.path) ?: return null
+            return if (node.isEditable) AccessibilityTypeHandle(target.path, node, target.rawNodeId) else null
         }
     }
 
     fun scroll(selector: ElementSelector?, forward: Boolean = true): Boolean {
         if (!agentCanAct()) return false
-        val node = selector?.let { resolveLiveTarget(it)?.second } ?: findScrollable(rootInActiveWindow)
+        val node = if (selector != null) resolveLiveTarget(selector)?.second else findScrollable(preferredForegroundRoot())
         node ?: return false
         val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         return node.performAction(action)
@@ -575,37 +565,21 @@ class CycloneAccessibilityService : AccessibilityService() {
         return match.node to live
     }
 
-    private fun liveNodeAtSnapshotPath(snapshotNode: UiNodeSnapshot): AccessibilityNodeInfo? {
-        val path = snapshotNode.path
-        val candidates = ArrayList<AccessibilityNodeInfo>()
-        preferredForegroundRoot()?.let(candidates::add)
-        rootInActiveWindow?.let { root ->
-            if (candidates.none { it.windowId == root.windowId }) candidates.add(root)
-        }
-        windows.orEmpty().forEach { window ->
-            val wroot = window.root ?: return@forEach
-            if (candidates.none { it.windowId == wroot.windowId }) candidates.add(wroot)
-        }
-        for (root in candidates) {
-            val live = nodeAtPath(root, path) ?: continue
-            if (sameNode(snapshotNode, live)) return live
-        }
-        return null
-    }
+    private fun liveNodeAtSnapshotPath(snapshotNode: UiNodeSnapshot): AccessibilityNodeInfo? =
+        nodeAtTaskPath(snapshotNode.path)?.takeIf { sameNode(snapshotNode, it) }
 
-    private fun nodeAtPath(root: AccessibilityNodeInfo, path: String): AccessibilityNodeInfo? {
-        val pieces = path.split('/').filter { it.isNotBlank() }
-        if (pieces.isEmpty()) return null
-        val start = pieces.first()
-        val walkRoot = if (start.startsWith("w")) {
-            val windowId = start.removePrefix("w").toIntOrNull() ?: return null
-            windows.orEmpty().firstOrNull { it.id == windowId }?.root ?: return null
-        } else {
-            if (start != "0") return null
-            root
+    private fun nodeAtTaskPath(path: String): AccessibilityNodeInfo? {
+        val parsed = TaskSurfaceWindows.parseNodePath(path) ?: return null
+        val primary = preferredForegroundRoot() ?: return null
+        val root = if (parsed.windowId == null || parsed.windowId == primary.windowId) primary else {
+            val window = windowsOnAllDisplays.get(0).orEmpty().firstOrNull { it.id == parsed.windowId } ?: return null
+            val candidate = window.root ?: return null
+            if (!TaskSurfaceWindows.includeSibling(window.type, candidate.packageName?.toString().orEmpty(),
+                    primary.packageName?.toString().orEmpty())) return null
+            candidate
         }
-        var node = walkRoot
-        for (index in pieces.drop(1)) node = node.getChild(index.toIntOrNull() ?: return null) ?: return null
+        var node = root
+        for (index in parsed.children) node = node.getChild(index) ?: return null
         return node
     }
 

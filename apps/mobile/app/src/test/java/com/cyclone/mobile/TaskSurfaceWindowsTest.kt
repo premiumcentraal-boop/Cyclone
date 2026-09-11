@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TaskSurfaceWindowsTest {
+    @Test fun siblingWindowPathTreatsZeroAsRootRatherThanFirstChild() {
+        assertEquals(TaskSurfaceWindows.NodePath(42, emptyList()), TaskSurfaceWindows.parseNodePath("w42/0"))
+        assertEquals(TaskSurfaceWindows.NodePath(42, listOf(3, 1)), TaskSurfaceWindows.parseNodePath("w42/0/3/1"))
+        assertEquals(TaskSurfaceWindows.NodePath(null, listOf(3, 1)), TaskSurfaceWindows.parseNodePath("0/3/1"))
+        listOf("w42/1", "w42", "0/-1", "wunknown/0", "0//1").forEach {
+            assertNull(TaskSurfaceWindows.parseNodePath(it))
+        }
+    }
+
     private val chrome = TaskSurfaceWindows.Window(1, 1, "com.android.chrome", 1)
     private val overlay = TaskSurfaceWindows.Window(2, 4, "com.cyclone.mobile", 9, active = true, focused = true)
 
