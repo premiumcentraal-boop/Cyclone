@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.CalendarMonth
@@ -124,6 +125,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                     Settings426Row("Phone autonomy", "Phone autonomy", Icons.Rounded.PhoneAndroid, accessProfile.displayName),
                 ),
                 "Phone" to listOf(
+                    Settings426Row("Quick setup", "Quick setup", Icons.Rounded.Bolt, "With root"),
                     Settings426Row("Phone control", "Phone control", Icons.Rounded.Smartphone, phoneValue()),
                     Settings426Row("Notifications", "Notifications", Icons.Rounded.Notifications, if (resultNotifications) "On" else "Off"),
                     Settings426Row("Background work", "Background work", Icons.Rounded.CloudQueue, backgroundValue()),
@@ -162,6 +164,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
         }
 
         when (section) {
+            "Quick setup" -> item { CycloneQuickSetup(context, refresh) { onSection("Permissions") } }
             "Model & API" -> item {
                 ModelApi426Card(
                     context = context,
