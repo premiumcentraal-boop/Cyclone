@@ -126,6 +126,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         @Volatile var stopRequested: Boolean = false,
         val playbookSteps: MutableList<PlaybookHintStep> = mutableListOf(),
         val compiledAttempts: MutableSet<String> = mutableSetOf(),
+        val cookieInterruptions: CookieInterruptionPolicy = CookieInterruptionPolicy(),
         var playbookPackage: String? = null,
     )
 
@@ -277,6 +278,16 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                             reason = "controller.human",
                         ),
                     )
+                }
+
+                session.cookieInterruptions.next(session.bridge.currentPage(), goal)?.let { target ->
+                    val summary = "Rejecting optional cookies, then continuing your task."
+                    onProgress(summary)
+                    AgentTraceRuntime.event(context, traceId, "INTERRUPTION", summary,
+                        code = "cookie.reject_optional", ok = true)
+                    return planFromDecision(PageAgentDecision("act", "Cookie consent", summary,
+                        listOf(PageAgentAction("phone.click", target.elementId, JSONObject(), true, summary)),
+                        null, null), session.state.page.pageKey)
                 }
 
                 when (session.bridge.photoEffect()) {
