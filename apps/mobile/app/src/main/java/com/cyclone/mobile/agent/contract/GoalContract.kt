@@ -5,6 +5,8 @@ import org.json.JSONObject
 
 enum class GoalRequirementKind {
     WEB_HOST,
+    BROWSER_PACKAGE,
+    AUTHENTICATED_SESSION,
     NAMED_WEB_SITE,
     VERIFIED_SCROLL,
     DISMISS_COOKIE_CONSENT,
@@ -100,6 +102,16 @@ object GoalContractCompiler {
             requirements += GoalRequirement(GoalRequirementKind.WEB_HOST, host)
         }
 
+        if (host != null && Regex("(?i)\\bchrome\\b").containsMatchIn(clean)) {
+            requirements += GoalRequirement(GoalRequirementKind.BROWSER_PACKAGE, "com.android.chrome")
+        }
+        val loginIntent = Regex("(?i)\\b(log\\s*in|sign\\s*in)\\b").containsMatchIn(clean)
+        val loginNavigationOnly = Regex("(?i)\\b(click|tap|press|open)\\s+(?:the\\s+)?(?:log\\s*in|sign\\s*in)(?:\\s+(?:button|page|form))?\\s*$")
+            .containsMatchIn(clean)
+        if (loginIntent && !loginNavigationOnly) {
+            requirements += GoalRequirement(GoalRequirementKind.AUTHENTICATED_SESSION, host)
+        }
+
         if (Regex("(?i)\\b(scroll|swipe)\\b").containsMatchIn(clean)) {
             val direction = when {
                 Regex("(?i)\\b(up|upward|upwards)\\b").containsMatchIn(clean) -> "UP"
@@ -168,6 +180,25 @@ object GoalContractCompiler {
     ): GoalRequirementResult {
         val successful = history.filter { it.androidExecutionOk && it.verification.passed }
         return when (requirement.kind) {
+            GoalRequirementKind.BROWSER_PACKAGE -> {
+                val matched = currentPage?.packageName == requirement.value
+                GoalRequirementResult(requirement, matched,
+                    if (matched) "requested browser is the current task surface" else "requested browser has not been verified")
+            }
+            GoalRequirementKind.AUTHENTICATED_SESSION -> {
+                val labels = currentPage?.controls.orEmpty().filter {
+                    it.role.lowercase() in setOf("button", "link", "menuitem") &&
+                        it.evidence.optBoolean("enabled", true) && it.evidence.optBoolean("visible", true) &&
+                        !it.evidence.optString("resourceId").startsWith("com.android.chrome:")
+                }.map { it.label.trim().lowercase() }
+                val hostMatches = requirement.value?.let { host -> currentPage?.let { pageShowsHost(it, host) } } ?: true
+                val signedOut = labels.any { it in setOf("log in", "login", "sign in", "signin") }
+                val signedIn = labels.any { it in setOf("log out", "logout", "sign out", "signout") }
+                val matched = currentPage?.actionable == true && hostMatches && signedIn && !signedOut
+                GoalRequirementResult(requirement, matched,
+                    if (matched) "current task surface exposes an authenticated-session sign-out control"
+                    else "login is not verified; reaching the host or login form is insufficient, and authentication boundaries still apply")
+            }
             GoalRequirementKind.NAMED_WEB_SITE -> {
                 val intent = NavigationIntent.parse(contract.sourceGoal)
                 val loadedHost = currentPage?.controls?.firstOrNull {

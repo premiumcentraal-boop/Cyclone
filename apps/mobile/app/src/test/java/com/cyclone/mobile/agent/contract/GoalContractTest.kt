@@ -7,6 +7,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GoalContractTest {
+    @Test fun redditLoginRequiresAuthenticatedEvidenceInRequestedBrowser() {
+        val contract = GoalContractCompiler.compile("open reddit.com on Chrome and login for me")
+        val host = page("com.android.chrome", "https://reddit.com/")
+        assertFalse(GoalContractCompiler.evaluate(contract, host, emptyList()).satisfied)
+        assertFalse(GoalContractCompiler.evaluate(contract,
+            host.copy(controls = listOf(control("Log in", "button"))), emptyList()).satisfied)
+        val authenticated = host.copy(controls = listOf(control("Log out", "menuitem")))
+        assertTrue(GoalContractCompiler.evaluate(contract, authenticated, emptyList()).satisfied)
+        assertFalse(GoalContractCompiler.evaluate(contract,
+            authenticated.copy(packageName = "org.mozilla.firefox"), emptyList()).satisfied)
+        assertFalse(GoalContractCompiler.evaluate(contract,
+            authenticated.copy(controls = authenticated.controls + control("Log in", "button")), emptyList()).satisfied)
+    }
+
+    @Test fun loginTextOrOldLoginOutcomeDoesNotProveCurrentAuthentication() {
+        val contract = GoalContractCompiler.compile("go to reddit.com and sign in")
+        val authenticated = page("com.android.chrome", "reddit.com", listOf(control("Log out", "button")))
+        val article = page("com.android.chrome", "reddit.com article explaining how to log out")
+        assertFalse(GoalContractCompiler.evaluate(contract, article,
+            listOf(outcome("phone.click", contract.sourceGoal, article, authenticated))).satisfied)
+        val wrongHost = page("com.android.chrome", "example.com", authenticated.controls)
+        assertFalse(GoalContractCompiler.evaluate(contract, wrongHost, emptyList()).satisfied)
+    }
+
+    @Test fun openingLoginFormDoesNotRequireSubmittingCredentials() {
+        assertFalse(GoalContractCompiler.compile("open reddit.com and click login").requirements.any {
+            it.kind == GoalRequirementKind.AUTHENTICATED_SESSION
+        })
+        assertTrue(GoalContractCompiler.compile("open reddit.com and log in").requirements.any {
+            it.kind == GoalRequirementKind.AUTHENTICATED_SESSION
+        })
+    }
+
     @Test fun onlySimpleHostNavigationQualifiesForLocalCompletion() {
         listOf("open ad.nl", "Go to https://www.ad.nl/", "please navigate to victor.ceo").forEach {
             assertTrue(GoalContractCompiler.isSimpleWebNavigation(it))
