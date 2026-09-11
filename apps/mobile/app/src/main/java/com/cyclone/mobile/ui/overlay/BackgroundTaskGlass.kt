@@ -27,6 +27,7 @@ import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.ui.v32.canContinueAfterHumanFromUi
 import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
 import com.cyclone.mobile.ui.v32.CycloneTaskStatusPill
 import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
@@ -104,7 +105,7 @@ private fun HumanTakeoverRibbon(task: WorkspaceTaskUi) {
             }
             Button(
                 onClick = { WorkspaceTasks.command(context, task, "resume") },
-                enabled = task.resumable && task.confirmation == null,
+                enabled = task.canContinueAfterHumanFromUi(),
                 modifier = Modifier.heightIn(min = 44.dp).semantics {
                     contentDescription = "I'm done, continue with Cyclone"
                 },

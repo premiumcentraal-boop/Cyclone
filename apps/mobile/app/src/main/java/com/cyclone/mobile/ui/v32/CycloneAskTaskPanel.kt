@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +66,7 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                CycloneAppIcon(presentation.packageName, Modifier.size(24.dp))
                 Text(
                     resolvedApp.takeIf { it.isNotBlank() && it != "Other" } ?: "Cyclone",
                     style = MaterialTheme.typography.labelMedium,

@@ -19,6 +19,16 @@ class TaskCheckpointTest {
     @Test fun activeStepIsNotDuplicated() {
         assertEquals(1,checkpointRows(task(TaskPhase.WORKING,listOf(SemanticTaskStep(1,"Opening Chrome",SemanticStepState.ACTIVE)))).size)
     }
+    @Test fun traceHudHasNoWindowCreationAndCheckpointsStayInAsk() {
+        fun source(path: String) = sequenceOf(java.io.File("src/main/java/com/cyclone/mobile/$path"),
+            java.io.File("apps/mobile/app/src/main/java/com/cyclone/mobile/$path")).first { it.isFile }.readText()
+        val trace = source("ai/AiTraceOverlayV27.kt")
+        assertFalse(trace.contains("WindowManager"))
+        assertFalse(trace.contains("addView"))
+        assertTrue(source("ui/v32/CycloneAskTaskPanel.kt").contains("CycloneTaskCheckpoints(task)"))
+        assertFalse(source("runtime/background/WorkspaceProgressActivity.kt").contains("SemanticProgress("))
+        assertTrue(source("ui/overlay/BackgroundTaskGlass.kt").contains("enabled = task.canContinueAfterHumanFromUi()"))
+    }
     @Test fun doneDoesNotFabricateNewWorkingRow() {
         assertTrue(checkpointRows(task(TaskPhase.DONE,emptyList())).isEmpty())
     }
