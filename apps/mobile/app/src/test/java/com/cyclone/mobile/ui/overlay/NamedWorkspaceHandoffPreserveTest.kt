@@ -11,11 +11,11 @@ import java.io.File
 
 /**
  * Named-VD Fast Path / skills must not bypass GATE, Take control, or Continue.
- * Overlay copy and chrome behavior stay frozen; this test only asserts they still hold.
+ * Legacy overlay controls remain stable; progress-page labels follow the 4.3.4 consumer UI.
  */
 class NamedWorkspaceHandoffPreserveTest {
     @Test
-    fun productCopyAndWorkspaceCtasStayFrozen() {
+    fun workspaceCtasPreserveExactCommandsWithConsumerLabels() {
         assertEquals("Take control", OverlayCopy.LIVE_RIGHT)
         assertEquals("Resume", OverlayCopy.RESUME)
         assertEquals("Cyclone needs you to confirm before finishing this.", OverlayCopy.GATE)
@@ -26,8 +26,12 @@ class NamedWorkspaceHandoffPreserveTest {
         assertEquals("Continue with Cyclone", NamedWorkspaceControlPolicy.CONTINUE)
 
         val progress = workspaceProgressSource()
-        assertTrue(progress.contains("\"Take control\""))
-        assertTrue(progress.contains("\"Continue with Cyclone\""))
+        assertTrue(progress.contains("\"Take Over\""))
+        assertTrue(progress.contains("\"I'm Done\""))
+        assertTrue(progress.contains("WorkspaceTasks.command(this@WorkspaceProgressActivity, task, \"handoff\")"))
+        assertTrue(progress.contains("WorkspaceTasks.command(this@WorkspaceProgressActivity, task, \"resume\")"))
+        assertTrue(progress.contains("enabled = task.canTakeOverFromUi()"))
+        assertTrue(progress.contains("enabled = task.canContinueAfterHumanFromUi()"))
         assertEquals(1, SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT)
         assertEquals(3, SessionPlaneKind.entries.size)
     }
