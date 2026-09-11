@@ -61,6 +61,7 @@ import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.permissions.CyclonePermissionSetup
+import com.cyclone.mobile.runtime.background.TaskPhase
 import java.time.LocalTime
 
 @Composable
@@ -210,9 +211,9 @@ private fun V32HomePage(
             }
         }
 
-        task?.takeIf { UiTask(it).active }?.let { active ->
-            item { CycloneSectionTitle("Active now") }
-            item { CycloneAskTaskPanel(active) }
+        task?.takeIf { it.phase != TaskPhase.STOPPED }?.let { current ->
+            item { CycloneSectionTitle("Current task") }
+            item { CycloneAskTaskPanel(current) }
         }
 
         item {

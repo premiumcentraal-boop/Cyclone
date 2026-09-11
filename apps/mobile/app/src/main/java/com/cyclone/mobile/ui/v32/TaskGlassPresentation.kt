@@ -25,7 +25,11 @@ internal object TaskGlassPresentation {
     fun current(task: WorkspaceTaskUi?, resolvedApp: String? = task?.app): TaskGlassCardModel? {
         if (task == null || task.phase == TaskPhase.STOPPED) return null
         val label = TaskHumanizer.humanize(task.goal, resolvedApp)
-        val status = task.title
+        val status = when (task.taskVisualState()) {
+            CycloneTaskVisualState.WORKING -> "Working"
+            CycloneTaskVisualState.ACTION_NEEDED -> "Action Needed"
+            CycloneTaskVisualState.DONE -> "Done"
+        }
         val action = when {
             task.phase == TaskPhase.DONE -> "View result"
             task.phase in setOf(TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED) || task.confirmation != null -> "View options"

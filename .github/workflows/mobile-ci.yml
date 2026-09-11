@@ -2,7 +2,7 @@ name: Cyclone Mobile CI
 
 on:
   push:
-    branches: [main, 'agent/432-grounded-harness-backend', 'agent/430-profile-rescue', 'agent/427-structural-reliability', 'codex/cyclone-4.2.4-combined', 'codex/live-phone', 'codex/cyclone-4.0.4-simple-setup', 'codex/cyclone-4.0.1-bg-task-glass', 'release/cyclone-mobile-v*', 'agent/397-v4-live-background-completion', 'agent/398-runtime-and-task-ui', 'agent/399-composer-and-model-compat', 'agent/3912-background-intelligence']
+    branches: [main, 'agent/434-task-glass', 'agent/433-task-status-integration', 'agent/432-grounded-harness-backend', 'agent/430-profile-rescue', 'agent/427-structural-reliability', 'codex/cyclone-4.2.4-combined', 'codex/live-phone', 'codex/cyclone-4.0.4-simple-setup', 'codex/cyclone-4.0.1-bg-task-glass', 'release/cyclone-mobile-v*', 'agent/397-v4-live-background-completion', 'agent/398-runtime-and-task-ui', 'agent/399-composer-and-model-compat', 'agent/3912-background-intelligence']
     paths:
       - 'apps/mobile/**'
       - 'apps/device-gateway/**'

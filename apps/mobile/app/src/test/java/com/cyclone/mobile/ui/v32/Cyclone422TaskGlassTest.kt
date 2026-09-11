@@ -59,14 +59,17 @@ class Cyclone422TaskGlassTest {
 
     @Test fun taskControlsUseBackendCapabilities() {
         val panel = source("ui/v32/CycloneAskTaskPanel.kt")
-        assertTrue(panel.contains("task.interruption?.canResumeAfterHuman == true"))
-        assertTrue(panel.contains("task.interruption?.canTakeOver == true"))
-        assertTrue(panel.contains("task.interruption?.canAutofill == true"))
+        assertTrue(panel.contains("task.canContinueAfterHumanFromUi()"))
+        assertTrue(panel.contains("task.canTakeOverFromUi()"))
+        val capabilities = source("ui/v32/TaskStatusVisuals.kt")
+        assertTrue(capabilities.contains("interruption?.canResumeAfterHuman == true"))
+        assertTrue(capabilities.contains("interruption?.canTakeOver == true"))
+        assertTrue(panel.contains("enabled = false"))
         assertFalse(panel.contains("task.resumable &&"))
     }
 
     @Test fun failedTaskCannotMasqueradeAsResumableReview() {
-        assertEquals("Failed", TaskGlassPresentation.current(task(TaskPhase.FAILED))!!.status)
+        assertEquals("Action Needed", TaskGlassPresentation.current(task(TaskPhase.FAILED))!!.status)
         assertNull(TaskHarnessState.interruption(task(TaskPhase.FAILED)))
     }
 

@@ -5,6 +5,7 @@ import android.view.WindowManager
 import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,8 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,7 +51,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import com.cyclone.mobile.ai.vision.live.LiveVisionRuntime
 import com.cyclone.mobile.ui.v32.CycloneAppIcon
+import com.cyclone.mobile.ui.v32.CycloneTaskStatusPill
+import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
+import com.cyclone.mobile.ui.v32.TaskHumanizer
+import com.cyclone.mobile.ui.v32.canContinueAfterHumanFromUi
+import com.cyclone.mobile.ui.v32.canTakeOverFromUi
+import com.cyclone.mobile.ui.v32.taskVisualState
 import kotlinx.coroutines.delay
 
 /** View-only exact-session surface. Opening this page never acquires input authority. */
@@ -69,6 +74,8 @@ class WorkspaceProgressActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Live workspace frames can contain credentials or account data. Keep this surface out of
+        // screenshots, screen recording, and the Android recent-app snapshot.
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setContent {
             CycloneV32Theme {
@@ -82,82 +89,24 @@ class WorkspaceProgressActivity : ComponentActivity() {
                     Modifier
                         .fillMaxSize()
                         .systemBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     ProgressHeader(task = task, onBack = { finish() })
 
                     if (task == null || task.phase == TaskPhase.STOPPED) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(22.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            shadowElevation = 1.dp,
-                        ) {
-                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                Text("This task has ended", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    "Return to Ask Cyclone when you want to start something new.",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                        EndedCard()
                     } else {
                         Column(
                             Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            ProgressStateCard(task)
-
-                            if (showsVdPreview(task) && task.sessionId != null && task.phase != TaskPhase.HUMAN) {
-                                WorkspacePreview(
-                                    sessionId = task.sessionId,
-                                    modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 310.dp),
-                                    onAvailability = { liveAvailable = it },
-                                )
+                            TaskExperienceCard(task, liveAvailable) { available ->
+                                liveAvailable = available
                             }
-
-                            if (task.phase == TaskPhase.REVIEW) {
-                                ReviewCard(task, liveAvailable)
-                            }
-
-                            task.queued?.let { queued ->
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text("Up next", style = MaterialTheme.typography.labelMedium)
-                                            Text(
-                                                queued,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                        if (!task.working) {
-                                            TextButton(onClick = {
-                                                WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "cancel")
-                                                startActivity(
-                                                    android.content.Intent(this@WorkspaceProgressActivity, WorkspaceActivity::class.java)
-                                                        .putExtra("goal", queued),
-                                                )
-                                                finish()
-                                            }) { Text("Start") }
-                                        }
-                                    }
-                                }
-                            }
+                            task.queued?.let { queued -> QueueCard(task, queued) }
                         }
-
-                        ProgressActions(task)
+                        TaskFooter(task)
                     }
                 }
             }
@@ -190,141 +139,279 @@ class WorkspaceProgressActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ProgressStateCard(task: WorkspaceTaskUi) {
-        val title = task.title
+    private fun TaskExperienceCard(
+        task: WorkspaceTaskUi,
+        liveAvailable: Boolean,
+        onAvailability: (Boolean) -> Unit,
+    ) {
+        val visualState = task.taskVisualState()
+        val taskLabel = TaskHumanizer.humanize(task.goal, task.app)
+        val layer2 = isLayer2(task)
+        Surface(
+            modifier = Modifier.fillMaxWidth().animateContentSize(),
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            shadowElevation = 2.dp,
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(15.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        task.app,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    CycloneTaskStatusPill(visualState)
+                }
+
+                Text(
+                    taskLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                task.subtitle.trim().takeIf { it.isNotBlank() && it != taskLabel }?.let { subtitle ->
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                when {
+                    task.phase == TaskPhase.HUMAN -> HumanControlHint(task)
+                    showsVdPreview(task) && task.sessionId != null -> WorkspacePreview(
+                        sessionId = task.sessionId,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 320.dp),
+                        onAvailability = onAvailability,
+                    )
+                    else -> Unit
+                }
+
+                SemanticProgress(task, visualState)
+                TaskActions(task, visualState, layer2, liveAvailable)
+            }
+        }
+    }
+
+    @Composable
+    private fun HumanControlHint(task: WorkspaceTaskUi) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(22.dp),
-            color = when (task.phase) {
-                TaskPhase.DONE -> MaterialTheme.colorScheme.secondaryContainer
-                TaskPhase.FAILED -> MaterialTheme.colorScheme.errorContainer
-                TaskPhase.REVIEW -> MaterialTheme.colorScheme.tertiaryContainer
-                else -> MaterialTheme.colorScheme.surface
-            },
-            contentColor = when (task.phase) {
-                TaskPhase.DONE -> MaterialTheme.colorScheme.onSecondaryContainer
-                TaskPhase.FAILED -> MaterialTheme.colorScheme.onErrorContainer
-                TaskPhase.REVIEW -> MaterialTheme.colorScheme.onTertiaryContainer
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-            shadowElevation = 1.dp,
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .55f),
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (task.phase == TaskPhase.DONE) {
-                        Icon(Icons.Rounded.CheckCircle, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.secondary)
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("You're in control", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Finish the step in ${task.app}, then come back and tap I'm Done.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun SemanticProgress(task: WorkspaceTaskUi, visualState: CycloneTaskVisualState) {
+        val steps = task.semanticSteps.takeLast(4).map { step ->
+            when (step.state) {
+                SemanticStepState.DONE -> "✓  ${step.label}"
+                SemanticStepState.ACTIVE -> step.label
+                SemanticStepState.PENDING -> "Next: ${step.label}"
+                SemanticStepState.ACTION_NEEDED -> "Needs you: ${step.label}"
+                SemanticStepState.FAILED -> "Not completed: ${step.label}"
+            }
+        }
+        if (steps.isEmpty()) return
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            steps.forEach { step ->
+                Text(
+                    step,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun TaskActions(
+        task: WorkspaceTaskUi,
+        visualState: CycloneTaskVisualState,
+        layer2: Boolean,
+        liveAvailable: Boolean,
+    ) {
+        when (visualState) {
+            CycloneTaskVisualState.WORKING -> {
+                Text(
+                    "Cyclone is working on your task.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            CycloneTaskVisualState.ACTION_NEEDED -> {
+                if (layer2) {
+                    Button(
+                        onClick = { openInstalledApp(task.packageName) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                        shape = RoundedCornerShape(15.dp),
+                    ) { Text("Open ${task.app}") }
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Button(
+                            onClick = {
+                                WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff")
+                                finish()
+                            },
+                            enabled = task.canTakeOverFromUi(),
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(15.dp),
+                        ) { Text(if (task.phase == TaskPhase.HUMAN) "In control" else "Take Over") }
+
+                        if (task.confirmation != null) {
+                            OutlinedButton(
+                                enabled = liveAvailable,
+                                onClick = {
+                                    startService(
+                                        WorkspaceTasks.commandIntent(this@WorkspaceProgressActivity, task, "confirm")
+                                            .putExtra("confirmation", task.confirmation.token),
+                                    )
+                                },
+                                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                                shape = RoundedCornerShape(15.dp),
+                            ) { Text(task.confirmation.button) }
+                        } else {
+                            OutlinedButton(
+                                onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "resume") },
+                                enabled = task.canContinueAfterHumanFromUi(),
+                                modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                                shape = RoundedCornerShape(15.dp),
+                            ) { Text("I'm Done") }
+                        }
                     }
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
-                Text(task.subtitle, style = MaterialTheme.typography.bodyMedium)
-                task.semanticSteps.takeLast(8).forEach { step ->
-                    val status = when (step.state) {
-                        SemanticStepState.DONE -> "✓"
-                        SemanticStepState.ACTIVE -> "Working"
-                        SemanticStepState.PENDING -> "Pending"
-                        SemanticStepState.ACTION_NEEDED -> "Action Needed"
-                        SemanticStepState.FAILED -> "Not verified"
+
+                OutlinedButton(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    shape = RoundedCornerShape(15.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Autofill")
+                        Text("Soon", style = MaterialTheme.typography.labelSmall)
                     }
-                    Text("$status · ${step.label}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
+            CycloneTaskVisualState.DONE -> {
+                Button(
+                    onClick = {
+                        if (layer2) openInstalledApp(task.packageName)
+                        else {
+                            WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff")
+                            finish()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                    shape = RoundedCornerShape(15.dp),
+                ) { Text("Open Result") }
+            }
+        }
+    }
+
+    @Composable
+    private fun QueueCard(task: WorkspaceTaskUi, queued: String) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Up next", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        queued,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (!task.working) {
+                    TextButton(onClick = {
+                        WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "cancel")
+                        startActivity(
+                            android.content.Intent(this@WorkspaceProgressActivity, WorkspaceActivity::class.java)
+                                .putExtra("goal", queued),
+                        )
+                        finish()
+                    }) { Text("Start") }
                 }
             }
         }
     }
 
     @Composable
-    private fun ReviewCard(task: WorkspaceTaskUi, liveAvailable: Boolean) {
-        val confirmation = task.confirmation
+    private fun TaskFooter(task: WorkspaceTaskUi) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            TextButton(
+                onClick = {
+                    WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "cancel")
+                    finish()
+                },
+            ) {
+                Text(if (task.phase == TaskPhase.DONE || task.phase == TaskPhase.FAILED) "Close task" else "Stop task")
+            }
+        }
+    }
+
+    @Composable
+    private fun EndedCard() {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(22.dp),
             color = MaterialTheme.colorScheme.surface,
             shadowElevation = 1.dp,
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("This task has ended", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    confirmation?.explanation ?: "Check the prepared page in ${task.app} and make the final decision.",
+                    "Return to Ask Cyclone when you want to start something new.",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (confirmation != null) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff")
-                                finish()
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Modify") }
-                        Button(
-                            enabled = liveAvailable,
-                            onClick = {
-                                startService(
-                                    WorkspaceTasks.commandIntent(this@WorkspaceProgressActivity, task, "confirm")
-                                        .putExtra("confirmation", confirmation.token),
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) { Text(confirmation.button) }
-                    }
-                } else {
-                    Button(
-                        onClick = {
-                            WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff")
-                            finish()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Review in ${task.app}") }
-                }
             }
         }
     }
 
-    @Composable
-    private fun ProgressActions(task: WorkspaceTaskUi) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = {
-                    WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "cancel")
-                    finish()
-                },
-            ) { Text(if (task.phase == TaskPhase.DONE || task.phase == TaskPhase.FAILED) "Close task" else "Stop task") }
-
-            when {
-                isLayer2(task) -> Button(
-                    onClick = {
-                        val launch = packageManager.getLaunchIntentForPackage(task.packageName)
-                        if (launch != null) startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                        finish()
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text("Open ${task.app}") }
-
-                task.sessionId != null -> {
-                    val human = task.interruption?.canResumeAfterHuman == true
-                    if (human || task.interruption?.canTakeOver == true || task.working) {
-                        Button(
-                            onClick = {
-                                WorkspaceTasks.command(this@WorkspaceProgressActivity, task, if (human) "resume" else "handoff")
-                                if (!human) finish()
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(
-                                when {
-                                    human -> "Continue with Cyclone"
-                                    task.phase == TaskPhase.DONE -> "Open ${task.app}"
-                                    task.phase == TaskPhase.FAILED -> "Take control"
-                                    else -> "Take control"
-                                },
-                            )
-                        }
-                    }
-                }
-            }
+    private fun openInstalledApp(packageName: String) {
+        packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
+            startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
+        finish()
     }
 
     private fun isLayer2(task: WorkspaceTaskUi): Boolean =
@@ -368,9 +455,10 @@ class WorkspaceProgressActivity : ComponentActivity() {
 
         Surface(
             modifier = modifier,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
-            shadowElevation = 1.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 AndroidView(

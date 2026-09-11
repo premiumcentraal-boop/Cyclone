@@ -17,13 +17,9 @@ data class UiTask(val source: WorkspaceTaskUi) {
     val id get() = source.taskId
     val active get() = source.phase !in setOf(TaskPhase.DONE, TaskPhase.FAILED, TaskPhase.STOPPED)
     val consumerStatus get() = when (source.phase) {
-        TaskPhase.STARTING -> "Starting"
-        TaskPhase.WORKING -> "Working"
-        TaskPhase.PAUSED -> "Paused"
-        TaskPhase.REVIEW -> "Needs you"
-        TaskPhase.HUMAN -> "You're in control"
+        TaskPhase.STARTING, TaskPhase.WORKING -> "Working"
+        TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED -> "Action Needed"
         TaskPhase.DONE -> "Done"
-        TaskPhase.FAILED -> "Couldn't finish"
         TaskPhase.STOPPED -> "Stopped"
     }
     val subtitle get() = source.subtitle
@@ -59,15 +55,15 @@ fun CycloneTaskProgress(task: WorkspaceTaskUi, modifier: Modifier = Modifier) {
                     Text(task.title, style = MaterialTheme.typography.titleSmall)
                     Text(ui.subtitle, style = MaterialTheme.typography.bodyMedium, maxLines = 3)
                 }
+                if (task.phase != TaskPhase.STOPPED) CycloneTaskStatusPill(task.taskVisualState())
             }
-            if (task.working) LinearProgressIndicator(Modifier.fillMaxWidth())
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { ui.open(context) }) { Text(if (task.confirmation != null) "Review" else "View progress") }
                 // Layer 2 commands belong to its runtime, never the VD service.
                 if (runCatching { task.plane().kind == com.cyclone.mobile.runtime.session.SessionPlaneKind.SESSION_KERNEL_VD }.getOrDefault(false)) {
                     if (task.working) TextButton(onClick = { WorkspaceTasks.command(context, task, "pause") }) { Text("Pause") }
                     if (task.resumable && task.phase in setOf(TaskPhase.PAUSED, TaskPhase.HUMAN))
-                        TextButton(onClick = { WorkspaceTasks.command(context, task, "resume") }) { Text("Continue") }
+                        TextButton(onClick = { WorkspaceTasks.command(context, task, "resume") }) { Text("I'm Done") }
                     TextButton(onClick = { WorkspaceTasks.command(context, task, "cancel") }) { Text(if (ui.active) "Stop task" else "Close task") }
                 }
             }
