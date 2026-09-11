@@ -110,7 +110,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         val config: QuickAgentConfig,
         val bridge: CyclonePcParityBridge,
         val apiKey: String,
-        val reliability: AgentReliabilitySession,
         val skillSignatures: MutableList<String>,
         val successfulActions: MutableList<String>,
         val failedActions: MutableList<String>,
@@ -154,17 +153,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             ?: return@withContext QuickAgentResult(false, "Cyclone could not read the current Android page. Enable Accessibility and try again.", 0, config.model.id)
 
         val traceId = AgentTraceRuntime.start(context, goal, config.model.id)
-        val reliability = AgentReliabilitySession(
-            AgentReliabilityConfig(
-                maxTurns = 1_000,
-                maxConsecutiveFailures = 20,
-                maxRepeatedActionWithoutProgress = 10,
-                taskTimeoutMs = 300_000,
-            ),
-            sessionId = traceId,
-        )
-        reliability.start()
-        reliability.observe(state.page.pageKey)
+        // CycloneLocalAgent owns convergence and lifecycle; no independently paused executor guard.
         if (!background) maybeStartOverlay(traceId)
         val skillSignatures = mutableListOf<String>()
         val successfulActions = mutableListOf<String>()
@@ -194,7 +183,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             goal = goal,
             config = config,
             initial = state,
-            reliability = reliability,
             skillSignatures = skillSignatures,
             successfulActions = successfulActions,
             failedActions = failedActions,
@@ -259,7 +247,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         goal: String,
         config: QuickAgentConfig,
         initial: ObservedState,
-        reliability: AgentReliabilitySession,
         skillSignatures: MutableList<String>,
         successfulActions: MutableList<String>,
         failedActions: MutableList<String>,
@@ -272,7 +259,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             config = config,
             bridge = CyclonePcParityBridge(context, execution, goal).also { it.onOperation = { tool, result -> onOperation?.invoke(tool, result) } },
             apiKey = OpenRouterSecretStore.read(context),
-            reliability = reliability,
             skillSignatures = skillSignatures,
             successfulActions = successfulActions,
             failedActions = failedActions,
@@ -733,14 +719,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                 )
             }
 
-            val stableTarget = action.controlId ?: action.tool
-            if (session.reliability.requestAction(action.tool, stableTarget) != ReliabilityDirective.CONTINUE) {
-                return LocalExecution(
-                    state, false, verifiedProgress, session.bridge.observation()?.evidenceIdentity ?: cycloneObservation(state).evidenceIdentity,
-                    message = session.reliability.snapshot().stopCode ?: "Secondary reliability guard paused the action.",
-                )
-            }
-
             val summary = action.displaySummary.ifBlank { action.tool.removePrefix("phone.").replace('_', ' ') }
             onProgress(summary)
             AgentTraceRuntime.event(
@@ -792,11 +770,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             }
 
             val verified = envelope.verification.passed
-            session.reliability.result(
-                envelope.androidExecutionOk,
-                verified,
-                if (!envelope.androidExecutionOk) ReliabilityFailureClass.ACTION else ReliabilityFailureClass.VERIFICATION,
-            )
 
             val madeProgress = verified && progress.classification == ProgressClassification.VERIFIED_PROGRESS
             val previousMode = session.adaptiveMode
@@ -1049,11 +1022,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         )
         val envelope = session.bridge.actGraph(graphAction, session.goal)
         val progress = session.bridge.classifyProgress(envelope)
-        session.reliability.result(
-            envelope.androidExecutionOk,
-            envelope.verification.passed,
-            if (!envelope.androidExecutionOk) ReliabilityFailureClass.ACTION else ReliabilityFailureClass.VERIFICATION,
-        )
         AgentTraceRuntime.event(
             context, session.traceId, "VERIFICATION",
             if (envelope.verification.passed) "Learned route verified" else "Learned route no longer verified",

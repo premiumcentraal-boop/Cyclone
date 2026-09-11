@@ -5,6 +5,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CycloneExecutionBoundaryTest {
+    @Test fun staleLaunchThenProgressThenStaleBackStillReachesCookieAction() {
+        var plans = 0
+        var actions = 0
+        val model = object : CycloneAgentModel {
+            override fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
+                plans++
+                return CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.ACT, "step-$plans"))
+            }
+        }
+        val tools = object : CycloneAgentTools {
+            override fun observe(state: CycloneTaskState) = CycloneObservation("page-$actions", "page-$actions")
+            override fun execute(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn): CycloneToolResult {
+                actions++
+                val stale = actions == 1 || actions == 4
+                return CycloneToolResult(ok = !stale, staleTarget = stale, message = if (stale) "target.stale" else null)
+            }
+            override fun verify(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn, toolResult: CycloneToolResult) =
+                CycloneVerificationResult(verified = true, progress = true, complete = actions == 5)
+        }
+        val result = CycloneLocalAgent("open reddit and reject cookies", model, tools).runUntilBoundary()
+        assertTrue(result is CycloneAgentRunResult.Completed)
+        assertEquals(5, actions)
+        assertEquals(5, plans)
+    }
+
     private class Tools : CycloneAgentTools {
         var executions = 0
         override fun observe(state: CycloneTaskState) = CycloneObservation("same", "same")

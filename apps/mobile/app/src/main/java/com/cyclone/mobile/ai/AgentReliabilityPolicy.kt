@@ -122,7 +122,6 @@ class AgentReliabilitySession(
         val safe = safeFingerprint(stateFingerprint)
         if (lastState != safe) {
             repeatedActionCount = 0
-            retryCounts.clear()
         }
         lastState = safe
         observations.addLast(safe)
@@ -159,7 +158,11 @@ class AgentReliabilitySession(
             stateFingerprint = lastState,
             actionSignature = lastAction,
         )
-        if (ok && verified != false) {
+        if (ok && verified == true) {
+            retryCounts.clear()
+            repeatedActionCount = 0
+            oscillationCount = 0
+            observations.clear()
             consecutiveFailures = 0
             return ReliabilityDirective.CONTINUE
         }
@@ -183,6 +186,7 @@ class AgentReliabilitySession(
         status = AgentTaskStatus.RUNNING
         stopCode = null
         consecutiveFailures = 0
+        retryCounts.clear()
         repeatedActionCount = 0
         emit(ReliabilityEventType.RESUMED, "user.resume")
         return ReliabilityDirective.CONTINUE
