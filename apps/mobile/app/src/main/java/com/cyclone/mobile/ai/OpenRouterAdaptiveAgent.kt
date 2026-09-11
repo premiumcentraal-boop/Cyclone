@@ -601,6 +601,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                 detail = listOfNotNull(
                     event.pageIdentity?.let { "page=${it.takeLast(16)}" },
                     event.actionSignature?.let { "action=${it.take(120)}" },
+                    event.safeMessage?.let { "reason=${TracePrivacy.clean(it).take(500)}" },
                 ).joinToString(" · ").takeIf { it.isNotBlank() },
             )
         }
@@ -767,10 +768,11 @@ class OpenRouterAdaptiveAgent(private val context: Context,
 
             val envelope = session.bridge.act(action, state.page, session.goal)
             AgentTraceRuntime.event(
-                context, session.traceId, "ANDROID_EXECUTION",
-                if (envelope.androidExecutionOk) "Android accepted the action" else "Android rejected the action",
+                context, session.traceId, if (envelope.executorInvoked) "ANDROID_EXECUTION" else "ACTION_REJECTED",
+                if (!envelope.executorInvoked) "Action rejected before the canonical executor"
+                else if (envelope.androidExecutionOk) "Android accepted the action" else "Canonical executor rejected the action",
                 code = envelope.errorClass.name, ok = envelope.androidExecutionOk,
-                detail = envelope.safeMessage,
+                detail = "executorInvoked=${envelope.executorInvoked}; layer=${envelope.failureLayer}; ${envelope.safeMessage.orEmpty()}",
             )
             AgentTraceRuntime.event(
                 context, session.traceId, "AFTER_OBSERVATION",

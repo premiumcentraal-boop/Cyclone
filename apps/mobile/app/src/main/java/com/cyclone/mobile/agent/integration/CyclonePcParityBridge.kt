@@ -507,6 +507,9 @@ class CyclonePcParityBridge internal constructor(
                     .put("semanticSuccessClaimed", envelope.semanticSuccessClaimed)
                     .put("delta", envelope.delta.summary.take(240))
                     .put("errorClass", envelope.errorClass.name)
+                    .put("failureLayer", envelope.failureLayer.name)
+                    .put("executorInvoked", envelope.executorInvoked)
+                    .put("safeMessage", envelope.safeMessage?.let { com.cyclone.mobile.ai.TracePrivacy.clean(it).take(300) } ?: JSONObject.NULL)
                     .put("learningRecorded", envelope.learning.recorded),
             )
         }

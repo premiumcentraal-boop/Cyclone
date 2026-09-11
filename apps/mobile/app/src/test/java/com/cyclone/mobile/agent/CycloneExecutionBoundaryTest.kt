@@ -8,6 +8,7 @@ class CycloneExecutionBoundaryTest {
     @Test fun staleLaunchThenProgressThenStaleBackStillReachesCookieAction() {
         var plans = 0
         var actions = 0
+        val trace = mutableListOf<CycloneTraceEvent>()
         val model = object : CycloneAgentModel {
             override fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
                 plans++
@@ -24,10 +25,12 @@ class CycloneExecutionBoundaryTest {
             override fun verify(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn, toolResult: CycloneToolResult) =
                 CycloneVerificationResult(verified = true, progress = true, complete = actions == 5)
         }
-        val result = CycloneLocalAgent("open reddit and reject cookies", model, tools).runUntilBoundary()
+        val result = CycloneLocalAgent("open reddit and reject cookies", model, tools,
+            trace = CycloneAgentTraceSink { trace += it }).runUntilBoundary()
         assertTrue(result is CycloneAgentRunResult.Completed)
         assertEquals(5, actions)
         assertEquals(5, plans)
+        assertEquals(2, trace.count { it.type == CycloneTraceEventType.TOOL_RESULT && it.safeMessage == "target.stale" })
     }
 
     private class Tools : CycloneAgentTools {

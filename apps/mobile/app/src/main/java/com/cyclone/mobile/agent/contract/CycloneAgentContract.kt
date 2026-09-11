@@ -148,4 +148,5 @@ data class AgentActionEnvelope(
     val observationGeneration: Long?,
     val learning: AgentLearningResult,
     val safeMessage: String? = null,
+    val executorInvoked: Boolean = false,
 )

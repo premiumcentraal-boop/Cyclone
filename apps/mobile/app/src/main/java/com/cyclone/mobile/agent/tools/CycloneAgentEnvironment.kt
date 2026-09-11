@@ -398,6 +398,7 @@ class CycloneAgentEnvironment internal constructor(
             observationGeneration = visibleGeneration,
             learning = learning,
             safeMessage = failure?.message,
+            executorInvoked = true,
         )
         remember(envelope)
         envelope
