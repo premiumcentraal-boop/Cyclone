@@ -17,7 +17,7 @@ class CycloneTaskPresentationTest {
         assertTrue(UiTask(source).belongsToProfile("profile"))
         assertFalse(UiTask(source).belongsToProfile("other"))
         assertFalse(UiTask(source.copy(sessionId = "named-vd",
-            displayId = 2, displayId = 7)).belongsToProfile("profile"))
+            displayId = 7)).belongsToProfile("profile"))
         assertFalse(UiTask(source.copy(workspaceGeneration = null)).belongsToProfile("profile"))
         assertFalse(UiTask(source.copy(workspaceId = null, workspaceGeneration = null)).belongsToProfile("profile"))
     }
@@ -84,6 +84,7 @@ class CycloneTaskPresentationTest {
         val human = WorkspaceTaskUi(
             taskId = "t",
             sessionId = "named-vd",
+            displayId = 2,
             app = "Salesforce",
             packageName = "com.salesforce",
             goal = "Sign in",
@@ -96,5 +97,7 @@ class CycloneTaskPresentationTest {
         assertFalse(human.canTakeOverFromUi())
         assertTrue(human.canContinueAfterHumanFromUi())
         assertFalse(human.copy(resumable = false).canContinueAfterHumanFromUi())
+        assertFalse(human.copy(displayId = null).canContinueAfterHumanFromUi())
+        assertFalse(human.copy(interruption = null).canContinueAfterHumanFromUi())
     }
 }
