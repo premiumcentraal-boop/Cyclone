@@ -396,6 +396,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                         state = session.state,
                         providerSort = config.providerSort,
                         traceId = traceId,
+                        bridge = session.bridge,
                         agentContext = agentContext,
                     )
                 } else {
@@ -479,6 +480,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                                 state = session.state,
                                 providerSort = config.providerSort,
                                 traceId = traceId,
+                                bridge = session.bridge,
                                 agentContext = session.bridge.promptContext(goal),
                             ) ?: return CycloneToolResult(
                                 ok = false,
@@ -494,8 +496,9 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                             val providerMessage = ProviderFailure.message(decision.reason.orEmpty())
                             return CycloneToolResult(
                                 ok = complete,
+                                gateRequired = decision.status == "need_human",
                                 hardBlocker = providerMessage != null,
-                                message = providerMessage ?: decision.answer,
+                                message = providerMessage ?: decision.answer ?: decision.reason ?: decision.displaySummary,
                                 payload = LocalExecution(session.state, complete, complete, observation.evidenceIdentity,
                                     complete = complete, message = decision.answer),
                             )
@@ -1312,8 +1315,12 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         state: ObservedState,
         providerSort: String,
         traceId: String,
+        bridge: CyclonePcParityBridge,
         agentContext: JSONObject? = null,
     ): PageAgentDecision? {
+        if (!bridge.claimVisionCapture()) return PageAgentDecision("blocked", "",
+            "Visual evidence was already checked without progress; a different strategy is required.",
+            emptyList(), null, "vision.capture_budget_exhausted")
         AgentTraceRuntime.event(context, traceId, "VISION", "Structured page context is ambiguous; capturing one visual fallback for this page", code = "page.vision_once", ok = true)
         val shot = PhoneToolExecutor.execute(
             context,
@@ -1345,6 +1352,8 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
         val raw = response.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         val parsed = runCatching { PageAgentProtocol.parse(raw) }.getOrNull() ?: return null
         return VisualControlGrounding.bind(parsed, frameId, shotData, card, System.currentTimeMillis())
+            ?: PageAgentDecision("blocked", "", "The image target could not be bound to one fresh task control.",
+                emptyList(), null, "vision.target_unresolved")
     }
 
     private fun providerBoundary(response: JSONObject, traceId: String): PageAgentDecision? {

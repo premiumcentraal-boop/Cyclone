@@ -299,7 +299,6 @@ class CyclonePcParityBridge internal constructor(
                 memory = memory.copy(
                     attemptedLevels = memory.attemptedLevels + RecoveryLevel.SILENT_SCREENSHOT_VISION,
                     attemptedEvidence = memory.attemptedEvidence + EvidenceSource.SCREENSHOT_VISION,
-                    capturesForSemanticState = memory.capturesForSemanticState + 1,
                 )
             }
             RecoveryLevel.BACKTRACK_OR_REPLAN -> {
@@ -333,6 +332,16 @@ class CyclonePcParityBridge internal constructor(
         val value = forceVision
         forceVision = false
         return value
+    }
+
+    /** Both model-requested and recovery-requested screenshots consume the same budget. */
+    fun claimVisionCapture(): Boolean {
+        if (memory.capturesForSemanticState > 0) return false
+        memory = memory.copy(capturesForSemanticState = 1,
+            attemptedLevels = memory.attemptedLevels + RecoveryLevel.SILENT_SCREENSHOT_VISION,
+            attemptedEvidence = memory.attemptedEvidence + EvidenceSource.SCREENSHOT_VISION)
+        forceVision = false
+        return true
     }
 
     fun markVerifiedProgress() {

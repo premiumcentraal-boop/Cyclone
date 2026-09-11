@@ -40,6 +40,12 @@ class CyclonePcParityBridgeTest {
         bridge.observe("reject cookies")
         assertTrue(bridge.consumeForcedVision())
         assertFalse(bridge.consumeForcedVision())
+        assertTrue(bridge.claimVisionCapture())
+        assertFalse(bridge.claimVisionCapture())
+        bridge.observe("open reddit.com")
+        assertFalse(bridge.claimVisionCapture())
+        bridge.markVerifiedProgress()
+        assertTrue(bridge.claimVisionCapture())
     }
 
     private class FakeEnvironment(cards: List<AgentPageCard>) : CycloneAgentEnvironmentApi {
