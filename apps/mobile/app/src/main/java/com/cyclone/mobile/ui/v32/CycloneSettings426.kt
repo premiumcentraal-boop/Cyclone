@@ -84,9 +84,8 @@ private data class Settings426Row(
 )
 
 @Composable
-internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh: () -> Unit) {
-    var section by rememberSaveable { mutableStateOf("") }
-    BackHandler(section.isNotEmpty()) { section = "" }
+internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh: () -> Unit,
+    section: String, onSection: (String) -> Unit) {
 
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     var selectedModel by rememberSaveable(refreshTick) {
@@ -144,7 +143,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                     Settings426Row("About", "Cyclone", Icons.Rounded.Info, CycloneRelease.label),
                 ),
             ),
-            onOpen = { section = it },
+            onOpen = onSection,
         )
         return
     }
@@ -153,9 +152,6 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
         contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 36.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
-            TextButton(onClick = { section = "" }) { Text("‹ Settings") }
-        }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(section, style = MaterialTheme.typography.headlineSmall)
