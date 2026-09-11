@@ -29,7 +29,8 @@ object RootQuickSetup {
 
     fun apply(context: Context, independent: Boolean): String = synchronized(Layer2Workspaces.engine.mutationLock) {
         val user = Process.myUid() / 100000
-        fun eligible() = !Layer2Workspaces.gated() && WorkspaceTasks.state.value?.phase.let {
+        fun eligible() = !Layer2Workspaces.gated() &&
+            !com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.hasExecutingTask() && WorkspaceTasks.state.value?.phase.let {
             it == null || it in setOf(TaskPhase.DONE, TaskPhase.FAILED, TaskPhase.STOPPED)
         }
         if (!eligible()) return@synchronized "Finish or close the current task before setup."
