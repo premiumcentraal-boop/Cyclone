@@ -32,7 +32,7 @@ internal fun CycloneQuickSetup(context: Context, refresh: () -> Unit, openPermis
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Quick setup", style = MaterialTheme.typography.headlineSmall)
-        Text("Set up this profile with root: phone control, notifications, microphone, calendar, overlay, battery access, routine timing and Cyclone’s keyboard. Other profiles stay unchanged.")
+        Text("Set up this profile with root: phone control, notifications, microphone, calendar, overlay, battery access, routine timing and Cyclone’s keyboard. App permissions apply to this profile. Battery exemption applies to Cyclone across profiles.")
         Row {
             Checkbox(independent, { independent = it }, enabled = !busy)
             Column {

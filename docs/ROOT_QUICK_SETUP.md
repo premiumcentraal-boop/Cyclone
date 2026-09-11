@@ -2,7 +2,7 @@
 
 Settings > Quick setup > Enable with root applies allowlisted permissions to Cyclone in the currently active Android user. The user sees the requested capabilities and may deselect Independent phone autonomy before applying. Existing GATE confirmations remain authoritative.
 
-Automated: notifications, microphone, calendar, overlay, precise alarms, battery exemption, notification listener, Accessibility and enabling (not selecting) the agent keyboard. Existing Accessibility services are preserved. An enabled-but-unbound Cyclone service is removed/re-added without disabling other services. Readiness polls the real binding, not just the settings flag. Retry is safe; granted permissions remain in place after partial failure.
+Automated: notifications, microphone, calendar, overlay, precise alarms, battery exemption, notification listener, Accessibility and enabling (not selecting) the agent keyboard. Existing Accessibility services are preserved. Android battery exemption is package-wide across profiles; other permission grants are user-scoped. An enabled-but-unbound Cyclone service is removed/re-added without disabling other services. Readiness polls the real binding, not just the settings flag. Retry is safe; granted permissions remain in place after partial failure.
 
 The trusted local setup helper runs under the existing mutation lock, refuses active/review tasks and GATE, verifies root and the current Android user, rechecks identity before every command, bounds output and times out commands. It is not an LLM tool. It never edits Magisk policy, grants another package, switches user, approves a task, or copies secrets.
 
