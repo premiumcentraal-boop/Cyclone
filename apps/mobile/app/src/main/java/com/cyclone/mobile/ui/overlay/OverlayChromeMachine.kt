@@ -21,12 +21,14 @@ class OverlayChromeMachine(
         cta: OverlayAnalysisCta = OverlayAnalysisCta.CONFIRM,
     ) {
         if (snapshot.state != OverlayChromeState.IDLE && snapshot.state != OverlayChromeState.DONE) return
+        val keepMinimized = snapshot.minimized
         snapshot = OverlayChromeSnapshot(
             state = OverlayChromeState.ANALYSIS,
             sessionId = sessionId,
             bullets = bullets,
             analysisCta = cta,
             idleChipVisible = false,
+            minimized = keepMinimized,
         )
     }
 
@@ -39,7 +41,7 @@ class OverlayChromeMachine(
             state = OverlayChromeState.WORKING,
             sessionId = sessionId.ifBlank { snapshot.sessionId },
             idleChipVisible = false,
-            minimized = false,
+            minimized = snapshot.minimized,
             userPaused = false,
         )
         cycloneState.resumeAgent()
@@ -249,8 +251,13 @@ class OverlayChromeMachine(
             snapshot.state != OverlayChromeState.WORKING &&
             snapshot.state != OverlayChromeState.LIVE
         ) return
-        if (snapshot.userPaused) cycloneState.resumeAgent() else cycloneState.pauseAgentForUser()
-        snapshot = snapshot.copy(userPaused = !snapshot.userPaused)
+        val returningToAgent = snapshot.userPaused
+        if (returningToAgent) cycloneState.resumeAgent() else cycloneState.pauseAgentForUser()
+        snapshot = snapshot.copy(
+            userPaused = !snapshot.userPaused,
+            minimized = if (returningToAgent) true else snapshot.minimized,
+            idleChipVisible = if (returningToAgent) false else snapshot.idleChipVisible,
+        )
         emitChrome(OverlayChromeEventKind.TAKE_CONTROL)
     }
 
@@ -298,7 +305,7 @@ class OverlayChromeMachine(
         snapshot = snapshot.copy(
             state = OverlayChromeState.DONE,
             idleChipVisible = false,
-            minimized = false,
+            minimized = true,
             userPaused = false,
         )
         emit(
