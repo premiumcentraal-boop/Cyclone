@@ -22,10 +22,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -45,9 +48,18 @@ import com.cyclone.mobile.runtime.background.WorkspaceTasks
 @Composable
 fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val resolvedApp = remember(task.packageName) { appLabel(context, task.packageName) }
     val presentation = TaskGlassPresentation.current(task, resolvedApp) ?: return
     val visualState = task.taskVisualState()
+
+    // A task/result card is the primary interaction surface. Do not leave a stale editor/IME
+    // competing for half the display when execution starts, fails, pauses, or finishes.
+    LaunchedEffect(task.taskId, task.phase) {
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+    }
 
     Surface(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
