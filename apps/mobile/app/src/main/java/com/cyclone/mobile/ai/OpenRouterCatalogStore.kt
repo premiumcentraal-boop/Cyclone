@@ -19,7 +19,8 @@ object OpenRouterCatalogStore {
         if (!prefs(context).contains(SELECTION)) {
             val old = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).getString("openrouter_model", null)
             val id = old?.let { ModelRegistry.resolve(it)?.openRouterSlug ?: it }?.takeIf { OpenRouterCustomModelStore.isValidSlug(it) }
-            check(prefs(context).edit().putStringSet(SELECTION, setOfNotNull(id) + OpenRouterCustomModelStore.list(context).map { it.id }).commit()) { "Could not save model selection." }
+            // Migration must not crash Settings when Android cannot flush preferences immediately.
+            prefs(context).edit().putStringSet(SELECTION, setOfNotNull(id) + OpenRouterCustomModelStore.list(context).map { it.id }).apply()
         }
     }
     fun models(context: Context): List<CatalogModel> { initialize(context); return catalog }
@@ -39,12 +40,12 @@ object OpenRouterCatalogStore {
     @Synchronized fun select(context: Context, id: String, selected: Boolean) {
         require(OpenRouterCustomModelStore.isValidSlug(id))
         val next = ModelPickerSelection(selectedIds(context), activeId(context)).toggle(id, selected)
-        check(prefs(context).edit().putStringSet(SELECTION, next.ids).commit()) { "Could not save model selection." }
         try {
+            check(prefs(context).edit().putStringSet(SELECTION, next.ids).commit()) { "Could not save model selection." }
             check(context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).edit()
                 .putString("openrouter_model", next.activeId).commit()) { "Could not update selected model." }
         } finally {
-            // A partial storage failure must still make the UI reflect the committed checkboxes.
+            // Even on a failed disk write, Android may update its in-memory preferences.
             revision.value++
         }
     }

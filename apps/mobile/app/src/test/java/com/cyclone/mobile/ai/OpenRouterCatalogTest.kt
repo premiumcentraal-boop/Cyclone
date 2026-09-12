@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class OpenRouterCatalogTest {
+    @Test fun embeddedErrorsWorkAtBothChatAndAgentBoundaries() {
+        val error = """{"code":403,"message":"This key cannot access the selected model"}"""
+        for (body in listOf(error, "{\"error\":$error}")) {
+            val failure = ProviderFailure.classify(200, body, "provider/model")
+            assertEquals(403, failure.httpStatus)
+            assertEquals(ProviderFailureClass.MODEL_ACCESS_DENIED, failure.failureClass)
+            assertFalse(failure.retryable)
+        }
+    }
+
     @Test fun catalogPreservesExactIdsAndCapabilitiesAndSearchesBothNameAndProvider() {
         val models = OpenRouterCatalog.parse("""{"data":[
           {"id":"new/model:free","name":"New model","architecture":{"input_modalities":["text","image"],"output_modalities":["text"]},"top_provider":{"max_completion_tokens":2048}},

@@ -46,7 +46,10 @@ internal object ProviderFailure {
     ): SanitizedProviderFailure {
         val body = rawBody.orEmpty()
         val status = if (httpStatus in 200..299) runCatching {
-            org.json.JSONObject(body).optJSONObject("error")?.optInt("code", 500)?.takeIf { it in 400..599 } ?: httpStatus
+            val json = org.json.JSONObject(body)
+            // The chat boundary supplies an envelope; agent boundaries supply its error object.
+            val error = json.optJSONObject("error") ?: json
+            error.optInt("code", httpStatus).takeIf { it in 400..599 } ?: httpStatus
         }.getOrDefault(httpStatus) else httpStatus
         val lower = body.lowercase()
         val providerCode = extractJsonScalar(body, "code")?.let(::sanitize)?.take(120)
