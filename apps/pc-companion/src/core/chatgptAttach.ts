@@ -58,6 +58,15 @@ export interface ChatgptPadConfig {
   hasConnectKey?: boolean;
 }
 
+export interface ParsedVmosConnectCommand {
+  sshHost: string;
+  sshPort: number;
+  sshUser: string;
+  localAdbPort: number;
+  remoteAdbSpec: string;
+  serial: string;
+}
+
 export interface ChatgptAttachConfig {
   controlApiBase: string;
   defaultGoal: string;
@@ -77,6 +86,8 @@ export interface ChatgptPadStatus {
   sessionId: string;
   sessionToken: string;
   sessionSource: SessionSource;
+  gatewayReady?: boolean;
+  trustReady?: boolean;
   error?: string;
 }
 
@@ -104,7 +115,7 @@ export interface ChatgptShareStatus {
 }
 
 export interface ConnectionCheckItem {
-  id: "adb" | "mobile" | "control" | "handoff";
+  id: "adb" | "mobile" | "session" | "control" | "handoff";
   label: string;
   ok: boolean;
 }
@@ -132,6 +143,36 @@ export function newPadDraft(existing: ChatgptPadConfig[] = []): ChatgptPadConfig
     remoteAdbSpec: "localhost:1",
     connectKey: "",
     hasConnectKey: false,
+  };
+}
+
+/** Parse the non-secret VMOS "Connect command" into the local pad fields. */
+export function parseVmosConnectCommand(command: string): ParsedVmosConnectCommand | null {
+  const text = (command || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!text || !/(^|\s)ssh(?:\.exe)?(?=\s|$)/i.test(text)) return null;
+
+  const targetMatches = [...text.matchAll(/(?:^|\s)([A-Za-z0-9._-]+)@(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+)(?=\s|$)/g)];
+  const target = targetMatches.at(-1);
+  if (!target) return null;
+
+  const portMatch = text.match(/(?:^|\s)-p\s+(\d{1,5})(?=\s|$)/i)
+    ?? text.match(/(?:^|\s)-p(\d{1,5})(?=\s|$)/i);
+  const forwardMatch = text.match(/(?:^|\s)-L\s+(\d{1,5}):([^\s:]+):(\d{1,5})(?=\s|$)/i)
+    ?? text.match(/(?:^|\s)-L(\d{1,5}):([^\s:]+):(\d{1,5})(?=\s|$)/i);
+  if (!portMatch || !forwardMatch) return null;
+
+  const sshPort = Number(portMatch[1]);
+  const localAdbPort = Number(forwardMatch[1]);
+  const remotePort = Number(forwardMatch[3]);
+  if (!validPort(sshPort) || !validPort(localAdbPort) || !validPort(remotePort)) return null;
+
+  return {
+    sshUser: target[1],
+    sshHost: target[2].replace(/^\[|\]$/g, ""),
+    sshPort,
+    localAdbPort,
+    remoteAdbSpec: `${forwardMatch[2]}:${remotePort}`,
+    serial: `localhost:${localAdbPort}`,
   };
 }
 
@@ -195,6 +236,19 @@ export function emptyShareStatus(localBase = ""): ChatgptShareStatus {
   };
 }
 
+/** A pad is exportable only when the Gateway minted a real Cloud Control session. */
+export function cloudSessionReady(pad: ChatgptPadStatus | null | undefined): boolean {
+  return Boolean(
+    pad?.ok
+      && pad.adb === "device"
+      && pad.mobile === "running"
+      && pad.sessionSource === "control-api"
+      && pad.deviceId
+      && pad.sessionId
+      && pad.sessionToken,
+  );
+}
+
 export function connectionChecklist(input: {
   pads?: ChatgptPadStatus[];
   controlApi?: string;
@@ -202,10 +256,10 @@ export function connectionChecklist(input: {
   handoffCopied?: boolean;
 }): ConnectionCheckItem[] {
   const pads = input.pads || [];
-  const ready = pads.filter((pad) => pad.ok);
   return [
-    { id: "adb", label: "ADB device", ok: ready.some((pad) => pad.adb === "device") },
-    { id: "mobile", label: "Cyclone Mobile running", ok: ready.some((pad) => pad.mobile === "running") },
+    { id: "adb", label: "ADB device", ok: pads.some((pad) => pad.adb === "device") },
+    { id: "mobile", label: "Cyclone Mobile running", ok: pads.some((pad) => pad.mobile === "running") },
+    { id: "session", label: "Cloud AI session", ok: pads.some((pad) => cloudSessionReady(pad)) },
     { id: "control", label: "CONTROL_API reachable", ok: Boolean(input.controlApiReachable) && !isPlaceholderControlApi(input.controlApi) },
     { id: "handoff", label: "Handoff copied", ok: Boolean(input.handoffCopied) },
   ];
@@ -287,7 +341,7 @@ export function buildFleetHandoff(
   secrets: string[] = [],
 ): string {
   const controlApi = publicControlApi(result.controlApi);
-  const ready = result.pads.filter((pad) => pad.ok);
+  const ready = result.pads.filter((pad) => cloudSessionReady(pad));
   const lines = [
     "# Cyclone VMOS Fleet Handoff",
     "",
@@ -306,10 +360,10 @@ export function buildFleetHandoff(
     "## Fleet summary",
   ];
   for (const pad of result.pads) {
-    if (pad.ok) {
+    if (cloudSessionReady(pad)) {
       lines.push(`- ${pad.label}: DEVICE_ID=${pad.deviceId} ADB=${pad.adb} MOBILE=${pad.mobile} SESSION=${pad.sessionSource}`);
     } else {
-      lines.push(`- ${pad.label}: FAILED — ${sanitizeError(pad.error)}`);
+      lines.push(`- ${pad.label}: NOT READY — ${sanitizeError(pad.error)}`);
     }
   }
   lines.push("", "## Attach blocks (paste into ChatGPT)");
@@ -327,22 +381,26 @@ export function padNotes(pad: ChatgptPadStatus): string {
   if (pad.mobile === "installed") notes.push("Cyclone Mobile installed but not running.");
   if (pad.adb !== "device") notes.push(`ADB ${pad.adb}.`);
   if (pad.sessionSource === "local-stub") {
-    notes.push("local-stub session until Cloud Control API accepts the mint.");
+    notes.push("Cloud AI session unavailable; re-run Sync fleet after fixing the Gateway connection.");
   }
   return notes.length ? notes.join(" ") : "none";
 }
 
 export function sanitizeError(message: string | undefined): string {
-  if (!message) return "sync failed";
+  if (!message) return "Cloud AI session is not ready. Re-run Sync fleet and follow the pad hint.";
   let text = message;
   for (const name of SECRET_FIELD_NAMES) {
     text = text.replace(new RegExp(`${name}\\s*[:=]\\s*\\S+`, "ig"), "[redacted]");
   }
-  return text.slice(0, 180);
+  return text.slice(0, 220);
 }
 
 export function readyCount(result: ChatgptSyncResult | null | undefined): number {
-  return result?.pads.filter((pad) => pad.ok).length ?? 0;
+  return result?.pads.filter((pad) => cloudSessionReady(pad)).length ?? 0;
+}
+
+function validPort(value: number): boolean {
+  return Number.isInteger(value) && value > 0 && value <= 65535;
 }
 
 function randomHex(bytes: number): string {
