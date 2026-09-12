@@ -36,7 +36,7 @@ export const SECRET_FIELD_NAMES = [
 export const CUSTOM_GPT_SETUP_HINTS = [
   "Create a Custom GPT and paste the bundled driver instructions.",
   "Actions -> Create -> paste the bundled OpenAPI schema (Copy OpenAPI binds the live CONTROL_API).",
-  "Auth = API Key / Bearer. Use SESSION_TOKEN from the handoff.",
+  "Action Authentication = None. The schema sends the pasted SESSION_TOKEN in X-Cyclone-Session-Token on each protected call.",
   "Click Share to ChatGPT for an HTTPS trycloudflare CONTROL_API. ChatGPT Actions cannot reach localhost.",
   "Paste the one-file handoff into the chat. Never paste SSH Connect Keys or VMOS AccessKeys.",
 ];
@@ -377,8 +377,8 @@ export function buildFleetHandoff(
     "",
     "## Driver instructions (for ChatGPT Custom GPT)",
     "1. You control these phones via Actions only (observe → act → observe).",
-    "2. Pick DEVICE_ID / SESSION_ID from the attach blocks below.",
-    "3. Use SESSION_TOKEN as Bearer when the Action auth prompts.",
+    "2. Pick DEVICE_ID / SESSION_ID / SESSION_TOKEN from the attach blocks below.",
+    "3. Pass SESSION_TOKEN as X-Cyclone-Session-Token on every protected Action call.",
     "4. Never ask for SSH Connect Keys or VMOS API credentials.",
     "5. If ADB/mobile NOTES say missing/offline, tell the operator to re-run Sync fleet in Cyclone One.",
     "",
