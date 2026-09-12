@@ -108,12 +108,13 @@ class CycloneV39AiChatPageTest {
     @Test fun modelAndReasoningPreferencesStayCanonical() {
         val page = source("CycloneV39AiChatPage.kt")
         val controls = source("CycloneIntelligenceControls.kt")
+        val reasoning = source("CycloneReasoningSelector.kt")
         assertTrue(page.contains("const val PREFS = \"cyclone_ai\""))
         assertTrue(page.contains("const val MODEL_KEY = \"openrouter_model\""))
-        assertTrue(controls.contains("putString(V39AiChatContract.MODEL_KEY, V39AiChatContract.storageId(model))"))
-        assertTrue(controls.contains("putString(\"openrouter_reasoning_effort\", level)"))
+        assertTrue(controls.contains("OpenRouterCatalogStore.setActive(context"))
+        assertTrue(reasoning.contains("OpenRouterCatalogStore.setReasoningEffort(context, canonical, value)"))
+        assertTrue(reasoning.contains("reasoningSelectorMode(options)"))
         assertTrue(page.contains("showModelPill = false"))
-        assertTrue(page.contains("prefs.getString(V39AiChatContract.MODEL_KEY, null)"))
     }
 
     @Test fun missingKeyBlocksChatButNotPhoneRoutingContract() {
