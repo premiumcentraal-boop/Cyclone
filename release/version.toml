@@ -1,5 +1,5 @@
 # Cyclone Mobile 4.3.7 — OpenRouter catalog and model selection.
-# Model/API update requested September 12, 2026; physical device acceptance remains unverified.
+# Publication authorized by the user on September 12, 2026; physical device acceptance remains unverified.
 schema = 1
 product_version = "4.3.7"
 channel = "development"
@@ -14,7 +14,7 @@ mcp = "4.1.0"
 
 [release]
 previous_mobile_version = "4.3.6"
-publication_authorized = false
+publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
