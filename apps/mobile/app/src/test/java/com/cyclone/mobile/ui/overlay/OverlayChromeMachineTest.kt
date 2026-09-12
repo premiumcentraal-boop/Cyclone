@@ -156,13 +156,20 @@ class OverlayChromeMachineTest {
     }
 
     @Test
-    fun activeWorkStaysVisibleWhileComposeOwnsCompactLevelAndExitNeverConfirmsGate() {
+    fun activeWorkMinimizesIntoTaskBackedGlassAndCanReExpandWithoutChangingRunState() {
         val events = mutableListOf<OverlayChromeEvent>()
         val effects = RecordingEffects()
         val machine = OverlayChromeMachine(emit = { events += it }, cycloneState = effects)
         machine.enterWorking("restore")
         machine.enterLive()
+
         machine.dispatch(OverlayUserAction.MINIMIZE)
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertTrue(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().idleChipVisible)
+        assertFalse(machine.snapshot().voiceListening)
+
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
         assertEquals(OverlayChromeState.LIVE, machine.state())
         assertFalse(machine.snapshot().minimized)
         assertFalse(machine.snapshot().idleChipVisible)
