@@ -48,39 +48,67 @@ function Test-PortListening([int]$port) {
 function Ensure-Tunnel($pad, $stateDir) {
   $localPort = [int]$pad.localAdbPort
   if (Test-PortListening $localPort) { return }
-  if (-not $pad.sshHost) { return }
+  if (-not $pad.sshHost) { throw "SSH host missing for $($pad.label)" }
   $key = [string]$pad.connectKey
   if (-not $key) { throw "Connect Key missing for $($pad.label)" }
+
+  $sshCommand = Get-Command ssh.exe -ErrorAction SilentlyContinue
+  if (-not $sshCommand) { $sshCommand = Get-Command ssh -ErrorAction SilentlyContinue }
+  if (-not $sshCommand) {
+    throw 'Windows OpenSSH Client is unavailable. Install the OpenSSH Client optional feature, then Sync fleet again.'
+  }
+
   $askPass = Join-Path $stateDir ("askpass-{0}.cmd" -f $localPort)
   $keyFile = Join-Path $stateDir ("connect-key-{0}.ephemeral.txt" -f $localPort)
-  Set-Content -Path $keyFile -Value $key -Encoding ascii -NoNewline
-  @"
+  $p = $null
+  try {
+    Set-Content -Path $keyFile -Value $key -Encoding ascii -NoNewline
+    @"
 @echo off
 type "%~dp0connect-key-$localPort.ephemeral.txt"
 "@ | Set-Content -Path $askPass -Encoding ascii
-  $env:SSH_ASKPASS = $askPass
-  $env:SSH_ASKPASS_REQUIRE = 'force'
-  $env:DISPLAY = 'dummy'
-  $remote = if ($pad.remoteAdbSpec) { [string]$pad.remoteAdbSpec } else { 'localhost:1' }
-  $user = if ($pad.sshUser) { [string]$pad.sshUser } else { 's' }
-  $fwd = "${localPort}:${remote}"
-  $sshArgs = @(
-    '-oStrictHostKeyChecking=accept-new',
-    '-oPreferredAuthentications=password',
-    '-oPubkeyAuthentication=no',
-    '-oNumberOfPasswordPrompts=1',
-    '-p', ("{0}" -f [int]$pad.sshPort),
-    '-L', $fwd,
-    '-Nf',
-    ("{0}@{1}" -f $user, [string]$pad.sshHost)
-  )
-  $p = Start-Process -FilePath ssh -ArgumentList $sshArgs -PassThru -WindowStyle Hidden
-  Start-Sleep -Seconds 2
-  if (-not (Test-PortListening $localPort)) {
-    throw "SSH tunnel failed for $($pad.label) on port $localPort"
+    $env:SSH_ASKPASS = $askPass
+    $env:SSH_ASKPASS_REQUIRE = 'force'
+    $env:DISPLAY = 'dummy'
+
+    $remote = if ($pad.remoteAdbSpec) { [string]$pad.remoteAdbSpec } else { 'localhost:1' }
+    $user = if ($pad.sshUser) { [string]$pad.sshUser } else { 's' }
+    $fwd = "${localPort}:${remote}"
+    $sshArgs = @(
+      '-oStrictHostKeyChecking=accept-new',
+      '-oExitOnForwardFailure=yes',
+      '-oPreferredAuthentications=keyboard-interactive,password',
+      '-oKbdInteractiveAuthentication=yes',
+      '-oPubkeyAuthentication=no',
+      '-oNumberOfPasswordPrompts=1',
+      '-oServerAliveInterval=15',
+      '-oServerAliveCountMax=2',
+      '-p', ("{0}" -f [int]$pad.sshPort),
+      '-L', $fwd,
+      '-N',
+      ("{0}@{1}" -f $user, [string]$pad.sshHost)
+    )
+    $p = Start-Process -FilePath $sshCommand.Source -ArgumentList $sshArgs -PassThru -WindowStyle Hidden
+
+    $deadline = (Get-Date).AddSeconds(12)
+    while ((Get-Date) -lt $deadline -and -not (Test-PortListening $localPort)) {
+      if ($p.HasExited) {
+        throw "VMOS SSH tunnel exited before ADB became reachable for $($pad.label). Check host, port and Connect Key."
+      }
+      Start-Sleep -Milliseconds 250
+    }
+    if (-not (Test-PortListening $localPort)) {
+      throw "VMOS SSH tunnel timed out for $($pad.label) on local ADB port $localPort."
+    }
+  } catch {
+    if ($p -and -not $p.HasExited) {
+      try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    throw
+  } finally {
+    # The Connect Key is needed only while OpenSSH authenticates. Never leave the plaintext helper behind.
+    try { Remove-Item -Force $keyFile, $askPass -ErrorAction SilentlyContinue } catch {}
   }
-  try { Remove-Item -Force $keyFile, $askPass -ErrorAction SilentlyContinue } catch {}
-  $null = $p
 }
 
 function Connect-AdbPad($adb, [string]$serial) {
