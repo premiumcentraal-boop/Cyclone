@@ -10,6 +10,7 @@ on:
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
       - 'scripts/vmos/**'
+      - 'release/version.toml'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   push:
@@ -22,6 +23,7 @@ on:
       - 'packaging/pc-companion/**'
       - 'scripts/pc-companion/**'
       - 'scripts/vmos/**'
+      - 'release/version.toml'
       - '.github/workflows/pc-companion-ci.yml'
       - '.github/workflows/pc-companion-release.yml'
   workflow_dispatch:
@@ -44,6 +46,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13.7'
+      - name: Verify Cyclone One VMOS candidate identity
+        shell: pwsh
+        run: |
+          python - <<'PY'
+          import json,re,tomllib
+          from pathlib import Path
+          package=json.loads(Path('apps/pc-companion/package.json').read_text())
+          lock=json.loads(Path('apps/pc-companion/package-lock.json').read_text())
+          tauri=json.loads(Path('apps/pc-companion/src-tauri/tauri.conf.json').read_text())
+          cargo=Path('apps/pc-companion/src-tauri/Cargo.toml').read_text()
+          cargo_lock=Path('apps/pc-companion/src-tauri/Cargo.lock').read_text()
+          release=tomllib.loads(Path('release/version.toml').read_text())
+          expected='1.5.1'
+          assert package['version']==expected
+          assert lock['version']==expected and lock['packages']['']['version']==expected
+          assert tauri['version']==expected
+          assert re.search(r'^version = "1\.5\.1"$', cargo, re.M)
+          assert re.search(r'name = "cyclone-pc-companion"\nversion = "1\.5\.1"', cargo_lock)
+          assert release['components']['pc_companion']==expected
+          assert release['components']['mobile']=='4.3.6'
+          assert release['release']['publication_authorized'] is False
+          PY
       - name: Test gateway and MCP contracts
         shell: pwsh
         run: |
@@ -79,7 +103,7 @@ jobs:
           npm test
           npm run build
           Pop-Location
-      - name: Build frozen Python sidecars
+      - name: Build frozen Python sidecars and bundled ADB
         shell: pwsh
         run: ./scripts/pc-companion/build-sidecars.ps1
       - name: Build NSIS installer
@@ -88,14 +112,20 @@ jobs:
           Push-Location apps/pc-companion
           npm run tauri build -- --bundles nsis
           Pop-Location
-      - name: Stage candidate and provenance
+      - name: Stage candidate, install acceptance and provenance
         shell: pwsh
         run: |
           $Installer = Get-ChildItem 'apps/pc-companion/src-tauri/target/release/bundle/nsis/*.exe' | Select-Object -First 1
           if ($null -eq $Installer) { throw 'Cyclone NSIS installer was not produced.' }
           $PcVersion = (Get-Content 'apps/pc-companion/package.json' | ConvertFrom-Json).version
           New-Item -ItemType Directory -Force -Path dist/pc-companion | Out-Null
-          Copy-Item $Installer.FullName (Join-Path 'dist/pc-companion' "Cyclone-PC-Companion-$PcVersion-Setup.exe") -Force
+          $Candidate = Join-Path 'dist/pc-companion' "Cyclone-PC-Companion-$PcVersion-Setup.exe"
+          Copy-Item $Installer.FullName $Candidate -Force
+          ./scripts/pc-companion/test-installed-candidate.ps1 -Installer $Candidate -Output dist/pc-companion/installer-acceptance.json
+          $Acceptance = Get-Content dist/pc-companion/installer-acceptance.json -Raw | ConvertFrom-Json
+          if (-not $Acceptance.installed -or -not $Acceptance.bundled_adb -or $Acceptance.bundled_adb_version -ne '37.0.1') {
+            throw 'Installed candidate did not prove bundled Android Platform-Tools 37.0.1.'
+          }
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
           python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
       - uses: actions/upload-artifact@v4
