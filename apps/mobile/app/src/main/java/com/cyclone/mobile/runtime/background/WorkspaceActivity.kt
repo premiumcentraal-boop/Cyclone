@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cyclone.mobile.ui.overlay.OverlayExternalInteraction
 import com.cyclone.mobile.ui.v32.CycloneIntelligenceStyle
 import com.cyclone.mobile.ui.v32.CycloneIntelligenceTheme
 import com.cyclone.mobile.ui.v32.CycloneOrbitMark
@@ -28,6 +29,20 @@ import rikka.shizuku.Shizuku
 
 /** Target choice remains explicit. Visual presentation never grants execution authority. */
 class WorkspaceActivity : ComponentActivity() {
+    /**
+     * This Activity is a deliberate full-screen handoff. While it is visible, the accessibility
+     * overlay must yield completely rather than visually competing with the app/destination form.
+     */
+    override fun onStart() {
+        super.onStart()
+        OverlayExternalInteraction.active.value = true
+    }
+
+    override fun onStop() {
+        OverlayExternalInteraction.active.value = false
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val apps = packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
