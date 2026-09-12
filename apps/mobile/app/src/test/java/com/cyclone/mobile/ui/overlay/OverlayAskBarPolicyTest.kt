@@ -47,6 +47,13 @@ class OverlayAskBarPolicyTest {
     }
 
     @Test
+    fun activeSwipeDownUsesTheSameCompactTaskGlassAsAutomaticCollapse() {
+        val overlay = source("ui/overlay/OverlayChrome.kt")
+        assertFalse(overlay.contains("taskCollapsed"))
+        assertTrue(overlay.contains("if (dismiss) onAction(OverlayUserAction.MINIMIZE)"))
+    }
+
+    @Test
     fun fullScreenCycloneActivitiesOwnTheScreenWithoutOverlayOrBorderCompetition() {
         val controller = source("ai/OverlayChromeController.kt")
         val workspace = source("runtime/background/WorkspaceActivity.kt")
