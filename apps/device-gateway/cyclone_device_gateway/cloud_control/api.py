@@ -10,6 +10,9 @@ from ..desktop_runtime.models import DesktopRuntimeError, RuntimeErrorCode
 from .service import CloudControlService, CloudSession
 
 
+SESSION_HEADER = "X-Cyclone-Session-Token"
+
+
 class SessionMintBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     deviceId: str | None = Field(default=None, max_length=160)
@@ -70,9 +73,16 @@ def create_cloud_control_router(runtime: Any, token: str) -> APIRouter:
     runtime.cloud_control = service
     router = APIRouter(prefix="/cloud")
 
-    def principal(authorization: str | None = Header(default=None)) -> CloudSession | str:
+    def principal(authorization: str | None, session_token: str | None = None) -> CloudSession | str:
+        # Local One/MCP clients keep using Authorization: Bearer. Custom GPT Actions
+        # cannot update their configured API-key secret every time Sync mints a new
+        # short-lived session, so the public Action schema passes the allowed
+        # SESSION_TOKEN explicitly in X-Cyclone-Session-Token instead.
+        credential = authorization
+        if not credential and session_token:
+            credential = f"Bearer {session_token}"
         try:
-            return service.authenticate(authorization)
+            return service.authenticate(credential)
         except DesktopRuntimeError as exc:
             raise HTTPException(status_code=401, detail=exc.to_dict()) from exc
 
@@ -101,9 +111,13 @@ def create_cloud_control_router(runtime: Any, token: str) -> APIRouter:
         return _call(lambda: service.mint(device_id=body.deviceId, serial=body.serial, ttl_seconds=body.ttlSeconds))
 
     @router.get("/v1/devices")
-    def list_devices(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def list_devices(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
+    ) -> dict[str, Any]:
         bind_base(request)
-        return _call(lambda: service.list_devices(principal(authorization)))
+        return _call(lambda: service.list_devices(principal(authorization, session_token)))
 
     @router.get("/v1/devices/{device_id}/status")
     def device_status(
@@ -111,44 +125,81 @@ def create_cloud_control_router(runtime: Any, token: str) -> APIRouter:
         request: Request,
         sessionId: str | None = Query(default=None),
         authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
     ) -> dict[str, Any]:
         bind_base(request)
-        return _call(lambda: service.status(principal(authorization), device_id, sessionId))
+        return _call(lambda: service.status(principal(authorization, session_token), device_id, sessionId))
 
     @router.post("/v1/devices/{device_id}/observe")
-    def observe(device_id: str, body: ObserveBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def observe(
+        device_id: str,
+        body: ObserveBody,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
+    ) -> dict[str, Any]:
         bind_base(request)
         return _call(lambda: service.observe(
-            principal(authorization),
+            principal(authorization, session_token),
             device_id,
             session_id=body.sessionId,
             include_ui_summary=body.includeUiSummary,
         ))
 
     @router.post("/v1/devices/{device_id}/tap")
-    def tap(device_id: str, body: TapBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def tap(
+        device_id: str,
+        body: TapBody,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
+    ) -> dict[str, Any]:
         bind_base(request)
-        return _call(lambda: service.tap(principal(authorization), device_id, body.model_dump()))
+        return _call(lambda: service.tap(principal(authorization, session_token), device_id, body.model_dump()))
 
     @router.post("/v1/devices/{device_id}/swipe")
-    def swipe(device_id: str, body: SwipeBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def swipe(
+        device_id: str,
+        body: SwipeBody,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
+    ) -> dict[str, Any]:
         bind_base(request)
-        return _call(lambda: service.swipe(principal(authorization), device_id, body.model_dump()))
+        return _call(lambda: service.swipe(principal(authorization, session_token), device_id, body.model_dump()))
 
     @router.post("/v1/devices/{device_id}/type")
-    def type_text(device_id: str, body: TypeBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def type_text(
+        device_id: str,
+        body: TypeBody,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
+    ) -> dict[str, Any]:
         bind_base(request)
-        return _call(lambda: service.type_text(principal(authorization), device_id, body.model_dump()))
+        return _call(lambda: service.type_text(principal(authorization, session_token), device_id, body.model_dump()))
 
     @router.post("/v1/devices/{device_id}/launch")
-    def launch(device_id: str, body: LaunchBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def launch(
+        device_id: str,
+        body: LaunchBody,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
+    ) -> dict[str, Any]:
         bind_base(request)
-        return _call(lambda: service.launch_app(principal(authorization), device_id, body.model_dump()))
+        return _call(lambda: service.launch_app(principal(authorization, session_token), device_id, body.model_dump()))
 
     @router.post("/v1/devices/{device_id}/key")
-    def press_key(device_id: str, body: KeyBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    def press_key(
+        device_id: str,
+        body: KeyBody,
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session_token: str | None = Header(default=None, alias=SESSION_HEADER),
+    ) -> dict[str, Any]:
         bind_base(request)
-        return _call(lambda: service.press_key(principal(authorization), device_id, body.model_dump()))
+        return _call(lambda: service.press_key(principal(authorization, session_token), device_id, body.model_dump()))
 
     @router.get("/v1/screenshots/{shot_id}")
     def screenshot(shot_id: str):
