@@ -56,27 +56,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13.7'
-      - name: Verify Cyclone One VMOS candidate identity
+      - name: Verify Cyclone One 1.5.4 VMOS Cloud AI candidate identity
         shell: pwsh
         run: |
+          python scripts/ci/release_versions.py --check
           $Code = @'
           import json,re,tomllib
           from pathlib import Path
           package=json.loads(Path('apps/pc-companion/package.json').read_text())
-          lock=json.loads(Path('apps/pc-companion/package-lock.json').read_text())
           tauri=json.loads(Path('apps/pc-companion/src-tauri/tauri.conf.json').read_text())
           cargo=Path('apps/pc-companion/src-tauri/Cargo.toml').read_text()
-          cargo_lock=Path('apps/pc-companion/src-tauri/Cargo.lock').read_text()
           release=tomllib.loads(Path('release/version.toml').read_text())
-          expected='1.5.3'
+          expected='1.5.4'
           assert package['version']==expected
-          assert lock['version']==expected and lock['packages']['']['version']==expected
           assert tauri['version']==expected
-          assert re.search(r'^version = "1\.5\.3"$', cargo, re.M)
-          assert re.search(r'name = "cyclone-pc-companion"\nversion = "1\.5\.3"', cargo_lock)
+          assert re.search(r'^version = "1\.5\.4"$', cargo, re.M)
           assert release['components']['pc_companion']==expected
           assert release['components']['mobile']=='4.3.6'
-          assert release['release']['candidate_generation']=='cyclone-one-1.5.3-chatgpt-attach'
+          assert release['release']['candidate_generation']=='cyclone-one-1.5.4-vmos-cloud-ai'
           assert release['release']['publication_authorized'] is True
           '@
           $Code | python -

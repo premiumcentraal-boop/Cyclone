@@ -119,7 +119,8 @@ def test_cloud_health_names_phonetoolexecutor(tmp_path):
     assert body["architecture"]["provider_native_mutation_allowed"] is False
     assert "SESSION_TOKEN" in body["handoffFields"]
     assert "connectKey" not in body["handoffFields"]
-    assert body["auth"] == "bearer-session-token"
+    assert body["auth"] == "session-token-header-or-bearer"
+    assert body["sessionHeader"] == "X-Cyclone-Session-Token"
     assert body["localBase"].rstrip("/").endswith("/cloud")
 
 
@@ -131,7 +132,7 @@ def test_cloud_root_exposes_local_base(tmp_path):
     assert body["ok"] is True
     assert body["health"] == "/cloud/v1/health"
     assert body["localBase"].rstrip("/").endswith("/cloud")
-    assert body["auth"] == "bearer-session-token"
+    assert body["auth"] == "session-token-header-or-bearer"
 
 
 def test_session_mint_and_observe_tap_use_session_bearer(tmp_path):
@@ -175,6 +176,42 @@ def test_session_mint_and_observe_tap_use_session_bearer(tmp_path):
     assert "gateway-secret" not in dumped
 
 
+def test_custom_gpt_can_use_pasted_session_token_header(tmp_path):
+    runtime = FakeRuntime()
+    client, _ = _client(tmp_path, runtime)
+    device_id = runtime.fleet.device.device_id
+    minted = client.post(
+        "/cloud/v1/sessions",
+        headers={"Authorization": "Bearer gateway-secret"},
+        json={"deviceId": device_id, "ttlSeconds": 120},
+    )
+    assert minted.status_code == 200
+    session = minted.json()
+    headers = {"X-Cyclone-Session-Token": session["sessionToken"]}
+
+    status = client.get(
+        f"/cloud/v1/devices/{device_id}/status?sessionId={session['sessionId']}",
+        headers=headers,
+    )
+    assert status.status_code == 200
+    assert status.json()["gatewayReady"] is True
+    assert status.json()["trustReady"] is True
+
+    observe = client.post(
+        f"/cloud/v1/devices/{device_id}/observe",
+        headers=headers,
+        json={"sessionId": session["sessionId"]},
+    )
+    assert observe.status_code == 200
+    tap = client.post(
+        f"/cloud/v1/devices/{device_id}/tap",
+        headers=headers,
+        json={"sessionId": session["sessionId"], "x": 12, "y": 34},
+    )
+    assert tap.status_code == 200
+    assert runtime.agent.actions[-1]["capability_id"] == "phone.click"
+
+
 def test_session_token_cannot_see_another_device(tmp_path):
     runtime = FakeRuntime()
     client, _ = _client(tmp_path, runtime)
@@ -188,9 +225,18 @@ def test_session_token_cannot_see_another_device(tmp_path):
     assert other.status_code == 401
 
 
-def test_cloud_control_rejects_missing_bearer(tmp_path):
+def test_cloud_control_rejects_missing_session_credential(tmp_path):
     client, _ = _client(tmp_path)
     response = client.get("/cloud/v1/devices")
+    assert response.status_code == 401
+
+
+def test_cloud_control_rejects_bad_session_header(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.get(
+        "/cloud/v1/devices",
+        headers={"X-Cyclone-Session-Token": "not-a-real-session"},
+    )
     assert response.status_code == 401
 
 

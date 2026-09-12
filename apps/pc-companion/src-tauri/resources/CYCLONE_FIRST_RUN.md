@@ -1,16 +1,16 @@
 # Cyclone One — first run
 
-Cyclone One 1.5.3 is self-contained for Android transport onboarding and ChatGPT Attach.
+Cyclone One 1.5.4 is self-contained for Android transport onboarding and ChatGPT Attach.
 
 1. Open Cyclone One and click **Connect phone**.
 2. No Android Studio or separate ADB install is required. Cyclone One ships bundled Android Platform-Tools 37.0.1.
 3. Choose one transport:
    - **USB:** enable Android Developer options → USB debugging, connect the cable, unlock the phone, approve this PC, then click **Check USB**.
    - **Wireless:** Android Settings → Developer options → Wireless debugging → Pair device with pairing code. Enter the pairing address, the separate device address, and the 6-digit code, then click **Pair & connect**.
-   - **VMOS:** use Android 15 when available. Android 13/14 are compatible; Android 12 and older are unsupported for this Cyclone setup. Install Cyclone Mobile 4.3.6 inside VMOS, enable the provider ADB/Local Debugging tunnel, copy its host:port endpoint, then click **Connect VMOS phone**.
-4. Cyclone One starts its private One gateway automatically on loopback. A successful transport makes the phone discoverable and immediately refreshes the Fleet.
-5. Transport is not Cyclone trust. After ADB is ready, open **Cyclone Mobile → PC Gateway & QR pairing** and finish the normal QR/manual trust-pairing flow in Cyclone One.
-6. **ChatGPT Attach** syncs VMOS Cloud pads and copies a one-file Custom GPT handoff. SSH Connect Keys and VMOS AccessKeys stay on this PC.
-7. Click **Share to ChatGPT** so Plus Custom GPT Actions get an HTTPS CONTROL_API. ChatGPT cannot reach localhost. Auth is Bearer SESSION_TOKEN from the handoff.
+   - **VMOS:** use Android 15 when available. Android 13/14 are compatible; Android 12 and older are unsupported for this Cyclone setup. Install Cyclone Mobile 4.3.6 inside VMOS and enable provider ADB. In **ChatGPT Attach → Add pad**, paste the VMOS **Connect command**, paste its **Connect Key** separately, then click **Sync fleet**. The Connect Key stays on this PC.
+4. Cyclone One starts its private One gateway automatically on loopback. VMOS Sync opens the SSH tunnel, connects the bundled ADB client and rescans the Gateway inventory.
+5. Transport is not Cyclone trust. After ADB is ready, open **Cyclone Mobile → PC Gateway & QR pairing** and finish the normal QR/manual trust-pairing flow in Cyclone One. Re-run **Sync fleet** until **Cloud AI session** is green.
+6. **ChatGPT Attach** exports only pads with a real Cloud Control session. It will not copy a handoff containing a local/fake session token. SSH Connect Keys and VMOS AccessKeys never enter the handoff.
+7. Click **Share to ChatGPT** so Custom GPT Actions get an HTTPS CONTROL_API. ChatGPT cannot reach localhost. In the GPT Action editor choose **Authentication: None**; the Cyclone OpenAPI schema requires `X-Cyclone-Session-Token`, which the GPT fills from the latest pasted `SESSION_TOKEN`.
 
-The One gateway remains loopback-only; do not expose its bearer token or ADB endpoint publicly. Share to ChatGPT only publishes the Cloud Control `/cloud` surface over HTTPS.
+The One gateway remains loopback-only; do not expose its bearer token or ADB endpoint publicly. Share to ChatGPT publishes only the Cloud Control surface. The short-lived `SESSION_TOKEN` is the only control credential given to ChatGPT, and it remains scoped to its Cyclone device/session.

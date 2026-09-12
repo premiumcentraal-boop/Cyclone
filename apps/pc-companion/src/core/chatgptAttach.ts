@@ -36,7 +36,7 @@ export const SECRET_FIELD_NAMES = [
 export const CUSTOM_GPT_SETUP_HINTS = [
   "Create a Custom GPT and paste the bundled driver instructions.",
   "Actions -> Create -> paste the bundled OpenAPI schema (Copy OpenAPI binds the live CONTROL_API).",
-  "Auth = API Key / Bearer. Use SESSION_TOKEN from the handoff.",
+  "Action Authentication = None. The schema sends the pasted SESSION_TOKEN in X-Cyclone-Session-Token on each protected call.",
   "Click Share to ChatGPT for an HTTPS trycloudflare CONTROL_API. ChatGPT Actions cannot reach localhost.",
   "Paste the one-file handoff into the chat. Never paste SSH Connect Keys or VMOS AccessKeys.",
 ];
@@ -58,6 +58,15 @@ export interface ChatgptPadConfig {
   hasConnectKey?: boolean;
 }
 
+export interface ParsedVmosConnectCommand {
+  sshHost: string;
+  sshPort: number;
+  sshUser: string;
+  localAdbPort: number;
+  remoteAdbSpec: string;
+  serial: string;
+}
+
 export interface ChatgptAttachConfig {
   controlApiBase: string;
   defaultGoal: string;
@@ -77,6 +86,8 @@ export interface ChatgptPadStatus {
   sessionId: string;
   sessionToken: string;
   sessionSource: SessionSource;
+  gatewayReady?: boolean;
+  trustReady?: boolean;
   error?: string;
 }
 
@@ -104,7 +115,7 @@ export interface ChatgptShareStatus {
 }
 
 export interface ConnectionCheckItem {
-  id: "adb" | "mobile" | "control" | "handoff";
+  id: "adb" | "mobile" | "session" | "control" | "handoff";
   label: string;
   ok: boolean;
 }
@@ -135,6 +146,36 @@ export function newPadDraft(existing: ChatgptPadConfig[] = []): ChatgptPadConfig
   };
 }
 
+/** Parse the non-secret VMOS "Connect command" into the local pad fields. */
+export function parseVmosConnectCommand(command: string): ParsedVmosConnectCommand | null {
+  const text = (command || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!text || !/(^|\s)ssh(?:\.exe)?(?=\s|$)/i.test(text)) return null;
+
+  const targetMatches = [...text.matchAll(/(?:^|\s)([A-Za-z0-9._-]+)@(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+)(?=\s|$)/g)];
+  const target = targetMatches.at(-1);
+  if (!target) return null;
+
+  const portMatch = text.match(/(?:^|\s)-p\s+(\d{1,5})(?=\s|$)/i)
+    ?? text.match(/(?:^|\s)-p(\d{1,5})(?=\s|$)/i);
+  const forwardMatch = text.match(/(?:^|\s)-L\s+(\d{1,5}):([^\s:]+):(\d{1,5})(?=\s|$)/i)
+    ?? text.match(/(?:^|\s)-L(\d{1,5}):([^\s:]+):(\d{1,5})(?=\s|$)/i);
+  if (!portMatch || !forwardMatch) return null;
+
+  const sshPort = Number(portMatch[1]);
+  const localAdbPort = Number(forwardMatch[1]);
+  const remotePort = Number(forwardMatch[3]);
+  if (!validPort(sshPort) || !validPort(localAdbPort) || !validPort(remotePort)) return null;
+
+  return {
+    sshUser: target[1],
+    sshHost: target[2].replace(/^\[|\]$/g, ""),
+    sshPort,
+    localAdbPort,
+    remoteAdbSpec: `${forwardMatch[2]}:${remotePort}`,
+    serial: `localhost:${localAdbPort}`,
+  };
+}
+
 export function publicControlApi(base: string | null | undefined, fallbackPort?: number): string {
   const trimmed = (base || "").trim().replace(/\/+$/, "");
   if (trimmed) return trimmed;
@@ -145,6 +186,29 @@ export function publicControlApi(base: string | null | undefined, fallbackPort?:
 export function isPlaceholderControlApi(base: string | null | undefined): boolean {
   const trimmed = (base || "").trim();
   return !trimmed || /CONTROL_API_HOST_PLACEHOLDER/i.test(trimmed);
+}
+
+export function isEphemeralShareControlApi(base: string | null | undefined): boolean {
+  try {
+    const url = new URL((base || "").trim());
+    return /(^|\.)trycloudflare\.com$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** True only for an externally addressable HTTPS control URL suitable for ChatGPT Actions. */
+export function isPublicControlApi(base: string | null | undefined): boolean {
+  if (isPlaceholderControlApi(base)) return false;
+  try {
+    const url = new URL((base || "").trim());
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:") return false;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost")) return false;
+    return Boolean(host);
+  } catch {
+    return false;
+  }
 }
 
 export function localCloudControlBase(httpBase: string | null | undefined): string {
@@ -168,8 +232,10 @@ export function resolveControlApi(options: {
   fallbackPort?: number;
 }): string {
   const configured = (options.configured || "").trim().replace(/\/+$/, "");
-  if (configured && !isPlaceholderControlApi(configured)) return configured;
   const share = publicShareControlApi(options.shareUrl);
+  // trycloudflare URLs are ephemeral. A newly running share must beat a stale saved share URL.
+  if (share && (!configured || isPlaceholderControlApi(configured) || isEphemeralShareControlApi(configured))) return share;
+  if (configured && !isPlaceholderControlApi(configured)) return configured;
   if (share) return share;
   const local = localCloudControlBase(options.localBase);
   if (local) return local;
@@ -195,6 +261,19 @@ export function emptyShareStatus(localBase = ""): ChatgptShareStatus {
   };
 }
 
+/** A pad is exportable only when the Gateway minted a real Cloud Control session. */
+export function cloudSessionReady(pad: ChatgptPadStatus | null | undefined): boolean {
+  return Boolean(
+    pad?.ok
+      && pad.adb === "device"
+      && pad.mobile === "running"
+      && pad.sessionSource === "control-api"
+      && pad.deviceId
+      && pad.sessionId
+      && pad.sessionToken,
+  );
+}
+
 export function connectionChecklist(input: {
   pads?: ChatgptPadStatus[];
   controlApi?: string;
@@ -202,11 +281,11 @@ export function connectionChecklist(input: {
   handoffCopied?: boolean;
 }): ConnectionCheckItem[] {
   const pads = input.pads || [];
-  const ready = pads.filter((pad) => pad.ok);
   return [
-    { id: "adb", label: "ADB device", ok: ready.some((pad) => pad.adb === "device") },
-    { id: "mobile", label: "Cyclone Mobile running", ok: ready.some((pad) => pad.mobile === "running") },
-    { id: "control", label: "CONTROL_API reachable", ok: Boolean(input.controlApiReachable) && !isPlaceholderControlApi(input.controlApi) },
+    { id: "adb", label: "ADB device", ok: pads.some((pad) => pad.adb === "device") },
+    { id: "mobile", label: "Cyclone Mobile running", ok: pads.some((pad) => pad.mobile === "running") },
+    { id: "session", label: "Cloud AI session", ok: pads.some((pad) => cloudSessionReady(pad)) },
+    { id: "control", label: "Public CONTROL_API", ok: Boolean(input.controlApiReachable) && isPublicControlApi(input.controlApi) },
     { id: "handoff", label: "Handoff copied", ok: Boolean(input.handoffCopied) },
   ];
 }
@@ -287,7 +366,7 @@ export function buildFleetHandoff(
   secrets: string[] = [],
 ): string {
   const controlApi = publicControlApi(result.controlApi);
-  const ready = result.pads.filter((pad) => pad.ok);
+  const ready = result.pads.filter((pad) => cloudSessionReady(pad));
   const lines = [
     "# Cyclone VMOS Fleet Handoff",
     "",
@@ -298,18 +377,18 @@ export function buildFleetHandoff(
     "",
     "## Driver instructions (for ChatGPT Custom GPT)",
     "1. You control these phones via Actions only (observe → act → observe).",
-    "2. Pick DEVICE_ID / SESSION_ID from the attach blocks below.",
-    "3. Use SESSION_TOKEN as Bearer when the Action auth prompts.",
+    "2. Pick DEVICE_ID / SESSION_ID / SESSION_TOKEN from the attach blocks below.",
+    "3. Pass SESSION_TOKEN as X-Cyclone-Session-Token on every protected Action call.",
     "4. Never ask for SSH Connect Keys or VMOS API credentials.",
     "5. If ADB/mobile NOTES say missing/offline, tell the operator to re-run Sync fleet in Cyclone One.",
     "",
     "## Fleet summary",
   ];
   for (const pad of result.pads) {
-    if (pad.ok) {
+    if (cloudSessionReady(pad)) {
       lines.push(`- ${pad.label}: DEVICE_ID=${pad.deviceId} ADB=${pad.adb} MOBILE=${pad.mobile} SESSION=${pad.sessionSource}`);
     } else {
-      lines.push(`- ${pad.label}: FAILED — ${sanitizeError(pad.error)}`);
+      lines.push(`- ${pad.label}: NOT READY — ${sanitizeError(pad.error)}`);
     }
   }
   lines.push("", "## Attach blocks (paste into ChatGPT)");
@@ -327,22 +406,26 @@ export function padNotes(pad: ChatgptPadStatus): string {
   if (pad.mobile === "installed") notes.push("Cyclone Mobile installed but not running.");
   if (pad.adb !== "device") notes.push(`ADB ${pad.adb}.`);
   if (pad.sessionSource === "local-stub") {
-    notes.push("local-stub session until Cloud Control API accepts the mint.");
+    notes.push("Cloud AI session unavailable; re-run Sync fleet after fixing the Gateway connection.");
   }
   return notes.length ? notes.join(" ") : "none";
 }
 
 export function sanitizeError(message: string | undefined): string {
-  if (!message) return "sync failed";
+  if (!message) return "Cloud AI session is not ready. Re-run Sync fleet and follow the pad hint.";
   let text = message;
   for (const name of SECRET_FIELD_NAMES) {
     text = text.replace(new RegExp(`${name}\\s*[:=]\\s*\\S+`, "ig"), "[redacted]");
   }
-  return text.slice(0, 180);
+  return text.slice(0, 220);
 }
 
 export function readyCount(result: ChatgptSyncResult | null | undefined): number {
-  return result?.pads.filter((pad) => pad.ok).length ?? 0;
+  return result?.pads.filter((pad) => cloudSessionReady(pad)).length ?? 0;
+}
+
+function validPort(value: number): boolean {
+  return Number.isInteger(value) && value > 0 && value <= 65535;
 }
 
 function randomHex(bytes: number): string {
