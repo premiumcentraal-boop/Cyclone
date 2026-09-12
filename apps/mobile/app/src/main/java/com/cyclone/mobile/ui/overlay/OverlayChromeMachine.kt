@@ -254,21 +254,17 @@ class OverlayChromeMachine(
         emitChrome(OverlayChromeEventKind.TAKE_CONTROL)
     }
 
-    /** Active work never vanishes into the idle hotspot; the Compose panel owns its compact level. */
+    /**
+     * Minimize changes presentation only; it never releases task ownership.
+     * Active work keeps idleChipVisible=false so the controller renders the task-backed compact
+     * glass rather than an idle launcher. Tapping that glass re-expands the same WORKING/LIVE run.
+     */
     private fun minimize() {
         if (snapshot.state == OverlayChromeState.IDLE) return
-        if (snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE) {
-            snapshot = snapshot.copy(
-                minimized = false,
-                idleChipVisible = false,
-                voiceListening = false,
-                voiceMessage = null,
-            )
-            return
-        }
+        val activeWork = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
         snapshot = snapshot.copy(
             minimized = true,
-            idleChipVisible = true,
+            idleChipVisible = !activeWork,
             voiceListening = false,
             voiceMessage = null,
         )
