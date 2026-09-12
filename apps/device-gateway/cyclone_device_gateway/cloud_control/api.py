@@ -77,10 +77,9 @@ def create_cloud_control_router(runtime: Any, token: str) -> APIRouter:
         # Local One/MCP clients keep using Authorization: Bearer. Custom GPT Actions
         # cannot update their configured API-key secret every time Sync mints a new
         # short-lived session, so the public Action schema passes the allowed
-        # SESSION_TOKEN explicitly in X-Cyclone-Session-Token instead.
-        credential = authorization
-        if not credential and session_token:
-            credential = f"Bearer {session_token}"
+        # SESSION_TOKEN explicitly in X-Cyclone-Session-Token instead. Prefer the
+        # scoped session header when both are present (for clean 1.5.3 upgrades).
+        credential = f"Bearer {session_token}" if session_token else authorization
         try:
             return service.authenticate(credential)
         except DesktopRuntimeError as exc:
