@@ -3,6 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 
 const source = fs.readFileSync(new URL("../src/ui/transportOnboarding.ts", import.meta.url), "utf8");
+const mainSource = fs.readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 
 test("transport onboarding UI exposes USB, Wireless and VMOS first-connect paths", () => {
   assert.match(source, /Connect phone/);
@@ -11,6 +12,15 @@ test("transport onboarding UI exposes USB, Wireless and VMOS first-connect paths
   assert.match(source, /Connect VMOS phone/);
   assert.match(source, /Developer options → USB debugging/);
   assert.match(source, /Wireless debugging/);
+});
+
+test("real Cyclone One bootstrap mounts the always-available Connect phone surface after app start", () => {
+  const startIndex = mainSource.indexOf("await app.start()");
+  const mountIndex = mainSource.indexOf("mountTransportOnboarding(service)");
+  assert.ok(startIndex > 0 && mountIndex > startIndex);
+  assert.match(mainSource, /import \{ mountTransportOnboarding \} from "\.\/ui\/transportOnboarding\.js"/);
+  assert.match(source, /position: "fixed"/);
+  assert.match(source, /document\.body\.append\(dialog, launcher\)/);
 });
 
 test("first-run copy is self-contained and carries VMOS, Mobile and trust-pairing handoff", () => {
