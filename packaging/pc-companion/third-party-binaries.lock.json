@@ -2,11 +2,19 @@
   "schema_version": 1,
   "binaries": [
     {
+      "name": "android-platform-tools",
+      "version": "37.0.1",
+      "official_source": "https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip",
+      "license": "Apache-2.0",
+      "sha256": "84df1e5628bc7e6a9f2bf750ab98c591a99a6d622fd48f789cf278336bab5b99",
+      "method": "Downloaded from Google's official repository during the Windows build, SHA-256 verified, and bundled under Cyclone One/android-platform-tools so operators do not need a separate ADB install."
+    },
+    {
       "name": "scrcpy-server",
       "version": "4.0",
       "official_source": "https://github.com/Genymobile/scrcpy/releases/download/v4.0/scrcpy-server-v4.0",
       "license": "Apache-2.0",
-      "sha256": "84924bd564a1eb6089c872c7521f968058977f91f5ff02514a8c74aff3210f3a",
+      "sha256": "84924bd564a1eb608058977f91f5ff02514a8c74aff3210f3a",
       "method": "Downloaded during the frozen sidecar build, checksum-verified, and embedded in CyclonePCRuntime.exe"
     },
     {
