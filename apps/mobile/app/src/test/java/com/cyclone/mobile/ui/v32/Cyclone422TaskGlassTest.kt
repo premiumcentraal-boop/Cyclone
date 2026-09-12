@@ -44,7 +44,7 @@ class Cyclone422TaskGlassTest {
         assertEquals("View progress", card.actionLabel)
     }
 
-    @Test fun finishedTaskRemainsOpenableButLeavesPersistentBackgroundGlass() {
+    @Test fun finishedTaskRemainsOpenableWithoutPersistentBackgroundGlass() {
         val done = task(TaskPhase.DONE)
         val card = TaskGlassPresentation.current(done)!!
         assertEquals("Done", card.status)
@@ -61,14 +61,15 @@ class Cyclone422TaskGlassTest {
         assertEquals("View options", card.actionLabel)
     }
 
-    @Test fun taskControlsUseBackendCapabilities() {
+    @Test fun taskControlsUseBackendCapabilitiesAndNeverAdvertiseUnavailableFutureActions() {
         val panel = source("ui/v32/CycloneAskTaskPanel.kt")
         assertTrue(panel.contains("task.canContinueAfterHumanFromUi()"))
         assertTrue(panel.contains("task.canTakeOverFromUi()"))
         val capabilities = source("ui/v32/TaskStatusVisuals.kt")
         assertTrue(capabilities.contains("interruption?.canResumeAfterHuman == true"))
         assertTrue(capabilities.contains("interruption?.canTakeOver == true"))
-        assertTrue(panel.contains("enabled = false"))
+        assertFalse(panel.contains("Text(\"Autofill\")"))
+        assertFalse(panel.contains("Text(\"Soon\")"))
         assertFalse(panel.contains("task.resumable &&"))
     }
 
