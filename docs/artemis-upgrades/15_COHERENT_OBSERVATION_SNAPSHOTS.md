@@ -4,7 +4,7 @@
 
 ## Finding
 
-Artemis's helper exposes a single snapshot request that can return hierarchy and screenshot together. The client has a dedicated `get_atomic_snapshot` path instead of independently requesting every representation.[^1][^2] This reduces transport round trips and gives a common capture boundary.
+Artemis's helper exposes a single snapshot request that can return hierarchy and screenshot together. The client has a dedicated `get_atomic_snapshot` path instead of independently requesting every representation.[^1][^2] The endpoint can reduce transport round trips and gives a common capture boundary. A repository-wide search found the Python method definition but no call site at this snapshot; integration into the main loops is not established. Treat this as an available interface design, not a measured optimization already used throughout Artemis.
 
 The method name does not prove hardware-level simultaneity: Android hierarchy traversal and asynchronous screenshot capture still take time. Cyclone should specify and measure capture skew instead of asserting perfect atomicity.
 

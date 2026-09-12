@@ -10,7 +10,7 @@ Some Artemis behavior should not transfer: its fallback-model handover and long 
 
 ## Cyclone comparison
 
-Cyclone 4.3.7 already fixes the static catalog/picker path, removes public-endpoint pinning, and classifies access, guardrail, authentication, credit, and embedded HTTP 200 errors. Those changes are the baseline, not an unfinished proposal.[^3]
+Cyclone 4.3.7 already fixes the static catalog/picker path, removes public-endpoint pinning, and classifies access, guardrail, authentication, credit, and embedded HTTP 200 errors. Those changes are the baseline, not an unfinished proposal.[^3][^6][^7]
 
 However, chat, the adaptive agent, and qualification still construct separate HTTP clients and request lifecycles with different timeouts. The typed failure result is shared; cancellation, pacing, and aggregate endpoint health are not one shared transport service.[^4][^5] This proposal completes that separation without reopening the model-selection feature.
 
@@ -28,7 +28,7 @@ Add typed phase events so a stalled request is reported as connecting, awaiting 
 
 Test 403 and 401 with exactly one attempt, bounded 429/503 recovery, cancellation during backoff, concurrent failures causing one half-open probe, key replacement clearing account state, and a late response after Stop producing zero actions. Confirm the chosen model ID and privacy fields remain unchanged across all attempts.
 
-Ship a shared request-context adapter first, then retry/breaker policy behind a flag. Measure provider calls per verified task, p95 blocked time, duplicate attempts, and canceled-request survival. Roll back the pacing layer while retaining 4.3.7's catalog and error fixes. Depends on proposal 01's phase budgets.
+Ship a shared request-context adapter first, then retry/breaker policy behind a flag. Measure provider calls per verified task, p95 blocked time, duplicate attempts, and canceled-request survival. Roll back the pacing layer while retaining 4.3.7's catalog and error fixes. Define the common deadline/phase contract with proposal 01 first; transport consolidation can then ship independently of new interruption handlers.
 
 ## Sources
 
@@ -41,3 +41,7 @@ Ship a shared request-context adapter first, then retry/breaker policy behind a 
 [^4]: Cyclone, [`apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt`](https://github.com/premiumcentraal-boop/Cyclone/blob/c90dcfa3b047b638ab35400bbac7c9e09840d325/apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterAdaptiveAgent.kt#L81), `private val http`.
 
 [^5]: Cyclone, [`apps/mobile/app/src/main/java/com/cyclone/mobile/ai/CycloneTextChat.kt`](https://github.com/premiumcentraal-boop/Cyclone/blob/c90dcfa3b047b638ab35400bbac7c9e09840d325/apps/mobile/app/src/main/java/com/cyclone/mobile/ai/CycloneTextChat.kt#L23), `private val http`.
+
+[^6]: Cyclone, [`apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterCatalog.kt`](https://github.com/premiumcentraal-boop/Cyclone/blob/c90dcfa3b047b638ab35400bbac7c9e09840d325/apps/mobile/app/src/main/java/com/cyclone/mobile/ai/OpenRouterCatalog.kt).
+
+[^7]: Cyclone, [`apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneOpenRouterCatalog.kt`](https://github.com/premiumcentraal-boop/Cyclone/blob/c90dcfa3b047b638ab35400bbac7c9e09840d325/apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneOpenRouterCatalog.kt).
