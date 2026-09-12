@@ -45,6 +45,9 @@ internal object ProviderFailure {
         requestId: String? = null,
     ): SanitizedProviderFailure {
         val body = rawBody.orEmpty()
+        val status = if (httpStatus in 200..299) runCatching {
+            org.json.JSONObject(body).optJSONObject("error")?.optInt("code", 500)?.takeIf { it in 400..599 } ?: httpStatus
+        }.getOrDefault(httpStatus) else httpStatus
         val lower = body.lowercase()
         val providerCode = extractJsonScalar(body, "code")?.let(::sanitize)?.take(120)
         val providerMessage = extractJsonString(body, "message")
@@ -56,32 +59,32 @@ internal object ProviderFailure {
             typed == "payment_required" -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
             typed == "rate_limit_exceeded" -> ProviderFailureClass.RATE_LIMITED
             typed in setOf("content_policy_violation", "refusal") ||
-                (httpStatus == 403 && listOf("guardrail", "moderation", "content filter", "prompt injection", "request blocked").any(lower::contains)) -> ProviderFailureClass.PROVIDER_REQUEST_BLOCKED
+                (status == 403 && listOf("guardrail", "moderation", "content filter", "prompt injection", "request blocked").any(lower::contains)) -> ProviderFailureClass.PROVIDER_REQUEST_BLOCKED
 
-            httpStatus == 401 -> ProviderFailureClass.PROVIDER_AUTH_FAILED
-            httpStatus in setOf(403, 404) && listOf("data policy", "data collection", "privacy", "training", "zdr").any(lower::contains) -> ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
-            httpStatus == 404 && ("no endpoints" in lower || "no provider" in lower) -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
-            httpStatus == 403 -> ProviderFailureClass.MODEL_ACCESS_DENIED
-            httpStatus == 404 -> ProviderFailureClass.MODEL_NOT_FOUND
-            httpStatus == 402 -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
-            httpStatus == 429 -> ProviderFailureClass.RATE_LIMITED
-            httpStatus == 0 || httpStatus == 408 || httpStatus == 504 -> ProviderFailureClass.NETWORK_FAILURE
+            status == 401 -> ProviderFailureClass.PROVIDER_AUTH_FAILED
+            status in setOf(403, 404) && listOf("data policy", "data collection", "privacy", "training", "zdr").any(lower::contains) -> ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
+            status == 404 && ("no endpoints" in lower || "no provider" in lower) -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
+            typed == "permission_denied" || status == 403 -> ProviderFailureClass.MODEL_ACCESS_DENIED
+            status == 404 -> ProviderFailureClass.MODEL_NOT_FOUND
+            status == 402 -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
+            status == 429 -> ProviderFailureClass.RATE_LIMITED
+            status == 0 || status == 408 || status == 504 -> ProviderFailureClass.NETWORK_FAILURE
             "context" in lower && ("limit" in lower || "length" in lower || "too long" in lower) -> ProviderFailureClass.CONTEXT_LIMIT
-            (httpStatus == 400 || httpStatus == 422) &&
+            (status == 400 || status == 422) &&
                 ("response_format" in lower || "response format" in lower || "unsupported parameter" in lower || "unsupported_param" in lower) ->
                 ProviderFailureClass.PARAMETER_UNSUPPORTED
             "routing" in lower && ("constraint" in lower || "require_parameters" in lower || "provider" in lower) ->
                 ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
             ("no provider" in lower || "no endpoints" in lower || "no endpoint" in lower) ->
                 ProviderFailureClass.NO_PROVIDER_AVAILABLE
-            (httpStatus == 400 || httpStatus == 422) && "model" in lower &&
+            (status == 400 || status == 422) && "model" in lower &&
                 ("not found" in lower || "unknown" in lower || "invalid" in lower) -> ProviderFailureClass.MODEL_NOT_FOUND
-            httpStatus in 500..599 -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
+            status in 500..599 -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
             else -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
         }
         return SanitizedProviderFailure(
             failureClass = failureClass,
-            httpStatus = httpStatus,
+            httpStatus = status,
             providerCode = providerCode,
             providerMessage = providerMessage,
             selectedModelId = selectedModelId?.take(180),

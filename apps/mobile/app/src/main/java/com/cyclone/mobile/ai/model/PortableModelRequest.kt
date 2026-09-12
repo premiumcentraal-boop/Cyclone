@@ -12,7 +12,7 @@ object PortableModelRequest {
         val profile = ModelRegistry.resolve(modelId)
         val maximum = com.cyclone.mobile.ai.OpenRouterCatalogStore.lookup(modelId)?.maxOutputTokens ?: 16384
         val provider = JSONObject().put("sort", "latency")
-            .put("allow_fallbacks", profile?.allowProviderFallbacks ?: !modelId.contains("contributor", true))
+            .put("allow_fallbacks", profile?.allowProviderFallbacks ?: false)
         if (providers.isNotEmpty()) provider.put("only", JSONArray(providers))
         return JSONObject().put("model", modelId).put("messages", messages).put("stream", false)
             .put("max_tokens", outputTokens.coerceIn(1, minOf(maximum, 16384)))

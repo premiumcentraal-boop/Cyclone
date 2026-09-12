@@ -1,7 +1,6 @@
 package com.cyclone.mobile.ai
 
 import android.content.Context
-import com.cyclone.mobile.ai.model.ModelEndpointCatalog
 import com.cyclone.mobile.ai.model.PortableModelRequest
 import com.cyclone.mobile.ui.overlay.TaskAttachment
 import kotlinx.coroutines.Dispatchers

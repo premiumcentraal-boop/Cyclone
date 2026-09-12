@@ -146,6 +146,8 @@ class OpenRouterAdaptiveAgent(private val context: Context,
     ): QuickAgentResult = withContext(Dispatchers.IO) {
         if (goal.isBlank()) return@withContext QuickAgentResult(false, "Describe what you want Cyclone to do.", 0, config.model.id)
 
+        if (config.model.id.isBlank()) return@withContext QuickAgentResult(false, "Choose a model in Settings → Model & API.", 0, "")
+
         AgentTraceRuntime.initialize(context)
         CycloneBrainRuntime.initialize(context)
         AdaptiveBrainRuntime.initialize(context)
@@ -1318,6 +1320,9 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         bridge: CyclonePcParityBridge,
         agentContext: JSONObject? = null,
     ): PageAgentDecision? {
+        if (!model.vision) return PageAgentDecision("blocked", "",
+            "This page needs visual evidence. Choose an image-capable model in Settings → Model & API.",
+            emptyList(), null, "model.image_input_required")
         if (!bridge.claimVisionCapture()) return PageAgentDecision("blocked", "",
             "Visual evidence was already checked without progress; a different strategy is required.",
             emptyList(), null, "vision.capture_budget_exhausted")
@@ -1396,7 +1401,7 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
             val json = runCatching { JSONObject(text) }.getOrElse {
                 JSONObject().put("error", JSONObject().put("message", text.ifBlank { "HTTP ${response.code}" }))
             }
-            if (!response.isSuccessful) {
+            if (!response.isSuccessful || json.has("error")) {
                 if (!json.has("error")) json.put("error", JSONObject().put("code", response.code))
                 json.put("_httpStatus", response.code).put("_selectedModel", model.id)
                     .put("_requestId", response.header("x-request-id") ?: response.header("x-openrouter-request-id") ?: "")

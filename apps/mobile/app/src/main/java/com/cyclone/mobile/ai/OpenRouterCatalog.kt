@@ -58,9 +58,9 @@ class OpenRouterCatalogClient(private val http: OkHttpClient = OkHttpClient.Buil
                 .header("Authorization", "Bearer $apiKey").header("X-Title", "Cyclone Mobile").build()
             return http.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
+                if (!response.isSuccessful || runCatching { JSONObject(body).has("error") }.getOrDefault(false)) {
                     val failure = ProviderFailure.classify(response.code, body)
-                    throw IOException("OpenRouter HTTP ${response.code}: ${failure.userMessage}")
+                    throw IOException("OpenRouter HTTP ${failure.httpStatus}: ${failure.userMessage}")
                 }
                 try { OpenRouterCatalog.parse(body) } catch (_: Exception) { throw IOException("OpenRouter returned an invalid model catalog. Refresh to try again.") }
             }

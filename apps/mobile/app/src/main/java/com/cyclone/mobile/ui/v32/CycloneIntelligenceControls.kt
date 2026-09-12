@@ -141,7 +141,7 @@ private fun OverlaySettingsWizard(
                             style = MaterialTheme.typography.titleSmall,
                         )
                         if (pickerModels.isEmpty()) Text("Choose models in Settings → Model & API", Modifier.padding(16.dp))
-            pickerModels.forEach { option ->
+                        pickerModels.forEach { option ->
                             val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
                             DropdownMenuItem(
                                 text = {
@@ -453,8 +453,9 @@ fun CycloneIntelligenceControls(
     var level by remember {
         mutableStateOf(normalizedEffort(prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium"))
     }
-    var model by remember {
-        mutableStateOf(V39AiChatContract.modelForStored(prefs.getString(V39AiChatContract.MODEL_KEY, null)))
+    val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
+    var model by remember(catalogRevision) {
+        mutableStateOf(V39AiChatContract.modelForStored(OpenRouterCatalogStore.activeId(context)))
     }
 
     fun persist(modelId: String, effort: String) {

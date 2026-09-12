@@ -38,12 +38,14 @@ object OpenRouterCatalogStore {
     }
     @Synchronized fun select(context: Context, id: String, selected: Boolean) {
         require(OpenRouterCustomModelStore.isValidSlug(id))
-        val ids = selectedIds(context).toMutableSet().apply { if (selected) add(id) else remove(id) }
-        check(prefs(context).edit().putStringSet(SELECTION, ids).commit()) { "Could not save model selection." }
-        if (activeId(context).isBlank()) {
+        val next = ModelPickerSelection(selectedIds(context), activeId(context)).toggle(id, selected)
+        check(prefs(context).edit().putStringSet(SELECTION, next.ids).commit()) { "Could not save model selection." }
+        try {
             check(context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).edit()
-                .putString("openrouter_model", ids.sorted().firstOrNull().orEmpty()).commit()) { "Could not update selected model." }
+                .putString("openrouter_model", next.activeId).commit()) { "Could not update selected model." }
+        } finally {
+            // A partial storage failure must still make the UI reflect the committed checkboxes.
+            revision.value++
         }
-        revision.value++
     }
 }
