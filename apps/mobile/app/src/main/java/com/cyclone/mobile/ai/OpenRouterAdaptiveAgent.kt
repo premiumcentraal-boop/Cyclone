@@ -1378,7 +1378,7 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
     ): JSONObject {
         val body = try {
             com.cyclone.mobile.ai.model.PortableModelRequest.body(model.id, messages,
-                com.cyclone.mobile.ai.model.ModelEndpointCatalog.verifiedTags(model.id, http))
+                emptyList())
         } catch (_: IOException) {
             return JSONObject().put("error", JSONObject().put("code", 503).put("message", "No verified endpoint is currently available"))
                 .put("_httpStatus", 503).put("_selectedModel", model.id)

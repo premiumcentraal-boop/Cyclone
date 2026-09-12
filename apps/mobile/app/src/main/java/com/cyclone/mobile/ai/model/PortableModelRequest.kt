@@ -8,13 +8,15 @@ import java.io.IOException
 
 /** Shared compatibility contract. No invented effort names or provider-specific sampling settings. */
 object PortableModelRequest {
-    fun body(modelId: String, messages: JSONArray, providers: List<String>, outputTokens: Int = 8192): JSONObject {
-        require(providers.isNotEmpty()) { "No verified provider endpoints" }
+    fun body(modelId: String, messages: JSONArray, providers: List<String> = emptyList(), outputTokens: Int = 8192): JSONObject {
         val profile = ModelRegistry.resolve(modelId)
+        val maximum = com.cyclone.mobile.ai.OpenRouterCatalogStore.lookup(modelId)?.maxOutputTokens ?: 16384
+        val provider = JSONObject().put("sort", "latency")
+            .put("allow_fallbacks", profile?.allowProviderFallbacks ?: !modelId.contains("contributor", true))
+        if (providers.isNotEmpty()) provider.put("only", JSONArray(providers))
         return JSONObject().put("model", modelId).put("messages", messages).put("stream", false)
-            .put("max_tokens", outputTokens.coerceIn(4096, 16384))
-            .put("provider", JSONObject().put("only", JSONArray(providers)).put("sort", "latency")
-                .put("allow_fallbacks", profile?.allowProviderFallbacks ?: false))
+            .put("max_tokens", outputTokens.coerceIn(1, minOf(maximum, 16384)))
+            .put("provider", provider)
     }
 }
 

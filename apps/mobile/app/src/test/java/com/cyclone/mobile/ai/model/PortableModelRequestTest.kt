@@ -4,12 +4,20 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 class PortableModelRequestTest {
+    @Test fun defaultRoutingDoesNotPinPublicEndpointsOrOverridePrivacy() {
+        val body = PortableModelRequest.body("provider/new-model", JSONArray())
+        assertFalse(body.getJSONObject("provider").has("only"))
+        assertFalse(body.getJSONObject("provider").has("data_collection"))
+        assertFalse(body.has("models"))
+        assertEquals("provider/new-model", body.getString("model"))
+    }
+
     @Test fun everyProfileUsesTheSamePortableContractWithoutInventedThinkingModes() {
         ModelRegistry.all.forEach { profile ->
             val body = PortableModelRequest.body(profile.openRouterSlug, JSONArray(), listOf("verified"), 300)
             assertEquals(profile.openRouterSlug, body.getString("model"))
             assertFalse(body.has("reasoning")); assertFalse(body.has("temperature")); assertFalse(body.has("response_format"))
-            assertTrue(body.getInt("max_tokens") >= 4096)
+            assertEquals(300, body.getInt("max_tokens"))
             assertEquals("verified", body.getJSONObject("provider").getJSONArray("only").getString(0))
         }
     }

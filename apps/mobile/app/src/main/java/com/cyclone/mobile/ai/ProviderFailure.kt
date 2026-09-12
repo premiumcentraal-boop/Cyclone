@@ -3,6 +3,7 @@ package com.cyclone.mobile.ai
 enum class ProviderFailureClass {
     MODEL_NOT_FOUND,
     MODEL_ACCESS_DENIED,
+    PROVIDER_REQUEST_BLOCKED,
     PROVIDER_AUTH_FAILED,
     NO_PROVIDER_AVAILABLE,
     RATE_LIMITED,
@@ -27,9 +28,10 @@ data class SanitizedProviderFailure(
     val code: String get() = failureClass.name
     val userMessage: String get() {
         val base = ProviderFailure.message(code) ?: "The model provider could not serve this request."
+        val explanation = providerMessage?.takeIf { it.isNotBlank() }?.let { " OpenRouter: $it" }.orEmpty()
         return if (selectedModelId?.contains("contributor") == true && failureClass in setOf(ProviderFailureClass.MODEL_ACCESS_DENIED, ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED))
             "$base Muse Contributor requires eligible account access and compatible OpenRouter data-policy settings. Prompts and outputs may be used for training; Cyclone has not changed your privacy settings."
-        else base
+        else base + explanation
     }
 }
 
@@ -48,7 +50,14 @@ internal object ProviderFailure {
         val providerMessage = extractJsonString(body, "message")
             ?.let(::sanitize)
             ?.take(600)
+        val typed = extractJsonString(body, "error_type").orEmpty().lowercase()
         val failureClass = when {
+            typed == "authentication" -> ProviderFailureClass.PROVIDER_AUTH_FAILED
+            typed == "payment_required" -> ProviderFailureClass.PROVIDER_CREDIT_EXHAUSTED
+            typed == "rate_limit_exceeded" -> ProviderFailureClass.RATE_LIMITED
+            typed in setOf("content_policy_violation", "refusal") ||
+                (httpStatus == 403 && listOf("guardrail", "moderation", "content filter", "prompt injection", "request blocked").any(lower::contains)) -> ProviderFailureClass.PROVIDER_REQUEST_BLOCKED
+
             httpStatus == 401 -> ProviderFailureClass.PROVIDER_AUTH_FAILED
             httpStatus in setOf(403, 404) && listOf("data policy", "data collection", "privacy", "training", "zdr").any(lower::contains) -> ProviderFailureClass.ROUTING_CONSTRAINT_UNSATISFIED
             httpStatus == 404 && ("no endpoints" in lower || "no provider" in lower) -> ProviderFailureClass.NO_PROVIDER_AVAILABLE
@@ -91,7 +100,8 @@ internal object ProviderFailure {
 
     fun message(code: String): String? = when (runCatching { ProviderFailureClass.valueOf(code) }.getOrNull()) {
         ProviderFailureClass.MODEL_NOT_FOUND -> "The selected model was not found by the provider. Choose another explicitly supported model or try again later."
-        ProviderFailureClass.MODEL_ACCESS_DENIED -> "The provider denied access to the selected model. Check model access for this OpenRouter account."
+        ProviderFailureClass.MODEL_ACCESS_DENIED -> "OpenRouter denied this request. Refresh the catalog in Settings → Model & API and check this key's model permissions."
+        ProviderFailureClass.PROVIDER_REQUEST_BLOCKED -> "OpenRouter or the provider blocked this request under its content or guardrail policy. Review the request and your OpenRouter guardrails."
         ProviderFailureClass.PROVIDER_AUTH_FAILED -> "The provider rejected the OpenRouter credentials. Check the API key in Settings."
         ProviderFailureClass.NO_PROVIDER_AVAILABLE -> "No compatible provider could serve this model request. Try again or explicitly choose another model."
         ProviderFailureClass.RATE_LIMITED -> "The model provider is rate-limiting requests. Wait before trying again."

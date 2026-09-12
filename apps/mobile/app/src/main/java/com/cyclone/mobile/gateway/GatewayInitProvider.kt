@@ -19,6 +19,7 @@ import android.net.Uri
 class GatewayInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
         val app = context?.applicationContext ?: return true
+        runCatching { com.cyclone.mobile.ai.OpenRouterCatalogStore.initialize(app) }
         runCatching { GatewayRuntime.startPairingBootstrap(app) }
             .onFailure {
                 GatewayRuntime.reportSafeError(

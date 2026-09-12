@@ -44,13 +44,17 @@ object OpenRouterModelPresets {
     val DEEPSEEK_V4_FLASH = GLM_5_3_FLASH
 
     // Unknown custom slugs remain accepted, but vision support is not assumed.
-    fun byId(id: String): OpenRouterModelPreset = ModelRegistry.resolve(id)?.let(ModelRegistry::preset)
-        ?: OpenRouterModelPreset(id, id, false, reasoningEffort = "medium")
+    fun byId(id: String): OpenRouterModelPreset {
+        val canonical = ModelRegistry.resolve(id)?.openRouterSlug ?: id
+        return OpenRouterCatalogStore.lookup(canonical)?.preset()
+            ?: ModelRegistry.resolve(id)?.let(ModelRegistry::preset)
+            ?: OpenRouterModelPreset(id, id.ifBlank { "Choose model" }, false)
+    }
 }
 
 data class QuickAgentConfig(
     val model: OpenRouterModelPreset = OpenRouterModelPresets.DEFAULT,
-    val visionModel: OpenRouterModelPreset = OpenRouterModelPresets.GEMINI_3_8_FLASH,
+    val visionModel: OpenRouterModelPreset = model,
     /**
      * Legacy compatibility knob for older workflow/tests. Foreground CycloneLocalAgent execution
      * no longer uses provider-call count as a task termination budget.
@@ -143,7 +147,7 @@ class OpenRouterQuickAgent(private val context: Context) {
     ): JSONObject {
         val maxTokens = 8192
         val body = com.cyclone.mobile.ai.model.PortableModelRequest.body(model.id, messages,
-            com.cyclone.mobile.ai.model.ModelEndpointCatalog.verifiedTags(model.id, http), maxTokens)
+            emptyList(), maxTokens)
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $apiKey")

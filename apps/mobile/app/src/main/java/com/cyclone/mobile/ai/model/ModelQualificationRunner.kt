@@ -65,13 +65,13 @@ class ModelQualificationRunner(
             return@withContext ModelQualificationOutcome.Passed(profile, cached = true)
         }
 
-        if (apiKey.isBlank()) {
+        if (apiKey.isBlank() || model.id.isBlank()) {
             return@withContext ModelQualificationOutcome.Failed(
                 profile,
                 SanitizedProviderFailure(
                     failureClass = ProviderFailureClass.PROVIDER_AUTH_FAILED,
                     httpStatus = 0,
-                    providerMessage = "OpenRouter API key is missing.",
+                    providerMessage = "Add an OpenRouter API key and choose a model in Settings → Model & API.",
                     selectedModelId = profile.openRouterSlug,
                     retryable = false,
                 ),
@@ -95,7 +95,7 @@ class ModelQualificationRunner(
             .put(JSONObject().put("role", "user").put("content", ModelQualificationContract.USER_PROMPT))
         val body = try {
             PortableModelRequest.body(profile.openRouterSlug, messages,
-                ModelEndpointCatalog.verifiedTags(profile.openRouterSlug, http))
+                emptyList(), outputTokens = 512)
         } catch (_: IOException) {
             return ModelQualificationOutcome.Failed(profile, SanitizedProviderFailure(
                 ProviderFailureClass.NO_PROVIDER_AVAILABLE, 0, selectedModelId = profile.openRouterSlug,
@@ -118,11 +118,11 @@ class ModelQualificationRunner(
                 val requestId = response.header("x-request-id")
                     ?: response.header("x-openrouter-request-id")
                 val providerName = json?.optString("provider")?.takeIf { it.isNotBlank() }
-                if (!response.isSuccessful) {
+                if (!response.isSuccessful || json?.has("error") == true) {
                     return ModelQualificationOutcome.Failed(
                         profile,
                         ProviderFailure.classify(
-                            httpStatus = response.code,
+                            httpStatus = if (response.isSuccessful) json?.optJSONObject("error")?.optInt("code", 500) ?: 500 else response.code,
                             rawBody = text,
                             selectedModelId = profile.openRouterSlug,
                             providerName = providerName,

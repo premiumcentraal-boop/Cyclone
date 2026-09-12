@@ -27,6 +27,7 @@ object CycloneTextChat {
     suspend fun answer(context: Context, model: OpenRouterModelPreset, history: List<Pair<String, String>>,
                        request: String, attachment: TaskAttachment?): String = withContext(Dispatchers.IO) {
         val key = OpenRouterSecretStore.read(context)
+        check(model.id.isNotBlank()) { "Choose a model in Settings → Model & API." }
         check(key.isNotBlank()) { "Add your API key in Settings to chat." }
         check(attachment?.imageDataUrl == null || model.vision) { "Choose an image-capable model for this attachment." }
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content",
@@ -40,7 +41,7 @@ object CycloneTextChat {
             .put(JSONObject().put("type", "text").put("text", text))
             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url))) } ?: text
         messages.put(JSONObject().put("role", "user").put("content", content))
-        val body = PortableModelRequest.body(model.id, messages, ModelEndpointCatalog.verifiedTags(model.id, http))
+        val body = PortableModelRequest.body(model.id, messages, emptyList())
         currentCoroutineContext().ensureActive()
         val call = http.newCall(Request.Builder().url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $key").header("HTTP-Referer", "https://github.com/premiumcentraal-boop/Cyclone")
@@ -53,8 +54,13 @@ object CycloneTextChat {
                 }
                 override fun onResponse(call: Call, response: Response) {
                     val result = runCatching { response.use {
-                        check(it.isSuccessful) { "Chat provider returned HTTP ${it.code}. Check your key or model in Settings." }
-                        val answer = JSONObject(it.body?.string().orEmpty()).optJSONArray("choices")?.optJSONObject(0)
+                        val raw = it.body?.string().orEmpty()
+                        val json = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+                        check(it.isSuccessful && !json.has("error")) {
+                            val failure = ProviderFailure.classify(if (it.isSuccessful) json.optJSONObject("error")?.optInt("code", 500) ?: 500 else it.code, raw, model.id)
+                            "OpenRouter HTTP ${failure.httpStatus} (${failure.code}): ${failure.userMessage}"
+                        }
+                        val answer = json.optJSONArray("choices")?.optJSONObject(0)
                             ?.optJSONObject("message")?.optString("content").orEmpty()
                         check(answer.isNotBlank()) { "The model returned no answer. Try another model." }; answer
                     } }

@@ -111,7 +111,7 @@ internal object V39AiChatContract {
 
     fun normalizedRequest(value: String) = value.trim()
     fun modelForStored(stored: String?): OpenRouterModelPreset =
-        OpenRouterModelPresets.byId(stored.orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id })
+        OpenRouterModelPresets.byId(stored ?: OpenRouterModelPresets.DEFAULT.id)
     fun storageId(model: OpenRouterModelPreset): String = ModelRegistry.profileForPreset(model)?.cycloneId ?: model.id
     fun models(): List<OpenRouterModelPreset> = OpenRouterModelPresets.all
 
@@ -119,7 +119,7 @@ internal object V39AiChatContract {
         val model = modelForStored(modelId)
         return QuickAgentConfig(
             model = model,
-            visionModel = if (ModelRegistry.profileForPreset(model)?.isContributor == true) model else OpenRouterModelPresets.GEMINI_3_8_FLASH,
+            visionModel = model,
             safeMode = accessProfile != CycloneAiAccessProfile.FULL,
             accessProfile = accessProfile,
         )
