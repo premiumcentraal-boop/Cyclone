@@ -7,6 +7,21 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+data class CatalogReasoning(
+    val supportedEfforts: List<String>,
+    val defaultEffort: String?,
+    val mandatory: Boolean,
+    val defaultEnabled: Boolean?,
+    val supportsMaxTokens: Boolean,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("mandatory", mandatory)
+        .put("supported_efforts", JSONArray(supportedEfforts))
+        .put("default_effort", defaultEffort ?: JSONObject.NULL)
+        .put("supports_max_tokens", supportsMaxTokens)
+        .also { json -> defaultEnabled?.let { json.put("default_enabled", it) } }
+}
+
 data class CatalogModel(
     val id: String,
     val name: String,
@@ -14,6 +29,7 @@ data class CatalogModel(
     val textOutput: Boolean,
     val contextLength: Int,
     val maxOutputTokens: Int?,
+    val reasoning: CatalogReasoning? = null,
 ) {
     fun preset() = OpenRouterModelPreset(id, name, imageInput)
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name)
@@ -21,6 +37,7 @@ data class CatalogModel(
             .put("output_modalities", JSONArray(if (textOutput) listOf("text") else listOf("other"))))
         .put("context_length", contextLength)
         .put("top_provider", JSONObject().put("max_completion_tokens", maxOutputTokens ?: JSONObject.NULL))
+        .also { json -> reasoning?.let { json.put("reasoning", it.toJson()) } }
 }
 
 object OpenRouterCatalog {
@@ -32,16 +49,43 @@ object OpenRouterCatalog {
             if (!OpenRouterCustomModelStore.isValidSlug(id)) return@mapNotNull null
             val architecture = row.optJSONObject("architecture")
             fun has(array: JSONArray?, value: String): Boolean = array != null && (0 until array.length()).any { array.optString(it) == value }
+            val reasoningJson = row.optJSONObject("reasoning")
+            val reasoning = reasoningJson?.let { json ->
+                val efforts = json.optJSONArray("supported_efforts")?.let { values ->
+                    (0 until values.length()).mapNotNull { i -> values.optString(i).trim().takeIf(String::isNotBlank) }.distinct()
+                }.orEmpty()
+                CatalogReasoning(
+                    supportedEfforts = efforts,
+                    defaultEffort = json.optString("default_effort").trim().takeIf(String::isNotBlank),
+                    mandatory = json.optBoolean("mandatory", false),
+                    defaultEnabled = json.takeIf { it.has("default_enabled") }?.optBoolean("default_enabled"),
+                    supportsMaxTokens = json.optBoolean("supports_max_tokens", false),
+                )
+            }
             CatalogModel(id, row.optString("name").ifBlank { id }.take(200),
                 has(architecture?.optJSONArray("input_modalities"), "image"),
                 architecture?.optJSONArray("output_modalities")?.let { has(it, "text") } ?: true,
                 row.optInt("context_length", 0),
-                row.optJSONObject("top_provider")?.optInt("max_completion_tokens", 0)?.takeIf { it > 0 })
+                row.optJSONObject("top_provider")?.optInt("max_completion_tokens", 0)?.takeIf { it > 0 },
+                reasoning)
         }.distinctBy { it.id }.sortedBy { it.name.lowercase() }
     }
     fun search(models: List<CatalogModel>, query: String): List<CatalogModel> {
         val terms = query.trim().lowercase().split(Regex("\\s+")).filter(String::isNotBlank)
         return models.filter { model -> terms.all { it in "${model.name} ${model.id}".lowercase() } }
+    }
+}
+
+/** Never invents an effort name: only an exact token advertised for this exact model can be sent. */
+object OpenRouterReasoningContract {
+    fun exactEffort(reasoning: CatalogReasoning?, requested: String?): String? =
+        requested?.takeIf { value -> reasoning?.supportedEfforts?.contains(value) == true }
+
+    fun apply(body: JSONObject, reasoning: CatalogReasoning?, requested: String?): JSONObject {
+        exactEffort(reasoning, requested)?.let { effort ->
+            body.put("reasoning", JSONObject().put("effort", effort))
+        }
+        return body
     }
 }
 

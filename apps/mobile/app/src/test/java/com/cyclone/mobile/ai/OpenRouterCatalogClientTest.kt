@@ -39,6 +39,16 @@ class OpenRouterCatalogClientTest {
         assertEquals(setOf("a/one"), result.availableIds)
     }
 
+    @Test fun reasoningMetadataRetainsExactOpenRouterEffortsAndRoundTrips() {
+        val json = """{"data":[{"id":"meta/test","name":"Test","architecture":{"input_modalities":["text"],"output_modalities":["text"]},"reasoning":{"mandatory":true,"default_enabled":true,"supported_efforts":["xhigh","high","medium","low","minimal"],"default_effort":"medium"}}]}"""
+        val model = OpenRouterCatalog.parse(json).single()
+        assertEquals(listOf("xhigh", "high", "medium", "low", "minimal"), model.reasoning?.supportedEfforts)
+        assertEquals("medium", model.reasoning?.defaultEffort)
+        assertTrue(model.reasoning?.mandatory == true)
+        val roundTrip = OpenRouterCatalog.parse(org.json.JSONObject().put("data", org.json.JSONArray().put(model.toJson())).toString()).single()
+        assertEquals(model.reasoning, roundTrip.reasoning)
+    }
+
     @Test fun failedAccountLookupRetainsCatalogWithoutClaimingAccess() {
         val result = client { request ->
             if (request.url.encodedPath.endsWith("/user")) 403 to """{"error":{"message":"Key permissions denied"}}"""
