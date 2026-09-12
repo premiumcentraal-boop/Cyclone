@@ -35,7 +35,6 @@ import {
   emptyShareStatus,
   gatewayPortFromBase,
   localCloudControlBase,
-  localStubSession,
   parseMobileChip,
   resolveControlApi,
   type ChatgptPadStatus,
@@ -125,6 +124,17 @@ type RuntimeSelfTest = {
   runtimeInstanceId: string;
   runtimePort: number;
   sessionBinding: string;
+};
+
+type CloudControlDeviceStatus = {
+  deviceId: string;
+  sessionId?: string;
+  adb?: string;
+  mobileInstalled?: boolean;
+  mobileRunning?: boolean;
+  gatewayReady?: boolean;
+  trustReady?: boolean;
+  message?: string;
 };
 
 /** The single real-backend adapter used by the Cyclone PC Companion UI. */
@@ -578,49 +588,91 @@ export class HttpDesktopService implements DesktopService {
 
   async syncChatgptAttachFleet(): Promise<ChatgptSyncResult> {
     const raw = await invoke<ChatgptSyncResult>("chatgpt_attach_sync");
-    try {
-      await this.scanDevices();
-    } catch {
-      // ADB inventory refresh is best-effort; pad status from the sync still stands.
-    }
     const sourcePads = Array.isArray(raw.pads) ? raw.pads : [];
     const pads: ChatgptPadStatus[] = [];
+
     for (const pad of sourcePads) {
       if (!pad.ok) {
-        pads.push(pad);
+        pads.push({ ...pad, mobile: parseMobileChip(pad.mobile) });
         continue;
       }
-      try {
-        const minted = await this.request<{ sessionId: string; sessionToken: string; deviceId?: string; source?: string }>(
-          "/cloud/v1/sessions",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              deviceId: pad.deviceId || undefined,
-              serial: pad.serial || undefined,
-              ttlSeconds: 7200,
-            }),
-          },
-        );
+
+      let minted: { sessionId: string; sessionToken: string; deviceId?: string; source?: string } | null = null;
+      let mintError: unknown = null;
+      for (let attempt = 0; attempt < 3 && !minted; attempt += 1) {
+        try {
+          await this.scanDevices();
+          minted = await this.request<{ sessionId: string; sessionToken: string; deviceId?: string; source?: string }>(
+            "/cloud/v1/sessions",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                deviceId: pad.deviceId || undefined,
+                serial: pad.serial || undefined,
+                ttlSeconds: 7200,
+              }),
+            },
+          );
+        } catch (error) {
+          mintError = error;
+          if (attempt < 2) await sleep(300 * (attempt + 1));
+        }
+      }
+
+      if (!minted?.sessionId || !minted.sessionToken || !(minted.deviceId || pad.deviceId)) {
         pads.push({
           ...pad,
-          deviceId: minted.deviceId || pad.deviceId,
-          sessionId: minted.sessionId,
-          sessionToken: minted.sessionToken,
-          sessionSource: "control-api",
-          mobile: parseMobileChip(pad.mobile),
-        });
-      } catch {
-        const stub = localStubSession();
-        pads.push({
-          ...pad,
-          sessionId: pad.sessionId || stub.sessionId,
-          sessionToken: pad.sessionToken || stub.sessionToken,
+          ok: false,
+          deviceId: pad.deviceId || "",
+          sessionId: "",
+          sessionToken: "",
           sessionSource: "local-stub",
           mobile: parseMobileChip(pad.mobile),
+          error: cloudSessionFailure(mintError),
         });
+        continue;
       }
+
+      const deviceId = minted.deviceId || pad.deviceId;
+      let status: CloudControlDeviceStatus;
+      try {
+        status = await this.request<CloudControlDeviceStatus>(
+          `/cloud/v1/devices/${encodeURIComponent(deviceId)}/status?sessionId=${encodeURIComponent(minted.sessionId)}`,
+        );
+      } catch (error) {
+        pads.push({
+          ...pad,
+          ok: false,
+          deviceId,
+          sessionId: "",
+          sessionToken: "",
+          sessionSource: "local-stub",
+          mobile: parseMobileChip(pad.mobile),
+          error: `Cloud AI readiness check failed. ${safeErrorMessage(error)}`,
+        });
+        continue;
+      }
+
+      const mobile = status.mobileRunning ? "running" : status.mobileInstalled ? "installed" : "missing";
+      const ready = status.adb === "device"
+        && status.mobileRunning === true
+        && status.gatewayReady === true
+        && status.trustReady === true;
+      pads.push({
+        ...pad,
+        ok: ready,
+        deviceId,
+        adb: status.adb === "device" ? "device" : status.adb === "offline" ? "offline" : status.adb === "unauthorized" ? "unauthorized" : "missing",
+        mobile,
+        sessionId: ready ? minted.sessionId : "",
+        sessionToken: ready ? minted.sessionToken : "",
+        sessionSource: ready ? "control-api" : "local-stub",
+        gatewayReady: status.gatewayReady,
+        trustReady: status.trustReady,
+        error: ready ? undefined : cloudReadinessHint(status),
+      });
     }
+
     const share = await this.chatgptShareStatus().catch(() => emptyShareStatus(this.cloudControlLocalBase()));
     const probed = await this.probeCloudControl();
     const controlApi = resolveControlApi({
@@ -630,7 +682,7 @@ export class HttpDesktopService implements DesktopService {
       fallbackPort: gatewayPortFromBase(this.httpBase),
     });
     return {
-      ok: pads.some((pad) => pad.ok),
+      ok: pads.some((pad) => pad.ok && pad.sessionSource === "control-api"),
       controlApi,
       generatedAt: raw.generatedAt,
       pads,
@@ -786,6 +838,28 @@ class DesktopHttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
     super(message);
   }
+}
+
+function cloudSessionFailure(error: unknown): string {
+  if (error instanceof DesktopHttpError && error.code === "DEVICE_NOT_FOUND") {
+    return "Cloud AI session could not bind this VMOS ADB device. Keep VMOS ADB on, then Sync fleet again; Cyclone will rescan the Gateway automatically.";
+  }
+  return `Cloud AI session could not be created. ${safeErrorMessage(error)}`;
+}
+
+function cloudReadinessHint(status: CloudControlDeviceStatus): string {
+  if (status.adb !== "device") return "VMOS ADB is not ready. Check Turn on ADB in VMOS, then Sync fleet again.";
+  if (!status.mobileInstalled) return "Cyclone Mobile is missing on this VMOS pad. Install/start Cyclone Mobile, then Sync fleet again.";
+  if (!status.mobileRunning) return "Cyclone Mobile is installed but not running on this VMOS pad. Start it, then Sync fleet again.";
+  if (!status.gatewayReady) return "Cyclone Mobile is not paired with this Cyclone One. Open Mobile -> PC Gateway & QR pairing, pair once, then Sync fleet again.";
+  if (!status.trustReady) return "Cyclone Mobile trust is not ready. Finish PC Gateway pairing/trust on the phone, then Sync fleet again.";
+  return status.message || "Cloud AI session is not ready. Re-run Sync fleet.";
+}
+
+function safeErrorMessage(error: unknown): string {
+  if (error instanceof DesktopHttpError) return `${error.code}: ${error.message}`.slice(0, 180);
+  if (error instanceof Error) return error.message.slice(0, 180);
+  return "Re-run Sync fleet and follow the pad status hint.";
 }
 
 function connector(id: ConnectorCard["id"], name: string, description: string, raw?: string): ConnectorCard {
