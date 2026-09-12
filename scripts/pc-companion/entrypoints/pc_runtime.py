@@ -101,5 +101,7 @@ if __name__ == "__main__":
         persist_runtime_bearer(token, url, write_cursor=True, mcp_executable=mcp_executable)
     else:
         apply_gateway_env()
+    from cyclone_phone_mcp.live_phone_ipc import start as start_live_phone
+    start_live_phone()
     _start_parent_watch()
     raise SystemExit(main())

@@ -162,7 +162,7 @@ class BackgroundSetupActivity : ComponentActivity() {
                         installMessage = null
                         try { launchInstallStep(nextStep) }
                         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                        catch (error: Exception) { installMessage = error.message ?: "Setup paused. Please retry." }
+                        catch (error: Exception) { installMessage = error.message ?: "Setup paused. You can retry or go Back." }
                     }
                 }
 

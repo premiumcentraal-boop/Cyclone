@@ -9,6 +9,7 @@ import com.cyclone.mobile.ai.OverlayChromeController
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.QuickAgentConfig
 import com.cyclone.mobile.ai.QuickAgentResult
+import com.cyclone.mobile.runtime.background.*
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,11 +38,15 @@ object OverlayChromeRuntime {
         emit = OverlayChromeBus::publish,
         cycloneState = cycloneState,
     )
+    private val mutableActivity = kotlinx.coroutines.flow.MutableStateFlow(machine.state())
+    val activity: kotlinx.coroutines.flow.StateFlow<OverlayChromeState> = mutableActivity
     private var controller: OverlayChromeController? = null
     private var service: CycloneAccessibilityService? = null
     private var aiJob: Job? = null
     private var workspaceJob: Job? = null
     private var adaptiveAgent: OpenRouterAdaptiveAgent? = null
+    private var foregroundTaskId: String? = null
+    private var foregroundResuming = false
     private var suspendedTaskId: String? = null
 
     private data class GateChallenge(
@@ -61,7 +66,12 @@ object OverlayChromeRuntime {
 
     fun attach(service: CycloneAccessibilityService) {
         synchronized(lock) {
-            if (controller != null) return
+            if (controller != null && this.service === service) {
+                controller?.render(machine.snapshot())
+                return
+            }
+            workspaceJob?.cancel()
+            controller?.dismiss()
             this.service = service
             val next = OverlayChromeController(
                 service = service,
@@ -79,7 +89,13 @@ object OverlayChromeRuntime {
             workspaceJob = aiScope.launch {
                 var previousTask: String? = null
                 com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collect { task ->
-                    if (BackgroundGlassPolicy.tearDown(task)) clearBackgroundChrome()
+                    if (task?.foreground == true) {
+                        controller?.background(task)
+                        service?.let { AgentTaskNotificationRuntime.renderTask(it, task) }
+                        previousTask = task.taskId
+                        return@collect
+                    }
+                    if (BackgroundGlassPolicy.tearDown(task) || (task == null && previousTask != null)) clearBackgroundChrome()
                     else if (BackgroundGlassPolicy.visible(task)) {
                         if (previousTask != task?.taskId) mutate { it.resetIdle() }
                         controller?.background(task)
@@ -109,18 +125,26 @@ object OverlayChromeRuntime {
                 cycloneState = cycloneState,
             )
         }
-        context?.let { AgentTaskNotificationRuntime.finish(it, false, "Task stopped.") }
+        context?.let {
+                    foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task -> task.copy(phase = TaskPhase.STOPPED, resumable = false) } }
+                    AgentTaskNotificationRuntime.finish(it, false, "Task stopped.")
+                    com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it)
+                }
     }
 
     fun clearBackgroundChrome() {
         synchronized(lock) {
             OverlayExternalInteraction.active.value = false
-            machine.resetIdle(idleChipVisible = false)
+            // Task presentation ends; the accessibility-owned entry point does not.
+            if (!hasExecutingTask()) machine.resetIdle(idleChipVisible = true)
+            mutableActivity.value = machine.state()
             controller?.background(null)
-            controller?.dismiss()
+            controller?.render(machine.snapshot())
         }
     }
+    /** Device hook: task cleanup retains the launcher; only service detach removes all windows. */
     fun overlayWindowCount(): Int = synchronized(lock) { controller?.attachedWindowCount() ?: 0 }
+    fun overlayLauncherCount(): Int = synchronized(lock) { controller?.attachedLauncherCount() ?: 0 }
 
     fun startAnalysis(
         sessionId: String,
@@ -206,6 +230,12 @@ object OverlayChromeRuntime {
 
     fun dispatch(action: OverlayUserAction) {
         val before = snapshot()
+        if (action == OverlayUserAction.TAKE_CONTROL) {
+            WorkspaceTasks.state.value?.takeIf { it.foreground && it.taskId == foregroundTaskId }?.let { task ->
+                commandForegroundTask(task.taskId, if (before.userPaused) "resume" else "handoff")
+                return
+            }
+        }
         if (action == OverlayUserAction.GATE_CONFIRM) approvePendingGateChallenge(before)
         mutate { it.dispatch(action) }
         when (action) {
@@ -220,7 +250,11 @@ object OverlayChromeRuntime {
                     aiJob?.cancel()
                     aiJob = null
                 }
-                context?.let { AgentTaskNotificationRuntime.finish(it, false, "Task stopped.") }
+                context?.let {
+                    foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task -> task.copy(phase = TaskPhase.STOPPED, resumable = false) } }
+                    AgentTaskNotificationRuntime.finish(it, false, "Task stopped.")
+                    com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it)
+                }
             }
             OverlayUserAction.GATE_CONFIRM -> resumeSuspendedTask()
             OverlayUserAction.TAKE_CONTROL -> {
@@ -236,20 +270,28 @@ object OverlayChromeRuntime {
         mutate { it.updateComposer(text) }
     }
 
+    /** Composer animation is not execution ownership. Suspended/GATE tasks still own their slot. */
+    fun hasExecutingTask(): Boolean = synchronized(lock) {
+        aiJob?.isActive == true || suspendedTaskId != null || pendingGateChallenge != null
+    }
+
     fun submitRequest(text: String) {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
         val context = synchronized(lock) { service } ?: return
-        val backgroundTask = com.cyclone.mobile.runtime.background.WorkspaceTasks.state.value
-        if (backgroundTask != null && backgroundTask.phase !in setOf(
-                com.cyclone.mobile.runtime.background.TaskPhase.STOPPED,
-                com.cyclone.mobile.runtime.background.TaskPhase.FAILED)) {
-            com.cyclone.mobile.runtime.background.WorkspaceTasks.update(backgroundTask.taskId) { it.copy(queued = request) }
-            updateComposer("")
+        val busy = !com.cyclone.mobile.runtime.background.WorkspaceTasks.canStartRequest()
+        if (busy) {
+            runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.queueRequest(request) }
+                .onSuccess { updateComposer("") }
+                .onFailure { android.widget.Toast.makeText(context, it.message, android.widget.Toast.LENGTH_LONG).show() }
             return
         }
-        // A named installed app is a suitable isolated task. Ambiguity is resolved by the user,
-        // never by guessing a target or falling back after a workspace failure.
+        // Only explicit intent selects isolation. Naming an app is ordinary foreground use.
+        val target = com.cyclone.mobile.runtime.background.ExecutionTargetResolver.resolve(request)
+        if (target is com.cyclone.mobile.runtime.background.ExecutionTarget.Profile) {
+            android.widget.Toast.makeText(context, "Open the requested profile in Profiles before continuing.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         val apps = context.packageManager.queryIntentActivities(
             android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
             .filter { it.activityInfo.packageName != context.packageName }.distinctBy { it.activityInfo.packageName }
@@ -257,10 +299,7 @@ object OverlayChromeRuntime {
             val label = app.loadLabel(context.packageManager).toString()
             label.length >= 3 && Regex("(?i)(?<![\\p{L}\\p{N}])" + Regex.escape(label) + "(?![\\p{L}\\p{N}])").containsMatchIn(request)
         }
-        val share = com.cyclone.mobile.capture.LiveCaptureSessionManager.state.value
-        val explicitForeground = share.phase == com.cyclone.mobile.capture.ScreenSharePhase.LIVE &&
-            share.scope == com.cyclone.mobile.capture.CaptureScope.WHOLE_DISPLAY
-        if (!explicitForeground) {
+        if (target == com.cyclone.mobile.runtime.background.ExecutionTarget.BackgroundWorkspace) {
             synchronized(lock) { adaptiveAgent?.cancelActiveTask(); aiJob?.cancel() }
             if (matches.size == 1) {
                 val app = matches.single()
@@ -277,15 +316,25 @@ object OverlayChromeRuntime {
         val accepted = synchronized(lock) {
             pendingGateChallenge = null
             approvedGateChallenge = null
+            if (machine.state() !in setOf(OverlayChromeState.ANALYSIS, OverlayChromeState.WORKING, OverlayChromeState.LIVE)) {
+                machine.startAnalysis(java.util.UUID.randomUUID().toString())
+            }
             val before = machine.snapshot()
             machine.submitRequest(request)
             val changed = before.state == OverlayChromeState.ANALYSIS ||
                 before.state == OverlayChromeState.WORKING ||
                 before.state == OverlayChromeState.LIVE
+            mutableActivity.value = machine.state()
             controller?.render(machine.snapshot())
             changed
         }
-        if (accepted) runAiRequest(request)
+        if (accepted) {
+            val launch = matches.singleOrNull()?.takeIf {
+                !PendingTaskAttachment.present.value && com.cyclone.mobile.runtime.background.ExecutionTargetResolver.isSimpleLaunch(
+                    request, it.loadLabel(context.packageManager).toString())
+            }?.activityInfo?.packageName
+            runAiRequest(request, launch)
+        }
     }
 
     fun updateVoice(listening: Boolean, transcript: String? = null, message: String? = null) {
@@ -296,14 +345,30 @@ object OverlayChromeRuntime {
         synchronized(lock) { controller?.beginVoiceInput() }
     }
 
-    private fun runAiRequest(request: String) {
+    private fun runAiRequest(request: String, launchPackage: String? = null) {
         val context = synchronized(lock) { service } ?: return
         synchronized(lock) {
             aiJob?.cancel()
             adaptiveAgent?.cancelActiveTask()
         }
+        val shared = WorkspaceTaskUi("foreground-${java.util.UUID.randomUUID()}", "default-foreground",
+            "your app", launchPackage ?: "", request, phase = TaskPhase.WORKING, displayId = 0)
+        WorkspaceTasks.publishStart(shared)
+        foregroundTaskId = shared.taskId
         AgentTaskNotificationRuntime.start(context)
-        val agent = OpenRouterAdaptiveAgent(context)
+        val agent = OpenRouterAdaptiveAgent(context).also { agent ->
+            var revision = 0L
+            agent.onOperation = { tool, result ->
+                WorkspaceTasks.update(shared.taskId) { task ->
+                    if (result == null) { revision = task.controlRevision; TaskHarnessState.begin(task, tool) }
+                    else TaskHarnessState.finish(task, TaskOperationEvidence("default-foreground", 0, revision,
+                        result.androidExecutionOk, result.verification.passed,
+                        result.afterObservationId != null && result.afterObservationId != result.beforeObservationId &&
+                            result.after?.sessionId == "default-foreground" && result.after?.displayId == 0,
+                        result.verification.basis))
+                }
+            }
+        }
         synchronized(lock) {
             adaptiveAgent = agent
             suspendedTaskId = null
@@ -315,6 +380,28 @@ object OverlayChromeRuntime {
                 // Progress belongs in the task notification/run log, not the request composer.
                 it.dispatch(OverlayUserAction.MINIMIZE)
                 it.updateStatus("Starting…")
+            }
+            if (launchPackage != null) {
+                val outcome = runCatching {
+                    val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+                            java.util.UUID.randomUUID().toString(), "phone.open_app",
+                            org.json.JSONObject().put("package", launchPackage)
+                                .put("sessionId", "default-foreground").put("displayId", 0)))
+                    }
+                    check(result.ok) { result.error?.message ?: "Couldn't open the app." }
+                    var observed = false
+                    repeat(10) {
+                        if (com.cyclone.mobile.runtime.background.BackgroundSetup.foregroundPackage() == launchPackage) observed = true
+                        if (!observed) kotlinx.coroutines.delay(150)
+                    }
+                    check(observed) { "Couldn't verify the app opened." }
+                }
+                outcome.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
+                handleAgentResult(QuickAgentResult(outcome.isSuccess,
+                    if (outcome.isSuccess) "App opened." else outcome.exceptionOrNull()?.message ?: "Couldn't open the app.",
+                    1, "", classification = if (outcome.isSuccess) "COMPLETE" else "FAILED"))
+                return@launch
             }
             val settings = readAiSettings(context)
             val accessProfile = CycloneAiAccessProfileStore.read(context)
@@ -334,12 +421,52 @@ object OverlayChromeRuntime {
                 // state; the trace already records the successful local Brain write.
                 if (!clean.equals(INTERNAL_BRAIN_UPDATED, ignoreCase = true)) {
                     AgentTaskNotificationRuntime.progress(context, clean)
-                    mutate { it.updateStatus(clean) }
+                    mutate { it.updateStatus("Checking the current page") }
                 }
             }
             handleAgentResult(result)
         }
         synchronized(lock) { aiJob = job }
+    }
+
+    /** Exact-task service command; retains the original foreground agent and controller machinery. */
+    fun commandForegroundTask(id: String, command: String) {
+        val task = WorkspaceTasks.state.value?.takeIf { it.foreground && it.taskId == id && id == foregroundTaskId } ?: return
+        when (command) {
+            "handoff", "pause" -> {
+                if (!task.working && task.interruption?.canTakeOver != true && task.phase != TaskPhase.DONE) return
+                WorkspaceTasks.update(id) { it.copy(phase = TaskPhase.HUMAN) }
+                DeviceState.setController(DeviceState.Controller.HUMAN)
+                if (!snapshot().userPaused) mutate { it.dispatch(OverlayUserAction.TAKE_CONTROL) }
+            }
+            "resume" -> {
+                if (task.interruption?.canResumeAfterHuman != true) return
+                val prior = synchronized(lock) {
+                    if (foregroundResuming) return
+                    foregroundResuming = true
+                    aiJob
+                }
+                aiScope.launch {
+                    try {
+                        prior?.join()
+                        val current = WorkspaceTasks.state.value
+                        if (current?.taskId != id || current.controlRevision != task.controlRevision ||
+                            current.interruption?.canResumeAfterHuman != true) return@launch
+                        DeviceState.setController(DeviceState.Controller.AGENT)
+                        if (snapshot().userPaused) mutate { it.dispatch(OverlayUserAction.TAKE_CONTROL) }
+                        resumeSuspendedTask()
+                    } finally {
+                        synchronized(lock) { foregroundResuming = false }
+                    }
+                }
+            }
+            "cancel" -> {
+                dispatch(OverlayUserAction.STOP_TASK)
+                WorkspaceTasks.clearClosedTask(id, task.sessionId)
+                service?.let { AgentTaskNotificationRuntime.cancel(it) }
+                foregroundTaskId = null
+            }
+        }
     }
 
     private fun resumeSuspendedTask() {
@@ -359,12 +486,13 @@ object OverlayChromeRuntime {
                 }
                 machine.updateStatus("Re-observing after handoff…")
             }
-            AgentTaskNotificationRuntime.progress(context, "Re-observing after handoff…")
+            foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { it.copy(phase = TaskPhase.WORKING, message = "Checking the current page") } }
+            AgentTaskNotificationRuntime.progress(context, "Checking the current page")
             val result = agent.resume { progress ->
                 val clean = progress.trim()
                 if (!clean.equals(INTERNAL_BRAIN_UPDATED, ignoreCase = true)) {
                     AgentTaskNotificationRuntime.progress(context, clean)
-                    mutate { it.updateStatus(clean) }
+                    mutate { it.updateStatus("Checking the current page") }
                 }
             }
             handleAgentResult(result)
@@ -374,6 +502,15 @@ object OverlayChromeRuntime {
 
     private fun handleAgentResult(result: QuickAgentResult) {
         val context = synchronized(lock) { service }
+        foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task ->
+            if (!task.working && result.classification == "HUMAN_OR_GATE") task.copy(resumable = true)
+            else task.copy(phase = when (result.classification) {
+                "COMPLETE" -> TaskPhase.DONE
+                "HUMAN_OR_GATE" -> TaskPhase.REVIEW
+                "CANCELLED" -> TaskPhase.STOPPED
+                else -> TaskPhase.FAILED
+            }, resumable = result.classification == "HUMAN_OR_GATE")
+        } }
         when (result.classification) {
             "HUMAN_OR_GATE" -> {
                 context?.let { AgentTaskNotificationRuntime.waiting(it, result.message) }
@@ -418,11 +555,15 @@ object OverlayChromeRuntime {
                 mutate { it.finishStopped(result.message) }
             }
         }
+        if (result.classification != "HUMAN_OR_GATE") {
+            context?.let { com.cyclone.mobile.runtime.background.WorkspaceTasks.scheduleQueuePromotion(it) }
+        }
     }
 
     private fun mutate(block: (OverlayChromeMachine) -> Unit) {
         synchronized(lock) {
             block(machine)
+            mutableActivity.value = machine.state()
             controller?.render(machine.snapshot())
         }
     }
@@ -463,7 +604,7 @@ object OverlayChromeRuntime {
     private fun readAiSettings(context: Context): OverlayAiSettings {
         val prefs = context.getSharedPreferences(AI_PREFS, Context.MODE_PRIVATE)
         val savedModel = prefs.getString(MODEL_KEY, OpenRouterModelPresets.DEFAULT.id).orEmpty()
-        val modelId = savedModel.takeIf { id -> OpenRouterModelPresets.all.any { it.id == id } }
+        val modelId = com.cyclone.mobile.ai.model.ModelRegistry.resolve(savedModel)?.let(com.cyclone.mobile.ai.model.ModelRegistry::preset)?.id
             ?: OpenRouterModelPresets.DEFAULT.id
         val effort = prefs.getString(EFFORT_KEY, "medium").orEmpty()
             .takeIf { it in REASONING_LEVELS } ?: "medium"

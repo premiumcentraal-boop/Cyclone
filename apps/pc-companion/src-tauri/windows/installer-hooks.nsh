@@ -18,6 +18,10 @@
   ExecWait 'cmd /C taskkill /F /T /IM CycloneAgentMCP.exe >NUL 2>&1'
   ClearErrors
   ExecWait 'cmd /C taskkill /F /T /IM CyclonePCRuntime.exe >NUL 2>&1'
+  ClearErrors
+  ExecWait 'cmd /C powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Cyclone One\mcp-tunnel\scripts\stop-tunnel.ps1" >NUL 2>&1'
+  ClearErrors
+  ExecWait 'cmd /C taskkill /F /T /IM CycloneLivePhone.exe >NUL 2>&1'
   Sleep 1500
 !macroend
 
@@ -32,5 +36,9 @@
   ExecWait 'cmd /C taskkill /F /T /IM CycloneAgentMCP.exe >NUL 2>&1'
   ClearErrors
   ExecWait 'cmd /C taskkill /F /T /IM CyclonePCRuntime.exe >NUL 2>&1'
+  ClearErrors
+  ExecWait 'cmd /C powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Cyclone One\mcp-tunnel\scripts\stop-tunnel.ps1" >NUL 2>&1'
+  ClearErrors
+  ExecWait 'cmd /C taskkill /F /T /IM CycloneLivePhone.exe >NUL 2>&1'
   Sleep 1500
 !macroend

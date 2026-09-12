@@ -8,6 +8,7 @@ import android.os.UserHandle
 import android.os.UserManager
 import com.cyclone.mobile.*
 import com.cyclone.mobile.gateway.GatewayObservationStore
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import org.json.JSONArray
@@ -69,6 +70,9 @@ object Layer2Workspaces {
 
     fun profileUserId(ctx: Context, user: UserHandle): Int? {
         if (user == Process.myUserHandle()) return currentAndroidUserId()
+        ProfileSetupRuntime.existingUser(ctx)?.let { saved ->
+            if (android.os.UserHandle.getUserHandleForUid(saved * ANDROID_UIDS_PER_USER) == user) return saved
+        }
         val launcher = ctx.getSystemService(LauncherApps::class.java)
         return runCatching {
             launcher.getActivityList(null, user).firstOrNull()?.applicationInfo?.uid
@@ -98,11 +102,16 @@ object Layer2Workspaces {
         p.getString("appPackage"), p.optInt("androidUserId", 0), p.optInt("displayId", 0))
     fun status(ctx: Context): JSONObject = synchronized(engine.mutationLock) {
         initialize(ctx)
-        JSONObject().put("workspaces", JSONArray(engine.snapshot().map(::json)))
-            .put("holder", engine.holder()?.workspaceId ?: JSONObject.NULL)
-            .put("workspaceGeneration", engine.holder()?.generation ?: JSONObject.NULL)
-            .put("armed", JSONArray(engine.queue())).put("gated", gated())
-            .put("root", RootProbe.status.label).put("displayId", 0)
+        val holder = engine.holder()
+        attachPlane(
+            JSONObject().put("workspaces", JSONArray(engine.snapshot().map(::json)))
+                .put("holder", holder?.workspaceId ?: JSONObject.NULL)
+                .put("workspaceGeneration", holder?.generation ?: JSONObject.NULL)
+                .put("armed", JSONArray(engine.queue())).put("gated", gated())
+                .put("root", RootProbe.status.label).put("displayId", 0),
+            holder?.workspaceId,
+            holder?.generation,
+        )
     }
     private fun launch(w: Workspace) {
         check(!gated()) { "GATE: human review required" }
@@ -160,10 +169,23 @@ object Layer2Workspaces {
         }
         // Old frame references are invalid; the agent must obtain a new Page Card after switch.
         GatewayObservationStore.clear("default-foreground")
-        JSONObject().put("workspaceId", lease.workspaceId).put("workspaceGeneration", lease.generation)
-            .put("sessionId", "default-foreground").put("displayId", 0).put("verified", true)
-            .put("next", "phone.observe; include workspaceId and workspaceGeneration on every mutation")
+        attachPlane(
+            JSONObject().put("workspaceId", lease.workspaceId).put("workspaceGeneration", lease.generation)
+                .put("sessionId", "default-foreground").put("displayId", 0).put("verified", true)
+                .put("next", "phone.observe; include workspaceId and workspaceGeneration on every mutation"),
+            lease.workspaceId,
+            lease.generation,
+        )
     }
+    private fun attachPlane(payload: JSONObject, workspaceId: String? = null, workspaceGeneration: Long? = null): JSONObject {
+        val identity = JSONObject().put("sessionId", "default-foreground").put("displayId", 0)
+        if (workspaceId != null) {
+            identity.put("workspaceId", workspaceId)
+            if (workspaceGeneration != null) identity.put("workspaceGeneration", workspaceGeneration)
+        }
+        return SessionContract.attach(payload, SessionContract.classify(identity))
+    }
+
     fun requireMutation(ctx: Context, request: PhoneToolRequest) {
         initialize(ctx)
         val id = request.params.optString("workspaceId").takeIf { it.isNotBlank() }
@@ -178,6 +200,12 @@ object Layer2Workspaces {
                 "workspace.list" -> status(ctx)
                 "workspace.register" -> { check(!gated()) { "GATE: review required" }; engine.register(fromJson(p)); status(ctx) }
                 "workspace.switch", "phone.workspace_switch" -> switch(ctx, p.getString("id"))
+                "workspace.close_task" -> {
+                    val id = p.getString("workspaceId")
+                    engine.closeTask(id, p.getLong("workspaceGeneration"))
+                    goals.remove(id)
+                    status(ctx)
+                }
                 "workspace.pause" -> { engine.pause(); status(ctx) }
                 "workspace.release" -> { check(!gated()) { "GATE: resolve review before clearing selection" }; engine.clearSelection(); goals.clear(); status(ctx) }
                 "workspace.arm" -> { check(!gated()) { "GATE: review required" }; val id = p.getString("id"); engine.arm(id); goals[id] = p.optString("goal").take(500); status(ctx) }
@@ -185,7 +213,17 @@ object Layer2Workspaces {
                     check(!gated()) { engine.pause(); "GATE: queue paused" }
                     val id = engine.queue().firstOrNull() ?: error("QUEUE_EMPTY: arm a workspace job first")
                     engine.disarm(id)
-                    switch(ctx, id).also { engine.arm(id); it.put("goal", goals[id].orEmpty()) }
+                    switch(ctx, id).also { payload ->
+                        engine.arm(id)
+                        payload.put("goal", goals[id].orEmpty())
+                        val workspace = engine.snapshot().firstOrNull { it.id == id }
+                        val generation = payload.optLong("workspaceGeneration", -1L)
+                        if (workspace != null && generation >= 0L) {
+                            com.cyclone.mobile.runtime.background.WorkspaceTasks.observeLayer2Slice(
+                                workspace, generation, goals[id].orEmpty(),
+                            )
+                        }
+                    }
                 }
                 else -> error("Unknown workspace operation")
             }

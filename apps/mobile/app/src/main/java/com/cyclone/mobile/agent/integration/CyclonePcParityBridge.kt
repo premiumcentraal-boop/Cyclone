@@ -45,6 +45,7 @@ class CyclonePcParityBridge internal constructor(
     constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
         this(CycloneAgentEnvironment(context.applicationContext, execution, userTaskGoal), execution = execution)
 
+    var onOperation: ((String, AgentActionEnvelope?) -> Unit)? = null
     private var page: AgentPageCard? = null
     private var memory: RecoveryMemory = RecoveryMemory()
     private var lastRecovery: RecoveryDecision? = null
@@ -59,7 +60,7 @@ class CyclonePcParityBridge internal constructor(
         val result = environment.locate(goal)
         val fresh = result.page ?: return null
         page = fresh
-        if (previousKey == null || previousKey != fresh.pageKey) {
+        if (previousKey == null) {
             memory = RecoveryMemory(
                 attemptedLevels = setOf(RecoveryLevel.CURRENT_SEMANTIC_PAGE),
                 attemptedEvidence = setOf(EvidenceSource.CURRENT_SEMANTIC_PAGE),
@@ -75,6 +76,16 @@ class CyclonePcParityBridge internal constructor(
             )
         }
         return fresh
+    }
+
+    fun invalidateAfterHandoff() {
+        environment.invalidateObservation()
+        page = null
+        searchEvidence = emptyList()
+        inspectionEvidence = emptyList()
+        memory = RecoveryMemory()
+        lastRecovery = null
+        forceVision = false
     }
 
     fun currentPage(): AgentPageCard? = page
@@ -193,7 +204,9 @@ class CyclonePcParityBridge internal constructor(
             val elementId = resolveElementId(action.controlId, legacyPage, goal)
             if (elementId != null) params.put("elementId", elementId)
         }
+        onOperation?.invoke(action.tool, null)
         return environment.act(action.tool, params, goal).also { envelope ->
+            onOperation?.invoke(action.tool, envelope)
             page = envelope.after ?: page
         }
     }
@@ -203,7 +216,9 @@ class CyclonePcParityBridge internal constructor(
         val candidate = search(query, goal).firstOrNull()
         val params = JSONObject()
         if (candidate != null) params.put("elementId", candidate.elementId)
+        onOperation?.invoke("phone.click", null)
         return environment.act("phone.click", params, goal).also { envelope ->
+            onOperation?.invoke("phone.click", envelope)
             page = envelope.after ?: page
         }
     }
@@ -222,7 +237,7 @@ class CyclonePcParityBridge internal constructor(
      * Selects and performs only read-only recovery escalation. Mutation recovery (scroll/back/backtrack)
      * remains an explicit next model/tool decision so GATE/policy and user intent stay authoritative.
      */
-    fun recover(cause: RecoverableCause, goal: String): RecoveryDecision? {
+    fun recover(cause: RecoverableCause, goal: String, failuresWithoutProgress: Int = 0): RecoveryDecision? {
         val card = page ?: observe(goal) ?: return null
         val request = RecoveryRequest(
             observation = observationEvidence(card),
@@ -241,7 +256,15 @@ class CyclonePcParityBridge internal constructor(
             boundedExplorationAvailable = true,
             backtrackOrAlternateBranchAvailable = true,
         )
-        val decision = recovery.selectRecovery(request)
+        // A second grounding failure after semantic search needs pixels, even on a populated tree.
+        val groundingFailure = cause in setOf(RecoverableCause.STALE_SELECTOR,
+            RecoverableCause.TARGET_MISSING_FROM_COMPACT_CONTROLS, RecoverableCause.VERIFICATION_FAILED,
+            RecoverableCause.AFTER_STATE_MISSING, RecoverableCause.AMBIGUOUS_SEMANTICS,
+            RecoverableCause.SAME_PAGE_NO_EFFECT)
+        val decision = if (failuresWithoutProgress >= 2 && groundingFailure &&
+            RecoveryLevel.GOAL_RANKED_SEARCH in memory.attemptedLevels && memory.capturesForSemanticState == 0) {
+            RecoveryDecision(RecoveryLevel.SILENT_SCREENSHOT_VISION, "grounding_failed_after_semantic_search")
+        } else recovery.selectRecovery(request.copy(knownVerifiedRouteAvailable = request.knownVerifiedRouteAvailable && failuresWithoutProgress == 0))
         lastRecovery = decision
         when (decision.level) {
             RecoveryLevel.KNOWN_VERIFIED_ROUTE -> loadKnowledge(goal)
@@ -276,7 +299,6 @@ class CyclonePcParityBridge internal constructor(
                 memory = memory.copy(
                     attemptedLevels = memory.attemptedLevels + RecoveryLevel.SILENT_SCREENSHOT_VISION,
                     attemptedEvidence = memory.attemptedEvidence + EvidenceSource.SCREENSHOT_VISION,
-                    capturesForSemanticState = memory.capturesForSemanticState + 1,
                 )
             }
             RecoveryLevel.BACKTRACK_OR_REPLAN -> {
@@ -310,6 +332,16 @@ class CyclonePcParityBridge internal constructor(
         val value = forceVision
         forceVision = false
         return value
+    }
+
+    /** Both model-requested and recovery-requested screenshots consume the same budget. */
+    fun claimVisionCapture(): Boolean {
+        if (memory.capturesForSemanticState > 0) return false
+        memory = memory.copy(capturesForSemanticState = 1,
+            attemptedLevels = memory.attemptedLevels + RecoveryLevel.SILENT_SCREENSHOT_VISION,
+            attemptedEvidence = memory.attemptedEvidence + EvidenceSource.SCREENSHOT_VISION)
+        forceVision = false
+        return true
     }
 
     fun markVerifiedProgress() {
@@ -427,6 +459,8 @@ class CyclonePcParityBridge internal constructor(
     }
 
     private fun pageCardJson(card: AgentPageCard): JSONObject = JSONObject()
+        .put("sessionId", card.sessionId)
+        .put("displayId", card.displayId)
         .put("observationId", card.observationId)
         .put("generation", card.generation)
         .put("package", card.packageName)
@@ -482,6 +516,9 @@ class CyclonePcParityBridge internal constructor(
                     .put("semanticSuccessClaimed", envelope.semanticSuccessClaimed)
                     .put("delta", envelope.delta.summary.take(240))
                     .put("errorClass", envelope.errorClass.name)
+                    .put("failureLayer", envelope.failureLayer.name)
+                    .put("executorInvoked", envelope.executorInvoked)
+                    .put("safeMessage", envelope.safeMessage?.let { com.cyclone.mobile.ai.TracePrivacy.clean(it).take(300) } ?: JSONObject.NULL)
                     .put("learningRecorded", envelope.learning.recorded),
             )
         }
@@ -544,6 +581,9 @@ class CyclonePcParityBridge internal constructor(
         .put("risk", candidate.evidence.optString("risk"))
         .put("expectedEffect", candidate.evidence.opt("expectedEffect") ?: JSONObject.NULL)
         .put("clickable", candidate.evidence.optBoolean("clickable"))
+        .put("enabled", candidate.evidence.optBoolean("enabled", true))
+        .put("visibleToUser", candidate.evidence.optBoolean("visibleToUser", true))
+        .put("bounds", candidate.evidence.optJSONObject("bounds") ?: JSONObject.NULL)
         .put("editable", candidate.evidence.optBoolean("editable"))
         .put("scrollable", candidate.evidence.optBoolean("scrollable"))
         .put("selected", candidate.evidence.optBoolean("selected"))

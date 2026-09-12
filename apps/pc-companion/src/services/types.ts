@@ -1,3 +1,12 @@
+import type {
+  McpTunnelMode,
+  McpTunnelSmokeCheck,
+  McpTunnelSmokeResult,
+  McpTunnelState,
+  McpTunnelStatus,
+  McpTunnelToken,
+} from "../core/mcpTunnel.js";
+
 export type DeviceLifecycleState =
   | "READY"
   | "UNPAIRED"
@@ -97,6 +106,15 @@ export interface ConnectionDiagnosticBundle {
   path: string;
   createdAtEpochMs: number;
 }
+
+export type {
+  McpTunnelMode,
+  McpTunnelSmokeCheck,
+  McpTunnelSmokeResult,
+  McpTunnelState,
+  McpTunnelStatus,
+  McpTunnelToken,
+};
 
 export interface DeviceVideoDescriptor {
   mode: StreamBackendMode;
@@ -328,10 +346,11 @@ export type ConnectorState =
   | "NEEDS_ATTENTION";
 
 export interface ConnectorCard {
-  id: "codex" | "deepseek-mcp" | "generic-mcp" | string;
+  id: "codex" | "grok" | "cursor" | "opencode" | "copilot" | "deepseek-mcp" | "generic-mcp" | string;
   name: string;
   description: string;
   state: ConnectorState;
+  aiState?: "UNKNOWN" | "DETECTED" | "CONFIGURED" | "CONNECTED" | "FAILED";
   actionLabel?: string;
   detected?: boolean;
   configured?: boolean;
@@ -343,6 +362,7 @@ export interface ConnectorCard {
   toolCount?: number;
   transport?: string;
   approvalMode?: string;
+  phoneState?: "UNKNOWN" | "CONNECTED" | "READY" | "DISCONNECTED";
 }
 
 export interface ConnectorActionResult {
@@ -447,6 +467,15 @@ export interface DesktopService {
   listConnectors(): Promise<ConnectorCard[]>;
   runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<ConnectorActionResult>;
   getRuntimeStatus(): Promise<DesktopRuntimeStatus>;
+  getMcpTunnelStatus(): Promise<McpTunnelStatus>;
+  startMcpTunnel(mode?: McpTunnelMode): Promise<McpTunnelStatus>;
+  stopMcpTunnel(): Promise<McpTunnelStatus>;
+  restartMcpTunnel(): Promise<McpTunnelStatus>;
+  rotateMcpTunnelToken(): Promise<McpTunnelStatus>;
+  setMcpTunnelMode(mode: McpTunnelMode): Promise<McpTunnelStatus>;
+  copyMcpTunnelToken(): Promise<McpTunnelToken>;
+  smokeMcpTunnel(): Promise<McpTunnelSmokeResult>;
+  openMcpTunnelDocs(): Promise<string>;
   getFleetWorkspace?(): Promise<FleetWorkspace>;
   saveFleetGroup?(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup>;
   deleteFleetGroup?(groupId: string): Promise<void>;

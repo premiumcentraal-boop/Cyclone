@@ -13,6 +13,18 @@ import org.junit.Test
 import java.util.ArrayDeque
 
 class CycloneAgentEnvironmentTest {
+    @Test fun cookieRejectionSurvivesCompactControlLimit() {
+        val before = observationWithHiddenRawTarget()
+        val controls = before.payload.getJSONArray("semanticControls")
+        controls.put(JSONObject().put("elementId", "semantic:${before.id}:cookies")
+            .put("observationId", before.id).put("label", "Reject Optional Cookies")
+            .put("role", "button").put("clickable", true))
+        val env = CycloneAgentEnvironment(FakeRuntime(before, null))
+        val page = env.observe("open reddit.com and login for me").page!!
+        assertTrue(page.controls.size <= 36)
+        assertNotNull(com.cyclone.mobile.ai.CookieInterruptionPolicy().next(page, "open reddit.com and login for me"))
+    }
+
     @Test fun executorSuccessWithoutSemanticChangeRemainsUnverifiedAndUnlearned() {
         val before = observation("obs-1", "home", "fp-1")
         val runtime = FakeRuntime(before, observation("obs-2", "home", "fp-1"))
@@ -160,7 +172,7 @@ class CycloneAgentEnvironmentTest {
             expectedPackage = "",
             goalLabel = "Continue",
             beforeObservation = unchanged,
-            afterObservation = unchanged,
+            afterObservation = observation("obs-expect-after", "home", "fp-expect"),
             androidExecutionOk = true,
             executorAssertionFailed = false,
             explicitExpectation = true,
@@ -168,6 +180,17 @@ class CycloneAgentEnvironmentTest {
         assertFalse(result.passed)
         assertEquals(AgentVerificationStatus.OBSERVED, result.status)
         assertEquals("NO_SEMANTIC_PROGRESS", result.basis)
+    }
+
+    @Test fun reusedObservationCannotVerifyBack() {
+        val same = observation("same", "home", "fp")
+        val result = GatewayV33ActionAdapter.verifyAfterState(
+            tool = "phone.back", expectedPackage = "", goalLabel = "Back",
+            beforeObservation = same, afterObservation = same, androidExecutionOk = true,
+            executorAssertionFailed = false, explicitExpectation = false)
+        assertFalse(result.passed)
+        assertEquals(AgentVerificationStatus.FAILED, result.status)
+        assertEquals("OBSERVATION_IDENTITY_MISMATCH", result.basis)
     }
 
     @Test fun pcFacingVerifierRejectsIdentityChurnAndAcceptsSemanticWitness() {

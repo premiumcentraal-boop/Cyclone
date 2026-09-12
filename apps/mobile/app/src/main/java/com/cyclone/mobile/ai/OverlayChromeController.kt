@@ -143,8 +143,9 @@ class OverlayChromeController(
         try { wm.removeViewImmediate(view) } catch (_: IllegalArgumentException) { /* Already removed by Android. */ }
         if (view is ComposeView) view.disposeComposition()
     }
-    /** Instrumentation hook: failed start / cancel must report zero owned overlay windows. */
+    /** Instrumentation hook: service detach has zero windows; task cleanup retains chrome. */
     fun attachedWindowCount(): Int = windows.size
+    fun attachedLauncherCount(): Int = if (root?.isAttachedToWindow == true) 1 else 0
     private fun addWindow(view: View, layout: WindowManager.LayoutParams) {
         wm.addView(view, layout)
         windows.attached(view)
@@ -152,7 +153,10 @@ class OverlayChromeController(
     fun background(task: com.cyclone.mobile.runtime.background.WorkspaceTaskUi?) {
         onMain {
             backgroundTask = task
-            if (com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy.tearDown(task)) dismiss()
+            if (com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy.tearDown(task)) {
+                backgroundTask = null
+                render(latest.copy(idleChipVisible = true))
+            }
             else if (com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy.visible(task)) {
                 if (root == null) show(latest) else applyLayout(latest)
             }
@@ -266,6 +270,11 @@ class OverlayChromeController(
     fun render(snapshot: OverlayChromeSnapshot) {
         onMain {
             latest = snapshot
+            if (root != null && root?.isAttachedToWindow != true) {
+                dismiss()
+                show(snapshot)
+                return@onMain
+            }
             if (root == null) {
                 if (snapshot.state != OverlayChromeState.IDLE || snapshot.idleChipVisible || glass()) show(snapshot)
                 return@onMain

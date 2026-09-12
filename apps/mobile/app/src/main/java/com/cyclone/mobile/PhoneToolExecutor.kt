@@ -11,6 +11,9 @@ import com.cyclone.mobile.fastpath.FastPathLoop
 import com.cyclone.mobile.fastpath.FastPathSettleResult
 import com.cyclone.mobile.fastpath.FastPathTimings
 import com.cyclone.mobile.gateway.GatewayObservationStore
+import com.cyclone.mobile.runtime.session.SessionContract
+import com.cyclone.mobile.runtime.session.SessionPlane
+import com.cyclone.mobile.runtime.session.SessionPlaneKind
 import com.cyclone.mobile.ui.overlay.GateBlockedException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,47 +46,74 @@ object PhoneToolExecutor {
         val management = request.tool.startsWith("workspace.") || request.tool == "phone.workspace_switch"
         if (management || request.tool in mutatingTools) return synchronized(mutationLock) {
             try {
-                val scope = com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(request.params)
+                val plane = SessionContract.classify(request.params)
                 if (management) {
-                    check(scope.sessionId == "default-foreground" && scope.displayId == 0) { "Layer 2 requires default-foreground / display 0" }
+                    check(plane.kind == SessionPlaneKind.FOREGROUND || plane.kind == SessionPlaneKind.LAYER2_WORKSPACE) {
+                        "Layer 2 requires default-foreground / display 0"
+                    }
                     if (request.tool != "workspace.list") {
                         synchronized(resultCache) { resultCache.clear() }
                         recentActions.clear()
                     }
-                    return@synchronized layer2.command(context, request)
+                    return@synchronized withPlane(layer2.command(context, request), plane)
                 }
                 layer2.requireMutation(context, request)
                 if (layer2.engine.selectedId() != null) {
-                    check(scope.sessionId == "default-foreground" && scope.displayId == 0) { "MUTATE_LOCK: display-0 workspace owns input" }
+                    check(plane.kind == SessionPlaneKind.FOREGROUND || plane.kind == SessionPlaneKind.LAYER2_WORKSPACE) {
+                        "MUTATE_LOCK: display-0 workspace owns input"
+                    }
                 }
-                executeScoped(context, request)
+                executeScoped(context, request, plane)
             } catch (error: Exception) { scopeFailure(request, error) }
         }
         return executeScoped(context, request)
     }
 
-    private fun executeScoped(context: Context, request: PhoneToolRequest): PhoneToolResult {
+    private fun executeScoped(context: Context, request: PhoneToolRequest, plane: SessionPlane? = null): PhoneToolResult {
         // Validate before cache lookup AND before observing the human display.
-        val scope = try { com.cyclone.mobile.runtime.session.ExecutionRequestScope.read(request.params) }
+        val resolved = try { plane ?: SessionContract.classify(request.params) }
         catch (error: IllegalArgumentException) { return scopeFailure(request, error) }
+        val scope = com.cyclone.mobile.runtime.session.ExecutionContext(resolved.sessionId, resolved.displayId)
         if (scope.sessionId != "default-foreground") {
-            return synchronized(mutationLock) { executeWorkspace(context, request, scope) }
+            return synchronized(mutationLock) { withPlane(executeWorkspace(context, request, scope), resolved) }
         }
         if (scope.displayId != 0) return scopeFailure(request, IllegalArgumentException("Display/session mismatch"))
-        cached(request.commandId)?.let { return it }
-        return if (request.tool in mutatingTools) {
+        cached(cacheKey(request))?.let { return withPlane(it, resolved) }
+        val result = if (request.tool in mutatingTools) {
             synchronized(mutationLock) {
-                cached(request.commandId) ?: executeInternal(context, request, mutating = true)
+                cached(cacheKey(request)) ?: executeInternal(context, request, mutating = true)
             }
         } else {
             executeInternal(context, request, mutating = false)
+        }
+        return withPlane(result, resolved)
+    }
+
+    private fun withPlane(result: PhoneToolResult, plane: SessionPlane): PhoneToolResult {
+        val payload = result.payload
+        if (!result.ok || payload !is JSONObject) return result
+        if (payload.optJSONObject("plane") != null) return result
+        if (result.tool != "phone.observe" && !result.tool.startsWith("workspace.") && result.tool != "phone.workspace_switch") {
+            return result
+        }
+        return result.copy(payload = SessionContract.attach(payload, plane))
+    }
+
+    private fun scopeErrorCode(error: Exception): PhoneToolErrorCode {
+        val reason = error.message.orEmpty().uppercase()
+        return when {
+            "HUMAN" in reason -> PhoneToolErrorCode.HUMAN_HAS_CONTROL
+            "POLICY" in reason || "GATE" in reason -> PhoneToolErrorCode.POLICY_DENIED
+            "STALE" in reason || "GENERATION" in reason || "EXPIRED" in reason -> PhoneToolErrorCode.FRESH_OBSERVATION_REQUIRED
+            "MISMATCH" in reason -> PhoneToolErrorCode.INVALID_REQUEST
+            else -> PhoneToolErrorCode.CAPABILITY_UNAVAILABLE
         }
     }
 
     private fun scopeFailure(request: PhoneToolRequest, error: Exception): PhoneToolResult {
         val now = System.currentTimeMillis()
         return PhoneToolResult(request.commandId, request.tool, false, now, now,
-            error = PhoneToolError(PhoneToolErrorCode.CAPABILITY_UNAVAILABLE, error.message.orEmpty()))
+            error = PhoneToolError(scopeErrorCode(error), "Execution scope unavailable; observe the current session again."))
     }
 
     private fun executeWorkspace(context: Context, request: PhoneToolRequest,
@@ -125,6 +155,7 @@ object PhoneToolExecutor {
             val selector = p.optJSONObject("selector")?.let(ElementSelector::fromJson)
             val chosen = selector?.let { SelectorEngine.resolve(snapshot, it, 1).firstOrNull()?.node }
             fun guardedPoint(): UiNodeSnapshot {
+                check(selector == null || chosen != null) { "STALE_OBSERVATION: semantic target is no longer present" }
                 val node = chosen ?: snapshot.nodes.filter {
                     val x = p.optDouble("x"); val y = p.optDouble("y")
                     x >= it.bounds.left && x < it.bounds.right && y >= it.bounds.top && y < it.bounds.bottom && it.clickable
@@ -196,8 +227,7 @@ object PhoneToolExecutor {
         } catch (error: Exception) {
             if (request.tool in mutatingTools) runCatching { GatewayObservationStore.clear(scope.sessionId) }
             PhoneToolResult(request.commandId, request.tool, false, started, System.currentTimeMillis(),
-                error = PhoneToolError(if (error.message?.contains("POLICY_DENIED") == true) PhoneToolErrorCode.POLICY_DENIED else PhoneToolErrorCode.CAPABILITY_UNAVAILABLE,
-                    error.message?.take(240) ?: "Workspace operation failed"))
+                error = PhoneToolError(scopeErrorCode(error), "Workspace operation could not complete in its current scope."))
         }
     }
 
@@ -206,13 +236,24 @@ object PhoneToolExecutor {
         val service = CycloneAccessibilityService.instance
         // Reuse the authoritative current gateway frame whenever possible. The old executor rebuilt
         // the Accessibility tree before every command, even phone.observe itself.
-        val before = if (mutating) currentFingerprint(service) else null
+        val before = if (mutating) service?.observe(markFresh = false)?.fingerprint else null
 
         if (mutating && DeviceState.controller != DeviceState.Controller.AGENT) {
             return finish(request, started, before, before, error = PhoneToolError(PhoneToolErrorCode.HUMAN_HAS_CONTROL, "Human currently owns device input"))
         }
         if (mutating && DeviceState.requireFreshObservation) {
             return finish(request, started, before, before, error = PhoneToolError(PhoneToolErrorCode.FRESH_OBSERVATION_REQUIRED, "Run phone.observe after returning control before issuing actions"))
+        }
+        val requestedObservation = request.params.optString("observationId").ifBlank {
+            request.params.optString("currentObservationId") }
+        if (mutating && requestedObservation.isNotBlank()) {
+            val observation = GatewayObservationStore.current()
+            if (!com.cyclone.mobile.fastpath.MutationGrounding.matches(requestedObservation, observation?.id,
+                    observation?.payload?.optString("accessibilityFingerprint"), before,
+                    "default-foreground", 0, observation?.execution?.sessionId, observation?.execution?.displayId)) {
+                return finish(request, started, before, before, error = PhoneToolError(PhoneToolErrorCode.STALE_ELEMENT,
+                    "STALE_OBSERVATION: the screen or observation changed. Observe again before choosing another target."))
+            }
         }
         if (mutating && isDuplicateAction(request)) {
             return finish(request, started, before, before, error = PhoneToolError(PhoneToolErrorCode.DUPLICATE_ACTION, "Duplicate action suppressed"))
@@ -241,6 +282,11 @@ object PhoneToolExecutor {
             ?.takeIf(String::isNotBlank)
         return cached ?: service?.observe(markFresh = false)?.fingerprint
     }
+
+    private fun cacheKey(request: PhoneToolRequest): String = listOf(request.commandId, request.tool,
+        request.params.optString("sessionId", "default-foreground"), request.params.optInt("displayId", 0),
+        request.params.optString("workspaceId"), request.params.optLong("workspaceGeneration", -1),
+        DeviceState.controllerEpoch()).joinToString("|")
 
     private fun cached(commandId: String): PhoneToolResult? = synchronized(resultCache) { resultCache[commandId] }
 
@@ -321,7 +367,11 @@ object PhoneToolExecutor {
                 launchedOutcome(service, before, p, eventGeneration, JSONObject().put("package", packageName).put("launched", true))
             }
             "phone.get_notifications" -> Outcome(notificationJson())
-            "phone.open_notification" -> openNotification(p.optString("key").takeIf { it.isNotBlank() })
+            "phone.open_notification" -> {
+                val generation = DeviceState.uiGeneration()
+                val opened = openNotification(p.optString("key").takeIf { it.isNotBlank() })
+                if (opened.error != null) opened else launchedOutcome(service, before, p, generation, JSONObject().put("opened", true))
+            }
             "phone.get_clipboard" -> {
                 val clipboard = context.getSystemService(ClipboardManager::class.java)
                 val text = clipboard?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
@@ -342,8 +392,9 @@ object PhoneToolExecutor {
                     p.optString("package").takeIf { it.isNotBlank() }?.let(::setPackage)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
+                val generation = DeviceState.uiGeneration()
                 context.startActivity(intent)
-                Outcome(JSONObject().put("started", true))
+                launchedOutcome(service, before, p, generation, JSONObject().put("started", true))
             }
             "phone.launch_intent" -> {
                 val uri = p.optString("uri")
@@ -416,6 +467,7 @@ object PhoneToolExecutor {
             if (action()) {
                 val (afterSnapshot, settle) = settleAfterMutation(service, before, request.params, eventGeneration)
                 val expected = request.params.optJSONObject("expect")
+                if (expected != null && afterSnapshot == null) return Outcome(error = PhoneToolError(PhoneToolErrorCode.ASSERTION_FAILED, "Fresh after-state unavailable"), attempts = attempts)
                 if (expected != null && afterSnapshot != null) {
                     val verification = evaluateCondition(afterSnapshot, expected)
                     if (!verification.first) {
@@ -429,7 +481,9 @@ object PhoneToolExecutor {
                 val payload = JSONObject()
                     .put("performed", true)
                     .put("screenChanged", settle.changed ?: JSONObject.NULL)
-                    .put("verified", settle.verified)
+                    .put("verified", com.cyclone.mobile.fastpath.MutationGrounding.verifiedTransition(true, settle.changed, expected != null))
+                    .put("expectationVerified", expected != null)
+                    .put("postconditionVerified", expected != null)
                     .put("fastPath", settle.toJson())
                 settle.warning?.let { payload.put("warning", it) }
                 return Outcome(
@@ -451,9 +505,12 @@ object PhoneToolExecutor {
         base: JSONObject,
     ): Outcome {
         if (service == null) return Outcome(base.put("verified", false).put("performed", true))
-        val (_, settle) = settleAfterMutation(service, before, params, eventGeneration)
+        val (after, settle) = settleAfterMutation(service, before, params, eventGeneration)
+        val expectedPackage = params.optString("package")
+        val packageVerified = expectedPackage.isNotBlank() && after?.packageName == expectedPackage
         base.put("performed", true)
-            .put("verified", settle.verified)
+            .put("verified", if (expectedPackage.isNotBlank()) packageVerified else settle.verified)
+            .put("postconditionVerified", packageVerified)
             .put("screenChanged", settle.changed ?: JSONObject.NULL)
             .put("fastPath", settle.toJson())
         settle.warning?.let { base.put("warning", it) }
@@ -631,7 +688,7 @@ object PhoneToolExecutor {
             payload = payload,
             error = error,
         )
-        synchronized(resultCache) { resultCache[request.commandId] = result }
+        synchronized(resultCache) { resultCache[cacheKey(request)] = result }
         DeviceState.addAudit(DeviceState.CommandAuditRecord(
             commandId = request.commandId,
             tool = request.tool,

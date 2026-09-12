@@ -15,6 +15,7 @@ import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
 import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
 import org.json.JSONObject
 
@@ -100,6 +101,10 @@ internal object GatewayV33ActionAdapter {
             JSONObject((args.optJSONObject("params") ?: JSONObject()).toString()),
             bound,
         )
+        if (beforeObservation != null && tool in mutatingTools) {
+            normalizedParams.put("observationId", beforeObservation.id)
+            if (bound.sessionId != "default-foreground") normalizedParams.put("executionGeneration", beforeObservation.payload.optLong("executionGeneration", -1))
+        }
         normalizedArgs.put("params", normalizedParams)
 
         val baseResult = when (tool) {
@@ -150,9 +155,10 @@ internal object GatewayV33ActionAdapter {
         }
 
         val execution = baseResult.optJSONObject("execution") ?: JSONObject()
+        val result = attachResultPlane(requestId, baseResult, bound, normalizedParams, execution.optJSONObject("payload"))
         if (tool.startsWith("workspace.") || tool == "phone.workspace_switch") {
             val ok = execution.optBoolean("ok", false)
-            return baseResult
+            return result
                 .put("androidExecution", JSONObject().put("ok", ok))
                 .put("verification", JSONObject().put("ok", ok)
                     .put("status", if (ok) "PASSED" else "FAILED")
@@ -179,7 +185,7 @@ internal object GatewayV33ActionAdapter {
             afterObservation = afterObservation,
             androidExecutionOk = androidExecutionOk,
             executorAssertionFailed = verificationFailedInExecutor,
-            explicitExpectation = expect != null,
+            explicitExpectation = expect != null && execution.optJSONObject("payload")?.optBoolean("expectationVerified") == true,
         )
         val afterStateVerified = sharedVerification.passed
         val verification = when {
@@ -213,9 +219,10 @@ internal object GatewayV33ActionAdapter {
                 .put("semanticSuccessClaimed", true)
                 .put("basis", sharedVerification.basis ?: "FRESH_AFTER_STATE_CHANGED")
             else -> JSONObject()
-                .put("ok", true)
+                .put("ok", false)
                 .put("status", "OBSERVED")
-                .put("code", JSONObject.NULL)
+                .put("code", "NO_SEMANTIC_PROGRESS")
+                .put("message", "The action was dispatched, but the observed page did not prove the intended transition. Re-observe; do not repeat the same mutation blindly.")
                 .put("semanticSuccessClaimed", false)
         }
 
@@ -231,7 +238,7 @@ internal object GatewayV33ActionAdapter {
             verification = verification,
         )
 
-        return baseResult
+        return result
             .put("transport", JSONObject().put("ok", true).put("protocol", GatewayProtocol.VERSION))
             .put("androidExecution", JSONObject()
                 .put("ok", androidExecutionOk)
@@ -284,7 +291,14 @@ internal object GatewayV33ActionAdapter {
         androidExecutionOk: Boolean,
         executorAssertionFailed: Boolean = false,
         explicitExpectation: Boolean = false,
-    ): AgentSemanticVerification = AgentSemanticVerifier.verify(
+    ): AgentSemanticVerification {
+        if (beforeObservation != null && afterObservation != null &&
+            (beforeObservation.execution != afterObservation.execution || beforeObservation.id == afterObservation.id ||
+                afterObservation.capturedAt < beforeObservation.capturedAt)) {
+            return AgentSemanticVerification(com.cyclone.mobile.agent.contract.AgentVerificationStatus.FAILED,
+                false, false, "OBSERVATION_IDENTITY_MISMATCH", "A different or stale execution surface cannot verify this action.")
+        }
+        return AgentSemanticVerifier.verify(
         tool = tool,
         androidExecutionOk = androidExecutionOk,
         executorAssertionFailed = executorAssertionFailed,
@@ -294,6 +308,7 @@ internal object GatewayV33ActionAdapter {
         before = beforeObservation?.let(::semanticState),
         after = afterObservation?.let(::semanticState),
     )
+    }
 
     internal fun verifiedByAfterState(
         tool: String,
@@ -439,21 +454,62 @@ internal object GatewayV33ActionAdapter {
         } else {
             GatewayPrivacy.redactActionParams(tool, params)
         }
-        return JSONObject()
-            .put("source", "PC_CODEX")
-            .put("tool", tool)
-            .put("authority", JSONObject()
-                .put("binding", GatewayActionAuthorityRegistry.bindingName())
-                .put("outcome", decision.outcome.name)
-                .put("reasonCode", decision.reasonCode))
-            .put("sanitizedParams", safeParams)
-            .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
+        return attachResultPlane(
+            requestId,
+            JSONObject()
+                .put("source", "PC_CODEX")
+                .put("tool", tool)
+                .put("authority", JSONObject()
+                    .put("binding", GatewayActionAuthorityRegistry.bindingName())
+                    .put("outcome", decision.outcome.name)
+                    .put("reasonCode", decision.reasonCode))
+                .put("sanitizedParams", safeParams)
+                .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson())),
+            bound,
+            scopedParams,
+            result.payload as? JSONObject,
+        )
     }
 
     private fun bindIdentity(requestId: String, args: JSONObject): ExecutionContext = try {
-        ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()))
+        val merged = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+        if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+        if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+            merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+        }
+        val plane = SessionContract.classify(merged)
+        ExecutionContext(plane.sessionId, plane.displayId)
     } catch (error: SessionIdentityException) {
-        throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch", requestId)
+        throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch", requestId)
+    }
+
+    private fun attachResultPlane(
+        requestId: String,
+        result: JSONObject,
+        bound: ExecutionContext,
+        params: JSONObject,
+        payload: JSONObject? = null,
+    ): JSONObject {
+        val identity = JSONObject(params.toString())
+            .put("sessionId", bound.sessionId)
+            .put("displayId", bound.displayId)
+        if (payload != null) {
+            if (payload.has("workspaceId") && !payload.isNull("workspaceId") &&
+                (!identity.has("workspaceId") || identity.isNull("workspaceId"))
+            ) {
+                identity.put("workspaceId", payload.get("workspaceId"))
+            }
+            if (payload.has("workspaceGeneration") && !payload.isNull("workspaceGeneration") &&
+                (!identity.has("workspaceGeneration") || identity.isNull("workspaceGeneration"))
+            ) {
+                identity.put("workspaceGeneration", payload.get("workspaceGeneration"))
+            }
+        }
+        return try {
+            SessionContract.attach(result, SessionContract.classify(identity))
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch", requestId)
+        }
     }
 
     private fun requireFreshObservation(requestId: String, args: JSONObject, bound: ExecutionContext): GatewayObservation {

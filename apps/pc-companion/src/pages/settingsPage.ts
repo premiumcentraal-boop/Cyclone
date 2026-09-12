@@ -1,4 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  formatSmokeLog,
+  friendlyTunnelState,
+  MCP_TUNNEL_CONNECTOR_CHECKLIST,
+  MCP_TUNNEL_FULL_WARNING,
+  MCP_TUNNEL_STDIO_NOTE,
+  MCP_TUNNEL_SUBTITLE,
+  MCP_TUNNEL_TITLE,
+  stoppedTunnelStatus,
+  type McpTunnelMode,
+  type McpTunnelStatus,
+} from "../core/mcpTunnel.js";
 import { DEFAULT_FOREGROUND_SESSION_ID, SETTINGS_MCP_SESSION_COPY } from "../core/sessionTiles.js";
 import type { DesktopDevice, DesktopRuntimeStatus, DesktopService } from "../services/types.js";
 import { button, el } from "../ui/dom.js";
@@ -13,9 +25,10 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   const header = el("header", "page-header");
   header.append(
     el("h1", "page-title", "Settings & diagnostics"),
-    el("p", "page-subtitle", "USB health, live Android crash monitoring, and Cyclone desktop status."),
+    el("p", "page-subtitle", "USB health, live Android crash monitoring, Cyclone desktop status, and the ChatGPT / Grok chat MCP tunnel."),
   );
   const cards = el("div", "settings-grid");
+  const remoteMcp = createRemoteMcpCard(service);
 
   const companion = statusCard(
     "PC Companion",
@@ -84,7 +97,7 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
   crashDiagnostics.append(diagnosticsPath, diagnosticsDetail, openDiagnostics);
 
   const privacy = statusCard("Privacy", "Protected", "Pairing codes are short-lived. Keyboard and clipboard contents are never kept by the desktop UI or live crash monitor.");
-  cards.append(companion, installPath, phones, mcpLiveDisplay, adb, autoDetect, bridgeRecovery, crashDiagnostics, connectionDiagnostics, privacy);
+  cards.append(remoteMcp.element, companion, installPath, phones, mcpLiveDisplay, adb, autoDetect, bridgeRecovery, crashDiagnostics, connectionDiagnostics, privacy);
   page.append(header, cards);
 
   if (service.mode === "real") {
@@ -214,8 +227,217 @@ export function createSettingsPage(service: DesktopService, devices: DesktopDevi
       active = false;
       if (diagnosticsTimer != null) window.clearInterval(diagnosticsTimer);
       diagnosticsTimer = null;
+      remoteMcp.destroy();
     },
   };
+}
+
+function createRemoteMcpCard(service: DesktopService): { element: HTMLElement; destroy(): void } {
+  const card = el("article", "setting-card mcp-tunnel-card");
+  const top = el("div", "mcp-tunnel-top");
+  const identity = el("div", "mcp-tunnel-identity");
+  identity.append(
+    el("div", "setting-label", MCP_TUNNEL_TITLE),
+    el("p", "setting-copy mcp-tunnel-lead", MCP_TUNNEL_SUBTITLE),
+  );
+  const statePill = el("span", "mcp-tunnel-state state-stopped", "Stopped");
+  top.append(identity, statePill);
+
+  const statusCopy = el("p", "setting-copy", "Checking tunnel status…");
+  const urlRow = el("div", "mcp-tunnel-url-grid");
+  const mcpUrl = urlField("MCP URL", "Public Streamable HTTP path. Quick tunnels change hostname on every Start.");
+  const healthUrl = urlField("Health URL", "Unauthenticated health check. Does not include the bearer.");
+  urlRow.append(mcpUrl.wrap, healthUrl.wrap);
+
+  const authRow = el("div", "mcp-tunnel-auth");
+  const tokenValue = el("div", "mcp-tunnel-token", "Bearer · last 4 —");
+  const copyToken = button("Copy token", "button secondary compact");
+  const rotateToken = button("Rotate token", "button ghost compact");
+  authRow.append(tokenValue, copyToken, rotateToken);
+
+  const modeRow = el("div", "mcp-tunnel-mode");
+  const readonlyBtn = button("Readonly (default)", "button secondary compact mcp-mode-readonly");
+  const fullBtn = button("Full (mutating tools)", "button ghost compact mcp-mode-full");
+  const modeWarning = el("p", "setting-copy mcp-tunnel-warning", MCP_TUNNEL_FULL_WARNING);
+  modeWarning.hidden = true;
+  modeRow.append(readonlyBtn, fullBtn);
+
+  const actions = el("div", "mcp-tunnel-actions");
+  const startBtn = button("Start tunnel", "button primary");
+  const stopBtn = button("Stop tunnel", "button secondary");
+  const restartBtn = button("Restart", "button ghost");
+  const smokeBtn = button("Smoke", "button secondary");
+  const docsBtn = button("Open connector docs", "button ghost");
+  actions.append(startBtn, stopBtn, restartBtn, smokeBtn, docsBtn);
+
+  const log = el("pre", "mcp-tunnel-log", "Tunnel log stays free of the full bearer token.");
+  const checklist = el("details", "mcp-tunnel-checklist");
+  const summary = el("summary", "", "ChatGPT + grok.com checklist");
+  const list = el("ol", "mcp-tunnel-steps");
+  for (const step of MCP_TUNNEL_CONNECTOR_CHECKLIST) list.append(el("li", "", step));
+  checklist.append(summary, list, el("p", "setting-copy", MCP_TUNNEL_STDIO_NOTE));
+
+  card.append(top, statusCopy, urlRow, authRow, modeRow, modeWarning, actions, log, checklist);
+
+  let active = true;
+  let busy = false;
+  let status: McpTunnelStatus = stoppedTunnelStatus("Checking tunnel status…");
+  let pollTimer: number | null = null;
+
+  const setBusy = (next: boolean, label?: string): void => {
+    busy = next;
+    for (const node of [startBtn, stopBtn, restartBtn, smokeBtn, copyToken, rotateToken, readonlyBtn, fullBtn, docsBtn]) {
+      node.disabled = next;
+    }
+    if (next && label) log.textContent = label;
+  };
+
+  const apply = (next: McpTunnelStatus): void => {
+    if (!active) return;
+    status = next;
+    const label = friendlyTunnelState(next.state);
+    statePill.textContent = label;
+    statePill.className = `mcp-tunnel-state state-${next.state}`;
+    statusCopy.textContent = next.message;
+    mcpUrl.value.textContent = next.mcpUrl || "Not published yet";
+    healthUrl.value.textContent = next.healthUrl || next.localHealthUrl;
+    tokenValue.textContent = next.tokenLast4 ? `Bearer · last 4 ${next.tokenLast4}` : "Bearer · last 4 — start once to create a token";
+    readonlyBtn.className = next.mode === "readonly" ? "button primary compact mcp-mode-readonly" : "button secondary compact mcp-mode-readonly";
+    fullBtn.className = next.mode === "full" ? "button primary compact mcp-mode-full" : "button ghost compact mcp-mode-full";
+    modeWarning.hidden = next.mode !== "full";
+    startBtn.disabled = busy || next.state === "running";
+    stopBtn.disabled = busy || next.state === "stopped";
+    restartBtn.disabled = busy || next.state === "stopped";
+  };
+
+  const refresh = async (): Promise<void> => {
+    if (!active || busy) return;
+    try {
+      apply(await service.getMcpTunnelStatus());
+    } catch {
+      if (active) apply(stoppedTunnelStatus("Could not read tunnel status. Keep Cyclone One open and retry."));
+    }
+  };
+
+  const runAction = async (label: string, work: () => Promise<McpTunnelStatus>): Promise<void> => {
+    if (busy) return;
+    setBusy(true, label);
+    try {
+      const next = await work();
+      apply(next);
+      if (next.error) log.textContent = next.error;
+      else log.textContent = next.message;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Tunnel command failed.";
+      log.textContent = message;
+      await refresh();
+    } finally {
+      setBusy(false);
+      startBtn.disabled = status.state === "running";
+      stopBtn.disabled = status.state === "stopped";
+      restartBtn.disabled = status.state === "stopped";
+    }
+  };
+
+  const copyText = async (value: string, control: HTMLButtonElement, restored: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(value);
+      control.textContent = "Copied";
+    } catch {
+      control.textContent = "Select to copy";
+    }
+    window.setTimeout(() => {
+      if (active) control.textContent = restored;
+    }, 1600);
+  };
+
+  startBtn.addEventListener("click", () => {
+    void runAction("Starting tunnel…", () => service.startMcpTunnel(status.mode));
+  });
+  stopBtn.addEventListener("click", () => {
+    void runAction("Stopping tunnel…", () => service.stopMcpTunnel());
+  });
+  restartBtn.addEventListener("click", () => {
+    void runAction("Restarting tunnel…", () => service.restartMcpTunnel());
+  });
+  smokeBtn.addEventListener("click", async () => {
+    if (busy) return;
+    setBusy(true, "Running gateway smoke…");
+    try {
+      const result = await service.smokeMcpTunnel();
+      log.textContent = formatSmokeLog(result);
+    } catch (error) {
+      log.textContent = error instanceof Error ? error.message : "Smoke failed.";
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
+  });
+  docsBtn.addEventListener("click", async () => {
+    try {
+      const path = await service.openMcpTunnelDocs();
+      log.textContent = `Opened connector setup notes: ${path}`;
+    } catch {
+      checklist.open = true;
+      log.textContent = "Could not open the docs file. Use the checklist below.";
+    }
+  });
+  copyToken.addEventListener("click", async () => {
+    try {
+      const secret = await service.copyMcpTunnelToken();
+      await copyText(secret.token, copyToken, "Copy token");
+      log.textContent = `Bearer copied (last 4 ${secret.last4}). It is not written to this log.`;
+    } catch (error) {
+      log.textContent = error instanceof Error ? error.message : "Could not copy the bearer token.";
+    }
+  });
+  rotateToken.addEventListener("click", () => {
+    void runAction("Rotating bearer… previous token will stop working.", () => service.rotateMcpTunnelToken());
+  });
+  mcpUrl.copy.addEventListener("click", () => {
+    if (status.mcpUrl) void copyText(status.mcpUrl, mcpUrl.copy, "Copy");
+  });
+  healthUrl.copy.addEventListener("click", () => {
+    const value = status.healthUrl || status.localHealthUrl;
+    if (value) void copyText(value, healthUrl.copy, "Copy");
+  });
+
+  const setMode = (mode: McpTunnelMode): void => {
+    if (mode === "full") {
+      const confirmed = window.confirm(
+        `${MCP_TUNNEL_FULL_WARNING}\n\nSwitch the public tunnel to full mode?`,
+      );
+      if (!confirmed) return;
+    }
+    void runAction(`Setting mode to ${mode}…`, () => service.setMcpTunnelMode(mode));
+  };
+  readonlyBtn.addEventListener("click", () => setMode("readonly"));
+  fullBtn.addEventListener("click", () => setMode("full"));
+
+  void refresh();
+  pollTimer = window.setInterval(() => {
+    void refresh();
+  }, 4000);
+
+  return {
+    element: card,
+    destroy: () => {
+      active = false;
+      if (pollTimer != null) window.clearInterval(pollTimer);
+      pollTimer = null;
+    },
+  };
+}
+
+function urlField(label: string, hint: string): { wrap: HTMLElement; value: HTMLElement; copy: HTMLButtonElement } {
+  const wrap = el("div", "mcp-tunnel-url");
+  wrap.append(el("div", "setting-label", label));
+  const value = el("div", "mcp-tunnel-url-value", "—");
+  const copy = button("Copy", "button ghost compact");
+  const row = el("div", "mcp-tunnel-url-row");
+  row.append(value, copy);
+  wrap.append(row, el("p", "setting-copy", hint));
+  return { wrap, value, copy };
 }
 
 function statusCard(title: string, value: string, copy: string): HTMLElement {

@@ -1,6 +1,7 @@
 package com.cyclone.mobile.agent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -279,6 +280,9 @@ class CycloneLocalAgentTest {
         assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Suspended)
         assertTrue(agent.resume())
         assertTrue(agent.snapshot().requireFreshObservation)
+        assertNull(agent.snapshot().latestObservationIdentity)
+        assertNull(agent.snapshot().latestPageIdentity)
+        assertNull(agent.snapshot().lastActionSignature)
         assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Completed)
         assertEquals(listOf(true, true), observedRequireFresh)
     }

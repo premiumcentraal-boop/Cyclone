@@ -32,8 +32,17 @@ import com.cyclone.mobile.ui.overlay.OverlayUserAction
 import com.cyclone.mobile.ui.v32.CycloneMobileV32App
 
 class MainActivity : ComponentActivity() {
+    private var rescueRedirect = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val needsRescue = com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime.currentUserId() > 0 &&
+            !createDeviceProtectedStorageContext().getSharedPreferences("cyclone_profile_origin", MODE_PRIVATE).contains("source")
+        if (needsRescue && !intent.getBooleanExtra("skip_profile_rescue", false)) {
+            rescueRedirect = true
+            startActivity(Intent(this, com.cyclone.mobile.ui.ProfileRescueActivity::class.java))
+            finish()
+            return
+        }
         initializeCyclone()
         migrateModelDefault()
         migrateCanonicalLearning()
@@ -42,7 +51,10 @@ class MainActivity : ComponentActivity() {
             // Android 15 enforces edge-to-edge for targetSdk 35. Keep Cyclone's interactive shell
             // inside the status-bar safe area so the top controls never compete with Wi-Fi/battery.
             Box(Modifier.fillMaxSize().statusBarsPadding()) {
-                CycloneMobileV32App()
+                androidx.compose.foundation.layout.Column {
+                    com.cyclone.mobile.ui.ProfileRescueBar()
+                    CycloneMobileV32App()
+                }
             }
         }
         handlePairingIntent(intent)
@@ -60,6 +72,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (rescueRedirect) return
         initializeCyclone()
         CycloneV31Runtime.servicesOrNull()?.refreshHealth()
     }

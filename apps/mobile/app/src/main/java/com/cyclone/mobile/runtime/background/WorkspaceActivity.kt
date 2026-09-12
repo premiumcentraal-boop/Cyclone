@@ -35,7 +35,9 @@ class WorkspaceActivity : ComponentActivity() {
             .sortedBy { it.loadLabel(packageManager).toString() }
         setContent {
             CycloneIntelligenceTheme {
-                var selected by rememberSaveable { mutableIntStateOf(0) }
+                val requested = WorkspaceTasks.resolveQueueTarget(this@WorkspaceActivity,
+                    PendingWorkspaceRequest("preview", intent.getStringExtra("goal").orEmpty(), null))
+                var selected by rememberSaveable { mutableIntStateOf(apps.indexOfFirst { it.activityInfo.packageName == requested?.packageName }.coerceAtLeast(0)) }
                 var menu by remember { mutableStateOf(false) }
                 var goal by rememberSaveable { mutableStateOf(intent.getStringExtra("goal").orEmpty()) }
                 var status by remember { mutableStateOf("") }
@@ -90,7 +92,7 @@ class WorkspaceActivity : ComponentActivity() {
                             }
                             startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
                             WorkspaceTasks.start(this@WorkspaceActivity, goal, app.activityInfo.packageName,
-                                app.loadLabel(packageManager).toString())
+                                app.loadLabel(packageManager).toString(), intent.getStringExtra("pendingRequestId"))
                             finish()
                         }.onFailure { status = it.message ?: "Couldn't start this task. Please try again." }
                     }, enabled = apps.isNotEmpty() && goal.isNotBlank() && readiness.setupFailure == null,

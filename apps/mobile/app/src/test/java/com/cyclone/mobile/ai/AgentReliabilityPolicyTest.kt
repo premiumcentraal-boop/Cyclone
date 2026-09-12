@@ -6,6 +6,30 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentReliabilityPolicyTest {
+    @Test fun redditSequenceDoesNotCarryRetryDebtAcrossVerifiedProgress() {
+        val session = AgentReliabilitySession(AgentReliabilityConfig(maxConsecutiveFailures = 20))
+        session.start()
+        session.observe("launcher")
+        session.requestAction("phone.open_app", "chrome")
+        assertEquals(ReliabilityDirective.RETRY, session.result(false, false, ReliabilityFailureClass.ACTION))
+        session.requestAction("phone.open_app", "chrome")
+        session.result(true, true)
+        session.requestAction("phone.launch_intent", "reddit")
+        session.result(true, true)
+        session.requestAction("phone.back", null)
+        assertEquals(ReliabilityDirective.RETRY, session.result(false, false, ReliabilityFailureClass.ACTION))
+        assertEquals(ReliabilityDirective.CONTINUE, session.requestAction("phone.click", "reject_optional_cookies"))
+    }
+
+    @Test fun observationChurnAndTransportAcceptanceDoNotEraseRetryDebt() {
+        val session = AgentReliabilitySession(AgentReliabilityConfig(maxConsecutiveFailures = 20))
+        session.start()
+        session.observe("a")
+        session.result(false, false, ReliabilityFailureClass.ACTION)
+        session.observe("b")
+        assertEquals(ReliabilityDirective.PAUSE, session.result(true, null, ReliabilityFailureClass.ACTION))
+    }
+
     @Test
     fun repeatedActionWithoutStateProgressPauses() {
         val session = AgentReliabilitySession(AgentReliabilityConfig(maxRepeatedActionWithoutProgress = 2))

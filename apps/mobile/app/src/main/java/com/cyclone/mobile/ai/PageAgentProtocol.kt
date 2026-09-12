@@ -14,6 +14,8 @@ data class PageAgentAction(
     val params: JSONObject,
     val expectedPageChange: Boolean,
     val displaySummary: String,
+    // Runtime-only provenance; JSON parsing never accepts a model assertion of visual grounding.
+    val visualGrounded: Boolean = false,
 )
 
 data class PageAgentDecision(
@@ -151,20 +153,27 @@ Schema:
     fun actionSignature(decision: PageAgentDecision, pageKey: String): String? {
         if (decision.status != "act" || decision.actions.isEmpty()) return null
         return decision.actions.joinToString("|") { action ->
-            when (action.tool) {
+            (if (action.visualGrounded) "vision:" else "") + when (action.tool) {
                 "phone.open_app" -> "phone.open_app:package=${inferAppPackage(action).orEmpty()}"
                 "phone.launch_intent" -> "phone.launch_intent:uri=${safeUriForTrace(action.params.optString("uri"))}"
-                "phone.type", "phone.replace_text" -> "${action.tool}:control=${action.controlId.orEmpty()}"
-                else -> "${action.tool}:control=${action.controlId.orEmpty()}:page=${pageKey.takeLast(12)}"
+                "phone.type", "phone.replace_text" -> "${action.tool}:control=${stableTargetId(action.controlId)}"
+                else -> "${action.tool}:control=${stableTargetId(action.controlId)}"
             }
         }.take(480)
+    }
+
+    /** Execution keeps fresh IDs; convergence ignores only their capture UUID. */
+    internal fun stableTargetId(id: String?): String {
+        val parts = id.orEmpty().split(':')
+        return if (parts.size >= 3 && parts[0] in setOf("semantic", "raw", "element"))
+            parts[0] + ":" + parts.drop(2).joinToString(":") else id.orEmpty()
     }
 
     /** Compact tool arguments for user-shareable diagnostics; never includes typed text/value fields. */
     fun diagnosticActionDetail(action: PageAgentAction): String = when (action.tool) {
         "phone.open_app" -> "package=${inferAppPackage(action).orEmpty().ifBlank { "[missing]" }}"
         "phone.launch_intent" -> "uri=${safeUriForTrace(action.params.optString("uri")).ifBlank { "[missing]" }}"
-        "phone.type", "phone.replace_text" -> "controlId=${action.controlId.orEmpty()} value=[REDACTED_TYPED_VALUE]"
+        "phone.type", "phone.replace_text" -> "controlId=${stableTargetId(action.controlId)} value=[REDACTED_TYPED_VALUE]"
         else -> action.controlId?.let { "controlId=$it" } ?: "no element-scoped arguments"
     }
 
