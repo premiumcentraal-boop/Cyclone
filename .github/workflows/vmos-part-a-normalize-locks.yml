@@ -20,8 +20,8 @@ jobs:
           node-version: '22'
       - name: Normalize npm lock
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund --prefix apps/pc-companion
-      - name: Normalize Cargo lock
-        run: cargo check --manifest-path apps/pc-companion/src-tauri/Cargo.toml
+      - name: Normalize Cargo lock without native GUI build
+        run: cargo generate-lockfile --manifest-path apps/pc-companion/src-tauri/Cargo.toml
       - name: Verify One 1.5.1 lock identities
         run: |
           python3 - <<'PY'
