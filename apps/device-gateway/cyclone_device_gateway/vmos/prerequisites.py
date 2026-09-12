@@ -6,11 +6,12 @@ import re
 from typing import Final
 
 
-CURRENT_ONE_VERSION: Final = "1.5.0"
-MIN_ONE_VERSION: Final = "1.5.0"
-CURRENT_ONE_INSTALLER: Final = "Cyclone-PC-Companion-1.5.0-Setup.exe"
+CURRENT_ONE_VERSION: Final = "1.5.1"
+MIN_ONE_VERSION: Final = "1.5.1"
+CURRENT_ONE_INSTALLER: Final = "Cyclone-PC-Companion-1.5.1-Setup.exe"
 CURRENT_ONE_INSTALL_ROOT: Final = r"%LOCALAPPDATA%\Cyclone One"
-CURRENT_ONE_INSTALLER_SHA256: Final = "191bae8bf09ffd95650cb21f4aa6ae090118e4001baf436f5e216615f2037097"
+BUNDLED_PLATFORM_TOOLS_VERSION: Final = "37.0.1"
+BUNDLED_ADB_RELATIVE_PATH: Final = r"android-platform-tools\adb.exe"
 CURRENT_MOBILE_BASELINE: Final = "4.3.6"
 CURRENT_MOBILE_APK: Final = "Cyclone-4.3.6.apk"
 CURRENT_MOBILE_SHA256: Final = "4894dd8c0a69d3445d81b2f33c98ceef86630a0951d273912bd240b87b27dc17"
@@ -68,38 +69,32 @@ INSTALL_ORDER: Final = (
     InstallStep(
         1,
         "Cyclone One",
-        f"Install published Cyclone One {CURRENT_ONE_VERSION} with {CURRENT_ONE_INSTALLER}; it installs per-user under {CURRENT_ONE_INSTALL_ROOT}.",
-        "One carries CyclonePCRuntime/PC Agent, CycloneAgentMCP and CycloneLivePhone sidecars. There is no separate PC Agent install.",
+        f"Install Cyclone One {CURRENT_ONE_VERSION} with {CURRENT_ONE_INSTALLER}; it installs per-user under {CURRENT_ONE_INSTALL_ROOT}.",
+        f"One carries CyclonePCRuntime/PC Agent, CycloneAgentMCP, CycloneLivePhone and pinned Android Platform-Tools {BUNDLED_PLATFORM_TOOLS_VERSION}. There is no separate PC Agent or ADB installation.",
     ),
     InstallStep(
         2,
-        "Android Platform Tools",
-        "Install Google's Android SDK Platform-Tools for Windows and make adb.exe callable on PATH (or pass its full path to the VMOS scripts).",
-        "Cyclone One 1.5.0 does not bundle adb.exe; VMOS bootstrap and device discovery require an ADB client on the Windows host.",
-    ),
-    InstallStep(
-        3,
         "VMOS Cloud",
         "Create/select one hosted VMOS Cloud Android 15 phone. Android 13/14 are compatibility targets; Android 10 cannot install current Cyclone Mobile.",
         "Cyclone Mobile minSdk is 33 (Android 13). The standard hosted VMOS path does not require a VMOS Edge image ID.",
     ),
     InstallStep(
-        4,
+        3,
         "VMOS Remote ADB",
-        "Ensure VMOS has authorized remote ADB for the account, then open the cloud phone → Local Debugging → ADB and complete VMOS's generated SSH/key + adb connection flow until adb reports state=device.",
+        f"Use One's bundled {BUNDLED_ADB_RELATIVE_PATH}. Ensure VMOS has authorized remote ADB for the account, then open the cloud phone → Local Debugging → ADB and complete VMOS's generated SSH/key + adb connection flow until adb reports state=device.",
         f"VMOS documents the manual Local Debugging ADB session as valid for {VMOS_REMOTE_ADB_DEFAULT_HOURS} hours. Pairing/trust has not started yet.",
     ),
     InstallStep(
-        5,
+        4,
         "Cyclone Mobile",
         f"Download the signed published {CURRENT_MOBILE_APK} (Mobile {CURRENT_MOBILE_BASELINE}) and verify SHA-256 {CURRENT_MOBILE_SHA256}.",
         "The VMOS phone must run package com.cyclone.mobile and launcher .MainActivity.",
     ),
     InstallStep(
-        6,
+        5,
         "Install + launch",
-        "Run scripts/vmos/check-prerequisites.ps1, then scripts/vmos/install-mobile.ps1 against the connected VMOS serial.",
-        "The scripts verify Android API level, package installation, launcher start and a live com.cyclone.mobile PID. Pairing/trust is checklist item 3.",
+        "Run scripts/vmos/check-prerequisites.ps1, then scripts/vmos/install-mobile.ps1 against the connected VMOS serial. Both default to One's bundled adb.exe.",
+        "The scripts verify the ADB runtime, Android API level, package installation, launcher start and a live com.cyclone.mobile PID. Pairing/trust is checklist item 3.",
     ),
 )
 
@@ -113,6 +108,7 @@ class PrerequisiteSnapshot:
     vmos_android_major: int | None
     vmos_adb_account_authorized: bool
     vmos_adb_session_open: bool
+    adb_version: str | None = None
     mobile_sha256: str | None = None
     vmos_image: str | None = None
     needs_edge_control_api: bool = False
@@ -141,7 +137,7 @@ def validate_prerequisites(snapshot: PrerequisiteSnapshot) -> PrerequisiteResult
         blockers.append("Windows 10 or later is required for the supported Cyclone One + VMOS operator path.")
 
     if snapshot.cyclone_one_version is None:
-        blockers.append(f"Install Cyclone One {CURRENT_ONE_VERSION} from the published one-{CURRENT_ONE_VERSION} release.")
+        blockers.append(f"Install Cyclone One {CURRENT_ONE_VERSION}; this is the first One build with the pinned bundled ADB runtime.")
     else:
         one_version = _version_tuple(snapshot.cyclone_one_version)
         if not one_version:
@@ -152,7 +148,22 @@ def validate_prerequisites(snapshot: PrerequisiteSnapshot) -> PrerequisiteResult
             warnings.append(f"Validated VMOS baseline is Cyclone One {CURRENT_ONE_VERSION}; found newer {snapshot.cyclone_one_version}.")
 
     if not snapshot.adb_available:
-        blockers.append("adb.exe is unavailable. Install Google Android SDK Platform-Tools; Cyclone One does not bundle ADB.")
+        blockers.append(
+            f"Cyclone One bundled adb.exe is unavailable. Repair/reinstall One {CURRENT_ONE_VERSION}; expected {CURRENT_ONE_INSTALL_ROOT}\\{BUNDLED_ADB_RELATIVE_PATH}."
+        )
+    elif snapshot.adb_version is None:
+        warnings.append(f"Verify the bundled ADB runtime is Platform-Tools {BUNDLED_PLATFORM_TOOLS_VERSION}.")
+    else:
+        adb_version = _version_tuple(snapshot.adb_version)
+        baseline = _version_tuple(BUNDLED_PLATFORM_TOOLS_VERSION)
+        if not adb_version:
+            blockers.append("ADB Platform-Tools version could not be parsed.")
+        elif adb_version < baseline:
+            blockers.append(f"ADB Platform-Tools {BUNDLED_PLATFORM_TOOLS_VERSION} or newer is required; found {snapshot.adb_version}.")
+        elif snapshot.adb_version != BUNDLED_PLATFORM_TOOLS_VERSION:
+            warnings.append(
+                f"Validated bundled ADB baseline is Platform-Tools {BUNDLED_PLATFORM_TOOLS_VERSION}; found {snapshot.adb_version}."
+            )
 
     if not snapshot.mobile_apk:
         blockers.append(f"Signed {CURRENT_MOBILE_APK} or a newer Cyclone Mobile APK is required.")
