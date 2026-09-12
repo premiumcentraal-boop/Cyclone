@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -27,12 +28,20 @@ import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
-import com.cyclone.mobile.ui.v32.canContinueAfterHumanFromUi
-import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
+import com.cyclone.mobile.ui.v32.CycloneAppIcon
 import com.cyclone.mobile.ui.v32.CycloneTaskStatusPill
 import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
+import com.cyclone.mobile.ui.v32.TaskHumanizer
+import com.cyclone.mobile.ui.v32.canContinueAfterHumanFromUi
+import com.cyclone.mobile.ui.v32.taskVisualState
 
-/** Overlay sibling of the in-app task glass. Both surfaces intentionally share one task identity. */
+/**
+ * The host app stays visually primary while Cyclone works.
+ *
+ * Background work is therefore one compact, tappable status ribbon. Tapping it expands the normal
+ * Ask Cyclone surface with full task controls. Human handoff keeps one explicit continuation button.
+ * Terminal results never render here; BackgroundGlassPolicy hands those to notification/history.
+ */
 @Composable
 fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
     val outsideCyclone = DeviceState.currentPackage != "com.cyclone.mobile"
@@ -47,29 +56,70 @@ fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
         if (outsideCyclone && task.phase == TaskPhase.HUMAN) {
             HumanTakeoverRibbon(task)
         } else {
-            CycloneAskTaskPanel(task)
+            BackgroundTaskRibbon(task, onAsk)
+        }
+    }
+}
+
+@Composable
+private fun BackgroundTaskRibbon(task: WorkspaceTaskUi, onAsk: () -> Unit) {
+    val visualState = task.taskVisualState()
+    val taskLabel = TaskHumanizer.humanize(task.goal, task.app)
+    val trailing = if (visualState == CycloneTaskVisualState.ACTION_NEEDED) "Review" else "Details"
+
+    Surface(
+        onClick = onAsk,
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .semantics { contentDescription = "$trailing for $taskLabel" },
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = .95f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp,
+        shadowElevation = 4.dp,
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 68.dp)
+                .padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+        ) {
             Surface(
-                onClick = onAsk,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics { contentDescription = "Ask Cyclone" },
-                shape = RoundedCornerShape(32.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .90f),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                tonalElevation = 0.dp,
-                shadowElevation = 5.dp,
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
             ) {
+                CycloneAppIcon(task.packageName, Modifier.padding(6.dp).size(30.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     Text(
-                        "Ask Cyclone…",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        task.app.takeIf(String::isNotBlank) ?: "Cyclone",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                    CycloneTaskStatusPill(visualState)
                 }
+                Text(
+                    taskLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
+            Text(
+                trailing,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }
