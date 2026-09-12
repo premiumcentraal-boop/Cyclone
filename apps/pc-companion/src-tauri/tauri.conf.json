@@ -36,11 +36,9 @@
       "binaries/CycloneAgentMCP",
       "binaries/CycloneLivePhone"
     ],
-    "resources": [
-      "resources/mcp-tunnel",
-      "resources/live-phone",
-      "resources/android-platform-tools"
-    ],
+    "resources": {
+      "resources/": ""
+    },
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,
