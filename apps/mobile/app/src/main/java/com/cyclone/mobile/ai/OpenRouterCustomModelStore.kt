@@ -26,7 +26,7 @@ object OpenRouterCustomModelStore {
             .toList()
     }
 
-    fun all(context: Context): List<OpenRouterModelPreset> = OpenRouterModelPresets.all + list(context)
+    fun all(context: Context): List<OpenRouterModelPreset> = OpenRouterCatalogStore.picker(context)
 
     fun add(context: Context, rawSlug: String): Result<OpenRouterModelPreset> = runCatching {
         val slug = rawSlug.trim()

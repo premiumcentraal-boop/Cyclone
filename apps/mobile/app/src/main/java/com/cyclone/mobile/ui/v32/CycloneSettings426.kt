@@ -90,7 +90,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
 
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     var selectedModel by rememberSaveable(refreshTick) {
-        mutableStateOf(V39AiChatContract.storageId(V39AiChatContract.modelForStored(prefs.getString(V39AiChatContract.MODEL_KEY, null))))
+        mutableStateOf(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context))
     }
     var reasoningEffort by rememberSaveable(refreshTick) {
         mutableStateOf(prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium")
@@ -422,7 +422,9 @@ private fun ModelApi426Card(
 ) {
     Settings426Surface {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            CycloneApiKeyEditor(context)
+            CycloneOpenRouterCatalog(context) {
+                onChanged(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context), effort)
+            }
             Text("Model", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             CycloneModelPill(modelId, effort, modifier = Modifier.align(Alignment.Start), onChange = onChanged)
         }

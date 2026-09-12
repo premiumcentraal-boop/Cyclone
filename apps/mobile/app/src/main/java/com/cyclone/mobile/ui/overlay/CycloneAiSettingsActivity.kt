@@ -35,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.ai.OpenRouterCatalogStore
+import com.cyclone.mobile.ui.v32.CycloneOpenRouterCatalog
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.ai.model.ModelQualificationOutcome
@@ -73,13 +76,9 @@ class CycloneAiSettingsActivity : ComponentActivity() {
 private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
     val prefs = remember { context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
-    var selectedModelId by rememberSaveable {
-        mutableStateOf(
-            prefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id)
-                .orEmpty()
-                .ifBlank { OpenRouterModelPresets.DEFAULT.id },
-        )
-    }
+    val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
+    val pickerModels = remember(catalogRevision) { OpenRouterCatalogStore.picker(context) }
+    var selectedModelId by rememberSaveable(catalogRevision) { mutableStateOf(OpenRouterCatalogStore.activeId(context)) }
     var reasoning by rememberSaveable {
         mutableStateOf(
             prefs.getString("openrouter_reasoning_effort", "medium")
@@ -132,8 +131,9 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
             }
         }
 
+        item { SettingsCard { CycloneOpenRouterCatalog(context) } }
         item { Text("Choose model", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-        items(OpenRouterModelPresets.all, key = { it.id }) { model ->
+        items(pickerModels, key = { it.id }) { model ->
             FilterChip(
                 selected = selectedModelId == model.id,
                 onClick = {
@@ -161,7 +161,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                     }
                 }
                 Button(
-                    enabled = !checking && OpenRouterSecretStore.hasKey(context),
+                    enabled = !checking && selectedModelId.isNotBlank() && OpenRouterSecretStore.hasKey(context),
                     onClick = {
                         checking = true
                         accessResult = null

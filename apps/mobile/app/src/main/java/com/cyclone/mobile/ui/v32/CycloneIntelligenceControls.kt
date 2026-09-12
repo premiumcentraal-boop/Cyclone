@@ -9,6 +9,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ai.CycloneAiAccessProfile
 import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
+import com.cyclone.mobile.ai.OpenRouterCatalogStore
 import com.cyclone.mobile.ai.OpenRouterModelPreset
 import com.cyclone.mobile.ai.OpenRouterModelPresets
 
@@ -89,7 +91,12 @@ private fun OverlaySettingsWizard(
     var step by remember { mutableStateOf(OverlaySettingsStep.MODEL) }
     var modelMenuOpen by remember { mutableStateOf(false) }
     var autonomy by remember { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
-    val currentModel = V39AiChatContract.modelForStored(modelId)
+    val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
+    val pickerModels = remember(catalogRevision) { OpenRouterCatalogStore.picker(context) }
+    val currentModel = V39AiChatContract.modelForStored(modelId).let { model ->
+        model.takeIf { candidate -> pickerModels.any { it.id == candidate.id } }
+            ?: OpenRouterModelPresets.byId(OpenRouterCatalogStore.activeId(context))
+    }
     val currentEffort = normalizedEffort(effort)
 
     Column(
@@ -133,7 +140,8 @@ private fun OverlaySettingsWizard(
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                             style = MaterialTheme.typography.titleSmall,
                         )
-                        OpenRouterModelPresets.all.forEach { option ->
+                        if (pickerModels.isEmpty()) Text("Choose models in Settings → Model & API", Modifier.padding(16.dp))
+            pickerModels.forEach { option ->
                             val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
                             DropdownMenuItem(
                                 text = {
@@ -362,8 +370,14 @@ fun CycloneModelPill(
     modifier: Modifier = Modifier,
     onChange: (String, String) -> Unit,
 ) {
+    val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
-    val currentModel = V39AiChatContract.modelForStored(modelId)
+    val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
+    val pickerModels = remember(catalogRevision) { OpenRouterCatalogStore.picker(context) }
+    val currentModel = V39AiChatContract.modelForStored(modelId).let { model ->
+        model.takeIf { candidate -> pickerModels.any { it.id == candidate.id } }
+            ?: OpenRouterModelPresets.byId(OpenRouterCatalogStore.activeId(context))
+    }
     val currentEffort = normalizedEffort(effort)
 
     Box(modifier) {
@@ -397,7 +411,8 @@ fun CycloneModelPill(
             modifier = Modifier.widthIn(min = 268.dp, max = 304.dp),
         ) {
             Text("Select model", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
-            OpenRouterModelPresets.all.forEach { option ->
+            if (pickerModels.isEmpty()) Text("Choose models in Settings → Model & API", Modifier.padding(16.dp))
+            pickerModels.forEach { option ->
                 val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
                 DropdownMenuItem(
                     text = {

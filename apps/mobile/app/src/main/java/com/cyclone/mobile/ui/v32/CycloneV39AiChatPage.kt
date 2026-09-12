@@ -156,8 +156,9 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
     var composer by rememberSaveable { mutableStateOf("") }
     var toolsOpen by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
-    var selectedModelId by rememberSaveable {
-        mutableStateOf(V39AiChatContract.storageId(V39AiChatContract.modelForStored(prefs.getString(V39AiChatContract.MODEL_KEY, null))))
+    val catalogRevision by com.cyclone.mobile.ai.OpenRouterCatalogStore.revision.collectAsState()
+    var selectedModelId by rememberSaveable(catalogRevision, refreshTick) {
+        mutableStateOf(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context))
     }
     var reasoningEffort by rememberSaveable {
         mutableStateOf(prefs.getString("openrouter_reasoning_effort", "medium") ?: "medium")
@@ -192,6 +193,10 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         val normalized = V39AiChatContract.normalizedRequest(raw)
         if (normalized.isBlank()) return
 
+        if (com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context).isBlank()) {
+            message = "Choose models in Settings → Model & API first."
+            return
+        }
         val route = RequestIntentRouter.route(normalized, hasAttachment = attached)
         val dispatch = if (route.intent == RequestIntent.CHAT) RequestDispatch.CHAT else
             RequestIntentRouter.dispatch(route, canStartPhoneTask = WorkspaceTasks.canStartRequest())
@@ -218,7 +223,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 }
                 val history = session.messages.map { (if (it.role == V39ChatRole.USER) "user" else "assistant") to it.text }
                 val attachment = PendingTaskAttachment.take()
-                val model = selectedModel.copy(reasoningEffort = reasoningEffort)
+                val model = OpenRouterModelPresets.byId(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context)).copy(reasoningEffort = reasoningEffort)
                 composer = ""
                 session.busy = true
                 session.status = "Answering…"
