@@ -1,5 +1,8 @@
 package com.cyclone.mobile.ai.model
 
+import com.cyclone.mobile.ai.OpenRouterCatalogStore
+import com.cyclone.mobile.ai.OpenRouterModelAvailability
+import com.cyclone.mobile.ai.OpenRouterReasoningContract
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -9,14 +12,31 @@ import java.io.IOException
 /** Shared compatibility contract. No invented effort names or provider-specific sampling settings. */
 object PortableModelRequest {
     fun body(modelId: String, messages: JSONArray, providers: List<String> = emptyList(), outputTokens: Int = 8192): JSONObject {
+        when (OpenRouterCatalogStore.requestAvailability(modelId)) {
+            OpenRouterModelAvailability.AVAILABLE -> Unit
+            OpenRouterModelAvailability.UNKNOWN -> throw IOException("OpenRouter model access has not been verified for the current API key. Refresh Settings → Model & API.")
+            OpenRouterModelAvailability.UNAVAILABLE -> throw IOException("The selected model is unavailable under the current OpenRouter API key. Choose another model in Settings → Model & API.")
+        }
+        return bodyForVerifiedModel(modelId, messages, providers, outputTokens)
+    }
+
+    /** Pure request-shape builder used after the key-scoped availability gate has passed. */
+    internal fun bodyForVerifiedModel(
+        modelId: String,
+        messages: JSONArray,
+        providers: List<String> = emptyList(),
+        outputTokens: Int = 8192,
+    ): JSONObject {
         val profile = ModelRegistry.resolve(modelId)
-        val maximum = com.cyclone.mobile.ai.OpenRouterCatalogStore.lookup(modelId)?.maxOutputTokens ?: 16384
+        val model = OpenRouterCatalogStore.lookup(modelId)
+        val maximum = model?.maxOutputTokens ?: 16384
         val provider = JSONObject().put("sort", "latency")
             .put("allow_fallbacks", profile?.allowProviderFallbacks ?: false)
         if (providers.isNotEmpty()) provider.put("only", JSONArray(providers))
-        return JSONObject().put("model", modelId).put("messages", messages).put("stream", false)
+        val body = JSONObject().put("model", modelId).put("messages", messages).put("stream", false)
             .put("max_tokens", outputTokens.coerceIn(1, minOf(maximum, 16384)))
             .put("provider", provider)
+        return OpenRouterReasoningContract.apply(body, model?.reasoning, OpenRouterCatalogStore.reasoningForRequest(modelId))
     }
 }
 

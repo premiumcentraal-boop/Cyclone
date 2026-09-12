@@ -35,27 +35,25 @@ internal fun CycloneOpenRouterCatalog(context: Context, onSelectionChanged: () -
     var refresh by remember { mutableStateOf(0) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var available by remember { mutableStateOf<Set<String>?>(null) }
     var hasKey by remember { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
 
     LaunchedEffect(keyGeneration, refresh) {
-        available = null
         error = null
         loading = hasKey
         if (!hasKey) return@LaunchedEffect
+        val key = OpenRouterSecretStore.read(context)
+        OpenRouterCatalogStore.invalidateAvailability(context)
         try {
             val fetched = withContext(Dispatchers.IO) {
-                val key = OpenRouterSecretStore.read(context)
                 val result = OpenRouterCatalogClient().fetch(key)
                 ensureActive()
-                // A late response from a replaced key must never label the new account's access.
                 if (key != OpenRouterSecretStore.read(context)) return@withContext null
                 OpenRouterCatalogStore.saveCatalog(context, result.models)
+                result.availableIds?.let { OpenRouterCatalogStore.saveAvailability(context, key, it) }
                 result
             }
             if (fetched != null) {
-                available = fetched.availableIds
-                error = fetched.warning?.let { "Catalog loaded; account availability could not be checked. $it" }
+                error = fetched.warning?.let { "Catalog loaded, but account availability is not verified. $it" }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -67,16 +65,16 @@ internal fun CycloneOpenRouterCatalog(context: Context, onSelectionChanged: () -
     }
 
     val rows = remember(models, selected, query, onlySelected) {
-        // Retain removed/unlisted selections so the user can still uncheck them.
         val known = models.map { it.id }.toSet()
         val missing = (selected - known).map { CatalogModel(it, it, false, true, 0, null) }
         OpenRouterCatalog.search(models + missing, query).filter { !onlySelected || it.id in selected }
     }
+    val key = remember(revision, keyGeneration) { OpenRouterSecretStore.read(context) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CycloneApiKeyEditor(context) {
+            OpenRouterCatalogStore.invalidateAvailability(context)
             hasKey = OpenRouterSecretStore.hasKey(context)
-            available = null
             keyGeneration++
         }
         OutlinedTextField(
@@ -91,7 +89,7 @@ internal fun CycloneOpenRouterCatalog(context: Context, onSelectionChanged: () -
         }
         FilterChip(selected = onlySelected, onClick = { onlySelected = !onlySelected }, label = { Text("Selected only") })
         Text("Tap a model to add or remove it from your picker. A green check means selected.", style = MaterialTheme.typography.bodySmall)
-        if (!hasKey) Text("Add your OpenRouter API key to load the full catalog.", style = MaterialTheme.typography.bodySmall)
+        if (!hasKey) Text("Add your OpenRouter API key to load and verify the catalog.", style = MaterialTheme.typography.bodySmall)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         if (rows.isEmpty()) {
@@ -101,15 +99,15 @@ internal fun CycloneOpenRouterCatalog(context: Context, onSelectionChanged: () -
                 items(rows, key = { it.id }) { model ->
                     val checked = model.id in selected
                     val listed = models.any { it.id == model.id }
-                    val unavailable = available?.let { model.id !in it } == true
-                    val canSelect = checked || (hasKey && listed && model.textOutput && !unavailable)
+                    val availability = if (hasKey) OpenRouterCatalogStore.availability(context, key, model.id) else OpenRouterModelAvailability.UNKNOWN
+                    val canSelect = checked || (hasKey && listed && model.textOutput && availability == OpenRouterModelAvailability.AVAILABLE)
                     Row(
                         Modifier.fillMaxWidth().toggleable(checked, enabled = canSelect, role = Role.Checkbox) { value ->
                             try {
                                 OpenRouterCatalogStore.select(context, model.id, value)
                                 onSelectionChanged()
-                            } catch (_: Exception) {
-                                error = "Could not save your model selection. Please try again."
+                            } catch (failure: Exception) {
+                                error = ProviderFailure.sanitize(failure.message ?: "Could not save your model selection. Please try again.")
                             }
                         }.padding(vertical = 12.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -121,9 +119,10 @@ internal fun CycloneOpenRouterCatalog(context: Context, onSelectionChanged: () -
                             Text(when {
                                 !listed -> "No longer in catalog · uncheck to remove"
                                 !model.textOutput -> "Not a chat model"
-                                unavailable -> "Unavailable under this key's account settings"
-                                model.imageInput -> "Text + images"
-                                else -> "Text only"
+                                availability == OpenRouterModelAvailability.UNKNOWN -> "Access not verified for this API key"
+                                availability == OpenRouterModelAvailability.UNAVAILABLE -> "Unavailable under this API key's account settings"
+                                model.imageInput -> "Available · text + images"
+                                else -> "Available · text only"
                             }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(
