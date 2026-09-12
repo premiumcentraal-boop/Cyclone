@@ -66,13 +66,25 @@ function Get-FreeLoopbackPort {
   finally { $Listener.Stop() }
 }
 
+function Get-SafeTail([string]$Path, [string]$Token, [string]$PrivateBase) {
+  if (-not (Test-Path $Path)) { return '<none>' }
+  $Text = ((Get-Content $Path -Tail 40 -ErrorAction SilentlyContinue) -join "`n")
+  if ($Token) { $Text = $Text.Replace($Token, '[redacted-token]') }
+  if ($PrivateBase) { $Text = $Text.Replace($PrivateBase, '[private-loopback]') }
+  if (-not $Text.Trim()) { return '<empty>' }
+  return $Text
+}
+
 $GatewayPort = Get-FreeLoopbackPort
 $GatewayBase = "http://127.0.0.1:$GatewayPort"
 $GatewayToken = ([Guid]::NewGuid().ToString('N')) + ([Guid]::NewGuid().ToString('N'))
 $GatewayRuntime = Join-Path $env:RUNNER_TEMP 'CycloneOneGatewayAcceptance'
 if (Test-Path $GatewayRuntime) { Remove-Item -Recurse -Force $GatewayRuntime }
 New-Item -ItemType Directory -Force -Path $GatewayRuntime | Out-Null
+$GatewayStdout = Join-Path $GatewayRuntime 'gateway-stdout.log'
+$GatewayStderr = Join-Path $GatewayRuntime 'gateway-stderr.log'
 $GatewayProcess = $null
+$GatewayReadySeconds = $null
 $EnvironmentNames = @(
   'CYCLONE_DEVICE_GATEWAY_TOKEN',
   'CYCLONE_DEVICE_GATEWAY_URL',
@@ -94,24 +106,46 @@ try {
   $env:CYCLONE_DESKTOP_PAIRING_BOOTSTRAP = '1'
   $env:ADB_PATH = $Adb
 
-  $GatewayProcess = Start-Process -FilePath (Join-Path $InstallDir 'CyclonePCRuntime.exe') -ArgumentList 'serve' -WorkingDirectory $InstallDir -WindowStyle Hidden -PassThru
+  $StartedAt = [DateTime]::UtcNow
+  $GatewayProcess = Start-Process -FilePath (Join-Path $InstallDir 'CyclonePCRuntime.exe') -ArgumentList 'serve' -WorkingDirectory $InstallDir -WindowStyle Hidden -RedirectStandardOutput $GatewayStdout -RedirectStandardError $GatewayStderr -PassThru
   $Headers = @{ Authorization = "Bearer $GatewayToken" }
   $Fleet = $null
-  $Deadline = [DateTime]::UtcNow.AddSeconds(45)
+  $LastGatewayError = $null
+  # PyInstaller one-file extraction plus Windows Defender can make a pristine CI runner materially
+  # slower than a warmed end-user install. Keep the acceptance bounded, but test the real cold
+  # installed executable rather than pre-warming or bypassing its normal entrypoint.
+  $Deadline = $StartedAt.AddSeconds(90)
   while ([DateTime]::UtcNow -lt $Deadline) {
-    if ($GatewayProcess.HasExited) { throw "Installed CyclonePCRuntime exited before gateway readiness: $($GatewayProcess.ExitCode)" }
+    if ($GatewayProcess.HasExited) {
+      $stderr = Get-SafeTail $GatewayStderr $GatewayToken $GatewayBase
+      throw "Installed CyclonePCRuntime exited before gateway readiness: $($GatewayProcess.ExitCode). stderr=$stderr"
+    }
     try {
       $Fleet = Invoke-RestMethod -Uri "$GatewayBase/v1/fleet" -Headers $Headers -Method Get -TimeoutSec 3
+      $GatewayReadySeconds = [Math]::Round(([DateTime]::UtcNow - $StartedAt).TotalSeconds, 2)
       break
     } catch {
+      $LastGatewayError = $_.Exception.Message
       Start-Sleep -Milliseconds 500
     }
   }
-  if ($null -eq $Fleet) { throw 'Installed CyclonePCRuntime did not expose its authenticated loopback gateway.' }
+  if ($null -eq $Fleet) {
+    $listeners = @()
+    try {
+      $listeners = @(Get-NetTCPConnection -OwningProcess $GatewayProcess.Id -State Listen -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State)
+    } catch {}
+    $listenerText = if ($listeners.Count) { $listeners | ConvertTo-Json -Compress } else { '<none>' }
+    $stderr = Get-SafeTail $GatewayStderr $GatewayToken $GatewayBase
+    $stdout = Get-SafeTail $GatewayStdout $GatewayToken $GatewayBase
+    $safeLastError = [string]$LastGatewayError
+    if ($GatewayToken) { $safeLastError = $safeLastError.Replace($GatewayToken, '[redacted-token]') }
+    if ($GatewayBase) { $safeLastError = $safeLastError.Replace($GatewayBase, '[private-loopback]') }
+    throw "Installed CyclonePCRuntime did not expose its authenticated loopback gateway within 90s. processId=$($GatewayProcess.Id) listeners=$listenerText lastProbe=$safeLastError stderr=$stderr stdout=$stdout"
+  }
   if ($null -eq $Fleet.protocol -or -not ($Fleet.PSObject.Properties.Name -contains 'devices')) {
     throw 'Installed CyclonePCRuntime fleet response is missing protocol/devices.'
   }
-  Write-Host "Installed gateway accepted: $GatewayBase protocol=$($Fleet.protocol) bearer-authenticated=yes"
+  Write-Host "Installed gateway accepted: $GatewayBase protocol=$($Fleet.protocol) bearer-authenticated=yes coldReadySeconds=$GatewayReadySeconds"
 
   $Transport = Invoke-RestMethod -Uri "$GatewayBase/v1/transport/usb" -Headers $Headers -Method Get -TimeoutSec 15
   if ($Transport.mode -ne 'usb' -or -not ($Transport.PSObject.Properties.Name -contains 'ok')) {
@@ -137,6 +171,7 @@ try {
   bundled_adb_path='android-platform-tools\\adb.exe'
   gateway_ready=$true
   gateway_loopback=$GatewayBase
+  gateway_cold_ready_seconds=$GatewayReadySeconds
   gateway_authenticated=$true
   transport_onboarding_api=$true
   first_run_guide=$true
