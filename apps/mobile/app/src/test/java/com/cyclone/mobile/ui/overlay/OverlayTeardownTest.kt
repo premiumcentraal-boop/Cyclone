@@ -47,8 +47,8 @@ class OverlayTeardownTest {
     }
 
     @Test
-    fun failedAndStoppedTearDownAndHideGlass() {
-        for (phase in listOf(TaskPhase.FAILED, TaskPhase.STOPPED)) {
+    fun terminalPhasesTearDownAndHideGlass() {
+        for (phase in listOf(TaskPhase.DONE, TaskPhase.FAILED, TaskPhase.STOPPED)) {
             val tick = task.copy(phase = phase)
             assertTrue(BackgroundGlassPolicy.tearDown(tick))
             assertFalse(BackgroundGlassPolicy.visible(tick))
@@ -56,11 +56,11 @@ class OverlayTeardownTest {
     }
 
     @Test
-    fun activePhasesKeepGlassVisibleWithoutTearDown() {
+    fun livePhasesKeepCompactGlassVisibleWithoutTearDown() {
         for (phase in listOf(
             TaskPhase.STARTING,
             TaskPhase.WORKING,
-            TaskPhase.DONE,
+            TaskPhase.PAUSED,
             TaskPhase.REVIEW,
             TaskPhase.HUMAN,
         )) {
