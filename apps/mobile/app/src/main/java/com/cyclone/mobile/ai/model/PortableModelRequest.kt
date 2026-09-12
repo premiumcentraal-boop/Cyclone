@@ -17,6 +17,16 @@ object PortableModelRequest {
             OpenRouterModelAvailability.UNKNOWN -> throw IOException("OpenRouter model access has not been verified for the current API key. Refresh Settings → Model & API.")
             OpenRouterModelAvailability.UNAVAILABLE -> throw IOException("The selected model is unavailable under the current OpenRouter API key. Choose another model in Settings → Model & API.")
         }
+        return bodyForVerifiedModel(modelId, messages, providers, outputTokens)
+    }
+
+    /** Pure request-shape builder used after the key-scoped availability gate has passed. */
+    internal fun bodyForVerifiedModel(
+        modelId: String,
+        messages: JSONArray,
+        providers: List<String> = emptyList(),
+        outputTokens: Int = 8192,
+    ): JSONObject {
         val profile = ModelRegistry.resolve(modelId)
         val model = OpenRouterCatalogStore.lookup(modelId)
         val maximum = model?.maxOutputTokens ?: 16384
