@@ -76,7 +76,8 @@ class CloudControlService:
             "mutationEngine": PHONE_MUTATION_ENGINE,
             "handoffFields": list(HANDOFF_PUBLIC_FIELDS),
             "architecture": architecture,
-            "auth": "bearer-session-token",
+            "auth": "session-token-header-or-bearer",
+            "sessionHeader": "X-Cyclone-Session-Token",
             "localBase": self.public_base or "",
         }
 
@@ -104,7 +105,7 @@ class CloudControlService:
     def authenticate(self, authorization: str | None) -> CloudSession | str:
         token = _bearer(authorization)
         if not token:
-            raise DesktopRuntimeError(RuntimeErrorCode.AUTH_REJECTED, "A Bearer token is required.")
+            raise DesktopRuntimeError(RuntimeErrorCode.AUTH_REJECTED, "A Cyclone session token is required.")
         if secrets.compare_digest(token, self.gateway_token):
             return "operator"
         with self._lock:
@@ -179,68 +180,60 @@ class CloudControlService:
     def swipe(self, principal: CloudSession | str, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
         x1, y1 = self._normalized_point(principal, device_id, body.get("x1"), body.get("y1"), True)
         x2, y2 = self._normalized_point(principal, device_id, body.get("x2"), body.get("y2"), True)
-        duration = body.get("durationMs", body.get("duration_ms", 300))
-        return self._mutate(principal, device_id, "phone.swipe", {
-            "x1": x1, "y1": y1, "x2": x2, "y2": y2, "durationMs": duration,
-        }, body)
+        return self._mutate(
+            principal,
+            device_id,
+            "phone.swipe",
+            {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "durationMs": int(body.get("durationMs") or 300)},
+            body,
+        )
 
     def type_text(self, principal: CloudSession | str, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        text = str(body.get("text") or "")
-        if not text:
-            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "text is required.")
-        return self._mutate(principal, device_id, "phone.type", {"text": text[:4096]}, body)
+        return self._mutate(principal, device_id, "phone.type", {"text": str(body.get("text") or "")}, body)
 
     def launch_app(self, principal: CloudSession | str, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        package_name = str(body.get("packageName") or body.get("package") or "")
-        if not package_name:
-            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "packageName is required.")
-        params: dict[str, Any] = {"package": package_name}
+        params = {"package": str(body.get("packageName") or "")}
         if body.get("activity"):
             params["activity"] = str(body["activity"])
         return self._mutate(principal, device_id, "phone.open_app", params, body)
 
     def press_key(self, principal: CloudSession | str, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
-        key = str(body.get("key") or "").strip().lower()
-        tool = {"back": "phone.back", "home": "phone.home"}.get(key)
-        if tool is None:
-            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Cloud Control supports back and home keys.")
-        return self._mutate(principal, device_id, tool, {}, body)
+        key = str(body.get("key") or "").lower()
+        capability = {
+            "back": "phone.back",
+            "home": "phone.home",
+            "recents": "phone.recents",
+            "enter": "phone.key",
+        }.get(key)
+        if not capability:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unsupported key")
+        params = {} if key != "enter" else {"key": "ENTER"}
+        return self._mutate(principal, device_id, capability, params, body)
 
     def screenshot(self, shot_id: str) -> StoredScreenshot:
+        self._prune()
         with self._lock:
             shot = self._shots.get(shot_id)
-        if shot is None or shot.expires_at <= time.time():
-            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "Screenshot expired.")
+        if shot is None:
+            raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "Screenshot expired or missing.")
         return shot
 
-    def _mutate(self, principal: CloudSession | str, device_id: str, tool: str, params: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
-        record = self._require_device(principal, device_id)
-        target = record.device_id if isinstance(record, CloudSession) else device_id
-        try:
-            self.runtime.controls.set_owner(target, "AI")
-        except Exception:
-            pass
-        expected = str(body.get("expectedObservationId") or "")
-        if isinstance(record, CloudSession):
-            expected = expected or record.last_observation_id or ""
-        if not expected:
-            observed = self.observe(principal, target, session_id=str(body.get("sessionId") or ""))
-            expected = str(observed.get("observationId") or "")
-        result = self.runtime.agent.action(target, {
-            "capability_id": tool,
-            "params": params,
-            "goal": str(body.get("goal") or tool.replace("phone.", "").replace("_", " "))[:1000],
-            "expected_observation_id": expected,
-            "request_ai_control": True,
-            "sessionId": body.get("sessionId") or (record.session_id if isinstance(record, CloudSession) else None),
-        })
-        return strip_secrets({
-            "ok": True,
-            "deviceId": target,
-            "tool": tool,
-            "mutationEngine": PHONE_MUTATION_ENGINE,
-            "result": {key: value for key, value in (result or {}).items() if key not in {"screenshot", "filePath"}},
-        })
+    def _resolve_device(self, *, device_id: str | None = None, serial: str | None = None):
+        if device_id:
+            return self.runtime.fleet.get(device_id)
+        if serial:
+            device = self.runtime.fleet.find_by_serial(serial)
+            if device is not None:
+                return device
+            # The VMOS SSH/ADB tunnel may have become ready after the last fleet scan.
+            # Give the desktop runtime one chance to ingest the freshly connected serial.
+            scan = getattr(self.runtime.fleet, "scan", None)
+            if callable(scan):
+                scan()
+                device = self.runtime.fleet.find_by_serial(serial)
+                if device is not None:
+                    return device
+        raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "VMOS ADB device is not in Cyclone fleet yet.")
 
     def _require_device(self, principal: CloudSession | str, device_id: str) -> CloudSession | Any:
         if isinstance(principal, CloudSession):
@@ -249,124 +242,148 @@ class CloudControlService:
             return principal
         return self._resolve_device(device_id=device_id)
 
-    def _resolve_device(self, *, device_id: str | None = None, serial: str | None = None):
-        if device_id:
-            return self.runtime.fleet.get(device_id)
-        if serial:
-            found = getattr(self.runtime.fleet, "find_by_serial", None)
-            session = found(serial) if callable(found) else None
-            if session is None:
-                raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "No fleet device matches that ADB serial.")
-            return session
-        raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "deviceId or serial is required.")
-
     def _device_card(self, device_id: str) -> dict[str, Any] | None:
         try:
-            session = self.runtime.fleet.get(device_id)
+            device = self.runtime.fleet.get(device_id)
         except DesktopRuntimeError:
             return None
-        adb = str(getattr(getattr(session, "adb_device", None), "state", "") or "missing")
-        public = session.public() if hasattr(session, "public") else {}
+        adb = str(getattr(getattr(device, "adb_device", None), "state", "") or "missing")
+        installed, running = self._mobile_state(device)
         return strip_secrets({
-            "deviceId": session.device_id,
-            "label": public.get("name") or session.device_id,
+            "deviceId": device.device_id,
+            "label": (device.public().get("name") or device.device_id),
             "adb": _adb_label(adb),
+            "mobileInstalled": installed,
+            "mobileRunning": running,
         })
 
-    def _mobile_state(self, session: Any) -> tuple[bool, bool]:
-        adb = getattr(session, "adb", None)
-        if adb is None:
-            return False, False
+    def _mobile_state(self, device) -> tuple[bool, bool]:
         try:
-            path = adb.shell("pm", "path", CYCLONE_PACKAGE, timeout=5)
-            installed = "package:" in (path or "")
+            installed = bool(device.adb.shell("pm", "path", CYCLONE_PACKAGE, timeout=4).strip())
         except Exception:
             installed = False
-        running = False
-        if installed:
-            try:
-                pid = (adb.shell("pidof", CYCLONE_PACKAGE, timeout=5) or "").strip()
-                running = bool(pid) and "error" not in pid.lower()
-            except Exception:
-                running = False
+        if not installed:
+            return False, False
+        try:
+            running = bool(device.adb.shell("pidof", CYCLONE_PACKAGE, timeout=4).strip())
+        except Exception:
+            running = False
         return installed, running
 
     def _trust(self, device_id: str) -> dict[str, Any]:
         try:
-            return self.runtime.trust.status(device_id)
+            value = self.runtime.trust.status(device_id)
+            return value if isinstance(value, dict) else {}
         except Exception:
             return {}
 
     def _status_message(self, adb: str, installed: bool, running: bool, paired: bool, trust: dict[str, Any]) -> str:
         if adb != "device":
-            return "ADB is not ready. Re-run Sync fleet in Cyclone One."
+            return f"ADB is {_adb_label(adb)}. Re-run Sync fleet."
         if not installed:
-            return "Cyclone Mobile is missing on this pad."
+            return "Cyclone Mobile is missing. Install it in the VMOS phone, then Sync fleet."
         if not running:
-            return "Cyclone Mobile is installed but not running."
+            return "Cyclone Mobile is installed but not running. Start it, then Sync fleet."
         if not paired:
-            return "Pair Cyclone Mobile with Cyclone One before ChatGPT can tap."
-        if not (trust.get("trusted") or trust.get("sessionReady")):
-            return "Phone trust is not ready."
-        return "Pad needs attention."
+            return "Cyclone Mobile is not paired with this One gateway. Finish PC Gateway pairing."
+        if not bool(trust.get("trusted") or trust.get("sessionReady")):
+            return "Cyclone Mobile trust is not ready. Finish pairing/trust, then Sync fleet."
+        return "Ready."
 
-    def _normalized_point(self, principal: CloudSession | str, device_id: str, x: Any, y: Any, normalized: Any) -> tuple[float, float]:
-        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
-            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "x and y are required.")
-        fx, fy = float(x), float(y)
-        if normalized is False:
-            session = self._resolve_device(device_id=device_id if not isinstance(principal, CloudSession) else principal.device_id)
-            width = float(getattr(session, "display_width", None) or 1080)
-            height = float(getattr(session, "display_height", None) or 2400)
-            fx, fy = fx / max(width, 1.0), fy / max(height, 1.0)
-        if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):
-            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Coordinates must be in the 0..1 range after normalization.")
-        return fx, fy
-
-    def _publish_screenshot(self, screenshot: Any) -> str | None:
-        path = None
-        media_type = "image/jpeg"
-        if isinstance(screenshot, dict):
-            artifact = screenshot.get("artifact") or {}
-            path = artifact.get("reference") or screenshot.get("filePath")
-            media_type = str(artifact.get("mediaType") or screenshot.get("codec") or media_type)
-        if not path:
-            return None
+    def _normalized_point(self, principal: CloudSession | str, device_id: str, x: Any, y: Any, normalized: Any) -> tuple[int, int]:
+        record = self._require_device(principal, device_id)
+        device = self._resolve_device(device_id=record.device_id if isinstance(record, CloudSession) else device_id)
         try:
-            data = Path(str(path)).read_bytes()
-        except OSError:
-            return None
-        shot_id = secrets.token_hex(16)
+            fx = float(x)
+            fy = float(y)
+        except (TypeError, ValueError) as exc:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Tap/swipe coordinates must be numeric.") from exc
+        if normalized or (0 <= fx <= 1 and 0 <= fy <= 1):
+            width = int(getattr(device, "display_width", 1080) or 1080)
+            height = int(getattr(device, "display_height", 1920) or 1920)
+            fx *= width
+            fy *= height
+        return max(0, int(round(fx))), max(0, int(round(fy)))
+
+    def _mutate(
+        self,
+        principal: CloudSession | str,
+        device_id: str,
+        capability_id: str,
+        params: dict[str, Any],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        record = self._require_device(principal, device_id)
+        target_device = record.device_id if isinstance(record, CloudSession) else device_id
+        payload = {
+            "capability_id": capability_id,
+            "params": params,
+            "goal": str(body.get("goal") or "ChatGPT cloud control")[:500],
+            "request_ai_control": True,
+            "sessionId": body.get("sessionId") or (record.session_id if isinstance(record, CloudSession) else None),
+        }
+        if isinstance(record, CloudSession) and record.last_observation_id:
+            payload["observation_id"] = record.last_observation_id
+        result = self.runtime.agent.action(target_device, payload)
+        clean = strip_secrets(result if isinstance(result, dict) else {"result": result})
+        clean.update({"deviceId": target_device, "sessionId": payload.get("sessionId"), "mutationEngine": PHONE_MUTATION_ENGINE})
+        return clean
+
+    def _publish_screenshot(self, raw: Any) -> str:
+        if not raw:
+            return ""
+        data: bytes | None = None
+        media_type = "image/png"
+        if isinstance(raw, bytes):
+            data = raw
+        elif isinstance(raw, dict):
+            maybe = raw.get("bytes") or raw.get("data")
+            if isinstance(maybe, bytes):
+                data = maybe
+            media_type = str(raw.get("media_type") or raw.get("mime") or media_type)
+        if not data:
+            return ""
+        shot_id = secrets.token_urlsafe(18)
         with self._lock:
             self._shots[shot_id] = StoredScreenshot(data=data, media_type=media_type, expires_at=time.time() + SCREENSHOT_TTL_SECONDS)
-        base = self.public_base.rstrip("/")
-        return f"{base}/v1/screenshots/{shot_id}" if base else f"/cloud/v1/screenshots/{shot_id}"
+        base = self.public_base.rstrip("/") if self.public_base else "/cloud"
+        return f"{base}/v1/screenshots/{shot_id}"
+
+    def _prune(self) -> None:
+        now = time.time()
+        with self._lock:
+            expired_sessions = [sid for sid, row in self._sessions.items() if row.expires_at <= now]
+            for sid in expired_sessions:
+                token = self._sessions[sid].session_token
+                self._sessions.pop(sid, None)
+                self._tokens.pop(token, None)
+            for key in [key for key, row in self._shots.items() if row.expires_at <= now]:
+                self._shots.pop(key, None)
+
+
+def strip_secrets(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: strip_secrets(item) for key, item in value.items() if key not in SECRET_FIELD_NAMES}
+    if isinstance(value, list):
+        return [strip_secrets(item) for item in value]
+    return value
 
 
 def _bearer(authorization: str | None) -> str:
-    value = (authorization or "").strip()
-    if value.lower().startswith("bearer "):
-        return value[7:].strip()
-    return ""
+    if not authorization:
+        return ""
+    prefix, _, token = authorization.partition(" ")
+    if prefix.lower() != "bearer" or not token:
+        return ""
+    return token.strip()
 
 
-def _adb_label(state: str) -> str:
-    if state == "device":
+def _adb_label(value: str) -> str:
+    text = value.lower()
+    if text == "device":
         return "device"
-    if state == "offline":
-        return "offline"
-    if state == "unauthorized":
+    if "unauthorized" in text:
         return "unauthorized"
+    if "offline" in text:
+        return "offline"
     return "missing"
-
-
-def strip_secrets(payload: Any) -> Any:
-    if isinstance(payload, dict):
-        return {
-            key: strip_secrets(value)
-            for key, value in payload.items()
-            if str(key) not in SECRET_FIELD_NAMES
-        }
-    if isinstance(payload, list):
-        return [strip_secrets(item) for item in payload]
-    return payload
