@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0 -or $AdbVersion -notmatch 'Version\s+37\.0\.1') {
 }
 $MarkerText = Get-Content $Marker -Raw
 if ($MarkerText -notmatch 'version=37\.0\.1') { throw 'Platform-Tools version marker is not 37.0.1.' }
-if ($MarkerText -notmatch 'sha256=84df1e5628bc7e6a9f2bf750ab98c591a99a6d622fd48f789cf278336bab5b99') {
+if ($MarkerText -notmatch 'sha256=45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99') {
   throw 'Platform-Tools version marker does not contain the pinned archive SHA-256.'
 }
 
