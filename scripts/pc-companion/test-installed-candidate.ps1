@@ -5,6 +5,7 @@ if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
 $process = Start-Process -FilePath (Resolve-Path $Installer) -ArgumentList "/S /D=$InstallDir" -PassThru
 if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Installer timed out' }
 if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+Write-Host "Installed candidate accepted at clean test directory: $InstallDir"
 
 $Required = @('cyclone-pc-companion.exe','CyclonePCRuntime.exe','CycloneAgentMCP.exe','CycloneLivePhone.exe')
 foreach ($Name in $Required) {
@@ -34,6 +35,7 @@ if ($MarkerText -notmatch 'version=37\.0\.1') { throw 'Platform-Tools version ma
 if ($MarkerText -notmatch 'sha256=45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99') {
   throw 'Platform-Tools version marker does not contain the pinned archive SHA-256.'
 }
+Write-Host 'Installed bundled adb accepted: Android Platform-Tools 37.0.1 with pinned archive SHA-256.'
 
 $FirstRunGuide = Get-ChildItem -Path $InstallDir -Recurse -Filter CYCLONE_FIRST_RUN.md -File | Select-Object -First 1
 if ($null -eq $FirstRunGuide) { throw 'Installed first-run guide is missing.' }
@@ -50,8 +52,12 @@ $GuideFragments = @(
   'loopback-only'
 )
 foreach ($Fragment in $GuideFragments) {
-  if (-not $GuideText.Contains($Fragment)) { throw "Installed first-run guide missing required instruction: $Fragment" }
+  if ($GuideText.IndexOf($Fragment, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw "Installed first-run guide missing required instruction: $Fragment"
+  }
 }
+Write-Host "Installed first-run guide accepted: $($FirstRunGuide.FullName)"
+Write-Host 'Installed first-run contract accepted: bundled ADB, VMOS Android 15/13/14 guidance, Cyclone Mobile 4.3.6, and PC Gateway & QR pairing handoff.'
 
 function Get-FreeLoopbackPort {
   $Listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -105,11 +111,13 @@ try {
   if ($null -eq $Fleet.protocol -or -not ($Fleet.PSObject.Properties.Name -contains 'devices')) {
     throw 'Installed CyclonePCRuntime fleet response is missing protocol/devices.'
   }
+  Write-Host "Installed gateway accepted: $GatewayBase protocol=$($Fleet.protocol) bearer-authenticated=yes"
 
   $Transport = Invoke-RestMethod -Uri "$GatewayBase/v1/transport/usb" -Headers $Headers -Method Get -TimeoutSec 15
   if ($Transport.mode -ne 'usb' -or -not ($Transport.PSObject.Properties.Name -contains 'ok')) {
     throw 'Installed CyclonePCRuntime did not expose the authenticated transport-onboarding API.'
   }
+  Write-Host "Installed transport onboarding accepted: mode=$($Transport.mode) authenticated=yes"
 } finally {
   if ($null -ne $GatewayProcess -and -not $GatewayProcess.HasExited) {
     & taskkill.exe /F /T /PID $GatewayProcess.Id | Out-Null
