@@ -49,7 +49,8 @@ $GuideFragments = @(
   'Android 12 and older are unsupported',
   'Cyclone Mobile 4.3.6',
   'PC Gateway & QR pairing',
-  'loopback-only'
+  'loopback-only',
+  'Share to ChatGPT'
 )
 foreach ($Fragment in $GuideFragments) {
   if ($GuideText.IndexOf($Fragment, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
@@ -58,6 +59,13 @@ foreach ($Fragment in $GuideFragments) {
 }
 Write-Host "Installed first-run guide accepted: $($FirstRunGuide.FullName)"
 Write-Host 'Installed first-run contract accepted: bundled ADB, VMOS Android 15/13/14 guidance, Cyclone Mobile 4.3.6, and PC Gateway & QR pairing handoff.'
+
+$SyncScript = Get-ChildItem -Path $InstallDir -Recurse -Filter 'Sync-VmosFleet.ps1' -File | Select-Object -First 1
+if ($null -eq $SyncScript) { throw 'Installed ChatGPT Attach Sync-VmosFleet.ps1 is missing.' }
+$SyncText = Get-Content $SyncScript.FullName -Raw
+if ($SyncText -notmatch '\$mobilePid\s*=') { throw 'Installed Sync-VmosFleet.ps1 does not use $mobilePid.' }
+if ($SyncText -match '(?i)\$pid\s*=') { throw 'Installed Sync-VmosFleet.ps1 still assigns reserved $PID.' }
+Write-Host "Installed ChatGPT Attach sync script accepted: $($SyncScript.FullName)"
 
 function Get-FreeLoopbackPort {
   $Listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -152,6 +160,12 @@ try {
     throw 'Installed CyclonePCRuntime did not expose the authenticated transport-onboarding API.'
   }
   Write-Host "Installed transport onboarding accepted: mode=$($Transport.mode) authenticated=yes"
+
+  $CloudHealth = Invoke-RestMethod -Uri "$GatewayBase/cloud/v1/health" -Method Get -TimeoutSec 15
+  if ($CloudHealth.ok -ne $true -or $CloudHealth.auth -ne 'bearer-session-token' -or [string]$CloudHealth.localBase -notmatch '/cloud$') {
+    throw 'Installed CyclonePCRuntime did not expose Cloud Control at /cloud/v1/health.'
+  }
+  Write-Host "Installed Cloud Control accepted: $($CloudHealth.localBase) auth=$($CloudHealth.auth)"
 } finally {
   if ($null -ne $GatewayProcess -and -not $GatewayProcess.HasExited) {
     & taskkill.exe /F /T /PID $GatewayProcess.Id | Out-Null
@@ -178,5 +192,7 @@ try {
   vmos_image_tip=$true
   mobile_tip=$true
   trust_pairing_tip=$true
+  chatgpt_attach_sync=$true
+  cloud_control_health=$true
   physical_phone='UNVERIFIED'
 } | ConvertTo-Json | Set-Content -Encoding utf8 $Output

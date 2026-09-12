@@ -377,6 +377,14 @@ class DeviceFleetManager:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "Device is not connected.", retryable=True)
         return session
 
+    def find_by_serial(self, serial: str) -> DeviceSession | None:
+        needle = (serial or "").strip()
+        if not needle:
+            return None
+        with self._lock:
+            device_id = self._serial_to_device.get(needle)
+            return self._sessions.get(device_id) if device_id else None
+
     def refresh_once(self, *, source: str = "manual") -> list[dict[str, Any]]:
         started = time.perf_counter()
         with self._refresh_lock:

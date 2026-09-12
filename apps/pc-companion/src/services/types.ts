@@ -1,4 +1,10 @@
 import type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptShareStatus,
+  ChatgptSyncResult,
+} from "../core/chatgptAttach.js";
+import type {
   McpTunnelMode,
   McpTunnelSmokeCheck,
   McpTunnelSmokeResult,
@@ -108,6 +114,9 @@ export interface ConnectionDiagnosticBundle {
 }
 
 export type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptSyncResult,
   McpTunnelMode,
   McpTunnelSmokeCheck,
   McpTunnelSmokeResult,
@@ -476,6 +485,17 @@ export interface DesktopService {
   copyMcpTunnelToken(): Promise<McpTunnelToken>;
   smokeMcpTunnel(): Promise<McpTunnelSmokeResult>;
   openMcpTunnelDocs(): Promise<string>;
+  loadChatgptAttachConfig(): Promise<ChatgptAttachConfig>;
+  saveChatgptAttachConfig(config: ChatgptAttachConfig): Promise<ChatgptAttachConfig>;
+  syncChatgptAttachFleet(): Promise<ChatgptSyncResult>;
+  copyChatgptHandoff(markdown: string): Promise<{ ok: boolean; markdown?: string }>;
+  saveChatgptHandoff(markdown: string): Promise<string>;
+  chatgptAttachResources(): Promise<ChatgptAttachResources>;
+  chatgptShareStatus(): Promise<ChatgptShareStatus>;
+  chatgptShareStart(): Promise<ChatgptShareStatus>;
+  chatgptShareStop(): Promise<ChatgptShareStatus>;
+  cloudControlLocalBase(): string;
+  probeCloudControl(base?: string): Promise<{ ok: boolean; localBase: string }>;
   getFleetWorkspace?(): Promise<FleetWorkspace>;
   saveFleetGroup?(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup>;
   deleteFleetGroup?(groupId: string): Promise<void>;

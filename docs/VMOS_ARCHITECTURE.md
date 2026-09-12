@@ -75,3 +75,9 @@ A VMOS phone is compatible only when all of the following are true:
 6. Cyclone re-observes/verifies the resulting state through its canonical phone path.
 
 The executable form of these invariants lives in `apps/device-gateway/cyclone_device_gateway/vmos/architecture.py` with tests in `apps/device-gateway/tests/test_vmos_architecture.py`.
+
+## ChatGPT Attach (Custom GPT Actions)
+
+Cyclone One's **ChatGPT Attach** tab is an operator surface for VMOS fleet bootstrap and handoff export. It may open remote ADB tunnels, detect `com.cyclone.mobile`, and mint short-lived Cloud Control sessions. **Share to ChatGPT** publishes Device Gateway Cloud Control (`http://127.0.0.1:<gateway>/cloud`) over HTTPS (trycloudflare) so Plus Custom GPT Actions can reach it. The one-file ChatGPT handoff may contain only `DEVICE_ID`, `SESSION_ID`, `SESSION_TOKEN`, `CONTROL_API`, `MOBILE`, `ADB`, `GOAL`, and `NOTES`.
+
+VMOS AccessKeys, SSH Connect Keys, and other transport secrets stay in the PC secret store and must never enter the handoff, GPT instructions, or model-visible context. ChatGPT Plus talks to the Cloud Control OpenAPI surface (`/cloud/v1`), which maps observe/tap/swipe/type/launch/key onto Device Gateway → Mobile → `PhoneToolExecutor`. Auth is Bearer `SESSION_TOKEN` from Sync/mint. Direct VMOS touch/ADB input remains forbidden as an agent path.

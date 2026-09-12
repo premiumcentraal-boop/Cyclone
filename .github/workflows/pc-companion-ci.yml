@@ -68,15 +68,16 @@ jobs:
           cargo=Path('apps/pc-companion/src-tauri/Cargo.toml').read_text()
           cargo_lock=Path('apps/pc-companion/src-tauri/Cargo.lock').read_text()
           release=tomllib.loads(Path('release/version.toml').read_text())
-          expected='1.5.1'
+          expected='1.5.3'
           assert package['version']==expected
           assert lock['version']==expected and lock['packages']['']['version']==expected
           assert tauri['version']==expected
-          assert re.search(r'^version = "1\.5\.1"$', cargo, re.M)
-          assert re.search(r'name = "cyclone-pc-companion"\nversion = "1\.5\.1"', cargo_lock)
+          assert re.search(r'^version = "1\.5\.3"$', cargo, re.M)
+          assert re.search(r'name = "cyclone-pc-companion"\nversion = "1\.5\.3"', cargo_lock)
           assert release['components']['pc_companion']==expected
           assert release['components']['mobile']=='4.3.6'
-          assert release['release']['publication_authorized'] is False
+          assert release['release']['candidate_generation']=='cyclone-one-1.5.3-chatgpt-attach'
+          assert release['release']['publication_authorized'] is True
           '@
           $Code | python -
       - name: Test gateway and MCP contracts
@@ -90,7 +91,7 @@ jobs:
         shell: pwsh
         run: |
           $failed = $false
-          Get-ChildItem 'scripts/vmos/*.ps1' | ForEach-Object {
+          @(Get-ChildItem 'scripts/vmos/*.ps1') + @(Get-ChildItem 'apps/pc-companion/src-tauri/resources/chatgpt-attach/scripts/*.ps1') | ForEach-Object {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
@@ -144,7 +145,9 @@ jobs:
             -not $Acceptance.first_run_guide -or
             -not $Acceptance.vmos_image_tip -or
             -not $Acceptance.mobile_tip -or
-            -not $Acceptance.trust_pairing_tip
+            -not $Acceptance.trust_pairing_tip -or
+            -not $Acceptance.chatgpt_attach_sync -or
+            -not $Acceptance.cloud_control_health
           ) {
             throw 'Installed candidate did not satisfy the self-contained first-run acceptance contract.'
           }

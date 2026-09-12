@@ -1,6 +1,6 @@
 import type { DesktopDevice } from "../services/types.js";
 
-export type AppRoute = "home" | "fleet" | "focused" | "automations" | "connections" | "settings";
+export type AppRoute = "home" | "fleet" | "focused" | "automations" | "connections" | "chatgpt" | "settings";
 
 export interface CompanionState {
   route: AppRoute;

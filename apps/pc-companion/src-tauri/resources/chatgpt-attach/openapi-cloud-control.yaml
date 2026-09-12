@@ -1,0 +1,246 @@
+openapi: 3.1.0
+info:
+  title: Cyclone Cloud Control API
+  version: 0.1.0
+  description: >-
+    ChatGPT Actions front door for VMOS phones. Mutations must execute via
+    Cyclone Mobile PhoneToolExecutor on the server side, not raw VMOS touch.
+servers:
+  - url: https://CONTROL_API_HOST_PLACEHOLDER
+    description: Replace with your Cloud Control base URL (no trailing slash)
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-session-or-api-key
+  schemas:
+    DeviceStatus:
+      type: object
+      properties:
+        deviceId: { type: string }
+        sessionId: { type: string }
+        adb: { type: string, enum: [device, offline, unauthorized, missing] }
+        mobileInstalled: { type: boolean }
+        gatewayReady: { type: boolean }
+        trustReady: { type: boolean }
+        message: { type: string }
+    ObserveResult:
+      type: object
+      properties:
+        deviceId: { type: string }
+        sessionId: { type: string }
+        screenshotUrl: { type: string, format: uri }
+        summary: { type: string }
+        foregroundPackage: { type: string }
+security:
+  - BearerAuth: []
+paths:
+  /v1/health:
+    get:
+      operationId: getHealth
+      summary: Cloud Control contract (mutation engine is PhoneToolExecutor)
+      security: []
+      responses:
+        '200':
+          description: OK
+  /v1/sessions:
+    post:
+      operationId: createSession
+      summary: Mint a short-lived control session for a linked device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deviceId: { type: string }
+                serial: { type: string }
+                ttlSeconds: { type: integer, default: 7200 }
+      responses:
+        '200':
+          description: OK
+  /v1/devices:
+    get:
+      operationId: listDevices
+      summary: List VMOS-backed devices known to the control plane
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        deviceId: { type: string }
+                        label: { type: string }
+                        adb: { type: string }
+  /v1/devices/{deviceId}/status:
+    get:
+      operationId: getDeviceStatus
+      summary: Gateway/ADB/Mobile/trust status for one device
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: sessionId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceStatus' }
+  /v1/devices/{deviceId}/observe:
+    post:
+      operationId: observe
+      summary: Capture screenshot (+ optional UI summary) via Cyclone path
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId: { type: string }
+                includeUiSummary: { type: boolean, default: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObserveResult' }
+  /v1/devices/{deviceId}/tap:
+    post:
+      operationId: tap
+      summary: Tap at normalized or pixel coordinates via PhoneToolExecutor
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, x, y]
+              properties:
+                sessionId: { type: string }
+                x: { type: number }
+                y: { type: number }
+                normalized: { type: boolean, default: false }
+      responses:
+        '200':
+          description: OK
+  /v1/devices/{deviceId}/swipe:
+    post:
+      operationId: swipe
+      summary: Swipe gesture via PhoneToolExecutor
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, x1, y1, x2, y2]
+              properties:
+                sessionId: { type: string }
+                x1: { type: number }
+                y1: { type: number }
+                x2: { type: number }
+                y2: { type: number }
+                durationMs: { type: integer, default: 300 }
+      responses:
+        '200':
+          description: OK
+  /v1/devices/{deviceId}/type:
+    post:
+      operationId: typeText
+      summary: Type text into the focused field
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, text]
+              properties:
+                sessionId: { type: string }
+                text: { type: string }
+      responses:
+        '200':
+          description: OK
+  /v1/devices/{deviceId}/launch:
+    post:
+      operationId: launchApp
+      summary: Launch an Android package/activity
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, packageName]
+              properties:
+                sessionId: { type: string }
+                packageName: { type: string }
+                activity: { type: string }
+      responses:
+        '200':
+          description: OK
+  /v1/devices/{deviceId}/key:
+    post:
+      operationId: pressKey
+      summary: Press back/home/recents or a keycode
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, key]
+              properties:
+                sessionId: { type: string }
+                key:
+                  type: string
+                  enum: [back, home, recents, enter]
+      responses:
+        '200':
+          description: OK
