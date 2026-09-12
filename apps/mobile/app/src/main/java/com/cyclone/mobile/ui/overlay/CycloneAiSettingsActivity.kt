@@ -48,11 +48,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ai.OpenRouterCatalogStore
-import com.cyclone.mobile.ui.v32.CycloneOpenRouterCatalog
-import com.cyclone.mobile.ai.OpenRouterModelPresets
 import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.ai.model.ModelQualificationOutcome
 import com.cyclone.mobile.ai.model.ModelQualificationRunner
+import com.cyclone.mobile.ui.v32.CycloneOpenRouterCatalog
+import com.cyclone.mobile.ui.v32.CycloneReasoningSelector
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
 import kotlinx.coroutines.launch
 
@@ -74,22 +74,14 @@ class CycloneAiSettingsActivity : ComponentActivity() {
 
 @Composable
 private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
-    val prefs = remember { context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
     val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
     val pickerModels = remember(catalogRevision) { OpenRouterCatalogStore.picker(context) }
     var selectedModelId by rememberSaveable(catalogRevision) { mutableStateOf(OpenRouterCatalogStore.activeId(context)) }
-    var reasoning by rememberSaveable {
-        mutableStateOf(
-            prefs.getString("openrouter_reasoning_effort", "medium")
-                .orEmpty()
-                .takeIf { it in REASONING_LEVELS } ?: "medium",
-        )
-    }
     var checking by remember { mutableStateOf(false) }
     var accessResult by remember { mutableStateOf<String?>(null) }
     var roleRefresh by remember { mutableStateOf(0) }
-    val selectedModel = OpenRouterModelPresets.byId(selectedModelId)
+    val selectedModel = remember(catalogRevision, selectedModelId) { OpenRouterCatalogStore.preset(context, selectedModelId) }
     val roleManager = remember(roleRefresh) { context.getSystemService(RoleManager::class.java) }
     val roleAvailable = roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)
     val assistantHeld = roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)
@@ -137,9 +129,13 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
             FilterChip(
                 selected = selectedModelId == model.id,
                 onClick = {
-                    selectedModelId = model.id
-                    prefs.edit().putString("openrouter_model", model.id).apply()
-                    accessResult = null
+                    try {
+                        OpenRouterCatalogStore.setActive(context, model.id)
+                        selectedModelId = OpenRouterCatalogStore.activeId(context)
+                        accessResult = null
+                    } catch (failure: Exception) {
+                        accessResult = failure.message
+                    }
                 },
                 label = { Text(model.label) },
             )
@@ -147,19 +143,17 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
-                Text("Reasoning", fontWeight = FontWeight.Bold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    REASONING_LEVELS.forEach { level ->
-                        FilterChip(
-                            selected = reasoning == level,
-                            onClick = {
-                                reasoning = level
-                                prefs.edit().putString("openrouter_reasoning_effort", level).apply()
-                            },
-                            label = { Text(level.replaceFirstChar { it.uppercase() }) },
-                        )
-                    }
+                Text("Intelligence", fontWeight = FontWeight.Bold)
+                if (selectedModelId.isBlank()) {
+                    Text("Choose an available model first.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    CycloneReasoningSelector(selectedModelId)
                 }
+                Text(
+                    "Cyclone uses only the exact reasoning efforts advertised by this model in OpenRouter. Changing intelligence never changes the model or provider route.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Button(
                     enabled = !checking && selectedModelId.isNotBlank() && OpenRouterSecretStore.hasKey(context),
                     onClick = {
@@ -174,12 +168,8 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                                         append(selectedModel.label)
                                         append(": ")
                                         append(result.failure.userMessage)
-                                        if (result.failure.httpStatus > 0) {
-                                            append(" (HTTP ").append(result.failure.httpStatus).append(')')
-                                        }
-                                        result.failure.providerMessage
-                                            ?.takeIf { it.isNotBlank() }
-                                            ?.let { append(" · ").append(it) }
+                                        if (result.failure.httpStatus > 0) append(" (HTTP ").append(result.failure.httpStatus).append(')')
+                                        result.failure.providerMessage?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
                                     }
                                 }
                             } catch (_: Exception) {
@@ -223,16 +213,12 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 }
                 if (roleAvailable && !assistantHeld) {
                     Button(
-                        onClick = {
-                            requestAssistant.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
-                        },
+                        onClick = { requestAssistant.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)) },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Make Cyclone my assistant") }
                 }
                 OutlinedButton(
-                    onClick = {
-                        context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    },
+                    onClick = { context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Open Android settings") }
                 Text(
@@ -258,5 +244,3 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
         )
     }
 }
-
-private val REASONING_LEVELS = listOf("low", "medium", "high", "max")
