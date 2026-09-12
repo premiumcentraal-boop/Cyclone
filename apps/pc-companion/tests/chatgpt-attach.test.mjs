@@ -11,6 +11,7 @@ import {
   assertHandoffSafe,
   buildAttachBlock,
   buildFleetHandoff,
+  cloudSessionReady,
   collectSecrets,
   bindOpenApiServer,
   connectionChecklist,
@@ -18,6 +19,7 @@ import {
   handoffContainsForbidden,
   isPlaceholderControlApi,
   newPadDraft,
+  parseVmosConnectCommand,
   publicControlApi,
   publicShareControlApi,
   resolveControlApi,
@@ -93,8 +95,28 @@ test("failed pads stay in the summary without attach blocks or secrets", () => {
       error: "connectKey=should-strip ssh failed",
     }],
   }, "Wait");
-  assert.match(text, /FAILED — \[redacted\]/);
+  assert.match(text, /NOT READY — \[redacted\]/);
   assert.doesNotMatch(text, /should-strip/);
+  assert.doesNotMatch(text, /CYCLONE_VMOS_ATTACH_v1/);
+});
+
+test("local stub sessions fail closed and never enter a ChatGPT handoff", () => {
+  const fake = {
+    ...secretPad,
+    sessionSource: "local-stub",
+    sessionId: "fake-session",
+    sessionToken: "fake-token",
+  };
+  assert.equal(cloudSessionReady(fake), false);
+  const text = buildFleetHandoff({
+    ok: true,
+    controlApi: "https://control.example/cloud",
+    generatedAt: "now",
+    pads: [fake],
+  }, "Observe");
+  assert.match(text, /Pads ready: 0 \/ 1/);
+  assert.doesNotMatch(text, /fake-session/);
+  assert.doesNotMatch(text, /fake-token/);
   assert.doesNotMatch(text, /CYCLONE_VMOS_ATTACH_v1/);
 });
 
@@ -103,6 +125,22 @@ test("attach block uses only the public field set", () => {
   for (const field of HANDOFF_PUBLIC_FIELDS) assert.match(block, new RegExp(`${field}:`));
   assert.doesNotMatch(block, /LABEL:/);
   assert.doesNotMatch(block, /SERIAL:/);
+});
+
+test("VMOS Connect command fills SSH and ADB tunnel fields without a secret", () => {
+  const parsed = parseVmosConnectCommand(
+    "ssh -oStrictHostKeyChecking=accept-new s@192.0.2.10 -p 1824 -L 63670:localhost:1 -Nf",
+  );
+  assert.deepEqual(parsed, {
+    sshHost: "192.0.2.10",
+    sshPort: 1824,
+    sshUser: "s",
+    localAdbPort: 63670,
+    remoteAdbSpec: "localhost:1",
+    serial: "localhost:63670",
+  });
+  assert.equal(parseVmosConnectCommand("adb connect localhost:63670"), null);
+  assert.equal(parseVmosConnectCommand("ssh s@192.0.2.10 -p 1824"), null);
 });
 
 test("public control API falls back to loopback cloud stub then placeholder", () => {
@@ -131,15 +169,21 @@ test("resolveControlApi prefers configured, then share HTTPS, then local stub", 
   assert.equal(isPlaceholderControlApi("http://127.0.0.1:8765/cloud"), false);
 });
 
-test("connection ready checklist covers ADB, Mobile, CONTROL_API, handoff", () => {
+test("connection ready checklist covers transport, real Cloud AI session, CONTROL_API, handoff", () => {
   const items = connectionChecklist({
     pads: [secretPad],
     controlApi: "http://127.0.0.1:8765/cloud",
     controlApiReachable: true,
     handoffCopied: true,
   });
-  assert.deepEqual(items.map((item) => item.id), ["adb", "mobile", "control", "handoff"]);
+  assert.deepEqual(items.map((item) => item.id), ["adb", "mobile", "session", "control", "handoff"]);
   assert.ok(items.every((item) => item.ok));
+  const fakeSession = connectionChecklist({
+    pads: [{ ...secretPad, sessionSource: "local-stub" }],
+    controlApi: "http://127.0.0.1:8765/cloud",
+    controlApiReachable: true,
+  });
+  assert.equal(fakeSession.find((item) => item.id === "session")?.ok, false);
   const empty = connectionChecklist({});
   assert.ok(empty.every((item) => !item.ok));
 });
@@ -153,7 +197,7 @@ test("OpenAPI server URL is rewritten to the live CONTROL_API", () => {
   assert.doesNotMatch(bound, /CONTROL_API_HOST_PLACEHOLDER/);
 });
 
-test("bundled Custom GPT pack has OpenAPI Actions and no VMOS AccessKey samples", () => {
+test("bundled Custom GPT pack has OpenAPI Actions and hardened VMOS tunnel bootstrap", () => {
   const pack = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src-tauri/resources/chatgpt-attach");
   const openapi = fs.readFileSync(path.join(pack, "openapi-cloud-control.yaml"), "utf8");
   const instructions = fs.readFileSync(path.join(pack, "CUSTOM_GPT_INSTRUCTIONS.md"), "utf8");
@@ -167,6 +211,11 @@ test("bundled Custom GPT pack has OpenAPI Actions and no VMOS AccessKey samples"
   assert.doesNotMatch(instructions, /AccessKey:/);
   assert.match(sync, /\$mobilePid\s*=/);
   assert.doesNotMatch(sync, /\$pid\s*=/i);
+  assert.match(sync, /ExitOnForwardFailure=yes/);
+  assert.match(sync, /PreferredAuthentications=keyboard-interactive,password/);
+  assert.match(sync, /finally\s*\{/i);
+  assert.match(sync, /Remove-Item -Force \$keyFile, \$askPass/);
+  assert.doesNotMatch(sync, /'-Nf'/);
   assert.match(connect, /Share to ChatGPT/);
   assert.match(connect, /Bearer/);
 });
@@ -184,6 +233,7 @@ test("mock service can save pads, sync, and copy a safe handoff", async () => {
   assert.equal(synced.ok, true);
   assert.equal(synced.pads[0].ok, true);
   assert.equal(synced.controlApi, "https://control.example/cloud");
+  assert.equal(cloudSessionReady(synced.pads[0]), true);
   const local = await service.probeCloudControl();
   assert.equal(local.ok, true);
   assert.match(local.localBase, /127\.0\.0\.1:8765\/cloud/);
