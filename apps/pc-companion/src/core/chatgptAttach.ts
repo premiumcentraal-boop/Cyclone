@@ -188,6 +188,29 @@ export function isPlaceholderControlApi(base: string | null | undefined): boolea
   return !trimmed || /CONTROL_API_HOST_PLACEHOLDER/i.test(trimmed);
 }
 
+export function isEphemeralShareControlApi(base: string | null | undefined): boolean {
+  try {
+    const url = new URL((base || "").trim());
+    return /(^|\.)trycloudflare\.com$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** True only for an externally addressable HTTPS control URL suitable for ChatGPT Actions. */
+export function isPublicControlApi(base: string | null | undefined): boolean {
+  if (isPlaceholderControlApi(base)) return false;
+  try {
+    const url = new URL((base || "").trim());
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:") return false;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost")) return false;
+    return Boolean(host);
+  } catch {
+    return false;
+  }
+}
+
 export function localCloudControlBase(httpBase: string | null | undefined): string {
   const trimmed = (httpBase || "").trim().replace(/\/+$/, "");
   if (!trimmed) return "";
@@ -209,8 +232,10 @@ export function resolveControlApi(options: {
   fallbackPort?: number;
 }): string {
   const configured = (options.configured || "").trim().replace(/\/+$/, "");
-  if (configured && !isPlaceholderControlApi(configured)) return configured;
   const share = publicShareControlApi(options.shareUrl);
+  // trycloudflare URLs are ephemeral. A newly running share must beat a stale saved share URL.
+  if (share && (!configured || isPlaceholderControlApi(configured) || isEphemeralShareControlApi(configured))) return share;
+  if (configured && !isPlaceholderControlApi(configured)) return configured;
   if (share) return share;
   const local = localCloudControlBase(options.localBase);
   if (local) return local;
@@ -260,7 +285,7 @@ export function connectionChecklist(input: {
     { id: "adb", label: "ADB device", ok: pads.some((pad) => pad.adb === "device") },
     { id: "mobile", label: "Cyclone Mobile running", ok: pads.some((pad) => pad.mobile === "running") },
     { id: "session", label: "Cloud AI session", ok: pads.some((pad) => cloudSessionReady(pad)) },
-    { id: "control", label: "CONTROL_API reachable", ok: Boolean(input.controlApiReachable) && !isPlaceholderControlApi(input.controlApi) },
+    { id: "control", label: "Public CONTROL_API", ok: Boolean(input.controlApiReachable) && isPublicControlApi(input.controlApi) },
     { id: "handoff", label: "Handoff copied", ok: Boolean(input.handoffCopied) },
   ];
 }
