@@ -2,21 +2,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Final
 
 
-CURRENT_ONE_VERSION: Final = "1.1.2"
+CURRENT_ONE_VERSION: Final = "1.5.0"
+MIN_ONE_VERSION: Final = "1.5.0"
+CURRENT_ONE_INSTALLER: Final = "Cyclone-PC-Companion-1.5.0-Setup.exe"
+CURRENT_ONE_INSTALL_ROOT: Final = r"%LOCALAPPDATA%\Cyclone One"
+CURRENT_ONE_INSTALLER_SHA256: Final = "191bae8bf09ffd95650cb21f4aa6ae090118e4001baf436f5e216615f2037097"
 CURRENT_MOBILE_BASELINE: Final = "4.3.6"
+CURRENT_MOBILE_APK: Final = "Cyclone-4.3.6.apk"
+CURRENT_MOBILE_SHA256: Final = "4894dd8c0a69d3445d81b2f33c98ceef86630a0951d273912bd240b87b27dc17"
 MIN_WINDOWS_MAJOR: Final = 10
 MIN_ANDROID_MAJOR: Final = 13
 PREFERRED_ANDROID_MAJOR: Final = 15
 SUPPORTED_ANDROID_MAJORS: Final = (13, 14, 15)
 VMOS_REMOTE_ADB_DEFAULT_HOURS: Final = 24
-VMOS_REMOTE_ADB_API_MIN_DAYS: Final = 1
-VMOS_REMOTE_ADB_API_MAX_DAYS: Final = 7
-VMOS_EDGE_CONTROL_API_MIN_CLIENT: Final = "2.0.4"
-VMOS_EDGE_CONTROL_API_MIN_CBS: Final = "1.1.1.10.7"
-VMOS_EDGE_ANDROID15_REFERENCE_IMAGE: Final = "vcloud_android15_edge_20251227201917"
+VMOS_EDGE_CONTROL_API_MIN_CBS: Final = "1.1.1.10"
+VMOS_EDGE_ANDROID15_CONTROL_API_MIN_IMAGE: Final = "vcloud_android15_edge_20260110"
+
+_MOBILE_APK_RE = re.compile(r"^Cyclone-(\d+)\.(\d+)\.(\d+)\.apk$", re.IGNORECASE)
+_EDGE_ANDROID15_IMAGE_RE = re.compile(r"^vcloud_android15_edge_(\d{8})(?:\d{6})?$")
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -24,6 +31,21 @@ def _version_tuple(value: str) -> tuple[int, ...]:
         return tuple(int(part) for part in value.split("."))
     except ValueError:
         return ()
+
+
+def _mobile_version(path: str) -> tuple[int, ...] | None:
+    match = _MOBILE_APK_RE.fullmatch(Path(path).name)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _edge_android15_image_supported(image: str) -> bool:
+    minimum = _EDGE_ANDROID15_IMAGE_RE.fullmatch(VMOS_EDGE_ANDROID15_CONTROL_API_MIN_IMAGE)
+    candidate = _EDGE_ANDROID15_IMAGE_RE.fullmatch(image)
+    if minimum is None or candidate is None:
+        return False
+    return int(candidate.group(1)) >= int(minimum.group(1))
 
 
 @dataclass(frozen=True)
@@ -45,33 +67,39 @@ class InstallStep:
 INSTALL_ORDER: Final = (
     InstallStep(
         1,
-        "VMOS Cloud",
-        "Create/select one hosted VMOS Cloud phone on Android 15. Android 13/14 remain supported compatibility targets; do not choose Android 10.",
-        "Cyclone Mobile minSdk is 33 (Android 13). Hosted VMOS Cloud is the preferred Cyclone path; VMOS Edge remains optional infrastructure.",
+        "Cyclone One",
+        f"Install published Cyclone One {CURRENT_ONE_VERSION} with {CURRENT_ONE_INSTALLER}; it installs per-user under {CURRENT_ONE_INSTALL_ROOT}.",
+        "One carries CyclonePCRuntime/PC Agent, CycloneAgentMCP and CycloneLivePhone sidecars. There is no separate PC Agent install.",
     ),
     InstallStep(
         2,
-        "Cyclone One",
-        f"Install Cyclone One {CURRENT_ONE_VERSION} on Windows 10+ for the current user.",
-        "Cyclone One bundles CyclonePCRuntime/PC Agent; do not install a second legacy PC Companion.",
+        "Android Platform Tools",
+        "Install Google's Android SDK Platform-Tools for Windows and make adb.exe callable on PATH (or pass its full path to the VMOS scripts).",
+        "Cyclone One 1.5.0 does not bundle adb.exe; VMOS bootstrap and device discovery require an ADB client on the Windows host.",
     ),
     InstallStep(
         3,
-        "VMOS Remote ADB",
-        "Ensure VMOS ADB permission is authorized for the account, open VMOS Local Debugging → ADB, then run VMOS's generated SSH connection command/key and ADB connect command.",
-        f"The UI/manual VMOS path defaults to a {VMOS_REMOTE_ADB_DEFAULT_HOURS}-hour connection. VMOS OpenAPI can request 1–7 day ADB validity; this transport is bootstrap-only.",
+        "VMOS Cloud",
+        "Create/select one hosted VMOS Cloud Android 15 phone. Android 13/14 are compatibility targets; Android 10 cannot install current Cyclone Mobile.",
+        "Cyclone Mobile minSdk is 33 (Android 13). The standard hosted VMOS path does not require a VMOS Edge image ID.",
     ),
     InstallStep(
         4,
-        "Cyclone Mobile",
-        f"Download Cyclone Mobile {CURRENT_MOBILE_BASELINE} or newer APK from the official GitHub release.",
-        "The VMOS phone must run package com.cyclone.mobile and launcher .MainActivity.",
+        "VMOS Remote ADB",
+        "Ensure VMOS has authorized remote ADB for the account, then open the cloud phone → Local Debugging → ADB and complete VMOS's generated SSH/key + adb connection flow until adb reports state=device.",
+        f"VMOS documents the manual Local Debugging ADB session as valid for {VMOS_REMOTE_ADB_DEFAULT_HOURS} hours. Pairing/trust has not started yet.",
     ),
     InstallStep(
         5,
+        "Cyclone Mobile",
+        f"Download the signed published {CURRENT_MOBILE_APK} (Mobile {CURRENT_MOBILE_BASELINE}) and verify SHA-256 {CURRENT_MOBILE_SHA256}.",
+        "The VMOS phone must run package com.cyclone.mobile and launcher .MainActivity.",
+    ),
+    InstallStep(
+        6,
         "Install + launch",
-        "Using the already-authorized VMOS ADB serial: adb -s <serial> install -r <Cyclone.apk>; then adb -s <serial> shell am start -W -n com.cyclone.mobile/.MainActivity.",
-        "Verify package presence and a live com.cyclone.mobile PID. Pairing/trust is intentionally the next checklist item.",
+        "Run scripts/vmos/check-prerequisites.ps1, then scripts/vmos/install-mobile.ps1 against the connected VMOS serial.",
+        "The scripts verify Android API level, package installation, launcher start and a live com.cyclone.mobile PID. Pairing/trust is checklist item 3.",
     ),
 )
 
@@ -85,9 +113,9 @@ class PrerequisiteSnapshot:
     vmos_android_major: int | None
     vmos_adb_account_authorized: bool
     vmos_adb_session_open: bool
+    mobile_sha256: str | None = None
     vmos_image: str | None = None
     needs_edge_control_api: bool = False
-    vmos_edge_client_version: str | None = None
     vmos_edge_cbs_version: str | None = None
 
 
@@ -113,17 +141,32 @@ def validate_prerequisites(snapshot: PrerequisiteSnapshot) -> PrerequisiteResult
         blockers.append("Windows 10 or later is required for the supported Cyclone One + VMOS operator path.")
 
     if snapshot.cyclone_one_version is None:
-        blockers.append(f"Install Cyclone One {CURRENT_ONE_VERSION}; it bundles the required PC runtime/agent.")
-    elif snapshot.cyclone_one_version != CURRENT_ONE_VERSION:
-        warnings.append(f"Validated baseline is Cyclone One {CURRENT_ONE_VERSION}; found {snapshot.cyclone_one_version}.")
+        blockers.append(f"Install Cyclone One {CURRENT_ONE_VERSION} from the published one-{CURRENT_ONE_VERSION} release.")
+    else:
+        one_version = _version_tuple(snapshot.cyclone_one_version)
+        if not one_version:
+            blockers.append("Cyclone One version could not be verified from the installed executable.")
+        elif one_version < _version_tuple(MIN_ONE_VERSION):
+            blockers.append(f"Cyclone One {MIN_ONE_VERSION} or newer is required; found {snapshot.cyclone_one_version}.")
+        elif snapshot.cyclone_one_version != CURRENT_ONE_VERSION:
+            warnings.append(f"Validated VMOS baseline is Cyclone One {CURRENT_ONE_VERSION}; found newer {snapshot.cyclone_one_version}.")
 
     if not snapshot.adb_available:
-        blockers.append("ADB is unavailable on the Windows runtime.")
+        blockers.append("adb.exe is unavailable. Install Google Android SDK Platform-Tools; Cyclone One does not bundle ADB.")
 
     if not snapshot.mobile_apk:
-        blockers.append(f"Cyclone Mobile {CURRENT_MOBILE_BASELINE} or newer APK is required.")
+        blockers.append(f"Signed {CURRENT_MOBILE_APK} or a newer Cyclone Mobile APK is required.")
     elif Path(snapshot.mobile_apk).suffix.lower() != ".apk":
         blockers.append("Cyclone Mobile install artifact must be an .apk file.")
+    else:
+        mobile_version = _mobile_version(snapshot.mobile_apk)
+        if mobile_version is not None and mobile_version < _version_tuple(CURRENT_MOBILE_BASELINE):
+            blockers.append(f"Cyclone Mobile {CURRENT_MOBILE_BASELINE} or newer is required; found {'.'.join(map(str, mobile_version))}.")
+        if Path(snapshot.mobile_apk).name.lower() == CURRENT_MOBILE_APK.lower():
+            if snapshot.mobile_sha256 is None:
+                warnings.append(f"Verify {CURRENT_MOBILE_APK} SHA-256 before install.")
+            elif snapshot.mobile_sha256.lower() != CURRENT_MOBILE_SHA256:
+                blockers.append(f"{CURRENT_MOBILE_APK} SHA-256 does not match the published release asset.")
 
     if snapshot.vmos_android_major is None:
         blockers.append("VMOS Android version is unknown; select a VMOS instance before continuing.")
@@ -141,24 +184,17 @@ def validate_prerequisites(snapshot: PrerequisiteSnapshot) -> PrerequisiteResult
         blockers.append("Open VMOS Local Debugging → ADB and establish VMOS's generated SSH/ADB connection before installing Cyclone Mobile.")
 
     if snapshot.needs_edge_control_api:
-        client = _version_tuple(snapshot.vmos_edge_client_version or "")
         cbs = _version_tuple(snapshot.vmos_edge_cbs_version or "")
-        if not client:
-            blockers.append(f"VMOS Edge Android Control API requires Edge client {VMOS_EDGE_CONTROL_API_MIN_CLIENT} or newer.")
-        elif client < _version_tuple(VMOS_EDGE_CONTROL_API_MIN_CLIENT):
-            blockers.append(f"VMOS Edge Android Control API requires Edge client {VMOS_EDGE_CONTROL_API_MIN_CLIENT} or newer.")
-        if not cbs:
-            blockers.append(f"VMOS Edge Android Control API baseline requires CBS {VMOS_EDGE_CONTROL_API_MIN_CBS} or newer.")
-        elif cbs < _version_tuple(VMOS_EDGE_CONTROL_API_MIN_CBS):
-            blockers.append(f"VMOS Edge Android Control API baseline requires CBS {VMOS_EDGE_CONTROL_API_MIN_CBS} or newer.")
+        if not cbs or cbs < _version_tuple(VMOS_EDGE_CONTROL_API_MIN_CBS):
+            blockers.append(f"VMOS Android Control API requires CBS {VMOS_EDGE_CONTROL_API_MIN_CBS} or newer.")
         if snapshot.vmos_android_major == 15:
             if not snapshot.vmos_image:
-                warnings.append(
-                    f"For VMOS Edge Android 15, the current documented 2.0 reference image is {VMOS_EDGE_ANDROID15_REFERENCE_IMAGE}; image identity was not supplied."
+                blockers.append(
+                    f"VMOS Edge Android 15 Control API requires image {VMOS_EDGE_ANDROID15_CONTROL_API_MIN_IMAGE} or newer."
                 )
-            elif snapshot.vmos_image != VMOS_EDGE_ANDROID15_REFERENCE_IMAGE:
-                warnings.append(
-                    f"VMOS Edge Android 15 image differs from the documented 2.0 reference image {VMOS_EDGE_ANDROID15_REFERENCE_IMAGE}; verify it is an official matching image."
+            elif not _edge_android15_image_supported(snapshot.vmos_image):
+                blockers.append(
+                    f"VMOS Edge Android 15 Control API requires image {VMOS_EDGE_ANDROID15_CONTROL_API_MIN_IMAGE} or newer."
                 )
 
     return PrerequisiteResult(ready=not blockers, blockers=tuple(blockers), warnings=tuple(warnings))
