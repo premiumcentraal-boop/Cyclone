@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 from typing import Final
 
@@ -34,8 +34,18 @@ def _version_tuple(value: str) -> tuple[int, ...]:
         return ()
 
 
+def _artifact_name(path: str) -> str:
+    """Return the leaf name for either Windows or host-native paths.
+
+    VMOS setup is operated from Windows, while contract tests also run on Linux. Using Path.name
+    alone on Linux treats backslashes as ordinary characters and can silently bypass Mobile
+    filename/version/hash guards. Treat a path containing backslashes as a Windows path.
+    """
+    return PureWindowsPath(path).name if "\\" in path else Path(path).name
+
+
 def _mobile_version(path: str) -> tuple[int, ...] | None:
-    match = _MOBILE_APK_RE.fullmatch(Path(path).name)
+    match = _MOBILE_APK_RE.fullmatch(_artifact_name(path))
     if not match:
         return None
     return tuple(int(part) for part in match.groups())
@@ -173,7 +183,8 @@ def validate_prerequisites(snapshot: PrerequisiteSnapshot) -> PrerequisiteResult
         mobile_version = _mobile_version(snapshot.mobile_apk)
         if mobile_version is not None and mobile_version < _version_tuple(CURRENT_MOBILE_BASELINE):
             blockers.append(f"Cyclone Mobile {CURRENT_MOBILE_BASELINE} or newer is required; found {'.'.join(map(str, mobile_version))}.")
-        if Path(snapshot.mobile_apk).name.lower() == CURRENT_MOBILE_APK.lower():
+        mobile_name = _artifact_name(snapshot.mobile_apk)
+        if mobile_name.lower() == CURRENT_MOBILE_APK.lower():
             if snapshot.mobile_sha256 is None:
                 warnings.append(f"Verify {CURRENT_MOBILE_APK} SHA-256 before install.")
             elif snapshot.mobile_sha256.lower() != CURRENT_MOBILE_SHA256:
