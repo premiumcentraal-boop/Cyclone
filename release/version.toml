@@ -1,5 +1,5 @@
-# Cyclone Mobile 4.3.6 — consolidated stability release after 4.3.5.
-# Publication authorized by the user on September 12, 2026; physical Pixel 8 acceptance remains mandatory.
+# Cyclone VMOS compatibility development baseline.
+# Mobile remains the published 4.3.6 identity; Cyclone One is aligned to the published 1.5.0 Local AI Edition.
 schema = 1
 product_version = "4.3.6"
 channel = "development"
@@ -8,16 +8,16 @@ python_version = "4.1.0"
 
 [components]
 mobile = "4.3.6"
-pc_companion = "1.1.2"
+pc_companion = "1.5.0"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
 previous_mobile_version = "4.3.5"
-publication_authorized = true
+publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.3.6-stability"
+candidate_generation = "cyclone-vmos-compatibility"

@@ -277,11 +277,14 @@ export class MockDesktopService implements DesktopService {
     return [
       {
         id: "codex", name: "Codex", description: "Use Cyclone phones from Codex.", state: "READY_TO_CONNECT", actionLabel: "Connect",
-        detected: true, configured: false, gatewayState: "READY", gatewayReachable: true,
-        readyDeviceCount: 3, deviceCount: 4, toolCount: 14, transport: "stdio", approvalMode: "writes",
+        aiState: "DETECTED", detected: true, configured: false, gatewayState: "READY", gatewayReachable: true,
+        readyDeviceCount: 3, deviceCount: 4, toolCount: 14, transport: "stdio", approvalMode: "writes", phoneState: "READY",
       },
-      { id: "deepseek-mcp", name: "DeepSeek / MCP harness", description: "Connect an MCP-capable reasoning harness.", state: "CONNECTED" },
-      { id: "generic-mcp", name: "Generic MCP", description: "Use a compatible MCP client.", state: "NOT_INSTALLED", actionLabel: "Set up" },
+      { id: "grok", name: "Grok", description: "Connect Grok on this PC.", state: "CONNECTED", aiState: "CONNECTED", detected: true, configured: true },
+      { id: "cursor", name: "Cursor", description: "Connect Cursor on this PC.", state: "READY_TO_CONNECT", aiState: "DETECTED", detected: true, configured: false },
+      { id: "opencode", name: "OpenCode", description: "Connect OpenCode on this PC.", state: "CONNECTED", aiState: "CONNECTED", detected: true, configured: true },
+      { id: "copilot", name: "Copilot", description: "Connect Copilot on this PC.", state: "NOT_INSTALLED", aiState: "UNKNOWN", detected: false },
+      { id: "generic", name: "Generic MCP", description: "Use a compatible MCP client.", state: "READY_TO_CONNECT", aiState: "DETECTED", detected: true },
     ];
   }
   async runConnectorAction(_connectorId: string, _action: "connect" | "install" | "repair"): Promise<ConnectorActionResult> {
