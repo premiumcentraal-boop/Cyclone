@@ -101,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings.from_env()
     app = create_desktop_app(settings)
+    # Part B transport onboarding is attached only to Cyclone One's authenticated loopback API.
+    # The router itself is allowlisted and exposes no generic adb/shell command surface.
     app.include_router(create_transport_router(app.state.desktop_runtime, settings.token))
     attach_to_app(app)
     uvicorn.run(app, host=settings.host, port=settings.port)
