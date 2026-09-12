@@ -1,5 +1,5 @@
 # Cyclone Mobile 4.3.8 — key-scoped OpenRouter catalog and exact per-model intelligence.
-# Publication authorized by the user on September 12, 2026; physical device acceptance remains unverified.
+# Publication authorized by the user on September 12, 2026; exact release-branch CI/signing required; physical device acceptance remains unverified.
 schema = 1
 product_version = "4.3.8"
 channel = "development"
