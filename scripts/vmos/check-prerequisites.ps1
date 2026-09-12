@@ -17,13 +17,13 @@ $windows = [System.Environment]::OSVersion.Version
 if ($windows.Major -lt 10) { $blockers += "Windows 10 or later is required." }
 
 $oneRoot = Join-Path $env:LOCALAPPDATA "Cyclone One"
-$oneExe = Join-Path $oneRoot "Cyclone One.exe"
+$oneExe = Join-Path $oneRoot "cyclone-pc-companion.exe"
 $bundledAdb = Join-Path $oneRoot "android-platform-tools\adb.exe"
 if ([string]::IsNullOrWhiteSpace($Adb)) { $Adb = $bundledAdb }
 
 $oneVersion = $null
 if (-not (Test-Path $oneExe)) {
-  $blockers += "Cyclone One is not installed at '%LOCALAPPDATA%\Cyclone One\Cyclone One.exe'. Install the Cyclone One 1.5.1 VMOS candidate first."
+  $blockers += "Cyclone One is not installed at '%LOCALAPPDATA%\Cyclone One\cyclone-pc-companion.exe'. Install the Cyclone One 1.5.1 VMOS candidate first."
 } else {
   try {
     $rawOneVersion = (Get-Item $oneExe).VersionInfo.ProductVersion
