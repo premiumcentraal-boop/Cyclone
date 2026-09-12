@@ -4,6 +4,7 @@ import "./tasks.css";
 import "./connections.css";
 import "./redesign.css";
 import "./connections-redesign.css";
+import "./chatgpt-attach.css";
 import { CyclonePcCompanionApp } from "./app.js";
 import { createDesktopService } from "./services/serviceFactory.js";
 import { mountTransportOnboarding } from "./ui/transportOnboarding.js";

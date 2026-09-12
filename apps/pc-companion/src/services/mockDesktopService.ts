@@ -23,7 +23,15 @@ import type {
   McpTunnelSmokeResult,
   McpTunnelStatus,
   McpTunnelToken,
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptSyncResult,
 } from "./types.js";
+import {
+  emptyChatgptAttachConfig,
+  localStubSession,
+  publicControlApi,
+} from "../core/chatgptAttach.js";
 import { bindLayer2Status, LAYER2_PROTOCOL } from "../core/layer2.js";
 import { stoppedTunnelStatus } from "../core/mcpTunnel.js";
 import { bindSessionTile, DEFAULT_FOREGROUND_SESSION_ID, isDefaultForegroundSession, jpegFocusTarget, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
@@ -42,6 +50,8 @@ export class MockDesktopService implements DesktopService {
   private tunnel: McpTunnelStatus = stoppedTunnelStatus(
     "Mock Settings terminal. Packaged Cyclone One starts the real HTTPS tunnel from here.",
   );
+  private chatgptConfig: ChatgptAttachConfig = emptyChatgptAttachConfig();
+  private chatgptSecrets = new Map<string, string>();
 
   constructor(deviceCount = 4) {
     this.devices = createMockDevices(deviceCount);
@@ -356,6 +366,75 @@ export class MockDesktopService implements DesktopService {
     return "mock://connector-setup";
   }
 
+  async loadChatgptAttachConfig(): Promise<ChatgptAttachConfig> {
+    return publicChatgptConfig(this.chatgptConfig, this.chatgptSecrets);
+  }
+
+  async saveChatgptAttachConfig(config: ChatgptAttachConfig): Promise<ChatgptAttachConfig> {
+    const pads = config.pads.map((pad, index) => {
+      const id = pad.id || `pad-${index + 1}`;
+      if (pad.connectKey) this.chatgptSecrets.set(id, pad.connectKey);
+      return {
+        id,
+        label: pad.label || id,
+        sshHost: pad.sshHost,
+        sshPort: pad.sshPort || 1824,
+        sshUser: pad.sshUser || "s",
+        localAdbPort: pad.localAdbPort || 63670 + index,
+        remoteAdbSpec: pad.remoteAdbSpec || "localhost:1",
+        hasConnectKey: Boolean(pad.connectKey || this.chatgptSecrets.get(id)),
+      };
+    });
+    this.chatgptConfig = {
+      controlApiBase: config.controlApiBase || "",
+      defaultGoal: config.defaultGoal || this.chatgptConfig.defaultGoal,
+      hasVmosApiKey: Boolean(config.vmosApiKey) || this.chatgptConfig.hasVmosApiKey,
+      pads,
+    };
+    return this.loadChatgptAttachConfig();
+  }
+
+  async syncChatgptAttachFleet(): Promise<ChatgptSyncResult> {
+    const pads = this.chatgptConfig.pads.map((pad) => {
+      const session = localStubSession();
+      return {
+        id: pad.id,
+        label: pad.label,
+        ok: true,
+        deviceId: `dev_${pad.id}`,
+        serial: `localhost:${pad.localAdbPort}`,
+        adb: "device" as const,
+        mobile: "running" as const,
+        sessionId: session.sessionId,
+        sessionToken: session.sessionToken,
+        sessionSource: "control-api" as const,
+      };
+    });
+    return {
+      ok: pads.length > 0,
+      controlApi: publicControlApi(this.chatgptConfig.controlApiBase, 8765),
+      generatedAt: new Date().toISOString(),
+      pads,
+      message: pads.length ? "Mock fleet synced." : "Add a pad first.",
+    };
+  }
+
+  async copyChatgptHandoff(markdown: string): Promise<{ ok: boolean; markdown?: string }> {
+    return { ok: true, markdown };
+  }
+
+  async saveChatgptHandoff(_markdown: string): Promise<string> {
+    return "mock://FLEET_HANDOFF.md";
+  }
+
+  async chatgptAttachResources(): Promise<ChatgptAttachResources> {
+    return {
+      openapi: "openapi: 3.1.0\ninfo:\n  title: Cyclone Cloud Control API\n",
+      instructions: "You control VMOS phones through Actions only.",
+      exampleFleet: "{\"pads\":[]}",
+    };
+  }
+
   async getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return {
       backendReachable: true,
@@ -649,4 +728,17 @@ function mockFrameDataUrl(
     : "";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="1200" viewBox="0 0 540 1200">${comment}<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="hsl(${hueA} 42% 16%)"/><stop offset="1" stop-color="hsl(${hueB} 52% 8%)"/></linearGradient></defs><rect width="540" height="1200" fill="url(#g)"/><rect x="28" y="70" width="484" height="120" rx="28" fill="rgba(255,255,255,.08)"/><rect x="28" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.07)"/><rect x="284" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.05)"/><rect x="28" y="474" width="484" height="190" rx="36" fill="rgba(255,255,255,.06)"/><rect x="28" y="692" width="484" height="320" rx="36" fill="rgba(255,255,255,.045)"/><circle cx="54" cy="1136" r="22" fill="#8b5cf6"/><text x="88" y="1146" fill="white" opacity=".82" font-family="system-ui" font-size="30">${label}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function publicChatgptConfig(config: ChatgptAttachConfig, secrets: Map<string, string>): ChatgptAttachConfig {
+  return {
+    controlApiBase: config.controlApiBase,
+    defaultGoal: config.defaultGoal,
+    hasVmosApiKey: config.hasVmosApiKey,
+    pads: config.pads.map((pad) => ({
+      ...pad,
+      connectKey: undefined,
+      hasConnectKey: Boolean(pad.hasConnectKey || secrets.get(pad.id)),
+    })),
+  };
 }

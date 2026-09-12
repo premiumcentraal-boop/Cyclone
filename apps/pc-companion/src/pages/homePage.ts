@@ -12,6 +12,7 @@ export function createHomePage(
   onControl: () => void,
   onAutomations: () => void,
   onConnections: () => void,
+  onChatgpt?: () => void,
 ): HomePageHandle {
   const page = el("section", "page content-page home-page home-overview");
   const readyDevices = devices.filter((device) => device.state === "READY" && !needsTrustRepair(device));
@@ -94,6 +95,7 @@ export function createHomePage(
   quick.append(
     quickCard("Tasks", "Run foreground or background phone work without cluttering your dashboard.", "Open Tasks", onAutomations),
     quickCard("AI connections", "Connect cloud agents or Codex with a guided one-step setup.", "Manage connections", onConnections),
+    quickCard("ChatGPT Attach", "Sync VMOS Cloud pads and copy a one-file ChatGPT handoff.", "Open ChatGPT Attach", onChatgpt ?? onConnections),
   );
 
   page.append(header, stats, workspace, quick);

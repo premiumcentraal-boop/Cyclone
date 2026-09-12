@@ -1,3 +1,4 @@
+mod chatgpt_attach;
 mod mcp_tunnel;
 mod live_phone;
 mod live_phone_bridge;
@@ -299,7 +300,13 @@ pub fn run() {
             mcp_tunnel::mcp_tunnel_set_mode,
             mcp_tunnel::mcp_tunnel_token,
             mcp_tunnel::mcp_tunnel_smoke,
-            mcp_tunnel::mcp_tunnel_open_docs
+            mcp_tunnel::mcp_tunnel_open_docs,
+            chatgpt_attach::chatgpt_attach_load,
+            chatgpt_attach::chatgpt_attach_save,
+            chatgpt_attach::chatgpt_attach_sync,
+            chatgpt_attach::chatgpt_attach_copy,
+            chatgpt_attach::chatgpt_attach_save_handoff,
+            chatgpt_attach::chatgpt_attach_resources
         ])
         .build(tauri::generate_context!())
         .expect("error while building Cyclone One")

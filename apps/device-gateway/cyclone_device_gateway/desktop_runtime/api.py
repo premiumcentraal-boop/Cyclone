@@ -31,6 +31,7 @@ from .sessions import ExecutionSessionService
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 from .workspace import FleetWorkspaceStore
+from ..cloud_control import create_cloud_control_router
 
 
 class PairCompleteBody(BaseModel):
@@ -756,6 +757,7 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.state.desktop_runtime = desktop
     app.include_router(create_desktop_router(desktop, settings.token))
     app.include_router(create_stream_router(desktop, settings.token))
+    app.include_router(create_cloud_control_router(desktop, settings.token))
     app.add_event_handler("startup", desktop.start)
     app.add_event_handler("shutdown", desktop.stop)
     return app

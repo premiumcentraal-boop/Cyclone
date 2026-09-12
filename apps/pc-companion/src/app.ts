@@ -8,6 +8,7 @@ import {
 import { TopologyRefreshGate } from "./core/topologyRefresh.js";
 import type { DesktopDevice, DesktopService, FleetWsEvent } from "./services/types.js";
 import { isSessionFabricEvent } from "./core/sessionTiles.js";
+import { createChatgptAttachPage } from "./pages/chatgptAttachPage.js";
 import { createConnectionsPage } from "./pages/connectionsPage.js";
 import { createAutomationsPage } from "./pages/automationsPage.js";
 import { createFleetPage } from "./pages/fleetPage.js";
@@ -93,6 +94,7 @@ export class CyclonePcCompanionApp {
       ["fleet", "▣", "Control"],
       ["automations", "↻", "Tasks"],
       ["connections", "◇", "Connections"],
+      ["chatgpt", "✦", "ChatGPT"],
     ];
     for (const [route, symbol, label] of entries) {
       const item = button("", "nav-button");
@@ -247,6 +249,7 @@ export class CyclonePcCompanionApp {
         () => this.navigate("fleet"),
         () => this.navigate("automations"),
         () => this.navigate("connections"),
+        () => this.navigate("chatgpt"),
       );
     }
     if (!this.currentPage && this.state.route === "automations") {
@@ -256,6 +259,9 @@ export class CyclonePcCompanionApp {
     }
     if (!this.currentPage && this.state.route === "connections") {
       this.currentPage = createConnectionsPage(this.service);
+    }
+    if (!this.currentPage && this.state.route === "chatgpt") {
+      this.currentPage = createChatgptAttachPage(this.service);
     }
     if (!this.currentPage && this.state.route === "settings") {
       this.currentPage = createSettingsPage(this.service, this.state.devices);
@@ -278,6 +284,7 @@ export class CyclonePcCompanionApp {
         () => this.navigate("fleet"),
         () => this.navigate("automations"),
         () => this.navigate("connections"),
+        () => this.navigate("chatgpt"),
       );
     }
     this.content.replaceChildren(this.currentPage.element);

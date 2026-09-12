@@ -1,4 +1,9 @@
 import type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptSyncResult,
+} from "../core/chatgptAttach.js";
+import type {
   McpTunnelMode,
   McpTunnelSmokeCheck,
   McpTunnelSmokeResult,
@@ -108,6 +113,9 @@ export interface ConnectionDiagnosticBundle {
 }
 
 export type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptSyncResult,
   McpTunnelMode,
   McpTunnelSmokeCheck,
   McpTunnelSmokeResult,
@@ -476,6 +484,12 @@ export interface DesktopService {
   copyMcpTunnelToken(): Promise<McpTunnelToken>;
   smokeMcpTunnel(): Promise<McpTunnelSmokeResult>;
   openMcpTunnelDocs(): Promise<string>;
+  loadChatgptAttachConfig(): Promise<ChatgptAttachConfig>;
+  saveChatgptAttachConfig(config: ChatgptAttachConfig): Promise<ChatgptAttachConfig>;
+  syncChatgptAttachFleet(): Promise<ChatgptSyncResult>;
+  copyChatgptHandoff(markdown: string): Promise<{ ok: boolean; markdown?: string }>;
+  saveChatgptHandoff(markdown: string): Promise<string>;
+  chatgptAttachResources(): Promise<ChatgptAttachResources>;
   getFleetWorkspace?(): Promise<FleetWorkspace>;
   saveFleetGroup?(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup>;
   deleteFleetGroup?(groupId: string): Promise<void>;
