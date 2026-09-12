@@ -30,16 +30,15 @@ class CycloneV39AiChatPageTest {
         assertNull(gate.tryAccept("Explain Android", hasKey = false))
     }
 
-    @Test fun modelSelectorUsesCanonicalPresetsAndReloadRestoresStoredId() {
-        assertEquals(OpenRouterModelPresets.all, V39AiChatContract.models())
+    @Test fun legacyModelReloadRestoresStoredId() {
         val chosen = OpenRouterModelPresets.all.last()
         assertEquals(chosen.id, V39AiChatContract.modelForStored(chosen.id).id)
         assertEquals(chosen.label, V39AiChatContract.modelForStored(chosen.id).label)
     }
 
-    @Test fun missingStoredModelUsesCanonicalDefault() {
-        assertEquals(OpenRouterModelPresets.DEFAULT.id, V39AiChatContract.modelForStored(null).id)
-        assertEquals(OpenRouterModelPresets.DEFAULT.id, V39AiChatContract.modelForStored(" ").id)
+    @Test fun emptySelectionNeverRestoresAnUnselectedDefault() {
+        assertEquals("", V39AiChatContract.modelForStored(null).id)
+        assertEquals("", V39AiChatContract.modelForStored(" ").id)
     }
 
     @Test fun existingSafetyProfileFeedsQuickAgentConfig() {

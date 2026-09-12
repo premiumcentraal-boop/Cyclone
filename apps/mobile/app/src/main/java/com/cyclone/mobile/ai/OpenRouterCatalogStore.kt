@@ -19,7 +19,7 @@ object OpenRouterCatalogStore {
         if (!prefs(context).contains(SELECTION)) {
             val old = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE).getString("openrouter_model", null)
             val id = old?.let { ModelRegistry.resolve(it)?.openRouterSlug ?: it }?.takeIf { OpenRouterCustomModelStore.isValidSlug(it) }
-            check(prefs(context).edit().putStringSet(SELECTION, setOfNotNull(id)).commit()) { "Could not save model selection." }
+            check(prefs(context).edit().putStringSet(SELECTION, setOfNotNull(id) + OpenRouterCustomModelStore.list(context).map { it.id }).commit()) { "Could not save model selection." }
         }
     }
     fun models(context: Context): List<CatalogModel> { initialize(context); return catalog }

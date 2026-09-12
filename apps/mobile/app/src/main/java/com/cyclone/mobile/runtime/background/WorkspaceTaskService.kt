@@ -123,7 +123,7 @@ class WorkspaceTaskService : Service() {
                 val settings = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
                 val profile = CycloneAiAccessProfileStore.read(applicationContext)
                 val config = QuickAgentConfig(
-                    model = (settings.getString("openrouter_model", null)?.let(OpenRouterModelPresets::byId) ?: OpenRouterModelPresets.DEFAULT).copy(
+                    model = OpenRouterModelPresets.byId(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(applicationContext)).copy(
                         reasoningEffort = settings.getString("openrouter_reasoning_effort", "medium")?.takeIf { it in setOf("low", "medium", "high", "max") } ?: "medium"),
                     safeMode = profile != CycloneAiAccessProfile.FULL, accessProfile = profile,
                     attachment = WorkspaceTasks.takeAttachment(task.taskId))

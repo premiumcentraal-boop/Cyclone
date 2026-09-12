@@ -111,9 +111,8 @@ internal object V39AiChatContract {
 
     fun normalizedRequest(value: String) = value.trim()
     fun modelForStored(stored: String?): OpenRouterModelPreset =
-        OpenRouterModelPresets.byId(stored ?: OpenRouterModelPresets.DEFAULT.id)
+        OpenRouterModelPresets.byId(stored.orEmpty())
     fun storageId(model: OpenRouterModelPreset): String = ModelRegistry.profileForPreset(model)?.cycloneId ?: model.id
-    fun models(): List<OpenRouterModelPreset> = OpenRouterModelPresets.all
 
     fun config(modelId: String, accessProfile: CycloneAiAccessProfile): QuickAgentConfig {
         val model = modelForStored(modelId)

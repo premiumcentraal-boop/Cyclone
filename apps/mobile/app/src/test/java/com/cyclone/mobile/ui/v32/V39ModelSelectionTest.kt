@@ -8,6 +8,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class V39ModelSelectionTest {
+    @Test fun liveCatalogSlugSurvivesStorageAndAllRequestModes() {
+        val slug = "new-provider/new-model:free"
+        val model = V39AiChatContract.modelForStored(slug)
+        assertEquals(slug, V39AiChatContract.storageId(model))
+        val config = V39AiChatContract.config(slug, CycloneAiAccessProfile.BALANCED)
+        assertEquals(slug, config.model.id)
+        assertEquals(slug, config.visionModel.id)
+    }
+
     @Test fun contributorPersistsAsDistinctCycloneIdentity() {
         val contributor = OpenRouterModelPresets.MUSE_SPARK_1_3_CONTRIBUTOR
         val normal = OpenRouterModelPresets.MUSE_SPARK_1_3
@@ -24,6 +33,6 @@ class V39ModelSelectionTest {
         val config = V39AiChatContract.config("muse-spark-1-3-contributor", CycloneAiAccessProfile.BALANCED)
         assertEquals("meta/muse-spark-1.3-contributor", config.model.id)
         assertEquals(config.model.id, config.visionModel.id)
-        assertTrue(V39AiChatContract.models().any { it.label == "Muse Spark 1.3 Contributor" })
+        assertTrue(config.model.label.contains("Contributor"))
     }
 }

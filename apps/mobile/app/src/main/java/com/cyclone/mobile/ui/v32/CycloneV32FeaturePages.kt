@@ -469,11 +469,7 @@ internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> 
         if (section == "Model & API") item {
             CycloneSimpleCard {
                 CycloneSectionTitle("AI model & key")
-                CycloneApiKeyEditor(context, onChanged = refresh)
-                Text("Model", fontWeight = FontWeight.Bold)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OpenRouterModelPresets.all.forEach { model -> FilterChip(selected = selectedModel == model.id, onClick = { selectedModel = model.id; aiPrefs.edit().putString("openrouter_model", model.id).apply() }, label = { Text(model.label) }) }
-                }
+                CycloneOpenRouterCatalog(context, onSelectionChanged = refresh)
             }
         }
         if (section == "PC Gateway") item {

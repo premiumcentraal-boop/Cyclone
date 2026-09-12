@@ -46,7 +46,7 @@ REQUIRED_AI_CHAT = (
     "CycloneTextChat.answer(context",
     "RequestIntentRouter.route(",
     "WorkspaceTasks.queueRequest(normalized)",
-    "OpenRouterModelPresets.all",
+    "OpenRouterCatalogStore.activeId(context)",
     '"Ask Cyclone…"',
     "CycloneModelPill(",
     "showModelPill = false",

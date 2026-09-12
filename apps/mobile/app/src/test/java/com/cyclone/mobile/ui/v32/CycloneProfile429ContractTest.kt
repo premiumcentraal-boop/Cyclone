@@ -92,7 +92,9 @@ class CycloneProfile429ContractTest {
         val overlay = source("ui/overlay/OverlayChrome.kt")
         assertTrue(controls.contains("fun CycloneModelPill"))
         assertTrue(controls.contains("showModelSelector: Boolean = true"))
-        assertTrue(controls.contains("OpenRouterModelPresets.all.forEach"))
+        assertTrue(controls.contains("OpenRouterCatalogStore.picker(context)"))
+        assertTrue(controls.contains("pickerModels.forEach"))
+        assertFalse(controls.contains("OpenRouterModelPresets.all.forEach"))
         assertTrue(overlay.contains("CycloneModelIntelligencePanel("))
     }
 

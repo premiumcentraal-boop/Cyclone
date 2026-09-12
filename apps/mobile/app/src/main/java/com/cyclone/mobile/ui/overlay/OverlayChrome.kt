@@ -73,7 +73,7 @@ private val ComposerInk: Color
     @Composable get() = MaterialTheme.colorScheme.surface
 
 data class OverlayAiSettings(
-    val modelId: String = OpenRouterModelPresets.DEFAULT.id,
+    val modelId: String = "",
     val reasoningEffort: String = "medium",
 )
 

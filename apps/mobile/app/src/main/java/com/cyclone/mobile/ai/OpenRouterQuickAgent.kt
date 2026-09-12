@@ -35,7 +35,7 @@ object OpenRouterModelPresets {
     val CLAUDE_FABLE_5_1 = ModelRegistry.preset(ModelRegistry.CLAUDE_FABLE_5_1)
     val MUSE_SPARK_1_3_CONTRIBUTOR = ModelRegistry.preset(ModelRegistry.MUSE_SPARK_1_3_CONTRIBUTOR)
 
-    /** Luna is the inexpensive balanced clean-install default. */
+    /** Legacy default for programmatic callers; UI choices come from OpenRouterCatalogStore. */
     val DEFAULT = GPT_5_6_LUNA
     val all = ModelRegistry.all.map(ModelRegistry::preset)
 
@@ -45,10 +45,10 @@ object OpenRouterModelPresets {
 
     // Unknown custom slugs remain accepted, but vision support is not assumed.
     fun byId(id: String): OpenRouterModelPreset {
-        val canonical = ModelRegistry.resolve(id)?.openRouterSlug ?: id
+        val canonical = ModelRegistry.resolve(id)?.openRouterSlug ?: id.trim()
         return OpenRouterCatalogStore.lookup(canonical)?.preset()
             ?: ModelRegistry.resolve(id)?.let(ModelRegistry::preset)
-            ?: OpenRouterModelPreset(id, id.ifBlank { "Choose model" }, false)
+            ?: OpenRouterModelPreset(canonical, canonical.ifBlank { "Choose model" }, false)
     }
 }
 
