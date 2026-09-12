@@ -38,8 +38,8 @@ import com.cyclone.mobile.ui.v32.taskVisualState
 /**
  * The host app stays visually primary while Cyclone works.
  *
- * Background work is therefore one compact, tappable status ribbon. Tapping it expands the normal
- * Ask Cyclone surface with full task controls. Human handoff keeps one explicit continuation button.
+ * Background work is one compact, tappable status ribbon. Tapping it expands the normal Ask
+ * Cyclone surface with full task controls. Human handoff keeps one explicit continuation button.
  * Terminal results never render here; BackgroundGlassPolicy hands those to notification/history.
  */
 @Composable
@@ -65,61 +65,41 @@ fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
 private fun BackgroundTaskRibbon(task: WorkspaceTaskUi, onAsk: () -> Unit) {
     val visualState = task.taskVisualState()
     val taskLabel = TaskHumanizer.humanize(task.goal, task.app)
-    val trailing = if (visualState == CycloneTaskVisualState.ACTION_NEEDED) "Review" else "Details"
 
     Surface(
         onClick = onAsk,
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize()
-            .semantics { contentDescription = "$trailing for $taskLabel" },
-        shape = RoundedCornerShape(24.dp),
+            .semantics { contentDescription = "Open Cyclone details for $taskLabel" },
+        shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = .95f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
-        shadowElevation = 4.dp,
+        shadowElevation = 3.dp,
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 68.dp)
-                .padding(start = 14.dp, top = 10.dp, end = 14.dp, bottom = 10.dp),
+                .heightIn(min = 64.dp)
+                .padding(horizontal = 13.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(11.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
             ) {
-                CycloneAppIcon(task.packageName, Modifier.padding(6.dp).size(30.dp))
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    Text(
-                        task.app.takeIf(String::isNotBlank) ?: "Cyclone",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    CycloneTaskStatusPill(visualState)
-                }
-                Text(
-                    taskLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                CycloneAppIcon(task.packageName, Modifier.padding(5.dp).size(28.dp))
             }
             Text(
-                trailing,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                taskLabel,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            CycloneTaskStatusPill(visualState)
         }
     }
 }
@@ -133,7 +113,7 @@ private fun HumanTakeoverRibbon(task: WorkspaceTaskUi) {
         color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
-        shadowElevation = 6.dp,
+        shadowElevation = 4.dp,
     ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
