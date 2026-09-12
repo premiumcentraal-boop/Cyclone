@@ -43,6 +43,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source checkout
+        shell: pwsh
+        run: |
+          $Expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $Actual = (git rev-parse HEAD).Trim()
+          if ($Actual -ne $Expected) {
+            throw "Installer acceptance must build the literal source head. expected=$Expected actual=$Actual"
+          }
+          Write-Host "Exact source checkout accepted: $Actual"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13.7'
@@ -139,10 +149,10 @@ jobs:
             throw 'Installed candidate did not satisfy the self-contained first-run acceptance contract.'
           }
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
-          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
+          python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.event.pull_request.head.sha || github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json
       - uses: actions/upload-artifact@v4
         with:
-          name: cyclone-pc-companion-${{ github.sha }}
+          name: cyclone-pc-companion-${{ github.event.pull_request.head.sha || github.sha }}
           path: dist/pc-companion/
           if-no-files-found: error
           retention-days: 30
