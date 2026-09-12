@@ -5,7 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 class PortableModelRequestTest {
     @Test fun defaultRoutingDoesNotPinPublicEndpointsOrOverridePrivacy() {
-        val body = PortableModelRequest.body("provider/new-model", JSONArray())
+        val body = PortableModelRequest.bodyForVerifiedModel("provider/new-model", JSONArray())
         assertFalse(body.getJSONObject("provider").has("only"))
         assertFalse(body.getJSONObject("provider").has("data_collection"))
         assertFalse(body.has("models"))
@@ -14,7 +14,7 @@ class PortableModelRequestTest {
 
     @Test fun everyProfileUsesTheSamePortableContractWithoutInventedThinkingModes() {
         ModelRegistry.all.forEach { profile ->
-            val body = PortableModelRequest.body(profile.openRouterSlug, JSONArray(), listOf("verified"), 300)
+            val body = PortableModelRequest.bodyForVerifiedModel(profile.openRouterSlug, JSONArray(), listOf("verified"), 300)
             assertEquals(profile.openRouterSlug, body.getString("model"))
             assertFalse(body.has("reasoning")); assertFalse(body.has("temperature")); assertFalse(body.has("response_format"))
             assertEquals(300, body.getInt("max_tokens"))
@@ -22,7 +22,7 @@ class PortableModelRequestTest {
         }
     }
     @Test fun contributorIdentityAndAccountPrivacyCannotBeSubstituted() {
-        val body = PortableModelRequest.body(ModelRegistry.MUSE_SPARK_1_3_CONTRIBUTOR.openRouterSlug, JSONArray(), listOf("meta"))
+        val body = PortableModelRequest.bodyForVerifiedModel(ModelRegistry.MUSE_SPARK_1_3_CONTRIBUTOR.openRouterSlug, JSONArray(), listOf("meta"))
         assertFalse(body.getJSONObject("provider").getBoolean("allow_fallbacks"))
         assertFalse(body.getJSONObject("provider").has("data_collection"))
     }
