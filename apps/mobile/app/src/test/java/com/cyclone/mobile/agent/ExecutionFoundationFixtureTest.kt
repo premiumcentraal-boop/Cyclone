@@ -34,9 +34,9 @@ class ExecutionFoundationFixtureTest {
 
     @Test fun consentThenLoginKeepsGoalAndUsesNoProviderBeforeDismissal() {
         // The real collection policy must exclude Cyclone chrome before policy/planning.
-        assertFalse(com.cyclone.mobile.ui.overlay.OverlayChromeObservation.shouldCollectSiblingWindow(
+        assertFalse(com.cyclone.mobile.TaskSurfaceWindows.includeSibling(
             com.cyclone.mobile.ui.overlay.OverlayChromeObservation.ACCESSIBILITY_OVERLAY_WINDOW_TYPE,
-            "com.cyclone.mobile", isWebish = true))
+            "com.cyclone.mobile", "com.android.chrome"))
         val fixture = Fixture()
         val policy = CookieInterruptionPolicy()
         var providerCalls = 0

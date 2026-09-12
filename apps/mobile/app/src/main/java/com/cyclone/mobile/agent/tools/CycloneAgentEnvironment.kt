@@ -514,6 +514,7 @@ class CycloneAgentEnvironment internal constructor(
             treeUseful = observation.payload.optBoolean("treeUseful", true),
             sessionId = observation.execution.sessionId,
             displayId = observation.execution.displayId,
+            legacyPage = observation.page,
         )
     }
 

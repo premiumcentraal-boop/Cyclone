@@ -13,6 +13,36 @@ import org.junit.Test
 import java.util.ArrayDeque
 
 class CycloneAgentEnvironmentTest {
+    @Test fun oneCaptureFeedsLegacyAndExecutableViewsDuringBannerArrival() {
+        val initial = observation("first", "home", "fp1")
+        val banner = observation("second", "consent", "fp2")
+        val runtime = FakeRuntime(initial, null).apply { captureQueue.addLast(banner) }
+        val bridge = com.cyclone.mobile.agent.integration.CyclonePcParityBridge(CycloneAgentEnvironment(runtime))
+        val first = bridge.observe("login")!!
+        assertSame(initial.page, first.legacyPage)
+        assertEquals(first.pageKey, first.legacyPage!!.pageKey)
+        assertEquals(1, runtime.captureQueue.size)
+        assertTrue(first.controls.all { it.observationId == first.observationId })
+        val second = bridge.observe("login")!!
+        assertSame(banner.page, second.legacyPage)
+        assertEquals(second.pageKey, second.legacyPage!!.pageKey)
+        assertTrue(runtime.captureQueue.isEmpty())
+    }
+
+    @Test fun screenshotSkewRotationAndChangedSurfaceFailClosed() {
+        val env = CycloneAgentEnvironment(FakeRuntime(observation("first", "home", "fp1"), null))
+        val card = env.observe("login").page!!.let { it.copy(pageEvidence = JSONObject()
+            .put("captureWidth", 100).put("captureHeight", 200)) }
+        val shot = JSONObject().put("sessionId", card.sessionId).put("displayId", card.displayId)
+            .put("width", 100).put("height", 200)
+        val check = com.cyclone.mobile.agent.ObservationCoherence
+        assertTrue(check.accepts(card, card.copy(observationId = "new"), shot, 100))
+        assertFalse(check.accepts(card, card, shot, 1501))
+        assertFalse(check.accepts(card, card.copy(packageName = "other"), shot, 100))
+        assertFalse(check.accepts(card, card.copy(displayId = 7), shot, 100))
+        assertFalse(check.accepts(card, card.copy(contentKey = "banner"), shot, 100))
+        assertFalse(check.accepts(card, card.copy(pageEvidence = JSONObject().put("captureWidth", 200).put("captureHeight", 100)), shot, 100))
+    }
     @Test fun cookieRejectionSurvivesCompactControlLimit() {
         val before = observationWithHiddenRawTarget()
         val controls = before.payload.getJSONArray("semanticControls")

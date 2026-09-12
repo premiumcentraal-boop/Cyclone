@@ -58,7 +58,11 @@ class CyclonePcParityBridge internal constructor(
     fun observe(goal: String): AgentPageCard? {
         val previousKey = page?.pageKey
         val result = environment.locate(goal)
-        val fresh = result.page ?: return null
+        val fresh = result.page ?: run { page = null; return null }
+        if (fresh.sessionId != execution.sessionId || fresh.displayId != execution.displayId) {
+            page = null
+            return null
+        }
         page = fresh
         if (previousKey == null) {
             memory = RecoveryMemory(
@@ -89,6 +93,13 @@ class CyclonePcParityBridge internal constructor(
     }
 
     fun currentPage(): AgentPageCard? = page
+
+    fun invalidateCapture() {
+        environment.invalidateObservation()
+        page = null
+        searchEvidence = emptyList()
+        inspectionEvidence = emptyList()
+    }
 
     fun observation(): CycloneObservation? = page?.let { card ->
         // Observation IDs intentionally do NOT participate in convergence. They rotate after every
