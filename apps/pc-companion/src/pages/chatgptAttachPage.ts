@@ -10,6 +10,7 @@ import {
   emptyShareStatus,
   isPlaceholderControlApi,
   newPadDraft,
+  parseVmosConnectCommand,
   readyCount,
   resolveControlApi,
   type ChatgptAttachConfig,
@@ -48,7 +49,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   empty.append(
     el("div", "empty-orbit"),
     el("h2", "empty-title", "Add a VMOS pad"),
-    el("p", "empty-copy", "Save host, port and Connect Key on this PC. Cyclone will tunnel ADB, detect Cyclone Mobile, mint a session and export one ChatGPT file."),
+    el("p", "empty-copy", "Paste the VMOS Connect command, add its Connect Key, then Sync. Cyclone keeps the key on this PC, tunnels ADB, checks Mobile and mints a real Cloud AI session."),
   );
   const addEmpty = button("Add pad", "button primary compact");
   empty.append(addEmpty);
@@ -152,7 +153,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     const total = state.pads.length;
     const api = resolvedApi();
     summary.replaceChildren(
-      chip("Pads", total ? `${ready}/${total} ready` : "None saved", ready > 0),
+      chip("Pads", total ? `${ready}/${total} Cloud AI ready` : "None saved", ready > 0),
       chip("Control API", isPlaceholderControlApi(api) ? "Not published" : api, !isPlaceholderControlApi(api)),
       chip("Last sync", lastSync ? lastSync.generatedAt : "Not yet", Boolean(lastSync)),
     );
@@ -178,7 +179,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
       const card = el("article", `chatgpt-pad-card ${pad.ok ? "ready" : ""}`);
       const top = el("div", "chatgpt-pad-top");
       top.append(el("h2", "chatgpt-pad-title", pad.label || pad.id));
-      top.append(el("span", `simple-status ${pad.ok ? "ready" : "attention"}`, pad.ok ? "Ready" : pad.error ? "Failed" : "Idle"));
+      top.append(el("span", `simple-status ${pad.ok ? "ready" : "attention"}`, pad.ok ? "Cloud AI ready" : pad.error ? "Needs setup" : "Idle"));
       const facts = el("div", "simple-facts chatgpt-pad-facts");
       const sessionLabel = !pad.ok
         ? "-"
@@ -210,6 +211,31 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
       });
       const head = el("div", "chatgpt-pad-form-head");
       head.append(title, remove);
+
+      const commandField = fieldInput(
+        "VMOS Connect command",
+        "text",
+        "ssh s@host -p 1824 -L 63670:localhost:1 -Nf",
+      );
+      const useCommand = button("Use VMOS command", "button secondary compact");
+      const commandRow = el("div", "advanced-action-row chatgpt-vmos-command-row");
+      commandRow.append(commandField.wrap, useCommand);
+      useCommand.addEventListener("click", () => {
+        const parsed = parseVmosConnectCommand(commandField.input.value);
+        if (!parsed) {
+          setMessage("Paste the full VMOS Connect command (ssh ... -p ... -L ...), then try again.", "warn");
+          return;
+        }
+        pad.sshHost = parsed.sshHost;
+        pad.sshPort = parsed.sshPort;
+        pad.sshUser = parsed.sshUser;
+        pad.localAdbPort = parsed.localAdbPort;
+        pad.remoteAdbSpec = parsed.remoteAdbSpec;
+        pad.serial = parsed.serial;
+        renderEditor();
+        setMessage("VMOS host and ADB tunnel filled in. Paste the Connect Key separately, then Sync fleet.", "ok");
+      });
+
       const grid = el("div", "chatgpt-pad-form-grid");
       const label = input("Label", pad.label, (value) => { pad.label = value; pad.id = slug(value) || pad.id; });
       const host = input("SSH host", pad.sshHost, (value) => { pad.sshHost = value; });
@@ -219,7 +245,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
       const remote = input("Remote ADB", pad.remoteAdbSpec, (value) => { pad.remoteAdbSpec = value; });
       const key = input(pad.hasConnectKey ? "Connect Key (saved, leave blank to keep)" : "Connect Key", pad.connectKey || "", (value) => { pad.connectKey = value; }, "password");
       grid.append(label, host, port, user, localPort, remote, key);
-      row.append(head, grid);
+      row.append(head, commandRow, grid);
       padEditor.append(row);
     });
   };
@@ -280,9 +306,9 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     busy = true;
     syncButton.disabled = true;
     syncButton.textContent = "Syncing...";
-    setMessage("Opening ADB tunnels and checking Cyclone Mobile...", "info");
+    setMessage("Opening VMOS ADB tunnels, checking Cyclone Mobile and minting Cloud AI sessions...", "info");
     try {
-      if (drafts.length && !state.pads.length) await persist();
+      if (drafts.length || state.pads.length) await persist();
       lastSync = await service.syncChatgptAttachFleet();
       handoffCopied = false;
       await refreshControl();
@@ -293,8 +319,8 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
       const api = resolvedApi();
       setMessage(
         ready
-          ? `Synced ${ready} pad${ready === 1 ? "" : "s"}. CONTROL_API ${api}. Click Share to ChatGPT so Plus Actions can reach this PC.`
-          : "No pads were ready. Check SSH/ADB and try again.",
+          ? `Cloud AI ready on ${ready} pad${ready === 1 ? "" : "s"}. CONTROL_API ${api}. Click Share to ChatGPT so Plus Actions can reach this PC.`
+          : "No pad has a real Cloud AI session yet. Follow the pad hint (ADB, Mobile, pairing/trust), then Sync fleet again.",
         ready ? "ok" : "warn",
       );
     } catch (error) {
@@ -307,10 +333,11 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   };
 
   const copyHandoff = async () => {
-    if (!lastHandoff) {
-      setMessage("Sync the fleet before copying a handoff.", "warn");
+    if (!lastSync || readyCount(lastSync) === 0) {
+      setMessage("A real Cloud AI session is required before copying a handoff. Fix the pad hint, then Sync fleet.", "warn");
       return;
     }
+    if (!lastHandoff) rebuildHandoff();
     try {
       await service.copyChatgptHandoff(lastHandoff);
       handoffCopied = true;
@@ -322,10 +349,11 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   };
 
   const saveHandoff = async () => {
-    if (!lastHandoff) {
-      setMessage("Sync the fleet before saving a handoff.", "warn");
+    if (!lastSync || readyCount(lastSync) === 0) {
+      setMessage("A real Cloud AI session is required before saving FLEET_HANDOFF.md. Fix the pad hint, then Sync fleet.", "warn");
       return;
     }
+    if (!lastHandoff) rebuildHandoff();
     try {
       const path = await service.saveChatgptHandoff(lastHandoff);
       setMessage(`Saved ${path}`, "ok");
@@ -341,7 +369,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     shareButton.textContent = "Sharing...";
     setMessage("Starting Cloud Control HTTPS share for ChatGPT Actions...", "info");
     try {
-      if (drafts.length && !state.pads.length) await persist();
+      if (drafts.length && (!lastSync || state.pads.length === 0)) await persist();
       if (state.pads.length && !lastSync) lastSync = await service.syncChatgptAttachFleet();
       share = await service.chatgptShareStart();
       await refreshControl();
@@ -349,13 +377,14 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
       renderSummary();
       renderPads();
       const api = share.url || resolvedApi();
-      if (lastHandoff) {
+      const ready = readyCount(lastSync);
+      if (ready > 0 && lastHandoff) {
         await service.copyChatgptHandoff(lastHandoff);
         handoffCopied = true;
         renderChecklist();
-        setMessage(`Shared to ChatGPT. CONTROL_API ${api}. Handoff copied. Paste it into the Custom GPT.`, "ok");
+        setMessage(`Shared to ChatGPT. CONTROL_API ${api}. Handoff copied with ${ready} Cloud AI-ready pad${ready === 1 ? "" : "s"}.`, "ok");
       } else {
-        setMessage(`Shared to ChatGPT. CONTROL_API ${api}. Sync the fleet, then copy the handoff.`, share.ok ? "ok" : "warn");
+        setMessage(`CONTROL_API ${api} is shared, but no pad has a real Cloud AI session. Fix the pad hint and Sync fleet before copying a handoff.`, "warn");
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Share to ChatGPT failed.", "warn");
