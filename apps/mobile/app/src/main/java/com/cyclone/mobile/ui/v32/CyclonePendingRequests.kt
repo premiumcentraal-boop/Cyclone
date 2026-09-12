@@ -5,7 +5,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -23,6 +22,7 @@ import com.cyclone.mobile.runtime.background.PendingWorkspaceRequest
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceDestinationHint
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.ui.overlay.OverlayExternalInteraction
 
 /**
  * FIFO presentation only: queued work has Steer + Stop and starts automatically when safely eligible.
@@ -78,14 +78,19 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
                         WorkspaceTasks.requests.steer(request.id, destination)
                         if (destination.androidUserId == com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.currentAndroidUserId() &&
                             WorkspaceTasks.resolveQueueTarget(context, request) == null) {
-                            // The destination picker is a full Activity. Collapse the accessibility
-                            // overlay first so the picker never appears underneath the composer,
-                            // result card, or queue controls.
                             steering = null
                             onOpen()
-                            context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
-                                .putExtra("goal", request.goal).putExtra("pendingRequestId", request.id)
-                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                            OverlayExternalInteraction.active.value = true
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
+                                        .putExtra("goal", request.goal)
+                                        .putExtra("pendingRequestId", request.id)
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }.onFailure {
+                                OverlayExternalInteraction.active.value = false
+                            }
                         } else {
                             WorkspaceTasks.tryPromoteNext(context)
                             steering = null
