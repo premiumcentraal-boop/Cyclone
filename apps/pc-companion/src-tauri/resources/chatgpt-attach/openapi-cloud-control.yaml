@@ -1,19 +1,26 @@
 openapi: 3.1.0
 info:
   title: Cyclone Cloud Control API
-  version: 0.1.0
+  version: 0.2.0
   description: >-
-    ChatGPT Actions front door for VMOS phones. Mutations must execute via
-    Cyclone Mobile PhoneToolExecutor on the server side, not raw VMOS touch.
+    ChatGPT Actions front door for VMOS phones. Mutations execute through
+    Cyclone Mobile PhoneToolExecutor. The short-lived SESSION_TOKEN from the
+    latest Cyclone handoff is sent in X-Cyclone-Session-Token on every protected action.
 servers:
   - url: https://CONTROL_API_HOST_PLACEHOLDER
-    description: Replace with your Cloud Control base URL (no trailing slash)
+    description: Cyclone One binds this to the current public CONTROL_API before you paste the schema.
 components:
-  securitySchemes:
-    BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: opaque-session-or-api-key
+  parameters:
+    CycloneSessionToken:
+      name: X-Cyclone-Session-Token
+      in: header
+      required: true
+      description: >-
+        Short-lived SESSION_TOKEN from the latest CYCLONE_VMOS_ATTACH_v1 block.
+        This is not an SSH Connect Key, VMOS AccessKey, or Cyclone One gateway token.
+      schema:
+        type: string
+        minLength: 16
   schemas:
     DeviceStatus:
       type: object
@@ -22,8 +29,10 @@ components:
         sessionId: { type: string }
         adb: { type: string, enum: [device, offline, unauthorized, missing] }
         mobileInstalled: { type: boolean }
+        mobileRunning: { type: boolean }
         gatewayReady: { type: boolean }
         trustReady: { type: boolean }
+        mutationEngine: { type: string }
         message: { type: string }
     ObserveResult:
       type: object
@@ -33,38 +42,22 @@ components:
         screenshotUrl: { type: string, format: uri }
         summary: { type: string }
         foregroundPackage: { type: string }
-security:
-  - BearerAuth: []
+        observationId: { type: string }
+        mutationEngine: { type: string }
 paths:
   /v1/health:
     get:
       operationId: getHealth
-      summary: Cloud Control contract (mutation engine is PhoneToolExecutor)
-      security: []
-      responses:
-        '200':
-          description: OK
-  /v1/sessions:
-    post:
-      operationId: createSession
-      summary: Mint a short-lived control session for a linked device
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                deviceId: { type: string }
-                serial: { type: string }
-                ttlSeconds: { type: integer, default: 7200 }
+      summary: Check Cloud Control and confirm PhoneToolExecutor is the mutation engine
       responses:
         '200':
           description: OK
   /v1/devices:
     get:
       operationId: listDevices
-      summary: List VMOS-backed devices known to the control plane
+      summary: List only the device authorized by the current Cyclone session token
+      parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
       responses:
         '200':
           description: OK
@@ -81,11 +74,14 @@ paths:
                         deviceId: { type: string }
                         label: { type: string }
                         adb: { type: string }
+                        mobileInstalled: { type: boolean }
+                        mobileRunning: { type: boolean }
   /v1/devices/{deviceId}/status:
     get:
       operationId: getDeviceStatus
-      summary: Gateway/ADB/Mobile/trust status for one device
+      summary: Check ADB, Cyclone Mobile, Gateway pairing and trust for the attached device
       parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
         - name: deviceId
           in: path
           required: true
@@ -103,8 +99,9 @@ paths:
   /v1/devices/{deviceId}/observe:
     post:
       operationId: observe
-      summary: Capture screenshot (+ optional UI summary) via Cyclone path
+      summary: Capture a screenshot and compact UI summary through Cyclone
       parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
         - name: deviceId
           in: path
           required: true
@@ -128,8 +125,9 @@ paths:
   /v1/devices/{deviceId}/tap:
     post:
       operationId: tap
-      summary: Tap at normalized or pixel coordinates via PhoneToolExecutor
+      summary: Tap through Cyclone Mobile PhoneToolExecutor
       parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
         - name: deviceId
           in: path
           required: true
@@ -146,14 +144,16 @@ paths:
                 x: { type: number }
                 y: { type: number }
                 normalized: { type: boolean, default: false }
+                goal: { type: string }
       responses:
         '200':
           description: OK
   /v1/devices/{deviceId}/swipe:
     post:
       operationId: swipe
-      summary: Swipe gesture via PhoneToolExecutor
+      summary: Swipe through Cyclone Mobile PhoneToolExecutor
       parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
         - name: deviceId
           in: path
           required: true
@@ -172,14 +172,16 @@ paths:
                 x2: { type: number }
                 y2: { type: number }
                 durationMs: { type: integer, default: 300 }
+                goal: { type: string }
       responses:
         '200':
           description: OK
   /v1/devices/{deviceId}/type:
     post:
       operationId: typeText
-      summary: Type text into the focused field
+      summary: Type text through Cyclone Mobile PhoneToolExecutor
       parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
         - name: deviceId
           in: path
           required: true
@@ -194,14 +196,16 @@ paths:
               properties:
                 sessionId: { type: string }
                 text: { type: string }
+                goal: { type: string }
       responses:
         '200':
           description: OK
   /v1/devices/{deviceId}/launch:
     post:
       operationId: launchApp
-      summary: Launch an Android package/activity
+      summary: Launch an Android package/activity through Cyclone Mobile PhoneToolExecutor
       parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
         - name: deviceId
           in: path
           required: true
@@ -217,14 +221,16 @@ paths:
                 sessionId: { type: string }
                 packageName: { type: string }
                 activity: { type: string }
+                goal: { type: string }
       responses:
         '200':
           description: OK
   /v1/devices/{deviceId}/key:
     post:
       operationId: pressKey
-      summary: Press back/home/recents or a keycode
+      summary: Press Back, Home, Recents or Enter through Cyclone Mobile PhoneToolExecutor
       parameters:
+        - $ref: '#/components/parameters/CycloneSessionToken'
         - name: deviceId
           in: path
           required: true
@@ -241,6 +247,7 @@ paths:
                 key:
                   type: string
                   enum: [back, home, recents, enter]
+                goal: { type: string }
       responses:
         '200':
           description: OK
