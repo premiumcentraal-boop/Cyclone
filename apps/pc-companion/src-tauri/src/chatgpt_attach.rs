@@ -19,7 +19,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PadConfig {
+pub struct PadConfig {
     id: String,
     label: String,
     #[serde(default)]
@@ -42,7 +42,7 @@ struct PadConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FleetConfig {
+pub struct FleetConfig {
     #[serde(default)]
     control_api_base: String,
     #[serde(default)]
