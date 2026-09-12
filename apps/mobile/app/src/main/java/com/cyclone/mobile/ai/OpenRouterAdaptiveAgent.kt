@@ -604,6 +604,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                     )
                 },
                 detail = listOfNotNull(
+                    event.span?.let { "spanSchema=${it.schema} decision=${it.decisionId} span=${it.spanId} phase=${it.phase} startMs=${it.startMs} durationMs=${it.durationMs} result=${it.result}" },
                     event.pageIdentity?.let { "page=${it.takeLast(16)}" },
                     event.actionSignature?.let { "action=${it.take(120)}" },
                     event.safeMessage?.let { "reason=${TracePrivacy.clean(it).take(500)}" },
