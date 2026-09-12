@@ -65,7 +65,11 @@ class WorkspaceActivity : ComponentActivity() {
                                         modifier = Modifier.weight(1f))
                                     Icon(Icons.Rounded.ArrowDropDown, null)
                                 }
-                                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenu(
+                                    expanded = menu,
+                                    onDismissRequest = { menu = false },
+                                    modifier = Modifier.heightIn(max = 320.dp),
+                                ) {
                                     apps.forEachIndexed { index, app ->
                                         DropdownMenuItem(text = { Text(app.loadLabel(packageManager).toString()) },
                                             onClick = { selected = index; menu = false })
