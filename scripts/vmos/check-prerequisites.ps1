@@ -1,14 +1,15 @@
 param(
   [Parameter(Mandatory=$true)][string]$MobileApk,
   [Parameter(Mandatory=$true)][string]$VmosSerial,
-  [string]$Adb = "adb"
+  [string]$Adb = ""
 )
 
 $ErrorActionPreference = "Stop"
 $blockers = @()
 $warnings = @()
 
-$requiredOneVersion = "1.5.0"
+$requiredOneVersion = "1.5.1"
+$requiredAdbVersion = [version]"37.0.1"
 $requiredMobileName = "Cyclone-4.3.6.apk"
 $requiredMobileSha256 = "4894dd8c0a69d3445d81b2f33c98ceef86630a0951d273912bd240b87b27dc17"
 
@@ -17,9 +18,12 @@ if ($windows.Major -lt 10) { $blockers += "Windows 10 or later is required." }
 
 $oneRoot = Join-Path $env:LOCALAPPDATA "Cyclone One"
 $oneExe = Join-Path $oneRoot "Cyclone One.exe"
+$bundledAdb = Join-Path $oneRoot "android-platform-tools\adb.exe"
+if ([string]::IsNullOrWhiteSpace($Adb)) { $Adb = $bundledAdb }
+
 $oneVersion = $null
 if (-not (Test-Path $oneExe)) {
-  $blockers += "Cyclone One is not installed at '%LOCALAPPDATA%\Cyclone One\Cyclone One.exe'. Install published Cyclone One 1.5.0 first."
+  $blockers += "Cyclone One is not installed at '%LOCALAPPDATA%\Cyclone One\Cyclone One.exe'. Install the Cyclone One 1.5.1 VMOS candidate first."
 } else {
   try {
     $rawOneVersion = (Get-Item $oneExe).VersionInfo.ProductVersion
@@ -37,13 +41,27 @@ if (-not (Test-Path $oneExe)) {
 }
 
 $adbResolved = $null
+$adbVersion = $null
 try {
-  $adbCommand = Get-Command $Adb -ErrorAction Stop
-  $adbResolved = $adbCommand.Source
-  & $Adb version | Out-Null
+  if (-not (Test-Path $Adb)) {
+    $command = Get-Command $Adb -ErrorAction Stop
+    $adbResolved = $command.Source
+  } else {
+    $adbResolved = (Resolve-Path $Adb).Path
+  }
+  $adbOutput = (& $adbResolved version 2>&1) -join "`n"
   if ($LASTEXITCODE -ne 0) { throw "adb version failed" }
+  if ($adbOutput -notmatch '(?m)^Version\s+(\d+\.\d+\.\d+)') {
+    throw "Could not parse Platform-Tools version from adb output: $adbOutput"
+  }
+  $adbVersion = [version]$Matches[1]
+  if ($adbVersion -lt $requiredAdbVersion) {
+    $blockers += "Android Platform-Tools $requiredAdbVersion or newer is required; found $adbVersion at '$adbResolved'."
+  } elseif ($adbResolved -ne $bundledAdb) {
+    $warnings += "Using ADB override '$adbResolved'. The one-click baseline is Cyclone One's bundled Platform-Tools 37.0.1 at '$bundledAdb'."
+  }
 } catch {
-  $blockers += "adb.exe is not callable. Install Google Android SDK Platform-Tools; Cyclone One does not bundle ADB."
+  $blockers += "Cyclone One bundled adb.exe is unavailable or invalid. Repair/reinstall One 1.5.1; expected '$bundledAdb'."
 }
 
 $mobileResolved = $null
@@ -74,9 +92,9 @@ if (-not (Test-Path $MobileApk)) {
 $deviceState = $null
 $androidRelease = $null
 $sdk = $null
-if ($null -ne $adbResolved) {
+if ($null -ne $adbResolved -and $null -ne $adbVersion -and $adbVersion -ge $requiredAdbVersion) {
   try {
-    $deviceState = (& $Adb -s $VmosSerial get-state 2>$null | Select-Object -First 1).Trim()
+    $deviceState = (& $adbResolved -s $VmosSerial get-state 2>$null | Select-Object -First 1).Trim()
     if ($deviceState -ne "device") {
       $blockers += "VMOS ADB serial '$VmosSerial' is not in device state. Re-open VMOS Local Debugging → ADB and reconnect."
     }
@@ -87,8 +105,8 @@ if ($null -ne $adbResolved) {
 
 if ($deviceState -eq "device") {
   try {
-    $sdk = [int]((& $Adb -s $VmosSerial shell getprop ro.build.version.sdk).Trim())
-    $androidRelease = (& $Adb -s $VmosSerial shell getprop ro.build.version.release).Trim()
+    $sdk = [int]((& $adbResolved -s $VmosSerial shell getprop ro.build.version.sdk).Trim())
+    $androidRelease = (& $adbResolved -s $VmosSerial shell getprop ro.build.version.release).Trim()
     if ($sdk -lt 33) {
       $blockers += "Cyclone Mobile requires Android API 33 / Android 13 or newer; VMOS reports API $sdk."
     } elseif ($sdk -lt 35) {
@@ -109,6 +127,9 @@ $result = [pscustomobject]@{
   CycloneOneVersion = $oneVersion
   RequiredCycloneOneVersion = $requiredOneVersion
   AdbPath = $adbResolved
+  BundledAdbPath = $bundledAdb
+  AdbVersion = if ($null -eq $adbVersion) { $null } else { $adbVersion.ToString() }
+  RequiredAdbVersion = $requiredAdbVersion.ToString()
   MobileApk = $mobileResolved
   MobileSha256 = $mobileSha256
   RequiredMobileSha256 = $requiredMobileSha256
