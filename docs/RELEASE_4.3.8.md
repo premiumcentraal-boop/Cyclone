@@ -33,3 +33,5 @@ Regression coverage locks the key-fingerprint access policy, fail-closed unknown
 Cyclone Mobile CI is the authoritative build gate for unit tests, Android lint, release APK assembly, repository guards, and artifact packaging. Publication is authorized for 4.3.8 only after the exact release-branch source passes that CI and the full-release workflow verifies artifact provenance and update-compatible signing continuity.
 
 Physical-device acceptance remains **UNVERIFIED**. A real OpenRouter account and target phone should still be used to exercise key replacement, full catalog refresh, unavailable-account models, switching between models with different reasoning vocabularies, model default, a text reply, and a phone task.
+
+This document is the publication checkpoint for `release/cyclone-mobile-v4.3.8`; the release pipeline must publish only the exact commit that passes the matching push CI run.
