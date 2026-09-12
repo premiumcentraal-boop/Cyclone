@@ -124,8 +124,19 @@ jobs:
           Copy-Item $Installer.FullName $Candidate -Force
           ./scripts/pc-companion/test-installed-candidate.ps1 -Installer $Candidate -Output dist/pc-companion/installer-acceptance.json
           $Acceptance = Get-Content dist/pc-companion/installer-acceptance.json -Raw | ConvertFrom-Json
-          if (-not $Acceptance.installed -or -not $Acceptance.bundled_adb -or $Acceptance.bundled_adb_version -ne '37.0.1') {
-            throw 'Installed candidate did not prove bundled Android Platform-Tools 37.0.1.'
+          if (
+            -not $Acceptance.installed -or
+            -not $Acceptance.bundled_adb -or
+            $Acceptance.bundled_adb_version -ne '37.0.1' -or
+            -not $Acceptance.gateway_ready -or
+            -not $Acceptance.gateway_authenticated -or
+            -not $Acceptance.transport_onboarding_api -or
+            -not $Acceptance.first_run_guide -or
+            -not $Acceptance.vmos_image_tip -or
+            -not $Acceptance.mobile_tip -or
+            -not $Acceptance.trust_pairing_tip
+          ) {
+            throw 'Installed candidate did not satisfy the self-contained first-run acceptance contract.'
           }
           python scripts/pc-companion/generate-third-party-notices.py --lock packaging/pc-companion/third-party-binaries.lock.json --output dist/pc-companion/THIRD_PARTY_NOTICES
           python scripts/pc-companion/generate-release-metadata.py --artifact-dir dist/pc-companion --source-sha '${{ github.sha }}' --version $PcVersion --third-party-lock packaging/pc-companion/third-party-binaries.lock.json

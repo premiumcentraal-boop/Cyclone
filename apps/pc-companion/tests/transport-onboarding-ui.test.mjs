@@ -13,6 +13,16 @@ test("transport onboarding UI exposes USB, Wireless and VMOS first-connect paths
   assert.match(source, /Wireless debugging/);
 });
 
+test("first-run copy is self-contained and carries VMOS, Mobile and trust-pairing handoff", () => {
+  assert.match(source, /Android Platform-Tools 37\.0\.1/);
+  assert.match(source, /no Android Studio or separate ADB install/);
+  assert.match(source, /Recommended VMOS image: Android 15/);
+  assert.match(source, /Android 13\/14 are compatible/);
+  assert.match(source, /Android 12 and older are unsupported/);
+  assert.match(source, /Cyclone Mobile 4\.3\.6/);
+  assert.match(source, /PC Gateway & QR pairing/);
+});
+
 test("wireless pairing code is cleared before async submit and never logged", () => {
   const clearIndex = source.indexOf('code.input.value = ""');
   const submitIndex = source.indexOf("client.pairWireless");
@@ -21,7 +31,8 @@ test("wireless pairing code is cleared before async submit and never logged", ()
   assert.match(source, /type = "password"|field\("6-digit pairing code"/);
 });
 
-test("successful transport invokes normal Cyclone fleet rescan", () => {
+test("successful transport invokes normal Cyclone fleet rescan and names the trust-pairing next step", () => {
   assert.match(source, /await service\.scanDevices\(\)/);
   assert.match(source, /transport route already refreshes DeviceFleetManager/);
+  assert.match(source, /Next: open Cyclone Mobile → PC Gateway & QR pairing to finish trust pairing/);
 });

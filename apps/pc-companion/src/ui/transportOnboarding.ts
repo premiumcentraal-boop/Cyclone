@@ -43,7 +43,8 @@ export function mountTransportOnboarding(service: DesktopService): () => void {
   const heading = el("div");
   heading.append(
     el("h2", "page-title", "Connect a phone"),
-    el("p", "page-subtitle", "Choose the transport. ADB connection comes first; Cyclone trust pairing stays separate."),
+    el("p", "page-subtitle", "Choose USB, Wireless, or VMOS. Cyclone One already includes Android Platform-Tools 37.0.1, so no Android Studio or separate ADB install is needed."),
+    el("p", "page-subtitle", "ADB connection comes first. When it is ready, open Cyclone Mobile → PC Gateway & QR pairing to finish Cyclone trust pairing."),
   );
   const close = button("Close", "button ghost compact");
   close.type = "button";
@@ -71,7 +72,10 @@ export function mountTransportOnboarding(service: DesktopService): () => void {
   };
 
   const finish = async (result: TransportStatus) => {
-    setStatus(result.next || (result.ok ? "ADB transport is ready." : "Transport needs attention."), result.ok);
+    const message = result.ok
+      ? `${result.next || "ADB transport is ready."} Next: open Cyclone Mobile → PC Gateway & QR pairing to finish trust pairing.`
+      : result.next || "Transport needs attention.";
+    setStatus(message, result.ok);
     if (result.ok) {
       // The authenticated transport route already refreshes DeviceFleetManager. This extra normal
       // UI scan makes the operator-visible Fleet deterministic even if its websocket refresh races.
@@ -161,7 +165,10 @@ export function mountTransportOnboarding(service: DesktopService): () => void {
 
     const section = el("div");
     Object.assign(section.style, { display: "grid", gap: "12px" });
-    section.append(el("p", "page-subtitle", "In VMOS/provider settings enable its ADB/Local Debugging tunnel, copy the provider ADB endpoint, then connect it here."));
+    section.append(
+      el("p", "page-subtitle", "Recommended VMOS image: Android 15. Android 13/14 are compatible; Android 12 and older are unsupported for this Cyclone setup."),
+      el("p", "page-subtitle", "Install Cyclone Mobile 4.3.6 inside VMOS. In VMOS/provider settings enable its ADB/Local Debugging tunnel, copy the provider ADB endpoint, then connect it here."),
+    );
     const endpoint = field("VMOS / remote ADB endpoint", "host.example:5555");
     const connectButton = button("Connect VMOS phone", "button primary");
     connectButton.addEventListener("click", () => void run(() => client.connectVmos(endpoint.input.value), connectButton));
