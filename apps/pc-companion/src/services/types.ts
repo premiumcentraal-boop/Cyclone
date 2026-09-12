@@ -1,6 +1,7 @@
 import type {
   ChatgptAttachConfig,
   ChatgptAttachResources,
+  ChatgptShareStatus,
   ChatgptSyncResult,
 } from "../core/chatgptAttach.js";
 import type {
@@ -490,6 +491,11 @@ export interface DesktopService {
   copyChatgptHandoff(markdown: string): Promise<{ ok: boolean; markdown?: string }>;
   saveChatgptHandoff(markdown: string): Promise<string>;
   chatgptAttachResources(): Promise<ChatgptAttachResources>;
+  chatgptShareStatus(): Promise<ChatgptShareStatus>;
+  chatgptShareStart(): Promise<ChatgptShareStatus>;
+  chatgptShareStop(): Promise<ChatgptShareStatus>;
+  cloudControlLocalBase(): string;
+  probeCloudControl(base?: string): Promise<{ ok: boolean; localBase: string }>;
   getFleetWorkspace?(): Promise<FleetWorkspace>;
   saveFleetGroup?(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup>;
   deleteFleetGroup?(groupId: string): Promise<void>;

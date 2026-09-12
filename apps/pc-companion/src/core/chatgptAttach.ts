@@ -35,9 +35,9 @@ export const SECRET_FIELD_NAMES = [
 
 export const CUSTOM_GPT_SETUP_HINTS = [
   "Create a Custom GPT and paste the bundled driver instructions.",
-  "Actions → Create → paste the bundled OpenAPI schema.",
+  "Actions -> Create -> paste the bundled OpenAPI schema (Copy OpenAPI binds the live CONTROL_API).",
   "Auth = API Key / Bearer. Use SESSION_TOKEN from the handoff.",
-  "Replace CONTROL_API_HOST_PLACEHOLDER with your public HTTPS Cloud Control base (ChatGPT cannot reach localhost).",
+  "Click Share to ChatGPT for an HTTPS trycloudflare CONTROL_API. ChatGPT Actions cannot reach localhost.",
   "Paste the one-file handoff into the chat. Never paste SSH Connect Keys or VMOS AccessKeys.",
 ];
 
@@ -95,6 +95,20 @@ export interface ChatgptAttachResources {
   exampleFleet: string;
 }
 
+export interface ChatgptShareStatus {
+  ok: boolean;
+  running: boolean;
+  url: string;
+  localBase: string;
+  message?: string;
+}
+
+export interface ConnectionCheckItem {
+  id: "adb" | "mobile" | "control" | "handoff";
+  label: string;
+  ok: boolean;
+}
+
 export function emptyChatgptAttachConfig(): ChatgptAttachConfig {
   return {
     controlApiBase: "",
@@ -126,6 +140,80 @@ export function publicControlApi(base: string | null | undefined, fallbackPort?:
   if (trimmed) return trimmed;
   if (fallbackPort && fallbackPort > 0) return `http://127.0.0.1:${fallbackPort}${LOCAL_CLOUD_CONTROL_PATH}`;
   return DEFAULT_CONTROL_API_PLACEHOLDER;
+}
+
+export function isPlaceholderControlApi(base: string | null | undefined): boolean {
+  const trimmed = (base || "").trim();
+  return !trimmed || /CONTROL_API_HOST_PLACEHOLDER/i.test(trimmed);
+}
+
+export function localCloudControlBase(httpBase: string | null | undefined): string {
+  const trimmed = (httpBase || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  if (/(^|\/)cloud$/i.test(trimmed)) return trimmed;
+  return `${trimmed}${LOCAL_CLOUD_CONTROL_PATH}`;
+}
+
+export function publicShareControlApi(tunnelUrl: string | null | undefined): string {
+  const trimmed = (tunnelUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  const origin = trimmed.replace(/\/(cloud|mcp)$/i, "");
+  return `${origin}${LOCAL_CLOUD_CONTROL_PATH}`;
+}
+
+export function resolveControlApi(options: {
+  configured?: string | null;
+  shareUrl?: string | null;
+  localBase?: string | null;
+  fallbackPort?: number;
+}): string {
+  const configured = (options.configured || "").trim().replace(/\/+$/, "");
+  if (configured && !isPlaceholderControlApi(configured)) return configured;
+  const share = publicShareControlApi(options.shareUrl);
+  if (share) return share;
+  const local = localCloudControlBase(options.localBase);
+  if (local) return local;
+  return publicControlApi("", options.fallbackPort);
+}
+
+export function gatewayPortFromBase(httpBase: string | null | undefined): number {
+  try {
+    const port = Number(new URL(httpBase || "").port);
+    return port > 0 ? port : 8765;
+  } catch {
+    return 8765;
+  }
+}
+
+export function emptyShareStatus(localBase = ""): ChatgptShareStatus {
+  return {
+    ok: false,
+    running: false,
+    url: "",
+    localBase,
+    message: "Share to ChatGPT is stopped.",
+  };
+}
+
+export function connectionChecklist(input: {
+  pads?: ChatgptPadStatus[];
+  controlApi?: string;
+  controlApiReachable?: boolean;
+  handoffCopied?: boolean;
+}): ConnectionCheckItem[] {
+  const pads = input.pads || [];
+  const ready = pads.filter((pad) => pad.ok);
+  return [
+    { id: "adb", label: "ADB device", ok: ready.some((pad) => pad.adb === "device") },
+    { id: "mobile", label: "Cyclone Mobile running", ok: ready.some((pad) => pad.mobile === "running") },
+    { id: "control", label: "CONTROL_API reachable", ok: Boolean(input.controlApiReachable) && !isPlaceholderControlApi(input.controlApi) },
+    { id: "handoff", label: "Handoff copied", ok: Boolean(input.handoffCopied) },
+  ];
+}
+
+export function bindOpenApiServer(openapi: string, controlApi: string): string {
+  if (!openapi || isPlaceholderControlApi(controlApi)) return openapi;
+  return openapi.replace(/https:\/\/CONTROL_API_HOST_PLACEHOLDER/g, controlApi.trim().replace(/\/+$/, ""));
 }
 
 export function mobileChip(installed: boolean, running: boolean): MobileChip {

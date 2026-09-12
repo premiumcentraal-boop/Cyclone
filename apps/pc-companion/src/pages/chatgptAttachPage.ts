@@ -2,15 +2,20 @@ import {
   CHATGPT_ATTACH_SUBTITLE,
   CHATGPT_ATTACH_TITLE,
   CUSTOM_GPT_SETUP_HINTS,
+  bindOpenApiServer,
   buildFleetHandoff,
   collectSecrets,
+  connectionChecklist,
   emptyChatgptAttachConfig,
+  emptyShareStatus,
+  isPlaceholderControlApi,
   newPadDraft,
-  publicControlApi,
   readyCount,
+  resolveControlApi,
   type ChatgptAttachConfig,
   type ChatgptPadConfig,
   type ChatgptPadStatus,
+  type ChatgptShareStatus,
   type ChatgptSyncResult,
 } from "../core/chatgptAttach.js";
 import type { DesktopService } from "../services/types.js";
@@ -31,9 +36,10 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   );
   const heroActions = el("div", "chatgpt-hero-actions");
   const syncButton = button("Sync fleet", "button primary");
+  const shareButton = button("Share to ChatGPT", "button secondary");
   const copyButton = button("Copy ChatGPT handoff", "button secondary");
   const saveButton = button("Save FLEET_HANDOFF.md", "button ghost");
-  heroActions.append(syncButton, copyButton, saveButton);
+  heroActions.append(syncButton, shareButton, copyButton, saveButton);
   header.append(heading, heroActions);
 
   const summary = el("div", "chatgpt-summary");
@@ -48,6 +54,8 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   empty.append(addEmpty);
 
   const message = el("div", "chatgpt-message", "Nothing is shared with ChatGPT until you copy the handoff.");
+  const checklist = el("div", "chatgpt-checklist");
+  const shareUrl = el("div", "chatgpt-share-url");
 
   const config = el("details", "simple-advanced chatgpt-config") as HTMLDetailsElement;
   const configSummary = el("summary", "simple-advanced-summary");
@@ -56,7 +64,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     el("span", "simple-advanced-copy", "Pads, CONTROL_API base, optional VMOS API key"),
   );
   const configBody = el("div", "simple-advanced-body chatgpt-config-body");
-  const goalInput = fieldInput("Default goal", "text", "Observe assigned phones…");
+  const goalInput = fieldInput("Default goal", "text", "Observe assigned phones...");
   const apiInput = fieldInput("CONTROL_API base", "url", "https://your-control-host/cloud");
   const vmosInput = fieldInput("VMOS API key (optional, stays on this PC)", "password", "OpenAPI AccessKey");
   const padEditor = el("div", "chatgpt-pad-editor");
@@ -83,7 +91,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   hintsBody.append(hintList, hintActions);
   hints.append(hintsSummary, hintsBody);
 
-  page.append(header, summary, message, padsGrid, empty, config, hints);
+  page.append(header, summary, message, shareUrl, checklist, padsGrid, empty, config, hints);
 
   let active = true;
   let busy = false;
@@ -91,20 +99,64 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   let lastSync: ChatgptSyncResult | null = null;
   let lastHandoff = "";
   let drafts: ChatgptPadConfig[] = [];
+  let share: ChatgptShareStatus = emptyShareStatus();
+  let controlReachable = false;
+  let localBase = "";
+  let handoffCopied = false;
 
   const setMessage = (text: string, kind: "ok" | "warn" | "info" = "info") => {
     message.textContent = text;
     message.className = `chatgpt-message ${kind}`;
   };
 
+  const resolvedApi = () => resolveControlApi({
+    configured: apiInput.input.value || state.controlApiBase || lastSync?.controlApi,
+    shareUrl: share.url,
+    localBase: localBase || share.localBase || service.cloudControlLocalBase(),
+  });
+
+  const rebuildHandoff = () => {
+    if (!lastSync) {
+      lastHandoff = "";
+      return;
+    }
+    lastSync = { ...lastSync, controlApi: resolvedApi() };
+    lastHandoff = buildFleetHandoff(lastSync, state.defaultGoal || goalInput.input.value, collectSecrets(state));
+  };
+
+  const renderChecklist = () => {
+    const items = connectionChecklist({
+      pads: lastSync?.pads,
+      controlApi: resolvedApi(),
+      controlApiReachable: controlReachable,
+      handoffCopied,
+    });
+    checklist.replaceChildren(el("h2", "chatgpt-checklist-title", "Connection ready"));
+    for (const item of items) {
+      const row = el("div", `chatgpt-check ${item.ok ? "ok" : ""}`);
+      row.append(
+        el("span", "chatgpt-check-mark", item.ok ? "OK" : "--"),
+        el("span", "chatgpt-check-label", item.label),
+      );
+      checklist.append(row);
+    }
+    const api = resolvedApi();
+    shareUrl.textContent = api && !isPlaceholderControlApi(api)
+      ? `CONTROL_API ${api}`
+      : "CONTROL_API waiting for Cloud Control (open Cyclone One, then Sync or Share).";
+    shareUrl.className = `chatgpt-share-url ${controlReachable || share.running ? "ready" : ""}`;
+  };
+
   const renderSummary = () => {
     const ready = readyCount(lastSync);
     const total = state.pads.length;
+    const api = resolvedApi();
     summary.replaceChildren(
       chip("Pads", total ? `${ready}/${total} ready` : "None saved", ready > 0),
-      chip("Control API", publicControlApi(state.controlApiBase), Boolean(state.controlApiBase)),
+      chip("Control API", isPlaceholderControlApi(api) ? "Not published" : api, !isPlaceholderControlApi(api)),
       chip("Last sync", lastSync ? lastSync.generatedAt : "Not yet", Boolean(lastSync)),
     );
+    renderChecklist();
   };
 
   const renderPads = () => {
@@ -128,10 +180,15 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
       top.append(el("h2", "chatgpt-pad-title", pad.label || pad.id));
       top.append(el("span", `simple-status ${pad.ok ? "ready" : "attention"}`, pad.ok ? "Ready" : pad.error ? "Failed" : "Idle"));
       const facts = el("div", "simple-facts chatgpt-pad-facts");
+      const sessionLabel = !pad.ok
+        ? "-"
+        : pad.sessionSource === "control-api" && pad.sessionId
+          ? pad.sessionId.slice(0, 12)
+          : pad.sessionSource;
       facts.append(
         fact("ADB", pad.adb),
         fact("Mobile", pad.mobile),
-        fact("Session", pad.ok ? pad.sessionSource : "—"),
+        fact("Session", sessionLabel),
       );
       card.append(top, facts);
       if (pad.deviceId) card.append(el("div", "chatgpt-pad-id", pad.deviceId));
@@ -167,6 +224,22 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     });
   };
 
+  const refreshControl = async () => {
+    try {
+      const probed = await service.probeCloudControl();
+      controlReachable = probed.ok;
+      localBase = probed.localBase || service.cloudControlLocalBase();
+    } catch {
+      controlReachable = false;
+      localBase = service.cloudControlLocalBase();
+    }
+    try {
+      share = await service.chatgptShareStatus();
+    } catch {
+      share = emptyShareStatus(localBase);
+    }
+  };
+
   const load = async () => {
     try {
       state = await service.loadChatgptAttachConfig();
@@ -179,6 +252,8 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     apiInput.input.value = state.controlApiBase;
     vmosInput.input.value = "";
     vmosInput.input.placeholder = state.hasVmosApiKey ? "VMOS API key saved on this PC" : "OpenAPI AccessKey";
+    await refreshControl();
+    if (!active) return;
     renderSummary();
     renderPads();
     renderEditor();
@@ -204,17 +279,24 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     if (busy) return;
     busy = true;
     syncButton.disabled = true;
-    syncButton.textContent = "Syncing…";
-    setMessage("Opening ADB tunnels and checking Cyclone Mobile…", "info");
+    syncButton.textContent = "Syncing...";
+    setMessage("Opening ADB tunnels and checking Cyclone Mobile...", "info");
     try {
       if (drafts.length && !state.pads.length) await persist();
       lastSync = await service.syncChatgptAttachFleet();
-      const markdown = buildFleetHandoff(lastSync, state.defaultGoal || goalInput.input.value, collectSecrets(state));
-      lastHandoff = markdown;
+      handoffCopied = false;
+      await refreshControl();
+      rebuildHandoff();
       renderSummary();
       renderPads();
       const ready = readyCount(lastSync);
-      setMessage(ready ? `Synced ${ready} pad${ready === 1 ? "" : "s"}. Copy the ChatGPT handoff when you are ready.` : "No pads were ready. Check SSH/ADB and try again.", ready ? "ok" : "warn");
+      const api = resolvedApi();
+      setMessage(
+        ready
+          ? `Synced ${ready} pad${ready === 1 ? "" : "s"}. CONTROL_API ${api}. Click Share to ChatGPT so Plus Actions can reach this PC.`
+          : "No pads were ready. Check SSH/ADB and try again.",
+        ready ? "ok" : "warn",
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Fleet sync failed.", "warn");
     } finally {
@@ -231,7 +313,9 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     }
     try {
       await service.copyChatgptHandoff(lastHandoff);
-      setMessage("Handoff copied. Paste it into your Custom GPT chat.", "ok");
+      handoffCopied = true;
+      renderChecklist();
+      setMessage(`Handoff copied. CONTROL_API ${resolvedApi()}. Paste it into your Custom GPT chat.`, "ok");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Clipboard copy failed.", "warn");
     }
@@ -250,7 +334,40 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
     }
   };
 
+  const shareToChatgpt = async () => {
+    if (busy) return;
+    busy = true;
+    shareButton.disabled = true;
+    shareButton.textContent = "Sharing...";
+    setMessage("Starting Cloud Control HTTPS share for ChatGPT Actions...", "info");
+    try {
+      if (drafts.length && !state.pads.length) await persist();
+      if (state.pads.length && !lastSync) lastSync = await service.syncChatgptAttachFleet();
+      share = await service.chatgptShareStart();
+      await refreshControl();
+      rebuildHandoff();
+      renderSummary();
+      renderPads();
+      const api = share.url || resolvedApi();
+      if (lastHandoff) {
+        await service.copyChatgptHandoff(lastHandoff);
+        handoffCopied = true;
+        renderChecklist();
+        setMessage(`Shared to ChatGPT. CONTROL_API ${api}. Handoff copied. Paste it into the Custom GPT.`, "ok");
+      } else {
+        setMessage(`Shared to ChatGPT. CONTROL_API ${api}. Sync the fleet, then copy the handoff.`, share.ok ? "ok" : "warn");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Share to ChatGPT failed.", "warn");
+    } finally {
+      busy = false;
+      shareButton.disabled = false;
+      shareButton.textContent = "Share to ChatGPT";
+    }
+  };
+
   syncButton.addEventListener("click", () => { void sync(); });
+  shareButton.addEventListener("click", () => { void shareToChatgpt(); });
   copyButton.addEventListener("click", () => { void copyHandoff(); });
   saveButton.addEventListener("click", () => { void saveHandoff(); });
   addPad.addEventListener("click", () => { drafts.push(newPadDraft(drafts)); renderEditor(); config.open = true; });
@@ -268,7 +385,7 @@ export function createChatgptAttachPage(service: DesktopService): ChatgptAttachP
   copyOpenApi.addEventListener("click", async () => {
     try {
       const resources = await service.chatgptAttachResources();
-      await navigator.clipboard.writeText(resources.openapi);
+      await navigator.clipboard.writeText(bindOpenApiServer(resources.openapi, resolvedApi()));
       setMessage("OpenAPI schema copied for GPT Actions.", "ok");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not copy OpenAPI.", "warn");

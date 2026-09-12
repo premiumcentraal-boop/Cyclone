@@ -1,4 +1,5 @@
 mod chatgpt_attach;
+mod chatgpt_share;
 mod mcp_tunnel;
 mod live_phone;
 mod live_phone_bridge;
@@ -241,6 +242,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(std::sync::Arc::new(live_phone_bridge::BridgeState::default()))
+        .manage(std::sync::Arc::new(chatgpt_share::ShareState::default()))
         .manage(GatewayState {
             token,
             http_base,
@@ -306,7 +308,10 @@ pub fn run() {
             chatgpt_attach::chatgpt_attach_sync,
             chatgpt_attach::chatgpt_attach_copy,
             chatgpt_attach::chatgpt_attach_save_handoff,
-            chatgpt_attach::chatgpt_attach_resources
+            chatgpt_attach::chatgpt_attach_resources,
+            chatgpt_share::chatgpt_attach_share_status,
+            chatgpt_share::chatgpt_attach_share_start,
+            chatgpt_share::chatgpt_attach_share_stop
         ])
         .build(tauri::generate_context!())
         .expect("error while building Cyclone One")
@@ -314,6 +319,7 @@ pub fn run() {
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = live_phone::live_phone_control("stop".into());
                 live_phone_bridge::shutdown(app.state::<std::sync::Arc<live_phone_bridge::BridgeState>>().inner());
+                chatgpt_share::shutdown(app.state::<std::sync::Arc<chatgpt_share::ShareState>>().inner());
             }
         });
 }

@@ -79,8 +79,17 @@ def create_cloud_control_router(runtime: Any, token: str) -> APIRouter:
     def bind_base(request: Request) -> None:
         service.public_base = str(request.base_url).rstrip("/") + "/cloud"
 
+    @router.get("")
+    @router.get("/")
+    def cloud_root(request: Request) -> dict[str, Any]:
+        bind_base(request)
+        contract = service.public_contract()
+        contract["health"] = "/cloud/v1/health"
+        return contract
+
     @router.get("/v1/health")
-    def health() -> dict[str, Any]:
+    def health(request: Request) -> dict[str, Any]:
+        bind_base(request)
         return service.public_contract()
 
     @router.post("/v1/sessions")

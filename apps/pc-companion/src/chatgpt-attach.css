@@ -83,6 +83,38 @@
   gap: 8px;
 }
 .chatgpt-hint-list { margin: 0; padding: 0 0 0 18px; color: var(--c-muted); font-size: 12px; line-height: 1.55; display: grid; gap: 6px; }
+.chatgpt-checklist {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius);
+  background: var(--c-surface);
+}
+.chatgpt-checklist-title {
+  margin: 0 0 4px;
+  color: var(--c-subtle);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.chatgpt-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-muted);
+  font-size: 12px;
+}
+.chatgpt-check.ok { color: var(--c-green); }
+.chatgpt-check-mark { width: 22px; font-size: 10px; font-weight: 750; letter-spacing: .04em; }
+.chatgpt-share-url {
+  color: var(--c-muted);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+.chatgpt-share-url.ready { color: var(--c-text); }
 
 @media (max-width: 900px) {
   .chatgpt-attach-header { align-items: flex-start; flex-direction: column; }

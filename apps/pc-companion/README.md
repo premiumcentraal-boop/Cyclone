@@ -10,7 +10,7 @@ The **AI connections** page provides one-click Codex setup. It configures the pa
 
 **Settings → Remote MCP (ChatGPT / Grok chat)** starts and stops the public HTTPS auth-gateway tunnel used by ChatGPT and grok.com connectors. Copy the MCP URL and bearer from that card. Local Grok Build / Cursor stdio MCP (`~/.grok/config.toml`) is not changed. See [`docs/A4_MCP_TUNNEL_SETTINGS.md`](../../docs/A4_MCP_TUNNEL_SETTINGS.md).
 
-The **ChatGPT Attach** tab syncs VMOS Cloud pads over ADB and exports a one-file Custom GPT handoff. SSH Connect Keys stay on this PC. See [`docs/VMOS_ARCHITECTURE.md`](../../docs/VMOS_ARCHITECTURE.md).
+The **ChatGPT Attach** tab syncs VMOS Cloud pads over ADB and exports a one-file Custom GPT handoff. **Share to ChatGPT** publishes Cloud Control (`/cloud`) over HTTPS so Plus Actions can reach this PC. SSH Connect Keys stay on this PC. See [`docs/VMOS_ARCHITECTURE.md`](../../docs/VMOS_ARCHITECTURE.md).
 
 ## Development
 

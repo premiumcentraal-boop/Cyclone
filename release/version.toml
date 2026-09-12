@@ -1,4 +1,4 @@
-# Cyclone One 1.5.2 ChatGPT Attach cut on the 1.5.1 VMOS/embedded-ADB baseline.
+# Cyclone One 1.5.3 ChatGPT Attach stable-connect cut on the 1.5.2 baseline.
 # Mobile remains the published 4.3.6 identity.
 schema = 1
 product_version = "4.3.6"
@@ -8,7 +8,7 @@ python_version = "4.1.0"
 
 [components]
 mobile = "4.3.6"
-pc_companion = "1.5.2"
+pc_companion = "1.5.3"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
@@ -20,4 +20,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-one-1.5.2-chatgpt-attach"
+candidate_generation = "cyclone-one-1.5.3-chatgpt-attach"

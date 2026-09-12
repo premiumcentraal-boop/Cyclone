@@ -31,7 +31,16 @@ import type {
   ChatgptAttachResources,
   ChatgptSyncResult,
 } from "./types.js";
-import { localStubSession, parseMobileChip, type ChatgptPadStatus } from "../core/chatgptAttach.js";
+import {
+  emptyShareStatus,
+  gatewayPortFromBase,
+  localCloudControlBase,
+  localStubSession,
+  parseMobileChip,
+  resolveControlApi,
+  type ChatgptPadStatus,
+  type ChatgptShareStatus,
+} from "../core/chatgptAttach.js";
 import { bindLayer2Status } from "../core/layer2.js";
 import { normalizeTunnelStatus } from "../core/mcpTunnel.js";
 import { isDefaultForegroundSession, parseFleetWsEvent, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
@@ -612,9 +621,17 @@ export class HttpDesktopService implements DesktopService {
         });
       }
     }
+    const share = await this.chatgptShareStatus().catch(() => emptyShareStatus(this.cloudControlLocalBase()));
+    const probed = await this.probeCloudControl();
+    const controlApi = resolveControlApi({
+      configured: raw.controlApi,
+      shareUrl: share.url,
+      localBase: probed.localBase || this.cloudControlLocalBase(),
+      fallbackPort: gatewayPortFromBase(this.httpBase),
+    });
     return {
       ok: pads.some((pad) => pad.ok),
-      controlApi: raw.controlApi,
+      controlApi,
       generatedAt: raw.generatedAt,
       pads,
       adbPath: raw.adbPath,
@@ -632,6 +649,41 @@ export class HttpDesktopService implements DesktopService {
 
   chatgptAttachResources(): Promise<ChatgptAttachResources> {
     return invoke<ChatgptAttachResources>("chatgpt_attach_resources");
+  }
+
+  cloudControlLocalBase(): string {
+    return localCloudControlBase(this.httpBase);
+  }
+
+  async probeCloudControl(base?: string): Promise<{ ok: boolean; localBase: string }> {
+    const localBase = localCloudControlBase(base || this.httpBase);
+    try {
+      const health = await this.request<{ ok?: boolean; localBase?: string }>("/cloud/v1/health");
+      return { ok: health.ok === true, localBase: health.localBase || localBase };
+    } catch {
+      return { ok: false, localBase };
+    }
+  }
+
+  async chatgptShareStatus(): Promise<ChatgptShareStatus> {
+    try {
+      return normalizeShare(await invoke<ChatgptShareStatus>("chatgpt_attach_share_status"), this.cloudControlLocalBase());
+    } catch {
+      return emptyShareStatus(this.cloudControlLocalBase());
+    }
+  }
+
+  async chatgptShareStart(): Promise<ChatgptShareStatus> {
+    const status = await invoke<ChatgptShareStatus>("chatgpt_attach_share_start", {
+      localPort: gatewayPortFromBase(this.httpBase),
+    });
+    return normalizeShare(status, this.cloudControlLocalBase());
+  }
+
+  chatgptShareStop(): Promise<ChatgptShareStatus> {
+    return invoke<ChatgptShareStatus>("chatgpt_attach_share_stop").then((status) =>
+      normalizeShare(status, this.cloudControlLocalBase()),
+    );
   }
 
   private async verifySessionBinding(timeoutMs: number): Promise<void> {
@@ -769,6 +821,16 @@ function normalizeAiState(raw?: string): NonNullable<ConnectorCard["aiState"]> {
 
 function stripSlash(value: string): string {
   return value.replace(/\/$/, "");
+}
+
+function normalizeShare(status: ChatgptShareStatus | null | undefined, localBase: string): ChatgptShareStatus {
+  return {
+    ok: Boolean(status?.ok),
+    running: Boolean(status?.running),
+    url: status?.url || "",
+    localBase: status?.localBase || localBase,
+    message: status?.message,
+  };
 }
 
 function sleep(ms: number): Promise<void> {

@@ -29,8 +29,12 @@ import type {
 } from "./types.js";
 import {
   emptyChatgptAttachConfig,
+  emptyShareStatus,
+  localCloudControlBase,
   localStubSession,
   publicControlApi,
+  publicShareControlApi,
+  type ChatgptShareStatus,
 } from "../core/chatgptAttach.js";
 import { bindLayer2Status, LAYER2_PROTOCOL } from "../core/layer2.js";
 import { stoppedTunnelStatus } from "../core/mcpTunnel.js";
@@ -52,6 +56,7 @@ export class MockDesktopService implements DesktopService {
   );
   private chatgptConfig: ChatgptAttachConfig = emptyChatgptAttachConfig();
   private chatgptSecrets = new Map<string, string>();
+  private chatgptShare: ChatgptShareStatus = emptyShareStatus("http://127.0.0.1:8765/cloud");
 
   constructor(deviceCount = 4) {
     this.devices = createMockDevices(deviceCount);
@@ -412,7 +417,10 @@ export class MockDesktopService implements DesktopService {
     });
     return {
       ok: pads.length > 0,
-      controlApi: publicControlApi(this.chatgptConfig.controlApiBase, 8765),
+      controlApi: publicControlApi(
+        this.chatgptConfig.controlApiBase || this.chatgptShare.url || this.cloudControlLocalBase(),
+        8765,
+      ),
       generatedAt: new Date().toISOString(),
       pads,
       message: pads.length ? "Mock fleet synced." : "Add a pad first.",
@@ -429,10 +437,38 @@ export class MockDesktopService implements DesktopService {
 
   async chatgptAttachResources(): Promise<ChatgptAttachResources> {
     return {
-      openapi: "openapi: 3.1.0\ninfo:\n  title: Cyclone Cloud Control API\n",
+      openapi: "openapi: 3.1.0\ninfo:\n  title: Cyclone Cloud Control API\nservers:\n  - url: https://CONTROL_API_HOST_PLACEHOLDER\n",
       instructions: "You control VMOS phones through Actions only.",
       exampleFleet: "{\"pads\":[]}",
     };
+  }
+
+  cloudControlLocalBase(): string {
+    return localCloudControlBase("http://127.0.0.1:8765");
+  }
+
+  async probeCloudControl(base?: string): Promise<{ ok: boolean; localBase: string }> {
+    return { ok: true, localBase: localCloudControlBase(base) || this.cloudControlLocalBase() };
+  }
+
+  async chatgptShareStatus(): Promise<ChatgptShareStatus> {
+    return { ...this.chatgptShare };
+  }
+
+  async chatgptShareStart(): Promise<ChatgptShareStatus> {
+    this.chatgptShare = {
+      ok: true,
+      running: true,
+      url: publicShareControlApi("https://mock-share.trycloudflare.com"),
+      localBase: this.cloudControlLocalBase(),
+      message: "ChatGPT can reach Cloud Control over HTTPS.",
+    };
+    return this.chatgptShareStatus();
+  }
+
+  async chatgptShareStop(): Promise<ChatgptShareStatus> {
+    this.chatgptShare = emptyShareStatus(this.cloudControlLocalBase());
+    return this.chatgptShareStatus();
   }
 
   async getRuntimeStatus(): Promise<DesktopRuntimeStatus> {

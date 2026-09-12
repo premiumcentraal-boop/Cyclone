@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: >-
     ChatGPT Actions front door for VMOS phones. Mutations must execute via
-    Cyclone Mobile PhoneToolExecutor on the server side — not raw VMOS touch.
+    Cyclone Mobile PhoneToolExecutor on the server side, not raw VMOS touch.
 servers:
   - url: https://CONTROL_API_HOST_PLACEHOLDER
     description: Replace with your Cloud Control base URL (no trailing slash)

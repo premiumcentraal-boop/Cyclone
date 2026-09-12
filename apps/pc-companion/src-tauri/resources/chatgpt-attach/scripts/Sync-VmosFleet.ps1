@@ -99,8 +99,9 @@ function Connect-AdbPad($adb, [string]$serial) {
 function Get-Mobile($adb, [string]$serial) {
   $path = (& $adb -s $serial shell pm path com.cyclone.mobile 2>&1 | Out-String)
   $installed = $path -match 'package:'
-  $pid = (& $adb -s $serial shell pidof com.cyclone.mobile 2>&1 | Out-String).Trim()
-  $running = $installed -and $pid -and ($pid -notmatch 'error')
+  # $PID is a PowerShell automatic variable (read-only). Never assign it.
+  $mobilePid = (& $adb -s $serial shell pidof com.cyclone.mobile 2>&1 | Out-String).Trim()
+  $running = $installed -and $mobilePid -and ($mobilePid -notmatch 'error')
   if ($running) { return 'running' }
   if ($installed) { return 'installed' }
   return 'missing'

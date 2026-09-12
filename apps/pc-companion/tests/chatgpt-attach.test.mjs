@@ -12,10 +12,15 @@ import {
   buildAttachBlock,
   buildFleetHandoff,
   collectSecrets,
+  bindOpenApiServer,
+  connectionChecklist,
   emptyChatgptAttachConfig,
   handoffContainsForbidden,
+  isPlaceholderControlApi,
   newPadDraft,
   publicControlApi,
+  publicShareControlApi,
+  resolveControlApi,
 } from "../.test-dist/core/chatgptAttach.js";
 import { MockDesktopService } from "../.test-dist/services/mockDesktopService.js";
 
@@ -106,16 +111,64 @@ test("public control API falls back to loopback cloud stub then placeholder", ()
   assert.equal(publicControlApi(""), "https://CONTROL_API_HOST_PLACEHOLDER");
 });
 
+test("resolveControlApi prefers configured, then share HTTPS, then local stub", () => {
+  assert.equal(resolveControlApi({
+    configured: "https://named.example/cloud",
+    shareUrl: "https://ephemeral.trycloudflare.com",
+    localBase: "http://127.0.0.1:8765/cloud",
+  }), "https://named.example/cloud");
+  assert.equal(resolveControlApi({
+    configured: "",
+    shareUrl: "https://ephemeral.trycloudflare.com/mcp",
+    localBase: "http://127.0.0.1:8765",
+  }), "https://ephemeral.trycloudflare.com/cloud");
+  assert.equal(resolveControlApi({
+    configured: "https://CONTROL_API_HOST_PLACEHOLDER",
+    localBase: "http://127.0.0.1:8791",
+  }), "http://127.0.0.1:8791/cloud");
+  assert.equal(publicShareControlApi("https://abc.trycloudflare.com"), "https://abc.trycloudflare.com/cloud");
+  assert.equal(isPlaceholderControlApi(""), true);
+  assert.equal(isPlaceholderControlApi("http://127.0.0.1:8765/cloud"), false);
+});
+
+test("connection ready checklist covers ADB, Mobile, CONTROL_API, handoff", () => {
+  const items = connectionChecklist({
+    pads: [secretPad],
+    controlApi: "http://127.0.0.1:8765/cloud",
+    controlApiReachable: true,
+    handoffCopied: true,
+  });
+  assert.deepEqual(items.map((item) => item.id), ["adb", "mobile", "control", "handoff"]);
+  assert.ok(items.every((item) => item.ok));
+  const empty = connectionChecklist({});
+  assert.ok(empty.every((item) => !item.ok));
+});
+
+test("OpenAPI server URL is rewritten to the live CONTROL_API", () => {
+  const bound = bindOpenApiServer(
+    "servers:\n  - url: https://CONTROL_API_HOST_PLACEHOLDER\n",
+    "https://abc.trycloudflare.com/cloud",
+  );
+  assert.match(bound, /https:\/\/abc\.trycloudflare\.com\/cloud/);
+  assert.doesNotMatch(bound, /CONTROL_API_HOST_PLACEHOLDER/);
+});
+
 test("bundled Custom GPT pack has OpenAPI Actions and no VMOS AccessKey samples", () => {
   const pack = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src-tauri/resources/chatgpt-attach");
   const openapi = fs.readFileSync(path.join(pack, "openapi-cloud-control.yaml"), "utf8");
   const instructions = fs.readFileSync(path.join(pack, "CUSTOM_GPT_INSTRUCTIONS.md"), "utf8");
+  const sync = fs.readFileSync(path.join(pack, "scripts", "Sync-VmosFleet.ps1"), "utf8");
+  const connect = fs.readFileSync(path.join(pack, "CONNECT.md"), "utf8");
   assert.match(openapi, /operationId: observe/);
   assert.match(openapi, /operationId: tap/);
   assert.match(openapi, /PhoneToolExecutor/);
   assert.doesNotMatch(openapi, /simulateTouch/);
   assert.match(instructions, /CYCLONE_VMOS_ATTACH_v1/);
   assert.doesNotMatch(instructions, /AccessKey:/);
+  assert.match(sync, /\$mobilePid\s*=/);
+  assert.doesNotMatch(sync, /\$pid\s*=/i);
+  assert.match(connect, /Share to ChatGPT/);
+  assert.match(connect, /Bearer/);
 });
 
 test("mock service can save pads, sync, and copy a safe handoff", async () => {
@@ -130,8 +183,16 @@ test("mock service can save pads, sync, and copy a safe handoff", async () => {
   const synced = await service.syncChatgptAttachFleet();
   assert.equal(synced.ok, true);
   assert.equal(synced.pads[0].ok, true);
-  const markdown = buildFleetHandoff(synced, saved.defaultGoal, ["PAD-SECRET-KEY"]);
+  assert.equal(synced.controlApi, "https://control.example/cloud");
+  const local = await service.probeCloudControl();
+  assert.equal(local.ok, true);
+  assert.match(local.localBase, /127\.0\.0\.1:8765\/cloud/);
+  const shared = await service.chatgptShareStart();
+  assert.equal(shared.ok, true);
+  assert.match(shared.url, /trycloudflare\.com\/cloud$/);
+  const markdown = buildFleetHandoff({ ...synced, controlApi: shared.url }, saved.defaultGoal, ["PAD-SECRET-KEY"]);
   const copied = await service.copyChatgptHandoff(markdown);
   assert.equal(copied.ok, true);
   assert.doesNotMatch(copied.markdown, /PAD-SECRET-KEY/);
+  assert.match(markdown, /CONTROL_API: https:\/\/mock-share\.trycloudflare\.com\/cloud/);
 });

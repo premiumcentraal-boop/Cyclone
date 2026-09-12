@@ -76,6 +76,8 @@ class CloudControlService:
             "mutationEngine": PHONE_MUTATION_ENGINE,
             "handoffFields": list(HANDOFF_PUBLIC_FIELDS),
             "architecture": architecture,
+            "auth": "bearer-session-token",
+            "localBase": self.public_base or "",
         }
 
     def mint(self, *, device_id: str | None = None, serial: str | None = None, ttl_seconds: int = SESSION_TTL_SECONDS) -> dict[str, Any]:

@@ -119,6 +119,19 @@ def test_cloud_health_names_phonetoolexecutor(tmp_path):
     assert body["architecture"]["provider_native_mutation_allowed"] is False
     assert "SESSION_TOKEN" in body["handoffFields"]
     assert "connectKey" not in body["handoffFields"]
+    assert body["auth"] == "bearer-session-token"
+    assert body["localBase"].rstrip("/").endswith("/cloud")
+
+
+def test_cloud_root_exposes_local_base(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.get("/cloud")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["health"] == "/cloud/v1/health"
+    assert body["localBase"].rstrip("/").endswith("/cloud")
+    assert body["auth"] == "bearer-session-token"
 
 
 def test_session_mint_and_observe_tap_use_session_bearer(tmp_path):
