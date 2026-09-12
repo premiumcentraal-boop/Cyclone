@@ -17,7 +17,9 @@ import {
   connectionChecklist,
   emptyChatgptAttachConfig,
   handoffContainsForbidden,
+  isEphemeralShareControlApi,
   isPlaceholderControlApi,
+  isPublicControlApi,
   newPadDraft,
   parseVmosConnectCommand,
   publicControlApi,
@@ -149,12 +151,26 @@ test("public control API falls back to loopback cloud stub then placeholder", ()
   assert.equal(publicControlApi(""), "https://CONTROL_API_HOST_PLACEHOLDER");
 });
 
-test("resolveControlApi prefers configured, then share HTTPS, then local stub", () => {
+test("public CONTROL_API rejects localhost while accepting HTTPS share/custom hosts", () => {
+  assert.equal(isPublicControlApi("http://127.0.0.1:8765/cloud"), false);
+  assert.equal(isPublicControlApi("https://localhost/cloud"), false);
+  assert.equal(isPublicControlApi("https://abc.trycloudflare.com/cloud"), true);
+  assert.equal(isPublicControlApi("https://control.example/cloud"), true);
+  assert.equal(isEphemeralShareControlApi("https://abc.trycloudflare.com/cloud"), true);
+  assert.equal(isEphemeralShareControlApi("https://control.example/cloud"), false);
+});
+
+test("resolveControlApi prefers stable custom, but live share beats stale trycloudflare", () => {
   assert.equal(resolveControlApi({
     configured: "https://named.example/cloud",
     shareUrl: "https://ephemeral.trycloudflare.com",
     localBase: "http://127.0.0.1:8765/cloud",
   }), "https://named.example/cloud");
+  assert.equal(resolveControlApi({
+    configured: "https://old-share.trycloudflare.com/cloud",
+    shareUrl: "https://fresh-share.trycloudflare.com",
+    localBase: "http://127.0.0.1:8765/cloud",
+  }), "https://fresh-share.trycloudflare.com/cloud");
   assert.equal(resolveControlApi({
     configured: "",
     shareUrl: "https://ephemeral.trycloudflare.com/mcp",
@@ -169,18 +185,24 @@ test("resolveControlApi prefers configured, then share HTTPS, then local stub", 
   assert.equal(isPlaceholderControlApi("http://127.0.0.1:8765/cloud"), false);
 });
 
-test("connection ready checklist covers transport, real Cloud AI session, CONTROL_API, handoff", () => {
+test("connection ready checklist covers transport, real Cloud AI session, public CONTROL_API, handoff", () => {
   const items = connectionChecklist({
     pads: [secretPad],
-    controlApi: "http://127.0.0.1:8765/cloud",
+    controlApi: "https://control.example/cloud",
     controlApiReachable: true,
     handoffCopied: true,
   });
   assert.deepEqual(items.map((item) => item.id), ["adb", "mobile", "session", "control", "handoff"]);
   assert.ok(items.every((item) => item.ok));
+  const localApi = connectionChecklist({
+    pads: [secretPad],
+    controlApi: "http://127.0.0.1:8765/cloud",
+    controlApiReachable: true,
+  });
+  assert.equal(localApi.find((item) => item.id === "control")?.ok, false);
   const fakeSession = connectionChecklist({
     pads: [{ ...secretPad, sessionSource: "local-stub" }],
-    controlApi: "http://127.0.0.1:8765/cloud",
+    controlApi: "https://control.example/cloud",
     controlApiReachable: true,
   });
   assert.equal(fakeSession.find((item) => item.id === "session")?.ok, false);
