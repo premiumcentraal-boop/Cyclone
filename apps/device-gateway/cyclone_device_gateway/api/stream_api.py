@@ -17,6 +17,7 @@ from ..desktop_runtime.models import (
     VIDEO_PROFILES,
     VIDEO_PROTOCOL_VERSION,
 )
+from .camera_stream_api import create_camera_stream_router
 from .layer2_api import create_layer2_router
 from .session_api import create_session_router
 
@@ -73,6 +74,10 @@ def create_stream_router(runtime: Any, token: str) -> APIRouter:
             "protocol": VIDEO_PROTOCOL_VERSION,
             "video": diagnostics,
         }
+
+    # Camera streaming is a sibling media plane. It reuses Cyclone's pinned scrcpy transport,
+    # captures the physical sensor aspect ratio, and fans one encoded source to <=5 viewers.
+    router.include_router(create_camera_stream_router(runtime, token))
 
     # Session routes share the same ephemeral local bearer, but every operation behind them also
     # requires the phone's trusted Android Gateway credential. No direct ADB execution route exists.

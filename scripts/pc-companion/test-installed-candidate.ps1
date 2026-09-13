@@ -41,14 +41,17 @@ $FirstRunGuide = Get-ChildItem -Path $InstallDir -Recurse -Filter CYCLONE_FIRST_
 if ($null -eq $FirstRunGuide) { throw 'Installed first-run guide is missing.' }
 $GuideText = Get-Content $FirstRunGuide.FullName -Raw
 $GuideFragments = @(
+  'Cyclone One 1.5.5',
   'Connect phone',
   'Android Platform-Tools 37.0.1',
   'no Android Studio or separate ADB install',
   'Android 15',
   'Android 13/14 are compatible',
   'Android 12 and older are unsupported',
-  'Cyclone Mobile 4.3.6',
+  'Cyclone Mobile 4.3.7',
   'PC Gateway & QR pairing',
+  'Camera streaming',
+  'sensor aspect ratio',
   'loopback-only',
   'Share to ChatGPT'
 )
@@ -58,7 +61,7 @@ foreach ($Fragment in $GuideFragments) {
   }
 }
 Write-Host "Installed first-run guide accepted: $($FirstRunGuide.FullName)"
-Write-Host 'Installed first-run contract accepted: bundled ADB, VMOS Android 15/13/14 guidance, Cyclone Mobile 4.3.6, and PC Gateway & QR pairing handoff.'
+Write-Host 'Installed first-run contract accepted: bundled ADB, VMOS guidance, Cyclone Mobile 4.3.7, camera streaming, and PC Gateway pairing.'
 
 $SyncScript = Get-ChildItem -Path $InstallDir -Recurse -Filter 'Sync-VmosFleet.ps1' -File | Select-Object -First 1
 if ($null -eq $SyncScript) { throw 'Installed ChatGPT Attach Sync-VmosFleet.ps1 is missing.' }
@@ -162,8 +165,9 @@ try {
   Write-Host "Installed transport onboarding accepted: mode=$($Transport.mode) authenticated=yes"
 
   $CloudHealth = Invoke-RestMethod -Uri "$GatewayBase/cloud/v1/health" -Method Get -TimeoutSec 15
-  if ($CloudHealth.ok -ne $true -or $CloudHealth.auth -ne 'bearer-session-token' -or [string]$CloudHealth.localBase -notmatch '/cloud$') {
-    throw 'Installed CyclonePCRuntime did not expose Cloud Control at /cloud/v1/health.'
+  if ($CloudHealth.ok -ne $true -or $CloudHealth.auth -ne 'session-token-header-or-bearer' -or $CloudHealth.sessionHeader -ne 'X-Cyclone-Session-Token' -or [string]$CloudHealth.localBase -notmatch '/cloud$') {
+    $CloudJson = $CloudHealth | ConvertTo-Json -Compress -Depth 6
+    throw "Installed CyclonePCRuntime Cloud Control health contract is invalid: $CloudJson"
   }
   Write-Host "Installed Cloud Control accepted: $($CloudHealth.localBase) auth=$($CloudHealth.auth)"
 } finally {
