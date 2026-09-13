@@ -54,6 +54,7 @@ class CyclonePcParityBridge internal constructor(
     private var brainEvidence: JSONObject? = null
     private var routeEvidence: JSONObject? = null
     private var forceVision = false
+    var incident: com.cyclone.mobile.agent.recovery.RecoveryIncident? = null
 
     fun observe(goal: String): AgentPageCard? {
         val previousKey = page?.pageKey
@@ -107,6 +108,7 @@ class CyclonePcParityBridge internal constructor(
         val semanticWitness = listOf(card.pageKey, card.contentKey, card.accessibilityFingerprint)
             .joinToString("|")
         CycloneObservation(
+            sessionId = card.sessionId, displayId = card.displayId, generation = card.generation, packageName = card.packageName,
             identity = semanticWitness,
             pageIdentity = card.pageKey,
             evidenceIdentity = semanticWitness,
@@ -121,6 +123,7 @@ class CyclonePcParityBridge internal constructor(
         val out = JSONObject()
             .put("contract", "cyclone-pc-parity-local-v2")
             .put("goal", goal)
+            .put("recoveryIncident", incident?.toJson() ?: JSONObject.NULL)
             .put("goalContract", contract.toJson())
             .put("completionState", completion.toJson())
             .put("staleIdRule", "elementId and elementIndex are valid only for the current observation; re-locate after every mutation")
@@ -224,7 +227,7 @@ class CyclonePcParityBridge internal constructor(
 
     fun actGraph(action: LearnedAction, goal: String): AgentActionEnvelope {
         val query = action.label.ifBlank { action.id }
-        val candidate = search(query, goal).firstOrNull()
+        val candidate = search(query, goal).filter { normalize(it.label) == normalize(query) || normalize(it.semanticName) == normalize(query) }.singleOrNull()
         val params = JSONObject()
         if (candidate != null) params.put("elementId", candidate.elementId)
         onOperation?.invoke("phone.click", null)
@@ -404,10 +407,10 @@ class CyclonePcParityBridge internal constructor(
             ?: controlId?.takeIf { it.isNotBlank() }
             ?: goal
         val normalized = normalize(query)
-        card.controls.firstOrNull {
+        card.controls.singleOrNull {
             normalize(it.semanticName) == normalized || normalize(it.label) == normalized
         }?.let { return it.elementId }
-        return search(query, goal).firstOrNull()?.elementId
+        return search(query, goal).filter { normalize(it.label) == normalized || normalize(it.semanticName) == normalized }.singleOrNull()?.elementId
     }
 
     private fun search(query: String, goal: String): List<AgentElementCandidate> {

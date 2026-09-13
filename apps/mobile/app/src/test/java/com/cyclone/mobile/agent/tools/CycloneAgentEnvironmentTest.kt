@@ -13,6 +13,45 @@ import org.junit.Test
 import java.util.ArrayDeque
 
 class CycloneAgentEnvironmentTest {
+    @Test fun movedTargetUsesFreshIdAndNeverOldCoordinates() {
+        val before = observation("old", "home", "fp", "Reject cookies")
+        val after = observation("fresh", "home", "fp2", "Reject cookies")
+        before.elements.values.single().evidence.put("bounds", JSONObject().put("left", 0).put("top", 0).put("right", 40).put("bottom", 20))
+        after.elements.values.single().evidence.put("bounds", JSONObject().put("left", 0).put("top", 80).put("right", 40).put("bottom", 100))
+        val report = CurrentTargetRevalidation.resolve(before, after, elementId(before))
+        assertEquals(TargetDrift.MOVED_SAME_IDENTITY, report.status)
+        assertEquals(elementId(after), report.elementId)
+        val runtime = FakeRuntime(before, null).apply { captureQueue.addLast(after) }
+        val env = CycloneAgentEnvironment(runtime, revalidateTargets = true)
+        env.observe("login")
+        env.act("phone.click", JSONObject().put("elementId", elementId(before)), "reject cookies")
+        assertEquals(1, runtime.executionCalls)
+        assertEquals(after.id, runtime.lastParams!!.getString("observationId"))
+        assertEquals(elementId(after), runtime.lastParams!!.getString("elementId"))
+    }
+
+    @Test fun replacementAmbiguityOcclusionAndScopeDriftNeverDispatch() {
+        val before = observation("old", "home", "fp", "Reject cookies")
+        before.elements.values.single().evidence.put("bounds", JSONObject().put("left", 0).put("top", 0).put("right", 40).put("bottom", 20))
+        val same = observation("fresh", "home", "fp2", "Reject cookies")
+        same.elements.values.single().evidence.put("bounds", JSONObject().put("left", 0).put("top", 0).put("right", 40).put("bottom", 20))
+        val duplicate = same.elements.values.single().copy(id = "semantic:fresh:duplicate")
+        val cases = listOf(
+            observation("accept", "home", "fp2", "Accept cookies") to TargetDrift.DISAPPEARED,
+            same.copy(elements = same.elements + (duplicate.id to duplicate)) to TargetDrift.AMBIGUOUS,
+            same.copy(execution = same.execution.copy(displayId = 7)) to TargetDrift.SCOPE_MISMATCH,
+        )
+        cases.forEach { (after, status) ->
+            assertEquals(status, CurrentTargetRevalidation.resolve(before, after, elementId(before)).status)
+            val runtime = FakeRuntime(before, null).apply { captureQueue.addLast(after) }
+            val env = CycloneAgentEnvironment(runtime, revalidateTargets = true)
+            env.observe("login")
+            assertFalse(env.act("phone.click", JSONObject().put("elementId", elementId(before)), "reject cookies").executorInvoked)
+            assertEquals(0, runtime.executionCalls)
+        }
+        same.elements.values.single().evidence.put("visibleToUser", false)
+        assertEquals(TargetDrift.OCCLUDED, CurrentTargetRevalidation.resolve(before, same, elementId(before)).status)
+    }
     @Test fun oneCaptureFeedsLegacyAndExecutableViewsDuringBannerArrival() {
         val initial = observation("first", "home", "fp1")
         val banner = observation("second", "consent", "fp2")
@@ -367,6 +406,7 @@ class CycloneAgentEnvironmentTest {
         var currentObservation: GatewayObservation? = null
         val captureQueue = ArrayDeque<GatewayObservation>().apply { addLast(initial) }
         var executionCalls = 0
+        var lastParams: JSONObject? = null
         var learningCalls = 0
 
         override fun capture(): GatewayObservation {
@@ -384,6 +424,7 @@ class CycloneAgentEnvironmentTest {
         override fun readinessFailure(): AgentFailure? = null
         override fun policyFailure(tool: String, params: JSONObject): AgentFailure? = null
         override fun execute(requestId: String, tool: String, params: JSONObject): PhoneToolResult {
+            lastParams = JSONObject(params.toString())
             executionCalls += 1
             return PhoneToolResult(requestId, tool, true, 1, 2)
         }

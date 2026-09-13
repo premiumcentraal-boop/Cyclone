@@ -274,6 +274,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         lateinit var localAgent: CycloneLocalAgent
         val model = object : CycloneAgentModel {
             override fun plan(taskState: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
+                session.bridge.incident = taskState.incident
                 if (!ownsInput()) {
                     return CyclonePlanResult.Valid(
                         CycloneModelTurn(
@@ -290,7 +291,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                         code = "cookie.reject_optional", ok = true)
                     return planFromDecision(PageAgentDecision("act", "Cookie consent", summary,
                         listOf(PageAgentAction("phone.click", target.elementId, JSONObject(), true, summary)),
-                        null, null), session.state.page.pageKey)
+                        null, null), session.state.page.pageKey, com.cyclone.mobile.agent.recovery.IncidentEffect.CONSENT_REMOVED)
                 }
 
                 when (session.bridge.photoEffect()) {
@@ -447,6 +448,17 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             override fun observe(taskState: CycloneTaskState): CycloneObservation? {
                 val fresh = observeState(goal, session.bridge) ?: return null
                 session.state = fresh
+                val card = session.bridge.currentPage()
+                val incident = taskState.incident
+                if (card != null && incident?.resolution == "OPEN" &&
+                    incident.intendedEffect == com.cyclone.mobile.agent.recovery.IncidentEffect.CONSENT_REMOVED &&
+                    card.treeUseful &&
+                    card.packageName == incident.packageName &&
+                    !Regex("(?i)cookies?|consent|toestemming").containsMatchIn("${card.pageSummary} ${card.pageText}") &&
+                    card.controls.none { CookieInterruptionPolicy.isRejectLabel(it.label) } &&
+                    card.controls.any { it.label.trim().lowercase() in setOf("log in", "login", "sign in", "inloggen") }) {
+                    localAgent.verifyIncident(com.cyclone.mobile.agent.recovery.IncidentEffect.CONSENT_REMOVED, card.sessionId, card.displayId)
+                }
                 if (!background) DeviceState.markObserved()
                 return session.bridge.observation()
             }
@@ -1213,7 +1225,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         )
     }
 
-    private fun planFromDecision(decision: PageAgentDecision, pageKey: String): CyclonePlanResult {
+    private fun planFromDecision(decision: PageAgentDecision, pageKey: String, intendedEffect: com.cyclone.mobile.agent.recovery.IncidentEffect = com.cyclone.mobile.agent.recovery.IncidentEffect.USER_GOAL_VERIFIED): CyclonePlanResult {
         val directive = when (decision.status) {
             "act" -> CycloneModelDirective.ACT
             "done" -> CycloneModelDirective.DONE
@@ -1231,6 +1243,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             CycloneModelTurn(
                 directive = directive,
                 actionSignature = signature,
+                intendedEffect = intendedEffect,
                 reason = decision.reason,
                 payload = decision,
             ),
