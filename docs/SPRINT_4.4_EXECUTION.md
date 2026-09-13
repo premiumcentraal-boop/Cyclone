@@ -45,3 +45,13 @@ Android production environment revalidates element intent against one fresh capt
 Tests: accepted-but-unverified recovery retains one incident and original goal; incident codec redacts non-code strategies; wrong effect/display cannot close it; moved control dispatch uses new ID; replacement/ambiguity/scope mismatch produce zero executor calls. Limitations: exact identity matching is conservative; unknown effects are not auto-closed; no process/device restart experiment or real keyboard/browser timing measurement yet.
 
 Checkpoint 3 exact working-source rerun: 1,014 tests passed, zero failures/errors; version/product/security guards passed. Consent proof uses the fresh capture boundary rather than comparing process-local generation counters after restart.
+
+Checkpoint 3 SHA: 97f4197cfaac67d569bf32f21e9935cdcbd90cc9. Matching push CI 34752640792 passed.
+
+Checkpoint 4 (07/08): typed semantic observation health distinguishes healthy/empty valid, timeout, permission/service unavailable, disconnected, scope mismatch and unavailable. Same-scope recovery has a 500ms cooldown and two-attempt bound; permanent boundaries stop without provider calls. Resuming a handoff resets health; no alternate display/backend is introduced. Health is projected into task progress, trace and provider context. Settings-wide diagnostics UI and alternate backend switching remain outside this foundational slice.
+
+Phone tasks, text chat and model qualification share ProviderRequests: exact request passthrough, individual cancellation, 30-second maximum remaining deadline, at most one classified transient retry, 250–5,000ms bounded pacing, and one active/half-open request per account/model/endpoint/purpose. 401/402/403/400 and embedded 403 do not retry. Key replacement cancels/invalidate old-account requests and pacing. Stop does not cancel a global HTTP dispatcher. Coroutine and late-response fixtures verify isolation and discarded results. Offline interceptor fixtures do not establish real provider latency or physical phone response time.
+
+Tests include permanent one-attempt errors, 503→success, repeated 429 bounded to two attempts, cancellation during backoff, response past deadline, independent concurrent request survival, coroutine cancellation, one half-open probe, key replacement, and no raw key in request context. Existing chat source assertion now checks the shared cancellation adapter; behavioral cancellation is covered by transport tests.
+
+Checkpoint 4 final suite: 1,027 tests passed, zero failures/errors. Transient observation fixture recovered after cooldown with exactly two captures in the same task; dead-service fixture made one capture and zero provider calls.

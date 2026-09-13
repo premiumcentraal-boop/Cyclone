@@ -47,6 +47,8 @@ class CyclonePcParityBridge internal constructor(
 
     var onOperation: ((String, AgentActionEnvelope?) -> Unit)? = null
     private var page: AgentPageCard? = null
+    var observationHealth = com.cyclone.mobile.agent.ObservationHealth(com.cyclone.mobile.agent.ObservationState.UNAVAILABLE, execution.sessionId, execution.displayId)
+        private set
     private var memory: RecoveryMemory = RecoveryMemory()
     private var lastRecovery: RecoveryDecision? = null
     private var searchEvidence: List<AgentElementCandidate> = emptyList()
@@ -56,14 +58,28 @@ class CyclonePcParityBridge internal constructor(
     private var forceVision = false
     var incident: com.cyclone.mobile.agent.recovery.RecoveryIncident? = null
 
-    fun observe(goal: String): AgentPageCard? {
+    @Synchronized fun observe(goal: String): AgentPageCard? {
+        val now = System.nanoTime() / 1_000_000
+        if (observationHealth.attempts > 0 && (observationHealth.terminal || now < observationHealth.cooldownUntilMs)) return null
         val previousKey = page?.pageKey
         val result = environment.locate(goal)
-        val fresh = result.page ?: run { page = null; return null }
-        if (fresh.sessionId != execution.sessionId || fresh.displayId != execution.displayId) {
+        val fresh = result.page ?: run {
             page = null
+            environment.invalidateObservation()
+            observationHealth = com.cyclone.mobile.agent.ObservationHealth.failure(result.failure, execution.sessionId,
+                execution.displayId, observationHealth.attempts + 1, observationHealth.lastSuccessMs, now)
             return null
         }
+        if (fresh.sessionId != execution.sessionId || fresh.displayId != execution.displayId) {
+            page = null
+            environment.invalidateObservation()
+            observationHealth = com.cyclone.mobile.agent.ObservationHealth(com.cyclone.mobile.agent.ObservationState.SCOPE_MISMATCH,
+                execution.sessionId, execution.displayId, 1)
+            return null
+        }
+        observationHealth = com.cyclone.mobile.agent.ObservationHealth(
+            if (fresh.controls.isEmpty()) com.cyclone.mobile.agent.ObservationState.EMPTY_VALID else com.cyclone.mobile.agent.ObservationState.HEALTHY,
+            execution.sessionId, execution.displayId, lastSuccessMs = fresh.capturedAtMs)
         page = fresh
         if (previousKey == null) {
             memory = RecoveryMemory(
@@ -84,6 +100,7 @@ class CyclonePcParityBridge internal constructor(
     }
 
     fun invalidateAfterHandoff() {
+        observationHealth = com.cyclone.mobile.agent.ObservationHealth(com.cyclone.mobile.agent.ObservationState.UNAVAILABLE, execution.sessionId, execution.displayId)
         environment.invalidateObservation()
         page = null
         searchEvidence = emptyList()
@@ -124,6 +141,7 @@ class CyclonePcParityBridge internal constructor(
             .put("contract", "cyclone-pc-parity-local-v2")
             .put("goal", goal)
             .put("recoveryIncident", incident?.toJson() ?: JSONObject.NULL)
+            .put("observationHealth", observationHealth.toJson())
             .put("goalContract", contract.toJson())
             .put("completionState", completion.toJson())
             .put("staleIdRule", "elementId and elementIndex are valid only for the current observation; re-locate after every mutation")

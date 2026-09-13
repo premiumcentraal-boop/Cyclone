@@ -67,6 +67,7 @@ fun interface CycloneAgentTraceSink { fun emit(event: CycloneTraceEvent); object
 interface CycloneTaskCheckpointStore { fun save(state: CycloneTaskState); object NoOp : CycloneTaskCheckpointStore { override fun save(state: CycloneTaskState) = Unit } }
 interface CycloneAgentModel { fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult }
 interface CycloneAgentTools {
+    fun observationHealth(): ObservationHealth? = null
     fun onRecovery(state: CycloneTaskState, kind: CycloneRecoveryKind, code: String) {}
     fun observe(state: CycloneTaskState): CycloneObservation?
     fun execute(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn): CycloneToolResult
@@ -181,6 +182,14 @@ class CycloneLocalAgent(
             val observation = timed(ExecutionPhase.OBSERVATION) { tools.observe(state) }
             executionBoundary()?.let { return it }
             if (observation == null) {
+                val health = tools.observationHealth()
+                if (health != null) {
+                    if (health.terminal) return hardBlocker(health.message)
+                    while (System.nanoTime() / 1_000_000 < health.cooldownUntilMs) {
+                        executionBoundary()?.let { return it }
+                        Thread.sleep(25)
+                    }
+                }
                 recover(CycloneRecoveryKind.OBSERVATION_FAILURE, "observe.failed", false)?.let { return it }
                 continue
             }

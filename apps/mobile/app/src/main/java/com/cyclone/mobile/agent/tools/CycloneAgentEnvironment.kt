@@ -717,8 +717,16 @@ class CycloneAgentEnvironment internal constructor(
         error: Throwable,
         defaultLayer: AgentFailureLayer,
     ): AgentFailure {
+        if (error is com.cyclone.mobile.runtime.session.SessionIdentityException) return AgentFailure(
+            AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+            "The requested session/display identity is unavailable or changed.", error.errorClass)
+        if (error is SecurityException) return AgentFailure(AgentFailureClass.ACCESSIBILITY_UNAVAILABLE,
+            AgentFailureLayer.OBSERVATION, false, "Observation permission is unavailable.", "OBSERVATION_PERMISSION_REQUIRED")
         if (error is GatewayProtocolException) {
             return when (error.code) {
+                "SESSION_REQUIRED", "SESSION_NOT_FOUND", "SESSION_UNKNOWN", "SESSION_DISPLAY_MISMATCH", "OBSERVATION_SESSION_MISMATCH" ->
+                    AgentFailure(AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+                        "The requested session/display identity is unavailable or changed.", error.code)
                 "STALE_OBSERVATION", "STALE_ELEMENT" -> staleFailure(
                     com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                 )

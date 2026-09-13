@@ -78,13 +78,6 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         else DeviceState.controller == DeviceState.Controller.AGENT
     private fun scoped(params: JSONObject = JSONObject()) = com.cyclone.mobile.runtime.session.ExecutionRequestScope.merge(
         JSONObject().put("sessionId", execution.sessionId).put("displayId", execution.displayId), params)
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(75, TimeUnit.SECONDS)
-        .writeTimeout(25, TimeUnit.SECONDS)
-        .callTimeout(60, TimeUnit.SECONDS)
-        .build()
-
     private data class ObservedState(
         val snapshot: JSONObject,
         val environment: JSONObject,
@@ -129,6 +122,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         val cookieInterruptions: CookieInterruptionPolicy = CookieInterruptionPolicy(),
         val executedActions: ExecutedActionMemory = ExecutedActionMemory(),
         var playbookPackage: String? = null,
+        val providerCancellation: ProviderCancellation = ProviderCancellation(),
     )
 
     private data class ActiveLocalSession(
@@ -155,8 +149,9 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         SkillRuntime.initialize(context)
         PageAwarenessRuntime.initialize(context)
 
-        var state = observeState(goal)
-            ?: return@withContext QuickAgentResult(false, "Cyclone could not read the current Android page. Enable Accessibility and try again.", 0, config.model.id)
+        val initialBridge = CyclonePcParityBridge(context, execution, goal)
+        var state = observeState(goal, initialBridge)
+            ?: return@withContext QuickAgentResult(false, initialBridge.observationHealth.message, 0, config.model.id)
 
         val traceId = AgentTraceRuntime.start(context, goal, config.model.id)
         // CycloneLocalAgent owns convergence and lifecycle; no independently paused executor guard.
@@ -245,7 +240,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
     fun cancelActiveTask() {
         activeLocalSession?.context?.stopRequested = true
         activeLocalSession?.agent?.cancel()
-        http.dispatcher.cancelAll()
+        activeLocalSession?.context?.providerCancellation?.cancel()
     }
 
     private fun createLocalSession(
@@ -426,6 +421,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         }
 
         val tools = object : CycloneAgentTools {
+            override fun observationHealth() = session.bridge.observationHealth
             override fun onRecovery(taskState: CycloneTaskState, kind: CycloneRecoveryKind, code: String) {
                 session.consecutiveNoProgressFailures = taskState.consecutiveRecoveryCyclesWithoutNewEvidence
                 if (session.consecutiveNoProgressFailures >= 2 && session.adaptiveMode != "FREE") {
@@ -446,7 +442,13 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             }
 
             override fun observe(taskState: CycloneTaskState): CycloneObservation? {
-                val fresh = observeState(goal, session.bridge) ?: return null
+                val fresh = observeState(goal, session.bridge) ?: run {
+                    onProgress(session.bridge.observationHealth.message)
+                    AgentTraceRuntime.event(context, traceId, "OBSERVATION_HEALTH", session.bridge.observationHealth.message,
+                        code = session.bridge.observationHealth.reason, ok = false,
+                        detail = session.bridge.observationHealth.toJson().toString())
+                    return null
+                }
                 session.state = fresh
                 val card = session.bridge.currentPage()
                 val incident = taskState.incident
@@ -566,7 +568,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                 turn: CycloneModelTurn,
             ): CycloneTaskClassification {
                 if (turn.reason == API_KEY_BLOCKER) return CycloneTaskClassification.HARD_BLOCKER
-                if (ProviderFailure.message(turn.reason.orEmpty()) != null) return CycloneTaskClassification.HARD_BLOCKER
+                if (ProviderFailure.message(turn.reason.orEmpty()) != null || turn.reason?.startsWith("provider.") == true) return CycloneTaskClassification.HARD_BLOCKER
                 if (!ownsInput() || deterministicHumanBoundary(session.state.page)) {
                     session.pendingGateClass = deterministicGateClass(session.state.page)
                     return CycloneTaskClassification.HUMAN_OR_GATE
@@ -709,7 +711,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                     CycloneTaskClassification.HARD_BLOCKER -> if (run.message == API_KEY_BLOCKER) {
                         "Cyclone reached an unknown page and needs the existing OpenRouter API key to continue."
                     } else {
-                        ProviderFailure.message(run.message.orEmpty()) ?: run.message ?: "Cyclone reached a deterministic hard blocker."
+                        ProviderFailure.message(run.message.orEmpty()) ?: run.message?.let(ProviderRequests::message) ?: "Cyclone reached a deterministic hard blocker."
                     }
                     CycloneTaskClassification.NON_CONVERGENCE -> when (run.message) {
                         "completion.ambiguous_after_recheck" -> "Cyclone could not verify completion after two checks. Open the run details to see the missing evidence."
@@ -1373,6 +1375,8 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
 
     private fun providerBoundary(response: JSONObject, traceId: String): PageAgentDecision? {
         if (!response.has("error")) return null
+        if (response.has("_lifecycle")) return PageAgentDecision("blocked", "", response.getString("_lifecycle"),
+            emptyList(), null, response.getString("_lifecycle"))
         val failure = ProviderFailure.classify(
             response.optInt("_httpStatus", response.optJSONObject("error")?.optInt("code", 500) ?: 500),
             response.optJSONObject("error")?.toString(),
@@ -1406,19 +1410,31 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
             .header("X-Title", "Cyclone Mobile V2.8 Page Agent")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        return try { http.newCall(request).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            val json = runCatching { JSONObject(text) }.getOrElse {
-                JSONObject().put("error", JSONObject().put("message", text.ifBlank { "HTTP ${response.code}" }))
+        val session = activeLocalSession?.context
+        val remaining = session?.checkpoint?.let { 300_000 - (System.currentTimeMillis() - it.taskStartTimeMs) }
+            ?: ProviderRequests.REQUEST_BUDGET_MS
+        val requestContext = ProviderRequests.context(session?.traceId ?: "phone-task", apiKey, model.id,
+            ProviderRequestPurpose.PHONE_TASK, remaining, session?.providerCancellation ?: ProviderCancellation(),
+            externallyCancelled = { session?.cancelled?.invoke() == true || session?.stopRequested == true },
+            onPhase = { phase, elapsed ->
+                if (session != null) AgentTraceRuntime.event(context, session.traceId, "PROVIDER_PHASE", phase,
+                    code = phase, ok = phase != "provider_cancelled",
+                    detail = "decision=${session.checkpoint?.modelTurns} phase=$phase elapsedMs=$elapsed request=${session.providerRequests}")
+            })
+        return try {
+            val response = ProviderRequests.execute(request, requestContext)
+            val json = runCatching { JSONObject(response.body) }.getOrElse {
+                JSONObject().put("error", JSONObject().put("code", response.status))
             }
-            if (!response.isSuccessful || json.has("error")) {
-                if (!json.has("error")) json.put("error", JSONObject().put("code", response.code))
-                json.put("_httpStatus", response.code).put("_selectedModel", model.id)
-                    .put("_requestId", response.header("x-request-id") ?: response.header("x-openrouter-request-id") ?: "")
+            if (response.status !in 200..299 || json.has("error")) {
+                if (!json.has("error")) json.put("error", JSONObject().put("code", response.status))
+                json.put("_httpStatus", response.status).put("_selectedModel", model.id)
+                    .put("_requestId", response.requestId ?: requestContext.requestId)
             }
             json
-        } } catch (_: IOException) {
-            JSONObject().put("error", JSONObject().put("code", 0))
+        } catch (error: ProviderLifecycleException) {
+            JSONObject().put("_lifecycle", error.reason).put("_selectedModel", model.id)
+                .put("error", JSONObject().put("code", 0))
         }
     }
 
