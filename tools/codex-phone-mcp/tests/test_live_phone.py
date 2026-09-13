@@ -50,6 +50,7 @@ class LivePhoneTests(unittest.TestCase):
         self.assertEqual('phone.click', call['tool'])
         self.assertEqual({'elementId': 'e1'}, call['params'])
         self.assertFalse(result['action']['verified'])
+        self.assertFalse(result['ok'])
         self.engine.observe.assert_called_once()
         self.assertNotIn('pixel', self.engine.observations)
 
@@ -75,7 +76,8 @@ class LivePhoneTests(unittest.TestCase):
         folder = Path(self.temp.name) / 'runtime' / 'fleet-screenshots'
         folder.mkdir(parents=True)
         image = folder / 'pixel.png'
-        image.write_bytes(b'\x89PNG\r\n\x1a\n' + b'test')
+        from PIL import Image
+        Image.new('RGB', (16, 24), 'blue').save(image)
         raw = {'screenshot': {'available': True, 'artifact': {'reference': str(image)}}}
         result = self.engine._image(raw)
         self.assertTrue(result['ready'])
@@ -83,6 +85,16 @@ class LivePhoneTests(unittest.TestCase):
         raw['screenshot']['artifact']['reference'] = '/etc/passwd'
         self.assertFalse(self.engine._image(raw)['ready'])
         self.assertFalse(self.engine._image({})['ready'])
+
+    def test_truncated_image_is_not_vision_ready(self):
+        folder = Path(self.temp.name) / 'runtime' / 'fleet-screenshots'
+        folder.mkdir(parents=True)
+        image = folder / 'broken.png'
+        image.write_bytes(b'\x89PNG\r\n\x1a\n' + b'broken')
+        (self.engine.root / 'latest.jpg').write_bytes(b'old image')
+        result = self.engine._image({'screenshot': {'available': True, 'artifact': {'reference': str(image)}}})
+        self.assertFalse(result['ready'])
+        self.assertFalse((self.engine.root / 'latest.jpg').exists())
 
     def test_observation_has_ui_and_current_image_same_response(self):
         self.tools.gateway.device_observe.return_value = {'observation': {}}
@@ -98,6 +110,14 @@ class LivePhoneTests(unittest.TestCase):
         self.assertNotIn('secret', json.dumps(result))
         self.assertNotIn('23456', json.dumps(result))
         self.assertEqual('Settings', result['ui'])
+
+    def test_typed_password_otp_and_key_never_return_in_response(self):
+        secrets = ('Password-123!', '654321', 'api-key-example')
+        response = {'after': {'ui': {'text': 'Password-123! api-key-example', 'otp': 654321}}, 'status': {'control': True}}
+        encoded = json.dumps(safe_result(response, secrets))
+        for secret in secrets:
+            self.assertNotIn(secret, encoded)
+        self.assertTrue(safe_result(response, secrets)['status']['control'])
 
     def test_live_marker_does_not_change_native_client(self):
         with patch('cyclone_phone_mcp.live_phone_ipc.GatewayClient._request', return_value={}) as call:
@@ -135,6 +155,12 @@ class WindowsLivePhoneIpcTests(unittest.TestCase):
             second = launch()
             try:
                 result = request_one({'operation': 'back', 'device': 'pixel', 'goal': 'Back', 'observation_id': 'before-restart'})
+                self.assertEqual('STALE_OBSERVATION', result['error'])
+                (root() / 'control.json').write_text('{"enabled":false,"stopped":true,"generation":"stop"}')
+                result = request_one({'operation': 'home', 'device': 'pixel', 'goal': 'Home', 'observation_id': 'old'})
+                self.assertEqual('LIVE_PHONE_STOPPED', result['error'])
+                (root() / 'control.json').write_text('{"enabled":true,"stopped":false,"generation":"resume"}')
+                result = request_one({'operation': 'home', 'device': 'pixel', 'goal': 'Home', 'observation_id': 'old'})
                 self.assertEqual('STALE_OBSERVATION', result['error'])
             finally:
                 second.terminate()

@@ -113,6 +113,17 @@ def cursor_mcp_path() -> Path:
     return Path.home() / ".cursor" / "mcp.json"
 
 
+def grok_config_path() -> Path:
+    override = os.getenv("CYCLONE_GROK_MCP_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".grok" / "mcp.json"
+
+
+def grok_profile(command: str, args: list[str]) -> dict[str, Any]:
+    return cursor_profile(command, args)
+
+
 def cursor_profile(command: str, args: list[str], env: dict[str, str] | None = None) -> dict[str, Any]:
     safe_env: dict[str, str] = {}
     for key, value in dict(env or {}).items():

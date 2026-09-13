@@ -5,14 +5,50 @@ import ipaddress
 from pathlib import Path
 import os
 import shutil
+import sys
 from urllib.parse import urlparse
 
 
+BUNDLED_PLATFORM_TOOLS_DIR = "android-platform-tools"
+
+
+def _bundled_adb_candidates() -> list[Path]:
+    candidates: list[Path] = []
+
+    # PyInstaller sidecars expose their actual executable path through sys.executable. Tauri
+    # installs the Android Platform-Tools resource beside CyclonePCRuntime.exe, so this path also
+    # works for silent/custom installer acceptance directories and does not depend on PATH.
+    try:
+        executable_root = Path(sys.executable).resolve().parent
+        candidates.append(executable_root / BUNDLED_PLATFORM_TOOLS_DIR / "adb.exe")
+    except (OSError, RuntimeError):
+        pass
+
+    # Normal per-user Cyclone One install location. Keep this fallback for development launchers
+    # that execute the gateway through Python rather than the frozen runtime sidecar.
+    local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        candidates.append(
+            Path(local_app_data) / "Cyclone One" / BUNDLED_PLATFORM_TOOLS_DIR / "adb.exe"
+        )
+
+    return candidates
+
+
 def resolve_adb_path() -> str:
-    """Resolve adb without requiring the desktop app to inherit a freshly edited PATH."""
+    """Resolve adb without requiring Android Studio or a user PATH edit.
+
+    Precedence is explicit operator override -> Cyclone One bundled Platform-Tools -> existing
+    system/SDK installation -> plain `adb` fallback. This makes the shipped One installer
+    self-contained while keeping development overrides possible.
+    """
     configured = os.getenv("ADB_PATH", "").strip()
     if configured:
         return configured
+
+    for candidate in _bundled_adb_candidates():
+        if candidate.is_file():
+            return str(candidate)
 
     discovered = shutil.which("adb")
     if discovered:

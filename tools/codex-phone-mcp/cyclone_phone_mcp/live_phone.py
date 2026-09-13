@@ -22,6 +22,8 @@ def validate_request(request):
     return dict(request)
 
 import os
+from io import BytesIO
+from PIL import Image
 import threading
 import time
 from pathlib import Path
@@ -45,6 +47,8 @@ class LivePhone:
         return {"device_id": request["device"], "session_id": SESSION, "display_id": DISPLAY}
 
     def _image(self, raw):
+        for name in ("latest.png", "latest.jpg"):
+            (self.root / name).unlink(missing_ok=True)
         screenshot = raw.get("screenshot") or {}
         artifact = screenshot.get("artifact") or {}
         reference = artifact.get("reference")
@@ -54,15 +58,26 @@ class LivePhone:
         runtime = Path(os.getenv("CYCLONE_DEVICE_GATEWAY_RUNTIME", str(self.root.parent / "runtime"))).resolve()
         if not source.is_relative_to(runtime / "fleet-screenshots") or not source.is_file() or source.stat().st_size > 8 * 1024 * 1024:
             return {"ready": False, "reason": "INVALID_SCREENSHOT_ARTIFACT"}
-        data = source.read_bytes()
+        with source.open("rb") as stream:
+            data = stream.read(8 * 1024 * 1024 + 1)
+        if len(data) > 8 * 1024 * 1024:
+            return {"ready": False, "reason": "INVALID_SCREENSHOT_ARTIFACT"}
         suffix = ".png" if data.startswith(b"\x89PNG\r\n\x1a\n") else ".jpg" if data.startswith(b"\xff\xd8\xff") else None
         if not suffix:
+            return {"ready": False, "reason": "INVALID_IMAGE"}
+        try:
+            with Image.open(BytesIO(data)) as decoded:
+                if decoded.format not in {"PNG", "JPEG"} or decoded.width * decoded.height > 20_000_000:
+                    raise ValueError("Unsupported image")
+                decoded.load()
+                width, height = decoded.size
+        except (OSError, ValueError, Image.DecompressionBombError):
             return {"ready": False, "reason": "INVALID_IMAGE"}
         target = self.root / ("latest" + suffix)
         temp = target.with_suffix(".tmp")
         temp.write_bytes(data)
         temp.replace(target)
-        return {"ready": True, "path": str(target), "captured_at": artifact.get("timestampMs"), "width": artifact.get("width"), "height": artifact.get("height")}
+        return {"ready": True, "path": str(target), "captured_at": artifact.get("timestampMs"), "width": width, "height": height, "mime": "image/png" if suffix == ".png" else "image/jpeg"}
 
     def observe(self, request):
         args = self._args(request)
@@ -76,7 +91,7 @@ class LivePhone:
         image = self._image(raw)
         if observation_id:
             self.observations[args["device_id"]] = (observation_id, time.monotonic(), image["ready"])
-        return {"ok": bool(observation_id), "mode": "LIVE PHONE", "session_id": SESSION, "display_id": DISPLAY, "observation_id": observation_id, "ui": card, "vision": image, "screenshot_path": image.get("path")}
+        return {"ok": bool(observation_id), "mode": "LIVE PHONE", "session_id": SESSION, "display_id": DISPLAY, "observation_id": observation_id, "device": args["device_id"], "package": card.get("package", card.get("appPackage")), "screenshot": {"available": image["ready"], "mime": image.get("mime"), "width": image.get("width"), "height": image.get("height"), "reference": image.get("path")}, "ui": card, "vision": image, "screenshot_path": image.get("path")}
 
     def execute(self, request):
         request = validate_request(request)
@@ -87,7 +102,7 @@ class LivePhone:
                 raw = self.tools.phone_devices({})
                 return {"devices": [{k: d[k] for k in ("device_id", "deviceId", "name", "model", "state") if k in d} for d in raw.get("devices", []) if d.get("source") in {"USB", "LAN"}]}
             if op == "status":
-                return {"mode": "LIVE PHONE", "control": "Paused" if self.paused else "Ready", "session_id": SESSION, "display_id": DISPLAY}
+                return {"mode": "LIVE PHONE", "control": "Paused" if self.paused else "Enabled — observe the selected phone first", "session_id": SESSION, "display_id": DISPLAY}
             if op in {"observe", "screenshot"}:
                 return self.observe(request)
             args = self._args(request)
@@ -127,4 +142,4 @@ class LivePhone:
         self.observations.pop(device, None)  # Never retry an uncertain mutation.
         result = self.tools.phone_act({**self._args(request), "tool": mapping[op], "params": params, "goal": goal, "request_ai_control": True, "user_authorized": request.get("user_authorized", False)})
         after = self.observe(request)
-        return {"action": result, "after": after, "note": "Swipe uses the existing semantic scroll route" if op == "swipe" else "Inspect verification; a transport receipt is not task success"}
+        return {"ok": result.get("ok") is True and after.get("ok") is True, "action": result, "after": after, "note": "Swipe uses the existing semantic scroll route" if op == "swipe" else "Inspect verification; a transport receipt is not task success"}

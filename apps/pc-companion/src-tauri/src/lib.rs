@@ -1,5 +1,8 @@
+mod chatgpt_attach;
+mod chatgpt_share;
 mod mcp_tunnel;
 mod live_phone;
+mod live_phone_bridge;
 
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
@@ -70,11 +73,25 @@ fn open_diagnostics_folder(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn connector_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["status", "--probe-gateway"]).await
+}
+
+#[tauri::command]
+async fn local_ai_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["status", "--probe-gateway"]).await
+}
+
+#[tauri::command]
+async fn local_ai_adapters(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    sidecar_json(app, &["adapters"]).await
+}
+
+async fn sidecar_json(app: tauri::AppHandle, args: &[&str]) -> Result<serde_json::Value, String> {
     let output = app
         .shell()
         .sidecar("CycloneAgentMCP")
         .map_err(|error| error.to_string())?
-        .args(["status", "--probe-gateway"])
+        .args(args)
         .output()
         .await
         .map_err(|error| error.to_string())?;
@@ -113,8 +130,11 @@ async fn connector_action(
 ) -> Result<serde_json::Value, String> {
     let host = match connector_id.as_str() {
         "codex" => "codex",
-        "deepseek-mcp" => "opencode",
-        "generic-mcp" => "generic",
+        "grok" => "grok",
+        "cursor" => "cursor",
+        "opencode" | "deepseek-mcp" => "opencode",
+        "copilot" => "copilot",
+        "generic" | "generic-mcp" => "generic",
         _ => return Err("Unknown Cyclone connector".into()),
     };
     if action == "install" && host != "generic" {
@@ -221,6 +241,8 @@ pub fn run() {
     let parent_pid = std::process::id().to_string();
 
     tauri::Builder::default()
+        .manage(std::sync::Arc::new(live_phone_bridge::BridgeState::default()))
+        .manage(std::sync::Arc::new(chatgpt_share::ShareState::default()))
         .manage(GatewayState {
             token,
             http_base,
@@ -261,9 +283,15 @@ pub fn run() {
             gateway_session,
             live_phone::live_phone_status,
             live_phone::live_phone_control,
+            live_phone_bridge::live_bridge_connect,
+            live_phone_bridge::live_bridge_status,
+            live_phone_bridge::live_bridge_disconnect,
+            live_phone_bridge::live_bridge_token,
             diagnostics_folder,
             open_diagnostics_folder,
             connector_status,
+            local_ai_status,
+            local_ai_adapters,
             connector_action,
             legacy_companion_warning,
             mcp_tunnel::mcp_tunnel_status,
@@ -274,8 +302,24 @@ pub fn run() {
             mcp_tunnel::mcp_tunnel_set_mode,
             mcp_tunnel::mcp_tunnel_token,
             mcp_tunnel::mcp_tunnel_smoke,
-            mcp_tunnel::mcp_tunnel_open_docs
+            mcp_tunnel::mcp_tunnel_open_docs,
+            chatgpt_attach::chatgpt_attach_load,
+            chatgpt_attach::chatgpt_attach_save,
+            chatgpt_attach::chatgpt_attach_sync,
+            chatgpt_attach::chatgpt_attach_copy,
+            chatgpt_attach::chatgpt_attach_save_handoff,
+            chatgpt_attach::chatgpt_attach_resources,
+            chatgpt_share::chatgpt_attach_share_status,
+            chatgpt_share::chatgpt_attach_share_start,
+            chatgpt_share::chatgpt_attach_share_stop
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Cyclone PC Companion");
+        .build(tauri::generate_context!())
+        .expect("error while building Cyclone One")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let _ = live_phone::live_phone_control("stop".into());
+                live_phone_bridge::shutdown(app.state::<std::sync::Arc<live_phone_bridge::BridgeState>>().inner());
+                chatgpt_share::shutdown(app.state::<std::sync::Arc<chatgpt_share::ShareState>>().inner());
+            }
+        });
 }

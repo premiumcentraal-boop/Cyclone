@@ -1,23 +1,23 @@
-# Cyclone Mobile 4.4.1: PR #103 visual upgrade on the released 4.4.0 execution foundation.
-# User authorized publication; exact-source CI and signing continuity remain required.
+# Cyclone Mobile 4.4.2 + Cyclone One 1.5.5 combined camera-streaming upgrade.
+# Mobile is built on exact published 4.4.1; One is built on the 1.5.4 VMOS/Cloud AI baseline.
 schema = 1
-product_version = "4.4.1"
+product_version = "4.4.2"
 channel = "development"
-android_version_code = 101
+android_version_code = 102
 python_version = "4.1.0"
 
 [components]
-mobile = "4.4.1"
-pc_companion = "1.1.2"
+mobile = "4.4.2"
+pc_companion = "1.5.5"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.4.0"
+previous_mobile_version = "4.4.1"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.4.1-visual"
+candidate_generation = "cyclone-4.4.2-one-1.5.5-camera"
