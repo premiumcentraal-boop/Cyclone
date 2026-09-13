@@ -81,7 +81,9 @@ internal object GatewayObservationAdapter {
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         PageAwarenessRuntime.initialize(context)
+        val captureStart = System.nanoTime() / 1_000_000
         val snapshot = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = true)
+        val captureEnd = System.nanoTime() / 1_000_000
         val raw = snapshot.toJson()
         val page = PageAwarenessRuntime.capture(context, raw)
         val safeRaw = GatewayPrivacy.sanitizeAccessibilitySnapshot(raw)
@@ -240,6 +242,10 @@ internal object GatewayObservationAdapter {
             windows = windows.length(),
             nextHopHints = nextHopHints,
         )
+        boundedPageEvidence.put("captureStartMonotonicMs", captureStart)
+            .put("captureEndMonotonicMs", captureEnd).put("captureDurationMs", captureEnd - captureStart)
+            .put("captureWidth", snapshot.screenWidth).put("captureHeight", snapshot.screenHeight)
+            .put("imageState", "unavailable")
         val includeScreenshot = args.optBoolean("includeScreenshot", false) && !background
         val screenshot = if (includeScreenshot) {
             runCatching {

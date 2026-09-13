@@ -61,9 +61,10 @@ interface CycloneAgentEnvironmentApi {
 class CycloneAgentEnvironment internal constructor(
     private val runtime: CycloneAgentRuntimePort,
     private val userTaskGoal: String? = null,
+    private val revalidateTargets: Boolean = false,
 ) : CycloneAgentEnvironmentApi {
     constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
-        this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal)
+        this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal, revalidateTargets = true)
 
     private val scope = AgentObservationScope()
     private val actionHistory = ArrayDeque<AgentActionEnvelope>()
@@ -193,14 +194,14 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
 
-        val before = currentVisibleObservation()
+        var before = currentVisibleObservation()
             ?: return@synchronized failureEnvelope(
                 tool,
                 effectiveGoal,
                 staleFailure("Fresh observe/locate/search is required before every mutation."),
             )
-        val visibleGeneration = scope.generation
-        val rawElementId = elementId(params, before)
+        var visibleGeneration = scope.generation
+        var rawElementId = elementId(params, before)
         if (tool in ELEMENT_ID_REQUIRED_TOOLS && rawElementId == null) {
             return@synchronized failureEnvelope(
                 tool,
@@ -241,6 +242,23 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
 
+        // Re-observe once at the execution boundary, then bind a new ID. Never repair coordinates.
+        if (revalidateTargets && rawElementId != null) {
+            val fresh = runCatching { runtime.capture() }.getOrElse {
+                scope.expire()
+                return@synchronized failureEnvelope(tool, effectiveGoal,
+                    failureFromThrowable(it, AgentFailureLayer.OBSERVATION), before, visibleGeneration)
+            }
+            val report = CurrentTargetRevalidation.resolve(before, fresh, rawElementId)
+            scope.expire()
+            if (report.elementId == null) return@synchronized failureEnvelope(tool, effectiveGoal,
+                AgentFailure(AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+                    "Target revalidation: ${report.status.name}. Inspect a fresh same-scope control.", report.status.name),
+                before, visibleGeneration)
+            before = fresh
+            visibleGeneration = scope.publish(fresh.id)
+            rawElementId = report.elementId
+        }
         val normalizedParams = JSONObject(params.toString())
             .put("observationId", before.id)
             .put("fastPath", true)
@@ -248,6 +266,7 @@ class CycloneAgentEnvironment internal constructor(
             normalizedParams.put("executionGeneration", before.payload.optLong("executionGeneration"))
         }
         if (rawElementId != null) {
+            if (revalidateTargets) normalizedParams.remove("selector")
             val evidence = runCatching { runtime.element(before, rawElementId) }.getOrElse { error ->
                 return@synchronized failureEnvelope(
                     tool,
@@ -514,6 +533,7 @@ class CycloneAgentEnvironment internal constructor(
             treeUseful = observation.payload.optBoolean("treeUseful", true),
             sessionId = observation.execution.sessionId,
             displayId = observation.execution.displayId,
+            legacyPage = observation.page,
         )
     }
 
@@ -697,8 +717,16 @@ class CycloneAgentEnvironment internal constructor(
         error: Throwable,
         defaultLayer: AgentFailureLayer,
     ): AgentFailure {
+        if (error is com.cyclone.mobile.runtime.session.SessionIdentityException) return AgentFailure(
+            AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+            "The requested session/display identity is unavailable or changed.", error.errorClass)
+        if (error is SecurityException) return AgentFailure(AgentFailureClass.ACCESSIBILITY_UNAVAILABLE,
+            AgentFailureLayer.OBSERVATION, false, "Observation permission is unavailable.", "OBSERVATION_PERMISSION_REQUIRED")
         if (error is GatewayProtocolException) {
             return when (error.code) {
+                "SESSION_REQUIRED", "SESSION_NOT_FOUND", "SESSION_UNKNOWN", "SESSION_DISPLAY_MISMATCH", "OBSERVATION_SESSION_MISMATCH" ->
+                    AgentFailure(AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+                        "The requested session/display identity is unavailable or changed.", error.code)
                 "STALE_OBSERVATION", "STALE_ELEMENT" -> staleFailure(
                     com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                 )

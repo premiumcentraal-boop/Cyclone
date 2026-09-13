@@ -1,12 +1,14 @@
 package com.cyclone.mobile.agent
 
 import java.util.UUID
+import com.cyclone.mobile.agent.recovery.RecoveryIncident
+import com.cyclone.mobile.agent.recovery.IncidentEffect
 
 enum class CycloneAgentStage { START, OBSERVE, PLAN_OR_RECALL, ACT, VERIFY, CLASSIFY_RESULT, SUSPENDED, TERMINAL }
 enum class CycloneTaskClassification { COMPLETE, RECOVERABLE, HUMAN_OR_GATE, HARD_BLOCKER, CANCELLED, NON_CONVERGENCE }
 enum class CycloneModelDirective { ACT, DONE, NEED_HUMAN, BLOCKED, NEED_VISION }
 enum class CycloneRecoveryKind { OBSERVATION_FAILURE, MALFORMED_MODEL, MODEL_BLOCKED_UNCONFIRMED, EMPTY_OR_INVALID_PLAN, TOOL_FAILURE, VERIFICATION_FAILURE, VISION_UNCHANGED, STALE_TARGET, BACKTRACK, POLICY_DENIED }
-enum class CycloneTraceEventType { TASK_STARTED, OBSERVE, PLAN, TOOL_REQUESTED, TOOL_RESULT, VERIFY, RECOVERY_CLASSIFIED, REPLAN, VISION_ESCALATION, GATE_SUSPEND, GATE_RESUME, COMPLETE, HARD_BLOCKER, NON_CONVERGENCE, CANCELLED }
+enum class CycloneTraceEventType { TASK_STARTED, OBSERVE, PLAN, TOOL_REQUESTED, TOOL_RESULT, VERIFY, RECOVERY_CLASSIFIED, REPLAN, VISION_ESCALATION, GATE_SUSPEND, GATE_RESUME, COMPLETE, HARD_BLOCKER, NON_CONVERGENCE, CANCELLED, PHASE }
 
 data class CycloneConvergencePolicy(
     val taskTimeoutMs: Long = 180_000,
@@ -32,8 +34,8 @@ data class CycloneConvergencePolicy(
     }
 }
 
-data class CycloneObservation(val identity: String, val pageIdentity: String, val evidenceIdentity: String = identity)
-data class CycloneModelTurn(val directive: CycloneModelDirective, val actionSignature: String? = null, val reason: String? = null, val payload: Any? = null)
+data class CycloneObservation(val identity: String, val pageIdentity: String, val evidenceIdentity: String = identity, val sessionId: String = "default-foreground", val displayId: Int = 0, val generation: Long = 0, val packageName: String = "")
+data class CycloneModelTurn(val directive: CycloneModelDirective, val actionSignature: String? = null, val reason: String? = null, val payload: Any? = null, val intendedEffect: IncidentEffect = IncidentEffect.USER_GOAL_VERIFIED)
 sealed interface CyclonePlanResult { data class Valid(val turn: CycloneModelTurn) : CyclonePlanResult; data class Malformed(val reason: String? = null) : CyclonePlanResult }
 data class CycloneToolResult(
     val ok: Boolean,
@@ -58,12 +60,14 @@ data class CycloneTraceEvent(
     val pageIdentity: String? = null,
     val actionSignature: String? = null,
     val safeMessage: String? = null,
+    val span: ExecutionSpan? = null,
 )
 
 fun interface CycloneAgentTraceSink { fun emit(event: CycloneTraceEvent); object NoOp : CycloneAgentTraceSink { override fun emit(event: CycloneTraceEvent) = Unit } }
 interface CycloneTaskCheckpointStore { fun save(state: CycloneTaskState); object NoOp : CycloneTaskCheckpointStore { override fun save(state: CycloneTaskState) = Unit } }
 interface CycloneAgentModel { fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult }
 interface CycloneAgentTools {
+    fun observationHealth(): ObservationHealth? = null
     fun onRecovery(state: CycloneTaskState, kind: CycloneRecoveryKind, code: String) {}
     fun observe(state: CycloneTaskState): CycloneObservation?
     fun execute(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn): CycloneToolResult
@@ -93,6 +97,11 @@ data class CycloneTaskState(
     val backtrackAttempts: Int,
     val staleTargetRetries: Int,
     val lastActionSignature: String?,
+    val incident: RecoveryIncident? = null,
+    val executionSessionId: String = "default-foreground",
+    val executionDisplayId: Int = 0,
+    val observationGeneration: Long = 0,
+    val executionPackageName: String = "",
 )
 
 sealed interface CycloneAgentRunResult {
@@ -121,6 +130,7 @@ class CycloneLocalAgent(
     private var suspendedAt: Long? = null
     private var mutationsWithoutVerifiedProgress = 0
     private var repeatedUnverifiedDone = 0
+    private var intendedEffect = IncidentEffect.USER_GOAL_VERIFIED
     private var state = restoredState
         ?.also { require(it.goal == goal) { "Restored task goal does not match requested goal" } }
         ?.let { restored ->
@@ -137,6 +147,18 @@ class CycloneLocalAgent(
         checkpoint()
     }
 
+    private val timing = ExecutionTiming(sink = { span ->
+        trace.emit(CycloneTraceEvent(CycloneTraceEventType.PHASE, now(), state.taskId,
+            state.currentStage, code = "phase.${span.phase.name.lowercase()}", span = span))
+    })
+    private fun <T> timed(phase: ExecutionPhase, block: () -> T): T =
+        timing.measure(state.modelTurns + 1, phase, { cancelled || externallyCancelled() }, block)
+
+    fun verifyIncident(effect: IncidentEffect, sessionId: String, displayId: Int) {
+        val old = state.incident ?: return
+        state = state.copy(incident = old.verified(effect, sessionId, displayId))
+        checkpoint()
+    }
     fun snapshot(): CycloneTaskState = state
     fun cancel() { cancelled = true }
     fun resume(): Boolean {
@@ -157,14 +179,24 @@ class CycloneLocalAgent(
             state = state.copy(currentStage = CycloneAgentStage.OBSERVE)
             val oldObs = state.latestObservationIdentity
             val oldPage = state.latestPageIdentity
-            val observation = tools.observe(state)
+            val observation = timed(ExecutionPhase.OBSERVATION) { tools.observe(state) }
             executionBoundary()?.let { return it }
             if (observation == null) {
+                val health = tools.observationHealth()
+                if (health != null) {
+                    if (health.terminal) return hardBlocker(health.message)
+                    while (System.nanoTime() / 1_000_000 < health.cooldownUntilMs) {
+                        executionBoundary()?.let { return it }
+                        Thread.sleep(25)
+                    }
+                }
                 recover(CycloneRecoveryKind.OBSERVATION_FAILURE, "observe.failed", false)?.let { return it }
                 continue
             }
             val newEvidence = observation.identity != oldObs || observation.pageIdentity != oldPage
             state = state.copy(
+                executionPackageName = observation.packageName,
+                executionSessionId = observation.sessionId, executionDisplayId = observation.displayId, observationGeneration = observation.generation,
                 latestObservationIdentity = observation.identity,
                 latestPageIdentity = observation.pageIdentity,
                 requireFreshObservation = false,
@@ -173,7 +205,7 @@ class CycloneLocalAgent(
             cancellation()?.let { return it }
 
             state = state.copy(currentStage = CycloneAgentStage.PLAN_OR_RECALL)
-            val plan = model.plan(state, observation)
+            val plan = timed(ExecutionPhase.PLAN_OR_RECALL) { model.plan(state, observation) }
             state = state.copy(modelTurns = state.modelTurns + 1)
             // A slow provider may return after Stop or the task deadline. Never execute its plan.
             executionBoundary()?.let { return it }
@@ -183,6 +215,7 @@ class CycloneLocalAgent(
                 continue
             }
             val turn = (plan as CyclonePlanResult.Valid).turn
+            intendedEffect = turn.intendedEffect
             emit(CycloneTraceEventType.PLAN, turn.directive.name.lowercase(), observation, turn.actionSignature); checkpoint()
 
             when (turn.directive) {
@@ -266,7 +299,7 @@ class CycloneLocalAgent(
             }
 
             executionBoundary()?.let { return it }
-            val tool = tools.execute(state, observation, turn)
+            val tool = timed(ExecutionPhase.DISPATCH) { tools.execute(state, observation, turn) }
             emit(CycloneTraceEventType.TOOL_RESULT, if (tool.ok) "tool.ok" else "tool.failed", observation,
                 tool.actionSignature ?: turn.actionSignature, tool.message); checkpoint()
             executionBoundary()?.let { return it }
@@ -294,7 +327,7 @@ class CycloneLocalAgent(
             }
 
             state = state.copy(currentStage = CycloneAgentStage.VERIFY)
-            val verification = tools.verify(state, observation, turn, tool)
+            val verification = timed(ExecutionPhase.VERIFICATION) { tools.verify(state, observation, turn, tool) }
             executionBoundary()?.let { return it }
             emit(CycloneTraceEventType.VERIFY, when { verification.complete && verification.verified -> "verify.complete"; verification.verified && verification.progress -> "verify.progress"; else -> "verify.failed" }, observation, turn.actionSignature)
             if (verification.complete && verification.verified) return complete(verification.message)
@@ -325,6 +358,9 @@ class CycloneLocalAgent(
         // semantic progress resets this counter (see the verified-progress branch above).
         val consecutive = state.consecutiveRecoveryCyclesWithoutNewEvidence + 1
         state = state.copy(
+            incident = (state.incident?.takeIf { it.resolution == "OPEN" } ?: RecoveryIncident(
+                taskId = state.taskId, sessionId = state.executionSessionId, displayId = state.executionDisplayId,
+                openingGeneration = state.observationGeneration, category = kind.name, intendedEffect = intendedEffect, packageName = state.executionPackageName)).attempt(code),
             currentStage = CycloneAgentStage.CLASSIFY_RESULT,
             recoveryAttempts = state.recoveryAttempts + (kind to attempts),
             consecutiveRecoveryCyclesWithoutNewEvidence = consecutive,
@@ -354,6 +390,11 @@ class CycloneLocalAgent(
     private fun hardBlocker(message: String?) = finish(CycloneTaskClassification.HARD_BLOCKER, CycloneTraceEventType.HARD_BLOCKER, message) { CycloneAgentRunResult.Stopped(it, message) }
     private fun nonConvergence(code: String) = finish(CycloneTaskClassification.NON_CONVERGENCE, CycloneTraceEventType.NON_CONVERGENCE, code) { CycloneAgentRunResult.Stopped(it, code) }
     private fun <T : CycloneAgentRunResult> finish(classification: CycloneTaskClassification, event: CycloneTraceEventType, code: String?, build: (CycloneTaskState) -> T): T {
+        state = state.copy(incident = state.incident?.let {
+            if (classification == CycloneTaskClassification.COMPLETE && it.intendedEffect == IncidentEffect.USER_GOAL_VERIFIED)
+                it.verified(IncidentEffect.USER_GOAL_VERIFIED, state.executionSessionId, state.executionDisplayId)
+            else if (it.resolution == "OPEN") it.copy(resolution = "TERMINAL") else it
+        })
         state = state.copy(currentStage = CycloneAgentStage.TERMINAL, gateSuspended = false, finalClassification = classification)
         emit(event, code); checkpoint(); return build(state)
     }

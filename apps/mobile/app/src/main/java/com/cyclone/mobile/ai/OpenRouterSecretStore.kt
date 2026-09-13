@@ -34,7 +34,11 @@ object OpenRouterSecretStore {
         val blob = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + "." +
             Base64.encodeToString(ciphertext, Base64.NO_WRAP)
         check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(PREF_BLOB, blob).commit()) { "Could not save encrypted API settings." }
-        if (previous != clean) OpenRouterCatalogStore.invalidateAvailability(context)
+        if (previous != clean) {
+            OpenRouterCatalogStore.invalidateAvailability(context)
+            ProviderRequests.invalidateAccount(OpenRouterCatalogStore.fingerprint(previous))
+            ProviderRequests.activateAccount(OpenRouterCatalogStore.fingerprint(clean))
+        }
     }
 
     fun read(context: Context): String {
@@ -52,9 +56,13 @@ object OpenRouterSecretStore {
     }
 
     fun clear(context: Context) {
-        val hadKey = read(context).isNotBlank()
+        val previous = read(context)
+        val hadKey = previous.isNotBlank()
         check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(PREF_BLOB).commit()) { "Could not clear encrypted API settings." }
-        if (hadKey) OpenRouterCatalogStore.invalidateAvailability(context)
+        if (hadKey) {
+            OpenRouterCatalogStore.invalidateAvailability(context)
+            ProviderRequests.invalidateAccount(OpenRouterCatalogStore.fingerprint(previous))
+        }
     }
 
     private fun getOrCreateKey(): SecretKey {

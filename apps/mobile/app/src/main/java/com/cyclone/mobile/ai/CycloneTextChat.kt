@@ -20,9 +20,6 @@ import kotlin.coroutines.resumeWithException
 
 /** Text/attachment conversation only: no Android observation, tools or mutation authority. */
 object CycloneTextChat {
-    private val http = OkHttpClient.Builder().connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS).callTimeout(75, TimeUnit.SECONDS).build()
-
     suspend fun answer(context: Context, model: OpenRouterModelPreset, history: List<Pair<String, String>>,
                        request: String, attachment: TaskAttachment?): String = withContext(Dispatchers.IO) {
         val key = OpenRouterSecretStore.read(context)
@@ -44,30 +41,19 @@ object CycloneTextChat {
         messages.put(JSONObject().put("role", "user").put("content", content))
         val body = PortableModelRequest.body(model.id, messages, emptyList())
         currentCoroutineContext().ensureActive()
-        val call = http.newCall(Request.Builder().url("https://openrouter.ai/api/v1/chat/completions")
+        val httpRequest = Request.Builder().url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $key").header("HTTP-Referer", "https://github.com/premiumcentraal-boop/Cyclone")
-            .header("X-Title", "Cyclone Mobile").post(body.toString().toRequestBody("application/json".toMediaType())).build())
-        suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (continuation.isActive) continuation.resumeWithException(IOException("Chat couldn't connect. Try again."))
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    val result = runCatching { response.use {
-                        val raw = it.body?.string().orEmpty()
-                        val json = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
-                        check(it.isSuccessful && !json.has("error")) {
-                            val failure = ProviderFailure.classify(if (it.isSuccessful) json.optJSONObject("error")?.optInt("code", 500) ?: 500 else it.code, raw, model.id)
-                            "OpenRouter HTTP ${failure.httpStatus} (${failure.code}): ${failure.userMessage}"
-                        }
-                        val answer = json.optJSONArray("choices")?.optJSONObject(0)
-                            ?.optJSONObject("message")?.optString("content").orEmpty()
-                        check(answer.isNotBlank()) { "The model returned no answer. Try another model." }; answer
-                    } }
-                    if (continuation.isActive) result.fold({ continuation.resume(it) }, { continuation.resumeWithException(it) })
-                }
-            })
+            .header("X-Title", "Cyclone Mobile").post(body.toString().toRequestBody("application/json".toMediaType())).build()
+        val reply = ProviderRequests.executeAsync(httpRequest,
+            ProviderRequests.context("chat-${java.util.UUID.randomUUID()}", key, model.id, ProviderRequestPurpose.CHAT))
+        currentCoroutineContext().ensureActive()
+        val json = runCatching { JSONObject(reply.body) }.getOrDefault(JSONObject())
+        check(reply.status in 200..299 && !json.has("error")) {
+            val failure = ProviderFailure.classify(reply.status, reply.body, model.id)
+            "OpenRouter HTTP ${failure.httpStatus} (${failure.code}): ${failure.userMessage}"
         }
+        val answer = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
+        check(answer.isNotBlank()) { "The model returned no answer." }
+        answer
     }
 }

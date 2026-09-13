@@ -73,6 +73,8 @@ data class AgentPageCard(
     val treeUseful: Boolean = true,
     val sessionId: String = "default-foreground",
     val displayId: Int = 0,
+    // In-process projection of the same capture; never serialized as a second observation.
+    val legacyPage: com.cyclone.mobile.applearner.PageContext? = null,
 )
 
 data class AgentObservationResult(
