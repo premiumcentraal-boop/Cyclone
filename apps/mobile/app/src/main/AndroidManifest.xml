@@ -60,6 +60,11 @@
         <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
         <activity android:name=".runtime.background.BackgroundSetupActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceActivity" android:exported="false" />
+        <activity
+            android:name=".stream.CameraStreamViewerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/AppTheme" />
         <service
             android:name=".runtime.background.WorkspaceTaskService"
             android:exported="false"
