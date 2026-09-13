@@ -28,7 +28,8 @@ class TaskComposerSeparationTest {
         assertFalse(chat.contains("OpenRouterAdaptiveAgent"))
         assertFalse(chat.contains("phone.observe"))
         assertFalse(chat.contains("put(\"tools\""))
-        assertTrue(chat.contains("invokeOnCancellation { call.cancel() }"))
+        assertTrue(chat.contains("ProviderRequests.executeAsync"))
+        assertTrue(source("ai/ProviderRequestLifecycle.kt").contains("invokeOnCancellation { context.cancellation.cancel() }"))
     }
 
     @Test fun autoRouterRunsBeforePhoneReadinessAndChatDoesNotQueue() {

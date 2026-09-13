@@ -8,6 +8,33 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CookieInterruptionPolicyTest {
+    @Test fun dutchRejectIsLocalAndAuthenticationControlsAreExcluded() {
+        val card = page()
+        val reject = card.controls.single().copy(label = "Alleen noodzakelijke cookies")
+        val decision = CookieInterruptionPolicy().evaluate(card.copy(controls = listOf(reject,
+            reject.copy(elementId = "auth", label = "Log in"), reject.copy(elementId = "permission", label = "Allow"))), "log in")
+        assertEquals(CookieInterruptionOutcome.HANDLED, decision.outcome)
+        assertEquals(reject.elementId, decision.target?.elementId)
+        assertEquals(CookieInterruptionOutcome.BLOCKED_BY_USER_INTENT,
+            CookieInterruptionPolicy().evaluate(card, "alle cookies accepteren").outcome)
+    }
+
+    @Test fun unresolvedOutcomesArePreciseAndNeverRepeatTheClick() {
+        val card = page()
+        val target = card.controls.single()
+        assertEquals("cookie.ambiguous_reject", CookieInterruptionPolicy().evaluate(
+            card.copy(controls = listOf(target, target.copy(elementId = "other"))), "login").reason)
+        assertEquals("cookie.reject_unavailable", CookieInterruptionPolicy().evaluate(
+            card.copy(controls = listOf(target.copy(evidence = JSONObject().put("enabled", false)))), "login").reason)
+        val policy = CookieInterruptionPolicy()
+        assertEquals(CookieInterruptionOutcome.HANDLED, policy.evaluate(card, "login").outcome)
+        assertEquals("cookie.effect_unverified", policy.evaluate(page("new"), "login").reason)
+    }
+
+    @Test fun cookieArticleIsNotAConsentInterruption() {
+        assertEquals(CookieInterruptionOutcome.NOT_APPLICABLE, CookieInterruptionPolicy().evaluate(
+            page().copy(controls = emptyList()), "read article").outcome)
+    }
     @Test fun redditLoginInterruptionRejectsLocallyOnceAcrossObservationChurn() {
         val policy = CookieInterruptionPolicy()
         assertEquals("Reject Optional Cookies", policy.next(page(), "open reddit.com on Chrome and login for me")?.label)
