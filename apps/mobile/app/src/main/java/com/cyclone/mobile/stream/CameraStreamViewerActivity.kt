@@ -9,11 +9,11 @@ import android.view.Gravity
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
-import com.cyclone.mobile.R
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -314,8 +314,8 @@ private class NativeAspectSurfaceView(activity: Activity) : SurfaceView(activity
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val availableWidth = MeasureSpec.getSize(widthMeasureSpec)
-        val availableHeight = MeasureSpec.getSize(heightMeasureSpec)
+        val availableWidth = View.MeasureSpec.getSize(widthMeasureSpec)
+        val availableHeight = View.MeasureSpec.getSize(heightMeasureSpec)
         if (videoWidth <= 0 || videoHeight <= 0 || availableWidth <= 0 || availableHeight <= 0) {
             setMeasuredDimension(availableWidth, availableHeight)
             return
