@@ -321,7 +321,6 @@ private fun ComposerPanel(
     val task = workspace?.takeIf { it.phase != TaskPhase.STOPPED }
     val foregroundWorking = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
     val activeWork = task?.working == true || foregroundWorking
-    var taskCollapsed by remember(snapshot.sessionId, task?.taskId) { mutableStateOf(false) }
     val compactRunning = activeWork && !editorFocused
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val taskAreaMax = if (keyboardOpen) {
@@ -333,8 +332,6 @@ private fun ComposerPanel(
         if (activeWork) {
             focusManager.clearFocus()
             accessory = ComposerAccessory.NONE
-        } else {
-            taskCollapsed = false
         }
     }
     DisposableEffect(view) {
@@ -380,9 +377,7 @@ private fun ComposerPanel(
             animate(dragOffset, if (dismiss) sheetHeight else 0f, animationSpec = tween(180)) { value, _ ->
                 dragOffset = value
             }
-            if (dismiss) {
-                if (activeWork) taskCollapsed = true else onAction(OverlayUserAction.MINIMIZE)
-            }
+            if (dismiss) onAction(OverlayUserAction.MINIMIZE)
             dragOffset = 0f
         }
     }
@@ -423,15 +418,6 @@ private fun ComposerPanel(
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .36f)),
             )
-        }
-
-        if (taskCollapsed && activeWork) {
-            CycloneForegroundWorkCard(
-                snapshot = snapshot,
-                compact = true,
-                onExpand = { taskCollapsed = false },
-            )
-            return@Column
         }
 
         Column(

@@ -2,12 +2,18 @@ package com.cyclone.mobile.ui.overlay
 
 import android.view.WindowManager
 import com.cyclone.mobile.ai.OverlayChromeWindowPolicy
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OverlayAskBarPolicyTest {
+    private fun source(path: String) = sequenceOf(
+        File("src/main/java/com/cyclone/mobile/$path"),
+        File("apps/mobile/app/src/main/java/com/cyclone/mobile/$path"),
+    ).first { it.isFile }.readText()
+
     @Test
     fun composerBottomGapIsThirtyDp() {
         assertEquals(30, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP)
@@ -38,5 +44,24 @@ class OverlayAskBarPolicyTest {
     fun compactIdleIsNotFullWidthAndDoesNotBlockInstagram() {
         val compact = OverlayChromeWindowPolicy.main(compact = true)
         assertFalse(compact.matchParentWidth)
+    }
+
+    @Test
+    fun activeSwipeDownUsesTheSameCompactTaskGlassAsAutomaticCollapse() {
+        val overlay = source("ui/overlay/OverlayChrome.kt")
+        assertFalse(overlay.contains("taskCollapsed"))
+        assertTrue(overlay.contains("if (dismiss) onAction(OverlayUserAction.MINIMIZE)"))
+    }
+
+    @Test
+    fun fullScreenCycloneActivitiesOwnTheScreenWithoutOverlayOrBorderCompetition() {
+        val controller = source("ai/OverlayChromeController.kt")
+        val workspace = source("runtime/background/WorkspaceActivity.kt")
+        assertTrue(controller.contains("!OverlayExternalInteraction.active.value"))
+        assertTrue(controller.contains("val externalActive by OverlayExternalInteraction.active.collectAsState()"))
+        assertTrue(workspace.contains("override fun onStart()"))
+        assertTrue(workspace.contains("OverlayExternalInteraction.active.value = true"))
+        assertTrue(workspace.contains("override fun onStop()"))
+        assertTrue(workspace.contains("OverlayExternalInteraction.active.value = false"))
     }
 }

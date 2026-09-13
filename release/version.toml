@@ -1,24 +1,23 @@
-# Cyclone Mobile 4.4.0 — execution foundation; preserves 4.3.8 OpenRouter fixes.
-# User requested the 4.4 update and release when ready; exact release-branch CI/signing required; physical device acceptance remains unverified.
-# Verified implementation checkpoint: bfef18b6cca0eee9cf6778e3e5ce8c4c4238e143. Publish only this release checkpoint's exact CI artifact.
+# Cyclone Mobile 4.4.1: PR #103 visual upgrade on the released 4.4.0 execution foundation.
+# User authorized publication; exact-source CI and signing continuity remain required.
 schema = 1
-product_version = "4.4.0"
+product_version = "4.4.1"
 channel = "development"
-android_version_code = 100
+android_version_code = 101
 python_version = "4.1.0"
 
 [components]
-mobile = "4.4.0"
+mobile = "4.4.1"
 pc_companion = "1.1.2"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.3.8"
+previous_mobile_version = "4.4.0"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.4-execution"
+candidate_generation = "cyclone-4.4.1-visual"

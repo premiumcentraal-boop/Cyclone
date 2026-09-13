@@ -22,8 +22,17 @@ internal data class CheckpointRow(val label: String, val state: SemanticStepStat
 
 internal fun checkpointRows(task: WorkspaceTaskUi): List<CheckpointRow> {
     val rows = task.semanticSteps.takeLast(3).map { CheckpointRow(it.label, it.state) }
-    return if (task.working && task.confirmation == null && rows.none { it.state == SemanticStepState.ACTIVE })
-        rows + CheckpointRow(task.subtitle, SemanticStepState.ACTIVE)
+    val activeLabel = task.subtitle.trim()
+    val alreadyRepresented = rows.any { row ->
+        row.label.trim().equals(activeLabel, ignoreCase = true)
+    }
+    return if (
+        task.working &&
+        task.confirmation == null &&
+        activeLabel.isNotBlank() &&
+        rows.none { it.state == SemanticStepState.ACTIVE } &&
+        !alreadyRepresented
+    ) rows + CheckpointRow(activeLabel, SemanticStepState.ACTIVE)
     else rows
 }
 

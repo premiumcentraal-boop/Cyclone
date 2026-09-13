@@ -22,10 +22,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -45,9 +48,18 @@ import com.cyclone.mobile.runtime.background.WorkspaceTasks
 @Composable
 fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val resolvedApp = remember(task.packageName) { appLabel(context, task.packageName) }
     val presentation = TaskGlassPresentation.current(task, resolvedApp) ?: return
     val visualState = task.taskVisualState()
+
+    // A task/result card is the primary interaction surface. Do not leave a stale editor/IME
+    // competing for half the display when execution starts, fails, pauses, or finishes.
+    LaunchedEffect(task.taskId, task.phase) {
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+    }
 
     Surface(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
@@ -137,6 +149,8 @@ private fun ActionNeededBody(
         task.phase == TaskPhase.FAILED -> task.subtitle
         else -> task.subtitle
     }.trim()
+    val canTakeOver = task.canTakeOverFromUi()
+    val canContinue = task.canContinueAfterHumanFromUi()
 
     Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
         if (prompt.isNotBlank()) {
@@ -147,41 +161,31 @@ private fun ActionNeededBody(
             )
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            Button(
-                onClick = onTakeOver,
-                enabled = task.canTakeOverFromUi(),
-                modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
-                    contentDescription = "Take over ${task.app}"
-                },
-                shape = RoundedCornerShape(15.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-            ) { Text(if (task.phase == TaskPhase.HUMAN) "In control" else "Take Over") }
+        // Only show actions that are actually available in this exact runtime state. Dead/future
+        // controls do not belong on the primary task surface.
+        if (canTakeOver || canContinue) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                if (canTakeOver) {
+                    Button(
+                        onClick = onTakeOver,
+                        modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
+                            contentDescription = "Take over ${task.app}"
+                        },
+                        shape = RoundedCornerShape(15.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    ) { Text("Take Over") }
+                }
 
-            OutlinedButton(
-                onClick = onDone,
-                enabled = task.canContinueAfterHumanFromUi(),
-                modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
-                    contentDescription = "I'm done, continue with Cyclone"
-                },
-                shape = RoundedCornerShape(15.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-            ) { Text("I'm Done") }
-        }
-
-        OutlinedButton(
-            onClick = {},
-            enabled = false,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-            shape = RoundedCornerShape(15.dp),
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Autofill")
-                Text("Soon", style = MaterialTheme.typography.labelSmall)
+                if (canContinue) {
+                    OutlinedButton(
+                        onClick = onDone,
+                        modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
+                            contentDescription = "I'm done, continue with Cyclone"
+                        },
+                        shape = RoundedCornerShape(15.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    ) { Text("I'm Done") }
+                }
             }
         }
 

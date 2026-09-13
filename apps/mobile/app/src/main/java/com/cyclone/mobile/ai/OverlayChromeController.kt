@@ -247,7 +247,8 @@ class OverlayChromeController(
                 setViewTreeSavedStateRegistryOwner(lifecycle)
                 setContent {
                     val sharing by LiveCaptureSessionManager.state.collectAsState()
-                    if (isCompact(latest) && sharing.active) {
+                    val externalActive by OverlayExternalInteraction.active.collectAsState()
+                    if (!externalActive && isCompact(latest) && sharing.active) {
                         com.cyclone.mobile.ui.v32.CycloneV32Theme {
                             androidx.compose.foundation.layout.Box(Modifier.padding(8.dp)) {
                                 ScreenSharePill(sharing) { LiveCaptureService.stop(service) }
@@ -318,7 +319,7 @@ class OverlayChromeController(
         view.visibility = if (visible) View.VISIBLE else View.GONE
 
         val spec = if (glass()) OverlayChromeWindowPolicy.glass() else OverlayChromeWindowPolicy.main(compact)
-        var changed = applyWindowContract(layout, spec)
+        val changed = applyWindowContract(layout, spec)
         if (changed) runCatching { wm.updateViewLayout(view, layout) }
 
         haloRoot?.let { halo ->
@@ -331,9 +332,11 @@ class OverlayChromeController(
         }
     }
 
-    /** Decoration never owns touch or focus, and never marks a background task as controlling this display. */
+    /** Decoration never owns touch/focus and yields with every explicit external interaction. */
     private fun renderActiveBorder(snapshot: OverlayChromeSnapshot) {
-        val active = !snapshot.userPaused && snapshot.state in setOf(OverlayChromeState.WORKING, OverlayChromeState.LIVE)
+        val active = !OverlayExternalInteraction.active.value &&
+            !snapshot.userPaused &&
+            snapshot.state in setOf(OverlayChromeState.WORKING, OverlayChromeState.LIVE)
         if (!active) {
             activeBorder?.let { windows.remove(it) }
             activeBorder = null
