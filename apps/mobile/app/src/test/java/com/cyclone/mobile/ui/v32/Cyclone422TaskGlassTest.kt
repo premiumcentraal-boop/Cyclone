@@ -1,6 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
 import com.cyclone.mobile.runtime.background.*
+import com.cyclone.mobile.ui.overlay.BackgroundGlassPolicy
 import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
@@ -43,12 +44,15 @@ class Cyclone422TaskGlassTest {
         assertEquals("View progress", card.actionLabel)
     }
 
-    @Test fun finishedTaskCollapsesToOpenableNotification() {
-        val card = TaskGlassPresentation.current(task(TaskPhase.DONE))!!
+    @Test fun finishedTaskRemainsOpenableWithoutPersistentBackgroundGlass() {
+        val done = task(TaskPhase.DONE)
+        val card = TaskGlassPresentation.current(done)!!
         assertEquals("Done", card.status)
         assertEquals("Opening Chrome", card.taskLabel)
         assertEquals("View result", card.actionLabel)
         assertEquals("View result for Opening Chrome", card.actionContentDescription)
+        assertFalse(BackgroundGlassPolicy.visible(done))
+        assertTrue(BackgroundGlassPolicy.tearDown(done))
     }
 
     @Test fun reviewTaskUsesConsumerCopy() {
@@ -57,14 +61,15 @@ class Cyclone422TaskGlassTest {
         assertEquals("View options", card.actionLabel)
     }
 
-    @Test fun taskControlsUseBackendCapabilities() {
+    @Test fun taskControlsUseBackendCapabilitiesAndNeverAdvertiseUnavailableFutureActions() {
         val panel = source("ui/v32/CycloneAskTaskPanel.kt")
         assertTrue(panel.contains("task.canContinueAfterHumanFromUi()"))
         assertTrue(panel.contains("task.canTakeOverFromUi()"))
         val capabilities = source("ui/v32/TaskStatusVisuals.kt")
         assertTrue(capabilities.contains("interruption?.canResumeAfterHuman == true"))
         assertTrue(capabilities.contains("interruption?.canTakeOver == true"))
-        assertTrue(panel.contains("enabled = false"))
+        assertFalse(panel.contains("Text(\"Autofill\")"))
+        assertFalse(panel.contains("Text(\"Soon\")"))
         assertFalse(panel.contains("task.resumable &&"))
     }
 
@@ -73,10 +78,13 @@ class Cyclone422TaskGlassTest {
         assertNull(TaskHarnessState.interruption(task(TaskPhase.FAILED)))
     }
 
-    @Test fun overlayAndInAppTaskGlassShareTheSameComponent() {
+    @Test fun backgroundGlassIsCompactProgressiveDisclosureNotASecondFullTaskCard() {
         val compact = source("ui/overlay/BackgroundTaskGlass.kt")
-        assertTrue(compact.contains("CycloneAskTaskPanel(task)"))
+        assertTrue(compact.contains("BackgroundTaskRibbon(task, onAsk)"))
+        assertTrue(compact.contains("TaskHumanizer.humanize"))
+        assertFalse(compact.contains("CycloneAskTaskPanel(task)"))
         assertFalse(compact.contains("BorderStroke"))
+        assertFalse(compact.contains("Text(\"Ask Cyclone…\")"))
     }
 
     @Test fun viewProgressUsesExactTaskProjection() {

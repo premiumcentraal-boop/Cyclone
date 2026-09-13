@@ -3,11 +3,28 @@ package com.cyclone.mobile.ui.overlay
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 
-/** Presentation only: never grants phone input authority. */
+/**
+ * Presentation only: never grants phone input authority.
+ *
+ * Background glass is a live-status surface, not task history. Terminal results belong in the
+ * notification/progress surface so a finished run never keeps a large card floating over Android.
+ */
 object BackgroundGlassPolicy {
-    fun visible(task: WorkspaceTaskUi?): Boolean = task != null && task.phase !in
-        setOf(TaskPhase.FAILED, TaskPhase.STOPPED)
-    fun tearDown(task: WorkspaceTaskUi?): Boolean = task?.phase in setOf(TaskPhase.FAILED, TaskPhase.STOPPED)
+    private val livePhases = setOf(
+        TaskPhase.STARTING,
+        TaskPhase.WORKING,
+        TaskPhase.PAUSED,
+        TaskPhase.REVIEW,
+        TaskPhase.HUMAN,
+    )
+
+    fun visible(task: WorkspaceTaskUi?): Boolean = task?.phase in livePhases
+
+    fun tearDown(task: WorkspaceTaskUi?): Boolean = task?.phase in setOf(
+        TaskPhase.DONE,
+        TaskPhase.FAILED,
+        TaskPhase.STOPPED,
+    )
 }
 
 /** Every successfully attached window is owned until synchronous removal completes. */

@@ -5,7 +5,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -20,15 +19,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.runtime.background.PendingWorkspaceRequest
+import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceDestinationHint
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.ui.overlay.OverlayExternalInteraction
 
-/** FIFO presentation only: queued work has Steer + Stop and starts automatically when safely eligible. */
-@Suppress("UNUSED_PARAMETER")
+/**
+ * FIFO presentation only: queued work has Steer + Stop and starts automatically when safely eligible.
+ *
+ * The queue is intentionally secondary UI. A current task/result owns the task surface, so queued
+ * requests stay hidden until that surface is gone instead of stacking another card beneath it.
+ */
 @Composable
 fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
     val requests by WorkspaceTasks.requests.state.collectAsState()
-    if (requests.isEmpty()) return
+    val currentTask by WorkspaceTasks.state.collectAsState()
+    if (requests.isEmpty() || currentTask?.phase?.let { it != TaskPhase.STOPPED } == true) return
     val context = LocalContext.current
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var steering by remember { mutableStateOf<PendingWorkspaceRequest?>(null) }
@@ -72,11 +78,23 @@ fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
                         WorkspaceTasks.requests.steer(request.id, destination)
                         if (destination.androidUserId == com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.currentAndroidUserId() &&
                             WorkspaceTasks.resolveQueueTarget(context, request) == null) {
-                            context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
-                                .putExtra("goal", request.goal).putExtra("pendingRequestId", request.id)
-                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                        } else WorkspaceTasks.tryPromoteNext(context)
-                        steering = null
+                            steering = null
+                            onOpen()
+                            OverlayExternalInteraction.active.value = true
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
+                                        .putExtra("goal", request.goal)
+                                        .putExtra("pendingRequestId", request.id)
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }.onFailure {
+                                OverlayExternalInteraction.active.value = false
+                            }
+                        } else {
+                            WorkspaceTasks.tryPromoteNext(context)
+                            steering = null
+                        }
                     },
                 )
             }
