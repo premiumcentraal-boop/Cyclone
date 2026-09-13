@@ -49,15 +49,12 @@ class OverlayGateInterruptTest {
 
             machine.dispatch(OverlayUserAction.GATE_CONFIRM)
             assertEquals(OverlayChromeState.DONE, machine.state())
-            assertEquals(
-                listOf(
-                    OverlayCopy.AI_MODE,
-                    "Saved as a draft skill. Review it in Automations before it can run alone.",
-                    OverlayCopy.MINIMIZE,
-                    OverlayCopy.EXIT,
-                ),
-                OverlayCopy.visibleFor(machine.snapshot()),
-            )
+            // Confirmation is the transition back to agent-owned execution. The transient DONE
+            // snapshot must stay visually collapsed so resumeSuspendedTask can continue behind the
+            // compact task glass instead of flashing a second full result/composer sheet.
+            assertTrue(machine.snapshot().minimized)
+            assertFalse(machine.snapshot().idleChipVisible)
+            assertEquals(2, effects.resumes)
             assertTrue(events.none { it.clicksHost || it.dispatchAccessibilityAction })
         }
     }
