@@ -5,8 +5,10 @@ import "./connections.css";
 import "./redesign.css";
 import "./connections-redesign.css";
 import "./chatgpt-attach.css";
+import "./camera-streaming.css";
 import { CyclonePcCompanionApp } from "./app.js";
 import { createDesktopService } from "./services/serviceFactory.js";
+import { mountCameraStreamingSettings } from "./ui/cameraStreamingSettings.js";
 import { mountTransportOnboarding } from "./ui/transportOnboarding.js";
 
 async function bootstrap(): Promise<void> {
@@ -17,7 +19,9 @@ async function bootstrap(): Promise<void> {
     const app = new CyclonePcCompanionApp(root, service);
     await app.start();
     const unmountTransportOnboarding = mountTransportOnboarding(service);
+    const unmountCameraStreamingSettings = mountCameraStreamingSettings(service);
     window.addEventListener("beforeunload", () => {
+      unmountCameraStreamingSettings();
       unmountTransportOnboarding();
       app.destroy();
     }, { once: true });
