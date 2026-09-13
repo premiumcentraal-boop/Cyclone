@@ -53,10 +53,7 @@ jobs:
             throw "Installer acceptance must build the literal source head. expected=$Expected actual=$Actual"
           }
           Write-Host "Exact source checkout accepted: $Actual"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13.7'
-      - name: Verify Cyclone One 1.5.4 VMOS Cloud AI candidate identity
+      - name: Verify Cyclone One 1.5.5 native camera streaming candidate identity
         shell: pwsh
         run: |
           python scripts/ci/release_versions.py --check
@@ -67,13 +64,13 @@ jobs:
           tauri=json.loads(Path('apps/pc-companion/src-tauri/tauri.conf.json').read_text())
           cargo=Path('apps/pc-companion/src-tauri/Cargo.toml').read_text()
           release=tomllib.loads(Path('release/version.toml').read_text())
-          expected='1.5.4'
+          expected='1.5.5'
           assert package['version']==expected
           assert tauri['version']==expected
-          assert re.search(r'^version = "1\.5\.4"$', cargo, re.M)
+          assert re.search(r'^version = "1\.5\.5"$', cargo, re.M)
           assert release['components']['pc_companion']==expected
-          assert release['components']['mobile']=='4.3.6'
-          assert release['release']['candidate_generation']=='cyclone-one-1.5.4-vmos-cloud-ai'
+          assert release['components']['mobile']=='4.3.7'
+          assert release['release']['candidate_generation']=='cyclone-one-1.5.5-native-camera-streaming'
           assert release['release']['publication_authorized'] is True
           '@
           $Code | python -

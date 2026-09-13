@@ -60,6 +60,13 @@
         <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
         <activity android:name=".runtime.background.BackgroundSetupActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceActivity" android:exported="false" />
+        <!-- Exported so the ADB shell can open the dedicated viewer. The activity accepts only
+             a tokenized loopback websocket URL; the PC gateway verifies a per-target ephemeral token. -->
+        <activity
+            android:name=".stream.CameraStreamViewerActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/AppTheme" />
         <service
             android:name=".runtime.background.WorkspaceTaskService"
             android:exported="false"

@@ -1,0 +1,331 @@
+.camera-stream-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(125, 125, 145, 0.18);
+  background:
+    radial-gradient(circle at 8% -20%, rgba(120, 110, 255, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(28, 28, 34, 0.98), rgba(20, 20, 25, 0.98));
+}
+
+.camera-stream-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.camera-stream-hero {
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.camera-stream-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  font-size: 22px;
+  line-height: 1;
+  color: #d9d7ff;
+  background: linear-gradient(145deg, rgba(106, 93, 255, 0.26), rgba(106, 93, 255, 0.08));
+  border: 1px solid rgba(145, 136, 255, 0.22);
+  box-shadow: 0 8px 24px rgba(36, 31, 95, 0.22);
+}
+
+.camera-stream-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.camera-stream-title-row,
+.camera-target-top,
+.camera-stream-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.camera-stream-lead {
+  max-width: 520px;
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+.camera-stream-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.camera-stream-pill.is-idle {
+  color: #b6b6c3;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.camera-stream-pill.is-live {
+  color: #baf3d1;
+  background: rgba(54, 179, 105, 0.12);
+  border-color: rgba(81, 211, 137, 0.22);
+}
+
+.camera-stream-pill.is-live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px rgba(100, 236, 158, 0.72);
+}
+
+.camera-stream-pill.is-attention {
+  color: #ffc8c8;
+  background: rgba(224, 72, 72, 0.12);
+  border-color: rgba(224, 72, 72, 0.22);
+}
+
+.camera-stream-form {
+  display: grid;
+  gap: 13px;
+}
+
+.camera-stream-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.camera-stream-field {
+  display: grid;
+  gap: 6px;
+}
+
+.camera-stream-field > span,
+.camera-target-top > span:first-child {
+  color: #a9a9b5;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.camera-stream-select {
+  appearance: none;
+  width: 100%;
+  height: 40px;
+  padding: 0 34px 0 12px;
+  color: #f2f2f6;
+  background-color: rgba(255, 255, 255, 0.045);
+  background-image:
+    linear-gradient(45deg, transparent 50%, #8f8f9c 50%),
+    linear-gradient(135deg, #8f8f9c 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 17px,
+    calc(100% - 11px) 17px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  outline: none;
+  font: inherit;
+  font-size: 12px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.camera-stream-select:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.065);
+}
+
+.camera-stream-select:focus {
+  border-color: rgba(132, 120, 255, 0.55);
+}
+
+.camera-stream-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.camera-aspect-lock {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 11px;
+  border-radius: 11px;
+  border: 1px solid rgba(121, 210, 158, 0.14);
+  background: rgba(66, 166, 111, 0.065);
+}
+
+.camera-aspect-check {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  color: #b8f0cf;
+  background: rgba(70, 186, 119, 0.14);
+  border: 1px solid rgba(91, 211, 143, 0.2);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.camera-aspect-lock strong,
+.camera-aspect-lock span {
+  display: block;
+}
+
+.camera-aspect-lock strong {
+  color: #e7eee9;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.camera-aspect-lock > div:nth-child(2) span {
+  color: #8fa298;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.camera-lock-badge {
+  color: #87cda4;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.camera-target-section {
+  display: grid;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.camera-target-count {
+  color: #777784;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.camera-target-list {
+  display: grid;
+  gap: 5px;
+}
+
+.camera-target-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.045);
+  cursor: pointer;
+}
+
+.camera-target-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.camera-target-row input {
+  accent-color: #796cff;
+}
+
+.camera-target-name {
+  overflow: hidden;
+  color: #dedee5;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camera-target-state {
+  color: #777783;
+  font-size: 9.5px;
+}
+
+.camera-target-empty {
+  padding: 11px;
+  border-radius: 9px;
+  color: #777783;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.camera-stream-status {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 35px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.camera-stream-status strong {
+  color: #d7d7df;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.camera-stream-status span {
+  color: #777783;
+  font-size: 9.5px;
+  text-align: right;
+}
+
+.camera-stream-status[data-kind="live"] strong {
+  color: #baf3d1;
+}
+
+.camera-stream-status[data-kind="error"] strong,
+.camera-stream-status[data-kind="limit"] strong {
+  color: #ffb7b7;
+}
+
+.camera-stream-actions {
+  justify-content: flex-start;
+}
+
+.camera-start-button {
+  min-width: 154px;
+}
+
+.camera-stop-button {
+  min-width: 82px;
+}
+
+@media (max-width: 880px) {
+  .camera-stream-two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-stream-status {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .camera-stream-status span {
+    text-align: left;
+  }
+}
