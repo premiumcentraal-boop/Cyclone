@@ -65,7 +65,9 @@ class CameraScrcpySession(ScrcpyMediaSession):
     """scrcpy media session that captures Camera2 instead of display 0.
 
     `camera_ar=sensor` is intentionally unconditional. max_size may reduce resolution for
-    throughput, but it may not change the source aspect ratio.
+    throughput, but it may not change the source aspect ratio. Decoder configuration and the
+    latest keyframe are cached so viewers 2-5 can join an already-live source immediately rather
+    than waiting for a future encoder keyframe.
     """
 
     def __init__(self, device: Any, spec: CameraSpec, diagnostic=None):
@@ -77,6 +79,32 @@ class CameraScrcpySession(ScrcpyMediaSession):
         )
         super().__init__(device, profile, resolve_scrcpy_artifact(), diagnostic)
         self.camera_spec = spec
+        self._cached_config: MediaEvent | None = None
+        self._cached_keyframe: MediaEvent | None = None
+
+    def subscribe(self) -> queue.Queue:
+        subscriber = super().subscribe()
+        with self._lock:
+            bootstrap = tuple(
+                event for event in (self._cached_config, self._cached_keyframe)
+                if event is not None
+            )
+        for event in bootstrap:
+            try:
+                subscriber.put_nowait(event)
+            except queue.Full:
+                break
+        return subscriber
+
+    def _broadcast(self, event: MediaEvent) -> None:
+        if event.kind == "packet":
+            if event.data.get("config"):
+                with self._lock:
+                    self._cached_config = event
+            elif event.data.get("keyframe"):
+                with self._lock:
+                    self._cached_keyframe = event
+        super()._broadcast(event)
 
     def status(self) -> dict[str, Any]:
         value = super().status()
@@ -106,6 +134,8 @@ class CameraScrcpySession(ScrcpyMediaSession):
         with self._lock:
             self._active_port = port
             self._active_scid = scid
+            self._cached_config = None
+            self._cached_keyframe = None
         try:
             adb.run(["push", str(self.artifact.path), remote_server], timeout=20)
             adb.run(["forward", f"tcp:{port}", f"localabstract:{socket_name}"], timeout=5)
