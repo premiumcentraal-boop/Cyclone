@@ -11,8 +11,8 @@ android {
         applicationId = "com.cyclone.mobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 103
-        versionName = "4.4.3"
+        versionCode = 104
+        versionName = "4.4.4"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -63,7 +63,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     // Kyant0/AndroidLiquidGlass 1.0.0 keeps the original Android LiquidButton renderer while
-    // remaining compatible with Cyclone 4.4.2's AGP line. The optical recipe is used directly.
+    // remaining compatible with Cyclone's AGP line. The optical recipe is used directly.
     implementation("io.github.kyant0:backdrop:1.0.0")
     implementation("io.github.kyant0:capsule:2.1.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

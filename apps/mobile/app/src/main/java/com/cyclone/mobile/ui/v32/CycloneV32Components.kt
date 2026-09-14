@@ -1,7 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,10 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
@@ -71,7 +68,7 @@ fun CycloneV32TopBar(
     onSettings: () -> Unit,
     onBack: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.background) {
+    Surface(color = Color.Transparent) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = CycloneSpacing.Page, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -127,78 +124,63 @@ fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> 
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     if (imeVisible) return
 
-    Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = .97f),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 7.dp),
     ) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
-            )
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(66.dp)
-                    .padding(horizontal = 6.dp)
-                    .selectableGroup(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                V32Destination.entries.forEach { destination ->
-                    val isSelected = selected == destination
-                    val isAi = destination == V32Destination.AI
-                    val itemTint = when {
-                        isAi && isSelected -> MaterialTheme.colorScheme.onPrimary
-                        isSelected -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(destination) }),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Surface(
-                            modifier = if (isAi) Modifier.size(48.dp) else Modifier.size(width = 38.dp, height = 30.dp),
-                            shape = if (isAi) CircleShape else RoundedCornerShape(12.dp),
-                            color = when {
-                                isAi && isSelected -> MaterialTheme.colorScheme.primary
-                                isAi -> MaterialTheme.colorScheme.surfaceVariant
-                                isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .78f)
-                                else -> Color.Transparent
-                            },
-                            contentColor = itemTint,
-                            shadowElevation = if (isAi && isSelected) 3.dp else 0.dp,
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    painter = androidx.compose.ui.res.painterResource(
-                                        when (destination) {
-                                            V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
-                                            V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
-                                            V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
-                                            V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
-                                            V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
-                                        },
-                                    ),
-                                    contentDescription = destination.label,
-                                    modifier = Modifier.size(if (isAi) 25.dp else 23.dp),
-                                    tint = itemTint,
-                                )
-                            }
-                        }
-                        androidx.compose.foundation.layout.Spacer(Modifier.height(if (isAi) 0.dp else 4.dp))
-                        Text(
-                            destination.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+        CycloneLiquidTray(height = 66.dp, contentPadding = 4.dp) {
+            BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight()) {
+                CycloneLiquidSelectionLens(
+                    selectedIndex = selected.ordinal,
+                    itemCount = V32Destination.entries.size,
+                    totalWidth = maxWidth,
+                    modifier = Modifier.align(Alignment.CenterStart),
+                    height = 58.dp,
+                )
+                Row(
+                    Modifier.fillMaxWidth().fillMaxHeight().selectableGroup(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    V32Destination.entries.forEach { destination ->
+                        val isSelected = selected == destination
+                        val tint by animateColorAsState(
+                            targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            animationSpec = tween(180),
+                            label = "Cyclone nav tint",
                         )
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(destination) }),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(
+                                painter = androidx.compose.ui.res.painterResource(
+                                    when (destination) {
+                                        V32Destination.HOME -> com.cyclone.mobile.R.drawable.ic_cyclone_home_42
+                                        V32Destination.PROFILES -> com.cyclone.mobile.R.drawable.ic_cyclone_profiles_42
+                                        V32Destination.AI -> com.cyclone.mobile.R.drawable.ic_cyclone_ai_42
+                                        V32Destination.ROUTINES -> com.cyclone.mobile.R.drawable.ic_cyclone_routines_42
+                                        V32Destination.BRAIN -> com.cyclone.mobile.R.drawable.ic_cyclone_brain_42
+                                    },
+                                ),
+                                contentDescription = destination.label,
+                                modifier = Modifier.size(if (destination == V32Destination.AI) 24.dp else 22.dp),
+                                tint = tint,
+                            )
+                            androidx.compose.foundation.layout.Spacer(Modifier.height(3.dp))
+                            Text(
+                                destination.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = tint,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 }
             }
@@ -214,33 +196,26 @@ fun CycloneSegmentedControl(
     modifier: Modifier = Modifier,
 ) {
     if (options.isEmpty()) return
-    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        BoxWithConstraints(Modifier.fillMaxWidth().height(44.dp).padding(3.dp)) {
-            val gap = 3.dp
-            val segmentWidth = (maxWidth - gap * (options.size - 1).toFloat()) / options.size.toFloat()
-            val targetOffset by animateDpAsState(
-                targetValue = (segmentWidth + gap) * selected.coerceIn(options.indices).toFloat(),
-                animationSpec = tween(durationMillis = 210),
-                label = "Cyclone segment position",
+    CycloneLiquidTray(modifier = modifier, height = 48.dp, contentPadding = 4.dp) {
+        BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight()) {
+            CycloneLiquidSelectionLens(
+                selectedIndex = selected,
+                itemCount = options.size,
+                totalWidth = maxWidth,
+                modifier = Modifier.align(Alignment.CenterStart),
+                height = 40.dp,
             )
-            Surface(
-                modifier = Modifier.offset(x = targetOffset).width(segmentWidth).fillMaxHeight(),
-                shape = RoundedCornerShape(13.dp),
-                color = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shadowElevation = 1.dp,
-            ) {}
-            Row(Modifier.fillMaxWidth().fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            Row(Modifier.fillMaxWidth().fillMaxHeight().selectableGroup()) {
                 options.forEachIndexed { index, label ->
                     val active = selected == index
                     val textColor by animateColorAsState(
-                        targetValue = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        animationSpec = tween(durationMillis = 170),
+                        targetValue = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        animationSpec = tween(170),
                         label = "Cyclone segment text",
                     )
                     Box(
                         modifier = Modifier
-                            .width(segmentWidth)
+                            .weight(1f)
                             .fillMaxHeight()
                             .selectable(selected = active, role = Role.Tab, onClick = { onSelect(index) }),
                         contentAlignment = Alignment.Center,
@@ -250,6 +225,8 @@ fun CycloneSegmentedControl(
                             style = MaterialTheme.typography.labelMedium,
                             color = textColor,
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }

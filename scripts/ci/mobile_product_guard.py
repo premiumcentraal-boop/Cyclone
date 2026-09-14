@@ -50,7 +50,8 @@ REQUIRED_AI_CHAT = (
     "OpenRouterCatalogStore.activeId(context)",
     '"Ask Cyclone…"',
     "CycloneModelPill(",
-    "showModelPill = false",
+    "CycloneModelIntelligencePanel(",
+    "showModelSelector = false",
 )
 REQUIRED_BRAIN_V39 = (
     "internal fun CycloneV39BrainPage",

@@ -32,6 +32,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -128,16 +129,28 @@ fun CycloneTheme(content: @Composable () -> Unit) {
         shapes = CycloneV32Shapes,
         typography = CycloneTypography,
     ) {
-        // Kyant's drawBackdrop samples a captured graphics layer. Keep the source separate from
-        // the controls themselves so the glass cannot recursively sample its own rendered output.
         val liquidBackdrop = rememberLayerBackdrop()
+        val dark = isSystemInDarkTheme()
+        val background = MaterialTheme.colorScheme.background
+        val opticalSource = Brush.verticalGradient(
+            listOf(
+                background,
+                MaterialTheme.colorScheme.primary.copy(alpha = if (dark) .12f else .055f),
+                background,
+                MaterialTheme.colorScheme.secondary.copy(alpha = if (dark) .07f else .028f),
+                background,
+            ),
+        )
         CompositionLocalProvider(LocalCycloneLiquidBackdrop provides liquidBackdrop) {
             Box(Modifier.fillMaxSize()) {
+                // Keep the sampled layer separate from the controls, as Kyant's demos do. The
+                // source now has restrained tonal variation instead of flat white, so refraction is
+                // visible on light screens without inventing borders or fake glassmorphism.
                 Box(
                     Modifier
                         .fillMaxSize()
                         .layerBackdrop(liquidBackdrop)
-                        .background(MaterialTheme.colorScheme.background),
+                        .background(opticalSource),
                 )
                 content()
             }
@@ -275,8 +288,8 @@ fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Uni
 }
 
 /**
- * Translucent glass is rendered directly into a clipped layer. Material shadow/elevation on
- * transparent Surfaces can rasterize as a rectangular band on some Android renderers.
+ * Calm content surface. Interactive navigation/action chrome must use CycloneLiquid* components;
+ * this intentionally stays a restrained content container rather than pretending to be glass.
  */
 @Composable
 fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
@@ -284,7 +297,7 @@ fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -
         modifier = modifier
             .animateContentSize()
             .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = .88f)),
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = .94f)),
     ) {
         content()
     }

@@ -6,22 +6,20 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -43,15 +41,10 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,16 +54,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import com.cyclone.mobile.CycloneRelease
 import com.cyclone.mobile.ai.CycloneAiAccessProfile
 import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
-import com.cyclone.mobile.ai.OpenRouterModelPresets
-import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.gateway.GatewaySettingsActivity
 import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.runtime.background.BackgroundSetup
@@ -84,10 +73,26 @@ private data class Settings426Row(
     val value: String? = null,
 )
 
-@Composable
-internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh: () -> Unit,
-    section: String, onSection: (String) -> Unit) {
+private val settingsAutonomyProfiles = listOf(
+    CycloneAiAccessProfile.GUIDED,
+    CycloneAiAccessProfile.BALANCED,
+    CycloneAiAccessProfile.FULL,
+)
 
+private fun settingsAutonomyLabel(profile: CycloneAiAccessProfile): String = when (profile) {
+    CycloneAiAccessProfile.GUIDED -> "Ask often"
+    CycloneAiAccessProfile.BALANCED -> "Balanced"
+    CycloneAiAccessProfile.FULL -> "Independent"
+}
+
+@Composable
+internal fun CycloneSettingsPage426(
+    context: Context,
+    refreshTick: Int,
+    refresh: () -> Unit,
+    section: String,
+    onSection: (String) -> Unit,
+) {
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     var selectedModel by rememberSaveable(refreshTick) {
         mutableStateOf(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context))
@@ -104,11 +109,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
     val essentialsReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
 
     fun modelValue(): String = V39AiChatContract.modelForStored(selectedModel).label
-    fun effortValue(): String = when (reasoningEffort.lowercase()) {
-        "low" -> "Low"
-        "high", "max" -> "High"
-        else -> "Medium"
-    }
+    fun effortValue(): String = reasoningEffort.takeIf { it.isNotBlank() }?.let(::reasoningEffortLabel) ?: "Model default"
     fun phoneValue(): String = when {
         phoneControl.ready -> "Ready"
         phoneControl.needsRepair -> "Repair"
@@ -122,7 +123,7 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                 "AI" to listOf(
                     Settings426Row("Model & API", "Model & API", Icons.Rounded.Psychology, modelValue()),
                     Settings426Row("Default intelligence", "Default intelligence", Icons.Rounded.Tune, effortValue()),
-                    Settings426Row("Phone autonomy", "Phone autonomy", Icons.Rounded.PhoneAndroid, accessProfile.displayName),
+                    Settings426Row("Phone autonomy", "Phone autonomy", Icons.Rounded.PhoneAndroid, settingsAutonomyLabel(accessProfile)),
                 ),
                 "Phone" to listOf(
                     Settings426Row("Quick setup", "Quick setup", Icons.Rounded.Bolt, "With root"),
@@ -198,18 +199,22 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
 
             "Phone autonomy" -> item {
                 Settings426Surface {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CycloneAiAccessProfile.entries.forEach { profile ->
-                            Settings426AutonomyRow(
-                                profile = profile,
-                                selected = accessProfile == profile,
-                                onClick = {
-                                    accessProfile = profile
-                                    CycloneAiAccessProfileStore.write(context, profile)
-                                    refresh()
-                                },
-                            )
-                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CycloneLiquidChoiceBar(
+                            options = settingsAutonomyProfiles.map(::settingsAutonomyLabel),
+                            selectedIndex = settingsAutonomyProfiles.indexOf(accessProfile).coerceAtLeast(0),
+                            onSelect = { index ->
+                                accessProfile = settingsAutonomyProfiles[index]
+                                CycloneAiAccessProfileStore.write(context, accessProfile)
+                                refresh()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            accessProfile.summary,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Text(
                             "Payments, credentials, destructive changes and final send actions still require confirmation.",
                             style = MaterialTheme.typography.bodySmall,
@@ -289,14 +294,8 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                 }
             }
 
-            "Permissions" -> item {
-                Permissions426Card(context)
-            }
-
-            "Profile engine" -> item {
-                Settings426Surface { RootFeaturesCard() }
-            }
-
+            "Permissions" -> item { Permissions426Card(context) }
+            "Profile engine" -> item { Settings426Surface { RootFeaturesCard() } }
             "Storage" -> item {
                 Settings426Surface {
                     Settings426InfoRow(
@@ -306,7 +305,6 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                     )
                 }
             }
-
             "PC Gateway" -> item {
                 Settings426Surface {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -322,7 +320,6 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                     }
                 }
             }
-
             "Privacy & safety" -> item {
                 Settings426Surface {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -332,7 +329,6 @@ internal fun CycloneSettingsPage426(context: Context, refreshTick: Int, refresh:
                     }
                 }
             }
-
             "About" -> item {
                 Settings426Surface {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -375,7 +371,7 @@ private fun Settings426Root(groups: List<Pair<String, List<Settings426Row>>>, on
                                         Modifier
                                             .fillMaxWidth()
                                             .padding(start = 58.dp, end = 14.dp)
-                                            .size(height = 1.dp, width = 1.dp)
+                                            .size(height = 1.dp, width = 1.dp),
                                     )
                                 }
                             }
@@ -458,26 +454,6 @@ private fun Permissions426Card(context: Context) {
                 else open426(context, CyclonePermissionSetup.appDetails(context))
             }
             Settings426InfoRow(Icons.Rounded.ScreenShare, "Screen sharing asks every session", "Android capture consent remains temporary and explicit.")
-        }
-    }
-}
-
-@Composable
-private fun Settings426AutonomyRow(profile: CycloneAiAccessProfile, selected: Boolean, onClick: () -> Unit) {
-    Card(
-        onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(profile.displayName, style = MaterialTheme.typography.titleSmall)
-                Text(profile.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (selected) Icon(Icons.Rounded.CheckCircle, "Selected", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         }
     }
 }

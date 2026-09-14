@@ -1,24 +1,24 @@
-# Cyclone Mobile 4.4.3 Liquid Glass visual-control upgrade on exact published 4.4.2.
-# Preserves Cyclone One 1.5.5 native camera-streaming compatibility and the 4.4.2 security foundation.
-# Final candidate includes only the four individually proven AGP 8.7 / Kotlin 2.2 lint-detector compatibility suppressions.
+# Cyclone Mobile 4.4.4 cohesive Liquid Glass redesign on exact published 4.4.3.
+# Preserves Cyclone One 1.5.5 native camera-streaming compatibility and the 4.4.3 security foundation.
+# Release candidate extends the Kyant0 optical language across navigation, selectors, toggles, search and Ask Cyclone interaction chrome.
 schema = 1
-product_version = "4.4.3"
+product_version = "4.4.4"
 channel = "development"
-android_version_code = 103
+android_version_code = 104
 python_version = "4.1.0"
 
 [components]
-mobile = "4.4.3"
+mobile = "4.4.4"
 pc_companion = "1.5.5"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.4.2"
+previous_mobile_version = "4.4.3"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.4.3-kyant-liquid-glass"
+candidate_generation = "cyclone-4.4.4-cohesive-liquid-chrome"

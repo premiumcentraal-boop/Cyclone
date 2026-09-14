@@ -1,23 +1,44 @@
 package com.cyclone.mobile.ui.v32
 
 import android.content.Context
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.ai.*
+import com.cyclone.mobile.ai.CatalogModel
+import com.cyclone.mobile.ai.OpenRouterCatalog
+import com.cyclone.mobile.ai.OpenRouterCatalogClient
+import com.cyclone.mobile.ai.OpenRouterCatalogStore
+import com.cyclone.mobile.ai.OpenRouterModelAvailability
+import com.cyclone.mobile.ai.OpenRouterSecretStore
+import com.cyclone.mobile.ai.ProviderFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -77,61 +98,108 @@ internal fun CycloneOpenRouterCatalog(context: Context, onSelectionChanged: () -
             hasKey = OpenRouterSecretStore.hasKey(context)
             keyGeneration++
         }
-        OutlinedTextField(
-            value = query, onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth(), singleLine = true,
-            label = { Text("Search OpenRouter models") },
-            leadingIcon = { Icon(Icons.Rounded.Search, null) },
+
+        CycloneLiquidSearchField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = "Search OpenRouter models",
+            modifier = Modifier.fillMaxWidth(),
         )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("${models.size} models · ${selected.size} selected", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-            TextButton(onClick = { refresh++ }, enabled = hasKey && !loading) { Text("Refresh") }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "${models.size} models · ${selected.size} selected",
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            CycloneLiquidTextAction(
+                label = if (loading) "Refreshing…" else "Refresh",
+                onClick = { refresh++ },
+                enabled = hasKey && !loading,
+            )
         }
-        FilterChip(selected = onlySelected, onClick = { onlySelected = !onlySelected }, label = { Text("Selected only") })
-        Text("Tap a model to add or remove it from your picker. A green check means selected.", style = MaterialTheme.typography.bodySmall)
-        if (!hasKey) Text("Add your OpenRouter API key to load and verify the catalog.", style = MaterialTheme.typography.bodySmall)
+
+        CycloneLiquidFilterChip(
+            selected = onlySelected,
+            label = "Selected only",
+            onClick = { onlySelected = !onlySelected },
+        )
+
+        Text(
+            "Tap a model to add or remove it from your picker. A green check means selected.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!hasKey) {
+            Text(
+                "Add your OpenRouter API key to load and verify the catalog.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+
         if (rows.isEmpty()) {
-            Text(if (models.isEmpty()) "Your catalog will appear here." else "No matching models.", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (models.isEmpty()) "Your catalog will appear here." else "No matching models.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
         } else {
             LazyColumn(Modifier.fillMaxWidth().height(420.dp)) {
                 items(rows, key = { it.id }) { model ->
                     val checked = model.id in selected
                     val listed = models.any { it.id == model.id }
-                    val availability = if (hasKey) OpenRouterCatalogStore.availability(context, key, model.id) else OpenRouterModelAvailability.UNKNOWN
+                    val availability = if (hasKey) {
+                        OpenRouterCatalogStore.availability(context, key, model.id)
+                    } else OpenRouterModelAvailability.UNKNOWN
                     val canSelect = checked || (hasKey && listed && model.textOutput && availability == OpenRouterModelAvailability.AVAILABLE)
                     Row(
-                        Modifier.fillMaxWidth().toggleable(checked, enabled = canSelect, role = Role.Checkbox) { value ->
-                            try {
-                                OpenRouterCatalogStore.select(context, model.id, value)
-                                onSelectionChanged()
-                            } catch (failure: Exception) {
-                                error = ProviderFailure.sanitize(failure.message ?: "Could not save your model selection. Please try again.")
+                        Modifier
+                            .fillMaxWidth()
+                            .toggleable(checked, enabled = canSelect, role = Role.Checkbox) { value ->
+                                try {
+                                    OpenRouterCatalogStore.select(context, model.id, value)
+                                    onSelectionChanged()
+                                } catch (failure: Exception) {
+                                    error = ProviderFailure.sanitize(
+                                        failure.message ?: "Could not save your model selection. Please try again.",
+                                    )
+                                }
                             }
-                        }.padding(vertical = 12.dp, horizontal = 4.dp),
+                            .padding(vertical = 12.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(model.name, style = MaterialTheme.typography.bodyMedium)
                             Text(model.id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(when {
-                                !listed -> "No longer in catalog · uncheck to remove"
-                                !model.textOutput -> "Not a chat model"
-                                availability == OpenRouterModelAvailability.UNKNOWN -> "Access not verified for this API key"
-                                availability == OpenRouterModelAvailability.UNAVAILABLE -> "Unavailable under this API key's account settings"
-                                model.imageInput -> "Available · text + images"
-                                else -> "Available · text only"
-                            }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                when {
+                                    !listed -> "No longer in catalog · uncheck to remove"
+                                    !model.textOutput -> "Not a chat model"
+                                    availability == OpenRouterModelAvailability.UNKNOWN -> "Access not verified for this API key"
+                                    availability == OpenRouterModelAvailability.UNAVAILABLE -> "Unavailable under this API key's account settings"
+                                    model.imageInput -> "Available · text + images"
+                                    else -> "Available · text only"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                         Icon(
                             if (checked) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
-                            contentDescription = null, modifier = Modifier.size(24.dp),
+                            contentDescription = if (checked) "Selected" else "Not selected",
+                            modifier = Modifier.size(24.dp),
                             tint = if (checked) Color(0xFF2EAD62) else MaterialTheme.colorScheme.outline,
                         )
                     }
-                    HorizontalDivider()
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
                 }
             }
         }
