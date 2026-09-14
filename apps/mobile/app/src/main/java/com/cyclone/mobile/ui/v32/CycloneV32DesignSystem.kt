@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +38,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 private val Ink = Color(0xFF0A1830)
 private val InkMuted = Color(0xFF5F7188)
@@ -123,8 +127,20 @@ fun CycloneTheme(content: @Composable () -> Unit) {
         colorScheme = if (isSystemInDarkTheme()) CycloneV32DarkColors else CycloneV32LightColors,
         shapes = CycloneV32Shapes,
         typography = CycloneTypography,
-        content = content,
-    )
+    ) {
+        val liquidBackdrop = rememberLayerBackdrop()
+        CompositionLocalProvider(LocalCycloneLiquidBackdrop provides liquidBackdrop) {
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .layerBackdrop(liquidBackdrop)
+                        .background(MaterialTheme.colorScheme.background),
+                )
+                content()
+            }
+        }
+    }
 }
 
 enum class CyclonePastel { PRIMARY, LILAC, MINT, LEMON, PEACH, SKY }
@@ -133,144 +149,46 @@ enum class CyclonePastel { PRIMARY, LILAC, MINT, LEMON, PEACH, SKY }
 data class CyclonePastelColors(val container: Color, val content: Color)
 
 @Composable
-fun cyclonePastel(tone: CyclonePastel): CyclonePastelColors {
-    return CyclonePastelColors(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)
-}
+fun cyclonePastel(tone: CyclonePastel): CyclonePastelColors =
+    CyclonePastelColors(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)
 
 @Composable
-fun CycloneHeroCard(
-    title: String,
-    body: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    tone: CyclonePastel = CyclonePastel.PRIMARY,
-    action: (@Composable () -> Unit)? = null,
-) {
+fun CycloneHeroCard(title: String, body: String, icon: ImageVector, modifier: Modifier = Modifier, tone: CyclonePastel = CyclonePastel.PRIMARY, action: (@Composable () -> Unit)? = null) {
     val colors = cyclonePastel(tone)
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.container, contentColor = colors.content),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-    ) {
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = colors.container, contentColor = colors.content), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                    Icon(icon, null, modifier = Modifier.size(22.dp))
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(title, style = MaterialTheme.typography.titleLarge)
-                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Icon(icon, null, modifier = Modifier.size(22.dp)) } }
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) { Text(title, style = MaterialTheme.typography.titleLarge); Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             action?.invoke()
         }
     }
 }
 
 @Composable
-fun CycloneSectionTitle(title: String, action: (@Composable () -> Unit)? = null) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-        action?.invoke()
-    }
-}
+fun CycloneSectionTitle(title: String, action: (@Composable () -> Unit)? = null) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f)); action?.invoke() } }
 
 @Composable
 fun CycloneStatusPill(label: String, positive: Boolean = true) {
     val container = if (positive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer
     val content = if (positive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer
     val dot = if (positive) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error
-    Surface(shape = RoundedCornerShape(999.dp), color = container, contentColor = content) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Surface(modifier = Modifier.size(6.dp), shape = CircleShape, color = dot) {}
-            Text(label, style = MaterialTheme.typography.labelMedium)
-        }
-    }
+    Surface(shape = RoundedCornerShape(999.dp), color = container, contentColor = content) { Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Surface(modifier = Modifier.size(6.dp), shape = CircleShape, color = dot) {}; Text(label, style = MaterialTheme.typography.labelMedium) } }
 }
 
 @Composable
-fun CycloneSimpleCard(
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
-    }
-}
+fun CycloneSimpleCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) { Card(modifier = modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) } }
 
 @Composable
-fun CyclonePageIntro(eyebrow: String, title: String, body: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(eyebrow.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        Text(title, style = MaterialTheme.typography.headlineMedium)
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(2.dp))
-    }
-}
+fun CyclonePageIntro(eyebrow: String, title: String, body: String) { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(eyebrow.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(title, style = MaterialTheme.typography.headlineMedium); Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(2.dp)) } }
+
+@Composable fun CycloneV32Theme(content: @Composable () -> Unit) = CycloneTheme(content)
+object CycloneColors { val Blue = Accent; val Cyan = Color(0xFF4FCBFF); val Success = Color(0xFF168653) }
+object CycloneSpacing { val Tiny = 4.dp; val Small = 8.dp; val Content = 16.dp; val Page = 20.dp; val Section = 28.dp; val ComposerLift = 30.dp }
 
 @Composable
-fun CycloneV32Theme(content: @Composable () -> Unit) = CycloneTheme(content)
-
-object CycloneColors {
-    val Blue = Accent
-    val Cyan = Color(0xFF4FCBFF)
-    val Success = Color(0xFF168653)
-}
-
-object CycloneSpacing {
-    val Tiny = 4.dp
-    val Small = 8.dp
-    val Content = 16.dp
-    val Page = 20.dp
-    val Section = 28.dp
-    val ComposerLift = 30.dp
-}
+fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) { Surface(modifier = modifier, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, shadowElevation = 1.dp, content = content) }
 
 @Composable
-fun CycloneSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp,
-        shadowElevation = 1.dp,
-        content = content,
-    )
-}
+fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) { Box(modifier = modifier.animateContentSize().clip(RoundedCornerShape(24.dp)).background(MaterialTheme.colorScheme.surface.copy(alpha = .88f))) { content() } }
 
-/**
- * Translucent glass is rendered directly into a clipped layer. Material shadow/elevation on
- * transparent Surfaces can rasterize as a rectangular band on some Android renderers.
- */
-@Composable
-fun CycloneGlassSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Box(
-        modifier = modifier
-            .animateContentSize()
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = .88f)),
-    ) {
-        content()
-    }
-}
-
-@Composable
-fun CycloneStatus(label: String, positive: Boolean = true) = CycloneStatusPill(label, positive)
+@Composable fun CycloneStatus(label: String, positive: Boolean = true) = CycloneStatusPill(label, positive)

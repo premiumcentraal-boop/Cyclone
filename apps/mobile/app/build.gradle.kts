@@ -6,7 +6,11 @@ plugins {
 
 android {
     namespace = "com.cyclone.mobile"
-    compileSdk = 35
+    // Kyant0/AndroidLiquidGlass 1.0.0 is the last stable release before the library's
+    // Compose 1.10+ / AGP 9 migration while retaining the same LiquidButton recipe used by
+    // current releases. Its AAR is compiled against API 36, so Cyclone compiles against 36 while
+    // deliberately keeping the 4.4.1 min/target SDK contract unchanged.
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.cyclone.mobile"
         minSdk = 33
@@ -52,6 +56,11 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Exact Kyant0 Backdrop renderer. 1.0.0 contains the same published LiquidButton
+    // vibrancy -> blur(2dp) -> lens(12dp,24dp) recipe used by the current catalog, without
+    // forcing Cyclone 4.4.1 onto the library's newer AGP 9 / Compose 1.12 toolchain.
+    implementation("io.github.kyant0:backdrop:1.0.0")
+    implementation("io.github.kyant0:capsule:2.1.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
