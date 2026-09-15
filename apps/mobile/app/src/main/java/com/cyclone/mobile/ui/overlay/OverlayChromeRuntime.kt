@@ -2,6 +2,8 @@ package com.cyclone.mobile.ui.overlay
 
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.DeviceState
+import com.cyclone.mobile.agent.CycloneTaskClassification
+import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.CycloneAiAccessProfile
 import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
 import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
@@ -15,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -405,18 +408,16 @@ object OverlayChromeRuntime {
             }
             val settings = readAiSettings(context)
             val accessProfile = CycloneAiAccessProfileStore.read(context)
-            val result = agent.execute(
-                request,
-                QuickAgentConfig(
-                    attachment = PendingTaskAttachment.take(),
-                    model = OpenRouterModelPresets.byId(settings.modelId).copy(
-                        reasoningEffort = settings.reasoningEffort,
-                    ),
-                    safeMode = accessProfile != CycloneAiAccessProfile.FULL,
-                    accessProfile = accessProfile,
+            val config = QuickAgentConfig(
+                attachment = PendingTaskAttachment.take(),
+                model = OpenRouterModelPresets.byId(settings.modelId).copy(
+                    reasoningEffort = settings.reasoningEffort,
                 ),
-            ) { progress ->
-                val clean = progress.trim()
+                safeMode = accessProfile != CycloneAiAccessProfile.FULL,
+                accessProfile = accessProfile,
+            )
+            val progress: (String) -> Unit = { status ->
+                val clean = status.trim()
                 // Brain consolidation is internal bookkeeping. Do not surface it as a task/composer
                 // state; the trace already records the successful local Brain write.
                 if (!clean.equals(INTERNAL_BRAIN_UPDATED, ignoreCase = true)) {
@@ -424,9 +425,54 @@ object OverlayChromeRuntime {
                     mutate { it.updateStatus("Checking the current page") }
                 }
             }
+            var result = agent.execute(request, config, progress)
+            if (result.taskId == null && result.decisions == 0) {
+                // 4.4.6 made capture-change races explicitly retryable, but execute() still returned
+                // before a trace existed. Give the screen one bounded settle interval and retry once.
+                AgentTaskNotificationRuntime.progress(context, "Refreshing the current screen…")
+                delay(INITIAL_OBSERVATION_RETRY_MS)
+                result = agent.execute(request, config, progress)
+            }
+            if (!result.ok && result.taskId == null) {
+                result = persistPreflightFailure(context, request, config.model.id, result)
+            }
             handleAgentResult(result)
         }
         synchronized(lock) { aiJob = job }
+    }
+
+    private fun persistPreflightFailure(
+        context: Context,
+        request: String,
+        modelId: String,
+        result: QuickAgentResult,
+    ): QuickAgentResult {
+        val traceId = AgentTraceRuntime.start(context, request, modelId)
+        val classification = preflightClassification(result.message)
+        AgentTraceRuntime.event(
+            context = context,
+            sessionId = traceId,
+            kind = "OBSERVATION_FAILED",
+            displayText = "Initial screen observation failed",
+            code = "observation.initial_failed",
+            ok = false,
+            detail = result.message,
+        )
+        AgentTraceRuntime.finish(context, traceId, "FAILED", result.message, result.decisions)
+        return result.copy(taskId = traceId, classification = classification)
+    }
+
+    private fun preflightClassification(message: String): String {
+        val terminal = listOf(
+            "permission",
+            "service is unavailable",
+            "disconnected",
+            "session or display",
+            "target app is not observable",
+            "workspace",
+        ).any { message.contains(it, ignoreCase = true) }
+        return if (terminal) CycloneTaskClassification.HARD_BLOCKER.name
+        else CycloneTaskClassification.NON_CONVERGENCE.name
     }
 
     /** Exact-task service command; retains the original foreground agent and controller machinery. */
@@ -599,6 +645,7 @@ object OverlayChromeRuntime {
 
     private const val GATE_CHALLENGE_TTL_MS = 60_000L
     private const val GATE_APPROVAL_TTL_MS = 30_000L
+    private const val INITIAL_OBSERVATION_RETRY_MS = 550L
     private const val INTERNAL_BRAIN_UPDATED = "Cyclone Brain updated"
 
     private fun readAiSettings(context: Context): OverlayAiSettings {
