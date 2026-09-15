@@ -9,8 +9,6 @@ import com.cyclone.mobile.applearner.PageAwarenessRuntime
 import com.cyclone.mobile.applearner.PageContext
 import com.cyclone.mobile.applearner.PageControl
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
-import com.cyclone.mobile.capture.PhoneScreenCapture
-import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
 import com.cyclone.mobile.fastpath.FastPathTree
 import com.cyclone.mobile.observability.pagecontext.PageContextSummary
 import com.cyclone.mobile.observability.pagecontext.PageTextExtractor
@@ -44,17 +42,35 @@ internal data class GatewayObservation(
     val payload: JSONObject,
     val elements: Map<String, GatewayElement>,
     val execution: ExecutionContext = ExecutionContext.DEFAULT,
+    val generation: Long = 0,
 )
 
 internal object GatewayObservationStore {
     private val scoped = com.cyclone.mobile.runtime.session.SessionObservationStore(
         com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions)
-    fun current(sessionId: String? = null): GatewayObservation? = scoped.current(sessionId)?.payload as? GatewayObservation
+    fun current(sessionId: String? = null): GatewayObservation? = scoped.current(sessionId)?.let(::project)
     fun current(execution: ExecutionContext): GatewayObservation? =
-        scoped.current(execution.sessionId, execution.displayId)?.payload as? GatewayObservation
-    fun replace(observation: GatewayObservation) {
+        scoped.current(execution.sessionId, execution.displayId)?.let(::project)
+    fun replace(observation: GatewayObservation): GatewayObservation = project(
         scoped.publish(observation.execution.sessionId, observation.execution.displayId, observation.id,
-            observation, observation.capturedAt)
+            observation, observation.capturedAt))
+    private fun project(envelope: com.cyclone.mobile.runtime.session.SessionObservationEnvelope): GatewayObservation {
+        val source = envelope.payload as GatewayObservation
+        val identity = com.cyclone.mobile.runtime.session.ObservationIdentity.fromPayload(source.id, envelope.generation,
+            source.execution, source.capturedAt, source.payload)
+        val elements = source.elements.mapValues { (_, element) -> element.copy(evidence = JSONObject(element.evidence.toString())
+            .put("observation", identity.toJson()).put("generation", envelope.generation)) }
+        val payload = JSONObject(source.payload.toString()).put("observation", identity.toJson()).put("generation", envelope.generation)
+        payload.optJSONObject("pageContext")?.put("observation", identity.toJson())
+        payload.optJSONObject("screenshot")?.put("observation", identity.toJson())?.put("generation", envelope.generation)
+        payload.optJSONArray("semanticControls")?.let { controls ->
+            for (i in 0 until controls.length()) controls.optJSONObject(i)?.let { control ->
+                control.put("observation", identity.toJson()).put("generation", envelope.generation)
+            }
+        }
+        return source.copy(generation = envelope.generation, elements = elements,
+            page = source.page.copy(observation = identity, controls = source.page.controls.map { it.copy(selector = JSONObject(it.selector.toString())) }),
+            payload = payload)
     }
     fun clear(sessionId: String? = null) { scoped.clear(sessionId) }
 }
@@ -81,11 +97,47 @@ internal object GatewayObservationAdapter {
         val service = CycloneAccessibilityService.instance
             ?: throw GatewayProtocolException("ACCESSIBILITY_NOT_CONNECTED", "Cyclone Accessibility is not connected")
         PageAwarenessRuntime.initialize(context)
-        val captureStart = System.nanoTime() / 1_000_000
-        val snapshot = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = true)
-        val captureEnd = System.nanoTime() / 1_000_000
+        val planeAtStart = observationPlane(args, execution)
+        val executionGenerationAtStart = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId) else null
+        fun surface(): com.cyclone.mobile.agent.ObservationSurface {
+            if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.requireScope(execution)
+            val plane = observationPlane(args, execution)
+            val workspace = plane.workspaceId?.let { id -> Layer2Workspaces.engine.snapshot().singleOrNull { it.id == id } }
+            val profile = com.cyclone.mobile.agent.SemanticCaptureBoundary.workspaceProfile(plane, Layer2Workspaces.engine.holder(), workspace)
+            val executionGeneration = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId) else null
+            return service.observationSurface(execution.sessionId, execution.displayId,
+                plane.toJson().put("executionGeneration", executionGeneration ?: JSONObject.NULL).toString(), profile)
+        }
+        val includeScreenshot = args.optBoolean("includeScreenshot", false)
+        val captured = try {
+            com.cyclone.mobile.agent.SemanticCaptureBoundary.capture(::surface,
+                semantic = { if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = true) },
+                image = if (!includeScreenshot) null else ({
+                    val result = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+                        "observation-image-${UUID.randomUUID()}", "phone.screenshot", JSONObject()
+                            .put("sessionId", execution.sessionId).put("displayId", execution.displayId)
+                            .put("minCapturedAtMonotonicMs", android.os.SystemClock.uptimeMillis())
+                            .put("includeBase64", args.optBoolean("includeScreenshotBase64", false))))
+                    if (!result.ok) JSONObject().put("available", false).put("errorCode", "SCREENSHOT_FAILED")
+                    else result.payload as? JSONObject ?: JSONObject().put("available", false)
+                }))
+        } catch (error: Exception) {
+            GatewayObservationStore.clear(execution.sessionId)
+            if (error is com.cyclone.mobile.agent.CaptureChanged) throw captureChanged()
+            throw error
+        }
+        val snapshot = captured.semantic
+        val captureStart = captured.startMs
+        val captureEnd = captured.endMs
+        if (snapshot.screenWidth != captured.surface.width || snapshot.screenHeight != captured.surface.height ||
+            com.cyclone.mobile.agent.SemanticCaptureBoundary.windowSignature(snapshot.windows) != captured.surface.windowSignature) {
+            GatewayObservationStore.clear(execution.sessionId)
+            throw captureChanged()
+        }
+        val screenshot = captured.image
         val raw = snapshot.toJson()
-        val page = PageAwarenessRuntime.capture(context, raw)
+        val learned = PageAwarenessRuntime.capture(context, raw)
+        val page = com.cyclone.mobile.agent.tools.ObservationProjections.freshLegacy(raw, learned)
         val safeRaw = GatewayPrivacy.sanitizeAccessibilitySnapshot(raw)
         val observationId = UUID.randomUUID().toString()
         val rawNodes = safeRaw.optJSONArray("nodes") ?: JSONArray()
@@ -243,28 +295,19 @@ internal object GatewayObservationAdapter {
             nextHopHints = nextHopHints,
         )
         boundedPageEvidence.put("captureStartMonotonicMs", captureStart)
+            .put("legacyFreshnessShadow", JSONObject().put("matches", learned.controls.map { it.key } == page.controls.map { it.key })
+                .put("currentControls", page.controls.size).put("learnedControls", learned.controls.size))
             .put("captureEndMonotonicMs", captureEnd).put("captureDurationMs", captureEnd - captureStart)
             .put("captureWidth", snapshot.screenWidth).put("captureHeight", snapshot.screenHeight)
             .put("imageState", "unavailable")
-        val includeScreenshot = args.optBoolean("includeScreenshot", false) && !background
-        val screenshot = if (includeScreenshot) {
-            runCatching {
-                PhoneScreenCapture.capture(
-                    service = service,
-                    maxDimension = args.optInt("screenshotMaxDimension", PhoneScreenCapture.DEFAULT_EVIDENCE_MAX_DIMENSION)
-                        .takeIf { it > 0 },
-                    includeBase64 = args.optBoolean("includeScreenshotBase64", false),
-                )
-            }.getOrElse { error ->
-                JSONObject()
-                    .put("available", false)
-                    .put("errorCode", (error as? ScreenCaptureException)?.code ?: "SCREENSHOT_FAILED")
-                    .put("error", (error.message ?: "Screen capture failed").take(240))
-            }
-        } else null
-        screenshot?.optString("filePath")?.takeIf { it.isNotBlank() }?.let { path ->
-            runCatching { PageAwarenessRuntime.store.attachPreview(page.pageKey, path) }
-        }
+        boundedPageEvidence.put("windowSignature", captured.surface.windowSignature)
+            .put("rotation", captured.surface.rotation).put("semanticRevision", captured.surface.revision)
+            .put("profileId", captured.surface.profileId ?: JSONObject.NULL)
+            .put("captureClock", "uptimeMillis")
+            .put("imageState", if (screenshot?.optBoolean("available") == true) "current" else "unavailable")
+            .put("imageStartMonotonicMs", captured.imageStartMs ?: JSONObject.NULL)
+            .put("imageEndMonotonicMs", captured.imageEndMs ?: JSONObject.NULL)
+            .put("imageErrorCode", screenshot?.optString("errorCode")?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
 
         val fullPage = page.toAgentJson(maxControls = page.controls.size)
             .put("structuralKey", page.structuralKey)
@@ -314,10 +357,18 @@ internal object GatewayObservationAdapter {
         } catch (error: SessionIdentityException) {
             throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch")
         }
+        if (plane != planeAtStart || (background &&
+            com.cyclone.mobile.runtime.background.WorkspaceRuntime.generation(execution.sessionId) != executionGenerationAtStart)) {
+            GatewayObservationStore.clear(execution.sessionId)
+            throw captureChanged()
+        }
         payload = SessionContract.attach(payload, plane)
         elements.values.forEach { it.evidence.put("sessionId", execution.sessionId).put("displayId", execution.displayId) }
-        return GatewayObservation(observationId, System.currentTimeMillis(), page, payload, elements, execution).also { GatewayObservationStore.replace(it) }
+        return GatewayObservationStore.replace(GatewayObservation(observationId, snapshot.timestampMs, page, payload, elements, execution))
     }
+
+    private fun captureChanged() = GatewayProtocolException("OBSERVATION_CHANGED_DURING_CAPTURE",
+        "The screen or task scope changed during capture; request a fresh same-scope observation.")
 
     fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray {
         val normalized = normalize(query)

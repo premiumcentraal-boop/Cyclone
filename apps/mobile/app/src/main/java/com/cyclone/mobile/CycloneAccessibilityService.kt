@@ -37,6 +37,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         val timestampMs: Long,
         val liveFrame: com.cyclone.mobile.ai.vision.live.LiveFrame? = null,
         val displayBounds: UiBounds? = null,
+        val capturedAtMonotonicMs: Long? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put("filePath", file.absolutePath)
@@ -49,7 +50,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             .put("sessionId", liveFrame?.sessionId ?: "default-foreground")
             .put("displayId", liveFrame?.displayId ?: 0)
             .put("frameId", liveFrame?.frameId ?: JSONObject.NULL)
-            .put("capturedAtMonotonicMs", liveFrame?.capturedAtMonotonicMs ?: JSONObject.NULL)
+            .put("capturedAtMonotonicMs", liveFrame?.capturedAtMonotonicMs ?: capturedAtMonotonicMs ?: JSONObject.NULL)
             .put("source", liveFrame?.source?.name ?: "ACCESSIBILITY_SCREENSHOT")
     }
 
@@ -59,6 +60,37 @@ class CycloneAccessibilityService : AccessibilityService() {
     @Volatile private var appLearnerRuntimeReady = false
     private var lastAutomationPackage: String? = null
     private var guidedOverlay: GuidedRecorderOverlayController? = null
+    private val observationRevisions = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.atomic.AtomicLong>()
+
+    /** Window metadata only: this must never traverse semantic children. Overlay chrome is excluded. */
+    fun observationSurface(sessionId: String, displayId: Int, scope: String, profileId: Int?): com.cyclone.mobile.agent.ObservationSurface {
+        val display = getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(displayId)
+            ?: error("DISPLAY_GONE")
+        val metrics = createDisplayContext(display).resources.displayMetrics
+        val listed = windowsOnAllDisplays.get(displayId).orEmpty()
+        val signature = com.cyclone.mobile.agent.SemanticCaptureBoundary.windowSignature(listed.map { window ->
+                val bounds = Rect().also { window.getBoundsInScreen(it) }
+                UiWindowSnapshot(window.id, "", window.type, window.layer, window.isActive, window.isFocused,
+                    UiBounds(bounds.left, bounds.top, bounds.right, bounds.bottom))
+            })
+        return com.cyclone.mobile.agent.ObservationSurface(sessionId, displayId, scope, signature,
+            metrics.widthPixels, metrics.heightPixels, display.rotation,
+            observationRevisions.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicLong() }.get(), profileId)
+    }
+
+    private fun recordObservationEvent(event: AccessibilityEvent) {
+        val listed = windowsOnAllDisplays
+        val owner = (0 until listed.size()).firstOrNull { i -> listed.valueAt(i).any { it.id == event.windowId } }
+        val window = owner?.let { listed.valueAt(it).first { window -> window.id == event.windowId } }
+        if (window?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return
+        if (window == null && event.packageName?.toString() == packageName &&
+            preferredForegroundRoot()?.packageName?.toString() != packageName) return
+        // A removed or unidentified window cannot safely be assigned to one display.
+        val displays = owner?.let { listOf(listed.keyAt(it)) } ?: observationRevisions.keys.toList()
+        displays.forEach { displayId ->
+            observationRevisions.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicLong() }.incrementAndGet()
+        }
+    }
 
     companion object {
         @Volatile var instance: CycloneAccessibilityService? = null
@@ -111,6 +143,7 @@ class CycloneAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        runCatching { recordObservationEvent(event) }
         // Background windows must not update the global foreground package, learning or UI state.
         if (event.windowId != -1 && windowsOnAllDisplays.get(0).orEmpty().none { it.id == event.windowId }) return
         try {
@@ -544,7 +577,7 @@ class CycloneAccessibilityService : AccessibilityService() {
                         val file = File(cacheDir, "cyclone-${System.currentTimeMillis()}.png")
                         FileOutputStream(file).use { output -> outputBitmap.compress(Bitmap.CompressFormat.PNG, 95, output) }
                         DeviceState.lastScreenshotPath = file.absolutePath
-                        ScreenshotArtifact(file, outputBitmap.width, outputBitmap.height, boundedCrop, System.currentTimeMillis())
+                        ScreenshotArtifact(file, outputBitmap.width, outputBitmap.height, boundedCrop, System.currentTimeMillis(), capturedAtMonotonicMs = result.timestamp)
                     } finally { result.hardwareBuffer.close() }
                 }
                 callback(outcome)

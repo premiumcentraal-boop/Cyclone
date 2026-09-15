@@ -13,6 +13,49 @@ import org.junit.Test
 import java.util.ArrayDeque
 
 class CycloneAgentEnvironmentTest {
+    @Test fun visualBridgeUsesOneCaptureAndSameGenerationForAllProjections() {
+        val initial = observation("visual", "home", "fp").copy(generation = 83)
+        initial.payload.put("screenshot", JSONObject().put("available", true).put("pngBase64", "fixture"))
+        val runtime = FakeRuntime(initial, null)
+        val bridge = com.cyclone.mobile.agent.integration.CyclonePcParityBridge(CycloneAgentEnvironment(runtime))
+        val captured = bridge.observeWithImage("login")!!
+        val card = captured.page!!
+        assertEquals(83L, card.generation)
+        assertEquals(83L, card.legacyPage!!.observation!!.generation)
+        assertEquals(83L, ObservationProjections.snapshot(card).getLong("generation"))
+        val prompt = bridge.promptContext("login")
+        assertEquals(83L, prompt.getJSONObject("pageCard").getLong("generation"))
+        assertFalse(prompt.toString().contains("pngBase64"))
+        assertEquals("fixture", captured.image!!.getString("pngBase64"))
+        assertEquals(1, runtime.captureCalls)
+    }
+
+    @Test fun captureRaceClearsCurrentPageAndReportsBoundedRecoveryWithoutDispatch() {
+        val runtime = FakeRuntime(observation("initial", "home", "fp"), null)
+        val bridge = com.cyclone.mobile.agent.integration.CyclonePcParityBridge(CycloneAgentEnvironment(runtime))
+        assertNotNull(bridge.observe("login"))
+        runtime.captureError = com.cyclone.mobile.agent.CaptureChanged()
+        assertNull(bridge.observeWithImage("login"))
+        assertNull(bridge.currentPage())
+        assertEquals(com.cyclone.mobile.agent.ObservationState.CAPTURE_CHANGED, bridge.observationHealth.state)
+        assertFalse(bridge.observationHealth.terminal)
+        assertEquals(0, runtime.executionCalls)
+    }
+    @Test fun authoritativeBridgeProjectsTheSourceGenerationWithOneCapture() {
+        val initial = observation("shared", "home", "fp").copy(generation = 82)
+        val runtime = FakeRuntime(initial, null)
+        val bridge = com.cyclone.mobile.agent.integration.CyclonePcParityBridge(CycloneAgentEnvironment(runtime))
+        val card = bridge.observe("login")!!
+        assertEquals(82L, card.generation)
+        assertEquals(82L, card.legacyPage!!.observation!!.generation)
+        assertEquals("authoritative", card.pageEvidence.getString("projectionMode"))
+        repeat(5) {
+            val prompt = bridge.promptContext("login").getJSONObject("pageCard")
+            assertEquals(82L, prompt.getJSONObject("observation").getLong("generation"))
+        }
+        assertTrue(runtime.captureQueue.isEmpty())
+        assertEquals(1, runtime.captureCalls)
+    }
     @Test fun workspaceFailuresHavePrecisePermanentHealthWithoutRawMessages() {
         val cases = mapOf("BACKEND_DISCONNECTED" to com.cyclone.mobile.agent.ObservationState.DISCONNECTED,
             "STALE_SESSION" to com.cyclone.mobile.agent.ObservationState.SCOPE_MISMATCH,
@@ -73,13 +116,15 @@ class CycloneAgentEnvironmentTest {
         val initial = observation("first", "home", "fp1")
         val banner = observation("second", "consent", "fp2")
         val runtime = FakeRuntime(initial, null).apply { captureQueue.addLast(banner) }
-        val bridge = com.cyclone.mobile.agent.integration.CyclonePcParityBridge(CycloneAgentEnvironment(runtime))
+        val bridge = com.cyclone.mobile.agent.integration.CyclonePcParityBridge(CycloneAgentEnvironment(runtime, projectionMode = ObservationProjectionMode.SHADOW))
         val first = bridge.observe("login")!!
+        assertTrue(first.pageEvidence.getJSONObject("projectionShadow").getBoolean("matches"))
         assertSame(initial.page, first.legacyPage)
         assertEquals(first.pageKey, first.legacyPage!!.pageKey)
         assertEquals(1, runtime.captureQueue.size)
         assertTrue(first.controls.all { it.observationId == first.observationId })
         val second = bridge.observe("login")!!
+        assertTrue(second.pageEvidence.getJSONObject("projectionShadow").getBoolean("matches"))
         assertSame(banner.page, second.legacyPage)
         assertEquals(second.pageKey, second.legacyPage!!.pageKey)
         assertTrue(runtime.captureQueue.isEmpty())
@@ -421,6 +466,7 @@ class CycloneAgentEnvironmentTest {
         var afterObservation: GatewayObservation?,
     ) : CycloneAgentRuntimePort {
         var currentObservation: GatewayObservation? = null
+        var captureCalls = 0
         var captureError: Throwable? = null
         val captureQueue = ArrayDeque<GatewayObservation>().apply { addLast(initial) }
         var executionCalls = 0
@@ -428,6 +474,7 @@ class CycloneAgentEnvironmentTest {
         var learningCalls = 0
 
         override fun capture(): GatewayObservation {
+            captureCalls++
             captureError?.let { throw it }
             val value = if (captureQueue.isEmpty()) currentObservation ?: error("No observation") else captureQueue.removeFirst()
             currentObservation = value

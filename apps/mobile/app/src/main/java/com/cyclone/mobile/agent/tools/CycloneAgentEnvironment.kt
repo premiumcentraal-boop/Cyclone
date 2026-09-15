@@ -45,6 +45,7 @@ import java.util.UUID
 /** Native in-process eyes/hands/verification contract for the standalone mobile agent. */
 interface CycloneAgentEnvironmentApi {
     fun observe(goal: String = ""): AgentObservationResult
+    fun observeWithImage(goal: String): AgentObservationResult = observe(goal)
     fun locate(goal: String): AgentSearchResult
     fun search(query: String, goal: String = query): AgentSearchResult
     fun inspect(elementId: String): AgentInspectResult
@@ -62,6 +63,7 @@ class CycloneAgentEnvironment internal constructor(
     private val runtime: CycloneAgentRuntimePort,
     private val userTaskGoal: String? = null,
     private val revalidateTargets: Boolean = false,
+    private val projectionMode: ObservationProjectionMode = ObservationProjectionMode.AUTHORITATIVE,
 ) : CycloneAgentEnvironmentApi {
     constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
         this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal, revalidateTargets = true)
@@ -77,15 +79,27 @@ class CycloneAgentEnvironment internal constructor(
     override fun observe(goal: String): AgentObservationResult = synchronized(this) {
         runCatching {
             val observation = runtime.capture()
-            val generation = scope.publish(observation.id)
+            val generation = scope.publish(observation.id, observation.generation.takeIf { it > 0 })
             AgentObservationResult(page = pageCard(observation, goal, generation, actionable = true))
         }.getOrElse { AgentObservationResult(failure = failureFromThrowable(it, AgentFailureLayer.OBSERVATION)) }
+    }
+
+    override fun observeWithImage(goal: String): AgentObservationResult = synchronized(this) {
+        runCatching {
+            val observation = runtime.captureWithImage()
+            val generation = scope.publish(observation.id, observation.generation.takeIf { it > 0 })
+            AgentObservationResult(page = pageCard(observation, goal, generation, actionable = true),
+                image = observation.payload.optJSONObject("screenshot")?.let { JSONObject(it.toString()) })
+        }.getOrElse {
+            invalidateObservation()
+            AgentObservationResult(failure = failureFromThrowable(it, AgentFailureLayer.OBSERVATION))
+        }
     }
 
     override fun locate(goal: String): AgentSearchResult = synchronized(this) {
         runCatching {
             val observation = runtime.capture()
-            val generation = scope.publish(observation.id)
+            val generation = scope.publish(observation.id, observation.generation.takeIf { it > 0 })
             AgentSearchResult(
                 page = pageCard(observation, goal, generation, actionable = true),
                 observationId = observation.id,
@@ -113,7 +127,7 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
         runCatching {
-            val observation = currentVisibleObservation() ?: runtime.capture().also { scope.publish(it.id) }
+            val observation = currentVisibleObservation() ?: runtime.capture().also { scope.publish(it.id, it.generation.takeIf { it > 0 }) }
             val generation = scope.generation
             AgentSearchResult(
                 page = pageCard(observation, goal, generation, actionable = true),
@@ -256,7 +270,7 @@ class CycloneAgentEnvironment internal constructor(
                     "Target revalidation: ${report.status.name}. Inspect a fresh same-scope control.", report.status.name),
                 before, visibleGeneration)
             before = fresh
-            visibleGeneration = scope.publish(fresh.id)
+            visibleGeneration = scope.publish(fresh.id, fresh.generation.takeIf { it > 0 })
             rawElementId = report.elementId
         }
         val normalizedParams = JSONObject(params.toString())
@@ -476,7 +490,18 @@ class CycloneAgentEnvironment internal constructor(
         }
     }
 
-    private fun pageCard(
+    private fun pageCard(observation: GatewayObservation, goal: String, generation: Long, actionable: Boolean): AgentPageCard {
+        val shared = ObservationProjections.pageCard(observation, goal, generation, actionable)
+        if (projectionMode == ObservationProjectionMode.SHADOW) {
+            val legacy = legacyPageCard(observation, goal, generation, actionable)
+            legacy.pageEvidence.put("projectionShadow", ObservationProjections.shadow(legacy, shared))
+            return legacy
+        }
+        shared.pageEvidence.put("projectionMode", "authoritative")
+        return shared
+    }
+
+    private fun legacyPageCard(
         observation: GatewayObservation,
         goal: String,
         generation: Long,
@@ -510,7 +535,7 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
 
-        return AgentPageCard(
+        val legacy = AgentPageCard(
             observationId = observation.id,
             generation = generation,
             actionable = actionable,
@@ -534,7 +559,10 @@ class CycloneAgentEnvironment internal constructor(
             sessionId = observation.execution.sessionId,
             displayId = observation.execution.displayId,
             legacyPage = observation.page,
+            observation = com.cyclone.mobile.runtime.session.ObservationIdentity.fromPayload(observation.id, generation,
+                observation.execution, observation.capturedAt, observation.payload).copy(freshness = if (actionable) "current" else "stale"),
         )
+        return legacy
     }
 
     private fun candidateFrom(item: JSONObject, evidence: JSONObject) = AgentElementCandidate(
@@ -725,6 +753,8 @@ class CycloneAgentEnvironment internal constructor(
             else -> null
         }
         when (workspaceCode) {
+            "OBSERVATION_CHANGED_DURING_CAPTURE" -> return AgentFailure(AgentFailureClass.AFTER_OBSERVATION_FAILED,
+                AgentFailureLayer.OBSERVATION, true, "The screen or task scope changed during capture; retry a fresh same-scope observation.", workspaceCode)
             "BACKEND_DISCONNECTED" -> return AgentFailure(AgentFailureClass.DEVICE_DISCONNECTED,
                 AgentFailureLayer.OBSERVATION, false, "The workspace backend is disconnected.", workspaceCode)
             "STALE_SESSION" -> return AgentFailure(AgentFailureClass.STALE_OBSERVATION,
@@ -908,9 +938,9 @@ internal class AgentObservationScope {
     var generation: Long = 0
         private set
 
-    fun publish(id: String): Long {
+    fun publish(id: String, sourceGeneration: Long? = null): Long {
         require(id.isNotBlank())
-        generation += 1
+        generation = sourceGeneration ?: (generation + 1)
         observationId = id
         return generation
     }
@@ -923,6 +953,7 @@ internal class AgentObservationScope {
 internal interface CycloneAgentRuntimePort {
     fun cameraImages(): Map<Long, Long>? = null
     fun capture(): GatewayObservation
+    fun captureWithImage(): GatewayObservation = capture()
     fun current(): GatewayObservation?
     fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray
     fun element(observation: GatewayObservation, elementId: String): JSONObject
@@ -980,6 +1011,8 @@ private class AndroidCycloneAgentRuntimePort(
         JSONObject().put("sessionId", execution.sessionId).put("displayId", execution.displayId), params)
 
     override fun capture(): GatewayObservation = GatewayObservationAdapter.capture(context, scoped())
+    override fun captureWithImage(): GatewayObservation = GatewayObservationAdapter.capture(context,
+        scoped(JSONObject().put("includeScreenshot", true).put("includeScreenshotBase64", true)))
     override fun current(): GatewayObservation? = GatewayObservationStore.current(execution.sessionId)
 
     override fun search(

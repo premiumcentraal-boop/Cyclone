@@ -9,10 +9,10 @@ THEME = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV
 
 
 class MobileLiquidGlassGuards(unittest.TestCase):
-    def test_444_identity_and_runtime_contract_are_preserved(self):
+    def test_445_identity_and_runtime_contract_are_preserved(self):
         build = APP_BUILD.read_text(encoding="utf-8")
-        self.assertIn('versionCode = 104', build)
-        self.assertIn('versionName = "4.4.4"', build)
+        self.assertIn('versionCode = 105', build)
+        self.assertIn('versionName = "4.4.5"', build)
         self.assertIn('minSdk = 33', build)
         self.assertIn('targetSdk = 35', build)
         self.assertIn('compileSdk = 36', build)

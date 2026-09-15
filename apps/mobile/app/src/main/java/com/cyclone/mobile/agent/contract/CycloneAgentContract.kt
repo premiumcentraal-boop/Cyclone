@@ -75,11 +75,13 @@ data class AgentPageCard(
     val displayId: Int = 0,
     // In-process projection of the same capture; never serialized as a second observation.
     val legacyPage: com.cyclone.mobile.applearner.PageContext? = null,
+    val observation: com.cyclone.mobile.runtime.session.ObservationIdentity? = null,
 )
 
 data class AgentObservationResult(
     val page: AgentPageCard? = null,
     val failure: AgentFailure? = null,
+    val image: JSONObject? = null,
 )
 
 data class AgentSearchResult(

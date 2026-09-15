@@ -417,6 +417,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                         providerSort = config.providerSort,
                         traceId = traceId,
                         bridge = session.bridge,
+                        onCaptured = { card -> stateFromCard(goal, card)?.let { session.state = it } },
                         agentContext = agentContext,
                     )
                 } else {
@@ -516,6 +517,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                                 providerSort = config.providerSort,
                                 traceId = traceId,
                                 bridge = session.bridge,
+                        onCaptured = { card -> stateFromCard(goal, card)?.let { session.state = it } },
                                 agentContext = session.bridge.promptContext(goal),
                             ) ?: return CycloneToolResult(
                                 ok = false,
@@ -1345,34 +1347,27 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         providerSort: String,
         traceId: String,
         bridge: CyclonePcParityBridge,
+        onCaptured: (com.cyclone.mobile.agent.contract.AgentPageCard) -> Unit,
         agentContext: JSONObject? = null,
     ): PageAgentDecision? {
         if (!model.vision) return PageAgentDecision("blocked", "",
             "This page needs visual evidence. Choose an image-capable model in Settings → Model & API.",
             emptyList(), null, "model.image_input_required")
-        if (!bridge.claimVisionCapture()) return PageAgentDecision("blocked", "",
-            "Visual evidence was already checked without progress; a different strategy is required.",
-            emptyList(), null, "vision.capture_budget_exhausted")
-        AgentTraceRuntime.event(context, traceId, "VISION", "Structured page context is ambiguous; capturing one visual fallback for this page", code = "page.vision_once", ok = true)
-        val captureStarted = System.nanoTime() / 1_000_000
-        val beforeImage = bridge.observe(goal) ?: return null
-        val shot = PhoneToolExecutor.execute(
-            context,
-            PhoneToolRequest("v28-vision-${UUID.randomUUID()}", "phone.screenshot", scoped(JSONObject().put("includeBase64", true))),
-        )
-        val shotData = shot.payload as? JSONObject ?: return null
+        AgentTraceRuntime.event(context, traceId, "VISION", "Capturing bounded current visual evidence", code = "page.vision_once", ok = true)
+        val captured = bridge.captureVisualEvidence(goal) ?: return PageAgentDecision("blocked", "",
+            "Current visual capture is unavailable after bounded recovery or its usable-image budget is exhausted.",
+            emptyList(), null, "observation.visual_capture_unavailable")
+        val afterImage = captured.page ?: return null
+        onCaptured(afterImage)
+        val shotData = captured.image ?: return null
+        if (!shotData.optBoolean("available", false)) return PageAgentDecision("blocked", "",
+            "Current visual evidence is unavailable: ${shotData.optString("errorCode", "SCREENSHOT_FAILED")}.",
+            emptyList(), null, "observation.image_unavailable")
         val base64 = shotData.optString("pngBase64")
         val frameId = UUID.randomUUID().toString()
-        val afterImage = bridge.observe(goal) ?: return null
-        if (!com.cyclone.mobile.agent.ObservationCoherence.accepts(beforeImage, afterImage, shotData,
-                System.nanoTime() / 1_000_000 - captureStarted)) {
-            bridge.invalidateCapture()
-            return PageAgentDecision("blocked", "", "Screen changed during visual capture; a fresh scoped observation is required.",
-                emptyList(), null, "observation.capture_skew")
-        }
         val coherentContext = bridge.promptContext(goal)
         val card = coherentContext.getJSONObject("pageCard")
-        if (!shot.ok || base64.isBlank()) return null
+        if (base64.isBlank()) return null
         val content = JSONArray()
             .put(JSONObject().put("type", "text").put("text", """
 You are Cyclone's one-time vision fallback for the CURRENT semantic page. Return the same strict PageAgentProtocol JSON schema.
@@ -1484,12 +1479,12 @@ Prefer observation-scoped controlId/elementId from PC_AGENT_CONTEXT.pageCard.con
     /** One authoritative gateway capture also supplies the learning/legacy page. */
     private fun observeState(goal: String, bridge: CyclonePcParityBridge = CyclonePcParityBridge(context, execution, goal)): ObservedState? {
         val card = bridge.observe(goal) ?: return null
+        return stateFromCard(goal, card)
+    }
+
+    private fun stateFromCard(goal: String, card: com.cyclone.mobile.agent.contract.AgentPageCard): ObservedState? {
         val page = card.legacyPage ?: return null
-        val snapshot = JSONObject().put("observationId", card.observationId).put("generation", card.generation)
-            .put("sessionId", card.sessionId).put("displayId", card.displayId)
-            .put("package", card.packageName).put("class", card.activity ?: JSONObject.NULL)
-            .put("fingerprint", card.accessibilityFingerprint).put("pageSummary", card.pageSummary)
-            .put("pageText", card.pageText).put("pageEvidence", card.pageEvidence)
+        val snapshot = com.cyclone.mobile.agent.tools.ObservationProjections.snapshot(card)
         // No fallback to DeviceState or a cached tree when a current field is missing.
         val environment = JSONObject(snapshot.toString()).put("goal", goal)
         return ObservedState(snapshot, environment, page)

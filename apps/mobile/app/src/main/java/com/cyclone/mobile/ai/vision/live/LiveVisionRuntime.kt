@@ -93,10 +93,15 @@ object LiveVisionRuntime {
 
     fun capture(cacheDir: File, crop: UiBounds? = null,
                 sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID,
-                waitMs: Long = 800): CycloneAccessibilityService.ScreenshotArtifact? {
+                waitMs: Long = 800, minCapturedAtMonotonicMs: Long? = null): CycloneAccessibilityService.ScreenshotArtifact? {
+        val requestDeadline = SystemClock.uptimeMillis() + waitMs.coerceIn(0, 2_000)
+        if (minCapturedAtMonotonicMs != null && sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID)
+            com.cyclone.mobile.capture.LiveCaptureService.sampler.requestBurst(SystemClock.uptimeMillis())
         // Window capture excludes Cyclone's own overlay even when full-display live capture is active.
         if (sessionId == ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID && crop == null) {
-            captureForegroundWindowBelowOverlay(cacheDir)?.let { return it }
+            captureForegroundWindowBelowOverlay(cacheDir, if (minCapturedAtMonotonicMs == null) 2_000 else waitMs.coerceIn(0, 2_000))
+                ?.takeIf { minCapturedAtMonotonicMs == null || (it.capturedAtMonotonicMs ?: -1) >= minCapturedAtMonotonicMs }
+                ?.let { return it }
         }
         val selected: Pair<LiveFrame, Bitmap>? = synchronized(lock) {
             val session = sessions.lookup(sessionId)
@@ -104,23 +109,11 @@ object LiveVisionRuntime {
                 null
             } else {
                 val revision = revisions[sessionId]
-                val deadline = SystemClock.uptimeMillis() + waitMs.coerceIn(0, 2_000)
-                var selectedFrame: Pair<LiveFrame, Bitmap>? = null
-                while (selectedFrame == null && revisions[sessionId] == revision) {
-                    val candidate = broker.framesSince(sessionId, 0).lastOrNull {
-                        FrameSelection.eligible(it, sessionId, session.displayId, SystemClock.uptimeMillis(), 750, boundaries[sessionId])
-                    }
-                    if (candidate != null) {
-                        val bitmap = pixels[candidate.payloadHandle]
-                        if (bitmap != null) selectedFrame = candidate to (bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: break)
-                    }
-                    if (selectedFrame == null) {
-                        val remaining = deadline - SystemClock.uptimeMillis()
-                        if (remaining <= 0) break
-                        lock.wait(remaining)
-                    }
-                }
-                selectedFrame
+                val remaining = if (minCapturedAtMonotonicMs == null) waitMs else (requestDeadline - SystemClock.uptimeMillis()).coerceAtLeast(0)
+                val frame = FrameSelection.awaitFresh(sessionId, session.displayId, boundaries[sessionId], minCapturedAtMonotonicMs,
+                    remaining, { broker.framesSince(sessionId, 0) }, { revisions[sessionId] == revision && sources.containsKey(sessionId) },
+                    { SystemClock.uptimeMillis() }, { lock.wait(it) })
+                frame?.let { candidate -> pixels[candidate.payloadHandle]?.copy(Bitmap.Config.ARGB_8888, false)?.let { candidate to it } }
             }
         }
 
@@ -149,7 +142,7 @@ object LiveVisionRuntime {
      * is visually above it. Android explicitly provides takeScreenshotOfWindow for this case, so
      * foreground agents no longer need the overlay to disappear before they can see the host app.
      */
-    private fun captureForegroundWindowBelowOverlay(cacheDir: File): CycloneAccessibilityService.ScreenshotArtifact? {
+    private fun captureForegroundWindowBelowOverlay(cacheDir: File, waitMs: Long): CycloneAccessibilityService.ScreenshotArtifact? {
         if (Build.VERSION.SDK_INT < 34) return null
         val service = CycloneAccessibilityService.instance ?: return null
         val targetId = service.foregroundTaskWindowId() ?: return null
@@ -178,6 +171,7 @@ object LiveVisionRuntime {
                             crop = null,
                             timestampMs = System.currentTimeMillis(),
                             displayBounds = UiBounds(rect.left, rect.top, rect.right, rect.bottom),
+                            capturedAtMonotonicMs = result.timestamp,
                         )
                     } finally {
                         if (bitmap !== wrapped) bitmap.recycle()
@@ -192,7 +186,7 @@ object LiveVisionRuntime {
                 latch.countDown()
             }
         })
-        if (!latch.await(2, TimeUnit.SECONDS)) return null
+        if (!latch.await(waitMs, TimeUnit.MILLISECONDS)) return null
         return captured
     }
 }

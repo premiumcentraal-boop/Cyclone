@@ -4,7 +4,7 @@ import com.cyclone.mobile.agent.contract.AgentFailure
 import com.cyclone.mobile.agent.contract.AgentFailureClass
 import org.json.JSONObject
 
-enum class ObservationState { HEALTHY, EMPTY_VALID, TIMEOUT, PERMISSION_REQUIRED, DISCONNECTED, SCOPE_MISMATCH, TARGET_NOT_VISIBLE, UNAVAILABLE }
+enum class ObservationState { HEALTHY, EMPTY_VALID, TIMEOUT, PERMISSION_REQUIRED, DISCONNECTED, SCOPE_MISMATCH, TARGET_NOT_VISIBLE, CAPTURE_CHANGED, UNAVAILABLE }
 data class ObservationHealth(
     val state: ObservationState,
     val sessionId: String,
@@ -24,6 +24,7 @@ data class ObservationHealth(
         ObservationState.SCOPE_MISMATCH -> "The requested session or display is unavailable or changed. Reopen this task's workspace."
         ObservationState.TARGET_NOT_VISIBLE -> "The target app is not observable on this task's display. Restore it in this workspace before continuing."
         ObservationState.UNAVAILABLE -> "No current semantic observation is available after bounded recovery."
+        ObservationState.CAPTURE_CHANGED -> "The screen or task scope changed during capture. A fresh same-scope observation is required."
     }
     fun toJson() = JSONObject().put("backend", "cyclone_accessibility").put("state", state.name)
         .put("sessionId", sessionId).put("displayId", displayId).put("attempts", attempts)
@@ -31,7 +32,8 @@ data class ObservationHealth(
         .put("nextRecovery", if (terminal) "user_or_lifecycle_change" else "same_scope_capture_after_cooldown")
     companion object {
         fun failure(failure: AgentFailure?, session: String, display: Int, attempts: Int, lastSuccess: Long?, now: Long): ObservationHealth {
-            val state = if (failure?.reasonCode == "FOREGROUND_REQUIRED") ObservationState.TARGET_NOT_VISIBLE else when (failure?.errorClass) {
+            val state = if (failure?.reasonCode == "OBSERVATION_CHANGED_DURING_CAPTURE") ObservationState.CAPTURE_CHANGED
+                else if (failure?.reasonCode == "FOREGROUND_REQUIRED") ObservationState.TARGET_NOT_VISIBLE else when (failure?.errorClass) {
                 AgentFailureClass.TIMEOUT -> ObservationState.TIMEOUT
                 AgentFailureClass.ACCESSIBILITY_UNAVAILABLE, AgentFailureClass.AUTH_REQUIRED -> ObservationState.PERMISSION_REQUIRED
                 AgentFailureClass.DEVICE_DISCONNECTED -> ObservationState.DISCONNECTED

@@ -129,7 +129,8 @@ object PhoneToolExecutor {
                     "phone.observe" -> runtime.observe(scope).toJson().put("sessionId", scope.sessionId).put("displayId", scope.displayId)
                     "phone.get_current_app" -> JSONObject().put("package", session.targetPackage).put("sessionId", scope.sessionId).put("displayId", scope.displayId)
                     "phone.screenshot" -> {
-                        val artifact = com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.capture(service.cacheDir, sessionId = scope.sessionId)
+                        val artifact = com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.capture(service.cacheDir, sessionId = scope.sessionId,
+                                minCapturedAtMonotonicMs = p.optLong("minCapturedAtMonotonicMs", -1).takeIf { it >= 0 })
                             ?: error("FRAME_STREAM_STALLED: no fresh frame from the requested display")
                         artifact.toJson().apply {
                             if (p.optBoolean("includeBase64")) put("pngBase64", Base64.encodeToString(artifact.file.readBytes(), Base64.NO_WRAP))
@@ -561,7 +562,8 @@ object PhoneToolExecutor {
         val crop = params.optJSONObject("crop")?.let {
             UiBounds(it.optInt("left"), it.optInt("top"), it.optInt("right"), it.optInt("bottom"))
         }
-        com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.capture(service.cacheDir, crop)?.let { artifact ->
+        com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.capture(service.cacheDir, crop,
+            minCapturedAtMonotonicMs = params.optLong("minCapturedAtMonotonicMs", -1).takeIf { it >= 0 })?.let { artifact ->
             return Outcome(artifact.toJson().apply {
                 if (params.optBoolean("includeBase64", false)) {
                     put("pngBase64", Base64.encodeToString(artifact.file.readBytes(), Base64.NO_WRAP))

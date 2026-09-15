@@ -25,6 +25,37 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CyclonePcParityBridgeTest {
+    @Test fun failedPixelsDoNotSpendUsableEvidenceAndOneRetryCanRecover() {
+        val environment = FakeEnvironment(listOf(card("one", "page", "one", "fp"), card("two", "page", "two", "fp")))
+        environment.images.add(JSONObject().put("available", false).put("errorCode", "IMAGE_CAPTURE_SKEW"))
+        environment.images.add(JSONObject().put("available", true).put("pngBase64", "fixture"))
+        val bridge = CyclonePcParityBridge(environment)
+        var pauses = 0
+        val result = bridge.captureVisualEvidence("reject cookies") { delay ->
+            pauses++
+            assertEquals(500L, delay)
+            val recovery = bridge.promptContext("reject cookies").getJSONObject("recovery")
+            assertEquals(1, recovery.getInt("visualCaptureAttempts"))
+            assertEquals(0, recovery.getInt("usableVisualCaptures"))
+            assertFalse(recovery.getJSONArray("attemptedEvidence").toString().contains("SCREENSHOT_VISION"))
+        }
+        assertTrue(result!!.image!!.getBoolean("available"))
+        assertEquals("two", result.page!!.observationId)
+        assertEquals(2, environment.imageCalls); assertEquals(1, pauses)
+        assertFalse(bridge.claimVisionCapture())
+        assertEquals(1, bridge.promptContext("reject cookies").getJSONObject("recovery").getInt("usableVisualCaptures"))
+    }
+
+    @Test fun repeatedImageFailureStopsAtTwoAttemptsWithoutClaimingVisualEvidence() {
+        val environment = FakeEnvironment(listOf(card("one", "page", "one", "fp"), card("two", "page", "two", "fp")))
+        repeat(2) { environment.images.add(JSONObject().put("available", false)) }
+        val bridge = CyclonePcParityBridge(environment)
+        assertFalse(bridge.captureVisualEvidence("login") {}!!.image!!.getBoolean("available"))
+        assertEquals(2, environment.imageCalls)
+        assertFalse(bridge.claimVisionCapture())
+        assertEquals(0, bridge.promptContext("login").getJSONObject("recovery").getInt("usableVisualCaptures"))
+    }
+
     @Test fun groundingFailureEscalatesDespitePageChurnAndSurvivesNextObserve() {
         val bridge = CyclonePcParityBridge(FakeEnvironment(listOf(
             card("one", "page-one", "one", "fp-one"),
@@ -49,6 +80,8 @@ class CyclonePcParityBridgeTest {
     }
 
     private class FakeEnvironment(cards: List<AgentPageCard>) : CycloneAgentEnvironmentApi {
+        val images = java.util.ArrayDeque<JSONObject>()
+        var imageCalls = 0
         private val cards = cards.toMutableList()
         private var current: AgentPageCard? = null
         var lastTool: String? = null
@@ -56,6 +89,11 @@ class CyclonePcParityBridgeTest {
 
         override fun observe(goal: String): AgentObservationResult =
             AgentObservationResult(page = next())
+
+        override fun observeWithImage(goal: String): AgentObservationResult {
+            imageCalls++
+            return AgentObservationResult(page = next(), image = images.pollFirst())
+        }
 
         override fun locate(goal: String): AgentSearchResult {
             val card = next()
