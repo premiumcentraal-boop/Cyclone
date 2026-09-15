@@ -33,8 +33,6 @@ import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -398,6 +396,52 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     )
                 }
 
+                // Keep backdrop-dependent settings in the same Compose/window hierarchy. 4.4.4
+                // rendered these controls inside DropdownMenu's popup window, which could leave the
+                // Kyant backdrop detached and crash when the Tune control was opened.
+                if (intelligenceOpen) {
+                    CycloneLiquidPanel(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = 24.dp,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    ) {
+                        CycloneModelIntelligencePanel(
+                            modelId = selectedModelId,
+                            effort = reasoningEffort,
+                            showModelSelector = false,
+                            onChange = ::persistAiControls,
+                        )
+                    }
+                } else if (toolsOpen) {
+                    CycloneLiquidPanel(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = 24.dp,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(onClick = {
+                                toolsOpen = false
+                                context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
+                            }) { Text("File") }
+                            TextButton(onClick = {
+                                toolsOpen = false
+                                context.startActivity(
+                                    Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                                        .putExtra("camera", true),
+                                )
+                            }) { Text("Photo") }
+                            TextButton(onClick = {
+                                toolsOpen = false
+                                context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
+                            }) { Text("Share screen") }
+                        }
+                    }
+                }
+
                 CycloneLiquidPanel(
                     modifier = Modifier.fillMaxWidth(),
                     cornerRadius = 30.dp,
@@ -420,54 +464,36 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box {
-                                CycloneTrayIconAction(
-                                    onClick = { intelligenceOpen = !intelligenceOpen },
-                                    enabled = !session.busy,
-                                    modifier = Modifier.size(44.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.Tune,
-                                        "Intelligence and phone autonomy",
-                                        Modifier.size(20.dp),
-                                        tint = if (intelligenceOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                DropdownMenu(expanded = intelligenceOpen, onDismissRequest = { intelligenceOpen = false }) {
-                                    CycloneModelIntelligencePanel(
-                                        modelId = selectedModelId,
-                                        effort = reasoningEffort,
-                                        showModelSelector = false,
-                                        onChange = ::persistAiControls,
-                                    )
-                                }
+                            CycloneTrayIconAction(
+                                onClick = {
+                                    intelligenceOpen = !intelligenceOpen
+                                    if (intelligenceOpen) toolsOpen = false
+                                },
+                                enabled = !session.busy,
+                                modifier = Modifier.size(44.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Tune,
+                                    "Intelligence and phone autonomy",
+                                    Modifier.size(20.dp),
+                                    tint = if (intelligenceOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
 
-                            Box {
-                                CycloneTrayIconAction(
-                                    onClick = { toolsOpen = true },
-                                    enabled = !session.busy,
-                                    modifier = Modifier.size(44.dp),
-                                ) {
-                                    Icon(Icons.Rounded.Add, "Add attachment", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                DropdownMenu(expanded = toolsOpen, onDismissRequest = { toolsOpen = false }) {
-                                    DropdownMenuItem(text = { Text("File") }, onClick = {
-                                        toolsOpen = false
-                                        context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
-                                    })
-                                    DropdownMenuItem(text = { Text("Take photo") }, onClick = {
-                                        toolsOpen = false
-                                        context.startActivity(
-                                            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
-                                                .putExtra("camera", true),
-                                        )
-                                    })
-                                    DropdownMenuItem(text = { Text("Share screen") }, onClick = {
-                                        toolsOpen = false
-                                        context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
-                                    })
-                                }
+                            CycloneTrayIconAction(
+                                onClick = {
+                                    toolsOpen = !toolsOpen
+                                    if (toolsOpen) intelligenceOpen = false
+                                },
+                                enabled = !session.busy,
+                                modifier = Modifier.size(44.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Add,
+                                    "Add attachment",
+                                    Modifier.size(22.dp),
+                                    tint = if (toolsOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
 
                             BasicTextField(

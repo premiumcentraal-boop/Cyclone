@@ -39,26 +39,30 @@ class CycloneVisual42ContractTest {
         assertFalse(panel.contains("WorkspaceTaskUi("))
     }
 
-    @Test fun bottomNavigationOwnsInsetsAndUsesOneLiquidSelectionLens() {
+    @Test fun bottomNavigationOwnsInsetsAndUsesOneInsetLiquidSelectionLens() {
         val nav = source("CycloneV32Components.kt")
         assertTrue(nav.contains("navigationBarsPadding()"))
         assertTrue(nav.contains("WindowInsets.ime"))
         assertTrue(nav.contains("if (imeVisible) return"))
-        assertTrue(nav.contains("CycloneLiquidTray(height = 66.dp"))
+        assertTrue(nav.contains("CycloneLiquidTray(height = 62.dp"))
         assertTrue(nav.contains("CycloneLiquidSelectionLens("))
         assertTrue(nav.contains("selectedIndex = selected.ordinal"))
+        assertTrue(nav.contains("height = 48.dp"))
+        assertTrue(nav.contains("horizontalInset = 4.dp"))
         assertFalse(nav.contains("NavigationBar("))
         assertFalse(nav.contains("Modifier.height(74.dp)"))
         assertTrue(nav.contains("ic_cyclone_ai_42"))
     }
 
-    @Test fun segmentedControlUsesOneLiquidTrayAndMovingLens() {
+    @Test fun segmentedControlUsesOneCompactTrayAndInsetMovingLens() {
         val controls = source("CycloneV32Components.kt")
         val segmented = controls.substringAfter("fun CycloneSegmentedControl(")
-        assertTrue(segmented.contains("CycloneLiquidTray(modifier = modifier, height = 48.dp"))
+        assertTrue(segmented.contains("CycloneLiquidTray(modifier = modifier, height = 44.dp"))
         assertTrue(segmented.contains("BoxWithConstraints"))
         assertTrue(segmented.contains("CycloneLiquidSelectionLens("))
         assertTrue(segmented.contains("selectedIndex = selected"))
+        assertTrue(segmented.contains("height = 34.dp"))
+        assertTrue(segmented.contains("horizontalInset = 4.dp"))
         assertTrue(segmented.contains("animateColorAsState"))
         assertTrue(segmented.contains("selectableGroup()"))
     }

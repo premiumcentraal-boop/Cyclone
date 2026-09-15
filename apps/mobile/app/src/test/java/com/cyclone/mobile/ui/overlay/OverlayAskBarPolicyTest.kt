@@ -15,13 +15,15 @@ class OverlayAskBarPolicyTest {
     ).first { it.isFile }.readText()
 
     @Test
-    fun composerBottomGapIsThirtyDp() {
-        assertEquals(30, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP)
+    fun appleComposerUsesReferenceHeightAndBottomGap() {
+        assertEquals(66, OverlayChromeContract.COMPOSER_HEIGHT_DP)
+        assertEquals(50, OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP)
+        assertEquals(26, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP)
     }
 
     @Test
-    fun askBarIsTwelveDpHigherThanLegacyEighteen() {
-        assertEquals(12, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP - 18)
+    fun compactBottomGapStaysClearOfLegacyEighteenDpPlacement() {
+        assertEquals(8, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP - 18)
     }
 
     @Test

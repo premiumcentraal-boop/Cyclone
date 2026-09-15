@@ -1,23 +1,23 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,6 +76,63 @@ fun CycloneModelIntelligencePanel(
 }
 
 @Composable
+private fun ModelPickerRows(
+    models: List<OpenRouterModelPreset>,
+    currentModel: OpenRouterModelPreset,
+    onSelect: (OpenRouterModelPreset) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(max = 320.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
+        if (models.isEmpty()) {
+            Text(
+                "Choose models in Settings → Model & API",
+                Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+        models.forEachIndexed { index, option ->
+            val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(option) }
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (selected) {
+                    Icon(Icons.Rounded.Check, "Selected", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                } else {
+                    Spacer(Modifier.size(18.dp))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(option.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        modelSubtitle(option),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (index != models.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 38.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun OverlaySettingsWizard(
     modelId: String,
     effort: String,
@@ -83,7 +140,7 @@ private fun OverlaySettingsWizard(
 ) {
     val context = LocalContext.current
     var step by remember { mutableStateOf(OverlaySettingsStep.MODEL) }
-    var modelMenuOpen by remember { mutableStateOf(false) }
+    var modelListOpen by remember { mutableStateOf(false) }
     var autonomy by remember { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
     val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
     val pickerModels = remember(catalogRevision) { OpenRouterCatalogStore.picker(context) }
@@ -120,49 +177,20 @@ private fun OverlaySettingsWizard(
 
         when (step) {
             OverlaySettingsStep.MODEL -> {
-                Box(Modifier.fillMaxWidth()) {
-                    CycloneLiquidMenuTrigger(
-                        title = "Model",
-                        value = currentModel.label,
-                        onClick = { modelMenuOpen = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        compact = true,
-                    )
-                    DropdownMenu(
-                        expanded = modelMenuOpen,
-                        onDismissRequest = { modelMenuOpen = false },
-                        modifier = Modifier.widthIn(min = 276.dp, max = 316.dp),
-                    ) {
-                        Text("Select model", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
-                        if (pickerModels.isEmpty()) Text("Choose models in Settings → Model & API", Modifier.padding(16.dp))
-                        pickerModels.forEach { option ->
-                            val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
-                            DropdownMenuItem(
-                                text = {
-                                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                        Text(option.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(
-                                            modelSubtitle(option),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    OpenRouterCatalogStore.setActive(context, option.id)
-                                    val exact = OpenRouterCatalogStore.reasoningSelection(context, option.id).orEmpty()
-                                    onChange(V39AiChatContract.storageId(option), exact)
-                                    modelMenuOpen = false
-                                    step = OverlaySettingsStep.INTELLIGENCE
-                                },
-                                leadingIcon = {
-                                    if (selected) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp))
-                                    else Spacer(Modifier.size(18.dp))
-                                },
-                            )
-                        }
+                CycloneLiquidMenuTrigger(
+                    title = "Model",
+                    value = currentModel.label,
+                    onClick = { modelListOpen = !modelListOpen },
+                    modifier = Modifier.fillMaxWidth(),
+                    compact = true,
+                )
+                if (modelListOpen) {
+                    ModelPickerRows(pickerModels, currentModel) { option ->
+                        OpenRouterCatalogStore.setActive(context, option.id)
+                        val exact = OpenRouterCatalogStore.reasoningSelection(context, option.id).orEmpty()
+                        onChange(V39AiChatContract.storageId(option), exact)
+                        modelListOpen = false
+                        step = OverlaySettingsStep.INTELLIGENCE
                     }
                 }
             }
@@ -217,7 +245,7 @@ private fun StandardIntelligencePanel(modelId: String, effort: String, onChange:
     val canonical = OpenRouterCatalogStore.canonicalId(modelId)
 
     Column(
-        Modifier.widthIn(min = 252.dp, max = 300.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+        Modifier.widthIn(min = 252.dp, max = 320.dp).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -262,7 +290,7 @@ private fun StandardIntelligencePanel(modelId: String, effort: String, onChange:
     }
 }
 
-/** Model selection floats above the composer and never steals typing width. */
+/** Stable in-layout model picker: never moves backdrop-dependent controls into a Popup window. */
 @Composable
 fun CycloneModelPill(
     modelId: String,
@@ -285,51 +313,38 @@ fun CycloneModelPill(
         ?: defaultEffort?.let { "${reasoningEffortLabel(it)} default" }
         ?: "Model controlled"
 
-    Box(modifier) {
+    Column(modifier, horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         CycloneLiquidMenuTrigger(
             title = "Model",
             value = "${currentModel.label} · $intelligenceLabel",
-            onClick = { open = true },
-            modifier = Modifier.widthIn(max = 226.dp),
+            onClick = { if (enabled) open = !open },
+            modifier = Modifier.widthIn(max = 240.dp),
             compact = true,
             enabled = enabled,
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.widthIn(min = 268.dp, max = 304.dp)) {
-            Text("Select model", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
-            if (pickerModels.isEmpty()) Text("Choose models in Settings → Model & API", Modifier.padding(16.dp))
-            pickerModels.forEach { option ->
-                val selected = V39AiChatContract.storageId(option) == V39AiChatContract.storageId(currentModel)
-                DropdownMenuItem(
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Text(option.label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                modelSubtitle(option),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    },
-                    onClick = {
-                        OpenRouterCatalogStore.setActive(context, option.id)
-                        onChange(
-                            V39AiChatContract.storageId(option),
-                            OpenRouterCatalogStore.reasoningSelection(context, option.id).orEmpty(),
-                        )
-                        open = false
-                    },
-                    leadingIcon = {
-                        if (selected) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp))
-                        else Spacer(Modifier.size(18.dp))
-                    },
-                )
+        if (open) {
+            CycloneLiquidPanel(
+                modifier = Modifier.widthIn(min = 268.dp, max = 320.dp),
+                cornerRadius = 22.dp,
+                contentPadding = PaddingValues(6.dp),
+            ) {
+                ModelPickerRows(pickerModels, currentModel) { option ->
+                    OpenRouterCatalogStore.setActive(context, option.id)
+                    onChange(
+                        V39AiChatContract.storageId(option),
+                        OpenRouterCatalogStore.reasoningSelection(context, option.id).orEmpty(),
+                    )
+                    open = false
+                }
             }
         }
     }
 }
 
+/**
+ * Legacy compact host retained for callers that need Tune + optional model pill. Expansion stays in
+ * the same Compose hierarchy, so it cannot reproduce the popup/backdrop crash from 4.4.4.
+ */
 @Composable
 fun CycloneIntelligenceControls(
     enabled: Boolean = true,
@@ -352,9 +367,9 @@ fun CycloneIntelligenceControls(
         onChanged()
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box {
-            IconButton(
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CycloneTrayIconAction(
                 onClick = { intelligenceOpen = !intelligenceOpen },
                 enabled = enabled,
                 modifier = Modifier.size(44.dp),
@@ -366,7 +381,21 @@ fun CycloneIntelligenceControls(
                     tint = if (intelligenceOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            DropdownMenu(expanded = intelligenceOpen, onDismissRequest = { intelligenceOpen = false }) {
+            if (showModelPill) {
+                CycloneModelPill(
+                    modelId = V39AiChatContract.storageId(model),
+                    effort = OpenRouterCatalogStore.reasoningSelection(context, model.id).orEmpty(),
+                    enabled = enabled,
+                    onChange = ::persist,
+                )
+            }
+        }
+        if (intelligenceOpen) {
+            CycloneLiquidPanel(
+                modifier = Modifier.widthIn(min = 268.dp, max = 320.dp),
+                cornerRadius = 22.dp,
+                contentPadding = PaddingValues(6.dp),
+            ) {
                 CycloneModelIntelligencePanel(
                     modelId = V39AiChatContract.storageId(model),
                     effort = OpenRouterCatalogStore.reasoningSelection(context, model.id).orEmpty(),
@@ -374,14 +403,6 @@ fun CycloneIntelligenceControls(
                     onChange = ::persist,
                 )
             }
-        }
-        if (showModelPill) {
-            CycloneModelPill(
-                modelId = V39AiChatContract.storageId(model),
-                effort = OpenRouterCatalogStore.reasoningSelection(context, model.id).orEmpty(),
-                enabled = enabled,
-                onChange = ::persist,
-            )
         }
     }
 }

@@ -28,7 +28,7 @@ internal object CycloneIntelligenceStyle {
 
 @Composable
 internal fun CycloneIntelligenceTheme(content: @Composable () -> Unit) {
-    CycloneTheme(content)
+    CycloneTheme(content = content)
 }
 
 /** Exact mark geometry from the supplied Cyclone Asset Pack v1. */

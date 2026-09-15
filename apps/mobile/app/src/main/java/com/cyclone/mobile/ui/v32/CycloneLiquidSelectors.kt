@@ -33,10 +33,10 @@ import androidx.compose.ui.unit.dp
 /**
  * Discrete choice control for 2-4 mutually-exclusive options.
  *
- * One Kyant liquid tray owns the whole control and one refractive lens moves between choices. This
- * avoids the row-of-independent-pills look and keeps selection motion physically coherent. A null
- * selected index is intentional: it represents a provider/model default without falsely lighting an
- * override choice.
+ * One tray owns the whole control and a deliberately inset refractive lens moves between choices.
+ * The lens is smaller than the host on every side, preventing the selected option from looking like
+ * a second rounded rectangle nested inside the first. A null selection represents provider/model
+ * default without falsely highlighting an override.
  */
 @Composable
 internal fun CycloneLiquidChoiceBar(
@@ -47,10 +47,10 @@ internal fun CycloneLiquidChoiceBar(
     compact: Boolean = false,
 ) {
     if (options.isEmpty()) return
-    val height = if (compact) 44.dp else 50.dp
-    val lensHeight = if (compact) 36.dp else 42.dp
+    val height = if (compact) 42.dp else 48.dp
+    val lensHeight = if (compact) 30.dp else 36.dp
 
-    CycloneLiquidTray(modifier = modifier, height = height, contentPadding = 4.dp) {
+    CycloneLiquidTray(modifier = modifier, height = height, contentPadding = 3.dp) {
         BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight()) {
             selectedIndex?.takeIf { it in options.indices }?.let { index ->
                 CycloneLiquidSelectionLens(
@@ -59,6 +59,7 @@ internal fun CycloneLiquidChoiceBar(
                     totalWidth = maxWidth,
                     modifier = Modifier.align(Alignment.CenterStart),
                     height = lensHeight,
+                    horizontalInset = 4.dp,
                 )
             }
             Row(
@@ -85,7 +86,7 @@ internal fun CycloneLiquidChoiceBar(
                     ) {
                         Text(
                             label,
-                            modifier = Modifier.padding(horizontal = 5.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp),
                             style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
                             color = color,
                             fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
@@ -100,8 +101,8 @@ internal fun CycloneLiquidChoiceBar(
 }
 
 /**
- * Compact binary control made from the same tray + moving refractive lens as the rest of Cyclone.
- * The control keeps the familiar switch footprint without introducing a stock Material thumb.
+ * Compact binary liquid control. The moving lens is visibly smaller than the tray and therefore
+ * reads as a thumb travelling through one physical object rather than another box drawn inside it.
  */
 @Composable
 internal fun CycloneLiquidToggle(
@@ -111,9 +112,9 @@ internal fun CycloneLiquidToggle(
     enabled: Boolean = true,
 ) {
     CycloneLiquidTray(
-        modifier = modifier.width(64.dp),
-        height = 40.dp,
-        contentPadding = 4.dp,
+        modifier = modifier.width(62.dp),
+        height = 38.dp,
+        contentPadding = 3.dp,
     ) {
         BoxWithConstraints(
             Modifier
@@ -131,7 +132,8 @@ internal fun CycloneLiquidToggle(
                 itemCount = 2,
                 totalWidth = maxWidth,
                 modifier = Modifier.align(Alignment.CenterStart),
-                height = 32.dp,
+                height = 28.dp,
+                horizontalInset = 3.dp,
             )
             if (checked) {
                 Box(
@@ -144,7 +146,7 @@ internal fun CycloneLiquidToggle(
                     Icon(
                         Icons.Rounded.Check,
                         contentDescription = null,
-                        modifier = Modifier.size(17.dp),
+                        modifier = Modifier.size(15.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -154,8 +156,8 @@ internal fun CycloneLiquidToggle(
 }
 
 /**
- * A single menu trigger rendered as one liquid object. The popup itself remains a Material menu;
- * only the persistent interactive chrome uses the refractive treatment.
+ * One liquid trigger used by in-layout selectors. The expanded content is owned by the caller in
+ * the same Compose hierarchy; no Material Popup is required for backdrop-dependent controls.
  */
 @Composable
 internal fun CycloneLiquidMenuTrigger(
@@ -168,8 +170,8 @@ internal fun CycloneLiquidMenuTrigger(
 ) {
     CycloneLiquidTray(
         modifier = modifier,
-        height = if (compact) 48.dp else 56.dp,
-        contentPadding = 4.dp,
+        height = if (compact) 46.dp else 54.dp,
+        contentPadding = 3.dp,
     ) {
         Row(
             Modifier
@@ -206,7 +208,7 @@ internal fun CycloneLiquidMenuTrigger(
             Icon(
                 Icons.Rounded.KeyboardArrowDown,
                 contentDescription = "Choose $title",
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(19.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

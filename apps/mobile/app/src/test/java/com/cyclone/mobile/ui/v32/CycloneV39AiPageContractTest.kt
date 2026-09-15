@@ -76,9 +76,10 @@ class CycloneV39AiPageContractTest {
         assertTrue(nav.contains("WindowInsets.ime"))
         assertTrue(nav.contains("if (imeVisible) return"))
         assertTrue(nav.contains("ic_cyclone_ai_42"))
-        assertTrue(nav.contains("CycloneLiquidTray(height = 66.dp"))
+        assertTrue(nav.contains("CycloneLiquidTray(height = 62.dp"))
         assertTrue(nav.contains("CycloneLiquidSelectionLens("))
-        assertTrue(nav.contains("height = 58.dp"))
+        assertTrue(nav.contains("height = 48.dp"))
+        assertTrue(nav.contains("horizontalInset = 4.dp"))
         assertFalse(nav.contains("NavigationBarItem("))
         assertFalse(nav.contains("Modifier.height(74.dp)"))
     }

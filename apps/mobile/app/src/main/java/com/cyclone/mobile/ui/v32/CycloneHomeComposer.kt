@@ -10,9 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,11 +21,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,7 +33,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -66,33 +62,48 @@ fun CycloneHomeComposer(onSubmit: (String) -> Unit) {
         text = ""
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        // One optical object owns the composer. Secondary tools are integrated hit targets rather
-        // than independent frosted circles; only Send remains a distinct tinted liquid action.
-        CycloneLiquidTray(
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Home is a launcher, not a second AI settings surface. Model/intelligence/autonomy live in
+        // the AI workspace; this launcher stays focused on request, attachment, voice and send.
+        CycloneLiquidPanel(
             modifier = Modifier.fillMaxWidth(),
-            height = 112.dp,
-            contentPadding = 8.dp,
+            cornerRadius = 28.dp,
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
         ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CycloneTrayIconAction(
+                    onClick = { tools = !tools },
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Add,
+                        "Add attachment",
+                        modifier = Modifier.size(22.dp),
+                        tint = if (tools) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
                 BasicTextField(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                        .heightIn(min = 42.dp, max = 54.dp)
+                        .weight(1f)
+                        .heightIn(min = 48.dp, max = 72.dp)
+                        .padding(horizontal = 8.dp, vertical = 12.dp)
                         .semantics { contentDescription = "Home request composer" },
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    maxLines = 3,
+                    maxLines = 2,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                     decorationBox = { field ->
-                        Box(contentAlignment = Alignment.TopStart) {
+                        Box(contentAlignment = Alignment.CenterStart) {
                             if (text.isEmpty()) {
                                 Text(
-                                    "What should Cyclone do?",
+                                    "Ask Cyclone",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
@@ -102,90 +113,77 @@ fun CycloneHomeComposer(onSubmit: (String) -> Unit) {
                     },
                 )
 
-                Row(
-                    Modifier.fillMaxWidth().height(48.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                CycloneTrayIconAction(
+                    onClick = {
+                        runCatching {
+                            voice.launch(
+                                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM),
+                            )
+                        }.onFailure { error = "Voice is unavailable. You can type your request." }
+                    },
+                    modifier = Modifier.size(44.dp),
                 ) {
-                    CycloneIntelligenceControls(showModelPill = false)
-                    Box {
-                        CycloneTrayIconAction(onClick = { tools = true }, modifier = Modifier.size(44.dp)) {
-                            Icon(
-                                Icons.Rounded.Add,
-                                "Add attachment",
-                                modifier = Modifier.size(22.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        DropdownMenu(tools, { tools = false }) {
-                            DropdownMenuItem(
-                                text = { Text("File") },
-                                onClick = {
-                                    tools = false
-                                    context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Take photo") },
-                                onClick = {
-                                    tools = false
-                                    context.startActivity(
-                                        Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
-                                            .putExtra("camera", true),
-                                    )
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Share screen") },
-                                onClick = {
-                                    tools = false
-                                    context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
-                                },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    CycloneTrayIconAction(
-                        onClick = {
-                            runCatching {
-                                voice.launch(
-                                    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                                        .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM),
-                                )
-                            }.onFailure { error = "Voice is unavailable. You can type your request." }
-                        },
-                        modifier = Modifier.size(44.dp),
+                    Icon(
+                        Icons.Rounded.Mic,
+                        "Dictate request",
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (backdrop != null) {
+                    CycloneKyantLiquidIconButton(
+                        onClick = { send() },
+                        backdrop = backdrop,
+                        enabled = text.isNotBlank(),
+                        modifier = Modifier.size(46.dp),
+                        tint = MaterialTheme.colorScheme.primary,
                     ) {
                         Icon(
-                            Icons.Rounded.Mic,
-                            "Dictate request",
+                            Icons.Rounded.ArrowUpward,
+                            "Send request",
                             modifier = Modifier.size(22.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MaterialTheme.colorScheme.onPrimary,
                         )
                     }
-                    Spacer(Modifier.size(4.dp))
-                    if (backdrop != null) {
-                        CycloneKyantLiquidIconButton(
-                            onClick = { send() },
-                            backdrop = backdrop,
-                            enabled = text.isNotBlank(),
-                            modifier = Modifier.size(46.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        ) {
-                            Icon(
-                                Icons.Rounded.ArrowUpward,
-                                "Send request",
-                                modifier = Modifier.size(22.dp),
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        }
-                    } else {
-                        CycloneTrayIconAction(onClick = { send() }, enabled = text.isNotBlank(), modifier = Modifier.size(46.dp)) {
-                            Icon(Icons.Rounded.ArrowUpward, "Send request", modifier = Modifier.size(22.dp))
-                        }
+                } else {
+                    CycloneTrayIconAction(onClick = { send() }, enabled = text.isNotBlank(), modifier = Modifier.size(46.dp)) {
+                        Icon(Icons.Rounded.ArrowUpward, "Send request", modifier = Modifier.size(22.dp))
                     }
                 }
             }
         }
+
+        if (tools) {
+            CycloneLiquidPanel(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 22.dp,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = {
+                        tools = false
+                        context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
+                    }) { Text("File") }
+                    TextButton(onClick = {
+                        tools = false
+                        context.startActivity(
+                            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                                .putExtra("camera", true),
+                        )
+                    }) { Text("Photo") }
+                    TextButton(onClick = {
+                        tools = false
+                        context.startActivity(Intent(context, com.cyclone.mobile.capture.LiveCaptureConsentActivity::class.java))
+                    }) { Text("Share screen") }
+                }
+            }
+        }
+
         if (error.isNotBlank()) {
             Text(
                 error,

@@ -52,7 +52,8 @@ class BackgroundGlassPolicyTest {
     }
 
     @Test
-    fun barIsTwelveDpHigher() {
-        assertEquals(12, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP - 18)
+    fun appleComposerKeepsACompactBottomBreathingGap() {
+        assertEquals(26, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP)
+        assertEquals(8, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP - 18)
     }
 }

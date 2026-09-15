@@ -87,13 +87,15 @@ class CycloneProfile429ContractTest {
         assertTrue(source.contains("fun rename(context: Context, id: String, label: String)"))
     }
 
-    @Test fun overlayModelControlIncludesCompactModelSelector() {
+    @Test fun overlayModelControlUsesStableInLayoutCatalogSelector() {
         val controls = source("ui/v32/CycloneIntelligenceControls.kt")
         val overlay = source("ui/overlay/OverlayChrome.kt")
         assertTrue(controls.contains("fun CycloneModelPill"))
         assertTrue(controls.contains("showModelSelector: Boolean = true"))
         assertTrue(controls.contains("OpenRouterCatalogStore.picker(context)"))
-        assertTrue(controls.contains("pickerModels.forEach"))
+        assertTrue(controls.contains("ModelPickerRows(pickerModels, currentModel)"))
+        assertTrue(controls.contains("models.forEachIndexed"))
+        assertFalse(controls.contains("DropdownMenu("))
         assertFalse(controls.contains("OpenRouterModelPresets.all.forEach"))
         assertTrue(overlay.contains("CycloneModelIntelligencePanel("))
     }

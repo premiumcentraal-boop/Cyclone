@@ -31,20 +31,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,11 +54,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -78,7 +69,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.capture.LiveCaptureConsentActivity
 import com.cyclone.mobile.capture.LiveCaptureService
@@ -88,13 +78,10 @@ import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
 import com.cyclone.mobile.ui.v32.CycloneForegroundWorkCard
-import com.cyclone.mobile.ui.v32.CycloneKyantLiquidIconButton
 import com.cyclone.mobile.ui.v32.CycloneLiquidPanel
-import com.cyclone.mobile.ui.v32.CycloneLiquidTray
 import com.cyclone.mobile.ui.v32.CyclonePendingRequests
 import com.cyclone.mobile.ui.v32.CycloneTrayIconAction
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
-import com.cyclone.mobile.ui.v32.LocalCycloneLiquidBackdrop
 import kotlinx.coroutines.launch
 
 private val AuroraBlue = Color(0xFF4A8DFF)
@@ -187,7 +174,7 @@ fun OverlayChrome(
     onIdleSemanticActivate: () -> Unit = { onAction(OverlayUserAction.ASK_CYCLONE) },
     modifier: Modifier = Modifier,
 ) {
-    CycloneV32Theme {
+    CycloneV32Theme(drawBackground = false) {
         val showOrb = snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
         AnimatedContent(
             targetState = showOrb,
@@ -336,9 +323,10 @@ private fun ComposerPanel(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
-    var accessory by remember { mutableStateOf<ComposerAccessory>(ComposerAccessory.NONE) }
+    var accessory by remember { mutableStateOf(ComposerAccessory.NONE) }
     val sharing by LiveCaptureSessionManager.state.collectAsState()
     val attached by PendingTaskAttachment.present.collectAsState()
+    val queued by WorkspaceTasks.requests.state.collectAsState()
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
@@ -348,7 +336,6 @@ private fun ComposerPanel(
     val task = workspace?.takeIf { it.phase != TaskPhase.STOPPED }
     val foregroundWorking = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
     val activeWork = task?.working == true || foregroundWorking
-    val compactRunning = activeWork && !editorFocused
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val taskAreaMax = if (keyboardOpen) {
         OverlayChromeContract.TASK_AREA_KEYBOARD_MAX_HEIGHT_DP
@@ -413,10 +400,7 @@ private fun ComposerPanel(
         }
     }
 
-    // Never inherit a full-screen sizing modifier here. The old overlay did, which turned the
-    // translucent sheet into the photographed full-screen white rectangle. This surface owns only
-    // its content height; the surrounding overlay window remains transparent and touch-through.
-    Box(
+    Column(
         Modifier
             .fillMaxWidth()
             .wrapContentHeight()
@@ -424,41 +408,33 @@ private fun ComposerPanel(
             .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp)
             .graphicsLayer { translationY = dragOffset }
             .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) },
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        CycloneLiquidPanel(
-            modifier = Modifier.fillMaxWidth().wrapContentHeight(),
-            cornerRadius = 32.dp,
-            contentPadding = PaddingValues(start = 10.dp, end = 10.dp, bottom = 10.dp),
-        ) {
-            Column(
-                Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(18.dp)
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(
-                                onDragStart = { settleJob?.cancel() },
-                                onVerticalDrag = { change, amount ->
-                                    change.consume()
-                                    dragOffset = (dragOffset + amount).coerceAtLeast(0f)
-                                },
-                                onDragCancel = { settle(false) },
-                                onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) },
-                            )
+        // Invisible, dedicated grab zone: keeps swipe-to-minimize without adding a visual handle
+        // above the Apple-style resting bar.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { settleJob?.cancel() },
+                        onVerticalDrag = { change, amount ->
+                            change.consume()
+                            dragOffset = (dragOffset + amount).coerceAtLeast(0f)
                         },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier
-                            .size(34.dp, 4.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = .30f)),
+                        onDragCancel = { settle(false) },
+                        onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) },
                     )
-                }
+                },
+        )
 
+        if (task != null || foregroundWorking || queued.isNotEmpty()) {
+            CycloneLiquidPanel(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 24.dp,
+                contentPadding = PaddingValues(10.dp),
+            ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -472,166 +448,93 @@ private fun ComposerPanel(
                     }
                     CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
                 }
-
-                if (sharing.phase != ScreenSharePhase.OFF) {
-                    ScreenSharePill(sharing) { LiveCaptureService.stop(context) }
-                }
-
-                if (accessory != ComposerAccessory.NONE) {
-                    Surface(
-                        shape = RoundedCornerShape(22.dp),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = .045f),
-                        tonalElevation = 0.dp,
-                        shadowElevation = 0.dp,
-                    ) {
-                        when (accessory) {
-                            ComposerAccessory.ATTACHMENTS -> Row(
-                                Modifier.heightIn(min = 52.dp).padding(horizontal = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java)) }) { Text("File") }
-                                TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("camera", true)) }) { Text("Photo") }
-                                TextButton(enabled = !sharing.active, onClick = {
-                                    launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
-                                }) { Text("Share screen") }
-                                TextButton(enabled = !sharing.active, onClick = {
-                                    launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
-                                }) { Text("Cross-app") }
-                            }
-                            ComposerAccessory.MODEL -> com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel(
-                                aiSettings.modelId,
-                                aiSettings.reasoningEffort,
-                            ) { model, effort ->
-                                onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort))
-                            }
-                            ComposerAccessory.NONE -> Unit
-                        }
-                    }
-                }
-
-                if (attached) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "Reference attached",
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(onClick = { PendingTaskAttachment.take() }) { Text("Remove") }
-                    }
-                }
-
-                // The editor is part of the one parent glass object. Tool icons are transparent hit
-                // targets; Send alone gets a separate primary liquid lens.
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = OverlayChromeContract.COMPOSER_HEIGHT_DP.dp)
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (!compactRunning) {
-                        CycloneTrayIconAction(
-                            onClick = { accessory = accessory.toggle(ComposerAccessory.MODEL) },
-                            modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                        ) {
-                            Icon(
-                                Icons.Rounded.Tune,
-                                "Choose model",
-                                tint = if (accessory == ComposerAccessory.MODEL) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    }
-
-                    CycloneTrayIconAction(
-                        onClick = { accessory = accessory.toggle(ComposerAccessory.ATTACHMENTS) },
-                        modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                    ) {
-                        Icon(Icons.Rounded.Add, "Add attachment", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(25.dp))
-                    }
-
-                    BasicTextField(
-                        value = snapshot.composerText,
-                        onValueChange = onComposerChanged,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { submit() }),
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                            .onFocusChanged { editorFocused = it.isFocused }
-                            .heightIn(min = 48.dp)
-                            .padding(horizontal = 8.dp, vertical = 13.dp)
-                            .semantics { contentDescription = OverlayCopy.COMPOSER },
-                        decorationBox = { field ->
-                            Box(contentAlignment = Alignment.CenterStart) {
-                                if (snapshot.composerText.isEmpty()) {
-                                    Text(
-                                        when {
-                                            foregroundWorking -> "Working on it…"
-                                            snapshot.voiceListening -> OverlayCopy.LISTENING
-                                            else -> OverlayCopy.COMPOSER
-                                        },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                    )
-                                }
-                                field()
-                            }
-                        },
-                    )
-
-                    if (!compactRunning) {
-                        CycloneTrayIconAction(
-                            onClick = onVoiceInput,
-                            modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                        ) {
-                            Icon(
-                                Icons.Rounded.Mic,
-                                contentDescription = "Dictate request",
-                                tint = if (snapshot.voiceListening) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    }
-
-                    val backdrop = LocalCycloneLiquidBackdrop.current
-                    if (backdrop != null) {
-                        CycloneKyantLiquidIconButton(
-                            onClick = {
-                                if (foregroundWorking) onAction(OverlayUserAction.STOP_TASK) else submit()
-                            },
-                            backdrop = backdrop,
-                            enabled = if (foregroundWorking) true else snapshot.composerText.isNotBlank(),
-                            modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        ) {
-                            if (foregroundWorking) {
-                                Box(
-                                    Modifier
-                                        .size(14.dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(MaterialTheme.colorScheme.onPrimary),
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Rounded.ArrowUpward,
-                                    "Send new task",
-                                    modifier = Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
+
+        if (sharing.phase != ScreenSharePhase.OFF) {
+            OverlayAppleStatusPill(
+                text = when (sharing.phase) {
+                    ScreenSharePhase.LIVE -> "Sharing screen"
+                    ScreenSharePhase.REQUESTING_PERMISSION -> "Waiting for permission"
+                    ScreenSharePhase.STARTING -> sharing.message ?: "Starting screen share"
+                    ScreenSharePhase.STOPPING -> "Stopping screen share"
+                    ScreenSharePhase.ERROR -> sharing.message ?: "Screen sharing failed"
+                    ScreenSharePhase.REVOKED -> "Screen sharing ended"
+                    ScreenSharePhase.OFF -> "Screen sharing off"
+                },
+                actionLabel = if (sharing.active) "Stop" else null,
+                onAction = if (sharing.active) ({ LiveCaptureService.stop(context) }) else null,
+            )
+        }
+
+        when (accessory) {
+            ComposerAccessory.ATTACHMENTS -> OverlayAppleToolsMenu(
+                sharingActive = sharing.active,
+                onCamera = {
+                    launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("camera", true))
+                },
+                onFiles = {
+                    launchExternal(Intent(context, OverlayAttachmentActivity::class.java))
+                },
+                onShareScreen = {
+                    launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
+                },
+                onCrossAppShare = {
+                    launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
+                },
+                onModelAndIntelligence = { accessory = ComposerAccessory.MODEL },
+                modifier = Modifier.fillMaxWidth(.82f),
+            )
+
+            ComposerAccessory.MODEL -> CycloneLiquidPanel(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 26.dp,
+                contentPadding = PaddingValues(12.dp),
+            ) {
+                com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel(
+                    aiSettings.modelId,
+                    aiSettings.reasoningEffort,
+                ) { model, effort ->
+                    onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort))
+                }
+            }
+
+            ComposerAccessory.NONE -> Unit
+        }
+
+        if (attached) {
+            OverlayAppleStatusPill(
+                text = "Reference attached",
+                actionLabel = "Remove",
+                onAction = { PendingTaskAttachment.take() },
+            )
+        }
+
+        OverlayAppleComposerBar(
+            text = snapshot.composerText,
+            onTextChanged = onComposerChanged,
+            focusRequester = focusRequester,
+            onFocusChanged = { editorFocused = it },
+            placeholder = when {
+                foregroundWorking -> "Working on it…"
+                snapshot.voiceListening -> OverlayCopy.LISTENING
+                else -> OverlayCopy.COMPOSER
+            },
+            menuOpen = accessory != ComposerAccessory.NONE,
+            voiceListening = snapshot.voiceListening,
+            working = foregroundWorking,
+            onMenu = {
+                accessory = if (accessory == ComposerAccessory.ATTACHMENTS) ComposerAccessory.NONE else ComposerAccessory.ATTACHMENTS
+            },
+            onDictate = onVoiceInput,
+            onPrimary = {
+                when {
+                    foregroundWorking -> onAction(OverlayUserAction.STOP_TASK)
+                    snapshot.composerText.isNotBlank() -> submit()
+                    else -> onVoiceInput()
+                }
+            },
+        )
     }
 }
 
@@ -686,33 +589,40 @@ internal enum class ComposerAccessory {
     fun toggle(next: ComposerAccessory): ComposerAccessory = if (this == next) NONE else next
 }
 
+/** Quiet inline status kept for callers/tests outside the Apple-style composer path. */
 @Composable
 internal fun ScreenSharePill(state: com.cyclone.mobile.capture.ScreenShareState, onStop: () -> Unit) {
-    CycloneLiquidTray(modifier = Modifier.fillMaxWidth(), height = 52.dp, contentPadding = 4.dp) {
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                when (state.phase) {
-                    ScreenSharePhase.LIVE -> "Sharing screen"
-                    ScreenSharePhase.REQUESTING_PERMISSION -> "Waiting for permission"
-                    ScreenSharePhase.STARTING -> state.message ?: "Starting screen share"
-                    ScreenSharePhase.STOPPING -> "Stopping screen share"
-                    ScreenSharePhase.ERROR -> state.message ?: "Screen sharing failed"
-                    ScreenSharePhase.REVOKED -> "Screen sharing ended"
-                    ScreenSharePhase.OFF -> "Screen sharing off"
-                },
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            if (state.active) {
-                TextButton(
-                    onClick = onStop,
-                    enabled = state.phase != ScreenSharePhase.STOPPING,
-                    modifier = Modifier.heightIn(min = 44.dp),
-                ) { Text("Stop") }
-            }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(if (state.active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant),
+        )
+        Text(
+            when (state.phase) {
+                ScreenSharePhase.LIVE -> "Sharing screen"
+                ScreenSharePhase.REQUESTING_PERMISSION -> "Waiting for permission"
+                ScreenSharePhase.STARTING -> state.message ?: "Starting screen share"
+                ScreenSharePhase.STOPPING -> "Stopping screen share"
+                ScreenSharePhase.ERROR -> state.message ?: "Screen sharing failed"
+                ScreenSharePhase.REVOKED -> "Screen sharing ended"
+                ScreenSharePhase.OFF -> "Screen sharing off"
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (state.active) {
+            TextButton(
+                onClick = onStop,
+                enabled = state.phase != ScreenSharePhase.STOPPING,
+                modifier = Modifier.heightIn(min = 40.dp),
+            ) { Text("Stop") }
         }
     }
 }

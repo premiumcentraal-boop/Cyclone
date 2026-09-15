@@ -2,15 +2,26 @@
 
 package androidx.compose.material3
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ui.v32.CycloneKyantLiquidButton
 import com.cyclone.mobile.ui.v32.CycloneKyantLiquidIconButton
@@ -20,10 +31,10 @@ import com.cyclone.mobile.ui.v32.LocalCycloneLiquidBackdrop
  * Cyclone-wide Material 3 compatibility layer.
  *
  * These deliberately narrower overloads win for the Button/IconButton call shapes used by the
- * 4.4.2 product without forcing every feature page to carry a custom import. Rendering is still
- * Kyant0/AndroidLiquidGlass Backdrop + the published LiquidButton effect recipe. Material `shape`
- * values are accepted only so existing call sites resolve here; the optical shape remains Kyant's
- * ContinuousCapsule. Material contentPadding is layout-only and is forwarded to the glass row.
+ * product without forcing every feature page to carry a custom import. Rendering uses
+ * Kyant0/AndroidLiquidGlass whenever a Cyclone backdrop is available. Accessibility overlays are
+ * intentionally transparent/content-sized and therefore have no local backdrop; those windows use
+ * compact Material-like fallbacks instead of crashing or inventing a full-screen sampling layer.
  */
 
 @Composable
@@ -33,16 +44,57 @@ private fun neutralGlassSurface(lightAlpha: Float, darkAlpha: Float): Color =
     )
 
 @Composable
-private fun requireCycloneBackdrop() = requireNotNull(LocalCycloneLiquidBackdrop.current) {
-    "Cyclone Liquid Glass button rendered outside CycloneTheme/Backdrop host"
-}
-
-@Composable
 private fun LiquidContent(contentColor: Color, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalContentColor provides contentColor, content = content)
 }
 
 private val KyantDefaultPadding = PaddingValues(horizontal = 16.dp)
+
+@Composable
+private fun FallbackButton(
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    contentPadding: PaddingValues,
+    containerColor: Color,
+    contentColor: Color,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val alpha = if (enabled) 1f else .46f
+    Row(
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(containerColor.copy(alpha = containerColor.alpha * alpha))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(contentPadding),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LiquidContent(contentColor.copy(alpha = contentColor.alpha * if (enabled) 1f else .58f)) { content() }
+    }
+}
+
+@Composable
+private fun FallbackIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    containerColor: Color,
+    contentColor: Color,
+    content: @Composable () -> Unit,
+) {
+    val alpha = if (enabled) 1f else .46f
+    Box(
+        modifier = modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clip(CircleShape)
+            .background(containerColor.copy(alpha = containerColor.alpha * alpha))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        LiquidContent(contentColor.copy(alpha = contentColor.alpha * if (enabled) 1f else .58f), content)
+    }
+}
 
 @Composable
 private fun CyclonePrimaryButton(
@@ -52,7 +104,14 @@ private fun CyclonePrimaryButton(
     contentPadding: PaddingValues,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackButton(
+            onClick, modifier, enabled, contentPadding,
+            MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimary, content,
+        )
+        return
+    }
     CycloneKyantLiquidButton(
         onClick = onClick,
         backdrop = backdrop,
@@ -73,7 +132,14 @@ private fun CycloneTonalButton(
     contentPadding: PaddingValues,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackButton(
+            onClick, modifier, enabled, contentPadding,
+            MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer, content,
+        )
+        return
+    }
     CycloneKyantLiquidButton(
         onClick = onClick,
         backdrop = backdrop,
@@ -94,13 +160,21 @@ private fun CycloneElevatedButton(
     contentPadding: PaddingValues,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val surface = neutralGlassSurface(lightAlpha = 0.11f, darkAlpha = 0.15f)
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackButton(
+            onClick, modifier, enabled, contentPadding,
+            surface, MaterialTheme.colorScheme.onSurface, content,
+        )
+        return
+    }
     CycloneKyantLiquidButton(
         onClick = onClick,
         backdrop = backdrop,
         modifier = modifier,
         enabled = enabled,
-        surfaceColor = neutralGlassSurface(lightAlpha = 0.11f, darkAlpha = 0.15f),
+        surfaceColor = surface,
         contentPadding = contentPadding,
     ) {
         LiquidContent(MaterialTheme.colorScheme.onSurface) { content() }
@@ -115,13 +189,21 @@ private fun CycloneOutlinedButton(
     contentPadding: PaddingValues,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val surface = neutralGlassSurface(lightAlpha = 0.09f, darkAlpha = 0.13f)
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackButton(
+            onClick, modifier, enabled, contentPadding,
+            surface, MaterialTheme.colorScheme.primary, content,
+        )
+        return
+    }
     CycloneKyantLiquidButton(
         onClick = onClick,
         backdrop = backdrop,
         modifier = modifier,
         enabled = enabled,
-        surfaceColor = neutralGlassSurface(lightAlpha = 0.09f, darkAlpha = 0.13f),
+        surfaceColor = surface,
         contentPadding = contentPadding,
     ) {
         LiquidContent(MaterialTheme.colorScheme.primary) { content() }
@@ -136,13 +218,21 @@ private fun CycloneTextButton(
     contentPadding: PaddingValues,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val surface = neutralGlassSurface(lightAlpha = 0.055f, darkAlpha = 0.085f)
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackButton(
+            onClick, modifier, enabled, contentPadding,
+            surface, MaterialTheme.colorScheme.primary, content,
+        )
+        return
+    }
     CycloneKyantLiquidButton(
         onClick = onClick,
         backdrop = backdrop,
         modifier = modifier,
         enabled = enabled,
-        surfaceColor = neutralGlassSurface(lightAlpha = 0.055f, darkAlpha = 0.085f),
+        surfaceColor = surface,
         contentPadding = contentPadding,
     ) {
         LiquidContent(MaterialTheme.colorScheme.primary) { content() }
@@ -296,13 +386,18 @@ fun IconButton(
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val surface = neutralGlassSurface(lightAlpha = 0.07f, darkAlpha = 0.11f)
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackIconButton(onClick, modifier, enabled, surface, MaterialTheme.colorScheme.onSurface, content)
+        return
+    }
     CycloneKyantLiquidIconButton(
         onClick = onClick,
         backdrop = backdrop,
         modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
         enabled = enabled,
-        surfaceColor = neutralGlassSurface(lightAlpha = 0.07f, darkAlpha = 0.11f),
+        surfaceColor = surface,
     ) {
         LiquidContent(MaterialTheme.colorScheme.onSurface) { content() }
     }
@@ -315,7 +410,14 @@ fun FilledIconButton(
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackIconButton(
+            onClick, modifier, enabled,
+            MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimary, content,
+        )
+        return
+    }
     CycloneKyantLiquidIconButton(
         onClick = onClick,
         backdrop = backdrop,
@@ -334,7 +436,14 @@ fun FilledTonalIconButton(
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackIconButton(
+            onClick, modifier, enabled,
+            MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer, content,
+        )
+        return
+    }
     CycloneKyantLiquidIconButton(
         onClick = onClick,
         backdrop = backdrop,
@@ -353,13 +462,18 @@ fun OutlinedIconButton(
     enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val backdrop = requireCycloneBackdrop()
+    val surface = neutralGlassSurface(lightAlpha = 0.09f, darkAlpha = 0.13f)
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    if (backdrop == null) {
+        FallbackIconButton(onClick, modifier, enabled, surface, MaterialTheme.colorScheme.primary, content)
+        return
+    }
     CycloneKyantLiquidIconButton(
         onClick = onClick,
         backdrop = backdrop,
         modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp),
         enabled = enabled,
-        surfaceColor = neutralGlassSurface(lightAlpha = 0.09f, darkAlpha = 0.13f),
+        surfaceColor = surface,
     ) {
         LiquidContent(MaterialTheme.colorScheme.primary) { content() }
     }

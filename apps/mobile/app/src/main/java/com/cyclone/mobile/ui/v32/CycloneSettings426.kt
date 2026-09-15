@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,7 +41,6 @@ import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -133,7 +133,7 @@ internal fun CycloneSettingsPage426(
                     Settings426Row("Permissions", "Permissions", Icons.Rounded.Security, "$essentialsReady/4"),
                 ),
                 "Profiles" to listOf(
-                    Settings426Row("Profile engine", "Profile engine", Icons.Rounded.Layers, "Manage"),
+                    Settings426Row("Profile engine", "Profiles", Icons.Rounded.Layers, "Manage"),
                     Settings426Row("Storage", "Storage", Icons.Rounded.Storage, "On device"),
                 ),
                 "Connections" to listOf(
@@ -157,7 +157,7 @@ internal fun CycloneSettingsPage426(
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(section, style = MaterialTheme.typography.headlineSmall)
+                Text(if (section == "Profile engine") "Profiles" else section, style = MaterialTheme.typography.headlineSmall)
                 Settings426DetailSubtitle(section)?.let { subtitle ->
                     Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -286,10 +286,11 @@ internal fun CycloneSettingsPage426(
                             body = if (background.setupFailure == null) "Cyclone can keep a task running while you use your phone." else "Open setup to check the secure workspace requirements.",
                             ready = background.setupFailure == null,
                         )
-                        Button(
+                        CycloneLiquidTextAction(
+                            label = if (background.setupFailure == null) "Review background setup" else "Set up background work",
                             onClick = { open426(context, Intent(context, BackgroundSetupActivity::class.java)) },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (background.setupFailure == null) "Review background setup" else "Set up background work") }
+                        )
                     }
                 }
             }
@@ -313,10 +314,11 @@ internal fun CycloneSettingsPage426(
                             "Optional PC companion",
                             "Cyclone's phone experience works without PC pairing. Connect a PC only when you want desktop control or agent integration.",
                         )
-                        Button(
+                        CycloneLiquidTextAction(
+                            label = "Open PC Gateway",
                             onClick = { open426(context, Intent(context, GatewaySettingsActivity::class.java)) },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Open PC Gateway") }
+                        )
                     }
                 }
             }
@@ -371,8 +373,10 @@ private fun Settings426Root(groups: List<Pair<String, List<Settings426Row>>>, on
                                         Modifier
                                             .fillMaxWidth()
                                             .padding(start = 58.dp, end = 14.dp)
-                                            .size(height = 1.dp, width = 1.dp),
-                                    )
+                                            .height(1.dp),
+                                    ) {
+                                        Box(Modifier.fillMaxWidth().height(1.dp).clickable(enabled = false) {})
+                                    }
                                 }
                             }
                         }

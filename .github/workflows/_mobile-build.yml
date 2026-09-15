@@ -48,6 +48,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # The legacy aggregate package named `tools` was removed from Google's SDK repository.
+          # setup-android defaults to `tools platform-tools`, so opt into the still-supported package
+          # explicitly; the exact platform/build-tools versions are installed in the next step.
+          packages: platform-tools
 
       - name: Install Android SDK packages
         shell: bash

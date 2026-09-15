@@ -3,21 +3,17 @@ package com.cyclone.mobile.ui.v32
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -98,8 +94,11 @@ internal fun CycloneQuickSetup(context: Context, refresh: () -> Unit, openPermis
                     )
                 }
 
-                Button(
+                CycloneLiquidTextAction(
+                    label = if (busy) "Setting up…" else if (readyCount == checks.size && checks.isNotEmpty()) "Run setup again" else "Enable with root",
                     enabled = !busy,
+                    prominent = true,
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         busy = true
                         scope.launch {
@@ -114,10 +113,7 @@ internal fun CycloneQuickSetup(context: Context, refresh: () -> Unit, openPermis
                             }
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                ) {
-                    Text(if (busy) "Setting up…" else if (readyCount == checks.size && checks.isNotEmpty()) "Run setup again" else "Enable with root")
-                }
+                )
 
                 message?.takeIf(String::isNotBlank)?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -176,7 +172,7 @@ internal fun CycloneQuickSetup(context: Context, refresh: () -> Unit, openPermis
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
         ) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     if (background.setupFailure == null) "Background work is ready" else "Background work needs setup",
                     style = MaterialTheme.typography.titleSmall,
@@ -190,12 +186,11 @@ internal fun CycloneQuickSetup(context: Context, refresh: () -> Unit, openPermis
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedButton(
+                CycloneLiquidTextAction(
+                    label = if (background.setupFailure == null) "Review background setup" else "Finish background setup",
                     onClick = { context.startActivity(Intent(context, BackgroundSetupActivity::class.java)) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) {
-                    Text(if (background.setupFailure == null) "Review background setup" else "Finish background setup")
-                }
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 

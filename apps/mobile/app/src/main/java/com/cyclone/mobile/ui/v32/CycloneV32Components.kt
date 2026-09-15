@@ -35,7 +35,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -128,16 +127,17 @@ fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> 
         Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 7.dp),
+            .padding(start = 14.dp, end = 14.dp, top = 5.dp, bottom = 8.dp),
     ) {
-        CycloneLiquidTray(height = 66.dp, contentPadding = 4.dp) {
+        CycloneLiquidTray(height = 62.dp, contentPadding = 4.dp) {
             BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight()) {
                 CycloneLiquidSelectionLens(
                     selectedIndex = selected.ordinal,
                     itemCount = V32Destination.entries.size,
                     totalWidth = maxWidth,
                     modifier = Modifier.align(Alignment.CenterStart),
-                    height = 58.dp,
+                    height = 48.dp,
+                    horizontalInset = 4.dp,
                 )
                 Row(
                     Modifier.fillMaxWidth().fillMaxHeight().selectableGroup(),
@@ -169,10 +169,10 @@ fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> 
                                     },
                                 ),
                                 contentDescription = destination.label,
-                                modifier = Modifier.size(if (destination == V32Destination.AI) 24.dp else 22.dp),
+                                modifier = Modifier.size(if (destination == V32Destination.AI) 23.dp else 21.dp),
                                 tint = tint,
                             )
-                            androidx.compose.foundation.layout.Spacer(Modifier.height(3.dp))
+                            androidx.compose.foundation.layout.Spacer(Modifier.height(2.dp))
                             Text(
                                 destination.label,
                                 style = MaterialTheme.typography.labelSmall,
@@ -196,14 +196,15 @@ fun CycloneSegmentedControl(
     modifier: Modifier = Modifier,
 ) {
     if (options.isEmpty()) return
-    CycloneLiquidTray(modifier = modifier, height = 48.dp, contentPadding = 4.dp) {
+    CycloneLiquidTray(modifier = modifier, height = 44.dp, contentPadding = 3.dp) {
         BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight()) {
             CycloneLiquidSelectionLens(
                 selectedIndex = selected,
                 itemCount = options.size,
                 totalWidth = maxWidth,
                 modifier = Modifier.align(Alignment.CenterStart),
-                height = 40.dp,
+                height = 34.dp,
+                horizontalInset = 4.dp,
             )
             Row(Modifier.fillMaxWidth().fillMaxHeight().selectableGroup()) {
                 options.forEachIndexed { index, label ->
@@ -249,7 +250,7 @@ fun CycloneRoutineCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(
                     shape = RoundedCornerShape(13.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -273,7 +274,7 @@ fun CycloneRoutineCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Switch(checked = automation.enabled, onCheckedChange = onEnabledChange)
+                CycloneLiquidToggle(checked = automation.enabled, onCheckedChange = onEnabledChange)
             }
             Row(
                 Modifier.fillMaxWidth(),
@@ -288,17 +289,11 @@ fun CycloneRoutineCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = if (automation.enabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (automation.enabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                ) {
-                    Text(
-                        if (automation.enabled) "On" else "Off",
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
+                Text(
+                    if (automation.enabled) "On" else "Off",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (automation.enabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

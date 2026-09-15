@@ -1,0 +1,350 @@
+package com.cyclone.mobile.ui.overlay
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.ScreenShare
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.cyclone.mobile.ui.v32.LocalCycloneLiquidBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+
+private val OverlayGlass = Color(0xFF111216).copy(alpha = 0.86f)
+private val OverlayGlassStrong = Color(0xFF111216).copy(alpha = 0.91f)
+private val OverlayGlassRim = Color.White.copy(alpha = 0.15f)
+private val OverlayGlassInner = Color.White.copy(alpha = 0.075f)
+private val OverlayText = Color(0xFFF5F5F7)
+private val OverlaySecondaryText = Color(0xFFAEAEB2)
+private val OverlayBlue = Color(0xFF2F7CF6)
+
+/**
+ * Overlay-only glass. Android cannot sample pixels owned by another app into a Compose backdrop, so
+ * the system overlay uses Kyant for refraction when a local backdrop is available and a deliberately
+ * dark translucent surface otherwise. The strong neutral surface keeps the control legible over both
+ * bright launchers and dark apps without painting a full-screen scrim.
+ */
+@Composable
+private fun OverlayAppleGlass(
+    modifier: Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp,
+    strong: Boolean = false,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val backdrop = LocalCycloneLiquidBackdrop.current
+    val shape = RoundedCornerShape(cornerRadius)
+    val surface = if (strong) OverlayGlassStrong else OverlayGlass
+    val glassModifier = if (backdrop != null) {
+        modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                vibrancy()
+                blur(2f.dp.toPx())
+                lens(10f.dp.toPx(), 20f.dp.toPx(), chromaticAberration = false)
+            },
+            onDrawSurface = { drawRect(surface) },
+        )
+    } else {
+        modifier.background(surface, shape)
+    }
+    Box(
+        glassModifier.border(1.dp, OverlayGlassRim, shape),
+        contentAlignment = Alignment.Center,
+        content = content,
+    )
+}
+
+@Composable
+internal fun OverlayAppleComposerBar(
+    text: String,
+    onTextChanged: (String) -> Unit,
+    focusRequester: FocusRequester,
+    onFocusChanged: (Boolean) -> Unit,
+    placeholder: String,
+    menuOpen: Boolean,
+    voiceListening: Boolean,
+    working: Boolean,
+    onMenu: () -> Unit,
+    onDictate: () -> Unit,
+    onPrimary: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OverlayAppleGlass(
+        modifier = modifier.fillMaxWidth().height(66.dp),
+        cornerRadius = 33.dp,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().fillMaxHeight().padding(start = 7.dp, end = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            OverlayAppleCircleAction(
+                onClick = onMenu,
+                selected = menuOpen,
+                description = if (menuOpen) "Close tools" else "Open tools",
+            ) {
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = null,
+                    tint = OverlayText,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+
+            BasicTextField(
+                value = text,
+                onValueChange = onTextChanged,
+                singleLine = true,
+                textStyle = TextStyle(color = OverlayText, fontSize = 17.sp, lineHeight = 22.sp),
+                cursorBrush = SolidColor(OverlayBlue),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onPrimary() }),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { onFocusChanged(it.isFocused) }
+                    .heightIn(min = 52.dp)
+                    .padding(horizontal = 10.dp, vertical = 15.dp)
+                    .semantics { contentDescription = "Ask Cyclone" },
+                decorationBox = { field ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (text.isEmpty()) {
+                            Text(
+                                placeholder,
+                                color = OverlaySecondaryText.copy(alpha = if (working) .56f else .78f),
+                                fontSize = 17.sp,
+                            )
+                        }
+                        field()
+                    }
+                },
+            )
+
+            if (!working) {
+                Box(
+                    Modifier
+                        .size(46.dp)
+                        .clickable(role = Role.Button, onClick = onDictate)
+                        .semantics { contentDescription = "Dictate request" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Mic,
+                        contentDescription = null,
+                        tint = if (voiceListening) OverlayBlue else OverlayText,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+
+            Box(
+                Modifier
+                    .size(50.dp)
+                    .background(OverlayBlue, CircleShape)
+                    .clickable(role = Role.Button, onClick = onPrimary)
+                    .semantics {
+                        contentDescription = when {
+                            working -> "Stop task"
+                            text.isNotBlank() -> "Send request"
+                            else -> "Start voice request"
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    working -> Box(Modifier.size(15.dp).background(Color.White, RoundedCornerShape(3.dp)))
+                    text.isNotBlank() -> Icon(
+                        Icons.Rounded.ArrowUpward,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp),
+                    )
+                    else -> OverlayVoiceWaveform()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverlayAppleCircleAction(
+    onClick: () -> Unit,
+    selected: Boolean,
+    description: String,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(
+        Modifier
+            .size(50.dp)
+            .background(if (selected) Color.White.copy(alpha = .14f) else OverlayGlassInner, CircleShape)
+            .border(0.7.dp, Color.White.copy(alpha = if (selected) .18f else .08f), CircleShape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+        content = content,
+    )
+}
+
+@Composable
+private fun OverlayVoiceWaveform() {
+    Canvas(Modifier.size(27.dp)) {
+        val centerY = size.height / 2f
+        val gap = size.width / 7f
+        val heights = listOf(.28f, .58f, .88f, .58f, .28f)
+        heights.forEachIndexed { index, factor ->
+            val x = gap * (index + 1)
+            val half = size.height * factor * .42f
+            drawLine(
+                color = Color.White,
+                start = androidx.compose.ui.geometry.Offset(x, centerY - half),
+                end = androidx.compose.ui.geometry.Offset(x, centerY + half),
+                strokeWidth = 2.2.dp.toPx(),
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun OverlayAppleToolsMenu(
+    sharingActive: Boolean,
+    onCamera: () -> Unit,
+    onFiles: () -> Unit,
+    onShareScreen: () -> Unit,
+    onCrossAppShare: () -> Unit,
+    onModelAndIntelligence: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OverlayAppleGlass(
+        modifier = modifier.widthIn(max = 310.dp),
+        cornerRadius = 30.dp,
+        strong = true,
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            OverlayAppleMenuRow(Icons.Rounded.CameraAlt, "Camera", onCamera)
+            OverlayAppleMenuRow(Icons.Rounded.AttachFile, "Files & photos", onFiles)
+            OverlayAppleMenuRow(Icons.Rounded.ScreenShare, "Share screen", onShareScreen, enabled = !sharingActive)
+            OverlayAppleMenuRow(Icons.Rounded.Apps, "Cross-app share", onCrossAppShare, enabled = !sharingActive)
+            OverlayAppleMenuRow(Icons.Rounded.Tune, "Model & intelligence", onModelAndIntelligence)
+        }
+    }
+}
+
+@Composable
+private fun OverlayAppleMenuRow(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    val alpha = if (enabled) 1f else .42f
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(62.dp)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(
+            Modifier
+                .size(46.dp)
+                .background(OverlayGlassInner.copy(alpha = OverlayGlassInner.alpha * alpha), CircleShape)
+                .border(0.7.dp, Color.White.copy(alpha = .08f * alpha), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = OverlayText.copy(alpha = alpha),
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Text(
+            label,
+            color = OverlayText.copy(alpha = alpha),
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+internal fun OverlayAppleStatusPill(
+    text: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    OverlayAppleGlass(
+        modifier = modifier.fillMaxWidth().heightIn(min = 46.dp),
+        cornerRadius = 23.dp,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(text, color = OverlayText, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            if (actionLabel != null && onAction != null) {
+                Text(
+                    actionLabel,
+                    color = OverlayBlue,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable(role = Role.Button, onClick = onAction),
+                )
+            }
+        }
+    }
+}

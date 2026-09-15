@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -122,37 +123,52 @@ val CycloneTypography = Typography(
     labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
 )
 
+/**
+ * Shared Cyclone theme.
+ *
+ * Normal in-app screens own one full-canvas optical backdrop. A floating accessibility overlay is a
+ * different window and cannot sample pixels owned by the host app, so transparent mode deliberately
+ * owns no backdrop layer at all. Liquid components already have a translucent fallback when the
+ * backdrop local is null. This keeps a WRAP_CONTENT overlay content-sized and prevents both the old
+ * full-screen measurement bug and a fake white/blue optical wash over the app underneath it.
+ */
 @Composable
-fun CycloneTheme(content: @Composable () -> Unit) {
+fun CycloneTheme(
+    drawBackground: Boolean = true,
+    content: @Composable () -> Unit,
+) {
     MaterialTheme(
         colorScheme = if (isSystemInDarkTheme()) CycloneV32DarkColors else CycloneV32LightColors,
         shapes = CycloneV32Shapes,
         typography = CycloneTypography,
     ) {
-        val liquidBackdrop = rememberLayerBackdrop()
-        val dark = isSystemInDarkTheme()
-        val background = MaterialTheme.colorScheme.background
-        val opticalSource = Brush.verticalGradient(
-            listOf(
-                background,
-                MaterialTheme.colorScheme.primary.copy(alpha = if (dark) .12f else .055f),
-                background,
-                MaterialTheme.colorScheme.secondary.copy(alpha = if (dark) .07f else .028f),
-                background,
-            ),
-        )
-        CompositionLocalProvider(LocalCycloneLiquidBackdrop provides liquidBackdrop) {
-            Box(Modifier.fillMaxSize()) {
-                // Keep the sampled layer separate from the controls, as Kyant's demos do. The
-                // source now has restrained tonal variation instead of flat white, so refraction is
-                // visible on light screens without inventing borders or fake glassmorphism.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .layerBackdrop(liquidBackdrop)
-                        .background(opticalSource),
-                )
-                content()
+        if (drawBackground) {
+            val liquidBackdrop = rememberLayerBackdrop()
+            val dark = isSystemInDarkTheme()
+            val background = MaterialTheme.colorScheme.background
+            val opticalSource = Brush.verticalGradient(
+                listOf(
+                    background,
+                    MaterialTheme.colorScheme.primary.copy(alpha = if (dark) .12f else .055f),
+                    background,
+                    MaterialTheme.colorScheme.secondary.copy(alpha = if (dark) .07f else .028f),
+                    background,
+                ),
+            )
+            CompositionLocalProvider(LocalCycloneLiquidBackdrop provides liquidBackdrop) {
+                Box(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .layerBackdrop(liquidBackdrop)
+                            .background(opticalSource),
+                    )
+                    content()
+                }
+            }
+        } else {
+            CompositionLocalProvider(LocalCycloneLiquidBackdrop provides null) {
+                Box(Modifier.wrapContentSize()) { content() }
             }
         }
     }
@@ -258,7 +274,10 @@ fun CyclonePageIntro(eyebrow: String, title: String, body: String) {
 }
 
 @Composable
-fun CycloneV32Theme(content: @Composable () -> Unit) = CycloneTheme(content)
+fun CycloneV32Theme(
+    drawBackground: Boolean = true,
+    content: @Composable () -> Unit,
+) = CycloneTheme(drawBackground = drawBackground, content = content)
 
 object CycloneColors {
     val Blue = Accent

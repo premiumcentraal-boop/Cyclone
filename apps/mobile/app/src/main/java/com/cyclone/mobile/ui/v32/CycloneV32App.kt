@@ -21,14 +21,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -160,53 +156,29 @@ private fun V32HomePage(
         in 12..17 -> "Good afternoon"
         else -> "Good evening"
     }
+    val readinessLabel = when {
+        ready.ready -> "Ready"
+        ready.needsRepair -> "Repair"
+        else -> "Setup"
+    }
 
     LazyColumn(
         contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(greeting, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                TextButton(onClick = onSettings) { Text("Settings") }
-                Surface(
-                    modifier = Modifier.clickable(onClick = onSettings),
-                    shape = RoundedCornerShape(999.dp),
-                    color = when {
-                        ready.ready -> MaterialTheme.colorScheme.secondaryContainer
-                        ready.needsRepair -> MaterialTheme.colorScheme.errorContainer
-                        else -> MaterialTheme.colorScheme.tertiaryContainer
-                    },
-                    contentColor = when {
-                        ready.ready -> MaterialTheme.colorScheme.onSecondaryContainer
-                        ready.needsRepair -> MaterialTheme.colorScheme.onErrorContainer
-                        else -> MaterialTheme.colorScheme.onTertiaryContainer
-                    },
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = when {
-                                ready.ready -> MaterialTheme.colorScheme.secondary
-                                ready.needsRepair -> MaterialTheme.colorScheme.error
-                                else -> MaterialTheme.colorScheme.tertiary
-                            },
-                            modifier = Modifier.size(6.dp),
-                        ) {}
-                        Text(
-                            when {
-                                ready.ready -> "Ready"
-                                ready.needsRepair -> "Repair"
-                                else -> "Setup"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
+                // One action owns both navigation and readiness. 4.4.4 exposed two adjacent
+                // Settings controls targeting the same page, which made the Home header cramped.
+                CycloneLiquidTextAction(
+                    label = "Settings · $readinessLabel",
+                    onClick = onSettings,
+                )
             }
         }
 
@@ -315,9 +287,9 @@ internal fun V32RoutineDetail(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            OutlinedButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, null)
-                Spacer(Modifier.size(6.dp))
+            TextButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, null, Modifier.size(19.dp))
+                Spacer(Modifier.size(5.dp))
                 Text("All routines")
             }
         }
@@ -354,12 +326,12 @@ internal fun V32RoutineDetail(
         }
         item {
             CycloneSimpleCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text("Routine is ${if (enabled) "on" else "off"}", style = MaterialTheme.typography.titleSmall)
                         Text("Turn it off without deleting it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(enabled, { value ->
+                    CycloneLiquidToggle(enabled, { value ->
                         enabled = value
                         val updated = automation.copy(enabled = value)
                         AutomationRuntime.store.saveAutomation(updated)
@@ -370,18 +342,16 @@ internal fun V32RoutineDetail(
                         refresh()
                     })
                 }
-                Button(
+                CycloneLiquidTextAction(
+                    label = "Run now",
                     enabled = enabled,
+                    prominent = true,
+                    modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         AutomationRuntime.router.runManual(automation.id)
                         Toast.makeText(context, "Routine started", Toast.LENGTH_SHORT).show()
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Rounded.PlayArrow, null)
-                    Spacer(Modifier.size(6.dp))
-                    Text("Run now")
-                }
+                )
             }
         }
     }

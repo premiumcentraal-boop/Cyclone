@@ -1,15 +1,15 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,13 +37,7 @@ fun reasoningSelectorMode(options: List<String>): ReasoningSelectorMode = when {
 internal fun reasoningEffortLabel(value: String): String = value.replace('_', ' ').split(' ')
     .joinToString(" ") { token -> token.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } }
 
-/**
- * Exact OpenRouter reasoning surface. It never maps, rounds or invents effort tokens.
- *
- * Two/three-way intelligence choices are one physical liquid control: a single Kyant tray with a
- * moving refractive lens. More complex provider option sets use one liquid menu trigger instead of
- * falling back to a stock outlined/filled field.
- */
+/** Exact OpenRouter reasoning surface; provider tokens are never rounded or invented. */
 @Composable
 internal fun CycloneReasoningSelector(
     modelId: String,
@@ -105,43 +99,54 @@ internal fun CycloneReasoningSelector(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (selected != null) {
-                        CycloneLiquidTextAction(
-                            label = "Default",
-                            onClick = { choose(null) },
-                        )
+                        CycloneLiquidTextAction(label = "Default", onClick = { choose(null) })
                     }
                 }
             }
         }
 
         ReasoningSelectorMode.MENU -> {
-            Box(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 CycloneLiquidMenuTrigger(
                     title = "Intelligence",
                     value = selected?.let(::reasoningEffortLabel)
                         ?: "Model default${defaultEffort?.let { " · ${reasoningEffortLabel(it)}" }.orEmpty()}",
-                    onClick = { menuOpen = true },
+                    onClick = { menuOpen = !menuOpen },
                     modifier = Modifier.fillMaxWidth(),
                     compact = compact,
                 )
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = {
-                            Text("Model default${defaultEffort?.let { " · ${reasoningEffortLabel(it)}" }.orEmpty()}")
-                        },
-                        onClick = { choose(null); menuOpen = false },
-                        trailingIcon = {
-                            if (selected == null) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp))
-                        },
-                    )
-                    options.forEach { effort ->
-                        DropdownMenuItem(
-                            text = { Text(reasoningEffortLabel(effort)) },
-                            onClick = { choose(effort); menuOpen = false },
-                            trailingIcon = {
-                                if (selected == effort) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp))
-                            },
-                        )
+                if (menuOpen) {
+                    val values = listOf<String?>(null) + options
+                    values.forEachIndexed { index, effort ->
+                        val active = if (effort == null) selected == null else selected == effort
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    choose(effort)
+                                    menuOpen = false
+                                }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                if (effort == null) {
+                                    "Model default${defaultEffort?.let { " · ${reasoningEffortLabel(it)}" }.orEmpty()}"
+                                } else reasoningEffortLabel(effort),
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            if (active) {
+                                Icon(Icons.Rounded.Check, "Selected", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        if (index != values.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 12.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f),
+                            )
+                        }
                     }
                 }
             }
