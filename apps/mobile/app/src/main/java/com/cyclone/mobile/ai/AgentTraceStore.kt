@@ -75,7 +75,7 @@ object AgentTraceRuntime {
     fun finish(context: Context, sessionId: String, status: String, result: String, decisions: Int) {
         initialize(context)
         val ok = status == "COMPLETED"
-        store.finishSession(sessionId, status, result, decisions)
+        if (!store.finishSession(sessionId, status, result, decisions)) return
         runCatching { AgentRunDiagnosticV39.ensureCanonical(context.applicationContext, sessionId) }
         AiTraceOverlayV27Runtime.finishTask(sessionId, ok, result)
 
@@ -204,13 +204,13 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
                 putNull("ended_at")
                 if (result == null) putNull("result") else put("result", TracePrivacy.clean(result).take(1500))
             },
-            "id=?",
+            "id=? AND ended_at IS NULL",
             arrayOf(id),
         )
     }
 
-    fun finishSession(id: String, status: String, result: String, decisions: Int) {
-        writableDatabase.update(
+    fun finishSession(id: String, status: String, result: String, decisions: Int): Boolean {
+        val changed = writableDatabase.update(
             "sessions",
             ContentValues().apply {
                 put("status", status.take(40))
@@ -218,9 +218,10 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
                 put("result", TracePrivacy.clean(result).take(1500))
                 put("decisions", decisions.coerceAtLeast(0))
             },
-            "id=?",
+            "id=? AND ended_at IS NULL",
             arrayOf(id),
         )
+        if (changed == 0) return false
         append(
             id,
             if (status == "COMPLETED") "DONE" else "STOPPED",
@@ -229,6 +230,7 @@ class AgentTraceStore(context: Context) : SQLiteOpenHelper(context, "cyclone_ai_
             ok = status == "COMPLETED",
             detail = result,
         )
+        return true
     }
 
     fun session(id: String): AiTraceSession? {

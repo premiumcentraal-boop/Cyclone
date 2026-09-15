@@ -33,6 +33,18 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -110,6 +122,10 @@ internal fun OverlayAppleComposerBar(
     menuOpen: Boolean,
     voiceListening: Boolean,
     working: Boolean,
+    paused: Boolean,
+    taskKey: String,
+    onPause: () -> Unit,
+    onStop: () -> Unit,
     onMenu: () -> Unit,
     onDictate: () -> Unit,
     onPrimary: () -> Unit,
@@ -144,7 +160,7 @@ internal fun OverlayAppleComposerBar(
                 textStyle = TextStyle(color = OverlayText, fontSize = 17.sp, lineHeight = 22.sp),
                 cursorBrush = SolidColor(OverlayBlue),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onPrimary() }),
+                keyboardActions = KeyboardActions(onSend = { if (!working && text.isNotBlank()) onPrimary() }),
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(focusRequester)
@@ -166,48 +182,25 @@ internal fun OverlayAppleComposerBar(
                 },
             )
 
-            if (!working) {
+            run {
                 Box(
                     Modifier
                         .size(46.dp)
-                        .clickable(role = Role.Button, onClick = onDictate)
+                        .clickable(enabled = !working, role = Role.Button, onClick = onDictate)
                         .semantics { contentDescription = "Dictate request" },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Rounded.Mic,
                         contentDescription = null,
-                        tint = if (voiceListening) OverlayBlue else OverlayText,
+                        tint = if (working) OverlaySecondaryText else if (voiceListening) OverlayBlue else OverlayText,
                         modifier = Modifier.size(26.dp),
                     )
                 }
             }
 
-            Box(
-                Modifier
-                    .size(50.dp)
-                    .background(OverlayBlue, CircleShape)
-                    .clickable(role = Role.Button, onClick = onPrimary)
-                    .semantics {
-                        contentDescription = when {
-                            working -> "Stop task"
-                            text.isNotBlank() -> "Send request"
-                            else -> "Start voice request"
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                when {
-                    working -> Box(Modifier.size(15.dp).background(Color.White, RoundedCornerShape(3.dp)))
-                    text.isNotBlank() -> Icon(
-                        Icons.Rounded.ArrowUpward,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(26.dp),
-                    )
-                    else -> OverlayVoiceWaveform()
-                }
-            }
+            OverlayRequestAction(working, paused, taskKey, text.isNotBlank(), onPrimary, onPause, onStop)
+
         }
     }
 }
@@ -229,26 +222,6 @@ private fun OverlayAppleCircleAction(
         contentAlignment = Alignment.Center,
         content = content,
     )
-}
-
-@Composable
-private fun OverlayVoiceWaveform() {
-    Canvas(Modifier.size(27.dp)) {
-        val centerY = size.height / 2f
-        val gap = size.width / 7f
-        val heights = listOf(.28f, .58f, .88f, .58f, .28f)
-        heights.forEachIndexed { index, factor ->
-            val x = gap * (index + 1)
-            val half = size.height * factor * .42f
-            drawLine(
-                color = Color.White,
-                start = androidx.compose.ui.geometry.Offset(x, centerY - half),
-                end = androidx.compose.ui.geometry.Offset(x, centerY + half),
-                strokeWidth = 2.2.dp.toPx(),
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-            )
-        }
-    }
 }
 
 @Composable
@@ -345,6 +318,71 @@ internal fun OverlayAppleStatusPill(
                     modifier = Modifier.clickable(role = Role.Button, onClick = onAction),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun OverlayRequestAction(
+    working: Boolean, paused: Boolean, taskKey: String, canSend: Boolean,
+    onSend: () -> Unit, onPauseOrResume: () -> Unit, onStop: () -> Unit,
+) {
+    val gesture = remember(taskKey, working) { ComposerStopGesture() }
+    val pauseState by rememberUpdatedState(paused)
+    val pauseAction by rememberUpdatedState(onPauseOrResume)
+    val stopAction by rememberUpdatedState(onStop)
+    var progress by remember(taskKey, working) { mutableFloatStateOf(0f) }
+    LaunchedEffect(gesture) {
+        while (working) {
+            withFrameNanos { progress = gesture.progress(android.os.SystemClock.uptimeMillis()) }
+        }
+    }
+    fun accessibleTap() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (gesture.armed(now)) { gesture.reset(); stopAction() }
+        else if (pauseState) { gesture.reset(); pauseAction() }
+        else { gesture.press(now); gesture.release(now); pauseAction() }
+    }
+    val action = if (working) Modifier
+        .pointerInput(gesture) {
+            detectTapGestures(onPress = {
+                coroutineScope {
+                    val wasPaused = pauseState
+                    val wasArmed = gesture.armed(android.os.SystemClock.uptimeMillis())
+                    gesture.press(android.os.SystemClock.uptimeMillis())
+                    if (!wasPaused) pauseAction()
+                    val hold = launch {
+                        delay(ComposerStopGesture.HOLD_MS)
+                        if (gesture.hold(android.os.SystemClock.uptimeMillis())) stopAction()
+                    }
+                    try {
+                        if (tryAwaitRelease()) {
+                            when (gesture.release(android.os.SystemClock.uptimeMillis())) {
+                                ComposerStopGesture.Release.STOP -> stopAction()
+                                ComposerStopGesture.Release.FIRST_TAP -> if (wasPaused && !wasArmed) {
+                                    gesture.reset(); pauseAction()
+                                }
+                                else -> Unit
+                            }
+                        } else gesture.cancel()
+                    } finally { hold.cancel() }
+                }
+            })
+        }
+        .semantics {
+            contentDescription = if (paused) "Resume request. Hold two seconds or tap twice to stop" else "Pause request. Hold two seconds or tap twice to stop"
+            onClick { accessibleTap(); true }
+            customActions = listOf(CustomAccessibilityAction("Stop request") { gesture.reset(); stopAction(); true })
+        }
+    else Modifier.clickable(enabled = canSend, role = Role.Button, onClick = onSend)
+        .semantics { contentDescription = "Send request" }
+    Box(Modifier.size(50.dp).background(Color.White.copy(alpha = if (working || canSend) 1f else .35f), CircleShape)
+        .then(action), contentAlignment = Alignment.Center) {
+        Icon(if (!working) Icons.Rounded.ArrowUpward else if (paused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+            contentDescription = null, tint = Color(0xFF111216), modifier = Modifier.size(27.dp))
+        if (progress > 0f) Canvas(Modifier.size(48.dp)) {
+            drawArc(OverlayBlue, -90f, progress * 360f, false,
+                style = Stroke(width = 3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
         }
     }
 }

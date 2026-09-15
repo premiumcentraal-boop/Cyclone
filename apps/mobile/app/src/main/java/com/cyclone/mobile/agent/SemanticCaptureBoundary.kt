@@ -37,7 +37,9 @@ object SemanticCaptureBoundary {
             right > left && bottom > top && image.optInt("width") == right - left && image.optInt("height") == bottom - top
     }
     fun <T> capture(surface: () -> ObservationSurface, semantic: () -> T,
-        image: (() -> JSONObject)? = null, clock: () -> Long = { android.os.SystemClock.uptimeMillis() }): CapturedSemantic<T> {
+        image: (() -> JSONObject)? = null, clock: () -> Long = { android.os.SystemClock.uptimeMillis() },
+        settle: () -> Unit = {}): CapturedSemantic<T> {
+        settle()
         val start = clock()
         val before = surface()
         val tree = semantic()

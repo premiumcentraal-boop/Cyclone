@@ -138,11 +138,21 @@ class OpenRouterAdaptiveAgent(private val context: Context,
     @Volatile
     private var activeLocalSession: ActiveLocalSession? = null
 
+    @Volatile var requestTraceId: String? = null
+        private set
+
     suspend fun execute(
         goal: String,
         config: QuickAgentConfig,
         onProgress: (String) -> Unit = {},
-    ): QuickAgentResult = withContext(Dispatchers.IO) {
+    ): QuickAgentResult {
+        val traceId = AgentTraceRuntime.start(context, goal, config.model.id)
+        requestTraceId = traceId
+        return RequestOutcomeBoundary.run(traceId, config.model.id, { result ->
+            AgentTraceRuntime.finish(context, traceId,
+                if (result.ok) "COMPLETED" else if (result.classification == "CANCELLED") "CANCELLED" else "FAILED",
+                result.message, result.decisions)
+        }) { withContext(Dispatchers.IO) {
         if (goal.isBlank()) return@withContext QuickAgentResult(false, "Describe what you want Cyclone to do.", 0, config.model.id)
 
         if (config.model.id.isBlank()) return@withContext QuickAgentResult(false, "Choose a model in Settings → Model & API.", 0, "")
@@ -155,10 +165,16 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         PageAwarenessRuntime.initialize(context)
 
         val initialBridge = CyclonePcParityBridge(context, execution, goal)
-        var state = observeState(goal, initialBridge)
-            ?: return@withContext QuickAgentResult(false, initialBridge.observationHealth.message, 0, config.model.id)
+        val state = com.cyclone.mobile.agent.InitialObservationRecovery.capture(
+            observe = { observeState(goal, initialBridge) },
+            health = { initialBridge.observationHealth },
+            wait = { ms -> onProgress("Refreshing the current screen…"); kotlinx.coroutines.delay(ms) },
+        ) ?: return@withContext QuickAgentResult(false, initialBridge.observationHealth.message, 0, config.model.id,
+            taskId = traceId, classification = if (initialBridge.observationHealth.state in setOf(
+                com.cyclone.mobile.agent.ObservationState.CAPTURE_CHANGED,
+                com.cyclone.mobile.agent.ObservationState.UNAVAILABLE,
+                com.cyclone.mobile.agent.ObservationState.TIMEOUT)) "NON_CONVERGENCE" else "HARD_BLOCKER")
 
-        val traceId = AgentTraceRuntime.start(context, goal, config.model.id)
         // CycloneLocalAgent owns convergence and lifecycle; no independently paused executor guard.
         if (!background) maybeStartOverlay(traceId)
         val skillSignatures = mutableListOf<String>()
@@ -199,6 +215,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         val executionJob = currentCoroutineContext().job
         session.context.cancelled = { !executionJob.isActive }
         return@withContext driveLocalSession(session, onProgress)
+        } }
     }
 
     /**
@@ -239,13 +256,19 @@ class OpenRouterAdaptiveAgent(private val context: Context,
         }
         val executionJob = currentCoroutineContext().job
         session.context.cancelled = { !executionJob.isActive }
-        driveLocalSession(session, onProgress)
+        RequestOutcomeBoundary.run(session.context.traceId, session.context.config.model.id, { result ->
+            AgentTraceRuntime.finish(context, session.context.traceId,
+                if (result.ok) "COMPLETED" else if (result.classification == "CANCELLED") "CANCELLED" else "FAILED",
+                result.message, result.decisions)
+        }) { driveLocalSession(session, onProgress) }
     }
 
     fun cancelActiveTask() {
         activeLocalSession?.context?.stopRequested = true
         activeLocalSession?.agent?.cancel()
         activeLocalSession?.context?.providerCancellation?.cancel()
+        requestTraceId?.let { AgentTraceRuntime.finish(context, it, "CANCELLED", "Request stopped by you.",
+            activeLocalSession?.context?.providerRequests ?: 0) }
     }
 
     private fun createLocalSession(

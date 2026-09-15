@@ -522,17 +522,17 @@ private fun ComposerPanel(
             },
             menuOpen = accessory != ComposerAccessory.NONE,
             voiceListening = snapshot.voiceListening,
-            working = foregroundWorking,
+            working = foregroundWorking || snapshot.userPaused,
+            paused = snapshot.userPaused,
+            taskKey = snapshot.sessionId,
+            onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
+            onStop = { onAction(OverlayUserAction.STOP_TASK) },
             onMenu = {
                 accessory = if (accessory == ComposerAccessory.ATTACHMENTS) ComposerAccessory.NONE else ComposerAccessory.ATTACHMENTS
             },
             onDictate = onVoiceInput,
             onPrimary = {
-                when {
-                    foregroundWorking -> onAction(OverlayUserAction.STOP_TASK)
-                    snapshot.composerText.isNotBlank() -> submit()
-                    else -> onVoiceInput()
-                }
+                if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
             },
         )
     }

@@ -715,7 +715,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         return null
     }
 
-    private fun waitForUiQuiet(quietMs: Long = 90L, maxWaitMs: Long = 300L) {
+    fun waitForUiQuiet(quietMs: Long = 90L, maxWaitMs: Long = 300L) {
         val started = System.currentTimeMillis()
         while (System.currentTimeMillis() - started < maxWaitMs) {
             val lastEvent = DeviceState.lastUiEventAtMs

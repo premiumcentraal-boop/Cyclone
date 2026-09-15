@@ -111,7 +111,8 @@ internal object GatewayObservationAdapter {
         val includeScreenshot = args.optBoolean("includeScreenshot", false)
         val captured = try {
             com.cyclone.mobile.agent.SemanticCaptureBoundary.capture(::surface,
-                semantic = { if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = true) },
+                settle = { service.waitForUiQuiet() },
+                semantic = { if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = false) },
                 image = if (!includeScreenshot) null else ({
                     val result = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
                         "observation-image-${UUID.randomUUID()}", "phone.screenshot", JSONObject()
@@ -126,6 +127,7 @@ internal object GatewayObservationAdapter {
             if (error is com.cyclone.mobile.agent.CaptureChanged) throw captureChanged()
             throw error
         }
+        if (!background) com.cyclone.mobile.DeviceState.markObserved()
         val snapshot = captured.semantic
         val captureStart = captured.startMs
         val captureEnd = captured.endMs

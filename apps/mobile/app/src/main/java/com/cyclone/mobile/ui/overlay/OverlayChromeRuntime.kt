@@ -377,6 +377,7 @@ object OverlayChromeRuntime {
             suspendedTaskId = null
         }
         val job = aiScope.launch {
+            try {
             mutate {
                 it.enterWorking()
                 // Once execution begins, collapse Cyclone's own accessibility overlay mechanically.
@@ -385,6 +386,7 @@ object OverlayChromeRuntime {
                 it.updateStatus("Starting…")
             }
             if (launchPackage != null) {
+                val launchTrace = AgentTraceRuntime.start(context, request, "local-launch")
                 val outcome = runCatching {
                     val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
                         com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
@@ -400,10 +402,13 @@ object OverlayChromeRuntime {
                     }
                     check(observed) { "Couldn't verify the app opened." }
                 }
+                AgentTraceRuntime.finish(context, launchTrace,
+                    if (outcome.isSuccess) "COMPLETED" else if (outcome.exceptionOrNull() is kotlinx.coroutines.CancellationException) "CANCELLED" else "FAILED",
+                    if (outcome.isSuccess) "App opened and verified." else "App launch failed or was stopped.", 1)
                 outcome.exceptionOrNull()?.let { if (it is kotlinx.coroutines.CancellationException) throw it }
                 handleAgentResult(QuickAgentResult(outcome.isSuccess,
                     if (outcome.isSuccess) "App opened." else outcome.exceptionOrNull()?.message ?: "Couldn't open the app.",
-                    1, "", classification = if (outcome.isSuccess) "COMPLETE" else "FAILED"))
+                    1, "local-launch", taskId = launchTrace, classification = if (outcome.isSuccess) "COMPLETE" else "FAILED"), shared.taskId)
                 return@launch
             }
             val settings = readAiSettings(context)
@@ -425,18 +430,19 @@ object OverlayChromeRuntime {
                     mutate { it.updateStatus("Checking the current page") }
                 }
             }
-            var result = agent.execute(request, config, progress)
-            if (result.taskId == null && result.decisions == 0) {
-                // 4.4.6 made capture-change races explicitly retryable, but execute() still returned
-                // before a trace existed. Give the screen one bounded settle interval and retry once.
-                AgentTaskNotificationRuntime.progress(context, "Refreshing the current screen…")
-                delay(INITIAL_OBSERVATION_RETRY_MS)
-                result = agent.execute(request, config, progress)
+            val result = agent.execute(request, config, progress)
+            handleAgentResult(result, shared.taskId)
+            } catch (error: Exception) {
+                val cancelled = error is kotlinx.coroutines.CancellationException
+                val result = QuickAgentResult(false,
+                    if (cancelled) "Request stopped." else "Request startup failed (${error.javaClass.simpleName}). Open Outcomes for details.",
+                    0, "request-startup", taskId = agent.requestTraceId,
+                    classification = if (cancelled) "CANCELLED" else "HARD_BLOCKER")
+                val recorded = if (result.taskId == null && launchPackage == null)
+                    persistPreflightFailure(context, request, result.model, result) else result
+                handleAgentResult(recorded, shared.taskId)
+                if (cancelled) throw error
             }
-            if (!result.ok && result.taskId == null) {
-                result = persistPreflightFailure(context, request, config.model.id, result)
-            }
-            handleAgentResult(result)
         }
         synchronized(lock) { aiJob = job }
     }
@@ -448,7 +454,7 @@ object OverlayChromeRuntime {
         result: QuickAgentResult,
     ): QuickAgentResult {
         val traceId = AgentTraceRuntime.start(context, request, modelId)
-        val classification = preflightClassification(result.message)
+        val classification = result.classification ?: preflightClassification(result.message)
         AgentTraceRuntime.event(
             context = context,
             sessionId = traceId,
@@ -458,7 +464,7 @@ object OverlayChromeRuntime {
             ok = false,
             detail = result.message,
         )
-        AgentTraceRuntime.finish(context, traceId, "FAILED", result.message, result.decisions)
+        AgentTraceRuntime.finish(context, traceId, if (classification == "CANCELLED") "CANCELLED" else "FAILED", result.message, result.decisions)
         return result.copy(taskId = traceId, classification = classification)
     }
 
@@ -519,6 +525,7 @@ object OverlayChromeRuntime {
         val agent = synchronized(lock) { adaptiveAgent } ?: return
         val taskId = synchronized(lock) { suspendedTaskId } ?: return
         val context = synchronized(lock) { service } ?: return
+        val expectedTaskId = foregroundTaskId
         val job = aiScope.launch {
             mutate { machine ->
                 when (machine.state()) {
@@ -541,16 +548,17 @@ object OverlayChromeRuntime {
                     mutate { it.updateStatus("Checking the current page") }
                 }
             }
-            handleAgentResult(result)
+            handleAgentResult(result, expectedTaskId)
         }
         synchronized(lock) { aiJob = job }
     }
 
-    private fun handleAgentResult(result: QuickAgentResult) {
+    private fun handleAgentResult(result: QuickAgentResult, expectedTaskId: String? = foregroundTaskId) {
+        if (expectedTaskId != foregroundTaskId) return
         val context = synchronized(lock) { service }
         foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task ->
             if (!task.working && result.classification == "HUMAN_OR_GATE") task.copy(resumable = true)
-            else task.copy(phase = when (result.classification) {
+            else task.copy(message = result.message, phase = when (result.classification) {
                 "COMPLETE" -> TaskPhase.DONE
                 "HUMAN_OR_GATE" -> TaskPhase.REVIEW
                 "CANCELLED" -> TaskPhase.STOPPED
@@ -645,7 +653,6 @@ object OverlayChromeRuntime {
 
     private const val GATE_CHALLENGE_TTL_MS = 60_000L
     private const val GATE_APPROVAL_TTL_MS = 30_000L
-    private const val INITIAL_OBSERVATION_RETRY_MS = 550L
     private const val INTERNAL_BRAIN_UPDATED = "Cyclone Brain updated"
 
     private fun readAiSettings(context: Context): OverlayAiSettings {
