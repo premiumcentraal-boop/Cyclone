@@ -8,6 +8,7 @@ import com.cyclone.mobile.BridgeClient
 import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest as NativePhoneToolRequest
+import com.cyclone.mobile.automation.stock.instagram.InstagramStockSkillCollectionGateway
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -35,9 +36,11 @@ object AutomationRuntime {
                 DeviceState.setController(DeviceState.Controller.HUMAN)
                 DeviceState.addLog("Automation takeover required run=$runId step=$stepId reason=$reason")
                 true
-            }
+            },
+            stockSkills = InstagramStockSkillCollectionGateway(app),
         )
         router = AutomationEventRouter(store, runner)
+        seedStockSkills()
         seedExamples()
         initialized = true
         store.listAutomations().filter { it.enabled && it.trigger.type == TriggerType.SCHEDULE }.forEach { registerSchedule(app, it) }
@@ -125,6 +128,13 @@ object AutomationRuntime {
         val pending = PendingIntent.getBroadcast(context, automationId.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         context.getSystemService(AlarmManager::class.java)
             .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis.coerceAtLeast(System.currentTimeMillis() + 1_000), pending)
+    }
+
+    private fun seedStockSkills() {
+        InstagramStockSkillCollectionGateway.definitions.forEach { definition ->
+            val existing = store.getSkill(definition.id)
+            if (existing == null || existing.version < definition.version) store.saveSkill(definition)
+        }
     }
 
     private fun seedExamples() {
