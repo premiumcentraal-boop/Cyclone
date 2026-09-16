@@ -6,9 +6,11 @@ import "./redesign.css";
 import "./connections-redesign.css";
 import "./chatgpt-attach.css";
 import "./camera-streaming.css";
+import "./instagram-presets.css";
 import { CyclonePcCompanionApp } from "./app.js";
 import { createDesktopService } from "./services/serviceFactory.js";
 import { mountCameraStreamingSettings } from "./ui/cameraStreamingSettings.js";
+import { mountInstagramPresetAutomations } from "./ui/instagramPresetAutomations.js";
 import { mountTransportOnboarding } from "./ui/transportOnboarding.js";
 
 async function bootstrap(): Promise<void> {
@@ -20,7 +22,9 @@ async function bootstrap(): Promise<void> {
     await app.start();
     const unmountTransportOnboarding = mountTransportOnboarding(service);
     const unmountCameraStreamingSettings = mountCameraStreamingSettings(service);
+    const unmountInstagramPresetAutomations = mountInstagramPresetAutomations(service);
     window.addEventListener("beforeunload", () => {
+      unmountInstagramPresetAutomations();
       unmountCameraStreamingSettings();
       unmountTransportOnboarding();
       app.destroy();
