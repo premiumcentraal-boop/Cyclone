@@ -696,12 +696,17 @@ class CycloneAgentEnvironment internal constructor(
                 message,
                 code.name,
             )
-            PhoneToolErrorCode.CAPABILITY_UNAVAILABLE,
-            PhoneToolErrorCode.APP_NOT_FOUND,
-            -> AgentFailure(
+            PhoneToolErrorCode.CAPABILITY_UNAVAILABLE -> AgentFailure(
                 AgentFailureClass.CAPABILITY_UNAVAILABLE,
                 AgentFailureLayer.CAPABILITY,
                 false,
+                message,
+                code.name,
+            )
+            PhoneToolErrorCode.APP_NOT_FOUND -> AgentFailure(
+                AgentFailureClass.TARGET_NOT_FOUND,
+                AgentFailureLayer.EXECUTION,
+                true,
                 message,
                 code.name,
             )

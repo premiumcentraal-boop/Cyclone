@@ -37,6 +37,7 @@ class WorkspaceRequestQueue422Test {
         val second = queue.add("open instagram")
         assertNull(queue.promotableHead(TaskPhase.WORKING))
         assertEquals(first.id, queue.promotableHead(TaskPhase.STOPPED)?.id)
+        assertEquals(first.id, queue.promotableHead(TaskPhase.DONE)?.id)
         queue.remove(first.id)
         assertEquals(second.id, queue.promotableHead(TaskPhase.FAILED)?.id)
         assertTrue(source("runtime/background/WorkspaceTaskService.kt").contains("WorkspaceTasks.scheduleQueuePromotion"))
@@ -46,7 +47,7 @@ class WorkspaceRequestQueue422Test {
         assertFalse(WorkspaceQueuePromotionPolicy.canPromote(TaskPhase.REVIEW))
         assertFalse(WorkspaceQueuePromotionPolicy.canPromote(TaskPhase.HUMAN))
         assertFalse(WorkspaceQueuePromotionPolicy.canPromote(TaskPhase.PAUSED))
-        assertFalse(WorkspaceQueuePromotionPolicy.canPromote(TaskPhase.DONE))
+        assertTrue(WorkspaceQueuePromotionPolicy.canPromote(TaskPhase.DONE))
         assertTrue(WorkspaceQueuePromotionPolicy.canPromote(TaskPhase.STOPPED))
         assertTrue(WorkspaceQueuePromotionPolicy.canPromote(TaskPhase.FAILED))
         assertTrue(WorkspaceQueuePromotionPolicy.canPromote(null))
@@ -78,10 +79,10 @@ class WorkspaceRequestQueue422Test {
 
     @Test fun promotionSourceReRunsExistingStartSafetyChecksAndNeverGuessesProfileB() {
         val state = source("runtime/background/WorkspaceTaskState.kt")
-        assertTrue(state.contains("requests.promotableHead(currentPhase)"))
+        assertTrue(state.contains("requests.promotableHead(state.value?.phase)"))
         assertTrue(state.contains("if (!canStartRequest() || Layer2Workspaces.gated())"))
         assertTrue(state.contains("preferred.androidUserId != own"))
-        assertTrue(state.contains("resolveQueueTarget(context, pending) ?: return@synchronized false"))
+        assertTrue(state.contains("OverlayChromeRuntime.submitRequest(pending.goal)"))
         assertTrue(state.contains("start(context.applicationContext, pending.goal, target.packageName, target.appLabel, pending.id)"))
     }
 }

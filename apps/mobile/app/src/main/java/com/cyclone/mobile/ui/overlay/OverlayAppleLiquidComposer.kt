@@ -31,9 +31,12 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.ScreenShare
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -61,28 +64,37 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cyclone.mobile.ui.v32.LocalCycloneInsideLiquidHost
 import com.cyclone.mobile.ui.v32.LocalCycloneLiquidBackdrop
+import com.cyclone.mobile.ui.v32.LocalCycloneOverlayChrome
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 
-private val OverlayGlass = Color(0xFF111216).copy(alpha = 0.86f)
-private val OverlayGlassStrong = Color(0xFF111216).copy(alpha = 0.91f)
-private val OverlayGlassRim = Color.White.copy(alpha = 0.15f)
-private val OverlayGlassInner = Color.White.copy(alpha = 0.075f)
+private val OverlayGlass = Color(0xFF1C1C1E).copy(alpha = 0.90f)
+private val OverlayGlassStrong = Color(0xFF1C1C1E).copy(alpha = 0.94f)
+private val OverlayGlassInner = Color.White.copy(alpha = 0.10f)
 private val OverlayText = Color(0xFFF5F5F7)
-private val OverlaySecondaryText = Color(0xFFAEAEB2)
-private val OverlayBlue = Color(0xFF2F7CF6)
+private val OverlaySecondaryText = Color(0xFFD1D1D6)
+private val OverlayBlue = Color(0xFF64B5FF)
+
+private val OverlayDarkScheme = darkColorScheme(
+    primary = OverlayBlue,
+    onPrimary = Color.White,
+    onSurface = OverlayText,
+    onSurfaceVariant = OverlaySecondaryText,
+    surface = Color(0xFF1C1C1E),
+    surfaceVariant = Color(0xFF2C2C2E),
+)
 
 /**
  * Overlay-only glass. Android cannot sample pixels owned by another app into a Compose backdrop, so
- * the system overlay uses Kyant for refraction when a local backdrop is available and a deliberately
- * dark translucent surface otherwise. The strong neutral surface keeps the control legible over both
- * bright launchers and dark apps without painting a full-screen scrim.
+ * the system overlay uses Kyant refraction over a dense charcoal fill — readable white type on
+ * Apple Regular glass, never a clear window onto the launcher.
  */
 @Composable
-private fun OverlayAppleGlass(
+internal fun OverlayAppleGlass(
     modifier: Modifier,
     cornerRadius: androidx.compose.ui.unit.Dp,
     strong: Boolean = false,
@@ -97,19 +109,26 @@ private fun OverlayAppleGlass(
             shape = { shape },
             effects = {
                 vibrancy()
-                blur(2f.dp.toPx())
-                lens(10f.dp.toPx(), 20f.dp.toPx(), chromaticAberration = false)
+                blur(16f.dp.toPx())
+                lens(12f.dp.toPx(), 24f.dp.toPx(), chromaticAberration = true)
             },
             onDrawSurface = { drawRect(surface) },
         )
     } else {
         modifier.background(surface, shape)
     }
-    Box(
-        glassModifier.border(1.dp, OverlayGlassRim, shape),
-        contentAlignment = Alignment.Center,
-        content = content,
-    )
+    CompositionLocalProvider(
+        LocalCycloneInsideLiquidHost provides true,
+        LocalCycloneOverlayChrome provides true,
+    ) {
+        MaterialTheme(colorScheme = OverlayDarkScheme) {
+            Box(
+                glassModifier,
+                contentAlignment = Alignment.Center,
+                content = content,
+            )
+        }
+    }
 }
 
 @Composable

@@ -8,15 +8,21 @@ import org.junit.Test
 class CycloneVisual42ContractTest {
     @Test fun homeReadsRealReadinessRoutinesAndTaskState() {
         val home = source("CycloneV32App.kt")
-        assertTrue(home.contains("Text(greeting"))
+        assertTrue(home.contains("CyclonePageHeader("))
+        assertTrue(home.contains("title = greeting"))
         assertTrue(home.contains("CyclonePermissionSetup.phoneControlSnapshot(context)"))
         assertTrue(home.contains("AutomationRuntime.store.listAutomations()"))
         assertTrue(home.contains("WorkspaceTasks.state.collectAsState()"))
         assertTrue(home.contains("takeIf { it.phase != TaskPhase.STOPPED }"))
         assertTrue(home.contains("V39AiChatSessionRuntime.pendingRequest = request"))
         assertTrue(home.contains("CycloneAskTaskPanel(current)"))
+        assertTrue(home.contains("cyclonePageInsets()"))
+        assertTrue(home.contains("CycloneStatusPill(readinessLabel"))
+        assertTrue(home.contains("ProfileRescueBar()"))
         assertFalse(home.contains("Your phone, simplified"))
         assertFalse(home.contains("Button(onClick = onAi"))
+        assertFalse(home.contains("Settings ·"))
+        assertFalse(home.contains("bottom = 96.dp"))
     }
 
     @Test fun homeRoutinesAreObjectsNotRawTextButtons() {
@@ -57,11 +63,11 @@ class CycloneVisual42ContractTest {
     @Test fun segmentedControlUsesOneCompactTrayAndInsetMovingLens() {
         val controls = source("CycloneV32Components.kt")
         val segmented = controls.substringAfter("fun CycloneSegmentedControl(")
-        assertTrue(segmented.contains("CycloneLiquidTray(modifier = modifier, height = 44.dp"))
+        assertTrue(segmented.contains("CycloneLiquidTray(modifier = modifier.fillMaxWidth(), height = 48.dp"))
         assertTrue(segmented.contains("BoxWithConstraints"))
         assertTrue(segmented.contains("CycloneLiquidSelectionLens("))
         assertTrue(segmented.contains("selectedIndex = selected"))
-        assertTrue(segmented.contains("height = 34.dp"))
+        assertTrue(segmented.contains("height = 38.dp"))
         assertTrue(segmented.contains("horizontalInset = 4.dp"))
         assertTrue(segmented.contains("animateColorAsState"))
         assertTrue(segmented.contains("selectableGroup()"))
@@ -74,6 +80,8 @@ class CycloneVisual42ContractTest {
         assertTrue(design.contains("Color(0xFF07101F)"))
         assertTrue(design.contains("Color(0xFF0E1A2B)"))
         assertTrue(design.contains("val Page = 20.dp"))
+        assertTrue(design.contains("val ScreenBottom = 24.dp"))
+        assertTrue(design.contains("fun cyclonePageInsets"))
         assertFalse(design.contains("border = BorderStroke"))
     }
 

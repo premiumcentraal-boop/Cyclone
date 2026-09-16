@@ -13,7 +13,8 @@ data class ObservationHealth(
     val lastSuccessMs: Long? = null,
     val cooldownUntilMs: Long = 0,
 ) {
-    val terminal get() = state in setOf(ObservationState.PERMISSION_REQUIRED, ObservationState.DISCONNECTED, ObservationState.SCOPE_MISMATCH, ObservationState.TARGET_NOT_VISIBLE) || attempts >= 2
+    val terminal get() = state in setOf(ObservationState.PERMISSION_REQUIRED, ObservationState.DISCONNECTED, ObservationState.SCOPE_MISMATCH, ObservationState.TARGET_NOT_VISIBLE) ||
+        attempts >= (if (state == ObservationState.CAPTURE_CHANGED) 5 else 2)
     val reason get() = "observation.${state.name.lowercase()}"
     val message get() = when (state) {
         ObservationState.HEALTHY -> "Semantic observation is current."

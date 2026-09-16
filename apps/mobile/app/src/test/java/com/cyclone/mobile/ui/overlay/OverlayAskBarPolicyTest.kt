@@ -66,4 +66,28 @@ class OverlayAskBarPolicyTest {
         assertTrue(workspace.contains("override fun onStop()"))
         assertTrue(workspace.contains("OverlayExternalInteraction.active.value = false"))
     }
+
+    @Test
+    fun overlayComposerRidesTheKeyboardWithoutAdjustResize() {
+        val controller = source("ai/OverlayChromeController.kt")
+        val overlay = source("ui/overlay/OverlayChrome.kt")
+        assertTrue(controller.contains("SOFT_INPUT_ADJUST_NOTHING"))
+        assertTrue(controller.contains("OverlayImeLift.windowY("))
+        assertTrue(controller.contains("WindowInsetsAnimationCompat.Callback"))
+        assertTrue(controller.contains("fitInsetsTypes = 0"))
+        assertFalse(controller.contains("SOFT_INPUT_ADJUST_RESIZE"))
+        assertTrue(overlay.contains("LocalOverlayImeBottomPx"))
+        assertFalse(overlay.contains("navigationBarsPadding()"))
+        assertFalse(overlay.contains("imePadding()"))
+    }
+
+    @Test
+    fun workingTaskKeepsAskCycloneInPlaceWithoutFullScreenWash() {
+        val runtime = source("ui/overlay/OverlayChromeRuntime.kt")
+        val controller = source("ai/OverlayChromeController.kt")
+        assertTrue(runtime.contains("it.enterWorking()"))
+        assertFalse(runtime.contains("it.dispatch(OverlayUserAction.MINIMIZE)"))
+        assertTrue(controller.contains("CycloneV32Theme(drawBackground = false)"))
+        assertTrue(controller.contains("fun keyboardClosed()"))
+    }
 }

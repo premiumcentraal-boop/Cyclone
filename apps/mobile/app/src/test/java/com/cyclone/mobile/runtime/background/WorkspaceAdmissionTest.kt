@@ -10,7 +10,7 @@ class WorkspaceAdmissionTest {
     }
     @Test fun suspendedAndRetainedTasksKeepTheirSlot() {
         listOf(TaskPhase.STARTING, TaskPhase.WORKING, TaskPhase.PAUSED, TaskPhase.HUMAN,
-            TaskPhase.REVIEW, TaskPhase.DONE).forEach {
+            TaskPhase.REVIEW).forEach {
             assertFalse(WorkspaceQueuePromotionPolicy.canStart(it, false))
         }
     }
@@ -23,8 +23,8 @@ class WorkspaceAdmissionTest {
         assertNull(queue.peek()?.blockedReason)
         assertEquals(request.goal, queue.peek()?.goal)
     }
-    @Test fun stoppedAndFailedTasksReleaseTheirSlot() {
-        listOf(TaskPhase.STOPPED, TaskPhase.FAILED).forEach {
+    @Test fun stoppedFailedAndFinishedTasksReleaseTheirSlot() {
+        listOf(TaskPhase.STOPPED, TaskPhase.FAILED, TaskPhase.DONE).forEach {
             assertTrue(WorkspaceQueuePromotionPolicy.canStart(it, false))
             assertFalse(WorkspaceQueuePromotionPolicy.canStart(it, true))
         }

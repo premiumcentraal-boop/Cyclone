@@ -7,6 +7,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GoalContractTest {
+    @Test fun browserFirstNavigationUsesLoadedHostNotGenericWords() {
+        val goal = "open chrome and go to Shopify"
+        val intent = NavigationIntent.parse(goal)!!
+        assertTrue(intent.chrome)
+        assertTrue(intent.accepts("https://shopify.com"))
+        assertFalse(intent.accepts("https://shopify.com/nl?country=NL"))
+        assertTrue(intent.acceptsLoaded("https://www.shopify.com/nl?country=NL"))
+        val contract = GoalContractCompiler.compile(goal)
+        assertFalse(contract.requirements.any { it.kind == GoalRequirementKind.GENERIC_SEMANTIC_EVIDENCE })
+        val bar = control("https://www.shopify.com/nl?country=NL", "edittext").copy(
+            evidence = JSONObject().put("resourceId", "com.android.chrome:id/url_bar"))
+        val loaded = page("com.android.chrome", "Shopify", listOf(bar))
+        assertTrue(GoalContractCompiler.evaluate(contract, loaded, emptyList()).satisfied)
+        assertFalse(GoalContractCompiler.evaluate(contract, loaded.copy(packageName = "org.mozilla.firefox"), emptyList()).satisfied)
+        val typing = loaded.copy(controls = listOf(bar.copy(evidence = JSONObject(bar.evidence.toString()).put("focused", true))))
+        assertFalse(GoalContractCompiler.evaluate(contract, typing, emptyList()).satisfied)
+        assertFalse(intent.acceptsLoaded("https://shopify.com.evil.com/nl"))
+        assertFalse(intent.acceptsLoaded("https://shopify.com@evil.com/"))
+        assertFalse(intent.acceptsLoaded("https://evil.com/?site=shopify.com"))
+    }
+
+    @Test fun browserFirstCompoundActionsCannotFinishAtTheLanding() {
+        listOf(
+            "open chrome and go to Shopify and log in",
+            "open chrome and go to Shopify then buy a plan",
+            "open chrome and search for Shopify",
+            "open chrome and go to Shopify and open settings",
+        ).forEach {
+            assertFalse(GoalContractCompiler.isSimpleWebNavigation(it))
+        }
+        assertTrue(GoalContractCompiler.isSimpleWebNavigation("Please open Google Chrome and then navigate to shopify.com"))
+    }
+
     @Test fun redditLoginRequiresAuthenticatedEvidenceInRequestedBrowser() {
         val contract = GoalContractCompiler.compile("open reddit.com on Chrome and login for me")
         val host = page("com.android.chrome", "https://reddit.com/")
@@ -38,6 +71,16 @@ class GoalContractTest {
         assertTrue(GoalContractCompiler.compile("open reddit.com and log in").requirements.any {
             it.kind == GoalRequirementKind.AUTHENTICATED_SESSION
         })
+    }
+
+    @Test fun namedAppOpenCompletesWhenTheAppIsForeground() {
+        val contract = GoalContractCompiler.compile("open Facebook")
+        assertTrue(contract.requirements.any { it.kind == GoalRequirementKind.NAMED_APP && it.value == "com.facebook.katana" })
+        val launcher = page("com.google.android.apps.nexuslauncher", "Home")
+        assertFalse(GoalContractCompiler.evaluate(contract, launcher, emptyList()).satisfied)
+        val facebook = page("com.facebook.katana", "Facebook")
+        assertTrue(GoalContractCompiler.evaluate(contract, facebook, emptyList()).satisfied)
+        assertFalse(GoalContractCompiler.evaluate(GoalContractCompiler.compile("open Facebook and login"), facebook, emptyList()).satisfied)
     }
 
     @Test fun onlySimpleHostNavigationQualifiesForLocalCompletion() {

@@ -10,10 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -152,7 +150,7 @@ internal fun CycloneSettingsPage426(
     }
 
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 36.dp),
+        contentPadding = cyclonePageInsets(top = 10.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
@@ -347,7 +345,7 @@ internal fun CycloneSettingsPage426(
 @Composable
 private fun Settings426Root(groups: List<Pair<String, List<Settings426Row>>>, onOpen: (String) -> Unit) {
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 36.dp),
+        contentPadding = cyclonePageInsets(top = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         groups.forEach { (groupTitle, rows) ->
@@ -363,20 +361,13 @@ private fun Settings426Root(groups: List<Pair<String, List<Settings426Row>>>, on
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        shadowElevation = 1.dp,
+                        shadowElevation = 0.dp,
                     ) {
                         Column {
                             rows.forEachIndexed { index, row ->
                                 Settings426ListRow(row, onClick = { onOpen(row.id) })
                                 if (index != rows.lastIndex) {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .padding(start = 58.dp, end = 14.dp)
-                                            .height(1.dp),
-                                    ) {
-                                        Box(Modifier.fillMaxWidth().height(1.dp).clickable(enabled = false) {})
-                                    }
+                                    CycloneHairline(Modifier.padding(start = 58.dp, end = 14.dp))
                                 }
                             }
                         }
@@ -498,7 +489,7 @@ private fun Settings426Surface(content: @Composable () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 1.dp,
+        shadowElevation = 0.dp,
     ) {
         Box(Modifier.padding(16.dp)) { content() }
     }

@@ -1,7 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -26,9 +26,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
@@ -47,9 +50,27 @@ import com.kyant.capsule.ContinuousCapsule
  * Cyclone semantic Liquid Chrome.
  *
  * One optical object owns each interaction region. Content cards remain quiet Material surfaces.
- * Trays deliberately use Kyant's restrained blur/lens recipe: the previous 8dp blur + 24/24 lens
- * created a thick second border on white backgrounds and made controls look nested inside boxes.
+ * Trays use Kyant's refractive recipe with chromatic aberration so the rim splits as the
+ * surface moves. Nested option bars must not draw a second tray inside a panel; they inherit
+ * [LocalCycloneInsideLiquidHost] and only move the inner lens.
  */
+internal val LocalCycloneInsideLiquidHost = compositionLocalOf { false }
+internal val LocalCycloneOverlayChrome = compositionLocalOf { false }
+
+@Composable
+internal fun cycloneGlassIsDark(): Boolean = LocalCycloneOverlayChrome.current || isSystemInDarkTheme()
+
+/** Apple Regular glass: milky white in light, dense charcoal in dark. Never a clear window. */
+@Composable
+internal fun cycloneGlassFill(panel: Boolean): Color {
+    val dark = cycloneGlassIsDark()
+    return if (dark) {
+        Color(0xFF1C1C1E).copy(alpha = if (panel) 0.90f else 0.86f)
+    } else {
+        Color.White.copy(alpha = if (panel) 0.88f else 0.84f)
+    }
+}
+
 @Composable
 internal fun CycloneLiquidTray(
     modifier: Modifier = Modifier,
@@ -58,15 +79,16 @@ internal fun CycloneLiquidTray(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val backdrop = LocalCycloneLiquidBackdrop.current
-    val dark = isSystemInDarkTheme()
-    val container = if (dark) Color(0xFF121212).copy(alpha = 0.30f) else Color.White.copy(alpha = 0.22f)
+    val container = cycloneGlassFill(panel = false)
+    val shape = ContinuousCapsule
 
     if (backdrop == null) {
         Box(
             modifier
                 .height(height)
                 .fillMaxWidth()
-                .background(container, ContinuousCapsule)
+                .clip(shape)
+                .background(container)
                 .padding(contentPadding),
             contentAlignment = Alignment.Center,
             content = content,
@@ -78,16 +100,17 @@ internal fun CycloneLiquidTray(
         modifier
             .drawBackdrop(
                 backdrop = backdrop,
-                shape = { ContinuousCapsule },
+                shape = { shape },
                 effects = {
                     vibrancy()
-                    blur(2f.dp.toPx())
-                    lens(12f.dp.toPx(), 24f.dp.toPx())
+                    blur(8f.dp.toPx())
+                    lens(12f.dp.toPx(), 24f.dp.toPx(), chromaticAberration = true)
                 },
                 onDrawSurface = { drawRect(container) },
             )
             .height(height)
             .fillMaxWidth()
+            .clip(shape)
             .padding(contentPadding),
         contentAlignment = Alignment.Center,
         content = content,
@@ -103,36 +126,39 @@ internal fun CycloneLiquidPanel(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val backdrop = LocalCycloneLiquidBackdrop.current
-    val dark = isSystemInDarkTheme()
     val shape = RoundedCornerShape(cornerRadius)
-    val container = if (dark) Color(0xFF121212).copy(alpha = 0.34f) else Color.White.copy(alpha = 0.25f)
+    val container = cycloneGlassFill(panel = true)
     val base = modifier.fillMaxWidth()
 
     if (backdrop == null) {
-        Box(
-            base.background(container, shape).padding(contentPadding),
-            contentAlignment = Alignment.Center,
-            content = content,
-        )
+        CompositionLocalProvider(LocalCycloneInsideLiquidHost provides true) {
+            Box(
+                base.clip(shape).background(container).padding(contentPadding),
+                contentAlignment = Alignment.Center,
+                content = content,
+            )
+        }
         return
     }
 
-    Box(
-        base
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { shape },
-                effects = {
-                    vibrancy()
-                    blur(2f.dp.toPx())
-                    lens(12f.dp.toPx(), 22f.dp.toPx())
-                },
-                onDrawSurface = { drawRect(container) },
-            )
-            .padding(contentPadding),
-        contentAlignment = Alignment.Center,
-        content = content,
-    )
+    CompositionLocalProvider(LocalCycloneInsideLiquidHost provides true) {
+        Box(
+            base
+                .drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { shape },
+                    effects = {
+                        vibrancy()
+                        blur(14f.dp.toPx())
+                        lens(12f.dp.toPx(), 22f.dp.toPx(), chromaticAberration = true)
+                    },
+                    onDrawSurface = { drawRect(container) },
+                )
+                .padding(contentPadding),
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+    }
 }
 
 /**
@@ -155,15 +181,15 @@ internal fun CycloneLiquidSelectionLens(
     val lensWidth = (itemWidth - safeInset * 2).coerceAtLeast(1.dp)
     val targetOffset by animateDpAsState(
         targetValue = itemWidth * selectedIndex.coerceIn(0, itemCount - 1) + safeInset,
-        animationSpec = tween(240),
+        animationSpec = spring(dampingRatio = 0.84f, stiffness = 420f),
         label = "Cyclone liquid selection",
     )
-    val dark = isSystemInDarkTheme()
-    val surface = if (dark) Color.White.copy(alpha = 0.075f) else Color.Black.copy(alpha = 0.035f)
+    val dark = cycloneGlassIsDark()
+    val frost = if (dark) Color.White.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.62f)
     val base = modifier.offset(x = targetOffset).width(lensWidth).height(height)
 
     if (backdrop == null) {
-        Box(base.background(surface, ContinuousCapsule))
+        Box(base.background(frost, ContinuousCapsule))
         return
     }
 
@@ -171,8 +197,8 @@ internal fun CycloneLiquidSelectionLens(
         base.drawBackdrop(
             backdrop = backdrop,
             shape = { ContinuousCapsule },
-            effects = { lens(7f.dp.toPx(), 11f.dp.toPx(), chromaticAberration = false) },
-            onDrawSurface = { drawRect(surface) },
+            effects = { lens(8f.dp.toPx(), 14f.dp.toPx(), chromaticAberration = true) },
+            onDrawSurface = { drawRect(frost) },
         ),
     )
 }
@@ -187,7 +213,7 @@ internal fun CycloneLiquidTextAction(
     prominent: Boolean = false,
 ) {
     val backdrop = LocalCycloneLiquidBackdrop.current
-    val dark = isSystemInDarkTheme()
+    val dark = cycloneGlassIsDark()
     val neutral = if (dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.055f)
     if (backdrop == null) {
         val shape = RoundedCornerShape(999.dp)
@@ -239,7 +265,7 @@ internal fun CycloneLiquidDestructiveAction(
     enabled: Boolean = true,
 ) {
     val backdrop = LocalCycloneLiquidBackdrop.current
-    val dark = isSystemInDarkTheme()
+    val dark = cycloneGlassIsDark()
     val surface = MaterialTheme.colorScheme.error.copy(alpha = if (dark) 0.18f else 0.10f)
     if (backdrop == null) {
         val shape = RoundedCornerShape(999.dp)
@@ -340,7 +366,7 @@ internal fun CycloneLiquidFilterChip(
     modifier: Modifier = Modifier,
 ) {
     val backdrop = LocalCycloneLiquidBackdrop.current
-    val dark = isSystemInDarkTheme()
+    val dark = cycloneGlassIsDark()
     val neutral = if (dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.055f)
     if (backdrop == null) {
         val shape = RoundedCornerShape(999.dp)

@@ -5,23 +5,63 @@ import java.net.URI
 /** Narrow intent captured from the user's task, never from model-provided authorization flags. */
 data class NavigationIntent(val target: String, val chrome: Boolean) {
     fun accepts(value: String): Boolean {
-        val uri = runCatching { URI(if ("://" in value) value else "https://$value") }.getOrNull() ?: return false
-        if (uri.scheme != "https" || uri.userInfo != null || uri.port != -1 || uri.query != null || uri.fragment != null) return false
+        val uri = parseUri(value) ?: return false
+        if (uri.query != null || uri.fragment != null) return false
         if (!uri.path.isNullOrBlank() && uri.path != "/") return false
-        val host = uri.host?.lowercase()?.removePrefix("www.") ?: return false
-        return if ('.' in target) host == target.removePrefix("https://").removePrefix("www.").trimEnd('/')
-        else host.split('.').let { it.size == 2 && it.first() == target }
+        return hostMatches(uri)
     }
-    companion object {
-        fun parse(goal: String): NavigationIntent? {
-            val match = Regex("(?i)^(?:please\\s+)?(?:open|go to|navigate to)\\s+(?:the\\s+)?([a-z0-9./:-]+)(?:\\s+(?:website|site))?(?:\\s+(?:in|on|using|with)\\s+(?:google\\s+)?(chrome))?[.!]?$").matchEntire(goal.trim()) ?: return null
-            val target = match.groupValues[1].lowercase().trimEnd('.')
-            val candidate = NavigationIntent(target, match.groupValues[2].isNotBlank())
-            // Only root hosts qualify for local completion; paths need their own goal evidence.
-            if ('.' in target) return candidate.takeIf { it.accepts(target) }
-            if (!Regex("[a-z][a-z0-9-]*").matches(target)) return null
-            if (target in setOf("camera", "chrome", "photos", "settings", "gmail", "youtube")) return null
-            return candidate
+
+    fun acceptsLoaded(value: String): Boolean {
+        val uri = parseUri(value) ?: return false
+        return hostMatches(uri)
+    }
+
+    private fun parseUri(value: String): URI? {
+        val uri = runCatching { URI(if ("://" in value) value else "https://$value") }.getOrNull() ?: return null
+        if (uri.scheme != "https" || uri.userInfo != null || uri.port != -1) return null
+        return uri
+    }
+
+    private fun hostMatches(uri: URI): Boolean {
+        val host = uri.host?.lowercase()?.removePrefix("www.") ?: return false
+        return if ('.' in target) {
+            val wanted = target.removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/')
+            host == wanted || host.endsWith(".$wanted")
+        } else {
+            host.split('.').let { it.size == 2 && it.first() == target }
         }
+    }
+
+    companion object {
+        private val SIMPLE = Regex(
+            "(?i)^(?:please\\s+)?(?:open|go to|navigate to)\\s+(?:the\\s+)?([a-z0-9./:-]+)(?:\\s+(?:website|site))?(?:\\s+(?:in|on|using|with)\\s+(?:google\\s+)?(chrome))?[.!]?$",
+        )
+        private val CHROME_THEN_SITE = Regex(
+            "(?i)^(?:please\\s+)?(?:open|launch)\\s+(?:google\\s+)?chrome\\s+(?:and\\s+)?(?:then\\s+)?(?:open|go to|navigate to)\\s+(?:the\\s+)?([a-z0-9.-]+)(?:\\s+(?:website|site))?[.!]?$",
+        )
+
+        fun parse(goal: String): NavigationIntent? {
+            val clean = goal.trim()
+            CHROME_THEN_SITE.matchEntire(clean)?.let { match ->
+                return candidate(match.groupValues[1], chrome = true)
+            }
+            val match = SIMPLE.matchEntire(clean) ?: return null
+            return candidate(match.groupValues[1], match.groupValues[2].isNotBlank())
+        }
+
+        private fun candidate(raw: String, chrome: Boolean): NavigationIntent? {
+            val target = raw.lowercase().trimEnd('.')
+            val intent = NavigationIntent(target, chrome)
+            if ('.' in target) return intent.takeIf { it.accepts(target) }
+            if (!Regex("[a-z][a-z0-9-]*").matches(target)) return null
+            if (target in NAMED_APPS) return null
+            return intent
+        }
+
+        private val NAMED_APPS = setOf(
+            "camera", "chrome", "photos", "settings", "gmail", "youtube",
+            "facebook", "instagram", "messenger", "whatsapp", "reddit",
+            "maps", "phone", "contacts", "messages", "files", "clock",
+        )
     }
 }

@@ -32,7 +32,7 @@ internal object WorkspaceQueuePromotionPolicy {
         canPromote(currentPhase) && !foregroundTaskOwnsSlot
 
     fun canPromote(currentPhase: TaskPhase?): Boolean =
-        currentPhase == null || currentPhase in setOf(TaskPhase.STOPPED, TaskPhase.FAILED)
+        currentPhase == null || currentPhase in setOf(TaskPhase.STOPPED, TaskPhase.FAILED, TaskPhase.DONE)
 }
 
 /** In-memory FIFO awaiting a safe execution slot; it never creates a second runner. */

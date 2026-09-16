@@ -39,7 +39,7 @@ fun CycloneFollowMePage(context: Context, refreshTick: Int, onBack: () -> Unit) 
     var message by remember { mutableStateOf("") }
 
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 96.dp),
+        contentPadding = cyclonePageInsets(top = 10.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
@@ -65,7 +65,7 @@ fun CycloneFollowMePage(context: Context, refreshTick: Int, onBack: () -> Unit) 
                     shape = RoundedCornerShape(24.dp),
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 0.dp,
-                    shadowElevation = 1.dp,
+                    shadowElevation = 0.dp,
                 ) {
                     Column(
                         Modifier.fillMaxWidth().padding(18.dp),
@@ -117,7 +117,7 @@ fun CycloneFollowMePage(context: Context, refreshTick: Int, onBack: () -> Unit) 
                     shape = RoundedCornerShape(24.dp),
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 0.dp,
-                    shadowElevation = 1.dp,
+                    shadowElevation = 0.dp,
                 ) {
                     Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Show it once", style = MaterialTheme.typography.titleMedium)
@@ -155,7 +155,7 @@ fun CycloneFollowMePage(context: Context, refreshTick: Int, onBack: () -> Unit) 
                         shape = RoundedCornerShape(22.dp),
                         color = MaterialTheme.colorScheme.surface,
                         tonalElevation = 0.dp,
-                        shadowElevation = 1.dp,
+                        shadowElevation = 0.dp,
                     ) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Ready to review", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -209,7 +209,7 @@ fun CycloneFollowMePage(context: Context, refreshTick: Int, onBack: () -> Unit) 
                     shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 0.dp,
-                    shadowElevation = 1.dp,
+                    shadowElevation = 0.dp,
                 ) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),

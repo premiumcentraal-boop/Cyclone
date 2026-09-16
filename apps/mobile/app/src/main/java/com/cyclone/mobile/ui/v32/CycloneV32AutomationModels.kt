@@ -165,3 +165,26 @@ fun StepDefinition.v32ReadableName(): String = name.ifBlank {
         else -> type.name.lowercase().replace('_', ' ').replaceFirstChar(Char::titlecase)
     }
 }
+
+/** Human-readable step line that never includes passwords, tokens, keys or typed values. */
+fun StepDefinition.v32SafeSummary(): String {
+    val tool = parameters["tool"]?.removePrefix("phone.")?.replace('_', ' ')
+    val target = selector?.text?.takeIf(String::isNotBlank)
+        ?: selector?.contentDescription?.takeIf(String::isNotBlank)
+        ?: selector?.resourceId?.substringAfterLast('/')?.takeIf(String::isNotBlank)
+        ?: selector?.role?.takeIf(String::isNotBlank)
+    val safe = parameters.filterKeys(::v32SafeParameterKey)
+        .filterKeys { it != "tool" }
+        .entries.take(3)
+        .joinToString(" · ") { (key, value) -> "${key.replace('_', ' ')}=$value" }
+    return buildString {
+        append(tool?.replaceFirstChar(Char::uppercase) ?: type.name.lowercase().replace('_', ' ').replaceFirstChar(Char::uppercase))
+        target?.let { append(" → $it") }
+        if (safe.isNotBlank()) append(" · $safe")
+    }
+}
+
+private fun v32SafeParameterKey(key: String): Boolean {
+    val normalized = key.lowercase()
+    return listOf("password", "secret", "token", "api_key", "apikey", "credential", "value", "text").none { it in normalized }
+}

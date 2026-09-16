@@ -1,17 +1,11 @@
 package com.cyclone.mobile.ui.v32
 
-import android.Manifest
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.widget.Toast
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,93 +13,38 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.AccountTree
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.BatteryChargingFull
-import androidx.compose.material.icons.rounded.Bolt
-import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.Keyboard
-import androidx.compose.material.icons.rounded.Layers
-import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Save
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.ScreenShare
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Settings as SettingsIcon
-import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.app.ActivityCompat
 import com.cyclone.mobile.CycloneAccessibilityService
-import com.cyclone.mobile.CycloneRelease
-import com.cyclone.mobile.DeviceState
-import com.cyclone.mobile.ai.AgentTraceRuntime
-import com.cyclone.mobile.ai.CycloneAiAccessProfile
-import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
-import com.cyclone.mobile.ai.OpenRouterAdaptiveAgent
-import com.cyclone.mobile.ai.OpenRouterModelPresets
-import com.cyclone.mobile.ai.OpenRouterSecretStore
-import com.cyclone.mobile.ai.QuickAgentConfig
-import com.cyclone.mobile.ai.TaskResultActivityV292
 import com.cyclone.mobile.applearner.AppLearnerRuntime
 import com.cyclone.mobile.applearner.FollowMeLearnerRuntime
 import com.cyclone.mobile.applearner.LearnerSessionState
 import com.cyclone.mobile.applearner.discardFollowMeSession
-import com.cyclone.mobile.brain.AdaptiveBrainRuntime
-import com.cyclone.mobile.brain.BrainChatRuntime
-import com.cyclone.mobile.brain.CycloneBrainRuntime
 import com.cyclone.mobile.debug.PageDebugSandboxV293
-import com.cyclone.mobile.gateway.GatewaySettingsActivity
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
-import com.cyclone.mobile.permissions.CyclonePermissionSetup
-import com.cyclone.mobile.ui.GatewayAiCard
-import kotlinx.coroutines.launch
-
 
 @Composable
 internal fun V32TeachPage(context: Context, refreshTick: Int) {
@@ -114,7 +53,7 @@ internal fun V32TeachPage(context: Context, refreshTick: Int) {
     val learnedApps = AppLearnerRuntime.learnedApps()
     val gestureCount = follow.teachingSessionId?.let { TeachingGestureEvidenceV292.list(context, it).size } ?: 0
 
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(contentPadding = cyclonePageInsets(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { CyclonePageIntro("Show it once", "Teach Cyclone", "Use your phone normally. Cyclone turns the useful path into reusable knowledge.") }
         item {
             CycloneHeroCard(
@@ -188,354 +127,6 @@ internal fun V32TeachPage(context: Context, refreshTick: Int) {
     }
 }
 
-private enum class V32AiMode { PHONE, BRAIN }
-
-@Composable
-internal fun V32AiPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
-    val prefs = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
-    val scope = rememberCoroutineScope()
-    val agent = remember { OpenRouterAdaptiveAgent(context) }
-    var mode by rememberSaveable { mutableStateOf(V32AiMode.PHONE) }
-    var phoneRequest by rememberSaveable { mutableStateOf("") }
-    var brainRequest by rememberSaveable { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf("") }
-    var historyTick by remember { mutableIntStateOf(0) }
-    val modelSlug = prefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }
-    val accessProfile = CycloneAiAccessProfileStore.read(context)
-    val hasKey = OpenRouterSecretStore.hasKey(context)
-    val history = remember(refreshTick, historyTick) { BrainChatRuntime.history(context, 12) }
-    fun config() = QuickAgentConfig(
-        model = OpenRouterModelPresets.byId(modelSlug),
-        safeMode = accessProfile != CycloneAiAccessProfile.FULL,
-        accessProfile = accessProfile,
-    )
-
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { CyclonePageIntro("One clear request", "Cyclone AI", "Known routes first, AI for uncertainty, vision only when structured phone evidence is not enough.") }
-        item { CycloneSegmentedControl(listOf("Control phone", "Ask Brain"), if (mode == V32AiMode.PHONE) 0 else 1, { mode = if (it == 0) V32AiMode.PHONE else V32AiMode.BRAIN }) }
-        if (mode == V32AiMode.PHONE) {
-            item {
-                CycloneHeroCard("What should happen?", "Describe the outcome. Cyclone handles the phone one verified step at a time.", Icons.Rounded.AutoAwesome, tone = CyclonePastel.LILAC) {
-                    OutlinedTextField(
-                        phoneRequest,
-                        { phoneRequest = it },
-                        Modifier.fillMaxWidth().semantics { contentDescription = "Phone task input" },
-                        minLines = 3,
-                        maxLines = 6,
-                        enabled = !busy,
-                        label = { Text("Phone task") },
-                        placeholder = { Text("Open my podcast app and find saved episodes") },
-                    )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            busy = true; status = "Starting…"; result = ""
-                            scope.launch {
-                                val run = agent.execute(phoneRequest, config()) { status = it }
-                                result = run.message; status = if (run.ok) "Completed and checked" else "Stopped safely"; busy = false
-                            }
-                        }, enabled = phoneRequest.isNotBlank() && !busy && hasKey, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.size(5.dp)); Text(if (busy) "Working…" else "Do it") }
-                        FilledTonalButton(onClick = {
-                            busy = true; status = "Building a reviewable routine…"; result = ""
-                            scope.launch {
-                                val run = agent.buildWorkflow(phoneRequest, config()) { status = it }
-                                result = run.message; status = if (run.ok) "Routine ready for review" else "No routine created"; busy = false
-                            }
-                        }, enabled = phoneRequest.isNotBlank() && !busy && hasKey, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.Bolt, null); Spacer(Modifier.size(5.dp)); Text("Make routine") }
-                    }
-                    if (!hasKey) OutlinedButton(onClick = onSettings, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Key, null); Spacer(Modifier.size(5.dp)); Text("Add AI key in Settings") }
-                }
-            }
-        } else {
-            if (history.isNotEmpty()) items(history.takeLast(8), key = { it.id }) { message ->
-                Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = if (message.role == "user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(if (message.role == "user") "You" else "Cyclone Brain", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold); Text(message.text) }
-                }
-            }
-            item {
-                CycloneSimpleCard {
-                    OutlinedTextField(brainRequest, { brainRequest = it }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 5, label = { Text("Ask or teach the Brain") })
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            val prompt = brainRequest.trim(); brainRequest = ""; busy = true
-                            scope.launch { result = BrainChatRuntime.chat(context, prompt, modelSlug); historyTick++; busy = false }
-                        }, enabled = brainRequest.isNotBlank() && !busy && hasKey, modifier = Modifier.weight(1f)) { Icon(Icons.AutoMirrored.Rounded.Send, null); Spacer(Modifier.size(5.dp)); Text("Ask") }
-                        FilledTonalButton(onClick = { BrainChatRuntime.saveKnowledge(context, brainRequest.trim()); brainRequest = ""; historyTick++ }, enabled = brainRequest.isNotBlank() && !busy, modifier = Modifier.weight(1f)) { Icon(Icons.Rounded.Save, null); Spacer(Modifier.size(5.dp)); Text("Remember") }
-                    }
-                }
-            }
-        }
-        if (status.isNotBlank() || result.isNotBlank()) item {
-            CycloneSimpleCard {
-                if (status.isNotBlank()) Text(status, fontWeight = FontWeight.Bold)
-                if (result.isNotBlank()) Text(result, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                val latest = AgentTraceRuntime.store.listSessions(1).firstOrNull()
-                if (latest != null && latest.status != "RUNNING") OutlinedButton(onClick = {
-                    context.startActivity(Intent(context, TaskResultActivityV292::class.java).putExtra(TaskResultActivityV292.EXTRA_SESSION_ID, latest.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.History, null); Spacer(Modifier.size(5.dp)); Text("Open decision timeline") }
-            }
-        }
-        item { GatewayAiCard(context, refreshTick) }
-    }
-}
-
-@Composable
-internal fun V32BrainPage(context: Context, refreshTick: Int) {
-    val store = AdaptiveBrainRuntime.store
-    val skills = remember(refreshTick) { store.listMicroSkills(60) }
-    val apps = remember(refreshTick) { store.listApps() }
-    val paths = remember(refreshTick) { store.listPaths(40) }
-    val notes = remember(refreshTick) { store.listNotes(30) }
-    val reports = remember(refreshTick) { CycloneBrainRuntime.store.listReports(12) }
-
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { CyclonePageIntro("Learn once, reuse", "Cyclone Brain", "A simple view of what Cyclone knows, how strong the evidence is and what changed recently.") }
-        item {
-            CycloneHeroCard("${skills.count { it.confidence >= .7 }} strong skills", "Across ${apps.size} apps and ${paths.size} reusable paths.", Icons.Rounded.AccountTree, tone = CyclonePastel.SKY) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    V32SmallMetric("Skills", skills.size, Modifier.weight(1f)); V32SmallMetric("Apps", apps.size, Modifier.weight(1f)); V32SmallMetric("Paths", paths.size, Modifier.weight(1f))
-                }
-            }
-        }
-        item { CycloneSectionTitle("Reusable skills") }
-        if (skills.isEmpty()) item { V32EmptyCard("Nothing verified yet", "Teach a routine or complete a phone task to create evidence.") }
-        else items(skills.take(16), key = { it.signature }) { skill ->
-            CycloneSimpleCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(skill.name, fontWeight = FontWeight.Bold)
-                        Text("${skill.successCount} success · ${skill.failureCount} failed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    CycloneStatusPill("${(skill.confidence * 100).toInt()}%", skill.confidence >= .55)
-                }
-            }
-        }
-        if (notes.isNotEmpty()) item {
-            CycloneSimpleCard {
-                Text("Latest learning", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                notes.take(6).forEach { Text("• ${it.text}", style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis) }
-            }
-        }
-        if (reports.isNotEmpty()) item {
-            CycloneSimpleCard {
-                Text("Recent outcomes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                reports.take(5).forEach { Text("• ${it.goal}: ${it.summary}", style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis) }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun V32SettingsPage(context: Context, refreshTick: Int, refresh: () -> Unit) {
-    var section by rememberSaveable { mutableStateOf("") }
-    androidx.activity.compose.BackHandler(section.isNotEmpty()) { section = "" }
-    val aiPrefs = context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE)
-    var hasKey by remember(refreshTick) { mutableStateOf(OpenRouterSecretStore.hasKey(context)) }
-    var selectedModel by rememberSaveable { mutableStateOf(aiPrefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id).orEmpty().ifBlank { OpenRouterModelPresets.DEFAULT.id }) }
-    var accessProfile by rememberSaveable { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
-    val phoneControl = CyclonePermissionSetup.phoneControlSnapshot(context)
-    val notificationAccess = CyclonePermissionSetup.notificationAccessEnabled(context)
-    val resultNotifications = CyclonePermissionSetup.resultNotificationsEnabled(context)
-    val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
-    val essentialReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
-    fun open(intent: Intent) = context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-
-    if (section.isEmpty()) {
-        LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("AI" to listOf("Model & API", "Default intelligence", "Phone autonomy"),
-                "Phone" to listOf("Phone control", "Notifications", "Background work", "Permissions"),
-                "Profiles" to listOf("Profile engine", "Storage"),
-                "Connections" to listOf("PC Gateway"),
-                "Privacy & safety" to listOf("Privacy & safety"), "About" to listOf("About")).forEach { (title, rows) ->
-                item { Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp)) }
-                items(rows) { row -> TextButton(onClick = { section = row }, modifier = Modifier.fillMaxWidth()) {
-                    Text(row, modifier = Modifier.weight(1f))
-                    if (row == "Phone control") Text(if (phoneControl.ready) "Ready" else if (phoneControl.needsRepair) "Repair" else "Setup needed")
-                    Text("  ›")
-                } }
-            }
-        }
-        return
-    }
-    LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { TextButton(onClick = { section = "" }) { Text("‹ $section") } }
-        if (section == "Default intelligence") item {
-            CycloneSimpleCard {
-                Text("How much should Cyclone think?", style = MaterialTheme.typography.titleMedium)
-                Text("Choose a lighter response or more thought for complex tasks.", style = MaterialTheme.typography.bodyMedium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Intelligence & autonomy", modifier = Modifier.weight(1f))
-                    CycloneIntelligenceControls(onChanged = refresh)
-                }
-            }
-        }
-        if (section == "Storage") item { Text("Routines and learned app knowledge are stored on this phone. Manage individual routines in Routines; view learned data in Brain.") }
-        if (section == "Background work") item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("Background tasks")
-                Text("Let Cyclone work on a separate screen while you use your phone.")
-                Button(onClick = { open(Intent(context, com.cyclone.mobile.runtime.background.BackgroundSetupActivity::class.java)) }) { Text("Set up background tasks") }
-            }
-        }
-        if (section == "Profile engine") item { com.cyclone.mobile.ui.RootFeaturesCard() }
-        if (section == "Phone control") item {
-            CycloneHeroCard(
-                title = if (essentialReady == 4) "Phone setup complete" else "$essentialReady of 4 essentials ready",
-                body = "Every permission is optional, Android-owned and reversible. Cyclone asks only after you tap a setup row.",
-                icon = Icons.Rounded.Security,
-                tone = if (essentialReady == 4) CyclonePastel.MINT else CyclonePastel.LEMON,
-            ) {
-                CycloneStatusPill(if (essentialReady == 4) "Ready" else "Finish setup", essentialReady == 4)
-            }
-        }
-        if (section in listOf("Phone control", "Notifications")) item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("Essential access")
-                CyclonePermissionRow(Icons.Rounded.Security, "Phone control", phoneControl.detail, phoneControl.ready, phoneControl.actionLabel) {
-                    open(CyclonePermissionSetup.accessibilitySettings())
-                }
-                CyclonePermissionRow(Icons.Rounded.Notifications, "Notification triggers", "React to selected app notifications without watching screenshots.", notificationAccess, if (notificationAccess) "Manage" else "Enable") {
-                    open(CyclonePermissionSetup.notificationAccessSettings())
-                }
-                CyclonePermissionRow(Icons.Rounded.History, "Result notifications", "Show a concise, visible result after an AI task or routine.", resultNotifications, if (resultNotifications) "Manage" else "Allow") {
-                    if (!resultNotifications && Build.VERSION.SDK_INT >= 33) {
-                        (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 320) }
-                    } else {
-                        open(CyclonePermissionSetup.appDetails(context))
-                    }
-                }
-                CyclonePermissionRow(Icons.Rounded.BatteryChargingFull, "Unrestricted battery", "Keep PC sessions and scheduled automation reliable while the phone is idle.", batteryUnrestricted, if (batteryUnrestricted) "Manage" else "Allow") {
-                    open(if (batteryUnrestricted) CyclonePermissionSetup.batteryOptimizationSettings() else CyclonePermissionSetup.batteryExemptionRequest(context))
-                }
-            }
-        }
-        if (section == "Permissions") item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("Advanced control")
-                val enhancedControl = CyclonePermissionSetup.enhancedControlEnabled(context)
-                val agentKeyboard = CyclonePermissionSetup.agentKeyboardEnabled(context)
-                val overlay = CyclonePermissionSetup.overlayEnabled(context)
-                val exactTiming = CyclonePermissionSetup.exactTimingEnabled(context)
-                val calendar = CyclonePermissionSetup.calendarEnabled(context)
-                val microphone = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                CyclonePermissionRow(Icons.Rounded.Layers, "Enhanced control engine", "Optional second Accessibility backend for difficult apps and richer takeover tools.", enhancedControl, if (enhancedControl) "Manage" else "Enable") {
-                    open(CyclonePermissionSetup.accessibilitySettings())
-                }
-                CyclonePermissionRow(Icons.Rounded.Keyboard, "Cyclone Agent Keyboard", "Optional input method for more reliable text entry in stubborn fields.", agentKeyboard, if (agentKeyboard) "Manage" else "Enable") {
-                    open(CyclonePermissionSetup.keyboardSettings())
-                }
-                CyclonePermissionRow(Icons.Rounded.Layers, "Display over apps", "Show visible takeover and connection controls above the current app.", overlay, if (overlay) "Manage" else "Allow") {
-                    open(CyclonePermissionSetup.overlaySettings(context))
-                }
-                CyclonePermissionRow(Icons.Rounded.Schedule, "Precise timing", "Optional exact scheduling for routines that cannot tolerate a flexible window.", exactTiming, if (exactTiming) "Manage" else "Allow") {
-                    open(CyclonePermissionSetup.exactTimingSettings(context))
-                }
-                CyclonePermissionRow(Icons.Rounded.CalendarMonth, "Calendar context", "Optional read-only matching for calendar-aware routines.", calendar, if (calendar) "Manage" else "Allow") {
-                    if (!calendar) {
-                        (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_CALENDAR), 321) }
-                    } else {
-                        open(CyclonePermissionSetup.appDetails(context))
-                    }
-                }
-                CyclonePermissionRow(Icons.Rounded.Mic, "Voice requests", "Speak a request into the Cyclone AI-mode composer.", microphone, if (microphone) "Manage" else "Allow") {
-                    if (!microphone) {
-                        (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.RECORD_AUDIO), 322) }
-                    } else {
-                        open(CyclonePermissionSetup.appDetails(context))
-                    }
-                }
-                V32FeatureRow(Icons.Rounded.ScreenShare, "Screen sharing asks every session", "Android's screen-capture consent is never converted into a permanent background grant.")
-            }
-        }
-        if (section == "Phone autonomy") item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("AI access profile")
-                Text("Android permissions decide what Cyclone can do. This separate profile decides what AI may use without stopping.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                CycloneAiAccessProfile.entries.forEach { profile ->
-                    V32AiAccessProfileCard(
-                        profile = profile,
-                        selected = accessProfile == profile,
-                        onClick = {
-                            accessProfile = profile
-                            CycloneAiAccessProfileStore.write(context, profile)
-                            refresh()
-                        },
-                    )
-                }
-                Text("Payments, credentials, destructive changes, security settings and final send actions still require a current local confirmation in every profile.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        if (section == "Model & API") item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("AI model & key")
-                CycloneOpenRouterCatalog(context, onSelectionChanged = refresh)
-            }
-        }
-        if (section == "PC Gateway") item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("Optional PC companion")
-                Text("Ask Cyclone, Profiles, Routines and Brain run on this phone. Internal API models need an internet connection and your API key, with no PC pairing required.")
-                Button(onClick = { context.startActivity(Intent(context, GatewaySettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Smartphone, null)
-                    Spacer(Modifier.size(6.dp))
-                    Text("PC Gateway & QR pairing")
-                }
-            }
-        }
-        if (section == "Privacy & safety") item {
-            CycloneSimpleCard {
-                CycloneSectionTitle("Privacy & safety")
-                V32FeatureRow(Icons.Rounded.Security, "One action authority", "Every UI, AI, routine and PC request goes through Cyclone policy and the canonical phone executor.")
-                V32FeatureRow(Icons.Rounded.Visibility, "Verified changes", "Transport success never substitutes for an observed phone result.")
-                V32FeatureRow(Icons.Rounded.Key, "Sensitive text stays private", "Passwords, OTPs, tokens and typed values are excluded from learning reports.")
-            }
-        }
-        if (section == "About") item { Text("${CycloneRelease.label} · com.cyclone.mobile", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) }
-    }
-}
-
-@Composable
-private fun V32AiAccessProfileCard(
-    profile: CycloneAiAccessProfile,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Card(
-        onClick = onClick,
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .14f) else MaterialTheme.colorScheme.surface,
-            ) {
-                Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                    Icon(
-                        if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.Security,
-                        null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(profile.displayName, fontWeight = FontWeight.Bold)
-                    if (profile == CycloneAiAccessProfile.BALANCED) CycloneStatusPill("Recommended", true)
-                }
-                Text(profile.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
 @Composable
 private fun V32FeatureRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, body: String) {
     Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
@@ -546,7 +137,7 @@ private fun V32FeatureRow(icon: androidx.compose.ui.graphics.vector.ImageVector,
 
 @Composable
 private fun V32SmallMetric(label: String, value: Int, modifier: Modifier = Modifier) {
-    Surface(modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .58f)) {
+    Surface(modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text(value.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text(label, style = MaterialTheme.typography.labelSmall) }
     }
 }

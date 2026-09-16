@@ -20,6 +20,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import com.cyclone.mobile.ui.overlay.OverlayExternalInteraction
 import androidx.compose.runtime.collectAsState
@@ -34,6 +35,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsAnimationCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -48,8 +52,10 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.cyclone.mobile.CycloneAccessibilityService
 import com.cyclone.mobile.MainActivity
+import com.cyclone.mobile.ui.overlay.LocalOverlayImeBottomPx
 import com.cyclone.mobile.ui.overlay.OverlayChrome
 import com.cyclone.mobile.ui.overlay.OverlayChromeContract
+import com.cyclone.mobile.ui.overlay.OverlayImeLift
 import com.cyclone.mobile.ui.overlay.OverlayAiSettings
 import com.cyclone.mobile.ui.overlay.OverlayIdleActivationTracker
 import com.cyclone.mobile.ui.overlay.OverlayIdleHalo
@@ -228,6 +234,8 @@ class OverlayChromeController(
     private var latest by mutableStateOf(OverlayChromeSnapshot())
     private var aiSettings by mutableStateOf(OverlayAiSettings())
     private var idleVisualState by mutableStateOf(OverlayIdleVisualState())
+    private var imeBottomPx by mutableStateOf(0)
+    private var navigationBottomPx by mutableStateOf(0)
     private var speechRecognizer: SpeechRecognizer? = null
 
     fun show(snapshot: OverlayChromeSnapshot) {
@@ -265,24 +273,28 @@ class OverlayChromeController(
                         applyLayout(latest)
                     }
                     if (glass()) {
-                        com.cyclone.mobile.ui.v32.CycloneV32Theme {
+                        com.cyclone.mobile.ui.v32.CycloneV32Theme(drawBackground = false) {
                             com.cyclone.mobile.ui.overlay.BackgroundTaskGlass(backgroundTask!!) { onAction(OverlayUserAction.ASK_CYCLONE) }
                         }
-                    } else OverlayChrome(
-                        snapshot = latest,
-                        onAction = onAction,
-                        onComposerChanged = onComposerChanged,
-                        onRequestSubmitted = onRequestSubmitted,
-                        onVoiceInput = ::beginVoiceInput,
-                        aiSettings = aiSettings,
-                        onAiSettingsChanged = { next ->
-                            aiSettings = next
-                            onAiSettingsChanged(next)
-                        },
-                        idleVisualState = idleVisualState,
-                        onIdleTap = ::recordIdleTap,
-                        onIdleSemanticActivate = ::recordSemanticActivation,
-                    )
+                    } else {
+                        CompositionLocalProvider(LocalOverlayImeBottomPx provides imeBottomPx) {
+                            OverlayChrome(
+                                snapshot = latest,
+                                onAction = onAction,
+                                onComposerChanged = onComposerChanged,
+                                onRequestSubmitted = onRequestSubmitted,
+                                onVoiceInput = ::beginVoiceInput,
+                                aiSettings = aiSettings,
+                                onAiSettingsChanged = { next ->
+                                    aiSettings = next
+                                    onAiSettingsChanged(next)
+                                },
+                                idleVisualState = idleVisualState,
+                                onIdleTap = ::recordIdleTap,
+                                onIdleSemanticActivate = ::recordSemanticActivation,
+                            )
+                        }
+                    }
                 }
             }
             val haloLayout = windowParams(OverlayChromeWindowPolicy.halo)
@@ -296,6 +308,7 @@ class OverlayChromeController(
             try {
                 addWindow(halo, haloLayout)
                 addWindow(view, layout)
+                trackIme(view)
             } catch (_: Exception) { dismiss(); return@onMain }
             val shareView = ComposeView(service).apply {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -366,6 +379,13 @@ class OverlayChromeController(
         }
     }
 
+    fun keyboardClosed() {
+        onMain {
+            imeBottomPx = 0
+            applyLayout(latest)
+        }
+    }
+
     private fun applyLayout(snapshot: OverlayChromeSnapshot) {
         if (hideLockedWindows()) return
         shareRoot?.visibility = View.VISIBLE
@@ -381,7 +401,7 @@ class OverlayChromeController(
         view.visibility = if (visible) View.VISIBLE else View.GONE
 
         val spec = if (glass()) OverlayChromeWindowPolicy.glass() else OverlayChromeWindowPolicy.main(compact)
-        val changed = applyWindowContract(layout, spec)
+        val changed = applyWindowContract(layout, spec, followKeyboard = !compact && !glass())
         if (changed) runCatching { wm.updateViewLayout(view, layout) }
 
         haloRoot?.let { halo ->
@@ -389,7 +409,7 @@ class OverlayChromeController(
             halo.visibility = if (visible && compact && !glass() && snapshot.idleChipVisible) View.VISIBLE else View.GONE
         }
         haloParams?.let { hp ->
-            val haloChanged = applyWindowContract(hp, OverlayChromeWindowPolicy.halo)
+            val haloChanged = applyWindowContract(hp, OverlayChromeWindowPolicy.halo, followKeyboard = false)
             if (haloChanged) haloRoot?.let { halo -> runCatching { wm.updateViewLayout(halo, hp) } }
         }
     }
@@ -439,20 +459,22 @@ class OverlayChromeController(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = gravityFor(spec)
-            y = dp(spec.bottomMarginDp)
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            y = liftedY(spec, followKeyboard = spec.heightDp == null && !spec.notFocusable)
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            fitInsetsTypes = 0
         }
 
     private fun applyWindowContract(
         layout: WindowManager.LayoutParams,
         spec: OverlayWindowContract,
+        followKeyboard: Boolean,
     ): Boolean {
         var changed = false
         val width = widthFor(spec)
         val height = heightFor(spec)
         val flags = flagsFor(spec)
         val gravity = gravityFor(spec)
-        val y = dp(spec.bottomMarginDp)
+        val y = liftedY(spec, followKeyboard)
         if (layout.width != width) {
             layout.width = width
             changed = true
@@ -473,7 +495,52 @@ class OverlayChromeController(
             layout.y = y
             changed = true
         }
+        if (layout.softInputMode != WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING) {
+            layout.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            changed = true
+        }
+        if (layout.fitInsetsTypes != 0) {
+            layout.fitInsetsTypes = 0
+            changed = true
+        }
         return changed
+    }
+
+    private fun liftedY(spec: OverlayWindowContract, followKeyboard: Boolean): Int =
+        OverlayImeLift.windowY(
+            followKeyboard = followKeyboard,
+            specBottomMarginPx = dp(spec.bottomMarginDp),
+            imeBottomPx = imeBottomPx,
+            navigationBottomPx = navigationBottomPx,
+            restGapPx = dp(OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP),
+            keyboardGapPx = dp(OverlayImeLift.KEYBOARD_GAP_DP),
+        )
+
+    private fun trackIme(view: View) {
+        val apply = { insets: WindowInsetsCompat ->
+            imeBottomPx = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            navigationBottomPx = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            applyLayout(latest)
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(view) { _, insets ->
+            apply(insets)
+            insets
+        }
+        ViewCompat.setWindowInsetsAnimationCallback(
+            view,
+            object : WindowInsetsAnimationCompat.Callback(
+                WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+            ) {
+                override fun onProgress(
+                    insets: WindowInsetsCompat,
+                    runningAnimations: MutableList<WindowInsetsAnimationCompat>,
+                ): WindowInsetsCompat {
+                    apply(insets)
+                    return insets
+                }
+            },
+        )
+        ViewCompat.requestApplyInsets(view)
     }
 
     private fun widthFor(spec: OverlayWindowContract): Int =

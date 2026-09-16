@@ -39,6 +39,25 @@ object FastPathLanding {
         "messages" to "com.google.android.apps.messaging",
         "phone" to "com.google.android.dialer",
         "contacts" to "com.google.android.contacts",
+        "facebook" to "com.facebook.katana",
+        "instagram" to "com.instagram.android",
+        "messenger" to "com.facebook.orca",
+        "whatsapp" to "com.whatsapp",
+        "reddit" to "com.reddit.frontpage",
+    )
+
+    private val PACKAGE_FALLBACKS = mapOf(
+        "com.facebook.katana" to listOf("com.facebook.katana", "com.facebook.lite"),
+        "com.whatsapp" to listOf("com.whatsapp", "com.whatsapp.w4b"),
+    )
+
+    private val WEB_FALLBACKS = mapOf(
+        "com.facebook.katana" to "https://facebook.com",
+        "com.facebook.lite" to "https://facebook.com",
+        "com.instagram.android" to "https://instagram.com",
+        "com.reddit.frontpage" to "https://reddit.com",
+        "com.facebook.orca" to "https://www.messenger.com",
+        "com.whatsapp" to "https://web.whatsapp.com",
     )
 
     private val URL = Regex("(?i)https?://[^\\s]+")
@@ -103,4 +122,9 @@ object FastPathLanding {
         if (':' in clean.substringAfter("://").substringBefore('/')) return null
         return clean.take(240)
     }
+
+    fun launchCandidates(packageName: String): List<String> =
+        (listOf(packageName) + (PACKAGE_FALLBACKS[packageName] ?: emptyList())).distinct()
+
+    fun webFallback(packageName: String): String? = WEB_FALLBACKS[packageName]
 }

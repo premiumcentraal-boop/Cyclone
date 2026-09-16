@@ -196,14 +196,14 @@ fun CycloneSegmentedControl(
     modifier: Modifier = Modifier,
 ) {
     if (options.isEmpty()) return
-    CycloneLiquidTray(modifier = modifier, height = 44.dp, contentPadding = 3.dp) {
+    CycloneLiquidTray(modifier = modifier.fillMaxWidth(), height = 48.dp, contentPadding = 4.dp) {
         BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight()) {
             CycloneLiquidSelectionLens(
                 selectedIndex = selected,
                 itemCount = options.size,
                 totalWidth = maxWidth,
                 modifier = Modifier.align(Alignment.CenterStart),
-                height = 34.dp,
+                height = 38.dp,
                 horizontalInset = 4.dp,
             )
             Row(Modifier.fillMaxWidth().fillMaxHeight().selectableGroup()) {

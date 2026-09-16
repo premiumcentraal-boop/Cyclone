@@ -5,6 +5,41 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ObservationHealthTest {
+    @Test fun loadingRaceBudgetIsDistinctFromPermissionAndTimeoutFailures() {
+        assertFalse(ObservationHealth(ObservationState.CAPTURE_CHANGED, "scope", 7, 2).terminal)
+        assertTrue(ObservationHealth(ObservationState.CAPTURE_CHANGED, "scope", 7, 5).terminal)
+    }
+
+    @Test fun loadingRacesStayInObservedLoopAndThenComplete() = loadingRaceRun(3, true)
+
+    @Test fun endlessLoadingEndsAsNonConvergenceWithoutCallingProvider() = loadingRaceRun(100, false)
+
+    private fun loadingRaceRun(failures: Int, completes: Boolean) {
+        var captures = 0
+        var plans = 0
+        val tools = object : CycloneAgentTools {
+            override fun observationHealth() = ObservationHealth(ObservationState.CAPTURE_CHANGED, "scope", 7, captures)
+            override fun observe(state: CycloneTaskState): CycloneObservation? {
+                captures++
+                return if (captures <= failures) null else CycloneObservation("fresh", "shopify", sessionId = "scope", displayId = 7)
+            }
+            override fun onRecovery(state: CycloneTaskState, kind: CycloneRecoveryKind, code: String) = error("No hidden recovery capture")
+            override fun execute(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn) = error("No mutation")
+            override fun verify(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn, toolResult: CycloneToolResult) = error("No mutation")
+            override fun verifyCompletion(state: CycloneTaskState, observation: CycloneObservation, turn: CycloneModelTurn) = CycloneVerificationResult(true, true, true)
+        }
+        val model = object : CycloneAgentModel {
+            override fun plan(state: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
+                plans++
+                return CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.DONE))
+            }
+        }
+        val result = CycloneLocalAgent("open chrome and go to Shopify", model, tools).runUntilBoundary()
+        assertEquals(if (completes) CycloneTaskClassification.COMPLETE else CycloneTaskClassification.NON_CONVERGENCE, result.state.finalClassification)
+        assertEquals(if (completes) 4 else 5, captures)
+        assertEquals(if (completes) 1 else 0, plans)
+    }
+
     @Test fun permissionDisconnectAndScopeAreTerminalWhileTimeoutIsBounded() {
         listOf(AgentFailureClass.ACCESSIBILITY_UNAVAILABLE, AgentFailureClass.DEVICE_DISCONNECTED, AgentFailureClass.STALE_OBSERVATION).forEach {
             val value = ObservationHealth.failure(AgentFailure(it, AgentFailureLayer.OBSERVATION, false, "fixture"), "isolated", 7, 1, null, 0)

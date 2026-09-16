@@ -2,10 +2,10 @@ package com.cyclone.mobile.ui.v32
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -78,14 +78,11 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
 
     var tab by remember { mutableIntStateOf(0) }
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
+        contentPadding = cyclonePageInsets(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("Brain", style = MaterialTheme.typography.headlineMedium)
-                Text("What Cyclone knows and trusts", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            CyclonePageHeader("Brain", "What Cyclone knows and trusts")
         }
 
         task?.takeIf { UiTask(it).active }?.let { active ->
@@ -114,10 +111,12 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
         }
 
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BrainMetric("Verified skills", verified.size.toString(), Modifier.weight(1f))
-                BrainMetric("Learned apps", learnedApps.size.toString(), Modifier.weight(1f))
-                BrainMetric("Confidence", "$averageConfidence%", Modifier.weight(1f))
+            CycloneLiquidTray(height = 74.dp, contentPadding = 6.dp) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BrainMetric("Skills", verified.size.toString(), Modifier.weight(1f))
+                    BrainMetric("Apps", learnedApps.size.toString(), Modifier.weight(1f))
+                    BrainMetric("Confidence", "$averageConfidence%", Modifier.weight(1f))
+                }
             }
         }
 
@@ -144,7 +143,7 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     ) {
                         Row(
                             Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
@@ -197,7 +196,7 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     ) {
                         Row(
                             Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
@@ -224,7 +223,16 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
             else -> {
                 item { CycloneSectionTitle("Recent outcomes") }
                 if (cleared.isNotEmpty()) {
-                    item { androidx.compose.material3.TextButton(onClick = { TaskCardDismissals.restore(context) }) { Text("Restore cleared cards") } }
+                    item {
+                        Text(
+                            "Restore cleared cards",
+                            modifier = Modifier
+                                .clickable { TaskCardDismissals.restore(context) }
+                                .padding(vertical = 12.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
                 if (visibleRuns.isEmpty()) {
                     item { BrainEmptyState("No outcomes yet", "Completed Cyclone tasks will appear here with concise results.") }
@@ -245,7 +253,7 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
                             color = MaterialTheme.colorScheme.surface,
-                            shadowElevation = 1.dp,
+                            shadowElevation = 0.dp,
                         ) {
                             Row(
                                 Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -269,7 +277,7 @@ private fun BrainEmptyState(title: String, body: String) {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 1.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
             Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
@@ -299,7 +307,7 @@ private fun V39RunCard(run: V39RunRow, onOpen: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -333,11 +341,13 @@ private fun V39RunCard(run: V39RunRow, onOpen: () -> Unit) {
 
 @Composable
 private fun BrainMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .72f)) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-        }
+    Column(
+        modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }
 

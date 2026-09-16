@@ -13,20 +13,12 @@ class VisualHierarchyRegressionTest {
     ).first { it.isFile }.readText()
 
     @Test
-    fun currentTaskOwnsPrimarySurfaceInsteadOfStackingQueueBelowIt() {
+    fun queuedWorkStaysVisibleUnderTheLiveTask() {
         val pending = source("ui/v32/CyclonePendingRequests.kt")
-        assertTrue(pending.contains("val currentTask by WorkspaceTasks.state.collectAsState()"))
-        assertTrue(pending.contains("val currentCardVisible = taskCardVisible(currentTask, clearedCards)"))
-        assertTrue(pending.contains("if (requests.isEmpty() || currentCardVisible) return"))
-    }
-
-    @Test
-    fun destinationHandoffSuppressesOverlayBeforeLaunchingFullScreenPicker() {
-        val pending = source("ui/v32/CyclonePendingRequests.kt")
-        val workspace = source("runtime/background/WorkspaceActivity.kt")
-        assertTrue(pending.contains("OverlayExternalInteraction.active.value = true"))
-        assertTrue(workspace.contains("OverlayExternalInteraction.active.value = true"))
-        assertTrue(workspace.contains("OverlayExternalInteraction.active.value = false"))
+        assertTrue(pending.contains("if (requests.isEmpty()) return"))
+        assertFalse(pending.contains("if (requests.isEmpty() || currentCardVisible) return"))
+        assertTrue(pending.contains("WorkspaceTasks.tryPromoteNext(context)"))
+        assertFalse(pending.contains("WorkspaceActivity::class.java"))
     }
 
     @Test

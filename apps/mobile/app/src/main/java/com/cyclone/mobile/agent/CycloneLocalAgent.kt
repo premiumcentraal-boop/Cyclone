@@ -195,10 +195,20 @@ class CycloneLocalAgent(
             if (observation == null) {
                 val health = tools.observationHealth()
                 if (health != null) {
-                    if (health.terminal) return hardBlocker(health.message)
+                    if (health.terminal) {
+                        return if (health.state == ObservationState.CAPTURE_CHANGED) {
+                            nonConvergence(health.message)
+                        } else {
+                            hardBlocker(health.message)
+                        }
+                    }
                     while (System.nanoTime() / 1_000_000 < health.cooldownUntilMs) {
                         executionBoundary()?.let { return it }
                         Thread.sleep(25)
+                    }
+                    if (health.state == ObservationState.CAPTURE_CHANGED) {
+                        emit(CycloneTraceEventType.RECOVERY_CLASSIFIED, "observation.capture_changed.retry")
+                        continue
                     }
                 }
                 recover(CycloneRecoveryKind.OBSERVATION_FAILURE, "observe.failed", false)?.let { return it }

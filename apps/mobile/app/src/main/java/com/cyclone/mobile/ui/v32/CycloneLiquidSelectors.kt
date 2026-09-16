@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,10 +34,8 @@ import androidx.compose.ui.unit.dp
 /**
  * Discrete choice control for 2-4 mutually-exclusive options.
  *
- * One tray owns the whole control and a deliberately inset refractive lens moves between choices.
- * The lens is smaller than the host on every side, preventing the selected option from looking like
- * a second rounded rectangle nested inside the first. A null selection represents provider/model
- * default without falsely highlighting an override.
+ * A standalone bar owns one refractive tray. When already inside a liquid panel the tray is
+ * omitted so the selected option is only the moving chromatic lens — never a second darkened box.
  */
 @Composable
 internal fun CycloneLiquidChoiceBar(
@@ -49,8 +48,9 @@ internal fun CycloneLiquidChoiceBar(
     if (options.isEmpty()) return
     val height = if (compact) 42.dp else 48.dp
     val lensHeight = if (compact) 30.dp else 36.dp
+    val embedded = LocalCycloneInsideLiquidHost.current
 
-    CycloneLiquidTray(modifier = modifier, height = height, contentPadding = 3.dp) {
+    val track: @Composable () -> Unit = {
         BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight()) {
             selectedIndex?.takeIf { it in options.indices }?.let { index ->
                 CycloneLiquidSelectionLens(
@@ -97,6 +97,12 @@ internal fun CycloneLiquidChoiceBar(
                 }
             }
         }
+    }
+
+    if (embedded) {
+        Box(modifier.height(height).fillMaxWidth(), contentAlignment = Alignment.Center) { track() }
+    } else {
+        CycloneLiquidTray(modifier = modifier, height = height, contentPadding = 3.dp) { track() }
     }
 }
 

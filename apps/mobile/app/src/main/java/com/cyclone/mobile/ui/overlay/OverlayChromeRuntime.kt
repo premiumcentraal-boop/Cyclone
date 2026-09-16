@@ -100,7 +100,6 @@ object OverlayChromeRuntime {
                     }
                     if (BackgroundGlassPolicy.tearDown(task) || (task == null && previousTask != null)) clearBackgroundChrome()
                     else if (BackgroundGlassPolicy.visible(task)) {
-                        if (previousTask != task?.taskId) mutate { it.resetIdle() }
                         controller?.background(task)
                     }
                     previousTask = task?.taskId
@@ -282,6 +281,7 @@ object OverlayChromeRuntime {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
         val context = synchronized(lock) { service } ?: return
+        synchronized(lock) { controller?.keyboardClosed() }
         val busy = !com.cyclone.mobile.runtime.background.WorkspaceTasks.canStartRequest()
         if (busy) {
             runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.queueRequest(request) }
@@ -380,9 +380,6 @@ object OverlayChromeRuntime {
             try {
             mutate {
                 it.enterWorking()
-                // Once execution begins, collapse Cyclone's own accessibility overlay mechanically.
-                // Progress belongs in the task notification/run log, not the request composer.
-                it.dispatch(OverlayUserAction.MINIMIZE)
                 it.updateStatus("Starting…")
             }
             if (launchPackage != null) {
@@ -587,6 +584,7 @@ object OverlayChromeRuntime {
                 synchronized(lock) {
                     suspendedTaskId = null
                     adaptiveAgent = null
+                    aiJob = null
                 }
                 when (snapshot().state) {
                     OverlayChromeState.GATE, OverlayChromeState.IDLE -> Unit
@@ -600,12 +598,13 @@ object OverlayChromeRuntime {
                 synchronized(lock) {
                     suspendedTaskId = null
                     adaptiveAgent = null
+                    aiJob = null
                 }
                 mutate { it.finishStopped(result.message) }
             }
             else -> {
                 context?.let { AgentTaskNotificationRuntime.finish(it, false, result.message) }
-                synchronized(lock) { suspendedTaskId = null; adaptiveAgent = null }
+                synchronized(lock) { suspendedTaskId = null; adaptiveAgent = null; aiJob = null }
                 mutate { it.finishStopped(result.message) }
             }
         }

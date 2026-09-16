@@ -68,7 +68,7 @@ internal fun CycloneQuickSetup(context: Context, refresh: () -> Unit, openPermis
             shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
-            shadowElevation = 1.dp,
+            shadowElevation = 0.dp,
         ) {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),
@@ -126,7 +126,7 @@ internal fun CycloneQuickSetup(context: Context, refresh: () -> Unit, openPermis
             shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp,
-            shadowElevation = 1.dp,
+            shadowElevation = 0.dp,
         ) {
             Column(
                 Modifier.fillMaxWidth().padding(16.dp),

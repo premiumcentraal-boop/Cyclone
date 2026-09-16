@@ -30,7 +30,7 @@ class CycloneProfile429ContractTest {
         assertTrue(source.contains("CycloneAppIcon(packageName"))
         assertTrue(source.contains("\"\$app · \${profile.label}\""))
         assertTrue(source.contains("Text(\"View progress\")"))
-        assertTrue(source.contains("Text(\"Open profile\")"))
+        assertTrue(source.contains("\"Open profile\""))
         assertTrue(source.contains("val openingMain = profile.owner"))
         assertTrue(source.contains("ProfileSetupRuntime.openProfile(context, if (openingMain) null else recordId)"))
         assertTrue(source.contains("ProfilePresentationPolicy.isCurrent(userId, verifiedCurrentUser)"))

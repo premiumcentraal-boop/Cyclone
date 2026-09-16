@@ -5,7 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,7 +29,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -285,31 +283,29 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     }
 
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
+        contentPadding = cyclonePageInsets(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Profiles", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        clusters.firstOrNull { it.current }?.let { "Current profile: ${it.label}" } ?: "Current profile not verified",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledIconButton(onClick = { setup = true }, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Rounded.Add, "Add profile", modifier = Modifier.size(22.dp))
-                }
-            }
+            CyclonePageHeader(
+                title = "Profiles",
+                subtitle = clusters.firstOrNull { it.current }?.let { "Current profile: ${it.label}" } ?: "Current profile not verified",
+                trailing = {
+                    FilledIconButton(onClick = { setup = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Rounded.Add, "Add profile", modifier = Modifier.size(22.dp))
+                    }
+                },
+            )
         }
 
         item {
-            Button(
+            CycloneLiquidTextAction(
+                label = "New task in current profile",
                 onClick = onAsk,
                 enabled = ProfilePresentationPolicy.canStartTask(processUser, processUser, verifiedCurrentUser, busy),
+                prominent = true,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("New task in current profile") }
+            )
         }
         item { CyclonePendingRequests() }
         item {
@@ -453,7 +449,7 @@ private fun ActiveProfileCard429(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -503,7 +499,7 @@ private fun ProfileIdentityCard429(profile: ProfileCluster, onOpen: () -> Unit) 
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -542,7 +538,7 @@ private fun AppGroupCard429(context: Context, group: AppProfileGroup, onOpen: ()
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
             Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
@@ -575,10 +571,10 @@ private fun AppGroupDetail429(
     onProfileDetail: (ProfileCluster) -> Unit,
 ) {
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 96.dp),
+        contentPadding = cyclonePageInsets(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { TextButton(onClick = onBack) { Text("‹ Groups") } }
+        item { CycloneBackRow("Groups", onBack) }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CycloneAppIcon(group.packageName, Modifier.size(46.dp))
@@ -637,10 +633,10 @@ private fun ProfileDetail429(
     val scope = rememberCoroutineScope()
     var localMessage by remember { mutableStateOf("") }
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 96.dp),
+        contentPadding = cyclonePageInsets(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { TextButton(onClick = onBack) { Text("‹ Profiles") } }
+        item { CycloneBackRow("Profiles", onBack) }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(shape = RoundedCornerShape(15.dp), color = MaterialTheme.colorScheme.primaryContainer) {
@@ -662,16 +658,25 @@ private fun ProfileDetail429(
 
         if (task != null) item { CycloneTaskProgress(task) }
 
+        if (busy) item { Text(switchMessage, style = MaterialTheme.typography.bodySmall) }
+
         item {
-            Button(enabled = profile.ready && !busy, onClick = onOpenProfile, modifier = Modifier.fillMaxWidth()) {
-                Text(if (busy) switchMessage else "Open profile")
-            }
+            CycloneLiquidTextAction(
+                label = "Open profile",
+                onClick = onOpenProfile,
+                enabled = profile.ready && !busy,
+                prominent = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         item {
-            OutlinedButton(onClick = onAsk, enabled = canStartTask, modifier = Modifier.fillMaxWidth()) {
-                Text("New task in ${profile.label}")
-            }
+            CycloneLiquidTextAction(
+                label = "New task in ${profile.label}",
+                onClick = onAsk,
+                enabled = canStartTask,
+                modifier = Modifier.fillMaxWidth(),
+            )
             if (!canStartTask) Text("Open this profile first to start a task here.", style = MaterialTheme.typography.bodySmall)
         }
         item { CycloneSectionTitle("Apps") }
@@ -725,7 +730,11 @@ private fun ProfileDetail429(
         }
 
         item {
-            OutlinedButton(onClick = onManage, modifier = Modifier.fillMaxWidth()) { Text("Manage apps & profile") }
+            CycloneLiquidTextAction(
+                label = "Manage apps & profile",
+                onClick = onManage,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         if (localMessage.isNotBlank()) item { Text(localMessage, style = MaterialTheme.typography.bodySmall) }
         if (error.isNotBlank()) item { Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }

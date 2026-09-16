@@ -16,6 +16,8 @@ object HarnessFailureCopy {
             "Authorization is missing or expired. Ask the human to restore access; do not request credentials in model context."
         "ASSERTION_FAILED", "VERIFICATION_FAILED", "NO_SEMANTIC_PROGRESS" ->
             "The action was dispatched, but its required after-state was not demonstrated. Re-observe before choosing a different action."
+        "APP_NOT_FOUND" ->
+            "That app is not installed. Observe the current page, then try another installed app or the website."
         "TIMEOUT" -> "The action timed out; execution may have occurred. Observe before deciding what remains to do."
         else -> "The operation did not establish a verified result. Observe the current page before choosing the next action."
     }

@@ -158,8 +158,12 @@ object WorkspaceTasks {
      * safe profile-capable route can consume it.
      */
     fun tryPromoteNext(context: Context): Boolean = synchronized(promotionLock) {
-        val currentPhase = state.value?.phase
-        val pending = requests.promotableHead(currentPhase) ?: return@synchronized false
+        val current = state.value
+        val currentPhase = current?.phase
+        if (currentPhase == TaskPhase.DONE) {
+            clearClosedTask(current.taskId, current.sessionId)
+        }
+        val pending = requests.promotableHead(state.value?.phase) ?: return@synchronized false
         if (!canStartRequest() || Layer2Workspaces.gated()) return@synchronized false
         val destinations = queueDestinations(context)
         val preferred = pending.preferredDestination
@@ -169,14 +173,14 @@ object WorkspaceTasks {
             requests.blocked(pending.id, "This profile can't run as an isolated task yet. Choose Profile A or open Profiles.")
             return@synchronized false
         }
-        if (ExecutionTargetResolver.resolve(pending.goal) == ExecutionTarget.CurrentForeground) {
+        val target = resolveQueueTarget(context, pending)
+        if (target == null || ExecutionTargetResolver.resolve(pending.goal) == ExecutionTarget.CurrentForeground) {
             if (!com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.isAttached()) return@synchronized false
             pending.attachment?.let(com.cyclone.mobile.ui.overlay.PendingTaskAttachment::set)
             requests.remove(pending.id)
             com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.submitRequest(pending.goal)
             return@synchronized true
         }
-        val target = resolveQueueTarget(context, pending) ?: return@synchronized false
         if (pending.targetPackageName != target.packageName || pending.targetAppLabel != target.appLabel) {
             requests.bindTarget(pending.id, target.packageName, target.appLabel)
         }
@@ -200,7 +204,7 @@ object WorkspaceTasks {
     fun start(context: Context, goal: String, packageName: String, label: String, pendingRequestId: String? = null) {
         check(canStartRequest()) { "Finish or close the current phone task before starting another." }
         check(!com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.gated()) { "Review the current task before starting another." }
-        val liveCount = mutable.value?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED) }?.let { 1 } ?: 0
+        val liveCount = mutable.value?.takeIf { it.phase !in setOf(TaskPhase.STOPPED, TaskPhase.FAILED, TaskPhase.DONE) }?.let { 1 } ?: 0
         check(liveCount < PRODUCT_HOT_BACKGROUND_LIMIT) {
             "Finish or stop your current task first."
         }

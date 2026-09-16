@@ -62,6 +62,26 @@ class MobileLiquidGlassGuards(unittest.TestCase):
         self.assertIn("shape = { ContinuousCapsule }", renderer)
         self.assertIn(".padding(contentPadding)", renderer)
 
+    def test_nested_option_bars_do_not_draw_a_second_dark_box(self):
+        chrome = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneLiquidChrome.kt").read_text(encoding="utf-8")
+        selectors = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneLiquidSelectors.kt").read_text(encoding="utf-8")
+        overlay = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayAppleLiquidComposer.kt").read_text(encoding="utf-8")
+        self.assertIn("LocalCycloneInsideLiquidHost", chrome)
+        self.assertIn("chromaticAberration = true", chrome)
+        self.assertNotIn("chromaticAberration = false", chrome)
+        self.assertIn("LocalCycloneOverlayChrome", chrome)
+        self.assertIn("0.88f", chrome)
+        self.assertIn("0.84f", chrome)
+        self.assertIn("blur(14f.dp.toPx())", chrome)
+        self.assertNotIn("Color.White.copy(alpha = 0.22f)", chrome)
+        self.assertNotIn("Color.Black.copy(alpha = 0.035f)", chrome)
+        self.assertIn("LocalCycloneInsideLiquidHost.current", selectors)
+        self.assertIn("chromaticAberration = true", overlay)
+        self.assertIn("OverlayDarkScheme", overlay)
+        self.assertIn("0.90f", overlay)
+        self.assertNotIn("chromaticAberration = false", overlay)
+        self.assertNotIn("OverlayGlassRim", overlay)
+
     def test_theme_owns_one_non_recursive_backdrop_source(self):
         source = THEME.read_text(encoding="utf-8")
         self.assertIn("rememberLayerBackdrop()", source)

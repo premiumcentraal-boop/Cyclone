@@ -53,12 +53,13 @@ class CycloneV39AiPageContractTest {
 
     @Test fun emptyStateMatchesAlpineProgressConcept() {
         val page = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
-        val backdrop = source("com/cyclone/mobile/ui/v32/CycloneAlpineBackdrop.kt")
-        assertTrue(page.contains("\"Let’s make\\nprogress today.\""))
-        assertTrue(page.contains("\"Ideas become real when you take the next step.\""))
-        assertTrue(page.contains("CycloneAlpineBackdrop"))
+        assertTrue(page.contains("\"Ask Cyclone\""))
+        assertTrue(page.contains("\"Tell Cyclone what to do on your phone.\""))
+        assertFalse(page.contains("CycloneAlpineBackdrop"))
+        assertFalse(page.contains("cyclone_alpine"))
+        assertFalse(page.contains("progress today"))
+        assertFalse(page.contains("Ideas become real"))
         assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
-        assertFalse(backdrop.contains("background.copy(alpha = .92f)"))
     }
 
     @Test fun replyStopIsChatOnly() {

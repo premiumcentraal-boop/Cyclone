@@ -433,6 +433,9 @@ class CyclonePcParityBridge internal constructor(
     fun verifiedSimpleNavigation(goal: String): Boolean =
         GoalContractCompiler.isSimpleWebNavigation(goal) && completionEvidence(goal)
 
+    fun verifiedNamedAppOpen(goal: String): Boolean =
+        com.cyclone.mobile.agent.plan.TaskDifficulty.isNamedAppOpenOnly(goal) && completionEvidence(goal)
+
     fun completionEvaluation(goal: String): JSONObject {
         val contract = GoalContractCompiler.compile(goal)
         return GoalContractCompiler.evaluate(contract, page, environment.history()).toJson()

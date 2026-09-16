@@ -353,10 +353,13 @@ object PhoneToolExecutor {
             "phone.back" -> actionWithConfirmation(service, request, before) { service?.goBack() == true }
             "phone.home" -> actionWithConfirmation(service, request, before) { service?.goHome() == true }
             "phone.open_app" -> {
-                val packageName = p.optString("package")
-                if (packageName.isBlank()) return errorResult(PhoneToolErrorCode.INVALID_REQUEST, "package is required")
-                val intent = context.packageManager.getLaunchIntentForPackage(packageName)
-                    ?: return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "No launchable app for $packageName")
+                val requested = p.optString("package")
+                if (requested.isBlank()) return errorResult(PhoneToolErrorCode.INVALID_REQUEST, "package is required")
+                val resolved = com.cyclone.mobile.fastpath.FastPathLanding.launchCandidates(requested).firstNotNullOfOrNull { pkg ->
+                    context.packageManager.getLaunchIntentForPackage(pkg)?.let { pkg to it }
+                } ?: return errorResult(PhoneToolErrorCode.APP_NOT_FOUND, "No launchable app for $requested")
+                val packageName = resolved.first
+                val intent = resolved.second
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (packageName == "com.android.settings") {
                     intent.action = Intent.ACTION_MAIN

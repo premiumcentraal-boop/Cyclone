@@ -73,14 +73,14 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
     when {
         mode == "teach" -> CycloneFollowMePage(context, refreshTick) { mode = "" }
         mode == "manual" -> Column {
-            TextButton(onClick = { mode = "advanced" }) { Text("‹ Advanced") }
+            CycloneBackRow("Advanced") { mode = "advanced" }
             V32TeachPage(context, refreshTick)
         }
         mode == "advanced" -> LazyColumn(
-            contentPadding = PaddingValues(20.dp),
+            contentPadding = cyclonePageInsets(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { TextButton(onClick = { mode = "" }) { Text("‹ Routines") } }
+            item { CycloneBackRow("Routines") { mode = "" } }
             item { CyclonePageIntro("Optional", "Advanced", "Build or inspect a routine when you need precise control.") }
             item {
                 CycloneSimpleCard(Modifier.fillMaxWidth()) {
@@ -127,27 +127,19 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
             val visibleRoutines = if (group == null) filtered else groups[group].orEmpty()
 
             LazyColumn(
-                contentPadding = PaddingValues(start = 20.dp, top = 14.dp, end = 20.dp, bottom = 96.dp),
+                contentPadding = cyclonePageInsets(),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("Routines", style = MaterialTheme.typography.headlineMedium)
-                            Text(
-                                "${all.size} ${if (all.size == 1) "routine" else "routines"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        FilledIconButton(onClick = { create = !create }, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Rounded.Add, if (create) "Close create menu" else "Create routine", modifier = Modifier.size(22.dp))
-                        }
-                    }
+                    CyclonePageHeader(
+                        title = "Routines",
+                        subtitle = "${all.size} ${if (all.size == 1) "routine" else "routines"}",
+                        trailing = {
+                            FilledIconButton(onClick = { create = !create }, modifier = Modifier.size(48.dp)) {
+                                Icon(Icons.Rounded.Add, if (create) "Close create menu" else "Create routine", modifier = Modifier.size(22.dp))
+                            }
+                        },
+                    )
                 }
 
                 if (create) {
@@ -206,9 +198,9 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, re
 
                 group?.let { activeGroup ->
                     item {
-                        TextButton(onClick = { group = null }) {
-                            Text("‹ ${if (grouping == 0 && activeGroup != "Other") appLabel(context, activeGroup) else activeGroup}")
-                        }
+                        CycloneBackRow(
+                            if (grouping == 0 && activeGroup != "Other") appLabel(context, activeGroup) else activeGroup,
+                        ) { group = null }
                     }
                 }
 
@@ -279,7 +271,7 @@ private fun RoutineGroupCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
             Modifier.padding(horizontal = 15.dp, vertical = 13.dp),
@@ -325,7 +317,7 @@ private fun RoutineListCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
             Modifier.padding(horizontal = 15.dp, vertical = 12.dp),

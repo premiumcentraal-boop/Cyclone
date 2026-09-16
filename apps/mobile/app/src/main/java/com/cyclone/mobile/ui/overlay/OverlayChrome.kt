@@ -18,14 +18,12 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -37,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,7 +77,6 @@ import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
 import com.cyclone.mobile.ui.v32.CycloneForegroundWorkCard
-import com.cyclone.mobile.ui.v32.CycloneLiquidPanel
 import com.cyclone.mobile.ui.v32.CyclonePendingRequests
 import com.cyclone.mobile.ui.v32.CycloneTrayIconAction
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
@@ -86,8 +84,7 @@ import kotlinx.coroutines.launch
 
 private val AuroraBlue = Color(0xFF4A8DFF)
 private val AuroraCyan = Color(0xFF80E9FF)
-private val AuroraViolet = Color(0xFF8568FF)
-private val AuroraMagenta = Color(0xFFE56CFF)
+private val AuroraWhite = Color(0xFFE8F4FF)
 
 data class OverlayAiSettings(
     val modelId: String = "",
@@ -274,7 +271,7 @@ internal fun OverlayIdleHalo(
                     Color.Transparent,
                     AuroraBlue.copy(alpha = 0.07f + response * 0.07f),
                     AuroraCyan.copy(alpha = 0.15f + response * 0.11f),
-                    AuroraMagenta.copy(alpha = 0.10f + response * 0.09f),
+                    AuroraWhite.copy(alpha = 0.10f + response * 0.09f),
                     Color.Transparent,
                 ),
             ),
@@ -287,7 +284,7 @@ internal fun OverlayIdleHalo(
             brush = Brush.radialGradient(
                 listOf(
                     AuroraCyan.copy(alpha = 0.06f + response * 0.13f),
-                    AuroraViolet.copy(alpha = 0.025f + response * 0.06f),
+                    AuroraBlue.copy(alpha = 0.025f + response * 0.06f),
                     Color.Transparent,
                 ),
                 center = center,
@@ -337,7 +334,8 @@ private fun ComposerPanel(
     val task = workspace?.takeIf { com.cyclone.mobile.ui.v32.taskCardVisible(it, clearedCards) }
     val foregroundWorking = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
     val activeWork = task?.working == true || foregroundWorking
-    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val imePx = LocalOverlayImeBottomPx.current
+    val keyboardOpen = imePx > 0 || WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val taskAreaMax = if (keyboardOpen) {
         OverlayChromeContract.TASK_AREA_KEYBOARD_MAX_HEIGHT_DP
     } else {
@@ -405,8 +403,7 @@ private fun ComposerPanel(
         Modifier
             .fillMaxWidth()
             .wrapContentHeight()
-            .navigationBarsPadding()
-            .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp)
+            .padding(horizontal = 12.dp)
             .graphicsLayer { translationY = dragOffset }
             .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) },
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -431,14 +428,15 @@ private fun ComposerPanel(
         )
 
         if (task != null || foregroundWorking || queued.isNotEmpty()) {
-            CycloneLiquidPanel(
+            OverlayAppleGlass(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 24.dp,
-                contentPadding = PaddingValues(10.dp),
+                strong = true,
             ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
+                        .padding(10.dp)
                         .heightIn(max = taskAreaMax.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -487,16 +485,18 @@ private fun ComposerPanel(
                 modifier = Modifier.fillMaxWidth(.82f),
             )
 
-            ComposerAccessory.MODEL -> CycloneLiquidPanel(
+            ComposerAccessory.MODEL -> OverlayAppleGlass(
                 modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 26.dp,
-                contentPadding = PaddingValues(12.dp),
+                cornerRadius = 30.dp,
+                strong = true,
             ) {
-                com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel(
-                    aiSettings.modelId,
-                    aiSettings.reasoningEffort,
-                ) { model, effort ->
-                    onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort))
+                Box(Modifier.padding(12.dp)) {
+                    com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel(
+                        aiSettings.modelId,
+                        aiSettings.reasoningEffort,
+                    ) { model, effort ->
+                        onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort))
+                    }
                 }
             }
 
@@ -548,15 +548,14 @@ private fun GatePanel(
         Modifier
             .fillMaxWidth()
             .wrapContentHeight()
-            .navigationBarsPadding()
-            .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp),
+            .padding(horizontal = 12.dp),
     ) {
-        CycloneLiquidPanel(
+        OverlayAppleGlass(
             modifier = Modifier.fillMaxWidth(),
             cornerRadius = 28.dp,
-            contentPadding = PaddingValues(18.dp),
+            strong = true,
         ) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Confirmation needed",
@@ -569,7 +568,7 @@ private fun GatePanel(
                     }
                 }
                 Text(OverlayCopy.GATE, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(
+                Button(
                     onClick = { onAction(OverlayUserAction.GATE_CONFIRM) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 ) { Text(OverlayCopy.CONFIRM) }

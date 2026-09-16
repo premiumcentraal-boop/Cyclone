@@ -13,6 +13,7 @@ enum class GoalRequirementKind {
     SITE_NOTIFICATION_PERMISSION,
     VERIFIED_TARGET_INTERACTION,
     GENERIC_SEMANTIC_EVIDENCE,
+    NAMED_APP,
 }
 
 data class GoalRequirement(
@@ -102,7 +103,7 @@ object GoalContractCompiler {
             requirements += GoalRequirement(GoalRequirementKind.WEB_HOST, host)
         }
 
-        if (host != null && Regex("(?i)\\bchrome\\b").containsMatchIn(clean)) {
+        if (navigation?.chrome == true || (host != null && Regex("(?i)\\bchrome\\b").containsMatchIn(clean))) {
             requirements += GoalRequirement(GoalRequirementKind.BROWSER_PACKAGE, "com.android.chrome")
         }
         val loginIntent = Regex("(?i)\\b(log\\s*in|sign\\s*in)\\b").containsMatchIn(clean)
@@ -110,6 +111,12 @@ object GoalContractCompiler {
             .containsMatchIn(clean)
         if (loginIntent && !loginNavigationOnly) {
             requirements += GoalRequirement(GoalRequirementKind.AUTHENTICATED_SESSION, host)
+        }
+
+        if (com.cyclone.mobile.agent.plan.TaskDifficulty.isNamedAppOpenOnly(clean)) {
+            com.cyclone.mobile.fastpath.FastPathLanding.namedApp(clean)?.second?.let { packageName ->
+                requirements += GoalRequirement(GoalRequirementKind.NAMED_APP, packageName)
+            }
         }
 
         if (Regex("(?i)\\b(scroll|swipe)\\b").containsMatchIn(clean)) {
@@ -206,9 +213,8 @@ object GoalContractCompiler {
                     !it.evidence.optBoolean("focused") && listOf("url_bar", "urlbar", "location_bar", "address_bar")
                         .any(it.evidence.optString("resourceId").lowercase()::contains)
                 }?.label
-                val matched = intent != null && loadedHost != null && intent.accepts(loadedHost) &&
-                    (!intent.chrome || currentPage.packageName == "com.android.chrome") &&
-                    pageShowsHost(currentPage, loadedHost.removePrefix("https://").removePrefix("www.").trimEnd('/'))
+                val matched = intent != null && loadedHost != null && intent.acceptsLoaded(loadedHost) &&
+                    (!intent.chrome || currentPage.packageName == "com.android.chrome")
                 GoalRequirementResult(requirement, matched, if (matched) "requested site loaded in the requested browser" else "site host and browser have not been verified")
             }
             GoalRequirementKind.WEB_HOST -> {
@@ -278,6 +284,17 @@ object GoalContractCompiler {
                 )
             }
 
+            GoalRequirementKind.NAMED_APP -> {
+                val expected = requirement.value.orEmpty()
+                val matched = currentPage != null && expected.isNotBlank() &&
+                    com.cyclone.mobile.fastpath.FastPathLanding.launchCandidates(expected)
+                        .any { it == currentPage.packageName }
+                GoalRequirementResult(
+                    requirement,
+                    matched,
+                    if (matched) "requested app is the current task surface" else "requested app has not been verified in the foreground",
+                )
+            }
             GoalRequirementKind.GENERIC_SEMANTIC_EVIDENCE -> {
                 val pageMatch = currentPage?.let { pageMatchesTerms(it, requirement.terms) } == true
                 val verifiedMutation = successful.isNotEmpty()

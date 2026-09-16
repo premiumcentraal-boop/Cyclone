@@ -25,11 +25,15 @@ REQUIRED_APP = (
 )
 REQUIRED_FEATURES = (
     "internal fun V32TeachPage",
+    "FollowMeLearnerRuntime.start(context)",
+    '"Start Follow Me"',
+)
+FORBIDDEN_FEATURES = (
     "internal fun V32AiPage",
     "internal fun V32BrainPage",
     "internal fun V32SettingsPage",
-    "GatewayAiCard(context, refreshTick)",
-    'CycloneSectionTitle("Optional PC companion")',
+    "GatewayAiCard",
+    "CycloneAlpineBackdrop",
 )
 REQUIRED_SETTINGS_426 = (
     "internal fun CycloneSettingsPage426",
@@ -111,12 +115,30 @@ def check() -> list[str]:
             continue
         for token in missing_tokens(text, required):
             errors.append(f"{path.relative_to(ROOT)} missing invariant: {token}")
+        if path == FEATURES:
+            for retired in FORBIDDEN_FEATURES:
+                if retired in text:
+                    errors.append(f"{path.relative_to(ROOT)} still ships retired UI: {retired}")
+        if path == AI_CHAT and "CycloneAlpineBackdrop" in text:
+            errors.append(f"{path.relative_to(ROOT)} still uses the alpine weather backdrop")
         if path in (APP, FEATURES, SETTINGS_426, AI_CHAT, MAIN):
             for retired in ("Teamwork Sniper", "TEAMWORK_SNIPER_PACKAGE", "coreWsUrl", "coreToken", "BridgeClient.start"):
                 if retired in text:
                     errors.append(f"{path.relative_to(ROOT)} exposes retired integration: {retired}")
         if path == CAMERA_VIEWER and ("?token=" in text or "getQueryParameter(\"token\")" in text):
             errors.append("Camera viewer must never carry viewer credentials in its WebSocket URL")
+    retired_paths = (
+        ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneAlpineBackdrop.kt",
+        ROOT / "apps/mobile/app/src/main/res/drawable-nodpi/cyclone_alpine_day.jpg",
+        ROOT / "apps/mobile/app/src/main/res/drawable-nodpi/cyclone_alpine_night.jpg",
+        ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/GatewayAiCard.kt",
+        ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v31/CycloneV31Cards.kt",
+        ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/modules/CycloneModulesScreen.kt",
+        ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/SetupComposeCompat.kt",
+    )
+    for path in retired_paths:
+        if path.exists():
+            errors.append(f"retired UI still present: {path.relative_to(ROOT)}")
     return errors
 
 
