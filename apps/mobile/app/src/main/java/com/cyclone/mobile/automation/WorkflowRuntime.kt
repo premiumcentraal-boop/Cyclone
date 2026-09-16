@@ -23,6 +23,7 @@ class AutomationRunner(
     private val integrations: IntegrationGateway,
     private val confirmations: ConfirmationGateway,
     private val takeover: TakeoverGateway,
+    private val stockSkills: StockSkillGateway = StockSkillGateway.UNCONFIGURED,
     private val observers: List<RunObserver> = emptyList(),
     private val sleep: (Long) -> Unit = { Thread.sleep(it) },
     private val now: () -> Long = System::currentTimeMillis
@@ -217,6 +218,21 @@ class AutomationRunner(
                 StepExecution(true, mapOf(target to match))
             }
             StepType.INVOKE_SKILL -> invokeSkill(runId, step.parameters["skillId"], variables, depth + 1)
+            StepType.STOCK_SKILL -> {
+                val skillId = step.parameters["skillId"] ?: return StepExecution(false, message = "missing_stock_skill_id")
+                val arguments = resolveMap(step.parameters - "skillId", variables)
+                val result = stockSkills.execute(StockSkillRequest(skillId, runId, step.id, arguments))
+                result.output.forEach { (key, value) -> variables[key] = value }
+                if (result.waitingForHuman) {
+                    takeover.request(result.message ?: "Stock skill requires human review: ${step.name}", runId, step.id)
+                }
+                StepExecution(
+                    success = result.success,
+                    output = result.output,
+                    waitingForHuman = result.waitingForHuman,
+                    message = result.message,
+                )
+            }
             StepType.BRANCH -> {
                 val skillId = if (evaluate(step.parameters, variables)) step.parameters["thenSkill"] else step.parameters["elseSkill"]
                 if (skillId.isNullOrBlank()) StepExecution(true, message = "branch_noop") else invokeSkill(runId, skillId, variables, depth + 1)
