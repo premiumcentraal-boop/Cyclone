@@ -47,8 +47,10 @@ import com.cyclone.mobile.ui.overlay.OverlayExternalInteraction
 fun CyclonePendingRequests(onOpen: () -> Unit = {}) {
     val requests by WorkspaceTasks.requests.state.collectAsState()
     val currentTask by WorkspaceTasks.state.collectAsState()
-    if (requests.isEmpty() || currentTask?.phase?.let { it != TaskPhase.STOPPED } == true) return
     val context = LocalContext.current
+    val clearedCards = TaskCardDismissals.cleared(context)
+    val currentCardVisible = taskCardVisible(currentTask, clearedCards)
+    if (requests.isEmpty() || currentCardVisible) return
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var steering by remember { mutableStateOf<PendingWorkspaceRequest?>(null) }
     val visible = if (keyboardOpen) requests.take(KEYBOARD_VISIBLE_QUEUE_CARDS) else requests

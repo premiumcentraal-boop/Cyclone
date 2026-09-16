@@ -16,7 +16,8 @@ class VisualHierarchyRegressionTest {
     fun currentTaskOwnsPrimarySurfaceInsteadOfStackingQueueBelowIt() {
         val pending = source("ui/v32/CyclonePendingRequests.kt")
         assertTrue(pending.contains("val currentTask by WorkspaceTasks.state.collectAsState()"))
-        assertTrue(pending.contains("currentTask?.phase?.let { it != TaskPhase.STOPPED } == true"))
+        assertTrue(pending.contains("val currentCardVisible = taskCardVisible(currentTask, clearedCards)"))
+        assertTrue(pending.contains("if (requests.isEmpty() || currentCardVisible) return"))
     }
 
     @Test

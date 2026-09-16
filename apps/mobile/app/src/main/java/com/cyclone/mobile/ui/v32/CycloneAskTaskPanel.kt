@@ -61,62 +61,64 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
         keyboard?.hide()
     }
 
-    Surface(
-        modifier = Modifier.fillMaxWidth().animateContentSize(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 0.dp,
-        shadowElevation = 2.dp,
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
-            verticalArrangement = Arrangement.spacedBy(11.dp),
+    CycloneSwipeTaskCard("task:${task.taskId}", canClear = !UiTask(task).active, onOpen = { UiTask(task).open(context) }) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().animateContentSize(),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            shadowElevation = 2.dp,
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
+                verticalArrangement = Arrangement.spacedBy(11.dp),
             ) {
-                CycloneAppIcon(presentation.packageName, Modifier.size(24.dp))
-                Text(
-                    resolvedApp.takeIf { it.isNotBlank() && it != "Other" } ?: "Cyclone",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                CycloneTaskStatusPill(visualState)
-            }
-
-            Text(
-                presentation.taskLabel,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            AnimatedContent(
-                targetState = visualState,
-                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
-                label = "Cyclone task state",
-            ) { state ->
-                when (state) {
-                    CycloneTaskVisualState.WORKING -> WorkingBody(task) {
-                        UiTask(task).open(context)
-                    }
-                    CycloneTaskVisualState.ACTION_NEEDED -> ActionNeededBody(
-                        task = task,
-                        onTakeOver = {
-                            WorkspaceTasks.command(context, task, "handoff")
-                        },
-                        onDone = {
-                            WorkspaceTasks.command(context, task, "resume")
-                        },
-                        onProgress = { UiTask(task).open(context) },
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CycloneAppIcon(presentation.packageName, Modifier.size(24.dp))
+                    Text(
+                        resolvedApp.takeIf { it.isNotBlank() && it != "Other" } ?: "Cyclone",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
                     )
-                    CycloneTaskVisualState.DONE -> DoneBody(task) {
-                        UiTask(task).open(context)
+                    CycloneTaskStatusPill(visualState)
+                }
+
+                Text(
+                    presentation.taskLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                AnimatedContent(
+                    targetState = visualState,
+                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                    label = "Cyclone task state",
+                ) { state ->
+                    when (state) {
+                        CycloneTaskVisualState.WORKING -> WorkingBody(task) {
+                            UiTask(task).open(context)
+                        }
+                        CycloneTaskVisualState.ACTION_NEEDED -> ActionNeededBody(
+                            task = task,
+                            onTakeOver = {
+                                WorkspaceTasks.command(context, task, "handoff")
+                            },
+                            onDone = {
+                                WorkspaceTasks.command(context, task, "resume")
+                            },
+                            onProgress = { UiTask(task).open(context) },
+                        )
+                        CycloneTaskVisualState.DONE -> DoneBody(task) {
+                            UiTask(task).open(context)
+                        }
                     }
                 }
             }

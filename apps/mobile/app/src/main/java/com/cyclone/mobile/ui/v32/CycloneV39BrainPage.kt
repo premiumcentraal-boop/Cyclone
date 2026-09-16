@@ -68,6 +68,8 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
             V39RunRow(session, metrics.toolCalls, metrics.failures, metrics.recoveries)
         }
     }
+    val cleared = TaskCardDismissals.cleared(context)
+    val visibleRuns = runs.filter { it.session.endedAt == null || "run:${it.session.id}" !in cleared }
     val verified = skills.filter { it.successCount > 0 }
     val learnedApps = apps.filter { it.openSuccessCount > 0 }
     val averageConfidence = if (verified.isEmpty()) 0 else {
@@ -221,10 +223,13 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
 
             else -> {
                 item { CycloneSectionTitle("Recent outcomes") }
-                if (runs.isEmpty()) {
+                if (cleared.isNotEmpty()) {
+                    item { androidx.compose.material3.TextButton(onClick = { TaskCardDismissals.restore(context) }) { Text("Restore cleared cards") } }
+                }
+                if (visibleRuns.isEmpty()) {
                     item { BrainEmptyState("No outcomes yet", "Completed Cyclone tasks will appear here with concise results.") }
                 }
-                items(runs, key = { it.session.id }) { run ->
+                items(visibleRuns, key = { it.session.id }) { run ->
                     V39RunCard(run) {
                         context.startActivity(
                             Intent(context, TaskResultActivityV292::class.java)
@@ -288,38 +293,40 @@ private fun BrainEmptyState(title: String, body: String) {
 private fun V39RunCard(run: V39RunRow, onOpen: () -> Unit) {
     val success = run.session.status == "COMPLETED"
     val duration = ((run.session.endedAt ?: System.currentTimeMillis()) - run.session.startedAt).coerceAtLeast(0)
-    Card(
-        onClick = onOpen,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-    ) {
-        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Icon(
-                    if (success) Icons.Rounded.CheckCircle else Icons.Rounded.History,
-                    null,
-                    modifier = Modifier.size(19.dp),
-                    tint = if (success) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(run.session.goal, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        run.session.result ?: if (run.session.status == "RUNNING") "Working" else "Task ended",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+    CycloneSwipeTaskCard("run:${run.session.id}", canClear = run.session.endedAt != null, onOpen = onOpen) {
+        Card(
+            onClick = onOpen,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        ) {
+            Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(
+                        if (success) Icons.Rounded.CheckCircle else Icons.Rounded.History,
+                        null,
+                        modifier = Modifier.size(19.dp),
+                        tint = if (success) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(run.session.goal, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            run.session.result ?: if (run.session.status == "RUNNING") "Working" else "Task ended",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
+                Text(
+                    "${run.session.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }} · ${formatDuration(duration)} · ${formatRunClock(run.session.startedAt)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text("View details", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
-            Text(
-                "${run.session.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }} · ${formatDuration(duration)} · ${formatRunClock(run.session.startedAt)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text("View details", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
         }
     }
 }

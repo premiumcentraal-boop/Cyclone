@@ -333,7 +333,8 @@ private fun ComposerPanel(
     var editorFocused by remember { mutableStateOf(false) }
     var restoreEditor by remember { mutableStateOf(false) }
     val workspace by WorkspaceTasks.state.collectAsState()
-    val task = workspace?.takeIf { it.phase != TaskPhase.STOPPED }
+    val clearedCards = com.cyclone.mobile.ui.v32.TaskCardDismissals.cleared(context)
+    val task = workspace?.takeIf { com.cyclone.mobile.ui.v32.taskCardVisible(it, clearedCards) }
     val foregroundWorking = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
     val activeWork = task?.working == true || foregroundWorking
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
