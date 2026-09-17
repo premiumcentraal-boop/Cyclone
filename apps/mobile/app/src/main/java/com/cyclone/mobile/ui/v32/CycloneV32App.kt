@@ -94,7 +94,12 @@ fun CycloneMobileV32App() {
                 }
             },
             bottomBar = {
-                if (!settingsOpen) CycloneV32BottomBar(destination) { destination = it }
+                if (!settingsOpen) {
+                    CycloneV32BottomBar(
+                        selected = destination,
+                        keepLayoutWhileIme = destination == V32Destination.AI,
+                    ) { destination = it }
+                }
             },
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {

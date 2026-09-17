@@ -49,7 +49,7 @@ class CycloneVisual42ContractTest {
         val nav = source("CycloneV32Components.kt")
         assertTrue(nav.contains("navigationBarsPadding()"))
         assertTrue(nav.contains("WindowInsets.ime"))
-        assertTrue(nav.contains("if (imeVisible) return"))
+        assertTrue(nav.contains("if (imeVisible && !keepLayoutWhileIme) return"))
         assertTrue(nav.contains("CycloneLiquidTray(height = 62.dp"))
         assertTrue(nav.contains("CycloneLiquidSelectionLens("))
         assertTrue(nav.contains("selectedIndex = selected.ordinal"))

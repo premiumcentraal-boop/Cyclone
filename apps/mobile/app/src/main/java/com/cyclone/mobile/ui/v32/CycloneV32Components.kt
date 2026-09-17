@@ -119,9 +119,13 @@ fun CycloneV32TopBar(
 }
 
 @Composable
-fun CycloneV32BottomBar(selected: V32Destination, onSelect: (V32Destination) -> Unit) {
+fun CycloneV32BottomBar(
+    selected: V32Destination,
+    keepLayoutWhileIme: Boolean = false,
+    onSelect: (V32Destination) -> Unit,
+) {
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    if (imeVisible) return
+    if (imeVisible && !keepLayoutWhileIme) return
 
     Column(
         Modifier

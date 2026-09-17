@@ -158,7 +158,7 @@ class CycloneV39AiChatPageTest {
         assertTrue(task in 0 until composer)
         assertTrue(foreground in 0 until composer)
         assertTrue(queued in 0 until composer)
-        assertTrue(page.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
+        assertTrue(page.contains("heightIn(max = 230.dp)"))
     }
 
     @Test fun translucentChatUsesClippedBackgroundsWithoutElevatedGhostBands() {

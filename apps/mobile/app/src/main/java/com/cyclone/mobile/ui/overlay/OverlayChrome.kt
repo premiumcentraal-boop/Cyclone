@@ -381,6 +381,10 @@ private fun ComposerPanel(
     var sheetHeight by remember { mutableStateOf(220f) }
     var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
+    LaunchedEffect(keyboardOpen) {
+        if (keyboardOpen) accessory = ComposerAccessory.NONE
+    }
+
     val submit = {
         if (snapshot.composerText.isNotBlank()) {
             onRequestSubmitted(snapshot.composerText)
@@ -427,6 +431,7 @@ private fun ComposerPanel(
                 },
         )
 
+        if (!keyboardOpen) {
         if (task != null || foregroundWorking || queued.isNotEmpty()) {
             OverlayAppleGlass(
                 modifier = Modifier.fillMaxWidth(),
@@ -482,7 +487,7 @@ private fun ComposerPanel(
                     launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
                 },
                 onModelAndIntelligence = { accessory = ComposerAccessory.MODEL },
-                modifier = Modifier.fillMaxWidth(.82f),
+                modifier = Modifier.fillMaxWidth(),
             )
 
             ComposerAccessory.MODEL -> OverlayAppleGlass(
@@ -509,6 +514,8 @@ private fun ComposerPanel(
                 actionLabel = "Remove",
                 onAction = { PendingTaskAttachment.take() },
             )
+        }
+
         }
 
         OverlayAppleComposerBar(

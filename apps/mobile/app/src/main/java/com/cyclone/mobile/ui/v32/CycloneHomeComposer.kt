@@ -7,6 +7,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -227,12 +230,14 @@ internal fun CycloneAttachmentTools(
             add(Triple(Icons.Rounded.AttachFile, filesLabel, onFiles))
             tileExtras.forEach { (icon, label) -> add(Triple(icon, label, { onExtra(label) })) }
         }
-        tiles.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { (icon, label, click) ->
-                    CyclonePlusTile(icon, label, Modifier.weight(1f), click)
-                }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            tiles.forEach { (icon, label, click) ->
+                CyclonePlusTile(icon, label, Modifier.width(124.dp), click)
             }
         }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -253,7 +258,7 @@ private fun CyclonePlusTile(
 ) {
     Surface(
         modifier = modifier
-            .heightIn(min = 96.dp)
+            .heightIn(min = 92.dp)
             .clickable(role = Role.Button, onClick = onClick),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .78f),
@@ -262,7 +267,7 @@ private fun CyclonePlusTile(
         shadowElevation = 0.dp,
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 16.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(26.dp))

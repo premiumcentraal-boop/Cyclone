@@ -4,10 +4,12 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.speech.RecognizerIntent
+import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -61,6 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,12 +76,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -164,7 +171,10 @@ internal class V39AiSubmitGate {
 
 @Composable
 internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
-    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+    val keyboardOpen = imeBottomPx > 0
+    val localView = LocalView.current
     val task by WorkspaceTasks.state.collectAsState()
     val queuedRequests by WorkspaceTasks.requests.state.collectAsState()
     val foregroundActivity by OverlayChromeRuntime.activity.collectAsState()
@@ -181,6 +191,17 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
     var voiceOpen by remember { mutableStateOf(false) }
     var modelMenuOpen by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
+    var composerRestingBottomPx by remember { mutableStateOf<Float?>(null) }
+    val keyboardTopPx = localView.rootView.height.toFloat() - imeBottomPx
+    val composerKeyboardGapPx = with(density) { 12.dp.toPx() }
+    val composerLiftTargetPx = composerRestingBottomPx
+        ?.let { (it - keyboardTopPx + composerKeyboardGapPx).coerceAtLeast(0f) }
+        ?: 0f
+    val composerLiftPx by animateFloatAsState(
+        targetValue = composerLiftTargetPx,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "Ask Cyclone keyboard lift",
+    )
     val catalogRevision by com.cyclone.mobile.ai.OpenRouterCatalogStore.revision.collectAsState()
     var selectedModelId by rememberSaveable(catalogRevision, refreshTick) {
         mutableStateOf(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context))
@@ -191,6 +212,17 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
     val hasKey = remember(refreshTick) { OpenRouterSecretStore.hasKey(context) }
     val previewRoute = remember(composer, attached) { RequestIntentRouter.route(composer, hasAttachment = attached) }
     val emptyCanvas = session.messages.isEmpty() && !session.busy && task == null && !foregroundWorking
+
+    DisposableEffect(context) {
+        val activity = context as? Activity
+        val previousSoftInputMode = activity?.window?.attributes?.softInputMode
+        activity?.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        onDispose {
+            if (previousSoftInputMode != null) {
+                activity?.window?.setSoftInputMode(previousSoftInputMode)
+            }
+        }
+    }
 
     val dictation = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         voiceOpen = false
@@ -367,7 +399,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 LazyColumn(
                     Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(top = if (keyboardOpen) 2.dp else 4.dp, bottom = 8.dp),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp),
                 ) {
                     if (session.messages.isNotEmpty()) {
                         items(session.messages, key = { it.id }) { V39ChatBubble(it) }
@@ -401,7 +433,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
 
             if (task != null || queuedRequests.isNotEmpty() || foregroundWorking) {
                 LazyColumn(
-                    Modifier.fillMaxWidth().heightIn(max = if (keyboardOpen) 132.dp else 230.dp),
+                    Modifier.fillMaxWidth().heightIn(max = 230.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(vertical = 2.dp),
                 ) {
@@ -447,7 +479,16 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             }
 
             CycloneLiquidPanel(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+                    .zIndex(2f)
+                    .graphicsLayer { translationY = -composerLiftPx }
+                    .onGloballyPositioned { coordinates ->
+                        if (!keyboardOpen && composerRestingBottomPx == null) {
+                            composerRestingBottomPx = coordinates.boundsInWindow().bottom
+                        }
+                    },
                 cornerRadius = 30.dp,
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
             ) {

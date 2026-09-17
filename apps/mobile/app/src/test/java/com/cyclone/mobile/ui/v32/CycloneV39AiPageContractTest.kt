@@ -48,7 +48,7 @@ class CycloneV39AiPageContractTest {
         assertTrue(liquidComposer in 0 until composer)
         assertTrue(text.contains("CycloneModelIntelligencePanel("))
         assertTrue(text.contains("showModelSelector = false"))
-        assertTrue(text.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
+        assertTrue(text.contains("heightIn(max = 230.dp)"))
     }
 
     @Test fun emptyStateMatchesDotFieldAskConcept() {
@@ -66,6 +66,19 @@ class CycloneV39AiPageContractTest {
         assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
     }
 
+    @Test fun keyboardMovesOnlyComposerAndPreservesAskLayout() {
+        val page = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
+        val app = source("com/cyclone/mobile/ui/v32/CycloneV32App.kt")
+        assertTrue(page.contains("SOFT_INPUT_ADJUST_NOTHING"))
+        assertTrue(page.contains("graphicsLayer { translationY = -composerLiftPx }"))
+        assertTrue(page.contains("composerKeyboardGapPx = with(density) { 12.dp.toPx() }"))
+        assertTrue(page.contains("onGloballyPositioned"))
+        assertTrue(page.contains("contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp)"))
+        assertTrue(page.contains("heightIn(max = 230.dp)"))
+        assertFalse(page.contains("heightIn(max = if (keyboardOpen)"))
+        assertTrue(app.contains("keepLayoutWhileIme = destination == V32Destination.AI"))
+    }
+
     @Test fun replyStopIsChatOnly() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
         val stopReply = text.indexOf("Stop reply")
@@ -79,7 +92,7 @@ class CycloneV39AiPageContractTest {
         val nav = source("com/cyclone/mobile/ui/v32/CycloneV32Components.kt")
         assertTrue(nav.contains("navigationBarsPadding()"))
         assertTrue(nav.contains("WindowInsets.ime"))
-        assertTrue(nav.contains("if (imeVisible) return"))
+        assertTrue(nav.contains("if (imeVisible && !keepLayoutWhileIme) return"))
         assertTrue(nav.contains("ic_cyclone_ai_42"))
         assertTrue(nav.contains("CycloneLiquidTray(height = 62.dp"))
         assertTrue(nav.contains("CycloneLiquidSelectionLens("))

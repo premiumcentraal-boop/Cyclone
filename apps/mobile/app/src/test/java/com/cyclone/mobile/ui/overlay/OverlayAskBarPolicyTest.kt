@@ -22,6 +22,11 @@ class OverlayAskBarPolicyTest {
     }
 
     @Test
+    fun keyboardUsesTheSameGapAsTheRestingComposer() {
+        assertEquals(OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP, OverlayImeLift.KEYBOARD_GAP_DP)
+    }
+
+    @Test
     fun compactBottomGapStaysClearOfLegacyEighteenDpPlacement() {
         assertEquals(8, OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP - 18)
     }
@@ -77,6 +82,8 @@ class OverlayAskBarPolicyTest {
         assertTrue(controller.contains("fitInsetsTypes = 0"))
         assertFalse(controller.contains("SOFT_INPUT_ADJUST_RESIZE"))
         assertTrue(overlay.contains("LocalOverlayImeBottomPx"))
+        assertTrue(overlay.contains("LaunchedEffect(keyboardOpen)"))
+        assertTrue(overlay.contains("if (!keyboardOpen)"))
         assertFalse(overlay.contains("navigationBarsPadding()"))
         assertFalse(overlay.contains("imePadding()"))
     }

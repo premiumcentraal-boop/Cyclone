@@ -35,7 +35,7 @@ class CycloneAskDotFieldContractTest {
 
     @Test fun existingAppNavigationStillOwnsAskCycloneDestination() {
         val app = source("com/cyclone/mobile/ui/v32/CycloneV32App.kt")
-        assertTrue(app.contains("if (!settingsOpen) CycloneV32BottomBar(destination)"))
+        assertTrue(app.contains("keepLayoutWhileIme = destination == V32Destination.AI"))
         assertTrue(app.contains("V32Destination.AI -> V39AiChatPage(context, refreshTick)"))
     }
 }

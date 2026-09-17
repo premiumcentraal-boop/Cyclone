@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.ScreenShare
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
@@ -254,20 +258,51 @@ internal fun OverlayAppleToolsMenu(
     modifier: Modifier = Modifier,
 ) {
     OverlayAppleGlass(
-        modifier = modifier.widthIn(max = 310.dp),
+        modifier = modifier.fillMaxWidth(),
         cornerRadius = 30.dp,
         strong = true,
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            OverlayAppleMenuRow(Icons.Rounded.CameraAlt, "Camera", onCamera)
-            OverlayAppleMenuRow(Icons.Rounded.AttachFile, "Files & photos", onFiles)
-            OverlayAppleMenuRow(Icons.Rounded.ScreenShare, "Share screen", onShareScreen, enabled = !sharingActive)
-            OverlayAppleMenuRow(Icons.Rounded.Apps, "Cross-app share", onCrossAppShare, enabled = !sharingActive)
-            OverlayAppleMenuRow(Icons.Rounded.Tune, "Model & intelligence", onModelAndIntelligence)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OverlayAppleToolTile(Icons.Rounded.CameraAlt, "Camera", onCamera)
+                OverlayAppleToolTile(Icons.Rounded.PhotoLibrary, "Photos", onFiles)
+                OverlayAppleToolTile(Icons.Rounded.AttachFile, "Files", onFiles)
+            }
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                OverlayAppleMenuRow(Icons.Rounded.ScreenShare, "Share screen", onShareScreen, enabled = !sharingActive)
+                OverlayAppleMenuRow(Icons.Rounded.Apps, "Cross-app share", onCrossAppShare, enabled = !sharingActive)
+                OverlayAppleMenuRow(Icons.Rounded.Tune, "Model & intelligence", onModelAndIntelligence)
+            }
         }
+    }
+}
+
+@Composable
+private fun OverlayAppleToolTile(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier
+            .width(118.dp)
+            .height(92.dp)
+            .background(OverlayGlassInner, RoundedCornerShape(22.dp))
+            .border(0.7.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(22.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Icon(icon, contentDescription = null, tint = OverlayText, modifier = Modifier.size(25.dp))
+        Text(label, color = OverlayText, fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }
 
