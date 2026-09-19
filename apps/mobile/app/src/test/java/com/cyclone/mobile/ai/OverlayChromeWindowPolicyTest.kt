@@ -94,10 +94,18 @@ class OverlayChromeWindowPolicyTest {
     }
 
     @Test
-    fun minimizedStateUsesTheSameBottomCenterCompactPolicy() {
-        val minimized = OverlayChromeWindowPolicy.main(compact = true)
+    fun minimizedRunUsesContentHeightAskCyclonePillWithoutTakingHostFocus() {
+        val minimized = OverlayChromeWindowPolicy.pill()
+        val flags = OverlayChromeWindowPolicy.flags(minimized)
         assertTrue(minimized.bottomCenter)
-        assertEquals(48, minimized.widthDp)
+        assertTrue(minimized.matchParentWidth)
+        assertEquals(null, minimized.heightDp)
+        assertTrue(minimized.notFocusable)
+        assertTrue(minimized.notTouchModal)
+        assertFalse(minimized.notTouchable)
         assertEquals(OverlayChromeContract.IDLE_TOUCH_BOTTOM_MARGIN_DP, minimized.bottomMarginDp)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0)
     }
 }

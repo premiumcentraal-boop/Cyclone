@@ -49,10 +49,15 @@ class OverlayAskBarPolicyTest {
     }
 
     @Test
-    fun activeSwipeDownUsesTheSameCompactTaskGlassAsAutomaticCollapse() {
+    fun activeSwipeDownUsesVisibleDrawerAndRestoresTheSameRunFromPill() {
         val overlay = source("ui/overlay/OverlayChrome.kt")
-        assertFalse(overlay.contains("taskCollapsed"))
-        assertTrue(overlay.contains("if (dismiss) onAction(OverlayUserAction.MINIMIZE)"))
+        val drawer = source("ui/v32/CycloneChatDrawer.kt")
+        assertTrue(overlay.contains("CycloneChatDrawerSurface("))
+        assertTrue(overlay.contains("CycloneCollapsedAskPill("))
+        assertTrue(overlay.contains("onAction(OverlayUserAction.MINIMIZE)"))
+        assertTrue(overlay.contains("onAction(OverlayUserAction.ASK_CYCLONE)"))
+        assertTrue(drawer.contains("Drag down or tap to minimize Cyclone chat"))
+        assertTrue(drawer.contains("Ask Cyclone. Open current chat."))
     }
 
     @Test

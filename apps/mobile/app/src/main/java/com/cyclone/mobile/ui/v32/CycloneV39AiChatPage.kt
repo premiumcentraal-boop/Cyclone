@@ -79,6 +79,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -165,6 +167,8 @@ internal class V39AiSubmitGate {
 @Composable
 internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val task by WorkspaceTasks.state.collectAsState()
     val queuedRequests by WorkspaceTasks.requests.state.collectAsState()
     val foregroundActivity by OverlayChromeRuntime.activity.collectAsState()
@@ -180,6 +184,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
     var toolsOpen by remember { mutableStateOf(false) }
     var voiceOpen by remember { mutableStateOf(false) }
     var modelMenuOpen by remember { mutableStateOf(false) }
+    var drawerCollapsed by rememberSaveable { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val catalogRevision by com.cyclone.mobile.ai.OpenRouterCatalogStore.revision.collectAsState()
     var selectedModelId by rememberSaveable(catalogRevision, refreshTick) {
@@ -310,10 +315,13 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         com.cyclone.mobile.capture.LiveScreenShare.start(context)
     }
 
-    LaunchedEffect(keyboardOpen) {
+    LaunchedEffect(keyboardOpen, toolsOpen, modelMenuOpen) {
         if (keyboardOpen) {
             modelMenuOpen = false
             toolsOpen = false
+            drawerCollapsed = false
+        } else if (toolsOpen || modelMenuOpen) {
+            drawerCollapsed = false
         }
     }
 
@@ -399,6 +407,31 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 }
             }
 
+            if (drawerCollapsed) {
+                CycloneCollapsedAskPill(
+                    onExpand = { drawerCollapsed = false },
+                    active = task?.working == true || foregroundWorking || session.busy,
+                    status = when {
+                        task?.working == true -> task?.subtitle?.takeIf(String::isNotBlank) ?: "Current run"
+                        foregroundWorking -> foregroundSnapshot.statusMessage ?: "Current run"
+                        session.busy -> "Answering…"
+                        queuedRequests.isNotEmpty() -> "Tasks waiting"
+                        else -> null
+                    },
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+            } else {
+                CycloneChatDrawerSurface(
+                    onCollapse = {
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
+                        toolsOpen = false
+                        modelMenuOpen = false
+                        drawerCollapsed = true
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                ) {
             if (task != null || queuedRequests.isNotEmpty() || foregroundWorking) {
                 LazyColumn(
                     Modifier.fillMaxWidth().heightIn(max = if (keyboardOpen) 132.dp else 230.dp),
@@ -561,6 +594,8 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 }
             }
         }
+                }
+            }
 
         AnimatedVisibility(
             visible = toolsOpen,
@@ -596,6 +631,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                             .verticalScroll(rememberScrollState())
                             .padding(bottom = 8.dp),
                     ) {
+                        CycloneSheetDismissHandle(onDismiss = { toolsOpen = false })
                         CycloneAttachmentTools(
                             onCamera = { openCamera() },
                             onFiles = { openFiles() },

@@ -196,6 +196,18 @@ class CycloneV39AiChatPageTest {
         assertTrue(tools in 0 until intelligence)
     }
 
+    @Test fun inAppChatUsesCollapsibleDrawerAndDraggablePlusSheet() {
+        val page = source("CycloneV39AiChatPage.kt")
+        val drawer = source("CycloneChatDrawer.kt")
+        assertTrue(page.contains("var drawerCollapsed by rememberSaveable"))
+        assertTrue(page.contains("CycloneChatDrawerSurface("))
+        assertTrue(page.contains("CycloneCollapsedAskPill("))
+        assertTrue(page.contains("CycloneSheetDismissHandle("))
+        assertTrue(page.contains("keyboardController?.hide()"))
+        assertTrue(drawer.contains("Drag down or tap to minimize Cyclone chat"))
+        assertTrue(drawer.contains("Ask Cyclone. Open current chat."))
+    }
+
     @Test fun plusPanelAndVoiceStayBehindOneComposer() {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("CycloneAttachmentTools("))

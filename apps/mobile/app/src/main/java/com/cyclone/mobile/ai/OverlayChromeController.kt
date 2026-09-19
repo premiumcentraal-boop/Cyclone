@@ -107,6 +107,17 @@ internal object OverlayChromeWindowPolicy {
         )
     }
 
+    fun pill(): OverlayWindowContract = OverlayWindowContract(
+        matchParentWidth = true,
+        widthDp = null,
+        heightDp = null,
+        bottomCenter = true,
+        notFocusable = true,
+        notTouchModal = true,
+        notTouchable = false,
+        bottomMarginDp = OverlayChromeContract.IDLE_TOUCH_BOTTOM_MARGIN_DP,
+    )
+
     fun glass(): OverlayWindowContract = main(compact = false).copy(notFocusable = true)
 
     val halo: OverlayWindowContract = OverlayWindowContract(
@@ -137,9 +148,10 @@ internal object OverlayChromeWindowPolicy {
  * Sibling of [AiTraceOverlayController]. Hosts the V4 Compose overlay on
  * TYPE_ACCESSIBILITY_OVERLAY so Cyclone chrome is not a new Activity.
  *
- * Expanded chrome is one touchable panel window. Compact mode deliberately splits the logical
+ * Expanded chrome is one touchable drawer window. Idle mode deliberately splits the logical
  * overlay into a non-touchable 144x72dp visual halo and a centered 48x48dp activation window.
- * The larger decoration never owns input; host taps outside the 48dp hotspot remain host taps.
+ * A minimized current run uses a separate content-height Ask Cyclone pill; it never turns the
+ * rest of the host app into a touch target.
  */
 class OverlayChromeController(
     private val service: CycloneAccessibilityService,
@@ -395,20 +407,28 @@ class OverlayChromeController(
         val view = root ?: return
         val layout = params ?: return
         val compact = isCompact(snapshot)
-        val visible = (!compact || snapshot.idleChipVisible || glass()) && !OverlayExternalInteraction.active.value
+        val collapsed = isCollapsedDrawer(snapshot)
+        val visible = (!compact || snapshot.idleChipVisible || collapsed || glass()) &&
+            !OverlayExternalInteraction.active.value
 
         view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         view.contentDescription =
             if (snapshot.state == OverlayChromeState.GATE && !snapshot.minimized) OverlayCopy.GATE else null
         view.visibility = if (visible) View.VISIBLE else View.GONE
 
-        val spec = if (glass()) OverlayChromeWindowPolicy.glass() else OverlayChromeWindowPolicy.main(compact)
-        val changed = applyWindowContract(layout, spec, followKeyboard = !compact && !glass())
+        val spec = when {
+            glass() -> OverlayChromeWindowPolicy.glass()
+            collapsed -> OverlayChromeWindowPolicy.pill()
+            else -> OverlayChromeWindowPolicy.main(compact)
+        }
+        val changed = applyWindowContract(layout, spec, followKeyboard = !compact && !glass() && !collapsed)
         if (changed) runCatching { wm.updateViewLayout(view, layout) }
 
         haloRoot?.let { halo ->
             halo.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            halo.visibility = if (visible && compact && !glass() && snapshot.idleChipVisible) View.VISIBLE else View.GONE
+            halo.visibility = if (
+                visible && snapshot.state == OverlayChromeState.IDLE && !glass() && snapshot.idleChipVisible
+            ) View.VISIBLE else View.GONE
         }
         haloParams?.let { hp ->
             val haloChanged = applyWindowContract(hp, OverlayChromeWindowPolicy.halo, followKeyboard = false)
@@ -450,7 +470,13 @@ class OverlayChromeController(
     }
 
     private fun overlayParams(snapshot: OverlayChromeSnapshot): WindowManager.LayoutParams =
-        windowParams(OverlayChromeWindowPolicy.main(isCompact(snapshot)))
+        windowParams(
+            when {
+                glass() -> OverlayChromeWindowPolicy.glass()
+                isCollapsedDrawer(snapshot) -> OverlayChromeWindowPolicy.pill()
+                else -> OverlayChromeWindowPolicy.main(isCompact(snapshot))
+            },
+        )
 
     private fun windowParams(spec: OverlayWindowContract): WindowManager.LayoutParams =
         WindowManager.LayoutParams(
@@ -591,6 +617,9 @@ class OverlayChromeController(
 
     private fun isCompact(snapshot: OverlayChromeSnapshot): Boolean =
         snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
+
+    private fun isCollapsedDrawer(snapshot: OverlayChromeSnapshot): Boolean =
+        snapshot.state != OverlayChromeState.IDLE && snapshot.minimized && !glass()
 
     fun beginVoiceInput() {
         onMain {
