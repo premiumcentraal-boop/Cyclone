@@ -1,0 +1,13 @@
+Cyclone apps/pc-glass
+====================
+
+This directory includes software derived from Artemis
+(https://github.com/google/artemis), licensed under the Apache License,
+Version 2.0.
+
+Copyright 2026 Google LLC
+
+This project includes source code developed by Minitap, Inc.
+(https://github.com/minitap-ai/mobile-use).
+
+See the accompanying LICENSE file for the full Apache-2.0 license text.
