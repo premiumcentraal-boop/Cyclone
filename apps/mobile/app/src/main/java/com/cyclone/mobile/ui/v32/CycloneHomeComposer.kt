@@ -180,6 +180,13 @@ fun CycloneHomeComposer(onSubmit: (String) -> Unit) {
                     tools = false
                     context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
                 },
+                onPhotos = {
+                    tools = false
+                    context.startActivity(
+                        Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                            .putExtra("photos", true),
+                    )
+                },
                 onShareScreen = {
                     tools = false
                     com.cyclone.mobile.capture.LiveScreenShare.start(context)
@@ -203,6 +210,7 @@ internal fun CycloneAttachmentTools(
     onCamera: () -> Unit,
     onFiles: () -> Unit,
     onShareScreen: () -> Unit,
+    onPhotos: (() -> Unit)? = null,
     extras: List<Pair<ImageVector, String>> = emptyList(),
     tileExtras: List<Pair<ImageVector, String>> = emptyList(),
     onExtra: (String) -> Unit = {},
@@ -223,7 +231,7 @@ internal fun CycloneAttachmentTools(
         }
         val tiles = buildList {
             add(Triple(Icons.Rounded.CameraAlt, "Camera", onCamera))
-            add(Triple(Icons.Rounded.PhotoLibrary, "Photos", onFiles))
+            add(Triple(Icons.Rounded.PhotoLibrary, "Photos", onPhotos ?: onFiles))
             add(Triple(Icons.Rounded.AttachFile, filesLabel, onFiles))
             tileExtras.forEach { (icon, label) -> add(Triple(icon, label, { onExtra(label) })) }
         }

@@ -34,23 +34,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.ai.CycloneAiAccessProfile
-import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
 import com.cyclone.mobile.ai.OpenRouterCatalogStore
 import com.cyclone.mobile.ai.OpenRouterModelPreset
 import com.cyclone.mobile.ai.OpenRouterModelPresets
-
-private val autonomyProfiles = listOf(
-    CycloneAiAccessProfile.GUIDED,
-    CycloneAiAccessProfile.BALANCED,
-    CycloneAiAccessProfile.FULL,
-)
-
-private fun autonomyLabel(profile: CycloneAiAccessProfile): String = when (profile) {
-    CycloneAiAccessProfile.GUIDED -> "Ask often"
-    CycloneAiAccessProfile.BALANCED -> "Balanced"
-    CycloneAiAccessProfile.FULL -> "Independent"
-}
 
 private fun modelSubtitle(model: OpenRouterModelPreset): String = when (model.id) {
     OpenRouterModelPresets.DEFAULT.id -> "Default · fast everyday tasks"
@@ -69,7 +55,7 @@ internal fun cycloneShortModelLabel(label: String): String {
     return core.split(Regex("\\s+")).filter { it.isNotBlank() }.take(2).joinToString(" ").ifBlank { "Cyclone" }
 }
 
-private enum class OverlaySettingsStep { MODEL, INTELLIGENCE, AUTONOMY }
+private enum class OverlaySettingsStep { MODEL, INTELLIGENCE }
 
 @Composable
 fun CycloneModelIntelligencePanel(
@@ -171,7 +157,6 @@ private fun OverlaySettingsWizard(
     val context = LocalContext.current
     var step by remember { mutableStateOf(OverlaySettingsStep.MODEL) }
     var modelListOpen by remember { mutableStateOf(false) }
-    var autonomy by remember { mutableStateOf(CycloneAiAccessProfileStore.read(context)) }
     val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
     val pickerModels = remember(catalogRevision) { OpenRouterCatalogStore.picker(context) }
     val currentModel = V39AiChatContract.modelForStored(modelId).let { model ->
@@ -193,7 +178,6 @@ private fun OverlaySettingsWizard(
                     when (item) {
                         OverlaySettingsStep.MODEL -> "Model"
                         OverlaySettingsStep.INTELLIGENCE -> "Intelligence"
-                        OverlaySettingsStep.AUTONOMY -> "Autonomy"
                     },
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall,
@@ -231,38 +215,15 @@ private fun OverlaySettingsWizard(
                 } else {
                     CycloneReasoningSelector(currentModel.id, compact = true) { selected ->
                         onChange(V39AiChatContract.storageId(currentModel), selected)
-                        step = OverlaySettingsStep.AUTONOMY
                     }
                     if (reasoningOptions.isEmpty()) {
-                        CycloneLiquidTextAction(
-                            label = "Continue",
-                            onClick = { step = OverlaySettingsStep.AUTONOMY },
-                            modifier = Modifier.align(Alignment.End),
-                            prominent = true,
+                        Text(
+                            "This model manages its own intelligence level.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-            }
-
-            OverlaySettingsStep.AUTONOMY -> {
-                val selectedIndex = autonomyProfiles.indexOf(autonomy).coerceAtLeast(0)
-                CycloneLiquidChoiceBar(
-                    options = autonomyProfiles.map(::autonomyLabel),
-                    selectedIndex = selectedIndex,
-                    onSelect = { index ->
-                        val profile = autonomyProfiles[index]
-                        autonomy = profile
-                        CycloneAiAccessProfileStore.write(context, profile)
-                        step = OverlaySettingsStep.MODEL
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    compact = true,
-                )
-                Text(
-                    autonomy.summary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }

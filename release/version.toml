@@ -1,25 +1,24 @@
-# Cyclone Mobile 4.7.0: Ask Cyclone chat drawer and in-chat task progress.
-# Built directly on the published Cyclone Mobile 4.6.9 release.
-# Release notes: docs/RELEASE_4.7.0.md
-# Publication source: canonical full-release workflow; Mobile CI must pass this exact SHA.
+# Cyclone Mobile 4.7.1: corrected three-stage Ask Cyclone overlay.
+# Built directly on published Cyclone Mobile 4.7.0, which itself is based on 4.6.9.
+# Release notes: docs/RELEASE_4.7.1.md
 schema = 1
-product_version = "4.7.0"
+product_version = "4.7.1"
 channel = "development"
-android_version_code = 130
+android_version_code = 131
 python_version = "4.1.0"
 
 [components]
-mobile = "4.7.0"
+mobile = "4.7.1"
 pc_companion = "1.5.5"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.6.9"
-publication_authorized = true
+previous_mobile_version = "4.7.0"
+publication_authorized = false
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.7.0-release"
+candidate_generation = "cyclone-4.7.1-overlay-states"

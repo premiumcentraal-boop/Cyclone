@@ -65,6 +65,8 @@ data class OverlayChromeSnapshot(
     val idleChipVisible: Boolean = true,
     val pcAutoApproveIgnored: Boolean = false,
     val minimized: Boolean = false,
+    /** True only for the tiny triple-tap launcher. minimized=true + launcherCollapsed=false is the usable composer. */
+    val launcherCollapsed: Boolean = false,
     val userPaused: Boolean = false,
     val composerText: String = "",
     val voiceListening: Boolean = false,

@@ -47,7 +47,7 @@ class CycloneV39AiPageContractTest {
         assertTrue(modelPill in 0 until liquidComposer)
         assertTrue(liquidComposer in 0 until composer)
         assertTrue(text.contains("CycloneModelIntelligencePanel("))
-        assertTrue(text.contains("showModelSelector = false"))
+        assertTrue(text.contains("showModelSelector = true"))
         assertTrue(text.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
     }
 

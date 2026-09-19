@@ -69,7 +69,6 @@ import com.cyclone.mobile.capture.ScreenSharePhase
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
 import com.cyclone.mobile.ui.v32.CycloneChatDrawerSurface
-import com.cyclone.mobile.ui.v32.CycloneCollapsedAskPill
 import com.cyclone.mobile.ui.v32.CycloneForegroundWorkCard
 import com.cyclone.mobile.ui.v32.CyclonePendingRequests
 import com.cyclone.mobile.ui.v32.CycloneTrayIconAction
@@ -167,7 +166,8 @@ fun OverlayChrome(
     CycloneV32Theme(drawBackground = false) {
         val presentation = when {
             snapshot.state == OverlayChromeState.IDLE -> "idle"
-            snapshot.minimized -> "collapsed"
+            snapshot.launcherCollapsed -> "launcher"
+            snapshot.minimized -> "minimized"
             snapshot.state == OverlayChromeState.GATE -> "gate"
             else -> "drawer"
         }
@@ -190,12 +190,30 @@ fun OverlayChrome(
                 } else {
                     Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
                 }
-                "collapsed" -> CollapsedRunChatPill(snapshot) {
-                    onAction(OverlayUserAction.ASK_CYCLONE)
+                "launcher" -> if (snapshot.idleChipVisible) {
+                    IdleActivationHotspot(
+                        state = idleVisualState,
+                        onTap = onIdleTap,
+                        onSemanticActivate = onIdleSemanticActivate,
+                        modifier = modifier,
+                    )
+                } else {
+                    Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
                 }
+                "minimized" -> ComposerPanel(
+                    snapshot = snapshot,
+                    minimized = true,
+                    onAction = onAction,
+                    onComposerChanged = onComposerChanged,
+                    onRequestSubmitted = onRequestSubmitted,
+                    onVoiceInput = onVoiceInput,
+                    aiSettings = aiSettings,
+                    onAiSettingsChanged = onAiSettingsChanged,
+                )
                 "gate" -> GatePanel(snapshot, onAction)
                 else -> ComposerPanel(
                     snapshot = snapshot,
+                    minimized = false,
                     onAction = onAction,
                     onComposerChanged = onComposerChanged,
                     onRequestSubmitted = onRequestSubmitted,
@@ -205,33 +223,6 @@ fun OverlayChrome(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun CollapsedRunChatPill(
-    snapshot: OverlayChromeSnapshot,
-    onExpand: () -> Unit,
-) {
-    val active = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
-    val status = when {
-        active && snapshot.userPaused -> "Paused · current run saved"
-        active -> snapshot.statusMessage?.takeIf(String::isNotBlank) ?: "Current run · tap to reopen"
-        snapshot.state == OverlayChromeState.ANALYSIS -> "Ready for your next request"
-        snapshot.state == OverlayChromeState.DONE -> "Run finished"
-        else -> "Current chat"
-    }
-    Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        CycloneCollapsedAskPill(
-            onExpand = onExpand,
-            active = active,
-            status = status,
-            containerColor = Color(0xFF1C1C1E).copy(alpha = .96f),
-            contentColor = Color(0xFFF5F5F7),
-            secondaryColor = Color(0xFFD1D1D6),
-            accentColor = Color(0xFF64B5FF),
-            outlineColor = Color.White.copy(alpha = .10f),
-        )
     }
 }
 
@@ -337,6 +328,7 @@ internal fun OverlayIdleHalo(
 @Composable
 private fun ComposerPanel(
     snapshot: OverlayChromeSnapshot,
+    minimized: Boolean,
     onAction: (OverlayUserAction) -> Unit,
     onComposerChanged: (String) -> Unit,
     onRequestSubmitted: (String) -> Unit,
@@ -417,6 +409,12 @@ private fun ComposerPanel(
             accessory = ComposerAccessory.NONE
             onAction(OverlayUserAction.MINIMIZE)
         },
+        onExpand = if (minimized) {
+            {
+                accessory = ComposerAccessory.NONE
+                onAction(OverlayUserAction.ASK_CYCLONE)
+            }
+        } else null,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
         containerColor = Color(0xFF111317).copy(alpha = .98f),
         contentColor = Color(0xFFF5F5F7),
@@ -424,7 +422,7 @@ private fun ComposerPanel(
         handleColor = Color.White.copy(alpha = .34f),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
     ) {
-        if (task != null || foregroundWorking || queued.isNotEmpty()) {
+        if (!minimized && (task != null || foregroundWorking || queued.isNotEmpty())) {
             OverlayAppleGlass(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 24.dp,
@@ -469,6 +467,9 @@ private fun ComposerPanel(
                 onCamera = {
                     launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("camera", true))
                 },
+                onPhotos = {
+                    launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("photos", true))
+                },
                 onFiles = {
                     launchExternal(Intent(context, OverlayAttachmentActivity::class.java))
                 },
@@ -479,7 +480,7 @@ private fun ComposerPanel(
                     launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
                 },
                 onModelAndIntelligence = { accessory = ComposerAccessory.MODEL },
-                modifier = Modifier.fillMaxWidth(.82f),
+                modifier = Modifier.fillMaxWidth(),
             )
 
             ComposerAccessory.MODEL -> OverlayAppleGlass(
@@ -508,6 +509,14 @@ private fun ComposerPanel(
             )
         }
 
+        val quickModelLabel = com.cyclone.mobile.ui.v32.cycloneShortModelLabel(
+            com.cyclone.mobile.ui.v32.V39AiChatContract.modelForStored(aiSettings.modelId).label.ifBlank { "Cyclone" },
+        )
+        val quickIntelligenceLabel = aiSettings.reasoningEffort
+            .takeIf(String::isNotBlank)
+            ?.let { com.cyclone.mobile.ui.v32.reasoningEffortLabel(it) }
+            ?: "Auto"
+
         OverlayAppleComposerBar(
             text = snapshot.composerText,
             onTextChanged = onComposerChanged,
@@ -531,6 +540,11 @@ private fun ComposerPanel(
             onDictate = onVoiceInput,
             onPrimary = {
                 if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
+            },
+            modelLabel = quickModelLabel,
+            intelligenceLabel = quickIntelligenceLabel,
+            onModelQuick = {
+                accessory = if (accessory == ComposerAccessory.MODEL) ComposerAccessory.NONE else ComposerAccessory.MODEL
             },
         )
     }

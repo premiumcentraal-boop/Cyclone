@@ -93,8 +93,8 @@ class CycloneV39AiChatPageTest {
         assertTrue(askGlass > pill)
         assertTrue(composer > askGlass)
         assertTrue(page.contains("CycloneModelIntelligencePanel("))
-        assertTrue(page.contains("showModelSelector = false"))
-        assertTrue(page.contains("if (!keyboardOpen)"))
+        assertTrue(page.contains("showModelSelector = true"))
+        assertTrue(page.contains("if (modelMenuOpen && !keyboardOpen)"))
         assertFalse(page.contains(".imePadding()"))
         assertEquals(1, Regex("CycloneModelPill\\(").findAll(page).count())
     }
@@ -120,7 +120,7 @@ class CycloneV39AiChatPageTest {
         assertTrue(reasoning.contains("OpenRouterCatalogStore.setReasoningEffort(context, canonical, value)"))
         assertTrue(reasoning.contains("reasoningSelectorMode(options)"))
         assertTrue(page.contains("CycloneModelIntelligencePanel("))
-        assertTrue(page.contains("showModelSelector = false"))
+        assertTrue(page.contains("showModelSelector = true"))
     }
 
     @Test fun missingKeyBlocksChatButNotPhoneRoutingContract() {
@@ -185,7 +185,8 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("Take a screenshot\", onSuggestion"))
         assertTrue(page.contains("compactHeader = true"))
         assertTrue(page.contains("expandInLayout = false"))
-        assertTrue(page.contains("CycloneModelPickerList("))
+        assertTrue(page.contains("CycloneModelIntelligencePanel("))
+        assertTrue(page.contains("showModelSelector = true"))
         assertTrue(page.contains("AskCycloneOrb()"))
         assertTrue(page.contains("AskCycloneDotField(Modifier.matchParentSize())"))
         assertTrue(page.contains("askCycloneCanvasBrush()"))
@@ -210,9 +211,14 @@ class CycloneV39AiChatPageTest {
 
     @Test fun plusPanelAndVoiceStayBehindOneComposer() {
         val page = source("CycloneV39AiChatPage.kt")
+        val homeComposer = source("CycloneHomeComposer.kt")
         assertTrue(page.contains("CycloneAttachmentTools("))
+        assertTrue(page.contains("onPhotos = { openPhotos() }"))
         assertTrue(page.contains("filesLabel = \"Files\""))
         assertTrue(page.contains("Create a routine"))
+        assertTrue(page.contains("Model & intelligence"))
+        assertTrue(homeComposer.contains("Icons.Rounded.PhotoLibrary, \"Photos\""))
+        assertTrue(homeComposer.contains("Icons.Rounded.AttachFile, filesLabel"))
         assertFalse(page.contains("Take screenshot"))
         assertFalse(page.contains("Deep research"))
         assertFalse(page.contains("Explain this screen"))
@@ -220,6 +226,16 @@ class CycloneV39AiChatPageTest {
         assertTrue(page.contains("AskCycloneVoiceMode"))
         assertTrue(page.contains("Listening…"))
         assertEquals(1, Regex("Icons\\.Rounded\\.Add").findAll(page).count())
+    }
+
+    @Test fun askBarContainsQuickModelAndIntelligenceSelector() {
+        val page = source("CycloneV39AiChatPage.kt")
+        val controls = source("CycloneIntelligenceControls.kt")
+        assertTrue(page.contains("contentDescription = \"Model and intelligence\""))
+        assertTrue(page.contains("cycloneShortModelLabel("))
+        assertTrue(page.contains("reasoningEffortLabel"))
+        assertTrue(controls.contains("private enum class OverlaySettingsStep { MODEL, INTELLIGENCE }"))
+        assertFalse(controls.contains("OverlaySettingsStep.AUTONOMY"))
     }
 
     @Test fun headerModelNameStaysTwoWords() {

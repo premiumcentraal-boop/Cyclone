@@ -29,6 +29,7 @@ class OverlayChromeMachine(
             analysisCta = cta,
             idleChipVisible = false,
             minimized = keepMinimized,
+            launcherCollapsed = false,
         )
     }
 
@@ -42,6 +43,7 @@ class OverlayChromeMachine(
             sessionId = sessionId.ifBlank { snapshot.sessionId },
             idleChipVisible = false,
             minimized = snapshot.minimized,
+            launcherCollapsed = snapshot.launcherCollapsed,
             userPaused = false,
         )
         cycloneState.resumeAgent()
@@ -49,7 +51,12 @@ class OverlayChromeMachine(
 
     fun enterLive() {
         if (snapshot.state != OverlayChromeState.WORKING) return
-        snapshot = snapshot.copy(state = OverlayChromeState.LIVE, idleChipVisible = false, minimized = false)
+        snapshot = snapshot.copy(
+            state = OverlayChromeState.LIVE,
+            idleChipVisible = false,
+            minimized = false,
+            launcherCollapsed = false,
+        )
     }
 
     fun enterGate(gateClass: OverlayGateClass, pcAutoApprove: Boolean = false, sessionId: String = snapshot.sessionId) {
@@ -61,6 +68,7 @@ class OverlayChromeMachine(
             idleChipVisible = false,
             pcAutoApproveIgnored = pcAutoApprove,
             minimized = false,
+            launcherCollapsed = false,
             userPaused = true,
             composerText = "",
             voiceListening = false,
@@ -85,7 +93,8 @@ class OverlayChromeMachine(
             state = OverlayChromeState.ANALYSIS,
             userPaused = false,
             minimized = true,
-            idleChipVisible = true,
+            launcherCollapsed = false,
+            idleChipVisible = false,
             statusMessage = null,
             bullets = emptyList(),
             composerText = "",
@@ -103,6 +112,7 @@ class OverlayChromeMachine(
             sessionId = finishedSession,
             idleChipVisible = true,
             minimized = true,
+            launcherCollapsed = false,
             userPaused = false,
             composerText = "",
             voiceListening = false,
@@ -139,9 +149,21 @@ class OverlayChromeMachine(
     }
 
     private fun askCyclone() {
+        if (snapshot.launcherCollapsed) {
+            // Triple-tap recovery returns to the request-ready composer first, not the full drawer.
+            snapshot = snapshot.copy(
+                minimized = true,
+                launcherCollapsed = false,
+                idleChipVisible = false,
+                statusMessage = null,
+                voiceMessage = null,
+            )
+            return
+        }
         if (snapshot.minimized) {
             snapshot = snapshot.copy(
                 minimized = false,
+                launcherCollapsed = false,
                 idleChipVisible = false,
                 statusMessage = null,
                 voiceMessage = null,
@@ -153,6 +175,7 @@ class OverlayChromeMachine(
                 state = OverlayChromeState.ANALYSIS,
                 idleChipVisible = false,
                 minimized = false,
+                launcherCollapsed = false,
             )
             emitChrome(OverlayChromeEventKind.ASK_CYCLONE)
             return
@@ -162,6 +185,7 @@ class OverlayChromeMachine(
             state = OverlayChromeState.ANALYSIS,
             idleChipVisible = false,
             minimized = false,
+            launcherCollapsed = false,
             userPaused = false,
             statusMessage = null,
             composerText = "",
@@ -227,7 +251,12 @@ class OverlayChromeMachine(
 
     private fun viewProgress() {
         if (snapshot.state != OverlayChromeState.WORKING) return
-        snapshot = snapshot.copy(state = OverlayChromeState.LIVE, idleChipVisible = false, minimized = false)
+        snapshot = snapshot.copy(
+            state = OverlayChromeState.LIVE,
+            idleChipVisible = false,
+            minimized = false,
+            launcherCollapsed = false,
+        )
         emitChrome(OverlayChromeEventKind.VIEW_PROGRESS)
     }
 
@@ -256,25 +285,37 @@ class OverlayChromeMachine(
         snapshot = snapshot.copy(
             userPaused = !snapshot.userPaused,
             minimized = if (returningToAgent) true else snapshot.minimized,
+            launcherCollapsed = if (returningToAgent) false else snapshot.launcherCollapsed,
             idleChipVisible = if (returningToAgent) false else snapshot.idleChipVisible,
         )
         emitChrome(OverlayChromeEventKind.TAKE_CONTROL)
     }
 
     /**
-     * Minimize changes presentation only; it never releases task ownership.
-     * Active work keeps idleChipVisible=false so the controller renders the task-backed compact
-     * glass rather than an idle launcher. Tapping that glass re-expands the same WORKING/LIVE run.
+     * Presentation-only collapse. First collapse keeps a fully usable Ask Cyclone composer.
+     * A second collapse becomes the tiny triple-tap launcher. Neither transition releases task ownership.
      */
     private fun minimize() {
         if (snapshot.state == OverlayChromeState.IDLE) return
-        val activeWork = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
-        snapshot = snapshot.copy(
-            minimized = true,
-            idleChipVisible = !activeWork,
-            voiceListening = false,
-            voiceMessage = null,
-        )
+        if (!snapshot.minimized) {
+            snapshot = snapshot.copy(
+                minimized = true,
+                launcherCollapsed = false,
+                idleChipVisible = false,
+                voiceListening = false,
+                voiceMessage = null,
+            )
+            return
+        }
+        if (!snapshot.launcherCollapsed) {
+            snapshot = snapshot.copy(
+                minimized = true,
+                launcherCollapsed = true,
+                idleChipVisible = true,
+                voiceListening = false,
+                voiceMessage = null,
+            )
+        }
     }
 
     private fun exitAiMode() {
@@ -306,6 +347,7 @@ class OverlayChromeMachine(
             state = OverlayChromeState.DONE,
             idleChipVisible = false,
             minimized = true,
+            launcherCollapsed = false,
             userPaused = false,
         )
         emit(

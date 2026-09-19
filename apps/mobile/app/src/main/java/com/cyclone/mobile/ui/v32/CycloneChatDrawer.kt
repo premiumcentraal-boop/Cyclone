@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+private enum class DrawerSettle { OPEN, COLLAPSE, EXPAND }
+
 internal object CycloneChatDrawerGesturePolicy {
     const val COLLAPSE_THRESHOLD_DP = 72f
     const val EXPAND_THRESHOLD_DP = 34f
@@ -59,6 +61,7 @@ internal object CycloneChatDrawerGesturePolicy {
 @Composable
 internal fun CycloneChatDrawerSurface(
     onCollapse: () -> Unit,
+    onExpand: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
@@ -72,16 +75,27 @@ internal fun CycloneChatDrawerSurface(
     var settleJob by remember { mutableStateOf<Job?>(null) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val collapseThresholdPx = with(density) { CycloneChatDrawerGesturePolicy.COLLAPSE_THRESHOLD_DP.dp.toPx() }
+    val expandThresholdPx = with(density) { CycloneChatDrawerGesturePolicy.EXPAND_THRESHOLD_DP.dp.toPx() }
 
-    fun settle(collapse: Boolean) {
+
+    fun settle(target: DrawerSettle) {
         settleJob?.cancel()
         settleJob = scope.launch {
+            val targetOffset = when (target) {
+                DrawerSettle.COLLAPSE -> collapseThresholdPx * 1.18f
+                DrawerSettle.EXPAND -> -expandThresholdPx * 1.18f
+                DrawerSettle.OPEN -> 0f
+            }
             animate(
                 initialValue = dragOffset,
-                targetValue = if (collapse) collapseThresholdPx * 1.25f else 0f,
-                animationSpec = spring(dampingRatio = .88f, stiffness = 520f),
+                targetValue = targetOffset,
+                animationSpec = spring(dampingRatio = .90f, stiffness = 560f),
             ) { value, _ -> dragOffset = value }
-            if (collapse) onCollapse()
+            when (target) {
+                DrawerSettle.COLLAPSE -> onCollapse()
+                DrawerSettle.EXPAND -> onExpand?.invoke()
+                DrawerSettle.OPEN -> Unit
+            }
             dragOffset = 0f
         }
     }
@@ -102,17 +116,33 @@ internal fun CycloneChatDrawerSurface(
                 Modifier
                     .fillMaxWidth()
                     .height(28.dp)
-                    .semantics { contentDescription = "Drag down or tap to minimize Cyclone chat" }
-                    .clickable(role = Role.Button) { settle(true) }
-                    .pointerInput(collapseThresholdPx) {
+                    .semantics {
+                        contentDescription = if (onExpand == null) {
+                            "Drag down or tap to minimize Cyclone chat"
+                        } else {
+                            "Drag up to expand or down to hide Cyclone chat"
+                        }
+                    }
+                    .clickable(role = Role.Button) {
+                        if (onExpand == null) settle(DrawerSettle.COLLAPSE) else settle(DrawerSettle.EXPAND)
+                    }
+                    .pointerInput(collapseThresholdPx, expandThresholdPx, onExpand) {
                         detectVerticalDragGestures(
                             onDragStart = { settleJob?.cancel() },
                             onVerticalDrag = { change, amount ->
                                 change.consume()
-                                dragOffset = (dragOffset + amount).coerceAtLeast(0f)
+                                val next = dragOffset + amount
+                                dragOffset = if (onExpand == null) next.coerceAtLeast(0f)
+                                else next.coerceIn(-expandThresholdPx * 1.6f, collapseThresholdPx * 1.6f)
                             },
-                            onDragCancel = { settle(false) },
-                            onDragEnd = { settle(dragOffset >= collapseThresholdPx) },
+                            onDragCancel = { settle(DrawerSettle.OPEN) },
+                            onDragEnd = {
+                                when {
+                                    dragOffset >= collapseThresholdPx -> settle(DrawerSettle.COLLAPSE)
+                                    onExpand != null && dragOffset <= -expandThresholdPx -> settle(DrawerSettle.EXPAND)
+                                    else -> settle(DrawerSettle.OPEN)
+                                }
+                            },
                         )
                     },
                 contentAlignment = Alignment.Center,

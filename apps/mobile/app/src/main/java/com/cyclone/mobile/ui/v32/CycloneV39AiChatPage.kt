@@ -54,6 +54,7 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -310,6 +311,14 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
     }
 
+    fun openPhotos() {
+        toolsOpen = false
+        context.startActivity(
+            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                .putExtra("photos", true),
+        )
+    }
+
     fun shareScreen() {
         toolsOpen = false
         com.cyclone.mobile.capture.LiveScreenShare.start(context)
@@ -520,33 +529,68 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                             )
                         }
 
-                        BasicTextField(
-                            value = composer,
-                            onValueChange = { composer = it },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp, max = 96.dp)
-                                .padding(horizontal = 8.dp, vertical = 12.dp)
-                                .semantics { contentDescription = "Ask Cyclone composer" },
-                            maxLines = 4,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { submit() }),
-                            decorationBox = { field ->
-                                Box(contentAlignment = Alignment.CenterStart) {
-                                    if (composer.isEmpty()) {
-                                        Text(
-                                            V39AiChatContract.PLACEHOLDER,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .heightIn(min = 20.dp)
+                                    .clickable(enabled = !session.busy, role = Role.Button) {
+                                        modelMenuOpen = !modelMenuOpen
+                                        if (modelMenuOpen) toolsOpen = false
                                     }
-                                    field()
-                                }
-                            },
-                        )
+                                    .padding(horizontal = 8.dp, vertical = 1.dp)
+                                    .semantics { contentDescription = "Model and intelligence" },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                Text(
+                                    cycloneShortModelLabel(
+                                        V39AiChatContract.modelForStored(selectedModelId).label.ifBlank { "Cyclone" },
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                )
+                                Text("·", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    reasoningEffort.takeIf(String::isNotBlank)?.let(::reasoningEffortLabel) ?: "Auto",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+
+                            BasicTextField(
+                                value = composer,
+                                onValueChange = { composer = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 34.dp, max = 78.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .semantics { contentDescription = "Ask Cyclone composer" },
+                                maxLines = 4,
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = { submit() }),
+                                decorationBox = { field ->
+                                    Box(contentAlignment = Alignment.CenterStart) {
+                                        if (composer.isEmpty()) {
+                                            Text(
+                                                V39AiChatContract.PLACEHOLDER,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                        field()
+                                    }
+                                },
+                            )
+                        }
 
                         val sendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
                             RequestIntent.PHONE_TASK -> true
@@ -634,56 +678,60 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         CycloneSheetDismissHandle(onDismiss = { toolsOpen = false })
                         CycloneAttachmentTools(
                             onCamera = { openCamera() },
+                            onPhotos = { openPhotos() },
                             onFiles = { openFiles() },
                             onShareScreen = { shareScreen() },
                             filesLabel = "Files",
                             extras = listOf(
                                 Icons.Rounded.Bolt to "Create a routine",
+                                Icons.Rounded.Tune to "Model & intelligence",
                             ),
                             onExtra = { label ->
                                 toolsOpen = false
-                                if (label == "Create a routine") composer = "Create a routine"
+                                when (label) {
+                                    "Create a routine" -> composer = "Create a routine"
+                                    "Model & intelligence" -> modelMenuOpen = true
+                                }
                             },
-                        )
-                        CycloneModelIntelligencePanel(
-                            modelId = selectedModelId,
-                            effort = reasoningEffort,
-                            showModelSelector = false,
-                            onChange = ::persistAiControls,
                         )
                     }
                 }
             }
         }
 
-        if (modelMenuOpen) {
-            if (!keyboardOpen) {
+        if (modelMenuOpen && !keyboardOpen) {
             Box(Modifier.matchParentSize().zIndex(4f)) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = .18f))
+                        .background(Color.Black.copy(alpha = .22f))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             onClick = { modelMenuOpen = false },
                         ),
                 )
-                CycloneLiquidPanel(
+                Surface(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 56.dp, start = 24.dp, end = 24.dp)
-                        .fillMaxWidth(),
-                    cornerRadius = 22.dp,
-                    contentPadding = PaddingValues(6.dp),
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .heightIn(max = 390.dp)
+                        .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
                 ) {
-                    CycloneModelPickerList(
-                        modelId = selectedModelId,
-                        onChange = ::persistAiControls,
-                        onDismiss = { modelMenuOpen = false },
-                    )
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        CycloneSheetDismissHandle(onDismiss = { modelMenuOpen = false })
+                        CycloneModelIntelligencePanel(
+                            modelId = selectedModelId,
+                            effort = reasoningEffort,
+                            showModelSelector = true,
+                            onChange = ::persistAiControls,
+                        )
+                    }
                 }
-            }
             }
         }
 
