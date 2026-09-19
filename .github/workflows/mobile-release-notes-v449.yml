@@ -1,0 +1,27 @@
+name: Cyclone 4.4.9 Release Notes Sync
+
+on:
+  push:
+    branches: ['release/cyclone-mobile-v4.4.9']
+    paths:
+      - '.github/workflows/mobile-release-notes-v449.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Sync published 4.4.9 release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release edit v4.4.9             --repo "$GITHUB_REPOSITORY"             --title 'Cyclone 4.4.9'             --notes-file docs/RELEASE_4.4.9.md

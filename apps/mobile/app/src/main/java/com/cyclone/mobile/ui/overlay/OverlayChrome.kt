@@ -4,7 +4,6 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,7 +13,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,9 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
@@ -48,7 +43,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,7 +54,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -74,15 +67,15 @@ import com.cyclone.mobile.capture.LiveCaptureConsentActivity
 import com.cyclone.mobile.capture.LiveCaptureService
 import com.cyclone.mobile.capture.LiveCaptureSessionManager
 import com.cyclone.mobile.capture.ScreenSharePhase
-import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
+import com.cyclone.mobile.ui.v32.CycloneChatDrawerSurface
+import com.cyclone.mobile.ui.v32.CycloneCollapsedAskPill
 import com.cyclone.mobile.ui.v32.CycloneForegroundWorkCard
 import com.cyclone.mobile.ui.v32.CycloneLiquidPanel
 import com.cyclone.mobile.ui.v32.CyclonePendingRequests
 import com.cyclone.mobile.ui.v32.CycloneTrayIconAction
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
-import kotlinx.coroutines.launch
 
 private val AuroraBlue = Color(0xFF4A8DFF)
 private val AuroraCyan = Color(0xFF80E9FF)
@@ -175,29 +168,36 @@ fun OverlayChrome(
     modifier: Modifier = Modifier,
 ) {
     CycloneV32Theme(drawBackground = false) {
-        val showOrb = snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
+        val presentation = when {
+            snapshot.state == OverlayChromeState.IDLE -> "idle"
+            snapshot.minimized -> "collapsed"
+            snapshot.state == OverlayChromeState.GATE -> "gate"
+            else -> "drawer"
+        }
         AnimatedContent(
-            targetState = showOrb,
+            targetState = presentation,
             transitionSpec = {
-                if (targetState) {
-                    (fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 2 })
-                        .togetherWith(fadeOut(tween(130)))
-                } else {
-                    (fadeIn(tween(220)) + slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 2 })
-                        .togetherWith(fadeOut(tween(120)) + slideOutVertically(tween(160)) { it / 3 })
-                }
+                (fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 3 })
+                    .togetherWith(fadeOut(tween(130)) + slideOutVertically(tween(160)) { it / 4 })
             },
-            label = "Cyclone composer",
-        ) { orb ->
-            when {
-                orb && snapshot.idleChipVisible -> IdleActivationHotspot(
-                    state = idleVisualState,
-                    onTap = onIdleTap,
-                    onSemanticActivate = onIdleSemanticActivate,
-                    modifier = modifier,
-                )
-                !orb && snapshot.state == OverlayChromeState.GATE -> GatePanel(snapshot, onAction)
-                !orb -> ComposerPanel(
+            label = "Cyclone chat drawer",
+        ) { mode ->
+            when (mode) {
+                "idle" -> if (snapshot.idleChipVisible) {
+                    IdleActivationHotspot(
+                        state = idleVisualState,
+                        onTap = onIdleTap,
+                        onSemanticActivate = onIdleSemanticActivate,
+                        modifier = modifier,
+                    )
+                } else {
+                    Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
+                }
+                "collapsed" -> CollapsedRunChatPill(snapshot) {
+                    onAction(OverlayUserAction.ASK_CYCLONE)
+                }
+                "gate" -> GatePanel(snapshot, onAction)
+                else -> ComposerPanel(
                     snapshot = snapshot,
                     onAction = onAction,
                     onComposerChanged = onComposerChanged,
@@ -208,6 +208,33 @@ fun OverlayChrome(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CollapsedRunChatPill(
+    snapshot: OverlayChromeSnapshot,
+    onExpand: () -> Unit,
+) {
+    val active = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
+    val status = when {
+        active && snapshot.userPaused -> "Paused · current run saved"
+        active -> "Current run · tap to reopen"
+        snapshot.state == OverlayChromeState.GATE -> "Action needed"
+        snapshot.state == OverlayChromeState.DONE -> "Run finished"
+        else -> null
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COLLAPSED_CHAT_BOTTOM_MARGIN_DP.dp),
+    ) {
+        CycloneCollapsedAskPill(
+            onExpand = onExpand,
+            active = active,
+            status = status,
+        )
     }
 }
 
@@ -322,7 +349,6 @@ private fun ComposerPanel(
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    val scope = rememberCoroutineScope()
     var accessory by remember { mutableStateOf(ComposerAccessory.NONE) }
     val sharing by LiveCaptureSessionManager.state.collectAsState()
     val attached by PendingTaskAttachment.present.collectAsState()
@@ -379,10 +405,6 @@ private fun ComposerPanel(
             }
     }
 
-    var dragOffset by remember { mutableStateOf(0f) }
-    var sheetHeight by remember { mutableStateOf(220f) }
-    var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-
     val submit = {
         if (snapshot.composerText.isNotBlank()) {
             onRequestSubmitted(snapshot.composerText)
@@ -390,46 +412,18 @@ private fun ComposerPanel(
         }
     }
 
-    fun settle(dismiss: Boolean) {
-        settleJob?.cancel()
-        settleJob = scope.launch {
-            animate(dragOffset, if (dismiss) sheetHeight else 0f, animationSpec = tween(180)) { value, _ ->
-                dragOffset = value
-            }
-            if (dismiss) onAction(OverlayUserAction.MINIMIZE)
-            dragOffset = 0f
-        }
-    }
-
-    Column(
-        Modifier
+    CycloneChatDrawerSurface(
+        onCollapse = {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+            onAction(OverlayUserAction.MINIMIZE)
+        },
+        modifier = Modifier
             .fillMaxWidth()
-            .wrapContentHeight()
             .navigationBarsPadding()
-            .padding(start = 12.dp, end = 12.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp)
-            .graphicsLayer { translationY = dragOffset }
-            .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) },
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(start = 10.dp, end = 10.dp, bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp),
+        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
     ) {
-        // Invisible, dedicated grab zone: keeps swipe-to-minimize without adding a visual handle
-        // above the Apple-style resting bar.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(10.dp)
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragStart = { settleJob?.cancel() },
-                        onVerticalDrag = { change, amount ->
-                            change.consume()
-                            dragOffset = (dragOffset + amount).coerceAtLeast(0f)
-                        },
-                        onDragCancel = { settle(false) },
-                        onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) },
-                    )
-                },
-        )
-
         if (task != null || foregroundWorking || queued.isNotEmpty()) {
             CycloneLiquidPanel(
                 modifier = Modifier.fillMaxWidth(),

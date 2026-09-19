@@ -164,16 +164,20 @@ class CycloneV39AiChatPageTest {
         val page = source("CycloneV39AiChatPage.kt")
         val design = source("CycloneV32DesignSystem.kt")
         assertTrue(page.contains(".background(MaterialTheme.colorScheme.surface.copy(alpha = .56f))"))
-        assertTrue(page.contains(".background(color)"))
+        assertTrue(page.contains("color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .68f)"))
+        assertTrue(page.contains("shadowElevation = 0.dp"))
         assertFalse(page.contains("shadowElevation = 5.dp"))
         assertFalse(design.substringAfter("fun CycloneGlassSurface").contains("shadowElevation = 4.dp"))
     }
 
-    @Test fun alpineEmptyStateUsesPreferredProgressComposition() {
+    @Test fun alpineEmptyStateUsesQuietReadyComposition() {
         val page = source("CycloneV39AiChatPage.kt")
         assertTrue(page.contains("CycloneAlpineBackdrop"))
-        assertTrue(page.contains("\"Let’s make\\nprogress today.\""))
-        assertTrue(page.contains("\"Ideas become real when you take the next step.\""))
+        assertTrue(page.contains("\"Ready when you are\""))
+        assertTrue(page.contains("\"Tell Cyclone what to do on your phone.\""))
+        assertTrue(page.contains("ic_cyclone_ai_42"))
+        assertFalse(page.contains("\"Let’s make\\nprogress today.\""))
+        assertFalse(page.contains("\"Ideas become real when you take the next step.\""))
         assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
     }
 

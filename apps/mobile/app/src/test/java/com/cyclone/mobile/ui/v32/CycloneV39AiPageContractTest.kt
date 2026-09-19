@@ -51,14 +51,19 @@ class CycloneV39AiPageContractTest {
         assertTrue(text.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
     }
 
-    @Test fun emptyStateMatchesAlpineProgressConcept() {
+    @Test fun emptyStateIsQuietAndComposerDrawerOwnsProgressiveDisclosure() {
         val page = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
-        val backdrop = source("com/cyclone/mobile/ui/v32/CycloneAlpineBackdrop.kt")
-        assertTrue(page.contains("\"Let’s make\\nprogress today.\""))
-        assertTrue(page.contains("\"Ideas become real when you take the next step.\""))
+        val drawer = source("com/cyclone/mobile/ui/v32/CycloneChatDrawer.kt")
+        assertTrue(page.contains("\"Ready when you are\""))
+        assertTrue(page.contains("\"Tell Cyclone what to do on your phone.\""))
         assertTrue(page.contains("CycloneAlpineBackdrop"))
-        assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
-        assertFalse(backdrop.contains("background.copy(alpha = .92f)"))
+        assertTrue(page.contains("CycloneChatDrawerSurface("))
+        assertTrue(page.contains("CycloneCollapsedAskPill("))
+        assertTrue(page.contains("CycloneChatToolsPanel("))
+        assertTrue(drawer.contains("Drag down or tap to minimize Cyclone chat"))
+        assertTrue(page.contains("if (intelligenceOpen && !keyboardOpen)"))
+        assertFalse(page.contains("Icons.Rounded.Tune"))
+        assertFalse(page.contains("\"Ideas become real when you take the next step.\""))
     }
 
     @Test fun replyStopIsChatOnly() {
