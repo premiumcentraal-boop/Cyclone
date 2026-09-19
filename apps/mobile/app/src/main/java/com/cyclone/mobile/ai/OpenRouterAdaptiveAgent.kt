@@ -78,6 +78,7 @@ import java.util.concurrent.TimeUnit
 class OpenRouterAdaptiveAgent(private val context: Context,
     private val execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT) {
     var onOperation: ((String, com.cyclone.mobile.agent.contract.AgentActionEnvelope?) -> Unit)? = null
+    var onTrajectory: ((com.cyclone.mobile.agent.plan.TaskTrajectory) -> Unit)? = null
     private val background get() = execution.sessionId != "default-foreground"
     private fun ownsInput(): Boolean = if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.ownsInput(execution.sessionId)
         else DeviceState.controller == DeviceState.Controller.AGENT
@@ -328,6 +329,12 @@ class OpenRouterAdaptiveAgent(private val context: Context,
             state = initial,
             progress = onProgress,
         )
+        fun publishTrajectory() {
+            if (session.trajectory.horizonPlanned && session.trajectory.waypoints.isNotEmpty()) {
+                onTrajectory?.invoke(session.trajectory)
+            }
+        }
+        publishTrajectory()
         lateinit var localAgent: CycloneLocalAgent
         val model = object : CycloneAgentModel {
             override fun plan(taskState: CycloneTaskState, observation: CycloneObservation): CyclonePlanResult {
@@ -425,6 +432,7 @@ class OpenRouterAdaptiveAgent(private val context: Context,
                         )
                     } ?: run { session.trajectory = session.trajectory.copy(horizonPlanned = true) }
                 }
+                publishTrajectory()
                 com.cyclone.mobile.brain.UserMdRuntime.slice(goal)?.let { slice ->
                     if (slice.askWhich.isNotEmpty() &&
                         com.cyclone.mobile.fastpath.FastPathLanding.namedApp(goal) == null

@@ -39,6 +39,11 @@ data class WorkspaceTaskUi(
     val workspaceGeneration: Long? = null,
     val glassStepKind: GlassStepKind? = null,
     val loginAutofill: Boolean = false,
+    /** Bounded, consumer-safe terminal copy. Never raw provider/tool reasoning. */
+    val outcome: String? = null,
+    /** Safe consumer plan derived from typed trajectory kinds, never raw model plan prose. */
+    val plannedMilestones: List<String> = emptyList(),
+    val plannedMilestoneIndex: Int = 0,
 ) {
     val foreground get() = sessionId == "default-foreground" && workspaceId == null
     val working get() = phase == TaskPhase.STARTING || phase == TaskPhase.WORKING

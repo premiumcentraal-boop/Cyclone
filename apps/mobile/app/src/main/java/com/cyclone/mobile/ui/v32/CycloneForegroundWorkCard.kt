@@ -1,7 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,7 +41,8 @@ fun CycloneForegroundWorkCard(
     val status = snapshot.statusMessage?.trim()?.takeIf { it.isNotBlank() }
         ?: snapshot.bullets.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
         ?: if (snapshot.state == OverlayChromeState.LIVE) "Watching the phone and continuing…" else "Using your phone…"
-    val shape = RoundedCornerShape(if (compact) 22.dp else 24.dp)
+    val shape = RoundedCornerShape(CycloneConversationTokens.taskRadius)
+    val palette = cycloneConversationPalette()
 
     Surface(
         modifier = modifier
@@ -50,14 +51,20 @@ fun CycloneForegroundWorkCard(
             .clip(shape)
             .then(if (compact && onExpand != null) Modifier.clickable(onClick = onExpand) else Modifier),
         shape = shape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = if (compact) .92f else .96f),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (compact) .94f else .98f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
-        shadowElevation = if (compact) 1.dp else 2.dp,
+        shadowElevation = 0.dp,
+        border = BorderStroke(.8.dp, palette.cardOutline),
     ) {
         if (compact) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 13.dp, top = 9.dp, end = 7.dp, bottom = 9.dp),
+                Modifier.fillMaxWidth().padding(
+                    start = CycloneConversationTokens.space12,
+                    top = CycloneConversationTokens.space8,
+                    end = CycloneConversationTokens.space8,
+                    bottom = CycloneConversationTokens.space8,
+                ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -83,8 +90,11 @@ fun CycloneForegroundWorkCard(
             }
         } else {
             Column(
-                Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 13.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.fillMaxWidth().padding(
+                    horizontal = CycloneConversationTokens.space16,
+                    vertical = CycloneConversationTokens.space12,
+                ),
+                verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space12),
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -99,6 +109,7 @@ fun CycloneForegroundWorkCard(
                     )
                     CycloneTaskStatusPill(CycloneTaskVisualState.WORKING)
                 }
+                CycloneTaskProgressIndicator(progress = null)
                 Text(
                     status,
                     maxLines = 2,

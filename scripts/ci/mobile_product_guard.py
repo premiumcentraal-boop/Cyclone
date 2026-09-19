@@ -10,6 +10,11 @@ APP = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV32
 FEATURES = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV32FeaturePages.kt"
 SETTINGS_426 = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneSettings426.kt"
 AI_CHAT = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt"
+INTELLIGENCE = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneIntelligenceControls.kt"
+OVERLAY_COMPOSER = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/overlay/OverlayAppleLiquidComposer.kt"
+TASK_PRESENTATION = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/background/TaskPresentationSnapshot.kt"
+TASK_PANEL = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneAskTaskPanel.kt"
+MINIMIZED_COMPOSER = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneMinimizedComposerBar.kt"
 BRAIN_V39 = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV39BrainPage.kt"
 MANIFEST = ROOT / "apps/mobile/app/src/main/AndroidManifest.xml"
 MAIN = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/MainActivity.kt"
@@ -54,9 +59,54 @@ REQUIRED_AI_CHAT = (
     "WorkspaceTasks.queueRequest(normalized)",
     "OpenRouterCatalogStore.activeId(context)",
     '"Ask Cyclone…"',
-    "CycloneModelPill(",
     "CycloneModelIntelligencePanel(",
-    "showModelSelector = false",
+    "CycloneConversationBubble(",
+    "showModelSelector = true",
+    'contentDescription = "Model and intelligence"',
+    "onPhotos = { openPhotos() }",
+    'filesLabel = "Files"',
+)
+REQUIRED_INTELLIGENCE = (
+    "private enum class OverlaySettingsStep { MODEL, INTELLIGENCE }",
+    'OverlaySettingsStep.MODEL -> "Model"',
+    'OverlaySettingsStep.INTELLIGENCE -> "Intelligence"',
+)
+FORBIDDEN_INTELLIGENCE = (
+    "OverlaySettingsStep.AUTONOMY",
+    '-> "Autonomy"',
+)
+REQUIRED_OVERLAY_COMPOSER = (
+    'OverlayAppleToolTile(Icons.Rounded.PhotoLibrary, "Photos"',
+    'OverlayAppleToolTile(Icons.Rounded.CameraAlt, "Camera"',
+    'OverlayAppleMenuRow(Icons.Rounded.AttachFile, "Files"',
+    'contentDescription = "Model and intelligence"',
+)
+FORBIDDEN_OVERLAY_COMPOSER = (
+    '"Files & photos"',
+)
+REQUIRED_TASK_PRESENTATION = (
+    "data class TaskPresentationSnapshot(",
+    "object TaskPresentationProjector",
+    "object TaskMilestoneProjector",
+    "object TaskFollowUpPolicy",
+    "plannedMilestones",
+    "progressFraction",
+)
+REQUIRED_TASK_PANEL = (
+    "TaskPresentationProjector.project(projectedTask)",
+    "CycloneConversationTokens.taskRadius",
+    "TaskFollowUpAction.RUN_AGAIN",
+    "TaskFollowUpAction.TRY_AGAIN",
+    "TaskFollowUpAction.OPEN_APP",
+    "shadowElevation = 0.dp",
+)
+REQUIRED_MINIMIZED_COMPOSER = (
+    "BasicTextField(",
+    'contentDescription = "Ask Cyclone minimized composer"',
+    'contentDescription = "Model and intelligence"',
+    "Icons.Rounded.Add",
+    "Icons.Rounded.GraphicEq",
+    "Icons.Rounded.ArrowUpward",
 )
 REQUIRED_BRAIN_V39 = (
     "internal fun CycloneV39BrainPage",
@@ -104,6 +154,11 @@ def check() -> list[str]:
         (FEATURES, REQUIRED_FEATURES),
         (SETTINGS_426, REQUIRED_SETTINGS_426),
         (AI_CHAT, REQUIRED_AI_CHAT),
+        (INTELLIGENCE, REQUIRED_INTELLIGENCE),
+        (OVERLAY_COMPOSER, REQUIRED_OVERLAY_COMPOSER),
+        (TASK_PRESENTATION, REQUIRED_TASK_PRESENTATION),
+        (TASK_PANEL, REQUIRED_TASK_PANEL),
+        (MINIMIZED_COMPOSER, REQUIRED_MINIMIZED_COMPOSER),
         (BRAIN_V39, REQUIRED_BRAIN_V39),
         (MANIFEST, REQUIRED_MANIFEST),
         (MAIN, REQUIRED_MAIN),
@@ -122,6 +177,14 @@ def check() -> list[str]:
                     errors.append(f"{path.relative_to(ROOT)} still ships retired UI: {retired}")
         if path == AI_CHAT and "CycloneAlpineBackdrop" in text:
             errors.append(f"{path.relative_to(ROOT)} still uses the alpine weather backdrop")
+        if path == INTELLIGENCE:
+            for retired in FORBIDDEN_INTELLIGENCE:
+                if retired in text:
+                    errors.append(f"{path.relative_to(ROOT)} still exposes retired quick control: {retired}")
+        if path == OVERLAY_COMPOSER:
+            for retired in FORBIDDEN_OVERLAY_COMPOSER:
+                if retired in text:
+                    errors.append(f"{path.relative_to(ROOT)} still merges attachment actions: {retired}")
         if path in (APP, FEATURES, SETTINGS_426, AI_CHAT, MAIN):
             for retired in ("Teamwork Sniper", "TEAMWORK_SNIPER_PACKAGE", "coreWsUrl", "coreToken", "BridgeClient.start"):
                 if retired in text:

@@ -51,8 +51,11 @@ class OverlayAttachmentActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) runCatching {
-            if (intent.getBooleanExtra("camera", false)) camera.launch(null)
-            else filePicker.launch(arrayOf("text/plain", "text/markdown", "image/jpeg", "image/png", "image/webp"))
+            when {
+                intent.getBooleanExtra("camera", false) -> camera.launch(null)
+                intent.getBooleanExtra("photos", false) -> filePicker.launch(arrayOf("image/jpeg", "image/png", "image/webp"))
+                else -> filePicker.launch(arrayOf("text/plain", "text/markdown", "image/jpeg", "image/png", "image/webp"))
+            }
         }.onFailure { Toast.makeText(this, "No compatible picker is available", Toast.LENGTH_LONG).show(); finish() }
     }
 }

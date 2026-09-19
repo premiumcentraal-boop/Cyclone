@@ -94,17 +94,17 @@ class OverlayChromeWindowPolicyTest {
     }
 
     @Test
-    fun minimizedRunUsesContentHeightAskCyclonePillWithoutTakingHostFocus() {
-        val minimized = OverlayChromeWindowPolicy.pill()
+    fun minimizedComposerIsContentHeightFocusableAndReadyForImmediateTyping() {
+        val minimized = OverlayChromeWindowPolicy.minimizedComposer()
         val flags = OverlayChromeWindowPolicy.flags(minimized)
         assertTrue(minimized.bottomCenter)
         assertTrue(minimized.matchParentWidth)
         assertEquals(null, minimized.heightDp)
-        assertTrue(minimized.notFocusable)
+        assertFalse(minimized.notFocusable)
         assertTrue(minimized.notTouchModal)
         assertFalse(minimized.notTouchable)
-        assertEquals(OverlayChromeContract.IDLE_TOUCH_BOTTOM_MARGIN_DP, minimized.bottomMarginDp)
-        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+        assertEquals(0, minimized.bottomMarginDp)
+        assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE == 0)
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0)
     }

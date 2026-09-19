@@ -35,20 +35,20 @@ class CycloneV39AiPageContractTest {
         assertTrue(text.contains("restoreAttachmentAfterChatFailure"))
     }
 
-    @Test fun taskAreaAndModelPillStayAboveLiquidComposer() {
+    @Test fun taskConversationAndQuickModelControlStayAboveOneLiquidComposer() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
         val current = text.indexOf("CycloneAskTaskPanel(current)")
         val queued = text.indexOf("CyclonePendingRequests()")
-        val modelPill = text.indexOf("CycloneModelPill(")
-        val liquidComposer = text.indexOf("CycloneLiquidPanel(", modelPill)
+        val drawer = text.indexOf("CycloneChatDrawerSurface(")
+        val quickModel = text.indexOf("contentDescription = \"Model and intelligence\"", drawer)
         val composer = text.lastIndexOf("BasicTextField(")
-        assertTrue(current in 0 until composer)
-        assertTrue(queued in 0 until composer)
-        assertTrue(modelPill in 0 until liquidComposer)
-        assertTrue(liquidComposer in 0 until composer)
+        assertTrue(current in 0 until drawer)
+        assertTrue(queued in 0 until drawer)
+        assertTrue(drawer in 0 until quickModel)
+        assertTrue(quickModel in 0 until composer)
         assertTrue(text.contains("CycloneModelIntelligencePanel("))
-        assertTrue(text.contains("showModelSelector = false"))
-        assertTrue(text.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
+        assertTrue(text.contains("showModelSelector = true"))
+        assertFalse(text.contains("CycloneModelPill("))
     }
 
     @Test fun emptyStateMatchesDotFieldAskConcept() {

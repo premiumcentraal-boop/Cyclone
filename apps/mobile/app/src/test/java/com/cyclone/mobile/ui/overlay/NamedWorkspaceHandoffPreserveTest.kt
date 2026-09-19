@@ -30,9 +30,9 @@ class NamedWorkspaceHandoffPreserveTest {
         assertTrue(progress.contains("\"I'm Done\""))
         assertTrue(progress.contains("WorkspaceTasks.command(this@WorkspaceProgressActivity, task, \"handoff\")"))
         assertTrue(progress.contains("WorkspaceTasks.command(this@WorkspaceProgressActivity, task, \"autofill\")"))
-        assertTrue(progress.contains("task.canAutofillFromUi()"))
-        assertTrue(progress.contains("enabled = task.canTakeOverFromUi()"))
-        assertTrue(progress.contains("enabled = task.canContinueAfterHumanFromUi()"))
+        assertTrue(progress.contains("TaskFollowUpAction.AUTOFILL in snapshot.followUps"))
+        assertTrue(progress.contains("enabled = TaskFollowUpAction.TAKE_OVER in snapshot.followUps"))
+        assertTrue(progress.contains("enabled = TaskFollowUpAction.CONTINUE in snapshot.followUps"))
         assertEquals(1, SessionKernel.PRODUCT_HOT_BACKGROUND_LIMIT)
         assertEquals(3, SessionPlaneKind.entries.size)
     }

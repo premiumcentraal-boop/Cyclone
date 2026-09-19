@@ -361,6 +361,11 @@ object OverlayChromeRuntime {
         AgentTaskNotificationRuntime.start(context)
         val agent = OpenRouterAdaptiveAgent(context).also { agent ->
             var revision = 0L
+            agent.onTrajectory = { trajectory ->
+                WorkspaceTasks.update(shared.taskId) { task ->
+                    TaskHarnessState.applyTrajectory(task, trajectory)
+                }
+            }
             agent.onOperation = { tool, result ->
                 WorkspaceTasks.update(shared.taskId) { task ->
                     if (result == null) { revision = task.controlRevision; TaskHarnessState.begin(task, tool) }
@@ -568,21 +573,33 @@ object OverlayChromeRuntime {
         if (expectedTaskId != foregroundTaskId) return
         val context = synchronized(lock) { service }
         foregroundTaskId?.let { id -> WorkspaceTasks.update(id) { task ->
-            if (!task.working && result.classification == "HUMAN_OR_GATE") task.copy(
-                resumable = true,
-                loginAutofill = result.gateClass == "login",
-            )
-            else task.copy(
-                message = result.message,
-                phase = when (result.classification) {
+            if (!task.working && result.classification == "HUMAN_OR_GATE") {
+                task.copy(
+                    resumable = true,
+                    outcome = null,
+                    loginAutofill = result.gateClass == "login",
+                )
+            } else {
+                val nextPhase = when (result.classification) {
                     "COMPLETE" -> TaskPhase.DONE
                     "HUMAN_OR_GATE" -> TaskPhase.REVIEW
                     "CANCELLED" -> TaskPhase.STOPPED
                     else -> TaskPhase.FAILED
-                },
-                resumable = result.classification == "HUMAN_OR_GATE",
-                loginAutofill = result.gateClass == "login",
-            )
+                }
+                val safeOutcome = when (nextPhase) {
+                    TaskPhase.DONE -> WorkspaceCopy.result(result.message)
+                    TaskPhase.FAILED -> "I couldn't finish this task. Your place is saved."
+                    TaskPhase.STOPPED -> "The task was stopped."
+                    else -> null
+                }
+                task.copy(
+                    message = safeOutcome ?: result.message,
+                    outcome = safeOutcome,
+                    phase = nextPhase,
+                    resumable = result.classification == "HUMAN_OR_GATE",
+                    loginAutofill = result.gateClass == "login",
+                )
+            }
         } }
         when (result.classification) {
             "HUMAN_OR_GATE" -> {

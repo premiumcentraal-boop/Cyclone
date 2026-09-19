@@ -41,6 +41,8 @@ import com.cyclone.mobile.ai.AgentTraceRuntime
 import com.cyclone.mobile.ai.AiTraceSession
 import com.cyclone.mobile.ai.TaskResultActivityV292
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
+import com.cyclone.mobile.runtime.background.TaskConsumerState
+import com.cyclone.mobile.runtime.background.TaskPresentationProjector
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -87,7 +89,15 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
 
         task?.takeIf { UiTask(it).active }?.let { active ->
             item {
-                val taskLabel = TaskGlassPresentation.current(active, appLabel(context, active.packageName))?.taskLabel ?: active.title
+                val projected = TaskPresentationProjector.project(
+                    active.copy(app = appLabel(context, active.packageName).takeIf { it != "Other" } ?: active.app),
+                )
+                val consumerState = when (projected.state) {
+                    TaskConsumerState.WORKING -> "Working"
+                    TaskConsumerState.ACTION_NEEDED -> "Action needed"
+                    TaskConsumerState.DONE -> "Done"
+                    TaskConsumerState.FAILED -> "Couldn't finish"
+                }
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
@@ -102,9 +112,14 @@ internal fun CycloneV39BrainPage(context: Context, refreshTick: Int) {
                         Icon(Icons.Rounded.SmartToy, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                             Text("Learning from current task", style = MaterialTheme.typography.labelMedium)
-                            Text(taskLabel, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                projected.currentMilestone ?: projected.title,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
-                        Text(UiTask(active).consumerStatus, style = MaterialTheme.typography.labelSmall)
+                        Text(consumerState, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

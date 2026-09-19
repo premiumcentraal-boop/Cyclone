@@ -2,23 +2,26 @@ package com.cyclone.mobile.ui.v32
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -41,17 +44,20 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.runtime.background.SemanticStepState
+import com.cyclone.mobile.runtime.background.TaskConsumerState
+import com.cyclone.mobile.runtime.background.TaskFollowUpAction
 import com.cyclone.mobile.runtime.background.TaskPhase
+import com.cyclone.mobile.runtime.background.TaskPresentationProjector
+import com.cyclone.mobile.runtime.background.TaskPresentationSnapshot
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 
 /**
- * Ask Cyclone's single task-status surface.
+ * Ask Cyclone's single stateful task surface.
  *
- * The card mirrors the grounded runtime with three consumer states only: Working, Action needed,
- * and Done. Execution details stay in diagnostics; the card shows semantic work and truthful
- * human-control actions.
+ * One physical card morphs between Working, Action needed, Done and Failed. Copy/progress comes
+ * from TaskPresentationProjector, so in-app chat, overlay and notifications can converge on the
+ * same grounded task evidence instead of inventing state separately.
  */
 @Composable
 fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
@@ -59,33 +65,51 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val resolvedApp = remember(task.packageName) { appLabel(context, task.packageName) }
-    val presentation = TaskGlassPresentation.current(task, resolvedApp) ?: return
+    val projectedTask = remember(task, resolvedApp) {
+        if (resolvedApp.isNotBlank() && resolvedApp != "Other") task.copy(app = resolvedApp) else task
+    }
+    val snapshot = remember(projectedTask) { TaskPresentationProjector.project(projectedTask) }
     val visualState = task.taskVisualState()
     var progressExpanded by rememberSaveable(task.taskId) { mutableStateOf(false) }
+    val palette = cycloneConversationPalette()
 
-    // A task/result card is the primary interaction surface. Do not leave a stale editor/IME
-    // competing for half the display when execution starts, fails, pauses, or finishes.
     LaunchedEffect(task.taskId, task.phase) {
         focusManager.clearFocus(force = true)
         keyboard?.hide()
         if (visualState != CycloneTaskVisualState.WORKING) progressExpanded = false
     }
 
-    val container = when (visualState) {
+    val targetContainer = when (visualState) {
         CycloneTaskVisualState.WORKING -> MaterialTheme.colorScheme.surface.copy(alpha = .98f)
-        CycloneTaskVisualState.ACTION_NEEDED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = .28f)
-        CycloneTaskVisualState.DONE -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .28f)
+        CycloneTaskVisualState.ACTION_NEEDED -> palette.attentionSoft
+        CycloneTaskVisualState.DONE -> palette.successSoft
+        CycloneTaskVisualState.FAILED -> palette.failureSoft
     }
-    val outline = when (visualState) {
-        CycloneTaskVisualState.WORKING -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = .58f)
-        CycloneTaskVisualState.ACTION_NEEDED -> MaterialTheme.colorScheme.error.copy(alpha = .24f)
-        CycloneTaskVisualState.DONE -> MaterialTheme.colorScheme.secondary.copy(alpha = .24f)
+    val targetOutline = when (visualState) {
+        CycloneTaskVisualState.WORKING -> palette.cardOutline
+        CycloneTaskVisualState.ACTION_NEEDED -> palette.attention.copy(alpha = .26f)
+        CycloneTaskVisualState.DONE -> palette.success.copy(alpha = .26f)
+        CycloneTaskVisualState.FAILED -> palette.failure.copy(alpha = .28f)
     }
+    val container by animateColorAsState(
+        targetValue = targetContainer,
+        animationSpec = tween(CycloneConversationTokens.stateTransitionMs),
+        label = "task-card-container",
+    )
+    val outline by animateColorAsState(
+        targetValue = targetOutline,
+        animationSpec = tween(CycloneConversationTokens.stateTransitionMs),
+        label = "task-card-outline",
+    )
 
-    CycloneSwipeTaskCard("task:${task.taskId}", canClear = !UiTask(task).active, onOpen = { UiTask(task).open(context) }) {
+    CycloneSwipeTaskCard(
+        "task:${task.taskId}",
+        canClear = !UiTask(task).active,
+        onOpen = { UiTask(task).open(context) },
+    ) {
         Surface(
             modifier = Modifier.fillMaxWidth().animateContentSize(),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(CycloneConversationTokens.taskRadius),
             color = container,
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
@@ -93,60 +117,62 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
             border = BorderStroke(.8.dp, outline),
         ) {
             Column(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
-                verticalArrangement = Arrangement.spacedBy(11.dp),
+                Modifier.fillMaxWidth().padding(
+                    horizontal = CycloneConversationTokens.space16,
+                    vertical = 15.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space12),
             ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CycloneAppIcon(presentation.packageName, Modifier.size(24.dp))
-                    Text(
-                        resolvedApp.takeIf { it.isNotBlank() && it != "Other" } ?: "Cyclone",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    CycloneTaskStatusPill(visualState)
-                }
+                TaskCardHeader(snapshot, visualState)
 
                 Text(
-                    presentation.taskLabel,
+                    snapshot.title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 3,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
 
                 AnimatedContent(
                     targetState = visualState,
-                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                    transitionSpec = {
+                        fadeIn(tween(CycloneConversationTokens.stateTransitionMs)) togetherWith
+                            fadeOut(tween(CycloneConversationTokens.fastTransitionMs))
+                    },
                     label = "Cyclone task state",
                 ) { state ->
                     when (state) {
                         CycloneTaskVisualState.WORKING -> WorkingBody(
                             task = task,
+                            snapshot = snapshot,
                             expanded = progressExpanded,
                             onToggleExpanded = { progressExpanded = !progressExpanded },
                             onFullDetails = { UiTask(task).open(context) },
                         )
                         CycloneTaskVisualState.ACTION_NEEDED -> ActionNeededBody(
                             task = task,
-                            onTakeOver = {
-                                WorkspaceTasks.command(context, task, "handoff")
-                            },
-                            onAutofill = {
-                                WorkspaceTasks.command(context, task, "autofill")
-                            },
-                            onDone = {
-                                WorkspaceTasks.command(context, task, "resume")
-                            },
+                            snapshot = snapshot,
+                            onTakeOver = { WorkspaceTasks.command(context, task, "handoff") },
+                            onAutofill = { WorkspaceTasks.command(context, task, "autofill") },
+                            onDone = { WorkspaceTasks.command(context, task, "resume") },
                             onProgress = { UiTask(task).open(context) },
                         )
-                        CycloneTaskVisualState.DONE -> DoneBody(task) {
-                            UiTask(task).open(context)
-                        }
+                        CycloneTaskVisualState.DONE -> TerminalBody(
+                            task = task,
+                            snapshot = snapshot,
+                            primaryAction = TaskFollowUpAction.RUN_AGAIN,
+                            onPrimary = { rerunTask(context, task) },
+                            onDetails = { UiTask(task).open(context) },
+                            onOpenApp = { openInstalledApp(context, task.packageName) },
+                        )
+                        CycloneTaskVisualState.FAILED -> TerminalBody(
+                            task = task,
+                            snapshot = snapshot,
+                            primaryAction = TaskFollowUpAction.TRY_AGAIN,
+                            onPrimary = { rerunTask(context, task) },
+                            onDetails = { UiTask(task).open(context) },
+                            onOpenApp = { openInstalledApp(context, task.packageName) },
+                        )
                     }
                 }
             }
@@ -155,50 +181,63 @@ fun CycloneAskTaskPanel(task: WorkspaceTaskUi) {
 }
 
 @Composable
+private fun TaskCardHeader(
+    snapshot: TaskPresentationSnapshot,
+    state: CycloneTaskVisualState,
+) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
+    ) {
+        CycloneAppIcon(snapshot.packageName, Modifier.size(26.dp))
+        Text(
+            snapshot.app.ifBlank { "Cyclone" },
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        CycloneTaskStatusPill(state)
+    }
+}
+
+@Composable
 private fun WorkingBody(
     task: WorkspaceTaskUi,
+    snapshot: TaskPresentationSnapshot,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
     onFullDetails: () -> Unit,
 ) {
-    val total = task.semanticSteps.size
-    val completed = task.semanticSteps.count { it.state == SemanticStepState.DONE }
+    val palette = cycloneConversationPalette()
+    Column(verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8)) {
+        CycloneTaskProgressIndicator(snapshot.progressFraction)
 
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 3.dp)
-                    .clip(RoundedCornerShape(999.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        val countLabel = snapshot.totalCount?.let { total ->
+            "${snapshot.completedCount} of $total complete"
+        } ?: snapshot.supportingCopy
+        countLabel?.takeIf(String::isNotBlank)?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (total > 0) {
-                Text(
-                    "$completed of $total complete",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
 
         if (expanded) {
-            CycloneTaskCheckpoints(task)
+            CycloneTaskCheckpoints(snapshot)
         } else {
-            val currentStep = task.subtitle.trim()
-            if (currentStep.isNotBlank()) {
+            snapshot.currentMilestone?.takeIf(String::isNotBlank)?.let { current ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
                 ) {
                     CycloneNineDotSpinner()
                     Text(
-                        currentStep,
+                        current,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -208,7 +247,7 @@ private fun WorkingBody(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8)) {
             TextButton(
                 onClick = onToggleExpanded,
                 contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
@@ -216,7 +255,7 @@ private fun WorkingBody(
             if (expanded) {
                 TextButton(
                     onClick = onFullDetails,
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    contentPadding = PaddingValues(horizontal = CycloneConversationTokens.space8, vertical = 2.dp),
                 ) { Text("Details") }
             }
         }
@@ -226,63 +265,47 @@ private fun WorkingBody(
 @Composable
 private fun ActionNeededBody(
     task: WorkspaceTaskUi,
+    snapshot: TaskPresentationSnapshot,
     onTakeOver: () -> Unit,
     onAutofill: () -> Unit,
     onDone: () -> Unit,
     onProgress: () -> Unit,
 ) {
-    val prompt = task.interruption?.prompt ?: when {
-        task.confirmation != null -> task.confirmation.explanation
-        task.phase == TaskPhase.HUMAN -> "Finish this step in ${task.app}, then tell Cyclone when you're done."
-        task.phase == TaskPhase.PAUSED -> "Your place is saved. Take over or continue when you're ready."
-        task.phase == TaskPhase.FAILED -> task.subtitle
-        else -> task.subtitle
-    }.trim()
-    val canTakeOver = task.canTakeOverFromUi()
-    val canAutofill = task.canAutofillFromUi()
-    val canContinue = task.canContinueAfterHumanFromUi()
-
-    Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
-        if (prompt.isNotBlank()) {
+    Column(verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space12)) {
+        snapshot.supportingCopy?.takeIf(String::isNotBlank)?.let {
             Text(
-                prompt,
+                it,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
-        if (canAutofill) {
+        if (TaskFollowUpAction.AUTOFILL in snapshot.followUps) {
             Button(
                 onClick = onAutofill,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp).semantics {
                     contentDescription = "Autofill sign-in for ${task.app}"
                 },
                 shape = RoundedCornerShape(15.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
             ) { Text("Autofill") }
         }
 
-        if (canTakeOver || canContinue) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                if (canTakeOver) {
+        val takeOver = TaskFollowUpAction.TAKE_OVER in snapshot.followUps
+        val continueTask = TaskFollowUpAction.CONTINUE in snapshot.followUps
+        if (takeOver || continueTask) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8)) {
+                if (takeOver) {
                     OutlinedButton(
                         onClick = onTakeOver,
-                        modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
-                            contentDescription = "Take over ${task.app}"
-                        },
+                        modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                         shape = RoundedCornerShape(15.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     ) { Text("Take Over") }
                 }
-
-                if (canContinue) {
+                if (continueTask) {
                     OutlinedButton(
                         onClick = onDone,
-                        modifier = Modifier.weight(1f).heightIn(min = 46.dp).semantics {
-                            contentDescription = "I'm done, continue with Cyclone"
-                        },
+                        modifier = Modifier.weight(1f).heightIn(min = 44.dp),
                         shape = RoundedCornerShape(15.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     ) { Text("I'm Done") }
                 }
             }
@@ -290,34 +313,96 @@ private fun ActionNeededBody(
 
         TextButton(
             onClick = onProgress,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
         ) { Text(if (task.confirmation != null) "Review details" else "View progress") }
     }
 }
 
 @Composable
-private fun DoneBody(task: WorkspaceTaskUi, onOpen: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SupportingLine(task)
-        CycloneTaskCheckpoints(task)
-        Button(
-            onClick = onOpen,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
-            shape = RoundedCornerShape(16.dp),
-        ) { Text("View Result") }
+private fun TerminalBody(
+    task: WorkspaceTaskUi,
+    snapshot: TaskPresentationSnapshot,
+    primaryAction: TaskFollowUpAction,
+    onPrimary: () -> Unit,
+    onDetails: () -> Unit,
+    onOpenApp: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space12)) {
+        snapshot.outcomeCopy?.takeIf(String::isNotBlank)?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } ?: snapshot.supportingCopy?.takeIf(String::isNotBlank)?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (snapshot.completedMilestones.isNotEmpty() && snapshot.state == TaskConsumerState.DONE) {
+            Text(
+                "${snapshot.completedMilestones.size} verified step${if (snapshot.completedMilestones.size == 1) "" else "s"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
+        ) {
+            OutlinedButton(
+                onClick = onDetails,
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                shape = RoundedCornerShape(15.dp),
+            ) { Text("View details") }
+            if (primaryAction in snapshot.followUps) {
+                Button(
+                    onClick = onPrimary,
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                    shape = RoundedCornerShape(15.dp),
+                ) {
+                    Text(
+                        when (primaryAction) {
+                            TaskFollowUpAction.RUN_AGAIN -> "Run again"
+                            TaskFollowUpAction.TRY_AGAIN -> "Try again"
+                            else -> "Continue"
+                        },
+                    )
+                }
+            }
+        }
+
+        if (TaskFollowUpAction.OPEN_APP in snapshot.followUps) {
+            TextButton(
+                onClick = onOpenApp,
+                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 2.dp),
+            ) { Text("Open app") }
+        }
     }
 }
 
-@Composable
-private fun SupportingLine(task: WorkspaceTaskUi) {
-    val line = task.subtitle.trim().takeIf { it.isNotBlank() }
-    if (line != null) {
-        Text(
-            line,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+private fun openInstalledApp(context: android.content.Context, packageName: String) {
+    if (packageName.isBlank()) return
+    context.packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
+        runCatching {
+            context.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+}
+
+private fun rerunTask(context: android.content.Context, task: WorkspaceTaskUi) {
+    runCatching {
+        WorkspaceTasks.queueRequest(
+            goal = task.goal,
+            targetPackageName = task.packageName.takeIf(String::isNotBlank),
+            targetAppLabel = task.app.takeIf(String::isNotBlank),
         )
+        WorkspaceTasks.tryPromoteNext(context.applicationContext)
     }
 }

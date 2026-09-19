@@ -3,7 +3,13 @@ package com.cyclone.mobile.ui.v32
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.PriorityHigh
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -14,6 +20,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.runtime.background.SemanticStepState
+import com.cyclone.mobile.runtime.background.TaskMilestoneProjector
+import com.cyclone.mobile.runtime.background.TaskPresentationProjector
+import com.cyclone.mobile.runtime.background.TaskPresentationSnapshot
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 import kotlin.math.cos
 import kotlin.math.sin
@@ -21,7 +30,9 @@ import kotlin.math.sin
 internal data class CheckpointRow(val label: String, val state: SemanticStepState)
 
 internal fun checkpointRows(task: WorkspaceTaskUi): List<CheckpointRow> {
-    val rows = task.semanticSteps.takeLast(3).map { CheckpointRow(it.label, it.state) }
+    val rows = TaskMilestoneProjector.project(task.semanticSteps)
+        .takeLast(4)
+        .map { CheckpointRow(it.label, it.state) }
     val activeLabel = task.subtitle.trim()
     val alreadyRepresented = rows.any { row ->
         row.label.trim().equals(activeLabel, ignoreCase = true)
@@ -54,20 +65,90 @@ fun CycloneNineDotSpinner(modifier: Modifier = Modifier) {
 
 @Composable
 fun CycloneTaskCheckpoints(task: WorkspaceTaskUi) {
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        checkpointRows(task).forEach { row ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (row.state == SemanticStepState.ACTIVE && task.working && task.confirmation == null) {
-                    CycloneNineDotSpinner()
-                } else Text(when(row.state) {
-                    SemanticStepState.DONE -> "✓"
-                    SemanticStepState.FAILED -> "–"
-                    SemanticStepState.ACTION_NEEDED -> "✦"
-                    else -> "○"
-                }, modifier = Modifier.width(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(row.label, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+    CycloneTaskCheckpoints(TaskPresentationProjector.project(task))
+}
+
+@Composable
+fun CycloneTaskCheckpoints(snapshot: TaskPresentationSnapshot) {
+    val rows = snapshot.milestones.ifEmpty {
+        snapshot.currentMilestone?.takeIf(String::isNotBlank)?.let {
+            listOf(com.cyclone.mobile.runtime.background.TaskPresentationMilestone(it, SemanticStepState.ACTIVE))
+        }.orEmpty()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8)) {
+        rows.forEach { row ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
+            ) {
+                CycloneCheckpointMarker(row.state)
+                Text(
+                    row.label,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (row.state == SemanticStepState.ACTIVE) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 2,
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun CycloneCheckpointMarker(state: SemanticStepState) {
+    val palette = cycloneConversationPalette()
+    when (state) {
+        SemanticStepState.ACTIVE -> Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+            CycloneNineDotSpinner(Modifier.size(18.dp))
+        }
+        SemanticStepState.DONE -> Surface(
+            modifier = Modifier.size(18.dp),
+            shape = androidx.compose.foundation.shape.CircleShape,
+            color = palette.active,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Check, null, Modifier.size(12.dp))
+            }
+        }
+        SemanticStepState.ACTION_NEEDED -> Surface(
+            modifier = Modifier.size(18.dp),
+            shape = androidx.compose.foundation.shape.CircleShape,
+            color = palette.attentionSoft,
+            contentColor = palette.attention,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.PriorityHigh, null, Modifier.size(12.dp))
+            }
+        }
+        SemanticStepState.FAILED -> Surface(
+            modifier = Modifier.size(18.dp),
+            shape = androidx.compose.foundation.shape.CircleShape,
+            color = palette.failureSoft,
+            contentColor = palette.failure,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.ErrorOutline, null, Modifier.size(12.dp))
+            }
+        }
+        SemanticStepState.PENDING -> Canvas(
+            Modifier.size(18.dp).semantics { contentDescription = "Pending" },
+        ) {
+            drawCircle(
+                color = palette.cardOutline,
+                radius = size.minDimension * .34f,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6.dp.toPx()),
+            )
         }
     }
 }

@@ -6,6 +6,7 @@ import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,13 +52,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import com.cyclone.mobile.ai.vision.live.LiveVisionRuntime
 import com.cyclone.mobile.ui.v32.CycloneAppIcon
+import com.cyclone.mobile.ui.v32.CycloneConversationTokens
+import com.cyclone.mobile.ui.v32.CycloneTaskCheckpoints
 import com.cyclone.mobile.ui.v32.CycloneTaskStatusPill
 import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
-import com.cyclone.mobile.ui.v32.TaskHumanizer
-import com.cyclone.mobile.ui.v32.canAutofillFromUi
-import com.cyclone.mobile.ui.v32.canContinueAfterHumanFromUi
-import com.cyclone.mobile.ui.v32.canTakeOverFromUi
+import com.cyclone.mobile.ui.v32.cycloneConversationPalette
 import com.cyclone.mobile.ui.v32.taskVisualState
 import kotlinx.coroutines.delay
 
@@ -146,19 +146,27 @@ class WorkspaceProgressActivity : ComponentActivity() {
         onAvailability: (Boolean) -> Unit,
     ) {
         val visualState = task.taskVisualState()
-        val taskLabel = TaskHumanizer.humanize(task.goal, task.app)
+        val snapshot = TaskPresentationProjector.project(task)
         val layer2 = isLayer2(task)
+        val palette = cycloneConversationPalette()
+        val outline = when (snapshot.state) {
+            TaskConsumerState.WORKING -> palette.cardOutline
+            TaskConsumerState.ACTION_NEEDED -> palette.attention.copy(alpha = .26f)
+            TaskConsumerState.DONE -> palette.success.copy(alpha = .26f)
+            TaskConsumerState.FAILED -> palette.failure.copy(alpha = .28f)
+        }
         Surface(
             modifier = Modifier.fillMaxWidth().animateContentSize(),
-            shape = RoundedCornerShape(26.dp),
+            shape = RoundedCornerShape(CycloneConversationTokens.taskRadius),
             color = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
-            shadowElevation = 2.dp,
+            shadowElevation = 0.dp,
+            border = BorderStroke(.8.dp, outline),
         ) {
             Column(
-                Modifier.fillMaxWidth().padding(15.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                Modifier.fillMaxWidth().padding(CycloneConversationTokens.space16),
+                verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space12),
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -175,19 +183,25 @@ class WorkspaceProgressActivity : ComponentActivity() {
                 }
 
                 Text(
-                    taskLabel,
+                    snapshot.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                task.subtitle.trim().takeIf { it.isNotBlank() && it != taskLabel }?.let { subtitle ->
+                snapshot.supportingCopy?.takeIf {
+                    it.isNotBlank() && !it.equals(snapshot.title, ignoreCase = true)
+                }?.let { subtitle ->
                     Text(
                         subtitle,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+
+                if (snapshot.milestones.isNotEmpty() && task.phase != TaskPhase.HUMAN) {
+                    CycloneTaskCheckpoints(snapshot)
                 }
 
                 when {
@@ -200,7 +214,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
                     else -> Unit
                 }
 
-                TaskActions(task, visualState, layer2, liveAvailable)
+                TaskActions(task, snapshot, visualState, layer2, liveAvailable)
             }
         }
     }
@@ -226,6 +240,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
     @Composable
     private fun TaskActions(
         task: WorkspaceTaskUi,
+        snapshot: TaskPresentationSnapshot,
         visualState: CycloneTaskVisualState,
         layer2: Boolean,
         liveAvailable: Boolean,
@@ -253,7 +268,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
                                 WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff")
                                 finish()
                             },
-                            enabled = task.canTakeOverFromUi(),
+                            enabled = TaskFollowUpAction.TAKE_OVER in snapshot.followUps,
                             modifier = Modifier.weight(1f).heightIn(min = 46.dp),
                             shape = RoundedCornerShape(15.dp),
                         ) { Text(if (task.phase == TaskPhase.HUMAN) "In control" else "Take Over") }
@@ -273,14 +288,14 @@ class WorkspaceProgressActivity : ComponentActivity() {
                         } else {
                             OutlinedButton(
                                 onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "resume") },
-                                enabled = task.canContinueAfterHumanFromUi(),
+                                enabled = TaskFollowUpAction.CONTINUE in snapshot.followUps,
                                 modifier = Modifier.weight(1f).heightIn(min = 46.dp),
                                 shape = RoundedCornerShape(15.dp),
                             ) { Text("I'm Done") }
                         }
                     }
 
-                    if (task.canAutofillFromUi()) {
+                    if (TaskFollowUpAction.AUTOFILL in snapshot.followUps) {
                         Button(
                             onClick = { WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "autofill") },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
@@ -291,17 +306,33 @@ class WorkspaceProgressActivity : ComponentActivity() {
             }
 
             CycloneTaskVisualState.DONE -> {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
+                ) {
+                    if (TaskFollowUpAction.OPEN_APP in snapshot.followUps) {
+                        OutlinedButton(
+                            onClick = { openInstalledApp(task.packageName) },
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(15.dp),
+                        ) { Text("Open app") }
+                    }
+                    if (TaskFollowUpAction.RUN_AGAIN in snapshot.followUps) {
+                        Button(
+                            onClick = { restartTask(task) },
+                            modifier = Modifier.weight(1f).heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(15.dp),
+                        ) { Text("Run again") }
+                    }
+                }
+            }
+
+            CycloneTaskVisualState.FAILED -> {
                 Button(
-                    onClick = {
-                        if (layer2) openInstalledApp(task.packageName)
-                        else {
-                            WorkspaceTasks.command(this@WorkspaceProgressActivity, task, "handoff")
-                            finish()
-                        }
-                    },
+                    onClick = { restartTask(task) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
                     shape = RoundedCornerShape(15.dp),
-                ) { Text("Open Result") }
+                ) { Text("Try again") }
             }
         }
     }
@@ -372,6 +403,18 @@ class WorkspaceProgressActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun restartTask(task: WorkspaceTaskUi) {
+        runCatching {
+            WorkspaceTasks.queueRequest(
+                goal = task.goal,
+                targetPackageName = task.packageName.takeIf(String::isNotBlank),
+                targetAppLabel = task.app.takeIf(String::isNotBlank),
+            )
+            WorkspaceTasks.tryPromoteNext(applicationContext)
+        }
+        finish()
     }
 
     private fun openInstalledApp(packageName: String) {

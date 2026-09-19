@@ -3,6 +3,8 @@ package com.cyclone.mobile.ui.v32
 import com.cyclone.mobile.runtime.background.PendingWorkspaceRequest
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
+import com.cyclone.mobile.runtime.background.TaskConsumerState
+import com.cyclone.mobile.runtime.background.TaskPresentationProjector
 
 internal data class TaskGlassCardModel(
     val status: String,
@@ -24,23 +26,26 @@ internal data class QueueGlassCardModel(
 internal object TaskGlassPresentation {
     fun current(task: WorkspaceTaskUi?, resolvedApp: String? = task?.app): TaskGlassCardModel? {
         if (task == null || task.phase == TaskPhase.STOPPED) return null
-        val label = TaskHumanizer.humanize(task.goal, resolvedApp)
-        val status = when (task.taskVisualState()) {
-            CycloneTaskVisualState.WORKING -> "Working"
-            CycloneTaskVisualState.ACTION_NEEDED -> "Action Needed"
-            CycloneTaskVisualState.DONE -> "Done"
+        val snapshot = TaskPresentationProjector.project(
+            if (resolvedApp.isNullOrBlank() || resolvedApp == task.app) task else task.copy(app = resolvedApp),
+        )
+        val status = when (snapshot.state) {
+            TaskConsumerState.WORKING -> "Working"
+            TaskConsumerState.ACTION_NEEDED -> "Action Needed"
+            TaskConsumerState.DONE -> "Done"
+            TaskConsumerState.FAILED -> "Couldn't finish"
         }
-        val action = when {
-            task.phase == TaskPhase.DONE -> "View result"
-            task.phase in setOf(TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED) || task.confirmation != null -> "View options"
-            else -> "View progress"
+        val action = when (snapshot.state) {
+            TaskConsumerState.DONE -> "View result"
+            TaskConsumerState.ACTION_NEEDED, TaskConsumerState.FAILED -> "View options"
+            TaskConsumerState.WORKING -> "View progress"
         }
         return TaskGlassCardModel(
             status = status,
-            taskLabel = label,
+            taskLabel = snapshot.title,
             actionLabel = action,
-            packageName = task.packageName.takeIf(String::isNotBlank),
-            actionContentDescription = "$action for $label",
+            packageName = snapshot.packageName.takeIf(String::isNotBlank),
+            actionContentDescription = "$action for ${snapshot.title}",
         )
     }
 

@@ -113,6 +113,55 @@ private val CycloneV32Shapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
+object CycloneConversationTokens {
+    val space4 = 4.dp
+    val space8 = 8.dp
+    val space12 = 12.dp
+    val space16 = 16.dp
+    val space24 = 24.dp
+
+    val bubbleRadius = 18.dp
+    val taskRadius = 22.dp
+    val sheetRadius = 28.dp
+    val composerRadius = 30.dp
+
+    const val stateTransitionMs = 200
+    const val fastTransitionMs = 140
+    const val drawerDampingRatio = .90f
+    const val drawerStiffness = 560f
+}
+
+@Immutable
+data class CycloneConversationPalette(
+    val active: Color,
+    val activeSoft: Color,
+    val success: Color,
+    val successSoft: Color,
+    val attention: Color,
+    val attentionSoft: Color,
+    val failure: Color,
+    val failureSoft: Color,
+    val cardOutline: Color,
+    val secondaryText: Color,
+)
+
+@Composable
+fun cycloneConversationPalette(): CycloneConversationPalette {
+    val colors = MaterialTheme.colorScheme
+    return CycloneConversationPalette(
+        active = colors.primary,
+        activeSoft = colors.primaryContainer.copy(alpha = .34f),
+        success = colors.secondary,
+        successSoft = colors.secondaryContainer.copy(alpha = .34f),
+        attention = colors.tertiary,
+        attentionSoft = colors.tertiaryContainer.copy(alpha = .42f),
+        failure = colors.error,
+        failureSoft = colors.errorContainer.copy(alpha = .30f),
+        cardOutline = colors.outlineVariant.copy(alpha = .62f),
+        secondaryText = colors.onSurfaceVariant,
+    )
+}
+
 val CycloneTypography = Typography(
     displaySmall = TextStyle(fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp),
     headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),

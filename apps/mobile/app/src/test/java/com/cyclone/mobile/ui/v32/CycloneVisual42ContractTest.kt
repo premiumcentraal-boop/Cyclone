@@ -35,16 +35,17 @@ class CycloneVisual42ContractTest {
 
     @Test fun taskCardIsOnePhysicalObjectWithExactTaskProjection() {
         val panel = source("CycloneAskTaskPanel.kt")
-        assertTrue(panel.contains("TaskGlassPresentation.current(task, resolvedApp)"))
-        assertTrue(panel.contains("CycloneAppIcon(presentation.packageName"))
+        assertTrue(panel.contains("TaskPresentationProjector.project(projectedTask)"))
+        assertTrue(panel.contains("CycloneAppIcon(snapshot.packageName"))
         assertTrue(panel.contains("UiTask(task).open(context)"))
-        assertTrue(panel.contains("CycloneTaskStatusPill(visualState)"))
-        assertTrue(panel.contains("task.canTakeOverFromUi()"))
-        assertTrue(panel.contains("task.canContinueAfterHumanFromUi()"))
+        assertTrue(panel.contains("CycloneTaskStatusPill(state)"))
+        assertTrue(panel.contains("TaskFollowUpAction.TAKE_OVER"))
+        assertTrue(panel.contains("TaskFollowUpAction.CONTINUE"))
+        assertTrue(panel.contains("TaskFollowUpAction.RUN_AGAIN"))
         assertTrue(panel.contains("border = BorderStroke(.8.dp, outline)"))
         assertTrue(panel.contains("shadowElevation = 0.dp"))
         assertTrue(panel.contains("progressExpanded"))
-        assertFalse(panel.contains("WorkspaceTaskUi("))
+        assertTrue(panel.contains("CycloneConversationTokens.taskRadius"))
     }
 
     @Test fun bottomNavigationOwnsInsetsAndUsesOneInsetLiquidSelectionLens() {
@@ -85,6 +86,8 @@ class CycloneVisual42ContractTest {
         assertTrue(design.contains("val ScreenBottom = 24.dp"))
         assertTrue(design.contains("fun cyclonePageInsets"))
         assertFalse(design.contains("border = BorderStroke"))
+        assertTrue(design.contains("object CycloneConversationTokens"))
+        assertTrue(design.contains("data class CycloneConversationPalette"))
     }
 
     @Test fun productionSettingsUsesUtilityFirst426Surface() {

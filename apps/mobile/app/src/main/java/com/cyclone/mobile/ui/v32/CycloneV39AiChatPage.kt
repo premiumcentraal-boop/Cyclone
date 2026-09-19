@@ -6,6 +6,7 @@ import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -17,6 +18,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -54,6 +56,7 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -237,11 +240,15 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 check(OverlayChromeRuntime.isAttached()) { "Phone control needs repair. Open Phone control in Settings." }
                 OverlayChromeRuntime.submitRequest(normalized)
             }.onSuccess {
+                session.append(V39ChatRole.USER, normalized)
+                session.append(V39ChatRole.CYCLONE, "Got it. I'll work on that on your phone.")
                 composer = ""
             }.onFailure { message = it.message ?: "Couldn't open the phone-task setup." }
 
             RequestDispatch.QUEUE_PHONE_TASK -> runCatching { WorkspaceTasks.queueRequest(normalized) }
                 .onSuccess {
+                    session.append(V39ChatRole.USER, normalized)
+                    session.append(V39ChatRole.CYCLONE, "I've saved that to Up next. Your current task can keep going.")
                     composer = ""
                     message = "Saved to Up next. Your current task continues."
                 }
@@ -310,6 +317,14 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
     }
 
+    fun openPhotos() {
+        toolsOpen = false
+        context.startActivity(
+            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                .putExtra("photos", true),
+        )
+    }
+
     fun shareScreen() {
         toolsOpen = false
         com.cyclone.mobile.capture.LiveScreenShare.start(context)
@@ -319,7 +334,6 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         if (keyboardOpen) {
             modelMenuOpen = false
             toolsOpen = false
-            drawerCollapsed = false
         } else if (toolsOpen || modelMenuOpen) {
             drawerCollapsed = false
         }
@@ -341,27 +355,15 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         AskCycloneDotField(Modifier.matchParentSize())
 
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxSize().padding(
+                horizontal = CycloneConversationTokens.space16,
+                vertical = CycloneConversationTokens.space8,
+            ),
+            verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
         ) {
             AskCycloneHeader(
                 onMenu = onSettings,
                 onProfile = onSettings,
-                model = {
-                    CycloneModelPill(
-                        modelId = selectedModelId,
-                        effort = reasoningEffort,
-                        enabled = !session.busy,
-                        compactHeader = true,
-                        expandInLayout = false,
-                        expanded = modelMenuOpen,
-                        onExpandedChange = {
-                            modelMenuOpen = it
-                            if (it) toolsOpen = false
-                        },
-                        onChange = ::persistAiControls,
-                    )
-                },
             )
 
             if (emptyCanvas && composer.isBlank()) {
@@ -374,51 +376,105 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             } else {
                 LazyColumn(
                     Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space12),
                     contentPadding = PaddingValues(top = if (keyboardOpen) 2.dp else 4.dp, bottom = 8.dp),
                 ) {
                     if (session.messages.isNotEmpty()) {
                         items(session.messages, key = { it.id }) { V39ChatBubble(it) }
                     }
 
+                    task?.let { current ->
+                        item(key = "current-${current.taskId}") {
+                            CycloneAskTaskPanel(current)
+                        }
+                    }
+                    if (foregroundWorking) {
+                        item(key = "foreground-${foregroundSnapshot.sessionId}") {
+                            CycloneForegroundWorkCard(foregroundSnapshot)
+                        }
+                    }
+                    if (queuedRequests.isNotEmpty()) {
+                        item(key = "queued") { CyclonePendingRequests() }
+                    }
+
                     if (session.busy || session.status.isNotBlank()) {
                         item {
-                            Box(
+                            Row(
                                 Modifier
-                                    .fillMaxWidth(.72f)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = .56f)),
+                                    .fillMaxWidth()
+                                    .padding(
+                                        start = CycloneConversationTokens.space4,
+                                        end = CycloneConversationTokens.space24,
+                                        top = CycloneConversationTokens.space4,
+                                        bottom = CycloneConversationTokens.space4,
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
                             ) {
-                                Row(
-                                    Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(9.dp),
-                                ) {
-                                    if (session.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Text(
-                                        if (session.busy) "Thinking…" else session.status,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
+                                if (session.busy) {
+                                    CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp)
                                 }
+                                Text(
+                                    if (session.busy) "Thinking…" else session.status,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
                             }
                         }
                     }
                 }
             }
 
-            if (drawerCollapsed) {
-                CycloneCollapsedAskPill(
+            AnimatedContent(
+                targetState = drawerCollapsed,
+                transitionSpec = {
+                    (fadeIn(tween(CycloneConversationTokens.stateTransitionMs)) +
+                        slideInVertically(
+                            animationSpec = tween(
+                                CycloneConversationTokens.stateTransitionMs,
+                                easing = FastOutSlowInEasing,
+                            ),
+                        ) { it / 6 }
+                    ).togetherWith(
+                        fadeOut(tween(CycloneConversationTokens.fastTransitionMs)) +
+                            slideOutVertically(
+                                animationSpec = tween(CycloneConversationTokens.fastTransitionMs),
+                            ) { it / 8 },
+                    )
+                },
+                label = "Ask Cyclone retraction",
+            ) { minimized ->
+                if (minimized) {
+                val minimizedSendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
+                    RequestIntent.PHONE_TASK -> true
+                    RequestIntent.CHAT -> hasKey && !session.busy
+                }
+                CycloneMinimizedComposerBar(
+                    text = composer,
+                    onTextChanged = { composer = it },
                     onExpand = { drawerCollapsed = false },
-                    active = task?.working == true || foregroundWorking || session.busy,
-                    status = when {
-                        task?.working == true -> task?.subtitle?.takeIf(String::isNotBlank) ?: "Current run"
-                        foregroundWorking -> foregroundSnapshot.statusMessage ?: "Current run"
-                        session.busy -> "Answering…"
-                        queuedRequests.isNotEmpty() -> "Tasks waiting"
-                        else -> null
+                    onAdd = {
+                        drawerCollapsed = false
+                        modelMenuOpen = false
+                        toolsOpen = true
                     },
-                    modifier = Modifier.padding(bottom = 12.dp),
+                    onModelAndIntelligence = {
+                        drawerCollapsed = false
+                        toolsOpen = false
+                        modelMenuOpen = true
+                    },
+                    onVoice = { startVoice() },
+                    onSubmit = { submit() },
+                    modelLabel = cycloneShortModelLabel(
+                        V39AiChatContract.modelForStored(selectedModelId).label.ifBlank { "Cyclone" },
+                    ),
+                    intelligenceLabel = reasoningEffort
+                        .takeIf(String::isNotBlank)
+                        ?.let(::reasoningEffortLabel)
+                        ?: "Auto",
+                    sendEnabled = minimizedSendEnabled,
+                    busy = session.busy,
+                    modifier = Modifier.padding(bottom = CycloneConversationTokens.space8),
                 )
             } else {
                 CycloneChatDrawerSurface(
@@ -432,26 +488,6 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                     contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
                 ) {
-            if (task != null || queuedRequests.isNotEmpty() || foregroundWorking) {
-                LazyColumn(
-                    Modifier.fillMaxWidth().heightIn(max = if (keyboardOpen) 132.dp else 230.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 2.dp),
-                ) {
-                    task?.let { current ->
-                        item(key = "current-${current.taskId}") { CycloneAskTaskPanel(current) }
-                    }
-                    if (foregroundWorking) {
-                        item(key = "foreground-${foregroundSnapshot.sessionId}") {
-                            CycloneForegroundWorkCard(foregroundSnapshot)
-                        }
-                    }
-                    if (queuedRequests.isNotEmpty()) {
-                        item(key = "queued") { CyclonePendingRequests() }
-                    }
-                }
-            }
-
             if (!hasKey) {
                 Surface(
                     shape = RoundedCornerShape(18.dp),
@@ -481,7 +517,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
 
             CycloneLiquidPanel(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                cornerRadius = 30.dp,
+                cornerRadius = CycloneConversationTokens.composerRadius,
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
             ) {
                 Column(Modifier.fillMaxWidth()) {
@@ -520,33 +556,68 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                             )
                         }
 
-                        BasicTextField(
-                            value = composer,
-                            onValueChange = { composer = it },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp, max = 96.dp)
-                                .padding(horizontal = 8.dp, vertical = 12.dp)
-                                .semantics { contentDescription = "Ask Cyclone composer" },
-                            maxLines = 4,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { submit() }),
-                            decorationBox = { field ->
-                                Box(contentAlignment = Alignment.CenterStart) {
-                                    if (composer.isEmpty()) {
-                                        Text(
-                                            V39AiChatContract.PLACEHOLDER,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .heightIn(min = 20.dp)
+                                    .clickable(enabled = !session.busy, role = Role.Button) {
+                                        modelMenuOpen = !modelMenuOpen
+                                        if (modelMenuOpen) toolsOpen = false
                                     }
-                                    field()
-                                }
-                            },
-                        )
+                                    .padding(horizontal = 8.dp, vertical = 1.dp)
+                                    .semantics { contentDescription = "Model and intelligence" },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                Text(
+                                    cycloneShortModelLabel(
+                                        V39AiChatContract.modelForStored(selectedModelId).label.ifBlank { "Cyclone" },
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                )
+                                Text("·", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    reasoningEffort.takeIf(String::isNotBlank)?.let(::reasoningEffortLabel) ?: "Auto",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+
+                            BasicTextField(
+                                value = composer,
+                                onValueChange = { composer = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 34.dp, max = 78.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .semantics { contentDescription = "Ask Cyclone composer" },
+                                maxLines = 4,
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = { submit() }),
+                                decorationBox = { field ->
+                                    Box(contentAlignment = Alignment.CenterStart) {
+                                        if (composer.isEmpty()) {
+                                            Text(
+                                                V39AiChatContract.PLACEHOLDER,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                        field()
+                                    }
+                                },
+                            )
+                        }
 
                         val sendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
                             RequestIntent.PHONE_TASK -> true
@@ -596,6 +667,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         }
                 }
             }
+            }
 
         AnimatedVisibility(
             visible = toolsOpen,
@@ -620,7 +692,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         .fillMaxWidth()
                         .heightIn(max = 420.dp)
                         .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(CycloneConversationTokens.sheetRadius),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
@@ -634,56 +706,60 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         CycloneSheetDismissHandle(onDismiss = { toolsOpen = false })
                         CycloneAttachmentTools(
                             onCamera = { openCamera() },
+                            onPhotos = { openPhotos() },
                             onFiles = { openFiles() },
                             onShareScreen = { shareScreen() },
                             filesLabel = "Files",
                             extras = listOf(
                                 Icons.Rounded.Bolt to "Create a routine",
+                                Icons.Rounded.Tune to "Model & intelligence",
                             ),
                             onExtra = { label ->
                                 toolsOpen = false
-                                if (label == "Create a routine") composer = "Create a routine"
+                                when (label) {
+                                    "Create a routine" -> composer = "Create a routine"
+                                    "Model & intelligence" -> modelMenuOpen = true
+                                }
                             },
-                        )
-                        CycloneModelIntelligencePanel(
-                            modelId = selectedModelId,
-                            effort = reasoningEffort,
-                            showModelSelector = false,
-                            onChange = ::persistAiControls,
                         )
                     }
                 }
             }
         }
 
-        if (modelMenuOpen) {
-            if (!keyboardOpen) {
+        if (modelMenuOpen && !keyboardOpen) {
             Box(Modifier.matchParentSize().zIndex(4f)) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = .18f))
+                        .background(Color.Black.copy(alpha = .22f))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             onClick = { modelMenuOpen = false },
                         ),
                 )
-                CycloneLiquidPanel(
+                Surface(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 56.dp, start = 24.dp, end = 24.dp)
-                        .fillMaxWidth(),
-                    cornerRadius = 22.dp,
-                    contentPadding = PaddingValues(6.dp),
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .heightIn(max = 390.dp)
+                        .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+                    shape = RoundedCornerShape(CycloneConversationTokens.sheetRadius),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
                 ) {
-                    CycloneModelPickerList(
-                        modelId = selectedModelId,
-                        onChange = ::persistAiControls,
-                        onDismiss = { modelMenuOpen = false },
-                    )
+                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                        CycloneSheetDismissHandle(onDismiss = { modelMenuOpen = false })
+                        CycloneModelIntelligencePanel(
+                            modelId = selectedModelId,
+                            effort = reasoningEffort,
+                            showModelSelector = true,
+                            onChange = ::persistAiControls,
+                        )
+                    }
                 }
-            }
             }
         }
 
@@ -697,7 +773,6 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
 private fun AskCycloneHeader(
     onMenu: () -> Unit,
     onProfile: () -> Unit,
-    model: @Composable () -> Unit,
 ) {
     Row(
         Modifier
@@ -718,7 +793,12 @@ private fun AskCycloneHeader(
             Icon(Icons.Rounded.Menu, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
         }
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            model()
+            Text(
+                "Cyclone",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
         Box(
             Modifier
@@ -981,43 +1061,20 @@ private fun AskCycloneVoiceMode(onClose: () -> Unit) {
 
 @Composable
 private fun V39ChatBubble(message: V39ChatMessage) {
-    val isUser = message.role == V39ChatRole.USER
-    if (!isUser) {
-        Column(
-            Modifier.fillMaxWidth().padding(end = 28.dp, top = 4.dp, bottom = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                message.text.replace("**", ""),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            if (message.ok != null) {
-                Text(
-                    if (message.ok) "Checked" else "Stopped",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (message.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-        return
-    }
-    val shape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
-    val color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .72f)
-    val contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(.82f)
-                .clip(shape)
-                .background(color),
-        ) {
-            Text(
-                message.text.replace("**", ""),
-                modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = contentColor,
-            )
-        }
+    CycloneConversationBubble(
+        text = message.text,
+        speaker = if (message.role == V39ChatRole.USER) {
+            CycloneConversationSpeaker.USER
+        } else {
+            CycloneConversationSpeaker.CYCLONE
+        },
+    )
+    if (message.role == V39ChatRole.CYCLONE && message.ok != null) {
+        Text(
+            if (message.ok) "Checked" else "Stopped",
+            modifier = Modifier.padding(top = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (message.ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        )
     }
 }

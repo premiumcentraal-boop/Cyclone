@@ -23,15 +23,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.DeviceState
+import com.cyclone.mobile.runtime.background.TaskFollowUpAction
 import com.cyclone.mobile.runtime.background.TaskPhase
+import com.cyclone.mobile.runtime.background.TaskPresentationProjector
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.v32.CycloneCollapsedAskPill
 import com.cyclone.mobile.ui.v32.CycloneTaskStatusPill
 import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
-import com.cyclone.mobile.ui.v32.TaskHumanizer
-import com.cyclone.mobile.ui.v32.canAutofillFromUi
-import com.cyclone.mobile.ui.v32.canContinueAfterHumanFromUi
 
 /**
  * The host app stays visually primary while Cyclone works.
@@ -60,7 +59,8 @@ fun BackgroundTaskGlass(task: WorkspaceTaskUi, onAsk: () -> Unit) {
 
 @Composable
 private fun BackgroundTaskRibbon(task: WorkspaceTaskUi, onAsk: () -> Unit) {
-    val taskLabel = TaskHumanizer.humanize(task.goal, task.app)
+    val snapshot = TaskPresentationProjector.project(task)
+    val taskLabel = snapshot.currentMilestone ?: snapshot.title
     CycloneCollapsedAskPill(
         onExpand = onAsk,
         active = true,
@@ -76,13 +76,14 @@ private fun BackgroundTaskRibbon(task: WorkspaceTaskUi, onAsk: () -> Unit) {
 @Composable
 private fun HumanTakeoverRibbon(task: WorkspaceTaskUi) {
     val context = LocalContext.current
+    val snapshot = TaskPresentationProjector.project(task)
     Surface(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
         shape = RoundedCornerShape(22.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
-        shadowElevation = 4.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
@@ -95,14 +96,14 @@ private fun HumanTakeoverRibbon(task: WorkspaceTaskUi) {
                     CycloneTaskStatusPill(CycloneTaskVisualState.ACTION_NEEDED)
                 }
                 Text(
-                    "Finish in ${task.app}, then continue Cyclone.",
+                    snapshot.supportingCopy ?: "Finish in ${task.app}, then continue Cyclone.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (task.canAutofillFromUi()) {
+            if (TaskFollowUpAction.AUTOFILL in snapshot.followUps) {
                 Button(
                     onClick = { WorkspaceTasks.command(context, task, "autofill") },
                     modifier = Modifier.heightIn(min = 44.dp).semantics {
@@ -113,7 +114,7 @@ private fun HumanTakeoverRibbon(task: WorkspaceTaskUi) {
             }
             Button(
                 onClick = { WorkspaceTasks.command(context, task, "resume") },
-                enabled = task.canContinueAfterHumanFromUi(),
+                enabled = TaskFollowUpAction.CONTINUE in snapshot.followUps,
                 modifier = Modifier.heightIn(min = 44.dp).semantics {
                     contentDescription = "I'm done, continue with Cyclone"
                 },

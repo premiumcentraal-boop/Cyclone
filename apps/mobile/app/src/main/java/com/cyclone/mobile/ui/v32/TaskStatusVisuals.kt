@@ -20,15 +20,15 @@ import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
 
-enum class CycloneTaskVisualState { WORKING, ACTION_NEEDED, DONE }
+enum class CycloneTaskVisualState { WORKING, ACTION_NEEDED, DONE, FAILED }
 
 fun WorkspaceTaskUi.taskVisualState(): CycloneTaskVisualState {
     if (confirmation != null) return CycloneTaskVisualState.ACTION_NEEDED
     return when (phase) {
         TaskPhase.STARTING, TaskPhase.WORKING -> CycloneTaskVisualState.WORKING
         TaskPhase.DONE -> CycloneTaskVisualState.DONE
-        TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN, TaskPhase.FAILED -> CycloneTaskVisualState.ACTION_NEEDED
-        TaskPhase.STOPPED -> CycloneTaskVisualState.ACTION_NEEDED
+        TaskPhase.PAUSED, TaskPhase.REVIEW, TaskPhase.HUMAN -> CycloneTaskVisualState.ACTION_NEEDED
+        TaskPhase.FAILED, TaskPhase.STOPPED -> CycloneTaskVisualState.FAILED
     }
 }
 
@@ -49,20 +49,24 @@ fun CycloneTaskStatusPill(
     state: CycloneTaskVisualState,
     modifier: Modifier = Modifier,
 ) {
+    val palette = cycloneConversationPalette()
     val container = when (state) {
-        CycloneTaskVisualState.WORKING -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .60f)
-        CycloneTaskVisualState.ACTION_NEEDED -> MaterialTheme.colorScheme.tertiaryContainer
-        CycloneTaskVisualState.DONE -> MaterialTheme.colorScheme.secondary.copy(alpha = .12f)
+        CycloneTaskVisualState.WORKING -> palette.activeSoft
+        CycloneTaskVisualState.ACTION_NEEDED -> palette.attentionSoft
+        CycloneTaskVisualState.DONE -> palette.successSoft
+        CycloneTaskVisualState.FAILED -> palette.failureSoft
     }
     val content = when (state) {
-        CycloneTaskVisualState.WORKING,
-        CycloneTaskVisualState.ACTION_NEEDED -> MaterialTheme.colorScheme.onTertiaryContainer
-        CycloneTaskVisualState.DONE -> MaterialTheme.colorScheme.secondary
+        CycloneTaskVisualState.WORKING -> palette.active
+        CycloneTaskVisualState.ACTION_NEEDED -> palette.attention
+        CycloneTaskVisualState.DONE -> palette.success
+        CycloneTaskVisualState.FAILED -> palette.failure
     }
     val label = when (state) {
         CycloneTaskVisualState.WORKING -> "Working"
         CycloneTaskVisualState.ACTION_NEEDED -> "Action needed"
         CycloneTaskVisualState.DONE -> "Done"
+        CycloneTaskVisualState.FAILED -> "Couldn't finish"
     }
 
     Surface(
@@ -90,6 +94,11 @@ fun CycloneTaskStatusPill(
                     contentDescription = null,
                     modifier = Modifier.size(13.dp),
                     tint = content,
+                )
+                CycloneTaskVisualState.FAILED -> Text(
+                    "!",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
                 )
             }
             Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)

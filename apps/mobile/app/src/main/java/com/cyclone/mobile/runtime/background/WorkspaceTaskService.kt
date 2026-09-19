@@ -118,6 +118,7 @@ class WorkspaceTaskService : Service() {
                     displayId = session.displayId,
                     phase = TaskPhase.WORKING,
                     message = "Opening ${it.app}",
+                    outcome = null,
                     glassStepKind = GlassStepKind.FAST_PATH,
                     steps = emptyList(),
                 ) }
@@ -131,6 +132,9 @@ class WorkspaceTaskService : Service() {
                 awaitWorkspace(session.sessionId, ExecutionContext.from(session))
                 agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session)).also { agent ->
                     var revision = 0L
+                    agent.onTrajectory = { trajectory ->
+                        update { TaskHarnessState.applyTrajectory(it, trajectory) }
+                    }
                     agent.onOperation = { tool, result ->
                         if (result == null) { revision = current?.controlRevision ?: -1; update { TaskHarnessState.begin(it, tool) } }
                         else update { TaskHarnessState.finish(it, TaskOperationEvidence(session.sessionId, session.displayId,
@@ -146,8 +150,15 @@ class WorkspaceTaskService : Service() {
                 if (error is CancellationException && error !is TimeoutCancellationException) throw error
                 sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it, WorkspaceState.FAILED) } }
                 sessionId = null
-                update { it.copy(phase = TaskPhase.FAILED, resumable = false,
-                    message = BackgroundSetup.failure(applicationContext, task.packageName, error)) }
+                val diagnostic = BackgroundSetup.failure(applicationContext, task.packageName, error)
+                update {
+                    it.copy(
+                        phase = TaskPhase.FAILED,
+                        resumable = false,
+                        message = diagnostic,
+                        outcome = "I couldn't finish this task. Your place is saved.",
+                    )
+                }
                 stopForeground(STOP_FOREGROUND_DETACH); stopSelf()
             }
         }
@@ -167,15 +178,30 @@ class WorkspaceTaskService : Service() {
         withContext(Dispatchers.IO) { WorkspaceRuntime.pause(id, WorkspaceState.BACKGROUND_NEEDS_HANDOFF) }
         update {
             when {
-                result.ok -> it.copy(phase = TaskPhase.DONE, resumable = false,
-                    message = WorkspaceCopy.result(result.message), steps = it.steps + "Checked the result")
+                result.ok -> {
+                    val safeOutcome = WorkspaceCopy.result(result.message)
+                    it.copy(
+                        phase = TaskPhase.DONE,
+                        resumable = false,
+                        message = safeOutcome,
+                        outcome = safeOutcome,
+                        steps = it.steps + "Checked the result",
+                    )
+                }
                 result.classification == "HUMAN_OR_GATE" -> it.copy(phase = TaskPhase.REVIEW,
                     message = if (result.gateClass == "login")
                         "This screen needs your sign-in. Take Over, Autofill, or tap I'm Done when finished."
                     else "Review the prepared page in ${it.app} before continuing.",
                     loginAutofill = result.gateClass == "login")
-                else -> it.copy(phase = TaskPhase.FAILED, resumable = false,
-                    message = "I couldn't finish. Your place in ${it.app} is saved for you.")
+                else -> {
+                    val safeFailure = "I couldn't finish. Your place in ${it.app} is saved for you."
+                    it.copy(
+                        phase = TaskPhase.FAILED,
+                        resumable = false,
+                        message = safeFailure,
+                        outcome = safeFailure,
+                    )
+                }
             }
         }
     }
@@ -237,6 +263,7 @@ class WorkspaceTaskService : Service() {
                     it.copy(
                         phase = TaskPhase.WORKING,
                         message = "Continuing from the current page",
+                        outcome = null,
                         glassStepKind = GlassStepKind.FAST_PATH,
                     )
                 }
@@ -302,7 +329,9 @@ class WorkspaceTaskService : Service() {
         val progress = PendingIntent.getActivity(this, 0, WorkspaceTasks.progressIntent(this, task),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val builder = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)
-            .setContentTitle(TaskNotificationProjection.title(task)).setContentText(task.subtitle).setOnlyAlertOnce(true).setShowWhen(false)
+            .setContentTitle(TaskNotificationProjection.title(task))
+            .setContentText(TaskNotificationProjection.body(task))
+            .setOnlyAlertOnce(true).setShowWhen(false)
             .setOngoing(task.working)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(progress)
             .setPublicVersion(Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)

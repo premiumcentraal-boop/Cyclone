@@ -49,15 +49,36 @@ class OverlayAskBarPolicyTest {
     }
 
     @Test
-    fun activeSwipeDownUsesVisibleDrawerAndRestoresTheSameRunFromPill() {
+    fun overlayUsesExpandedThenTypeableComposerThenTripleTapLauncher() {
         val overlay = source("ui/overlay/OverlayChrome.kt")
+        val machine = source("ui/overlay/OverlayChromeMachine.kt")
         val drawer = source("ui/v32/CycloneChatDrawer.kt")
-        assertTrue(overlay.contains("CycloneChatDrawerSurface("))
-        assertTrue(overlay.contains("CycloneCollapsedAskPill("))
+        assertTrue(overlay.contains("snapshot.launcherCollapsed -> \"launcher\""))
+        assertTrue(overlay.contains("snapshot.minimized -> \"minimized\""))
+        assertTrue(overlay.contains("\"minimized\" -> ComposerPanel("))
+        assertTrue(overlay.contains("\"launcher\" -> if (snapshot.idleChipVisible)"))
+        assertTrue(overlay.contains("IdleActivationHotspot("))
         assertTrue(overlay.contains("onAction(OverlayUserAction.MINIMIZE)"))
         assertTrue(overlay.contains("onAction(OverlayUserAction.ASK_CYCLONE)"))
-        assertTrue(drawer.contains("Drag down or tap to minimize Cyclone chat"))
-        assertTrue(drawer.contains("Ask Cyclone. Open current chat."))
+        assertTrue(machine.contains("if (!snapshot.minimized)"))
+        assertTrue(machine.contains("if (!snapshot.launcherCollapsed)"))
+        assertTrue(machine.contains("launcherCollapsed = true"))
+        assertTrue(drawer.contains("Drag up to expand or down to hide Cyclone chat"))
+        assertFalse(overlay.contains("CollapsedRunChatPill"))
+    }
+
+    @Test
+    fun overlayExtrasRestorePhotosAndQuickSelectorHasNoAutonomy() {
+        val composer = source("ui/overlay/OverlayAppleLiquidComposer.kt")
+        val controls = source("ui/v32/CycloneIntelligenceControls.kt")
+        assertTrue(composer.contains("OverlayAppleToolTile(Icons.Rounded.PhotoLibrary, \"Photos\""))
+        assertTrue(composer.contains("OverlayAppleToolTile(Icons.Rounded.CameraAlt, \"Camera\""))
+        assertTrue(composer.contains("OverlayAppleMenuRow(Icons.Rounded.AttachFile, \"Files\""))
+        assertFalse(composer.contains("\"Files & photos\""))
+        assertTrue(composer.contains("contentDescription = \"Model and intelligence\""))
+        assertTrue(controls.contains("private enum class OverlaySettingsStep { MODEL, INTELLIGENCE }"))
+        assertFalse(controls.contains("OverlaySettingsStep.AUTONOMY"))
+        assertFalse(controls.contains("\"Autonomy\""))
     }
 
     @Test

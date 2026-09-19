@@ -36,7 +36,7 @@ class CycloneTaskPresentationTest {
         }
     }
 
-    @Test fun consumerVisualStateCollapsesRuntimePhasesToThreeStates() {
+    @Test fun consumerVisualStateSeparatesWorkingActionNeededDoneAndFailed() {
         fun task(phase: TaskPhase) = WorkspaceTaskUi(
             taskId = "t",
             app = "App",
@@ -50,7 +50,8 @@ class CycloneTaskPresentationTest {
         assertEquals(CycloneTaskVisualState.ACTION_NEEDED, task(TaskPhase.PAUSED).taskVisualState())
         assertEquals(CycloneTaskVisualState.ACTION_NEEDED, task(TaskPhase.REVIEW).taskVisualState())
         assertEquals(CycloneTaskVisualState.ACTION_NEEDED, task(TaskPhase.HUMAN).taskVisualState())
-        assertEquals(CycloneTaskVisualState.ACTION_NEEDED, task(TaskPhase.FAILED).taskVisualState())
+        assertEquals(CycloneTaskVisualState.FAILED, task(TaskPhase.FAILED).taskVisualState())
+        assertEquals(CycloneTaskVisualState.FAILED, task(TaskPhase.STOPPED).taskVisualState())
         assertEquals(CycloneTaskVisualState.DONE, task(TaskPhase.DONE).taskVisualState())
     }
 

@@ -156,7 +156,7 @@ class OverlayChromeMachineTest {
     }
 
     @Test
-    fun activeWorkMinimizesIntoTaskBackedGlassAndCanReExpandWithoutChangingRunState() {
+    fun activeWorkCollapsesToComposerThenLauncherAndTripleTapRestoresComposerWithoutChangingRunState() {
         val events = mutableListOf<OverlayChromeEvent>()
         val effects = RecordingEffects()
         val machine = OverlayChromeMachine(emit = { events += it }, cycloneState = effects)
@@ -166,13 +166,32 @@ class OverlayChromeMachineTest {
         machine.dispatch(OverlayUserAction.MINIMIZE)
         assertEquals(OverlayChromeState.LIVE, machine.state())
         assertTrue(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().launcherCollapsed)
         assertFalse(machine.snapshot().idleChipVisible)
         assertFalse(machine.snapshot().voiceListening)
 
+        machine.updateComposer("next request")
+        assertEquals("next request", machine.snapshot().composerText)
+
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertTrue(machine.snapshot().minimized)
+        assertTrue(machine.snapshot().launcherCollapsed)
+        assertTrue(machine.snapshot().idleChipVisible)
+        assertEquals("next request", machine.snapshot().composerText)
+
+        // This is the action emitted after the launcher receives its deliberate triple tap.
         machine.dispatch(OverlayUserAction.ASK_CYCLONE)
         assertEquals(OverlayChromeState.LIVE, machine.state())
-        assertFalse(machine.snapshot().minimized)
+        assertTrue(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().launcherCollapsed)
         assertFalse(machine.snapshot().idleChipVisible)
+        assertEquals("next request", machine.snapshot().composerText)
+
+        // Explicit expand from the minimized composer's handle restores the full drawer.
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
+        assertFalse(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().launcherCollapsed)
 
         machine.enterGate(OverlayGateClass.DELETE)
         events.clear()

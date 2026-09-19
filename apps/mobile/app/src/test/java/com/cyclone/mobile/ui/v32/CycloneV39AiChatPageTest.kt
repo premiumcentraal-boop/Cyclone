@@ -84,19 +84,19 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("FilledIconButton("))
     }
 
-    @Test fun modelPillCannotStealComposerWidthAndKeyboardDoesNotDoubleInset() {
+    @Test fun modelIntelligenceControlLivesInsideComposerWithoutDuplicateHeaderPill() {
         val page = source("CycloneV39AiChatPage.kt")
-        val pill = page.indexOf("CycloneModelPill(")
-        val askGlass = page.indexOf("CycloneLiquidPanel(", pill)
-        val composer = page.indexOf("BasicTextField(", askGlass)
-        assertTrue(pill >= 0)
-        assertTrue(askGlass > pill)
-        assertTrue(composer > askGlass)
+        val askGlass = page.indexOf("CycloneLiquidPanel(")
+        val quickControl = page.indexOf("contentDescription = \"Model and intelligence\"", askGlass)
+        val composer = page.indexOf("BasicTextField(", quickControl)
+        assertTrue(askGlass >= 0)
+        assertTrue(quickControl > askGlass)
+        assertTrue(composer > quickControl)
         assertTrue(page.contains("CycloneModelIntelligencePanel("))
-        assertTrue(page.contains("showModelSelector = false"))
-        assertTrue(page.contains("if (!keyboardOpen)"))
+        assertTrue(page.contains("showModelSelector = true"))
+        assertTrue(page.contains("if (modelMenuOpen && !keyboardOpen)"))
         assertFalse(page.contains(".imePadding()"))
-        assertEquals(1, Regex("CycloneModelPill\\(").findAll(page).count())
+        assertFalse(page.contains("CycloneModelPill("))
     }
 
     @Test fun chatAndPhoneDispatchUseSeparateExistingPaths() {
@@ -120,7 +120,7 @@ class CycloneV39AiChatPageTest {
         assertTrue(reasoning.contains("OpenRouterCatalogStore.setReasoningEffort(context, canonical, value)"))
         assertTrue(reasoning.contains("reasoningSelectorMode(options)"))
         assertTrue(page.contains("CycloneModelIntelligencePanel("))
-        assertTrue(page.contains("showModelSelector = false"))
+        assertTrue(page.contains("showModelSelector = true"))
     }
 
     @Test fun missingKeyBlocksChatButNotPhoneRoutingContract() {
@@ -149,24 +149,31 @@ class CycloneV39AiChatPageTest {
         assertFalse(window.contains("WorkspaceTasks.command"))
     }
 
-    @Test fun taskAndForegroundWorkAreaIsBoundedAboveComposer() {
+    @Test fun taskAndForegroundWorkAreFirstClassConversationItemsAboveComposer() {
         val page = source("CycloneV39AiChatPage.kt")
         val task = page.indexOf("CycloneAskTaskPanel(current)")
         val foreground = page.indexOf("CycloneForegroundWorkCard(foregroundSnapshot)")
         val queued = page.indexOf("CyclonePendingRequests()")
+        val drawer = page.indexOf("CycloneChatDrawerSurface(")
         val composer = page.lastIndexOf("BasicTextField(")
-        assertTrue(task in 0 until composer)
-        assertTrue(foreground in 0 until composer)
-        assertTrue(queued in 0 until composer)
-        assertTrue(page.contains("heightIn(max = if (keyboardOpen) 132.dp else 230.dp)"))
+        assertTrue(task in 0 until drawer)
+        assertTrue(foreground in 0 until drawer)
+        assertTrue(queued in 0 until drawer)
+        assertTrue(drawer in 0 until composer)
+        assertTrue(page.contains("session.append(V39ChatRole.CYCLONE, \"Got it. I'll work on that on your phone.\")"))
     }
 
-    @Test fun translucentChatUsesClippedBackgroundsWithoutElevatedGhostBands() {
+    @Test fun translucentChatUsesSharedBubblePrimitiveWithoutElevatedGhostBands() {
         val page = source("CycloneV39AiChatPage.kt")
+        val bubble = source("CycloneConversationBubble.kt")
         val design = source("CycloneV32DesignSystem.kt")
-        assertTrue(page.contains(".background(MaterialTheme.colorScheme.surface.copy(alpha = .56f))"))
-        assertTrue(page.contains(".background(color)"))
+        assertFalse(page.contains(".background(MaterialTheme.colorScheme.surface.copy(alpha = .56f))"))
+        assertTrue(page.contains("CycloneConversationBubble("))
+        assertTrue(page.contains("if (session.busy) \"Thinking…\" else session.status"))
+        assertTrue(bubble.contains(".background(userContainer)"))
+        assertTrue(bubble.contains("CycloneConversationTokens.bubbleRadius"))
         assertFalse(page.contains("shadowElevation = 5.dp"))
+        assertFalse(bubble.contains("shadowElevation"))
         assertFalse(design.substringAfter("fun CycloneGlassSurface").contains("shadowElevation = 4.dp"))
     }
 
@@ -183,9 +190,10 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
         assertFalse(page.contains("AskSuggestionChip"))
         assertFalse(page.contains("Take a screenshot\", onSuggestion"))
-        assertTrue(page.contains("compactHeader = true"))
-        assertTrue(page.contains("expandInLayout = false"))
-        assertTrue(page.contains("CycloneModelPickerList("))
+        assertFalse(page.contains("compactHeader = true"))
+        assertFalse(page.contains("expandInLayout = false"))
+        assertTrue(page.contains("CycloneModelIntelligencePanel("))
+        assertTrue(page.contains("showModelSelector = true"))
         assertTrue(page.contains("AskCycloneOrb()"))
         assertTrue(page.contains("AskCycloneDotField(Modifier.matchParentSize())"))
         assertTrue(page.contains("askCycloneCanvasBrush()"))
@@ -196,23 +204,35 @@ class CycloneV39AiChatPageTest {
         assertTrue(tools in 0 until intelligence)
     }
 
-    @Test fun inAppChatUsesCollapsibleDrawerAndDraggablePlusSheet() {
+    @Test fun inAppChatUsesTypeableFirstStageRetractionAndDraggablePlusSheet() {
         val page = source("CycloneV39AiChatPage.kt")
         val drawer = source("CycloneChatDrawer.kt")
+        val minimized = source("CycloneMinimizedComposerBar.kt")
         assertTrue(page.contains("var drawerCollapsed by rememberSaveable"))
         assertTrue(page.contains("CycloneChatDrawerSurface("))
-        assertTrue(page.contains("CycloneCollapsedAskPill("))
+        assertTrue(page.contains("CycloneMinimizedComposerBar("))
+        assertTrue(page.contains("label = \"Ask Cyclone retraction\""))
+        assertTrue(page.contains("CycloneConversationTokens.stateTransitionMs"))
+        assertFalse(page.contains("CycloneCollapsedAskPill("))
         assertTrue(page.contains("CycloneSheetDismissHandle("))
         assertTrue(page.contains("keyboardController?.hide()"))
+        assertTrue(minimized.contains("BasicTextField("))
+        assertTrue(minimized.contains("contentDescription = \"Ask Cyclone minimized composer\""))
+        assertTrue(minimized.contains("contentDescription = \"Model and intelligence\""))
         assertTrue(drawer.contains("Drag down or tap to minimize Cyclone chat"))
-        assertTrue(drawer.contains("Ask Cyclone. Open current chat."))
     }
 
     @Test fun plusPanelAndVoiceStayBehindOneComposer() {
         val page = source("CycloneV39AiChatPage.kt")
+        val homeComposer = source("CycloneHomeComposer.kt")
         assertTrue(page.contains("CycloneAttachmentTools("))
+        assertTrue(page.contains("onPhotos = { openPhotos() }"))
         assertTrue(page.contains("filesLabel = \"Files\""))
         assertTrue(page.contains("Create a routine"))
+        assertTrue(page.contains("Model & intelligence"))
+        assertTrue(homeComposer.contains("Icons.Rounded.PhotoLibrary"))
+        assertTrue(homeComposer.contains("\"Photos\""))
+        assertTrue(homeComposer.contains("Icons.Rounded.AttachFile, filesLabel"))
         assertFalse(page.contains("Take screenshot"))
         assertFalse(page.contains("Deep research"))
         assertFalse(page.contains("Explain this screen"))
@@ -220,6 +240,16 @@ class CycloneV39AiChatPageTest {
         assertTrue(page.contains("AskCycloneVoiceMode"))
         assertTrue(page.contains("Listening…"))
         assertEquals(1, Regex("Icons\\.Rounded\\.Add").findAll(page).count())
+    }
+
+    @Test fun askBarContainsQuickModelAndIntelligenceSelector() {
+        val page = source("CycloneV39AiChatPage.kt")
+        val controls = source("CycloneIntelligenceControls.kt")
+        assertTrue(page.contains("contentDescription = \"Model and intelligence\""))
+        assertTrue(page.contains("cycloneShortModelLabel("))
+        assertTrue(page.contains("reasoningEffortLabel"))
+        assertTrue(controls.contains("private enum class OverlaySettingsStep { MODEL, INTELLIGENCE }"))
+        assertFalse(controls.contains("OverlaySettingsStep.AUTONOMY"))
     }
 
     @Test fun headerModelNameStaysTwoWords() {

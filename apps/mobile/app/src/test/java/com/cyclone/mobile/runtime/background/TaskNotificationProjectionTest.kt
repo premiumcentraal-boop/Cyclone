@@ -6,7 +6,8 @@ class TaskNotificationProjectionTest {
     @Test fun notificationsProjectTheSameStateAndCapabilities() {
         for (phase in TaskPhase.entries) {
             val state = TaskHarnessState.normalize(task, task.copy(phase = phase))
-            assertEquals(state.title, TaskNotificationProjection.title(state))
+            assertEquals(TaskPresentationProjector.project(state).title, TaskNotificationProjection.title(state))
+            assertEquals(TaskPresentationProjector.project(state).supportingCopy, TaskNotificationProjection.body(state))
             assertEquals(state.interruption?.canResumeAfterHuman == true,
                 TaskNotificationProjection.actions(state).any { it.first == "resume" })
             assertEquals(state.interruption?.canAutofill == true,
@@ -15,13 +16,16 @@ class TaskNotificationProjectionTest {
     }
     @Test fun failedIsTerminalRatherThanActionNeeded() {
         val failed = TaskHarnessState.normalize(task, task.copy(phase = TaskPhase.FAILED, resumable = false))
-        assertEquals("Failed", TaskNotificationProjection.title(failed))
+        val snapshot = TaskPresentationProjector.project(failed)
+        assertEquals(TaskConsumerState.FAILED, snapshot.state)
+        assertEquals(snapshot.title, TaskNotificationProjection.title(failed))
         assertTrue(TaskNotificationProjection.actions(failed).isEmpty())
     }
     @Test fun arbitraryProviderOrSecretMessageNeverBecomesNotificationCopy() {
         val state = task.copy(message = "password=123456 sk-or-secret Tap x=421 Model tool call")
         assertEquals("Getting your task ready", state.subtitle)
         assertFalse(state.copy(phase = TaskPhase.WORKING).subtitle.contains("secret"))
+        assertFalse(TaskNotificationProjection.body(state).contains("secret", ignoreCase = true))
     }
     @Test fun commandMatchingNeverTreatsMissingSessionAsWildcard() {
         assertFalse(WorkspaceTasks.matches(task, "t", null))

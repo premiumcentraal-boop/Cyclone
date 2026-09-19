@@ -5,6 +5,10 @@ object TaskConsumerCopy {
     fun subtitle(task: WorkspaceTaskUi): String {
         task.interruption?.let { return it.prompt }
         task.semanticSteps.lastOrNull()?.takeIf { it.state == SemanticStepState.ACTIVE }?.let { return it.label }
+        task.plannedMilestones
+            .getOrNull(task.plannedMilestoneIndex.coerceAtLeast(0))
+            ?.takeIf(String::isNotBlank)
+            ?.let { return it }
         return when (task.phase) {
             TaskPhase.STARTING -> "Getting your task ready"
             TaskPhase.WORKING -> "Checking the current page"
