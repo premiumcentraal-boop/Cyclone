@@ -15,6 +15,14 @@ object OverlayChromeContract {
     const val IDLE_TOUCH_BOTTOM_MARGIN_DP = 28
     const val IDLE_VISUAL_BOTTOM_MARGIN_DP = 16
 
+    // Minimized chat is a real Ask Cyclone pill, not the invisible 48dp idle hotspot. Keeping the
+    // two contracts separate lets a running task stay one gesture away without expanding the
+    // overlay's touchable region across the host app.
+    const val COLLAPSED_CHAT_HEIGHT_DP = 78
+    const val COLLAPSED_CHAT_BOTTOM_MARGIN_DP = 14
+    const val DRAWER_HANDLE_WIDTH_DP = 42
+    const val DRAWER_HANDLE_HEIGHT_DP = 4
+
     // Apple-inspired resting composer: one 66dp capsule, 50dp circular actions, and no enclosing
     // visual sheet. Tool/model menus float independently above it so there is never a box-in-box bar.
     const val COMPOSER_HEIGHT_DP = 66

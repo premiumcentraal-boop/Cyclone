@@ -35,7 +35,8 @@ class CycloneVisual42ContractTest {
         assertTrue(panel.contains("CycloneTaskStatusPill(visualState)"))
         assertTrue(panel.contains("task.canTakeOverFromUi()"))
         assertTrue(panel.contains("task.canContinueAfterHumanFromUi()"))
-        assertFalse(panel.contains("BorderStroke"))
+        assertTrue(panel.contains("border = BorderStroke(.8.dp, outline)"))
+        assertTrue(panel.contains("shadowElevation = 0.dp"))
         assertFalse(panel.contains("WorkspaceTaskUi("))
     }
 
