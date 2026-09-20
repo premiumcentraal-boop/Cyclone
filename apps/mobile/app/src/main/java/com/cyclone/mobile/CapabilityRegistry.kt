@@ -6,7 +6,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationManagerCompat
+import com.cyclone.mobile.gesture.HumanGestureRuntimeCapabilities
 import org.json.JSONArray
+import org.json.JSONObject
 
 object CapabilityRegistry {
     fun snapshot(context: Context): List<CapabilityState> {
@@ -57,7 +59,21 @@ object CapabilityRegistry {
         )
     }
 
-    fun toJson(context: Context): JSONArray = JSONArray().also { array ->
-        snapshot(context).forEach { array.put(it.toJson()) }
+    fun toJson(context: Context): JSONArray {
+        val accessibility = CycloneAccessibilityService.instance != null
+        return JSONArray().also { array ->
+            snapshot(context).forEach { array.put(it.toJson()) }
+            array.put(JSONObject()
+                .put("name", "human_gesture")
+                .put(
+                    "status",
+                    if (accessibility) CapabilityStatus.AVAILABLE.name else CapabilityStatus.MISSING_PERMISSION.name,
+                )
+                .put(
+                    "detail",
+                    if (accessibility) JSONObject.NULL else "Accessibility connection is required for foreground Human Gesture dispatch",
+                )
+                .put("runtime", HumanGestureRuntimeCapabilities.toJson(accessibility)))
+        }
     }
 }

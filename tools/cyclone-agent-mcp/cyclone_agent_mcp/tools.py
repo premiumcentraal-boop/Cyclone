@@ -6,7 +6,12 @@ from typing import Any, Callable
 
 from .audit import SafeAuditLog
 from .gateway import GatewayClient, GatewayError
-from .safe import redact, strip_typed_plaintext, validate_typed_params
+from .safe import (
+    redact,
+    strip_typed_plaintext,
+    validate_human_gesture_params,
+    validate_typed_params,
+)
 from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
 from .phone_mcp import (
     compact_observation,
@@ -402,6 +407,7 @@ class PhoneTools:
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
         validate_typed_params(params)
+        validate_human_gesture_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
@@ -484,6 +490,7 @@ class PhoneTools:
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
         validate_typed_params(params)
+        validate_human_gesture_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")

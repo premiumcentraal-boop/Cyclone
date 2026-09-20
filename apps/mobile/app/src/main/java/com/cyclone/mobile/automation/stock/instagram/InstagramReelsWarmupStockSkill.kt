@@ -298,7 +298,8 @@ internal class InstagramPhonePort(private val context: Context) {
             .put("y1", (screen.height * 0.72).roundToLong())
             .put("x2", (screen.width * 0.38).roundToLong())
             .put("y2", (screen.height * 0.22).roundToLong())
-            .put("durationMs", 350))
+            .put("durationMs", 350)
+            .put("humanize", "off"))
     }
 
     private fun clickFirst(selectors: List<JSONObject>): AndroidActionResult {

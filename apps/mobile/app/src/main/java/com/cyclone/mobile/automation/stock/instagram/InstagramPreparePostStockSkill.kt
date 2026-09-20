@@ -387,7 +387,8 @@ internal class InstagramPostPhonePort(private val context: Context) {
             .put("y1", screen.height * 0.78)
             .put("x2", screen.width * 0.5)
             .put("y2", screen.height * 0.38)
-            .put("durationMs", 350)))
+            .put("durationMs", 350)
+            .put("humanize", "off")))
     }
 
     private fun tapNode(node: PostNode): PostAction {

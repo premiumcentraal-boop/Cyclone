@@ -1,24 +1,26 @@
-# Cyclone Mobile 4.7.5: keyboard-aware Ask bar and live task progress.
-# Release source sealed on release/cyclone-mobile-v4.7.5.
+# Cyclone Mobile 4.7.6: Human Gesture V0.3 on the 4.7.5 keyboard/live-progress line.
+# Release source sealed on release/cyclone-mobile-v4.7.6.
+# Pre-release review 2026-09-20: GO. GATE, semantic-first, MutationGrounding,
+# cacheKey(request), and Fast Path Unchanged hold. Pixel 8 remains UNVERIFIED.
 # User authorized publication; exact-SHA Mobile CI gates the existing publisher.
 schema = 1
-product_version = "4.7.5"
+product_version = "4.7.6"
 channel = "development"
-android_version_code = 135
+android_version_code = 136
 python_version = "4.1.0"
 
 [components]
-mobile = "4.7.5"
+mobile = "4.7.6"
 pc_companion = "1.5.5"
 device_gateway = "4.1.0"
 mcp = "4.1.0"
 
 [release]
-previous_mobile_version = "4.7.4"
+previous_mobile_version = "4.7.5"
 publication_authorized = true
 physical_pixel8 = "UNVERIFIED"
 physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "LEGACY_UPDATE_COMPATIBLE_DEV_KEY"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-4.7.5-release"
+candidate_generation = "cyclone-4.7.6-release"
