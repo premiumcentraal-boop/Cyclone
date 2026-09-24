@@ -42,8 +42,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 /**
  * Teal Matrix is the only in-app palette. Light device settings no longer produce a white/blue
@@ -153,10 +151,15 @@ fun CycloneTheme(
             LocalContentColor provides SignatureInk,
         ) {
             if (drawBackground) {
-                val liquidBackdrop = rememberLayerBackdrop()
-                CompositionLocalProvider(LocalCycloneLiquidBackdrop provides liquidBackdrop) {
+                // No captured backdrop layer: nothing re-blurs the moving canvas every frame.
+                // Controls get teal glass from the canvas itself (Modifier.tealGlass); Material
+                // overrides use their plain fallbacks.
+                CompositionLocalProvider(
+                    LocalCycloneLiquidBackdrop provides null,
+                    LocalTealMatrixField provides true,
+                ) {
                     Box(Modifier.fillMaxSize()) {
-                        TealMatrixBackdrop(Modifier.fillMaxSize().layerBackdrop(liquidBackdrop))
+                        TealMatrixBackdrop(Modifier.fillMaxSize())
                         content()
                     }
                 }

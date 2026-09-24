@@ -36,6 +36,8 @@ class MainActivity : ComponentActivity() {
     private var rescueRedirect = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Compile the Teal Matrix shaders off the main thread before the first frame needs them.
+        com.cyclone.mobile.ui.v32.TealMatrixShaders.warmAsync()
         val needsRescue = com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime.currentUserId() > 0 &&
             !createDeviceProtectedStorageContext().getSharedPreferences("cyclone_profile_origin", MODE_PRIVATE).contains("source")
         if (needsRescue && !intent.getBooleanExtra("skip_profile_rescue", false)) {

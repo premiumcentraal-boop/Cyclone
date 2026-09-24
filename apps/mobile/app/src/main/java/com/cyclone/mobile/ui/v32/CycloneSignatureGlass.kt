@@ -36,12 +36,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.capsule.ContinuousRoundedRectangle
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -66,19 +60,6 @@ internal val SignatureScheme = darkColorScheme(
 
 internal val LocalCycloneSignatureTheme = compositionLocalOf { false }
 
-/**
- * Real-glass budget. Lensing is the most expensive pass; low-RAM phones keep blur + tint + specular
- * but skip the lens so scrolling stays smooth. [configure] runs once from the app entry point.
- */
-internal object CycloneGlassOptics {
-    @Volatile var lens: Boolean = true
-
-    fun configure(context: android.content.Context) {
-        val am = context.getSystemService(android.app.ActivityManager::class.java)
-        lens = am?.isLowRamDevice != true
-    }
-}
-
 /** Scoped to Ask and task surfaces; light device settings cannot leak into overlay text. */
 @Composable
 internal fun CycloneSignatureTheme(enabled: Boolean = true, content: @Composable () -> Unit) {
@@ -87,6 +68,8 @@ internal fun CycloneSignatureTheme(enabled: Boolean = true, content: @Composable
         LocalCycloneSignatureTheme provides true,
         LocalCycloneOverlayChrome provides true,
         LocalCycloneLiquidBackdrop provides null,
+        // Surfaces with their own canvas (the Ask page) keep painted glass.
+        LocalTealMatrixField provides false,
         LocalContentColor provides SignatureInk,
     ) {
         MaterialTheme(colorScheme = SignatureScheme, content = content)
@@ -124,9 +107,9 @@ internal fun CycloneSignatureGlass(
     refract: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    // Real glass (controls layer only): sample the living Teal Matrix canvas behind this surface.
-    // Read before CycloneSignatureTheme, which deliberately hides the backdrop from descendants.
-    val backdrop = if (refract && !solidBacking) LocalCycloneLiquidBackdrop.current else null
+    // Teal glass (controls layer only): the surface renders the living canvas itself, frosted and
+    // lensed, so no layer capture or blur pass runs. Off the canvas (floating overlay) it stays painted.
+    val live = refract && !solidBacking && LocalTealMatrixField.current
     val voiceLight = animateFloatAsState(if (listening) 1f else 0f, label = "Voice glass light")
     val focusLight = animateFloatAsState(if (focused) 1f else 0f, label = "Focus glass light")
     CompositionLocalProvider(
@@ -134,20 +117,7 @@ internal fun CycloneSignatureGlass(
         LocalCycloneOverlayChrome provides true,
     ) {
         CycloneSignatureTheme {
-            val optics = if (backdrop != null) {
-                Modifier.drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { ContinuousRoundedRectangle(cornerRadius) },
-                    effects = {
-                        vibrancy()
-                        blur(14f.dp.toPx())
-                        if (CycloneGlassOptics.lens) lens(10f.dp.toPx(), 22f.dp.toPx())
-                    },
-                    highlight = { Highlight.Default },
-                )
-            } else {
-                Modifier
-            }
+            val optics = if (live) Modifier.tealGlass(cornerRadius, press = { focusLight.value * 0.7f }) else Modifier
             Box(
                 modifier.then(optics).drawWithCache {
                     val radius = minOf(cornerRadius.toPx(), size.height / 2f)
@@ -156,15 +126,9 @@ internal fun CycloneSignatureGlass(
                     }
                     // Refracting glass keeps the scene visible through a thinner teal body; text on it
                     // still clears WCAG AA with margin (see docs/design/CYCLONE_TEAL_MATRIX.md).
-                    val fill = if (backdrop != null) {
-                        Brush.verticalGradient(listOf(
-                            Color(0x80225259), Color(0x9908272D), Color(0xA6052027), Color(0x8C1B5057),
-                        ))
-                    } else {
-                        Brush.verticalGradient(listOf(
-                            Color(0xE0225259), Color(0xEE08272D), Color(0xF0052027), Color(0xE01B5057),
-                        ))
-                    }
+                    val fill = Brush.verticalGradient(listOf(
+                        Color(0xE0225259), Color(0xEE08272D), Color(0xF0052027), Color(0xE01B5057),
+                    ))
                     val rim = Brush.verticalGradient(
                         0f to Color(0xFFB4EEEA).copy(alpha = .56f),
                         .22f to accent.copy(alpha = .14f),
@@ -192,7 +156,7 @@ internal fun CycloneSignatureGlass(
                     data class Dot(val center: Offset, val radius: Float, val alpha: Float)
                     val canvasSize = size
                     val dots = buildList {
-                        if (textured) {
+                        if (textured && !live) {
                             val unit = 1.dp.toPx()
                             val reach = minOf(canvasSize.width * .28f, 100.dp.toPx())
                             for (side in 0..1) {
@@ -229,6 +193,17 @@ internal fun CycloneSignatureGlass(
                     )
                     onDrawBehind {
                         clipPath(silhouette) {
+                            if (live) {
+                                // The glass shader already drew body, lensing and rim.
+                                drawRect(voiceHalo, alpha = voiceLight.value)
+                                if (focusLight.value > 0f) {
+                                    drawRoundRect(
+                                        focusRim, cornerRadius = CornerRadius(radius),
+                                        style = Stroke(1.2.dp.toPx()), alpha = focusLight.value * .6f,
+                                    )
+                                }
+                                return@clipPath
+                            }
                             if (solidBacking) drawRect(Color(0xFF08282D))
                             drawRect(fill)
                             drawRect(leftMist)

@@ -80,7 +80,8 @@ class CycloneVisual42ContractTest {
         val design = source("CycloneV32DesignSystem.kt")
         // Teal Matrix is the only in-app palette; system light mode no longer swaps it out.
         assertTrue(design.contains("SignatureScheme.copy("))
-        assertTrue(design.contains("TealMatrixBackdrop(Modifier.fillMaxSize().layerBackdrop(liquidBackdrop))"))
+        assertTrue(design.contains("TealMatrixBackdrop(Modifier.fillMaxSize())"))
+        assertTrue(design.contains("LocalTealMatrixField provides true"))
         assertTrue(design.contains("LocalCycloneSignatureTheme provides true"))
         assertFalse(design.contains("lightColorScheme("))
         assertFalse(design.contains("isSystemInDarkTheme()"))

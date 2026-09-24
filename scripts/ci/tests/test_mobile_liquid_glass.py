@@ -82,11 +82,18 @@ class MobileLiquidGlassGuards(unittest.TestCase):
         self.assertNotIn("chromaticAberration = false", overlay)
         self.assertNotIn("OverlayGlassRim", overlay)
 
-    def test_theme_owns_one_non_recursive_backdrop_source(self):
+    def test_theme_glass_samples_the_canvas_without_a_captured_layer(self):
+        # alpha.22: re-blurring a captured layer of the animated canvas on every frame was slow and
+        # refracted the dot matrix into noise. The theme draws one canvas and glass re-renders it
+        # analytically (Modifier.tealGlass), so no recursive or per-frame backdrop capture exists.
         source = THEME.read_text(encoding="utf-8")
-        self.assertIn("rememberLayerBackdrop()", source)
-        self.assertIn("LocalCycloneLiquidBackdrop provides liquidBackdrop", source)
-        self.assertIn("layerBackdrop(liquidBackdrop)", source)
+        self.assertNotIn("rememberLayerBackdrop(", source)
+        self.assertNotIn("layerBackdrop(", source)
+        self.assertIn("LocalCycloneLiquidBackdrop provides null", source)
+        self.assertIn("LocalTealMatrixField provides true", source)
+        self.assertIn("TealMatrixBackdrop(Modifier.fillMaxSize())", source)
+        field = (THEME.parent / "CycloneTealMatrixField.kt").read_text(encoding="utf-8")
+        self.assertIn("fun Modifier.tealGlass(", field)
 
     def test_only_known_lint_crashes_are_suppressed(self):
         build = APP_BUILD.read_text(encoding="utf-8")
