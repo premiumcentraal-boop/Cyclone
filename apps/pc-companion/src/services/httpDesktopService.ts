@@ -18,6 +18,8 @@ import type {
   TrustStatusResult,
   FleetBatchOperation,
   FleetBatchTask,
+  DeviceTask,
+  DeviceTaskRequest,
   FleetGroup,
   FleetWorkspace,
   FleetWsEvent,
@@ -154,6 +156,29 @@ export class HttpDesktopService implements DesktopService {
 
   cancelFleetBatch(batchId: string): Promise<FleetBatchTask> {
     return this.request(`/v1/fleet/batches/${encodeURIComponent(batchId)}/cancel`, { method: "POST" });
+  }
+
+  startDeviceTasks(requests: DeviceTaskRequest[]): Promise<DeviceTask[]> {
+    return this.request<{ tasks: DeviceTask[] }>("/v1/fleet/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        tasks: requests.map((r) => ({
+          deviceId: r.deviceId, goal: r.goal, model: r.model, providers: r.providers, apiKey: r.apiKey,
+        })),
+      }),
+    }).then((r) => r.tasks);
+  }
+
+  getDeviceTask(taskId: string): Promise<DeviceTask> {
+    return this.request(`/v1/fleet/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  listDeviceTasks(): Promise<DeviceTask[]> {
+    return this.request<{ tasks: DeviceTask[] }>("/v1/fleet/tasks").then((r) => r.tasks);
+  }
+
+  cancelDeviceTask(taskId: string): Promise<DeviceTask> {
+    return this.request(`/v1/fleet/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
   }
 
   watchFleet(onChange: (event?: FleetWsEvent) => void): () => void {
