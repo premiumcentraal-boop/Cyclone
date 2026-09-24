@@ -28,6 +28,7 @@ from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
 from .layer2 import Layer2WorkspaceService
 from .sessions import ExecutionSessionService
+from .task_runner import MultiDeviceTaskRunner, OpenRouterActionPlanner, TaskRunnerError
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 from .workspace import FleetWorkspaceStore
@@ -132,6 +133,22 @@ class FleetBatchBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class DeviceTaskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_id: str = Field(min_length=1, max_length=160, alias="deviceId")
+    goal: str = Field(min_length=1, max_length=2000)
+    model: str = Field(min_length=1, max_length=200)
+    providers: list[str] = Field(min_length=1, max_length=8)
+    # Never persisted: forwarded to OpenRouter for this task's lifetime only,
+    # kept out of task logs and diagnostics, and discarded when the task ends.
+    api_key: str = Field(min_length=1, alias="apiKey")
+
+
+class DeviceTasksBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tasks: list[DeviceTaskRequest] = Field(min_length=1, max_length=16)
+
+
 class VirtualCreateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: str = Field(min_length=1, max_length=80)
@@ -184,6 +201,10 @@ class DesktopRuntime:
         self.batches = FleetBatchService(lambda device_id: DesktopAndroidBackend(
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
         ))
+        # Each task carries its own model/providers/apiKey per request (see
+        # DeviceTaskRequest); nothing OpenRouter-related is stored on the
+        # runtime itself, matching the "no persisted API keys" product rule.
+        self.tasks = MultiDeviceTaskRunner(self.agent, self._make_planner)
         self.video_limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
         self.fleet.set_video_factory(lambda session: VideoStreamController(
             session,
@@ -194,6 +215,10 @@ class DesktopRuntime:
                 details=details,
             ),
         ))
+
+    @staticmethod
+    def _make_planner(model: str, providers: list[str], api_key: str) -> OpenRouterActionPlanner:
+        return OpenRouterActionPlanner(api_key, model, providers)
 
     def _snapshot_for_batch(self, device_id: str, profile: str) -> dict[str, Any]:
         session = self.fleet.get(device_id)
@@ -284,6 +309,25 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.post("/v1/fleet/batches/{batch_id}/cancel", dependencies=[Depends(auth)])
     def fleet_batch_cancel(batch_id: str) -> dict[str, Any]:
         return _service_call(lambda: runtime.batches.cancel(batch_id))
+
+    @router.post("/v1/fleet/tasks", dependencies=[Depends(auth)])
+    def fleet_tasks_start(body: DeviceTasksBody) -> dict[str, Any]:
+        # One independent observe/plan/act/verify loop per device_id, run
+        # concurrently - this is what lets "device A do X, device B do Y"
+        # actually happen at the same time instead of one after another.
+        return {"tasks": runtime.tasks.start_many([t.model_dump(by_alias=True) for t in body.tasks])}
+
+    @router.get("/v1/fleet/tasks", dependencies=[Depends(auth)])
+    def fleet_tasks_list() -> dict[str, Any]:
+        return {"tasks": runtime.tasks.list_tasks()}
+
+    @router.get("/v1/fleet/tasks/{task_id}", dependencies=[Depends(auth)])
+    def fleet_task_status(task_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.tasks.status(task_id))
+
+    @router.post("/v1/fleet/tasks/{task_id}/cancel", dependencies=[Depends(auth)])
+    def fleet_task_cancel(task_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.tasks.cancel(task_id))
 
     @router.get("/v1/virtual/providers", dependencies=[Depends(auth)])
     def virtual_providers() -> dict[str, Any]:
@@ -886,6 +930,9 @@ def _call(fn):
 def _service_call(fn):
     try:
         return fn()
+    except TaskRunnerError as exc:
+        status = {"NOT_FOUND": 404, "DEVICE_BUSY": 409}.get(exc.code, 400)
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message}) from exc
     except (KeyError, StopIteration) as exc:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Requested fleet resource was not found."}) from exc
     except ValueError as exc:
