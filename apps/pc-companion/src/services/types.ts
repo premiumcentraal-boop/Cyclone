@@ -206,6 +206,43 @@ export interface FleetBatchTask {
   summary: { requested: number; completed: number; succeeded: number; failed: number };
 }
 
+/** A single device's step in an AI task run (used for a live "what is it doing" log). */
+export interface DeviceTaskLogEntry {
+  at: number;
+  kind: string;
+  [key: string]: unknown;
+}
+
+export type DeviceTaskStatus = "RUNNING" | "COMPLETE" | "BLOCKED" | "FAILED" | "CANCELLED";
+
+/** One device's independent goal-driven run: "on this device, do X." Several of
+ * these can be RUNNING at once, one per device, which is what makes "device A
+ * does X while device B does Y" actually happen. */
+export interface DeviceTask {
+  taskId: string;
+  deviceId: string;
+  goal: string;
+  model: string;
+  status: DeviceTaskStatus;
+  turns: number;
+  maxTurns: number;
+  startedAtEpochMs: number;
+  finishedAtEpochMs?: number | null;
+  result?: string | null;
+  log: DeviceTaskLogEntry[];
+}
+
+/** What you fill in once to start a task on a device: which device, what to do,
+ * and which model/key to think with. The key is only ever sent for this
+ * request - Cyclone does not store it. */
+export interface DeviceTaskRequest {
+  deviceId: string;
+  goal: string;
+  model: string;
+  providers: string[];
+  apiKey: string;
+}
+
 export interface PairBeginResult {
   pairingId: string;
   expiresAtEpochMs: number;
@@ -454,4 +491,11 @@ export interface DesktopService {
   submitFleetBatch?(deviceIds: string[], operation: FleetBatchOperation, params?: Record<string, unknown>): Promise<FleetBatchTask>;
   getFleetBatch?(batchId: string): Promise<FleetBatchTask>;
   cancelFleetBatch?(batchId: string): Promise<FleetBatchTask>;
+  /** Start one independent AI-driven task per device (can be several devices
+   * at once, each with its own goal). Returns immediately with each task's
+   * initial state; poll getDeviceTask to follow progress. */
+  startDeviceTasks?(requests: DeviceTaskRequest[]): Promise<DeviceTask[]>;
+  getDeviceTask?(taskId: string): Promise<DeviceTask>;
+  listDeviceTasks?(): Promise<DeviceTask[]>;
+  cancelDeviceTask?(taskId: string): Promise<DeviceTask>;
 }
