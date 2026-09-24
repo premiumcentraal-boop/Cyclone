@@ -93,6 +93,7 @@ fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) ->
         CycloneSignatureGlass(
             modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
             focused = focused,
+            refract = true,
         ) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 8.dp),

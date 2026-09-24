@@ -64,6 +64,7 @@ import java.time.LocalTime
 fun CycloneMobileV32App() {
     CycloneV32Theme {
         val context = LocalContext.current
+        LaunchedEffect(context) { CycloneGlassOptics.configure(context) }
         var destination by rememberSaveable { mutableStateOf(V32Destination.HOME) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var settingsSection by rememberSaveable { mutableStateOf("") }

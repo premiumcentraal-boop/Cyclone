@@ -1,6 +1,14 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -84,7 +92,7 @@ internal enum class MatrixTone(val accent: Color) {
  * swell and fade like the reference's flowing matrix wave. Drawn once per size into the cache.
  */
 @Composable
-internal fun TealMatrixBackdrop(modifier: Modifier = Modifier) {
+internal fun TealMatrixStaticBackdrop(modifier: Modifier = Modifier) {
     Box(
         modifier.drawWithCache {
             val base = Brush.verticalGradient(
@@ -198,14 +206,24 @@ internal fun CycloneMatrixQuickAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Glass answers touch with light: a short spring-in and a lit rim while pressed.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.965f else 1f,
+        spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow),
+        label = "Quick action press",
+    )
     CycloneSignatureGlass(
         modifier = modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(18.dp))
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = label, onClick = onClick),
         textured = false,
-        solidBacking = true,
         cornerRadius = 18.dp,
+        focused = pressed,
+        refract = true,
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),

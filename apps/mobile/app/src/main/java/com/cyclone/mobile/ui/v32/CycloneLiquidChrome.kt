@@ -90,8 +90,8 @@ internal fun CycloneLiquidTray(
         CycloneSignatureGlass(
             modifier.height(height).fillMaxWidth(),
             textured = false,
-            solidBacking = true,
             cornerRadius = height / 2,
+            refract = true,
         ) {
             Box(Modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center, content = content)
         }
@@ -145,7 +145,7 @@ internal fun CycloneLiquidPanel(
     content: @Composable BoxScope.() -> Unit,
 ) {
     if (LocalCycloneSignatureTheme.current) {
-        CycloneSignatureGlass(modifier.fillMaxWidth(), cornerRadius = cornerRadius) {
+        CycloneSignatureGlass(modifier.fillMaxWidth(), cornerRadius = cornerRadius, refract = true) {
             Box(Modifier.padding(contentPadding), content = content)
         }
         return

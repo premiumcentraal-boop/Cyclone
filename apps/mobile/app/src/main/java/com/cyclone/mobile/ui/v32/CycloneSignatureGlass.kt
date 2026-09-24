@@ -36,6 +36,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.capsule.ContinuousRoundedRectangle
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -59,6 +65,19 @@ internal val SignatureScheme = darkColorScheme(
 )
 
 internal val LocalCycloneSignatureTheme = compositionLocalOf { false }
+
+/**
+ * Real-glass budget. Lensing is the most expensive pass; low-RAM phones keep blur + tint + specular
+ * but skip the lens so scrolling stays smooth. [configure] runs once from the app entry point.
+ */
+internal object CycloneGlassOptics {
+    @Volatile var lens: Boolean = true
+
+    fun configure(context: android.content.Context) {
+        val am = context.getSystemService(android.app.ActivityManager::class.java)
+        lens = am?.isLowRamDevice != true
+    }
+}
 
 /** Scoped to Ask and task surfaces; light device settings cannot leak into overlay text. */
 @Composable
@@ -102,8 +121,12 @@ internal fun CycloneSignatureGlass(
     solidBacking: Boolean = false,
     accent: Color = SignatureTeal,
     focused: Boolean = false,
+    refract: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    // Real glass (controls layer only): sample the living Teal Matrix canvas behind this surface.
+    // Read before CycloneSignatureTheme, which deliberately hides the backdrop from descendants.
+    val backdrop = if (refract && !solidBacking) LocalCycloneLiquidBackdrop.current else null
     val voiceLight = animateFloatAsState(if (listening) 1f else 0f, label = "Voice glass light")
     val focusLight = animateFloatAsState(if (focused) 1f else 0f, label = "Focus glass light")
     CompositionLocalProvider(
@@ -111,15 +134,37 @@ internal fun CycloneSignatureGlass(
         LocalCycloneOverlayChrome provides true,
     ) {
         CycloneSignatureTheme {
+            val optics = if (backdrop != null) {
+                Modifier.drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { ContinuousRoundedRectangle(cornerRadius) },
+                    effects = {
+                        vibrancy()
+                        blur(14f.dp.toPx())
+                        if (CycloneGlassOptics.lens) lens(10f.dp.toPx(), 22f.dp.toPx())
+                    },
+                    highlight = { Highlight.Default },
+                )
+            } else {
+                Modifier
+            }
             Box(
-                modifier.drawWithCache {
+                modifier.then(optics).drawWithCache {
                     val radius = minOf(cornerRadius.toPx(), size.height / 2f)
                     val silhouette = Path().apply {
                         addRoundRect(RoundRect(Rect(Offset.Zero, size), CornerRadius(radius)))
                     }
-                    val fill = Brush.verticalGradient(listOf(
-                        Color(0xE0225259), Color(0xEE08272D), Color(0xF0052027), Color(0xE01B5057),
-                    ))
+                    // Refracting glass keeps the scene visible through a thinner teal body; text on it
+                    // still clears WCAG AA with margin (see docs/design/CYCLONE_TEAL_MATRIX.md).
+                    val fill = if (backdrop != null) {
+                        Brush.verticalGradient(listOf(
+                            Color(0x80225259), Color(0x9908272D), Color(0xA6052027), Color(0x8C1B5057),
+                        ))
+                    } else {
+                        Brush.verticalGradient(listOf(
+                            Color(0xE0225259), Color(0xEE08272D), Color(0xF0052027), Color(0xE01B5057),
+                        ))
+                    }
                     val rim = Brush.verticalGradient(
                         0f to Color(0xFFB4EEEA).copy(alpha = .56f),
                         .22f to accent.copy(alpha = .14f),

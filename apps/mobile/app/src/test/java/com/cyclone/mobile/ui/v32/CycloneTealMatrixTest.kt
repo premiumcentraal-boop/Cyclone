@@ -91,9 +91,10 @@ class CycloneTealMatrixTest {
         assertTrue(panel.contains("MatrixTone.ATTENTION.accent"))
         assertTrue(panel.contains("MatrixTone.SUCCESS.accent"))
         val matrix = source("CycloneTealMatrix.kt")
-        assertTrue(matrix.contains("fun TealMatrixBackdrop("))
+        assertTrue(matrix.contains("fun TealMatrixStaticBackdrop("))
+        assertTrue(source("CycloneTealMatrixField.kt").contains("fun TealMatrixBackdrop("))
         assertTrue(matrix.contains("fun CycloneMatrixCard("))
-        // The backdrop is cached per size and has no animation loop.
+        // The static fallback is cached per size; the living field runs on a capped frame clock, not an infinite transition.
         assertFalse(matrix.contains("rememberInfiniteTransition"))
     }
 
