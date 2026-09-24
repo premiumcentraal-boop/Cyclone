@@ -1,6 +1,7 @@
 import { computeVirtualRange, fleetColumnCount } from "../core/grid.js";
 import type { DesktopDevice, DesktopService, FleetBatchOperation } from "../services/types.js";
 import { createLivePhoneView, type LivePhoneViewHandle } from "../ui/livePhoneView.js";
+import { createDeviceTaskPanel, type DeviceTaskPanelHandle } from "../ui/deviceTaskPanel.js";
 import { operatorRecovery } from "../core/operatorHealth.js";
 import { button, el } from "../ui/dom.js";
 
@@ -144,6 +145,7 @@ export function createFleetPage(
   page.append(viewport);
 
   let handles: LivePhoneViewHandle[] = [];
+  let taskPanels: DeviceTaskPanelHandle[] = [];
   let resizeObserver: ResizeObserver | null = null;
 
   const filteredDevices = () => devices.filter((device) => {
@@ -166,6 +168,8 @@ export function createFleetPage(
   const render = () => {
     handles.forEach((handle) => handle.destroy());
     handles = [];
+    taskPanels.forEach((panel) => panel.destroy());
+    taskPanels = [];
     const width = viewport.clientWidth || window.innerWidth;
     const matching = filteredDevices();
     const columns = fleetColumnCount(matching.length, width);
@@ -206,6 +210,11 @@ export function createFleetPage(
       });
       chooser.append(checkbox, el("span", "fleet-device-source", device.source === "VIRTUAL" ? `Virtual · ${device.provider ?? "provider"}` : (device.source ?? "USB")));
       handle.element.prepend(chooser);
+      if (device.paired) {
+        const taskPanel = createDeviceTaskPanel(service, device);
+        taskPanels.push(taskPanel);
+        handle.element.append(taskPanel.element);
+      }
       grid.append(handle.element);
       attachConnectionRecovery(handle.element, service, device, () => onScan(), onPair, onDiagnostics);
     }
@@ -271,6 +280,7 @@ export function createFleetPage(
       if (scrollRaf) cancelAnimationFrame(scrollRaf);
       resizeObserver?.disconnect();
       handles.forEach((handle) => handle.destroy());
+      taskPanels.forEach((panel) => panel.destroy());
     },
   };
 }
