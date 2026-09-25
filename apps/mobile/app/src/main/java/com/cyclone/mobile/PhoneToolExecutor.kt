@@ -612,8 +612,12 @@ object PhoneToolExecutor {
                         trace?.dispatchMode ?: "not_dispatched", "coordinate"),
                 )
             }
-            "phone.back" -> actionWithConfirmation(service, request, before) { service?.goBack() == true }
-            "phone.home" -> actionWithConfirmation(service, request, before) { service?.goHome() == true }
+            "phone.back" -> actionWithConfirmation(service, request, before) {
+                (service?.goBack() == true).also { if (it) TraceFieldSignals.navigated() }
+            }
+            "phone.home" -> actionWithConfirmation(service, request, before) {
+                (service?.goHome() == true).also { if (it) TraceFieldSignals.navigated() }
+            }
             "phone.open_app" -> {
                 val requested = p.optString("package")
                 if (requested.isBlank()) return errorResult(PhoneToolErrorCode.INVALID_REQUEST, "package is required")
@@ -632,6 +636,7 @@ object PhoneToolExecutor {
                 if (p.optBoolean("clearTask", false)) intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 val eventGeneration = DeviceState.uiGeneration()
                 context.startActivity(intent)
+                TraceFieldSignals.navigated()
                 launchedOutcome(service, before, p, eventGeneration, JSONObject().put("package", packageName).put("launched", true))
             }
             "phone.get_notifications" -> Outcome(notificationJson())
@@ -1205,3 +1210,10 @@ object PhoneToolExecutor {
 }
 
 private class PhoneToolException(val error: PhoneToolError) : RuntimeException(error.message)
+
+/** Visual-only: tells the user's Trace Field a new screen is coming. Never affects the action result. */
+private object TraceFieldSignals {
+    fun navigated() {
+        runCatching { com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.navigated() }
+    }
+}

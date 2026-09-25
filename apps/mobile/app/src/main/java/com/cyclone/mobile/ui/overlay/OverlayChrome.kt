@@ -40,6 +40,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +54,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -355,6 +359,18 @@ private fun ComposerPanel(
     val panelHeight = SignatureDrawerGeometry.availableHeight(
         LocalConfiguration.current.screenHeightDp, keyboardHeightDp,
     ).coerceAtMost(650)
+    // The work panel is only a little taller than the live work card; the conversation above it
+    // (the first prompt) stays one scroll away instead of filling half the screen.
+    var workCardPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val upperMaxHeight = if (workCardPx > 0) {
+        with(density) { workCardPx.toDp() } + OverlayChromeContract.WORK_PANEL_PEEK_DP.dp
+    } else androidx.compose.ui.unit.Dp.Unspecified
+    // Cyclone's own glass keeps the Trace Field underneath it: report where it is on screen.
+    val hostView = LocalView.current
+    DisposableEffect(Unit) {
+        onDispose { com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.chromeBounds(null) }
+    }
 
     LaunchedEffect(task?.taskId, task?.working, foregroundWorking) {
         if (activeWork) {
@@ -382,7 +398,18 @@ private fun ComposerPanel(
             onAction(OverlayUserAction.MINIMIZE)
         },
         onExpand = { onAction(OverlayUserAction.ASK_CYCLONE) },
-        modifier = Modifier.fillMaxWidth().heightIn(max = panelHeight.dp).padding(horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(max = panelHeight.dp).padding(horizontal = 16.dp)
+            .onGloballyPositioned { coordinates ->
+                val origin = IntArray(2).also { hostView.getLocationOnScreen(it) }
+                val bounds = coordinates.boundsInWindow()
+                com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.chromeBounds(
+                    android.graphics.RectF(
+                        bounds.left + origin[0], bounds.top + origin[1],
+                        bounds.right + origin[0], bounds.bottom + origin[1],
+                    ),
+                )
+            },
+        upperMaxHeight = upperMaxHeight,
         composer = {
         OverlayAppleComposerBar(
             text = snapshot.composerText,
@@ -434,9 +461,11 @@ private fun ComposerPanel(
                         assistantContent = Color(0xFFD1D1D6),
                     )
                 }
-                when {
-                    task != null -> CycloneAskTaskPanel(task)
-                    foregroundWorking -> CycloneForegroundWorkCard(snapshot)
+                Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
+                    when {
+                        task != null -> CycloneAskTaskPanel(task)
+                        foregroundWorking -> CycloneForegroundWorkCard(snapshot)
+                    }
                 }
                 CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
             }

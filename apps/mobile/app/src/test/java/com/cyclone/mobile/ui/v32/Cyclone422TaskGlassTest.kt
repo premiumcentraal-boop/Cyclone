@@ -163,7 +163,10 @@ class Cyclone422TaskGlassTest {
         val drawer = source("ui/overlay/SignatureOverlayDrawer.kt")
         assertTrue(overlay.contains("SignatureDrawerGeometry.availableHeight("))
         assertTrue(overlay.contains("heightIn(max = panelHeight.dp)"))
-        assertTrue(drawer.contains("verticalScroll(rememberScrollState())"))
+        // Bottom-anchored: the live work card stays in view, earlier messages scroll up.
+        assertTrue(drawer.contains("verticalScroll(rememberScrollState(), reverseScrolling = true)"))
+        assertTrue(drawer.contains("heightIn(max = upperMaxHeight)"))
+        assertTrue(overlay.contains("OverlayChromeContract.WORK_PANEL_PEEK_DP"))
         assertTrue(drawer.contains("Modifier.weight(1f, fill = false)"))
         assertFalse(queue.contains("max = 150.dp"))
     }

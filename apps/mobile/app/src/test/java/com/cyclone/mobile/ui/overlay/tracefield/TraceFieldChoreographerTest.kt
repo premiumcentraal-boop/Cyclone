@@ -135,19 +135,27 @@ class TraceFieldChoreographerTest {
         m.onEvent(TraceEvent.Handoff, 1.0)
         val faded = m.run(1.0, 1.25)
         assertTrue(faded.intensity < 0.05f)
+        // The lens leaves; the Reach scene stays so the user sees it is their turn.
+        assertTrue(faded.visible)
+        assertEquals(TraceScene.REACH.shaderIndex, faded.sceneTo)
         m.onEvent(TraceEvent.Act(TraceActKind.TAP, 1f, 1f), 1.25)
         assertEquals(TracePhase.HANDOFF, m.phase)
     }
 
-    @Test fun doneRainsThenTurnsOff() {
+    @Test fun doneBloomsTheSpiralThenRainsThenTurnsOff() {
         val m = machine()
         m.onEvent(TraceEvent.Wake(w / 2, h), 0.0)
         m.run(0.0, 1.0)
         m.onEvent(TraceEvent.Done, 1.0)
-        val mid = m.run(1.0, 1.3)
+        val bloom = m.run(1.0, 2.0)
+        assertEquals(TracePhase.DONE, bloom.phase)
+        assertEquals(-1f, bloom.rain)
+        assertEquals(TraceScene.CYCLONE.shaderIndex, bloom.sceneTo)
+        assertTrue(bloom.visible)
+        val mid = m.run(2.0, 3.3)
         assertEquals(TracePhase.DONE, mid.phase)
         assertTrue(mid.rain in 0.3f..0.7f)
-        val end = m.run(1.3, 2.5)
+        val end = m.run(3.3, 4.5)
         assertEquals(TracePhase.OFF, end.phase)
         assertFalse(end.visible)
         assertFalse(end.animating)

@@ -21,6 +21,8 @@ object OverlayChromeContract {
     const val COMPOSER_TOUCH_TARGET_DP = 50
     const val COMPOSER_BOTTOM_GAP_DP = 26
     const val TASK_AREA_MAX_HEIGHT_DP = 430
+    /** How much of the conversation above the live work card peeks into the work panel. */
+    const val WORK_PANEL_PEEK_DP = 56
     const val TASK_AREA_KEYBOARD_MAX_HEIGHT_DP = 210
     const val EXPANDED_GLASS_ALPHA = 0.0f
 

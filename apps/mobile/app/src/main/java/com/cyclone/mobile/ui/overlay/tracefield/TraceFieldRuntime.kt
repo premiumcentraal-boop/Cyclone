@@ -155,6 +155,17 @@ object TraceFieldRuntime {
 
     fun recovering() = publish(TraceEvent.Recover)
 
+    /** Opened an app or went back/home: the field draws First light. */
+    fun navigated() = publish(TraceEvent.Navigate)
+
+    /**
+     * Screen bounds of Cyclone's own Ask bar and work panel (null when hidden). The field keeps a soft
+     * cut-out there, so its digits never show through Cyclone's translucent glass.
+     */
+    fun chromeBounds(bounds: android.graphics.RectF?) {
+        main.post { view?.chromeBounds = bounds }
+    }
+
     private fun publish(event: TraceEvent) {
         runCatching { view?.publish(event) }
     }

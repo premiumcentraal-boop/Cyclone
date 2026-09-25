@@ -47,9 +47,13 @@ internal class TraceFieldView(
     private var accentTarget = TraceFieldColor.CYCLONE_BLUE
     private var accentNow = TraceFieldColor.CYCLONE_BLUE
 
-    /** Bottom-center Aurora pill area; the field never draws over Cyclone's own entry point. */
+    /** Fallback cut-out (bottom-centre Ask pill) until the chrome window reports its real bounds. */
     private val exclusionWidth = 176f * density
     private val exclusionHeight = 104f * density
+
+    /** Screen bounds of Cyclone's Ask bar + work panel; the field stays underneath them. Main thread. */
+    var chromeBounds: android.graphics.RectF? = null
+        set(value) { field = value; kick() }
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -105,6 +109,8 @@ internal class TraceFieldView(
             runtime.setFloatUniform("cell", cellW.toFloat(), cellH.toFloat())
             runtime.setFloatUniform("glyphCount", TraceFieldShader.GLYPHS.length.toFloat())
             runtime.setFloatUniform("lensSoft", 44f * density)
+            runtime.setFloatUniform("exclRadius", 28f * density)
+            runtime.setFloatUniform("exclFeather", 22f * density)
             runtime.setColorUniform("tint", TINT)
             runtime.setColorUniform("hot", HOT)
             runtime.setColorUniform("warm", WARM)
@@ -190,8 +196,23 @@ internal class TraceFieldView(
             runtime.setFloatUniform("warmth", frame.warmth)
             runtime.setFloatUniform("focus", frame.focus)
             runtime.setFloatUniform("flowTime", frame.flowTime)
-            val left = (width - exclusionWidth) / 2f
-            runtime.setFloatUniform("excl", left, height - exclusionHeight, left + exclusionWidth, height.toFloat())
+            runtime.setFloatUniform("sceneA", frame.sceneFrom)
+            runtime.setFloatUniform("sceneB", frame.sceneTo)
+            runtime.setFloatUniform("sceneFront", frame.sceneFront)
+            runtime.setFloatUniform("sceneRadial", frame.sceneRadial)
+            runtime.setFloatUniform("sceneLevel", frame.sceneLevel)
+            val chrome = chromeBounds
+            if (chrome != null && !chrome.isEmpty) {
+                val location = IntArray(2).also { getLocationOnScreen(it) }
+                runtime.setFloatUniform(
+                    "excl",
+                    chrome.left - location[0], chrome.top - location[1],
+                    chrome.right - location[0], chrome.bottom - location[1],
+                )
+            } else {
+                val left = (width - exclusionWidth) / 2f
+                runtime.setFloatUniform("excl", left, height - exclusionHeight, left + exclusionWidth, height.toFloat())
+            }
             canvas.drawPaint(paint)
         } catch (failure: Throwable) {
             disabled = true

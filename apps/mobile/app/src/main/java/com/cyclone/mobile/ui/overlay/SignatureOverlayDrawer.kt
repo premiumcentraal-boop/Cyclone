@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -37,6 +38,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ui.v32.SignatureMuted
 import kotlinx.coroutines.Job
@@ -64,6 +66,8 @@ internal fun SignatureOverlayDrawer(
     onCollapse: () -> Unit,
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Cap for the work panel above the composer; it scrolls, anchored to its newest (bottom) content. */
+    upperMaxHeight: Dp = Dp.Unspecified,
     composer: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -89,28 +93,8 @@ internal fun SignatureOverlayDrawer(
     LaunchedEffect(expanded) { settle(if (expanded) 1f else 0f) }
 
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        // Clip only the upper content. The composer below is never translated, faded,
-        // reparented, or clipped by the drawer's animated bounds.
-        Box(
-            Modifier.weight(1f, fill = false).fillMaxWidth().clip(RoundedCornerShape(30.dp))
-                .then(if (reveal == 0f) Modifier.clearAndSetSemantics {} else Modifier)
-                .layout { measurable, constraints ->
-                    val measured = measurable.measure(constraints.copy(minHeight = 0))
-                    fullHeight = measured.height.toFloat().coerceAtLeast(1f)
-                    val visible = SignatureDrawerGeometry.visibleHeight(measured.height, reveal)
-                    layout(measured.width, visible) {
-                        measured.placeRelative(0, visible - measured.height)
-                    }
-                },
-        ) {
-            CycloneConversationPanel(Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    content = content,
-                )
-            }
-        }
+        // The handle rides on top of the work panel. When the panel is collapsed it has no height,
+        // so the same handle then sits directly above the Ask bar.
         Box(
             Modifier.fillMaxWidth().height(24.dp)
                 .semantics {
@@ -145,6 +129,32 @@ internal fun SignatureOverlayDrawer(
             contentAlignment = Alignment.Center,
         ) {
             Box(Modifier.size(32.dp, 3.dp).background(SignatureMuted.copy(alpha = .38f), CircleShape))
+        }
+        // Clip only the upper content. The composer below is never translated, faded,
+        // reparented, or clipped by the drawer's animated bounds.
+        Box(
+            Modifier.weight(1f, fill = false).fillMaxWidth()
+                .then(if (upperMaxHeight != Dp.Unspecified) Modifier.heightIn(max = upperMaxHeight) else Modifier)
+                .clip(RoundedCornerShape(30.dp))
+                .then(if (reveal == 0f) Modifier.clearAndSetSemantics {} else Modifier)
+                .layout { measurable, constraints ->
+                    val measured = measurable.measure(constraints.copy(minHeight = 0))
+                    fullHeight = measured.height.toFloat().coerceAtLeast(1f)
+                    val visible = SignatureDrawerGeometry.visibleHeight(measured.height, reveal)
+                    layout(measured.width, visible) {
+                        measured.placeRelative(0, visible - measured.height)
+                    }
+                },
+        ) {
+            CycloneConversationPanel(Modifier.fillMaxWidth()) {
+                Column(
+                    // Reverse scrolling starts at the bottom: the live work card is always in view and
+                    // earlier messages (the first prompt) are one scroll up.
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState(), reverseScrolling = true),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    content = content,
+                )
+            }
         }
         composer()
     }

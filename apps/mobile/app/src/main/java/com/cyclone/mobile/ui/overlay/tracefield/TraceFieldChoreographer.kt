@@ -30,6 +30,8 @@ sealed interface TraceEvent {
     data class Target(val left: Float, val top: Float, val right: Float, val bottom: Float, val key: String) : TraceEvent
     data class Act(val kind: TraceActKind, val x: Float, val y: Float, val dx: Float = 0f, val dy: Float = 0f) : TraceEvent
     data object Recover : TraceEvent
+    /** The agent opened an app or went back/home: a new screen is coming. */
+    data object Navigate : TraceEvent
     data object Gate : TraceEvent
     data object Resume : TraceEvent
     data object Handoff : TraceEvent
@@ -67,8 +69,14 @@ data class TraceFrame(
     val seed: Float,
     /** 0 = diffuse ambient aurora (thinking, opening apps), 1 = sharp attention on one target. */
     val focus: Float = 0f,
-    /** Seconds of ambient flow; frozen with the field (GATE, reduce motion). */
+    /** Seconds of ambient flow; frozen with the field (GATE, reduce motion). Also the scene clock. */
     val flowTime: Float = 0f,
+    /** Cyclone Tide scene layer: scene ids, tide line (-0.2..1.2, 2 = no transition), radial tide, visibility. */
+    val sceneFrom: Float = TraceScene.TIDE.shaderIndex,
+    val sceneTo: Float = TraceScene.TIDE.shaderIndex,
+    val sceneFront: Float = TraceSceneDirector.IDLE_FRONT,
+    val sceneRadial: Float = 0f,
+    val sceneLevel: Float = 0f,
 )
 
 /**
@@ -105,6 +113,8 @@ class TraceFieldChoreographer(
     private var anchorY = ly
 
     private var intensity = 0f
+    private var sceneLevel = 0f
+    private val director = TraceSceneDirector(reduceMotion)
     private var focus = 0f
     private var flowTime = 0.0
     private var edge = 0f
@@ -137,12 +147,14 @@ class TraceFieldChoreographer(
                 setLens(width / 2f, height * 0.42f, dp(LENS_RADIUS_DP))
                 anchorX = tx; anchorY = ty
                 warmth = 0f
+                director.wake(flowTime)
                 enter(TracePhase.WAKE, now)
             }
             is TraceEvent.Observe -> {
                 if (!lensActive()) return
                 if (now - lastObserveAt < OBSERVE_DEBOUNCE_S) return
                 lastObserveAt = now
+                director.observed(flowTime)
                 seed = seedOf(event.fingerprint)
                 if (now - lastActAt < VERIFY_WINDOW_S) {
                     // The observation that follows an action is its verification: pull in, freeze.
@@ -168,6 +180,7 @@ class TraceFieldChoreographer(
             is TraceEvent.Act -> {
                 if (!lensActive()) return
                 lastActAt = now
+                director.acted(flowTime)
                 rippleX = event.x; rippleY = event.y
                 when (event.kind) {
                     TraceActKind.SCROLL -> {
@@ -186,6 +199,10 @@ class TraceFieldChoreographer(
                 }
                 enter(TracePhase.ACT, now)
             }
+            TraceEvent.Navigate -> {
+                if (!lensActive()) return
+                director.navigated(flowTime)
+            }
             TraceEvent.Recover -> {
                 if (!lensActive()) return
                 scrambleUntil = now + 0.15
@@ -199,15 +216,18 @@ class TraceFieldChoreographer(
             TraceEvent.Resume -> {
                 taskActive = true
                 warmth = 0f
+                director.resumed(flowTime)
                 enter(TracePhase.THINK, now)
             }
             TraceEvent.Handoff -> {
                 if (!taskActive) return
+                director.handoff(flowTime)
                 enter(TracePhase.HANDOFF, now)
             }
             TraceEvent.Done -> {
                 if (!taskActive && phase == TracePhase.OFF) return
                 taskActive = false
+                director.done(flowTime)
                 if (reduceMotion) enter(TracePhase.FADE, now) else enter(TracePhase.DONE, now)
             }
             TraceEvent.Stop -> {
@@ -263,6 +283,14 @@ class TraceFieldChoreographer(
         val focusTarget = focusFor(phase)
         // Focus arrives quickly and lets go slowly: attention snaps in, then relaxes back into the aurora.
         focus = approach(focus, focusTarget, dt, if (focusTarget > focus) 0.12 else 0.6, snap)
+        // The scene layer stays through handoff (Reach) and the finale; it leaves with the task.
+        val sceneTarget = when (phase) {
+            TracePhase.OFF, TracePhase.FADE -> 0f
+            else -> if (mode == TraceFieldMode.FIELD && (taskActive || phase == TracePhase.DONE)) 1f else 0f
+        }
+        sceneLevel = approach(sceneLevel, sceneTarget, dt, if (sceneTarget < sceneLevel) 0.12 else 0.3, snap)
+        director.reduceMotion = reduceMotion
+        val scene = director.frame(flowTime)
         intensity = approach(intensity, lensTarget, dt, fadeTau, snap)
         edge = approach(edge, edgeTarget, dt, 0.3, snap)
         warmth = approach(warmth, warmTarget, dt, 0.18, snap)
@@ -287,13 +315,17 @@ class TraceFieldChoreographer(
         val scanOn = phase == TracePhase.OBSERVE && !reduceMotion
         val scanP = if (scanOn) easeInOut((t2 / OBSERVE_S).toFloat().coerceIn(0f, 1f)) else 0f
 
-        val rain = if (phase == TracePhase.DONE && !reduceMotion) (t2 / DONE_S).toFloat().coerceIn(0f, 1f) else -1f
+        // Finale: the Cyclone spiral blooms, then the digits rain away in the last DONE_RAIN_S.
+        val rain = if (phase == TracePhase.DONE && !reduceMotion && t2 >= DONE_S - DONE_RAIN_S) {
+            ((t2 - (DONE_S - DONE_RAIN_S)) / DONE_RAIN_S).toFloat().coerceIn(0f, 1f)
+        } else -1f
         val edgeHead = ((now / EDGE_LAP_S) % 1.0).toFloat()
 
-        val visible = intensity > VISIBLE_EPS || edge > VISIBLE_EPS || lensTarget > 0f || edgeTarget > 0f
+        val visible = intensity > VISIBLE_EPS || edge > VISIBLE_EPS || lensTarget > 0f || edgeTarget > 0f ||
+            sceneLevel > VISIBLE_EPS || sceneTarget > 0f
         val lensSettled = abs(lx - tx) < 0.5f && abs(ly - ty) < 0.5f && abs(lhw - thw) < 0.5f &&
             abs(intensity - lensTarget) < 0.002f && abs(warmth - warmTarget) < 0.002f &&
-            abs(focus - focusTarget) < 0.002f
+            abs(focus - focusTarget) < 0.002f && abs(sceneLevel - sceneTarget) < 0.002f
         val animating = visible && !(phase == TracePhase.GATE && lensSettled && edge < VISIBLE_EPS) &&
             !(reduceMotion && lensSettled && edge < VISIBLE_EPS)
 
@@ -323,6 +355,11 @@ class TraceFieldChoreographer(
             edge = edge,
             edgeHead = edgeHead,
             seed = seed,
+            sceneFrom = scene.from.shaderIndex,
+            sceneTo = scene.to.shaderIndex,
+            sceneFront = scene.front,
+            sceneRadial = if (scene.radial) 1f else 0f,
+            sceneLevel = sceneLevel,
         )
     }
 
@@ -341,7 +378,7 @@ class TraceFieldChoreographer(
             }
             TracePhase.TARGET -> if (t >= TARGET_HOLD_S) enter(TracePhase.THINK, now)
             TracePhase.DONE -> if (t >= DONE_S) enter(TracePhase.OFF, now)
-            TracePhase.FADE -> if (intensity <= VISIBLE_EPS && t > 0.05) enter(TracePhase.OFF, now)
+            TracePhase.FADE -> if (intensity <= VISIBLE_EPS && sceneLevel <= VISIBLE_EPS && t > 0.05) enter(TracePhase.OFF, now)
             else -> Unit
         }
     }
@@ -383,7 +420,8 @@ class TraceFieldChoreographer(
         const val ACT_S = 0.6
         const val RIPPLE_S = 0.32
         const val TARGET_HOLD_S = 3.0
-        const val DONE_S = 0.6
+        const val DONE_S = 2.6
+        const val DONE_RAIN_S = 0.6
         const val EDGE_LAP_S = 40.0
         const val OBSERVE_DEBOUNCE_S = 0.25
         const val LENS_TAU_S = 0.11
