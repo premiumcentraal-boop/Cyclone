@@ -53,3 +53,5 @@ Thumbs.db
 playwright-report/
 test-results/
 .cyclone/agent-runs/
+
+.claude/settings.local.json
