@@ -135,9 +135,12 @@ internal object OverlayChromeWindowPolicy {
         bottomMarginDp = OverlayChromeContract.IDLE_VISUAL_BOTTOM_MARGIN_DP,
     )
 
-    fun flags(spec: OverlayWindowContract): Int {
-        // Keep assistant drafts and approval chrome out of all capture paths, including consent startup.
-        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_SECURE
+    fun flags(spec: OverlayWindowContract, secretVisible: Boolean = false): Int {
+        // Android replaces an entire secure window with black pixels in USB screen capture.
+        // The ordinary Ask/task surface is part of the phone UI and must mirror normally.
+        // Keep the Secrets Card protected; it is never exposed to the desktop stream.
+        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        if (secretVisible) flags = flags or WindowManager.LayoutParams.FLAG_SECURE
         if (spec.notTouchModal) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
         if (spec.notFocusable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         if (spec.notTouchable) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -735,7 +738,10 @@ class OverlayChromeController(
 
     private fun gravityFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.gravity(spec)
 
-    private fun flagsFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.flags(spec).let {
+    private fun flagsFor(spec: OverlayWindowContract): Int = OverlayChromeWindowPolicy.flags(
+        spec,
+        secretVisible = com.cyclone.mobile.secrets.SecretsCardRuntime.state.value?.visible == true,
+    ).let {
         if (OverlayExternalInteraction.active.value || OverlayGesturePassthrough.active()) {
             OverlayChromeWindowPolicy.withHostGesturePassthrough(it)
         } else it

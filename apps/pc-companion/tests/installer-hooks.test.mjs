@@ -8,7 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const hooks = readFileSync(resolve(here, "../src-tauri/windows/installer-hooks.nsh"), "utf8");
 
 function macro(name) {
-  const match = hooks.match(new RegExp(`!macro ${name}\\n([\\s\\S]*?)!macroend`));
+  const match = hooks.match(new RegExp(`!macro ${name}\\r?\\n([\\s\\S]*?)!macroend`));
   assert.ok(match, `expected macro ${name}`);
   return match[1];
 }

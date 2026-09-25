@@ -91,6 +91,8 @@ class OverlayChromeWindowPolicyTest {
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0)
         assertTrue(flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE == 0)
+        assertTrue("ordinary Ask chrome must be visible in USB mirroring", flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
+        assertTrue("Secrets Card remains capture-protected", OverlayChromeWindowPolicy.flags(expanded, secretVisible = true) and WindowManager.LayoutParams.FLAG_SECURE != 0)
     }
 
     @Test

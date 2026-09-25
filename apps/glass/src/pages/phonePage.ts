@@ -37,6 +37,8 @@ export function createPhonePage(ctx: GlassContext, deps: PhonePageDeps = {}): Gl
   }
   const device = ctx.device;
   let owner: Owner = "AI";
+  let takeover: Promise<boolean> | null = null;
+  let gestureQueue = Promise.resolve();
 
   const note = el("p", "control-note");
   note.setAttribute("role", "status");
@@ -64,8 +66,13 @@ export function createPhonePage(ctx: GlassContext, deps: PhonePageDeps = {}): Gl
       return state === "RECONNECTING" && current.usb === "USB_AUTHORIZED" ? null : liveViewProblem(current);
     },
     onGesture: (gesture) => {
-      if (gesture.type === "tap") void run({ kind: "tap", x: gesture.x, y: gesture.y });
-      else void run({ kind: "swipe", x1: gesture.x, y1: gesture.y, x2: gesture.x2 ?? gesture.x, y2: gesture.y2 ?? gesture.y, duration_ms: gesture.durationMs ?? 300 });
+      // A click on the live phone is a request for human control. Keep that first
+      // gesture and send it after the handoff, in pointer order.
+      gestureQueue = gestureQueue.then(async () => {
+        if (owner !== "HUMAN" && !(await takeControl())) return;
+        if (gesture.type === "tap") await run({ kind: "tap", x: gesture.x, y: gesture.y });
+        else await run({ kind: "swipe", x1: gesture.x, y1: gesture.y, x2: gesture.x2 ?? gesture.x, y2: gesture.y2 ?? gesture.y, duration_ms: gesture.durationMs ?? 300 });
+      });
     },
   });
 
@@ -110,25 +117,27 @@ export function createPhonePage(ctx: GlassContext, deps: PhonePageDeps = {}): Gl
     const toggle = actionButton(human ? "Give back to Cyclone" : "Take control", { icon: "hand", variant: human ? "secondary" : "primary" });
     toggle.addEventListener("click", () => void (human ? giveBack() : takeControl()));
     setChildren(controls, toggle);
-    live.setInteractive(human);
+    live.setInteractive(true);
     for (const key of [back, home, scrollUp, scrollDown, typeSend]) key.disabled = !human;
     typeInput.disabled = !human;
     typing.hidden = !human;
     typeNote.hidden = !human;
   };
 
-  const takeControl = async (): Promise<void> => {
-    if (await run({ kind: "take_human", sessionId: FOREGROUND_SESSION_ID })) {
-      owner = "HUMAN";
-      live.setProfile("focus");
-    }
-    render();
+  const takeControl = async (): Promise<boolean> => {
+    if (owner === "HUMAN") return true;
+    if (takeover) return takeover;
+    takeover = run({ kind: "take_human", sessionId: FOREGROUND_SESSION_ID }).then((ok) => {
+      if (ok) owner = "HUMAN";
+      render();
+      return ok;
+    }).finally(() => { takeover = null; });
+    return takeover;
   };
 
   const giveBack = async (): Promise<void> => {
     if (await run({ kind: "yield_ai", sessionId: FOREGROUND_SESSION_ID })) {
       owner = "AI";
-      live.setProfile("thumbnail");
     }
     render();
   };

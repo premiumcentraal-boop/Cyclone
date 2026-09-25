@@ -1,19 +1,19 @@
-# Cyclone V5 alpha.29 dev1: Task Kit - one command bus between every task button (overlay, notification, Ask, progress
-# screen) and the engine that owns the task, with a contract test over every engine and command.
+# Cyclone V5 alpha.30 dev1: Task Kit plus full-rate USB H.264 Glass mirroring,
+# exact desktop pointer input, and capture-visible Ask chrome.
 # Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested. Release candidate.
 schema = 1
-product_version = "5.0.0-alpha.29.dev1"
+product_version = "5.0.0-alpha.30.dev1"
 channel = "development"
-android_version_code = 171
-python_version = "5.0.0-alpha.29.dev1"
+android_version_code = 172
+python_version = "5.0.0-alpha.30.dev1"
 
 [components]
-mobile = "5.0.0-alpha.29.dev1"
-pc_companion = "1.6.0-alpha.29"
+mobile = "5.0.0-alpha.30.dev1"
+pc_companion = "1.6.0-alpha.30"
 # Cyclone Glass web app (apps/glass). Its own line; pc_companion is Cyclone One.
-glass = "1.0.0-alpha.14"
-device_gateway = "5.0.0-alpha.29.dev1"
-mcp = "5.0.0-alpha.29.dev1"
+glass = "1.0.0-alpha.15"
+device_gateway = "5.0.0-alpha.30.dev1"
+mcp = "5.0.0-alpha.30.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -25,4 +25,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha29-dev1-task-kit"
+candidate_generation = "cyclone-v5-alpha30-dev1-usb-glass"

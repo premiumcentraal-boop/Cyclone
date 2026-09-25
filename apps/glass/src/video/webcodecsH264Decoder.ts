@@ -270,7 +270,12 @@ export class WebCodecsH264Renderer implements VideoRenderer {
     }
     if (message.type === KEEPALIVE_TYPE) {
       this.report({ stage: "client.stream.keepalive", attempt: this.reconnectAttempt });
-      if (!this.live) this.armHealthTimeout(STREAM_RECOVERY_TIMEOUT_MS, "STREAM_RECOVERY_TIMEOUT");
+      // scrcpy emits frames only when pixels change. A healthy static screen must not cause
+      // Glass to tear down and recreate the decoder every fifteen seconds.
+      this.armHealthTimeout(
+        this.live ? STALE_FRAME_TIMEOUT_MS : STREAM_RECOVERY_TIMEOUT_MS,
+        this.live ? "FRAME_STALE" : "STREAM_RECOVERY_TIMEOUT",
+      );
     }
   }
 

@@ -545,10 +545,10 @@ def test_clipboard_is_pc_to_phone_and_sensitive_values_are_rejected_without_echo
 
 def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses():
     assert VIDEO_PROFILES["thumbnail"].max_long_edge <= 540
-    assert VIDEO_PROFILES["thumbnail"].target_fps <= 4
+    assert VIDEO_PROFILES["thumbnail"].target_fps == 8
     assert VIDEO_PROFILES["thumbnail"].cpu_weight < VIDEO_PROFILES["focus"].cpu_weight
-    assert VIDEO_PROFILES["focus"].max_long_edge <= 1080
-    assert VIDEO_PROFILES["focus"].target_fps == 15
+    assert VIDEO_PROFILES["focus"].max_long_edge == 1920
+    assert VIDEO_PROFILES["focus"].target_fps == 30
     fleet, session, _ = paired_session_for_services()
     session.screen_awake = False
     limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
@@ -801,6 +801,33 @@ def test_live_view_heals_itself_when_usb_is_not_ready_yet(tmp_path):
             first = json.loads(video.receive_text())
             assert first == {"type": "stream.error", "code": "USB_UNAUTHORIZED", "retryable": True}
             assert "stream.init" in video.receive_text(), "the producer keeps trying instead of closing the door"
+
+
+def test_closed_browser_releases_subscription_while_video_producer_is_silent(tmp_path):
+    from cyclone_device_gateway.desktop_runtime.video import StreamMessage
+    fleet, _, _ = make_fleet([ADBDevice("SERIAL-IDLE-1234", "device")])
+    fleet.refresh_once()
+    install_fake_bridges(fleet)
+    settings = Settings("pc-secret", None, "adb", tmp_path)
+    runtime = DesktopRuntime(settings, fleet=fleet)
+    device_id = fleet.list_public()[0]["deviceId"]
+    session = fleet.get(device_id)
+    controller = VideoStreamController(session, runtime.video_limiter, jpeg_first=True)
+    def silent_producer(profile, stop):
+        controller._broadcast(profile, StreamMessage("text", '{"type":"stream.init"}'))
+        stop.wait(5)
+    controller._produce_jpeg = silent_producer
+    session.video = controller
+    with TestClient(create_desktop_app(settings, runtime)) as client:
+        with client.websocket_connect(f"/v1/devices/{device_id}/video?profile=focus",
+                headers={"Authorization": "Bearer pc-secret"}) as video:
+            assert video.receive_json()["type"] == "stream.init"
+            assert controller.subscriber_count() == 1
+            video.close()
+            deadline = time.monotonic() + 2.5
+            while controller.subscriber_count() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert controller.subscriber_count() == 0
 
 
 def test_connection_debug_flow_records_client_server_timeline_and_creates_sendable_zip(tmp_path):

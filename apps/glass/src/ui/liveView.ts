@@ -1,8 +1,8 @@
 /**
- * Live phone view over the gateway's video WebSocket (JPEG-first; H.264 when the gateway sends it).
+ * Live phone view over the gateway's video WebSocket (USB H.264 with JPEG fallback).
  *
  * Profiles matter: `thumbnail` only watches, `focus` is the gateway's "a human is at the controls" stream.
- * Glass watches with `thumbnail` so Cyclone can keep working, and switches to `focus` only after Take control.
+ * The dedicated Phone page keeps `focus` active while AI or the owner controls input.
  */
 import { mapPointerGesture } from "../core/coordinates.js";
 import type { GatewayClient } from "../services/gateway.js";
@@ -39,7 +39,7 @@ export const LIVE_RETRY_MS = 5_000;
 export interface LiveView {
   element: HTMLElement;
   setProfile(profile: StreamProfile): void;
-  /** Pointer input reaches the phone only while the developer holds control. */
+  /** Allow pointer input on a live frame; the page may claim human control first. */
   setInteractive(interactive: boolean): void;
   state(): StreamUiState;
   destroy(): void;
@@ -64,7 +64,7 @@ export function createLiveView(options: LiveViewOptions): LiveView {
   overlay.setAttribute("role", "status");
   element.append(canvas, image, overlay);
 
-  let profile: StreamProfile = "thumbnail";
+  let profile: StreamProfile = "focus";
   let renderer: VideoRenderer | null = null;
   let current: StreamUiState = "CONNECTING";
   let interactive = false;
@@ -113,13 +113,14 @@ export function createLiveView(options: LiveViewOptions): LiveView {
   };
 
   element.addEventListener("pointerdown", (event: PointerEvent) => {
-    if (!interactive || event.button !== 0) return;
+    if (!interactive || current !== "LIVE" || event.button !== 0) return;
     pointer = { clientX: event.clientX, clientY: event.clientY, startedAtMs: event.timeStamp };
+    if (Number.isInteger(event.pointerId)) element.setPointerCapture?.(event.pointerId);
   });
   element.addEventListener("pointerup", (event: PointerEvent) => {
     const start = pointer;
     pointer = null;
-    if (!interactive || !start) return;
+    if (!interactive || current !== "LIVE" || !start) return;
     const width = canvas.width || image.naturalWidth;
     const height = canvas.height || image.naturalHeight;
     const gesture = mapPointerGesture(
@@ -134,6 +135,7 @@ export function createLiveView(options: LiveViewOptions): LiveView {
     if (gesture.type === "tap") options.onGesture({ type: "tap", x: gesture.x, y: gesture.y });
     else options.onGesture({ type: "swipe", x: gesture.x1, y: gesture.y1, x2: gesture.x2, y2: gesture.y2, durationMs: gesture.durationMs });
   });
+  element.addEventListener("pointercancel", () => { pointer = null; });
 
   setState("CONNECTING");
   start();

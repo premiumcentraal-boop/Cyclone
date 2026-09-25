@@ -675,6 +675,8 @@ internal object GatewayV33ManualDesktopAdapter {
                 toolArgs.put("tool", "phone.tap")
                 params.put("normalizedX", args.optDouble("x", Double.NaN))
                 params.put("normalizedY", args.optDouble("y", Double.NaN))
+                // Desktop input must land at the selected pixel, without AI gesture drift.
+                params.put("humanize", "off")
                 params.put("waitForChangeMs", 0)
             }
             "swipe" -> {
@@ -686,6 +688,7 @@ internal object GatewayV33ManualDesktopAdapter {
                     throw GatewayProtocolException("PROTOCOL_MISMATCH", "$name must be between 0 and 1", requestId)
                 }
                 toolArgs.put("tool", "phone.swipe")
+                params.put("humanize", "off")
                 params.put("x1", pixel("x1", snapshot.screenWidth))
                 params.put("y1", pixel("y1", snapshot.screenHeight))
                 params.put("x2", pixel("x2", snapshot.screenWidth))

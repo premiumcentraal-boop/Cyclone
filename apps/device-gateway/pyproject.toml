@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cyclone-device-gateway"
-version = "5.0.0-alpha.29.dev1"
+version = "5.0.0-alpha.30.dev1"
 description = "Deterministic PC-side Android device gateway for Cyclone"
 requires-python = ">=3.11"
 dependencies = [

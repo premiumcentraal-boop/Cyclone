@@ -50,21 +50,21 @@ function open(fake) {
   return { page, renderers, timers, controls: () => fake.gateway.calls.filter((c) => c.path.endsWith("/control")).map((c) => c.body) };
 }
 
-test("watching uses the thumbnail stream and never takes the phone from Cyclone", async () => {
+test("watching uses the full-rate focus stream without taking control from Cyclone", async () => {
   const fake = phone();
   const { page, renderers, controls } = open(fake);
   await flush();
   assert.equal(renderers.length, 1);
-  assert.equal(renderers[0].input.streamUrl, "ws://127.0.0.1:8765/v1/devices/d1/video?profile=thumbnail");
+  assert.equal(renderers[0].input.streamUrl, "ws://127.0.0.1:8765/v1/devices/d1/video?profile=focus");
   assert.deepEqual(renderers[0].input.streamProtocols, ["cyclone-v1", "cyclone-token.tok"]);
   assert.deepEqual(controls(), []);
   assert.match(page.element.textContent, /Cyclone has control/);
-  assert.equal(page.element.querySelector(".live-view").classList.contains("interactive"), false);
+  assert.equal(page.element.querySelector(".live-view").classList.contains("interactive"), true);
   page.destroy();
   assert.equal(renderers[0].stopped, true);
 });
 
-test("Take control switches to the focus stream; taps reach the phone; Give back returns it", async () => {
+test("Take control keeps the live stream running; taps reach the phone; Give back keeps watching", async () => {
   const fake = phone();
   const { page, renderers, controls } = open(fake);
   await flush();
@@ -73,7 +73,9 @@ test("Take control switches to the focus stream; taps reach the phone; Give back
   assert.deepEqual(controls()[0], { kind: "take_human", sessionId: "default-foreground" });
   assert.match(page.element.textContent, /You have control/);
   assert.equal(renderers.at(-1).input.profile, "focus");
+  assert.equal(renderers.length, 1, "input ownership does not restart the video connection");
   const view = page.element.querySelector(".live-view");
+  renderers[0].input.callbacks.onState("LIVE");
   assert.equal(view.classList.contains("interactive"), true);
 
   const canvas = view.querySelector(".live-canvas");
@@ -88,8 +90,35 @@ test("Take control switches to the focus stream; taps reach the phone; Give back
   page.element.querySelector(".phone-controls .btn").click();
   await flush();
   assert.deepEqual(controls()[2], { kind: "yield_ai", sessionId: "default-foreground" });
-  assert.equal(renderers.at(-1).input.profile, "thumbnail");
+  assert.equal(renderers.at(-1).input.profile, "focus");
+  assert.equal(renderers.length, 1);
   assert.match(page.element.textContent, /Cyclone has control/);
+  page.destroy();
+});
+
+test("first click on a live phone takes control and lands at that pixel", async () => {
+  const fake = phone();
+  const { page, renderers, controls } = open(fake);
+  await flush();
+  const view = page.element.querySelector(".live-view");
+  const canvas = view.querySelector(".live-canvas");
+  canvas.width = 1080;
+  canvas.height = 2340;
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 108, height: 234 });
+  view.dispatchEvent({ type: "pointerdown", button: 0, clientX: 27, clientY: 175.5, timeStamp: 0 });
+  view.dispatchEvent({ type: "pointerup", button: 0, clientX: 27, clientY: 175.5, timeStamp: 50 });
+  assert.deepEqual(controls(), [], "reconnecting video cannot receive a stale tap");
+  renderers[0].input.callbacks.onState("LIVE");
+  view.dispatchEvent({ type: "pointerdown", button: 0, clientX: 27, clientY: 175.5, timeStamp: 0 });
+  view.dispatchEvent({ type: "pointerup", button: 0, clientX: 27, clientY: 175.5, timeStamp: 50 });
+  await flush();
+  await flush();
+  assert.deepEqual(controls(), [
+    { kind: "take_human", sessionId: "default-foreground" },
+    { kind: "tap", x: 0.25, y: 0.75 },
+  ]);
+  assert.match(page.element.textContent, /You have control/);
+  assert.equal(renderers.length, 1, "first click does not reopen the video stream");
   page.destroy();
 });
 

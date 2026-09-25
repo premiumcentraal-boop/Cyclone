@@ -1,7 +1,7 @@
 {
   "name": "@cyclone/glass",
   "private": true,
-  "version": "1.0.0-alpha.14",
+  "version": "1.0.0-alpha.15",
   "description": "Cyclone Glass: local browser dashboard for the Cyclone Mobile engine",
   "type": "module",
   "scripts": {

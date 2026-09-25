@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import json
 import hashlib
 import hmac
@@ -722,12 +723,22 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
         q = controller.subscribe(profile)
         runtime.live_diagnostics.mark(device_id, "server.ws.accepted", details={"profile": profile, "transport": "websocket"})
         first_binary = True
+        async def watch_disconnect() -> None:
+            # Sending alone does not notice a closed browser while the encoder is quiet.
+            # Receive close frames so reloads cannot leave orphan subscriber queues.
+            while (await websocket.receive())["type"] != "websocket.disconnect":
+                pass
+
+        disconnect = asyncio.create_task(watch_disconnect())
         try:
-            while True:
+            while not disconnect.done():
                 try:
                     message: StreamMessage = await asyncio.to_thread(q.get, True, 1.0)
                 except queue.Empty:
                     continue
+                if message.kind == "close":
+                    await websocket.close(code=1012)
+                    break
                 if message.kind == "binary":
                     await websocket.send_bytes(message.data)  # type: ignore[arg-type]
                     if first_binary:
@@ -745,6 +756,9 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             )
         finally:
             controller.unsubscribe(profile, q)
+            disconnect.cancel()
+            with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                await disconnect
 
     return router
 
