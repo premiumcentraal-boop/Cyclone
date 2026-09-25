@@ -39,6 +39,20 @@ object PhoneToolExecutor {
     private val touchHumanizeTools = setOf("phone.tap", "phone.long_press", "phone.swipe", "phone.scroll")
     private val humanizeAwareTools = touchHumanizeTools + "phone.click"
     private val mutationLock = com.cyclone.mobile.runtime.workspaces.Layer2Workspaces.engine.mutationLock
+    // Only the authenticated manual.execute adapter enters this scope. It lets the desktop human
+    // use the canonical executor while the phone remains in HUMAN mode; AI actions stay blocked.
+    private val humanDesktopControl = ThreadLocal.withInitial { false }
+
+    internal fun <T> withHumanDesktopControl(action: () -> T): T {
+        val previous = humanDesktopControl.get()
+        humanDesktopControl.set(true)
+        return try { action() } finally { humanDesktopControl.set(previous) }
+    }
+
+    internal fun humanDesktopControlActive(): Boolean = humanDesktopControl.get() == true
+
+    private fun foregroundInputAllowed(): Boolean =
+        DeviceState.controller == DeviceState.Controller.AGENT || humanDesktopControlActive()
     private val resultCache = object : LinkedHashMap<String, PhoneToolResult>(128, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PhoneToolResult>?): Boolean = size > 250
     }
@@ -445,10 +459,10 @@ object PhoneToolExecutor {
         // the Accessibility tree before every command, even phone.observe itself.
         val before = if (mutating) service?.observe(markFresh = false)?.fingerprint else null
 
-        if (mutating && DeviceState.controller != DeviceState.Controller.AGENT) {
+        if (mutating && !foregroundInputAllowed()) {
             return finish(request, started, before, before, error = PhoneToolError(PhoneToolErrorCode.HUMAN_HAS_CONTROL, "Human currently owns device input"))
         }
-        if (mutating && DeviceState.requireFreshObservation) {
+        if (mutating && DeviceState.requireFreshObservation && !humanDesktopControlActive()) {
             return finish(request, started, before, before, error = PhoneToolError(PhoneToolErrorCode.FRESH_OBSERVATION_REQUIRED, "Run phone.observe after returning control before issuing actions"))
         }
         val requestedObservation = request.params.optString("observationId").ifBlank {
@@ -843,7 +857,7 @@ object PhoneToolExecutor {
             return errorResult(PhoneToolErrorCode.ACCESSIBILITY_NOT_CONNECTED, "Accessibility service is not connected")
         }
         val epoch = DeviceState.controllerEpoch()
-        if (DeviceState.controller != DeviceState.Controller.AGENT || epoch != DeviceState.controllerEpoch()) {
+        if (!foregroundInputAllowed() || epoch != DeviceState.controllerEpoch()) {
             return errorResult(PhoneToolErrorCode.HUMAN_HAS_CONTROL, "Controller changed while action was queued")
         }
         val snapshot = service.observe(markFresh = false)
@@ -883,7 +897,7 @@ object PhoneToolExecutor {
         var attempts = 0
         repeat(retries + 1) {
             attempts++
-            if (DeviceState.controller != DeviceState.Controller.AGENT || epoch != DeviceState.controllerEpoch()) {
+            if (!foregroundInputAllowed() || epoch != DeviceState.controllerEpoch()) {
                 return errorResult(PhoneToolErrorCode.HUMAN_HAS_CONTROL, "Controller changed while action was queued", attempts)
             }
             val eventGeneration = DeviceState.uiGeneration()

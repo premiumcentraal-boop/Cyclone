@@ -721,7 +721,9 @@ internal object GatewayV33ManualDesktopAdapter {
                 params.put("waitForChangeMs", 0)
             }
         }
-        return GatewayV33ActionAdapter.execute(context, requestId, toolArgs)
+        return PhoneToolExecutor.withHumanDesktopControl {
+            GatewayV33ActionAdapter.execute(context, requestId, toolArgs)
+        }
             .put("manualDesktopKind", kind)
             .put("typedValueRedacted", kind == "text")
     }

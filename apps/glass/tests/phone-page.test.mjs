@@ -56,7 +56,7 @@ test("watching uses the thumbnail stream and never takes the phone from Cyclone"
   await flush();
   assert.equal(renderers.length, 1);
   assert.equal(renderers[0].input.streamUrl, "ws://127.0.0.1:8765/v1/devices/d1/video?profile=thumbnail");
-  assert.deepEqual(renderers[0].input.streamProtocols, ["cyclone-token.tok"]);
+  assert.deepEqual(renderers[0].input.streamProtocols, ["cyclone-v1", "cyclone-token.tok"]);
   assert.deepEqual(controls(), []);
   assert.match(page.element.textContent, /Cyclone has control/);
   assert.equal(page.element.querySelector(".live-view").classList.contains("interactive"), false);

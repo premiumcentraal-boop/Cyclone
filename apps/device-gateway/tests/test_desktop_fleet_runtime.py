@@ -87,6 +87,7 @@ class FakeBridge:
         self.challenge = 0
         self.calls = []
         self.qr_approved = False
+        self.manual_result = {"ok": True, "status": "DONE"}
 
     def request_unauthenticated(self, op, args=None, request_id=None):
         self.calls.append((op, args or {}))
@@ -111,7 +112,7 @@ class FakeBridge:
         if op == "pair.revoke":
             return {"revoked": True}
         if op == "manual.execute":
-            return {"ok": True, "status": "DONE"}
+            return self.manual_result
         if op == "clipboard.get":
             return {"mode": "PC_TO_PHONE", "reverseSync": "UNAVAILABLE"}
         if op == "clipboard.set":
@@ -496,6 +497,22 @@ def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
     assert bridge.calls[-1][1]["text"] == "ordinary words"
     with pytest.raises(DesktopRuntimeError):
         service.execute(session.device_id, {"kind": "shell"})
+
+
+def test_manual_control_reports_android_execution_instead_of_transport_success():
+    fleet, session, bridge = paired_session_for_services()
+    service = ManualControlService(fleet)
+    bridge.manual_result = {
+        "transport": {"ok": True},
+        "androidExecution": {"ok": False, "errorCode": "HUMAN_HAS_CONTROL"},
+    }
+    refused = service.execute(session.device_id, {"kind": "tap", "x": .5, "y": .5})
+    assert refused["ok"] is False
+    assert refused["status"] == "HUMAN_HAS_CONTROL"
+
+    bridge.manual_result = {"androidExecution": {"ok": True}, "verification": {"status": "OBSERVED"}}
+    accepted = service.execute(session.device_id, {"kind": "tap", "x": .5, "y": .5})
+    assert accepted["ok"] is True
 
 
 def test_opening_paired_phone_uses_only_fixed_wake_event_and_marks_ready():

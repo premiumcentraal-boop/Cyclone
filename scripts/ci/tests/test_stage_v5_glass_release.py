@@ -27,14 +27,21 @@ class GlassReleaseStagingTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.installer = self.root / f"Cyclone-PC-Companion-{VERSION}-Setup.exe"
         self.installer.write_bytes(b"representative installer")
+        for name in ("CycloneAgentMCP.exe", "CycloneLivePhone.exe", "CyclonePCRuntime.exe"):
+            (self.root / name).write_bytes(name.encode())
         digest = hashlib.sha256(self.installer.read_bytes()).hexdigest()
         self.digest = digest
-        (self.root / "SHA256SUMS.txt").write_text(f"{digest}  {self.installer.name}\n")
+        payloads = sorted(self.root.glob("*.exe"), key=lambda path: path.name.lower())
+        hashes = [{"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                   "size_bytes": path.stat().st_size} for path in payloads]
+        (self.root / "SHA256SUMS.txt").write_text(
+            "".join(f"{item['sha256']}  {item['name']}\n" for item in hashes)
+        )
         (self.root / "source-sha.txt").write_text(SHA + "\n")
         (self.root / "THIRD_PARTY_NOTICES").write_text("Dependency notices\n")
         (self.root / "release-provenance.json").write_text(json.dumps({
             "product": "Cyclone One", "version": VERSION, "source_sha": SHA,
-            "artifacts": [{"name": self.installer.name, "sha256": digest, "size_bytes": self.installer.stat().st_size}],
+            "artifacts": hashes,
         }))
         acceptance = {key: True for key in glass_stage.ACCEPTANCE_KEYS}
         acceptance["bundled_adb_version"] = "37.0.1"
@@ -46,6 +53,11 @@ class GlassReleaseStagingTest(unittest.TestCase):
     def test_refuses_tampered_installer(self):
         self.installer.write_bytes(b"different installer")
         with self.assertRaisesRegex(ValueError, "checksum"):
+            glass_stage.verify(self.root, SHA, VERSION)
+
+    def test_refuses_tampered_sidecar(self):
+        (self.root / "CyclonePCRuntime.exe").write_bytes(b"different runtime")
+        with self.assertRaisesRegex(ValueError, "sidecar checksum"):
             glass_stage.verify(self.root, SHA, VERSION)
 
     def test_refuses_missing_installed_acceptance(self):

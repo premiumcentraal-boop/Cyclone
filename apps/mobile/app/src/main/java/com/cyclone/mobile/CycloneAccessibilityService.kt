@@ -780,7 +780,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         })
     }
 
-    private fun agentCanAct(): Boolean = DeviceState.controller == DeviceState.Controller.AGENT && !DeviceState.requireFreshObservation
+    private fun agentCanAct(): Boolean =
+        (DeviceState.controller == DeviceState.Controller.AGENT && !DeviceState.requireFreshObservation) ||
+            PhoneToolExecutor.humanDesktopControlActive()
 
     private fun resolveLiveTarget(selector: ElementSelector): Pair<UiNodeSnapshot, AccessibilityNodeInfo>? {
         val snapshot = observe(markFresh = false)

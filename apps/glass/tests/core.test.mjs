@@ -99,5 +99,5 @@ test("gateway client sends the bearer and normalises errors", async () => {
 
   const ws = client.socket("/v1/devices/d1/video?profile=focus", "http://127.0.0.1:8765");
   assert.equal(ws.url, "ws://127.0.0.1:8765/v1/devices/d1/video?profile=focus");
-  assert.deepEqual(ws.protocols, ["cyclone-token.t0k"]);
+  assert.deepEqual(ws.protocols, ["cyclone-v1", "cyclone-token.t0k"]);
 });

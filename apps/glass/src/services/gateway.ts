@@ -62,11 +62,11 @@ export class GatewayClient {
     return this.request<T>("POST", path, body ?? {}, signal);
   }
 
-  /** WebSocket URL + protocols; the gateway accepts the bearer as subprotocol `cyclone-token.<token>`. */
+  /** Offer the gateway's selected protocol as well as the bearer used to authenticate the handshake. */
   socket(path: string, origin: string): { url: string; protocols: string[] } {
     const base = this.baseUrl || origin;
     const url = base.replace(/^http/, "ws") + path;
-    return { url, protocols: [`cyclone-token.${this.token}`] };
+    return { url, protocols: ["cyclone-v1", `cyclone-token.${this.token}`] };
   }
 
   private async request<T>(method: string, path: string, body: unknown, signal?: AbortSignal): Promise<T> {

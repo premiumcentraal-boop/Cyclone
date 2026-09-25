@@ -58,7 +58,9 @@ class HumanGestureSemanticSafetyContractTest {
     @Test
     fun `foreground authorization checks remain before dispatch`() {
         val internal = slice(executor, "private fun executeInternal", "private fun currentFingerprint")
-        assertOrdered(internal, "DeviceState.controller != DeviceState.Controller.AGENT", "dispatch(context, request")
+        assertOrdered(internal, "!foregroundInputAllowed()", "dispatch(context, request")
+        assertTrue("DeviceState.controller == DeviceState.Controller.AGENT || humanDesktopControlActive()" in executor)
+        assertTrue("PhoneToolExecutor.withHumanDesktopControl" in productionSource("com/cyclone/mobile/gateway/GatewayV33ActionAdapter.kt"))
         assertOrdered(internal, "DeviceState.requireFreshObservation", "dispatch(context, request")
         assertOrdered(internal, "MutationGrounding.requiredFor", "dispatch(context, request")
         assertOrdered(internal, "isDuplicateAction(request)", "dispatch(context, request")

@@ -62,7 +62,7 @@ class OverlayToolsSheetTest {
     }
 
     @Test fun traceFieldDigitsAreCalmAndNeverReshuffleOnPageChange() {
-        val shader = source("ui/overlay/tracefield/TraceFieldShader.kt")
+        val shader = source("ui/overlay/tracefield/TraceFieldShader.kt").replace("\r\n", "\n")
         val cell = shader.substringAfter("bool cellAt(").substringBefore("\n}\n")
         // Layout, cadence and glyph identity use the seed-free hash only.
         assertFalse(cell.contains("h21("))

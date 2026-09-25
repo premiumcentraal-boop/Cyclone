@@ -28,8 +28,12 @@ def verify(directory: Path, source_sha: str, version: str) -> tuple[Path, str]:
     if release["components"]["pc_companion"] != version:
         raise ValueError("Glass version differs from checked-out release metadata")
     installer = directory / f"Cyclone-PC-Companion-{version}-Setup.exe"
-    names = {
-        installer.name, "release-provenance.json", "installer-acceptance.json",
+    payload_names = sorted(
+        (installer.name, "CycloneAgentMCP.exe", "CycloneLivePhone.exe", "CyclonePCRuntime.exe"),
+        key=str.lower,
+    )
+    names = set(payload_names) | {
+        "release-provenance.json", "installer-acceptance.json",
         "source-sha.txt", "THIRD_PARTY_NOTICES", "SHA256SUMS.txt",
     }
     if not directory.is_dir() or {p.name for p in directory.iterdir()} != names:
@@ -48,17 +52,20 @@ def verify(directory: Path, source_sha: str, version: str) -> tuple[Path, str]:
         raise ValueError("Installed Glass acceptance is incomplete")
     if acceptance.get("bundled_adb_version") != "37.0.1":
         raise ValueError("Bundled ADB version is unexpected")
-    digest = hashlib.sha256(installer.read_bytes()).hexdigest()
+    payloads = [directory / name for name in payload_names]
+    verified = [
+        {"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "size_bytes": path.stat().st_size}
+        for path in payloads
+    ]
     artifacts = provenance.get("artifacts")
-    if not isinstance(artifacts, list) or len(artifacts) != 1 or artifacts[0] != {
-        "name": installer.name, "sha256": digest, "size_bytes": installer.stat().st_size
-    }:
-        raise ValueError("Installer checksum, size, or provenance mismatch")
-    if (directory / "SHA256SUMS.txt").read_text(encoding="utf-8-sig").strip() != f"{digest}  {installer.name}":
+    if artifacts != verified:
+        raise ValueError("Installer or sidecar checksum, size, or provenance mismatch")
+    checksum_lines = "\n".join(f"{item['sha256']}  {item['name']}" for item in verified)
+    if (directory / "SHA256SUMS.txt").read_text(encoding="utf-8-sig").strip() != checksum_lines:
         raise ValueError("SHA256SUMS sidecar mismatch")
     if not (directory / "THIRD_PARTY_NOTICES").stat().st_size:
         raise ValueError("Third-party notices are empty")
-    return installer, digest
+    return installer, verified[payload_names.index(installer.name)]["sha256"]
 
 
 def main() -> int:

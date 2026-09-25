@@ -139,8 +139,14 @@ class ManualControlService:
         except (BridgeDisconnectedError, BridgeProtocolError) as exc:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_DISCONNECTED, "Phone disconnected during manual control.", retryable=True) from exc
         safe = dict(result_shape)
-        safe["ok"] = bool(result.get("ok", True))
-        if "status" in result:
+        android_execution = result.get("androidExecution")
+        if isinstance(android_execution, dict):
+            safe["ok"] = android_execution.get("ok") is True
+            if not safe["ok"]:
+                safe["status"] = str(android_execution.get("errorCode") or "ACTION_NOT_PERFORMED")
+        else:
+            safe["ok"] = result.get("ok") is True
+        if "status" in result and safe["ok"]:
             safe["status"] = result["status"]
         return safe
 
