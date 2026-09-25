@@ -41,6 +41,8 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 10 | [Reuse and refusals](10-reuse-and-refusals.md) | Steal 4.8. Do not rebuild. What we will not ship |
 | 11 | [Run inspector](11-run-inspector.md) | The autopsy: every run step by step, cause of death, fix |
 
+Research (input, not plan): [Jev + Astra hybrid control](research/jev-astra-hybrid-control.md) — fast System-1 selector + async frontier planner, compared with Cyclone's loop.
+
 ## Identity
 
 | Surface | Today | V5 generation |
