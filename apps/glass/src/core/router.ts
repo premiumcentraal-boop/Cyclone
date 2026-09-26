@@ -1,11 +1,11 @@
 /** Hash routes. Hash routing keeps the gateway's static mount trivial (one index.html under /glass/). */
-export type AppTab = "map" | "coverage" | "screens" | "scenarios" | "versions" | "runs" | "issues";
-const APP_TABS: AppTab[] = ["map", "coverage", "screens", "scenarios", "versions", "runs", "issues"];
+export type AppTab = "map" | "coverage" | "skills" | "screens" | "scenarios" | "versions" | "runs" | "issues";
+const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios", "versions", "runs", "issues"];
 
 export type Route =
   | { name: "home" }
   | { name: "apps" }
-  | { name: "app"; placeId: string; tab: AppTab; route?: string[]; runId?: string }
+  | { name: "app"; placeId: string; tab: AppTab; route?: string[]; runId?: string; skill?: string }
   | { name: "runs" }
   | { name: "run"; runId: string }
   | { name: "phone" }
@@ -17,7 +17,9 @@ export type Route =
 
 export const DEFAULT_ROUTE: Route = { name: "home" };
 
-const ROOM_ID = /^screen:[a-z_]{1,40}:[0-9a-f]{8,64}$/;
+/** Mapper rooms (`screen:purpose:digest`) and learned screens of the Taught map (`page:<id>`). */
+const ROOM_ID = /^(?:screen:[a-z_]{1,40}:[0-9a-f]{8,64}|page:[A-Za-z0-9_-]{1,160})$/;
+const SKILL_ID = /^you\.[a-f0-9]{12}$/;
 
 export function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#/, "");
@@ -29,6 +31,7 @@ export function parseRoute(hash: string): Route {
     if (!placeId) return { name: "apps" };
     const route = (query.get("route") ?? "").split(",").filter((id) => ROOM_ID.test(id)).slice(0, 60);
     const runId = query.get("run") ?? "";
+    const skill = query.get("skill") ?? "";
     const tab = APP_TABS.includes(parts[2] as AppTab) ? (parts[2] as AppTab) : "map";
     return {
       name: "app",
@@ -36,6 +39,7 @@ export function parseRoute(hash: string): Route {
       tab,
       ...(route.length ? { route } : {}),
       ...(/^[A-Za-z0-9_-]{4,120}$/.test(runId) ? { runId } : {}),
+      ...(SKILL_ID.test(skill) ? { skill } : {}),
     };
   }
   if (parts[0] === "runs" && parts.length >= 2) {
@@ -67,6 +71,7 @@ export function routeHref(route: Route): string {
       const query = new URLSearchParams();
       if (route.route?.length) query.set("route", route.route.join(","));
       if (route.runId) query.set("run", route.runId);
+      if (route.skill) query.set("skill", route.skill);
       const text = query.toString();
       return text ? `${base}?${text}` : base;
     }

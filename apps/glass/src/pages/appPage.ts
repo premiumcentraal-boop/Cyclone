@@ -4,7 +4,7 @@
  * phone's map and forwards the developer's Start / Pause / Stop.
  */
 import type { GlassContext } from "../app.js";
-import type { Route } from "../core/router.js";
+import { routeHref, type Route } from "../core/router.js";
 import { toMapsDocument } from "../maps/atlasDocument.js";
 import {
   inspectorState,
@@ -17,6 +17,7 @@ import {
 } from "../maps/atlasViewModel.js";
 import { createMappingWatcher, isActiveMapping, mappingStatusLine, type MappingWatcher } from "../maps/mappingWatcher.js";
 import type { MappingJobView, MappingMission } from "../services/atlasClient.js";
+import { GROUND_LABEL, GROUND_TONE, loadSkills, skillScreens, skillsThrough, type SkillView } from "../services/skills.js";
 import { missionLive, missionReport, startSheet, type MissionEvent } from "../ui/missionPanel.js";
 import { coverageReport } from "../maps/zones.js";
 import { loadApps, scenarioSummary, statusLabel, statusTone, versionLabel, type PhoneApp } from "../services/apps.js";
@@ -61,7 +62,11 @@ export function createAppPage(ctx: GlassContext, route: Extract<Route, { name: "
   const phone = phoneClient(ctx, deviceId, deps.fetch);
 
   let app: PhoneApp | null = null;
-  let persona: Persona = "mapping";
+  // A skill's saved way (and a run's rooms on learned screens) lives on the Taught map.
+  const learnedRoute = !!route.route?.length && route.route.every((id) => id.startsWith("page:"));
+  let persona: Persona = learnedRoute ? "live" : "mapping";
+  /** The owner's saved skills, for "Skills through here" (plan 23). Loaded once; older phones have none. */
+  let skills: SkillView[] = [];
   let model: AtlasViewModel | null = null;
   let job: MappingJobView | null = null;
   let selection: { kind: "screen" | "edge"; id: string } | null = null;
@@ -145,8 +150,11 @@ export function createAppPage(ctx: GlassContext, route: Extract<Route, { name: "
     banner.setAttribute("role", "status");
     banner.append(
       el("span", "route-banner-dot"),
-      el("span", undefined, `Showing the route of a run: ${route.route.length} ${route.route.length === 1 ? "room" : "rooms"}, numbered in order.`),
+      el("span", undefined, route.skill
+        ? `Showing a skill's saved way: ${route.route.length} ${route.route.length === 1 ? "place" : "places"}, numbered in order. The last one is where it works.`
+        : `Showing the route of a run: ${route.route.length} ${route.route.length === 1 ? "room" : "rooms"}, numbered in order.`),
     );
+    if (route.skill) banner.append(link("Back to Skills", `#/apps/${encodeURIComponent(placeId)}/skills`, "route-banner-link"));
     if (route.runId) banner.append(link("Back to the run", `#/runs/${encodeURIComponent(route.runId)}`, "route-banner-link"));
     const clear = link("Hide route", `#/apps/${encodeURIComponent(placeId)}/map`, "route-banner-link");
     banner.append(clear);
@@ -346,8 +354,27 @@ export function createAppPage(ctx: GlassContext, route: Extract<Route, { name: "
       },
     });
     if (state.kind === "edge" && state.fromScreenId && state.toScreenId) nodes.push(doorEvidence(state.fromScreenId, state.toScreenId));
+    if (state.kind === "screen" && selection?.kind === "screen") {
+      const through = skillsThrough(skills, selection.id);
+      if (through.length) nodes.splice(nodes.length - 1, 0, skillsHere(through, selection.id));
+    }
     if (state.kind === "empty" && zones && view.kind === "overview") nodes.splice(1, 1, el("p", "muted", "Pick a zone to open it, or a scenario lane above the map. Rooms and doors show up here when you select them."));
     setChildren(inspector, ...nodes);
+  };
+
+  /** Skills whose saved way passes this place; the last stop of a way is where the skill works. */
+  const skillsHere = (through: SkillView[], screenId: string): HTMLElement => {
+    const box = el("div", "skills-here");
+    box.append(el("h3", "inspector-section", `Skills through here (${through.length})`));
+    for (const skill of through) {
+      const works = skill.route[skill.route.length - 1]?.screenId === screenId;
+      const row = el("a", "skill-here");
+      row.href = routeHref({ name: "app", placeId, tab: "map", route: skillScreens(skill), skill: skill.skillId });
+      row.append(el("span", "skill-here-name", skill.name), chip(works ? "Works here" : "Passes here", works ? "accent" : "neutral"),
+        chip(GROUND_LABEL[skill.ground], GROUND_TONE[skill.ground]));
+      box.append(row);
+    }
+    return box;
   };
 
   /** Evidence for a door: the runs whose route walked it, newest first, each with a way into its replay. */
@@ -526,12 +553,20 @@ export function createAppPage(ctx: GlassContext, route: Extract<Route, { name: "
     const loaded = app as PhoneApp | null; // assigned by loadHeader(); TS cannot see through the closure
     const mapping = loaded?.personas.find((p) => p.persona === "mapping");
     const live = loaded?.personas.find((p) => p.persona === "live");
-    if ((!mapping || mapping.rooms === 0) && live && live.rooms > 0) {
+    if (!learnedRoute && (!mapping || mapping.rooms === 0) && live && live.rooms > 0) {
       persona = "live";
       personaSwitch.set(persona);
     }
     await loadAtlas(true);
     if (!destroyed) await watcher.attach().catch(() => undefined);
+    if (!destroyed && placeId.startsWith("package:")) {
+      const list = await loadSkills(ctx.client, deviceId).catch(() => null);
+      if (!destroyed && list) {
+        skills = list.skills.filter((skill) => skill.placeId === placeId);
+        // selection is set by board clicks; TS cannot see through those closures.
+        if ((selection as { kind: string } | null)?.kind === "screen") renderInspector();
+      }
+    }
     // The scenarios' entry place anchors the zones when the phone knows it.
     if (!destroyed && placeId.startsWith("package:")) {
       const scenarios = await getScenarios(ctx.client, deviceId, placeId, "mapping").catch(() => null);

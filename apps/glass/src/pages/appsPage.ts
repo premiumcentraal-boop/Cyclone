@@ -23,6 +23,7 @@ import {
 } from "../services/apps.js";
 import { MAPPING_TERMINAL_STATES } from "../services/atlasClient.js";
 import { phoneClient } from "../services/phone.js";
+import { loadSkills, skillsByApp } from "../services/skills.js";
 import { GatewayError } from "../services/gateway.js";
 import { listRuns, statusLabel as runStatusLabel, statusTone as runStatusTone, type RunSummary } from "../services/runs.js";
 import { el, setChildren } from "../ui/dom.js";
@@ -54,6 +55,8 @@ const SORTS: Array<{ id: FleetSort; label: string }> = [
 interface FleetFacts {
   lastRuns: Map<string, RunSummary>;
   mappingPlaceId: string | null;
+  /** Saved skills per app and how many need a re-check (plan 23). */
+  skills: Map<string, { count: number; recheck: number }>;
 }
 
 export function createAppsPage(ctx: GlassContext, route: Route): GlassPage {
@@ -72,7 +75,7 @@ export function createAppsPage(ctx: GlassContext, route: Route): GlassPage {
 
   let catalog: AppCatalog | null = null;
   /** Latest run per app (phones from alpha.11 record which apps a run entered) and the app being mapped. Optional. */
-  const facts: FleetFacts = { lastRuns: new Map(), mappingPlaceId: null };
+  const facts: FleetFacts = { lastRuns: new Map(), mappingPlaceId: null, skills: new Map() };
   let filter: FleetFilter = "all";
   let sort: FleetSort = "activity";
   let query = "";
@@ -152,6 +155,7 @@ export function createAppsPage(ctx: GlassContext, route: Route): GlassPage {
       render();
       void loadLastRuns(controller.signal);
       void loadMapping(controller.signal);
+      void loadSkillCounts(controller.signal);
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") return;
       catalog = null;
@@ -174,6 +178,17 @@ export function createAppsPage(ctx: GlassContext, route: Route): GlassPage {
       if (catalog && !signal.aborted) render();
     } catch {
       /* Older phones: the Apps page works without run facts. */
+    }
+  }
+
+  async function loadSkillCounts(signal: AbortSignal): Promise<void> {
+    try {
+      const list = await loadSkills(ctx.client, deviceId, signal);
+      if (signal.aborted) return;
+      facts.skills = skillsByApp(list.skills);
+      if (catalog) render();
+    } catch {
+      /* Phones before alpha.39 have no skills.list; the table works without it. */
     }
   }
 
@@ -258,6 +273,13 @@ function appRow(app: PhoneApp, known: AppKnowledge, facts: FleetFacts): HTMLAnch
 
   const statusCell = el("span", "col-status");
   statusCell.append(chip(KNOWLEDGE_LABEL[known], KNOWLEDGE_TONE[known]));
+  const skills = facts.skills.get(app.placeId);
+  if (skills?.count) {
+    const skillChip = chip(skills.recheck ? `${skills.recheck} skill${skills.recheck === 1 ? "" : "s"} to re-check` : `${skills.count} skill${skills.count === 1 ? "" : "s"}`,
+      skills.recheck ? "warning" : "accent");
+    skillChip.classList.add("fleet-skills");
+    statusCell.append(skillChip);
+  }
   if (app.installed === false) statusCell.append(chip("Uninstalled", "neutral"));
 
   const go = el("span", "col-go");

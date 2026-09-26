@@ -27,6 +27,8 @@ import { coverageReport, deriveZones } from "../maps/zones.js";
 import { actionButton, card, chip, emptyState, errorState, loadingState, searchInput, segmented, statTile } from "../ui/components.js";
 import { runRow, runsError } from "./runsPage.js";
 import { getKnowledge, type VaultSlot } from "../services/knowledgeSummary.js";
+import { GROUND_LABEL, GROUND_TONE, loadSkills, skillScreens, type SkillView } from "../services/skills.js";
+import { runListing } from "../services/market.js";
 import { appIssues } from "../services/issues.js";
 import { el, link, setChildren } from "../ui/dom.js";
 import { relativeTime } from "../ui/format.js";
@@ -39,7 +41,7 @@ type KnowledgeTab = Exclude<AppTab, "map">;
 export function appTabs(placeId: string, active: AppTab): HTMLElement {
   const tabs = el("nav", "tabs");
   const items: Array<[AppTab, string]> = [["map", "Map"], ["coverage", "Coverage"]];
-  if (placeId.startsWith("package:")) items.push(["runs", "Runs"], ["versions", "Changes"], ["scenarios", "Scenarios"], ["screens", "Screens"], ["issues", "Issues"]);
+  if (placeId.startsWith("package:")) items.push(["skills", "Skills"], ["runs", "Runs"], ["versions", "Changes"], ["scenarios", "Scenarios"], ["screens", "Screens"], ["issues", "Issues"]);
   else items.push(["screens", "Screens"]);
   for (const [tab, label] of items) {
     if (tab === active) {
@@ -109,6 +111,7 @@ export function createAppKnowledgePage(
       else if (route.tab === "screens") await loadScreens();
       else if (route.tab === "coverage") await loadCoverage();
       else if (route.tab === "issues") await loadIssues();
+      else if (route.tab === "skills") await loadSkillsTab();
       else await loadRuns();
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") return;
@@ -160,6 +163,82 @@ export function createAppKnowledgePage(
       list.append(node);
     }
     setChildren(body, stats, list);
+  }
+
+  /**
+   * Skills (plan 23): the owner's saved skills that work in this app, each with its health on the map and the saved way
+   * to where it works. Show on the map draws that way on the Taught map; Run starts it on the phone like any Ask.
+   */
+  async function loadSkillsTab(): Promise<void> {
+    const list = await loadSkills(ctx.client, deviceId, controller.signal);
+    if (controller.signal.aborted) return;
+    const here = list.skills.filter((skill) => skill.placeId === placeId);
+    const loose = list.skills.filter((skill) => !skill.placeId).length;
+    if (!here.length) {
+      setChildren(body, emptyState({
+        icon: "star",
+        title: "No skills in this app yet",
+        body: "Finish a run in this app on the phone and press Save skill. Cyclone remembers where the skill works on the map and keeps it there.",
+      }), loose ? el("p", "muted table-note", `${loose} saved ${loose === 1 ? "skill is" : "skills are"} not tied to an app yet (saved before skills were grounded).`) : null);
+      return;
+    }
+    const counts = { grounded: 0, partial: 0, "needs-recheck": 0, "not-grounded": 0 };
+    here.forEach((skill) => counts[skill.ground]++);
+    const stats = el("div", "stats stats-4");
+    stats.append(
+      statTile("Skills", String(here.length)),
+      statTile("Route known", String(counts.grounded), "success"),
+      statTile("Destination known", String(counts.partial), "accent"),
+      statTile("Needs re-check", String(counts["needs-recheck"]), counts["needs-recheck"] ? "warning" : "neutral"),
+    );
+    const cards = el("div", "skill-list");
+    for (const skill of here) cards.append(skillCard(skill));
+    setChildren(body, stats, cards, el("p", "muted table-note",
+      "A skill's way is advice: every run walks it checking each screen, and a finished run moves the skill to where it worked. Needs re-check means the map no longer knows where it works; the next run finds the way again."));
+  }
+
+  function skillCard(skill: SkillView): HTMLElement {
+    const node = card("skill-card");
+    node.dataset.skillId = skill.skillId;
+    const head = el("div", "skill-head");
+    head.append(icon("star", "skill-glyph"), el("h3", "skill-name", skill.name), chip(GROUND_LABEL[skill.ground], GROUND_TONE[skill.ground]));
+    node.append(head, el("p", "muted skill-detail", skill.detail));
+    if (skill.route.length) {
+      const way = el("ol", "skill-way");
+      skill.route.forEach((point, i) => {
+        if (i > 0) way.append(el("li", "skill-arrow", "→"));
+        const item = el("li", `skill-stop${i === skill.route.length - 1 ? " destination" : ""}${point.screenId ? "" : " unknown"}`);
+        item.append(el("span", "skill-stop-index", String(i + 1)), el("span", undefined, point.title));
+        way.append(item);
+      });
+      node.append(way);
+    }
+    const facts = el("div", "skill-facts muted");
+    facts.append(el("span", undefined, skill.finishSteps ? `About ${skill.finishSteps} step${skill.finishSteps === 1 ? "" : "s"} of work at the destination` : "Work happens where the way ends"));
+    if (skill.savedAt) facts.append(el("span", undefined, `grounded ${relativeTime(skill.savedAt)}`));
+    node.append(facts);
+    const actions = el("div", "skill-actions");
+    const screens = skillScreens(skill);
+    if (screens.length) {
+      const show = actionButton("Show on the map", { icon: "map" });
+      show.addEventListener("click", () => ctx.navigate({ name: "app", placeId, tab: "map", route: screens, skill: skill.skillId }));
+      actions.append(show);
+    }
+    const run = actionButton("Run on the phone", { icon: "play", variant: "primary" });
+    const note = el("span", "muted skill-note");
+    run.addEventListener("click", async () => {
+      run.disabled = true;
+      try {
+        await runListing(ctx.client, deviceId, skill.skillId, {});
+        note.textContent = "Started on the phone. Follow it on the Phone page.";
+      } catch (error) {
+        run.disabled = false;
+        note.textContent = error instanceof Error ? error.message : String(error);
+      }
+    });
+    actions.append(run, note);
+    node.append(actions);
+    return node;
   }
 
   /** Coverage (plan 22 §4.2): confidence, freshness, unconfirmed and blocked, per zone. Never "% of the app". */

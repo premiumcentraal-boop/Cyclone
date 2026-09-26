@@ -32,6 +32,7 @@ const PATHS = {
   layers: ["M12 3l9 5-9 5-9-5z", "M3 13l9 5 9-5"],
   clock: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 7v5l3 2"],
   bag: ["M5 8h14l-1 12H6z", "M9 8a3 3 0 0 1 6 0"],
+  star: ["M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"],
 } as const;
 
 export type IconName = keyof typeof PATHS;
