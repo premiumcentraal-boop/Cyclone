@@ -190,6 +190,7 @@ It has no screenshots, by design (§3).
 
 | Release | Contents |
 |---|---|
-| alpha.39 | Hands (plan 21): reliable typing into composers. |
-| alpha.40 | Durable per-room frontier and an information-gain planner; the Changes (version diff) overlay on the map. |
+| alpha.39 | One map, grounded skills and routines (plan 23). |
+| alpha.40 | Hands (plan 21): reliable typing into composers. |
+| alpha.41+ | Durable per-room frontier and an information-gain planner; the Changes (version diff) overlay on the map. |
 | Later | Test-account frame capture with retention; App Packs. |

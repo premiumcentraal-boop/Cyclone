@@ -66,6 +66,17 @@ card, and the `go_to` tool walks a route through the ordinary act path, re-readi
 stopping at the first surprise; walks and surprises feed back into the store. The Lab variant knob `useMap` A/B-tests
 it.
 
+### One map, grounded skills and routines (since 5.0.0-alpha.39)
+
+A mapping pass records a Mind-style trail (`mapping/run/MappingTrailTap.kt`) and, when it ends, learns it into app
+knowledge (`MappingLearning` → `MissionLearner`), so the map runs route on includes what missions walked; test-account
+passes are learned at confidence 0.5 and `MindMap` prefers confirmed moves. Owner skills carry an anchor
+(`market/SkillAnchor.kt`: app, way in, destination, finish steps) saved from the run's trail; `SkillGrounding` derives
+health from the current map and writes the Mind's skill card, and a finished skill run re-grounds its anchor. Routines
+run skills with `StepType.RUN_GROUNDED_SKILL` through `Marketplace.run` (the Ask entry); `RoutineGrounding` labels
+routines grounded or scripted. `skills.list` (`GET /v1/devices/{id}/skills`) feeds Glass's Skills tab, the way on the
+Taught map and the fleet. Plan: `Cyclone V5 plan/23-one-map-grounded-skills.md`.
+
 ### Mapping missions and the Glass Atlas (since 5.0.0-alpha.38)
 
 `mapping.start` takes an **identity**: `own` (the owner's account, look only: a sign-in wall ends the pass as
