@@ -1,5 +1,5 @@
 # Cyclone V5 alpha.43 dev1: Glass overlay - tilt-lit glass, the one-word plane pill, the island and notification-only heights, app logos, a background switch that is never silent.
-# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
+# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested. Release candidate.
 schema = 1
 product_version = "5.0.0-alpha.43.dev1"
 channel = "development"
