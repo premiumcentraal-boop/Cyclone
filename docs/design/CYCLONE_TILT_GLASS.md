@@ -118,7 +118,9 @@ Variants:
 | `GlassRoundButton` | 46 dp (40 dp in headers) circle, faint white radial fill, `litRim()` whose bright point faces the light, `pressGlow` |
 | `GlassCapsuleButton` | ≥ 44 dp capsule, radius 22, `litRim(cornerRadius = 22.dp)`, `pressGlow`; `primary` = teal fill |
 | `veilPill()` | the edge-less text pill |
-| `VoiceOrbButton` | a normal round button until listening; then a living teal orb (7 s swirl, 2.4 s breathing) whose light rises up into the bar and stays tight below; back to plain when voice stops |
+| `VoiceOrbButton` | a normal round button until listening; then a living teal orb: a lit sphere whose highlight faces the light, a 7 s swirl inside, and a soft 2.4 s breath of light that rises into the bar and fades to nothing before its edge (every glow is a radial gradient that reaches zero, so nothing has an edge); tight below. The mic turns dark (`#052528`) on the orb. One control in both states. Voice starts as the finger goes down: tap to talk, or hold ≥ 500 ms and let go to finish (push to talk); presses within 400 ms are one press, and a stop only counts after 800 ms of listening (`VoicePress`) |
+| `GlassToolTile` / `GlassToolRow` | the tools drawer's controls: a tile is a lit capsule (radius 22) with the icon on a soft disc; a row is a lit round button (40 dp) and its label, and pressing the row flashes the button |
+| `TiltGlassTheme` / `LocalTiltGlass` | the glass palette for Material text inside a glass surface; shared Teal Matrix controls (model picker, choice bar, menu trigger, text action) draw their glass version inside it: veils for trays, lit capsules for what you press |
 | `AppLogo` / `AppLogoStack` | real launcher icons, round, dark 2 dp ring; current app 34 dp in front with a teal ring, earlier ones 28 dp at 82% overlapping by 9 dp (last 3 distinct apps, never Cyclone itself) |
 | `GlassSpinner` | dotted ring, one turn per 1.6 s |
 | `GlassProgress` | 3 dp line; sliding segment (1.4 s) when the length is unknown |
@@ -127,6 +129,7 @@ Variants:
 | `WorkIsland` | 66 dp bar: current app logo in a turning ring (42 dp), two centred lines on a full-round veil, 2 dp progress along the bottom |
 | `OverlayOwnerCard` | panel: where ("Send to **Sam** in WhatsApp"), then the message as hero, then lit capsules (Send, Change, Not now) |
 | `GlassComposerBar` (in-app) / `OverlayAppleComposerBar` | 66 dp bar: + · Ask field on a veil filling the space · voice orb · send |
+| Tools drawer (`OverlayToolsSheet`, in-app `InAppGlassSheet`) | a working card: panel glass (radius 30), the card's grabber, one inner veil (radius 22); tiles, rows and the model page on it |
 
 ## 5. Layout: the stack
 

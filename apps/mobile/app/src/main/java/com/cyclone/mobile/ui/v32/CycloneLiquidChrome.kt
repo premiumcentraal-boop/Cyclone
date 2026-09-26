@@ -43,6 +43,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.ui.overlay.glass.LocalTiltGlass
+import com.cyclone.mobile.ui.overlay.glass.glassCapsule
+import com.cyclone.mobile.ui.overlay.glass.litRim
+import com.cyclone.mobile.ui.overlay.glass.veilPill
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -85,6 +89,15 @@ internal fun CycloneLiquidTray(
     contentPadding: Dp = 4.dp,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (LocalTiltGlass.current) {
+        // Tilt Glass: a tray only holds choices, so it is a soft veil capsule with no edge of its own.
+        Box(
+            modifier.height(height).fillMaxWidth().veilPill().padding(contentPadding),
+            contentAlignment = Alignment.Center,
+            content = content,
+        )
+        return
+    }
     if (LocalCycloneSignatureTheme.current) {
         // Same optical material as the Ask Cyclone capsule, minus its dotted whorls.
         CycloneSignatureGlass(
@@ -213,6 +226,12 @@ internal fun CycloneLiquidSelectionLens(
     val frost = if (dark) Color.White.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.62f)
     val base = modifier.offset(x = targetOffset).width(lensWidth).height(height)
 
+    if (LocalTiltGlass.current) {
+        // Tilt Glass: the chosen option is the lit teal capsule inside the veil.
+        Box(base.clip(ContinuousCapsule).background(SignatureTeal.copy(alpha = .22f)).litRim(width = 1.dp, cornerRadius = height / 2))
+        return
+    }
+
     if (LocalCycloneSignatureTheme.current) {
         // Teal lens: a lit inner capsule that slides inside the tray.
         Box(
@@ -250,6 +269,26 @@ internal fun CycloneLiquidTextAction(
     enabled: Boolean = true,
     prominent: Boolean = false,
 ) {
+    if (LocalTiltGlass.current) {
+        Box(
+            modifier
+                .heightIn(min = 40.dp)
+                .glassCapsule(
+                    20.dp, onClick, enabled = enabled,
+                    fill = if (prominent) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.08f),
+                )
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = (if (prominent) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                    .copy(alpha = if (enabled) 1f else .55f),
+            )
+        }
+        return
+    }
     val backdrop = LocalCycloneLiquidBackdrop.current
     val dark = cycloneGlassIsDark()
     val neutral = if (dark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.055f)

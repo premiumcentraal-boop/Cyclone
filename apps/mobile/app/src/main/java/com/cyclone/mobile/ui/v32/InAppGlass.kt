@@ -56,6 +56,7 @@ import com.cyclone.mobile.ui.overlay.PlaneRow
 import com.cyclone.mobile.ui.overlay.TaskAppTrail
 import com.cyclone.mobile.ui.overlay.WorkIsland
 import com.cyclone.mobile.ui.overlay.glass.GlassRoundButton
+import com.cyclone.mobile.ui.overlay.glass.TiltGlassTheme
 import com.cyclone.mobile.ui.overlay.glass.VoiceOrbButton
 import com.cyclone.mobile.ui.overlay.glass.tiltGlass
 
@@ -105,6 +106,32 @@ internal fun InAppTaskStack(task: WorkspaceTaskUi) {
     }
 }
 
+/** The grabber colour of a glass sheet: the working card's grabber. */
+internal val GlassMutedHandle = Color(0xFFA6CCCA).copy(alpha = 0.38f)
+
+/**
+ * A bottom sheet on the working card's glass (the in-app + drawer and its model page): the card's glass and radius,
+ * [handle] on top, then one inner veil the content sits on, in the glass palette.
+ */
+@Composable
+internal fun InAppGlassSheet(
+    modifier: Modifier = Modifier,
+    handle: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val radius = OverlayStackGeometry.CARD_RADIUS_DP.dp
+    Box(modifier.fillMaxWidth().tiltGlass(radius).clip(RoundedCornerShape(radius))) {
+        TiltGlassTheme {
+            Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
+                handle()
+                Box(Modifier.fillMaxWidth().background(Color(0x4D04181D), RoundedCornerShape(22.dp)).padding(12.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
 /** The on-screen (classic) task in the app, on the same glass. */
 @Composable
 internal fun InAppForegroundCard(snapshot: OverlayChromeSnapshot) {
@@ -126,6 +153,7 @@ internal fun GlassComposerBar(
     onAdd: () -> Unit,
     onVoice: () -> Unit,
     onSend: () -> Unit,
+    onVoiceStop: () -> Unit = {},
     sendEnabled: Boolean,
     busy: Boolean,
     voiceActive: Boolean,
@@ -160,9 +188,11 @@ internal fun GlassComposerBar(
                     }
                 },
             )
-            VoiceOrbButton(listening = voiceActive, enabled = !busy, description = "Voice mode", onClick = onVoice) {
-                SignatureIcon(SignatureGlyph.MIC)
-            }
+            // Voice mode is its own screen here, so the button opens it with a tap (no push to talk).
+            VoiceOrbButton(
+                listening = voiceActive, enabled = !busy, description = "Voice mode",
+                onStart = onVoice, onStop = onVoiceStop, pushToTalk = false,
+            ) { tint -> SignatureIcon(SignatureGlyph.MIC, color = tint) }
             GlassRoundButton("Send request", onSend, enabled = sendEnabled) {
                 SignatureIcon(SignatureGlyph.SEND, color = SignatureInk.copy(alpha = if (sendEnabled) 1f else .45f))
             }

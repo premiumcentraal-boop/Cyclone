@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -30,6 +31,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.ui.overlay.glass.LocalTiltGlass
+import com.cyclone.mobile.ui.overlay.glass.glassCapsule
 
 /**
  * Discrete choice control for 2-4 mutually-exclusive options.
@@ -174,17 +177,23 @@ internal fun CycloneLiquidMenuTrigger(
     compact: Boolean = false,
     enabled: Boolean = true,
 ) {
-    CycloneLiquidTray(
-        modifier = modifier,
-        height = if (compact) 46.dp else 54.dp,
-        contentPadding = 3.dp,
-    ) {
+    val height = if (compact) 46.dp else 54.dp
+    // Tilt Glass: the trigger is pressed, so it is a lit capsule with the press glow rather than a veil tray.
+    val glass = LocalTiltGlass.current
+    val frame: @Composable (@Composable BoxScope.() -> Unit) -> Unit = { inner ->
+        if (glass) Box(
+            modifier.height(height).fillMaxWidth().glassCapsule(height / 2, onClick, enabled = enabled),
+            contentAlignment = Alignment.Center,
+            content = inner,
+        ) else CycloneLiquidTray(modifier = modifier, height = height, contentPadding = 3.dp, content = inner)
+    }
+    frame {
         Row(
             Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
-                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-                .padding(horizontal = 13.dp),
+                .then(if (glass) Modifier else Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick))
+                .padding(horizontal = if (glass) 16.dp else 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {

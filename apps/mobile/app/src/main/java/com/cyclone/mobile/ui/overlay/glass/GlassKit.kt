@@ -21,8 +21,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -50,9 +54,64 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 
 private val Teal = Color(0xFF83DBD7)
 private val Ink = Color(0xFFE0F5F3)
+private val Muted = Color(0xFFA6CCCA)
+private val Dim = Color(0xFF6F9896)
+
+/**
+ * True inside a Tilt Glass surface (the tools drawer, its model page). Shared controls that also live on Teal Matrix
+ * screens read it and draw their glass version: lit capsules for what you press, veils for what you read.
+ */
+val LocalTiltGlass = compositionLocalOf { false }
+
+/** The glass palette for Material text and icons inside a tilt-glass surface, plus [LocalTiltGlass]. */
+@Composable
+fun TiltGlassTheme(content: @Composable () -> Unit) {
+    val colors = MaterialTheme.colorScheme.copy(
+        primary = Teal,
+        onPrimary = Color(0xFF052528),
+        onSurface = Ink,
+        onSurfaceVariant = Muted,
+        outline = Dim,
+        outlineVariant = Dim,
+    )
+    MaterialTheme(colorScheme = colors, typography = MaterialTheme.typography, shapes = MaterialTheme.shapes) {
+        CompositionLocalProvider(LocalTiltGlass provides true, LocalContentColor provides Ink, content = content)
+    }
+}
+
+/**
+ * A pressable capsule on the glass: a soft fill, the lit rim and the press glow (principles 6 and 7). [fill] is the
+ * dark-soft default; pass the teal for a primary or selected capsule.
+ */
+@Composable
+fun Modifier.glassCapsule(
+    cornerRadius: Dp,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    role: Role = Role.Button,
+    fill: Color = Color.White.copy(alpha = 0.08f),
+    interaction: MutableInteractionSource = remember { MutableInteractionSource() },
+): Modifier = this
+    .pressGlow(interaction, cornerRadius)
+    .clip(RoundedCornerShape(cornerRadius))
+    .background(fill)
+    .litRim(cornerRadius = cornerRadius)
+    .clickable(interaction, indication = null, enabled = enabled, role = role, onClick = onClick)
 
 /**
  * A thin rim whose brightest point faces the light (and a weaker one opposite), for round controls; with
@@ -151,47 +210,127 @@ fun GlassRoundButton(
 fun Modifier.veilPill(): Modifier = background(Color(0x4D04181D), RoundedCornerShape(percent = 50))
 
 /**
- * The voice button (plan 27): like the other round buttons until the owner talks, then a living teal orb whose light
- * rises upwards inside the bar (tight below). The parent clips the rising light to the bar.
+ * The voice button (plan 27): a normal round glass button until the owner talks, then a living teal orb. The orb is a
+ * lit sphere (its highlight faces the shared light), a slow swirl inside it (7 s), and a soft breath of light (2.4 s)
+ * that rises into the bar above it and fades out before the bar's edge; below the orb it stays tight.
+ *
+ * It is one control in both states, so a press is never cut short by the button changing under the finger. Voice
+ * starts as the finger goes down; see [VoicePress] for tap to talk, push to talk ([pushToTalk]) and the guard that
+ * keeps a bounce or a quick second touch from stopping it.
  */
 @Composable
-fun VoiceOrbButton(listening: Boolean, enabled: Boolean, description: String, onClick: () -> Unit, content: @Composable BoxScope.() -> Unit) {
-    if (!listening) {
-        GlassRoundButton(description, onClick, enabled = enabled, content = content)
-        return
-    }
-    val motion = rememberInfiniteTransition(label = "Voice orb")
-    val swirl by motion.animateFloat(0f, 360f, infiniteRepeatable(tween(7_000, easing = LinearEasing)), label = "Swirl")
-    val rise by motion.animateFloat(0f, 1f, infiniteRepeatable(tween(2_400), RepeatMode.Reverse), label = "Rise")
+fun VoiceOrbButton(
+    listening: Boolean,
+    enabled: Boolean,
+    description: String,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    pushToTalk: Boolean = true,
+    content: @Composable BoxScope.(tint: Color) -> Unit,
+) {
     val interaction = remember { MutableInteractionSource() }
+    val isListening by rememberUpdatedState(listening)
+    val canStart by rememberUpdatedState(enabled)
+    val start by rememberUpdatedState(onStart)
+    val stop by rememberUpdatedState(onStop)
+    val press = remember { longArrayOf(0L, 0L) } // [0] listening since, [1] last press that did something
+    LaunchedEffect(listening) { press[0] = if (listening) android.os.SystemClock.uptimeMillis() else 0L }
+    fun act(action: VoicePress.Action, now: Long) {
+        when (action) {
+            VoicePress.Action.START -> if (canStart) { press[1] = now; press[0] = now; start() }
+            VoicePress.Action.STOP -> { press[1] = now; stop() }
+            VoicePress.Action.NONE -> Unit
+        }
+    }
+    val motion = if (listening) rememberInfiniteTransition(label = "Voice orb") else null
+    val swirl = motion?.animateFloat(0f, 360f, infiniteRepeatable(tween(7_000, easing = LinearEasing)), label = "Swirl")
+    val breath = motion?.animateFloat(0f, 1f, infiniteRepeatable(tween(2_400), RepeatMode.Reverse), label = "Breath")
     Box(
         Modifier.size(46.dp)
             .pressGlow(interaction)
-            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = description },
+            .drawBehind { if (listening) drawVoiceOrb(swirl?.value ?: 0f, breath?.value ?: 0f) }
+            .clip(CircleShape)
+            .then(
+                if (listening) Modifier
+                else Modifier.background(Brush.radialGradient(listOf(Color.White.copy(alpha = 0.07f), Color.White.copy(alpha = 0.02f))))
+            )
+            .litRim()
+            .pointerInput(pushToTalk) {
+                detectTapGestures(onPress = voicePress@{
+                    val down = android.os.SystemClock.uptimeMillis()
+                    val action = VoicePress.down(down, isListening, press[0], press[1])
+                    if (action == VoicePress.Action.NONE || (action == VoicePress.Action.START && !canStart)) return@voicePress
+                    val pressed = PressInteraction.Press(it)
+                    interaction.emit(pressed)
+                    act(action, down)
+                    val released = tryAwaitRelease()
+                    interaction.emit(PressInteraction.Release(pressed))
+                    if (released && pushToTalk && action == VoicePress.Action.START) {
+                        val up = android.os.SystemClock.uptimeMillis()
+                        if (VoicePress.upAfterStart(up - down) == VoicePress.Action.STOP) { press[1] = up; stop() }
+                    }
+                })
+            }
+            .semantics {
+                role = Role.Button
+                contentDescription = description
+                stateDescription = if (listening) "Listening" else "Not listening"
+                onClick(label = if (listening) "Stop" else "Talk") {
+                    if (isListening) stop() else if (canStart) start()
+                    true
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(46.dp)) {
-            val c = center
-            val r = size.minDimension / 2f
-            // Light rising into the bar above the orb.
-            val h = r * (2.3f + 0.25f * rise)
-            drawOval(Brush.radialGradient(
-                listOf(Color(0xE66EF0E4), Color(0x6641D7CB), Color(0x0041D7CB)),
-                center = Offset(c.x, c.y - r * 0.2f), radius = h,
-            ), topLeft = Offset(c.x - r * 1.25f, c.y - h - r * 0.1f), size = Size(r * 2.5f, h + r * 0.5f))
-            drawCircle(Brush.radialGradient(
-                listOf(Color(0xFF6FE8DC), Color(0xFF35C2B6), Color(0xFF1F9C93), Color(0xFF17827B)),
-                center = Offset(c.x, c.y - r * 0.24f), radius = r * 1.1f,
-            ), radius = r)
-            rotate(swirl) {
-                drawCircle(Brush.radialGradient(listOf(Color(0x73D2FFFA), Color(0x00D2FFFA)),
-                    center = Offset(c.x - r * 0.3f, c.y - r * 0.35f), radius = r * 0.7f), radius = r)
-                drawCircle(Brush.radialGradient(listOf(Color(0x8C085A56), Color(0x00085A56)),
-                    center = Offset(c.x + r * 0.35f, c.y + r * 0.45f), radius = r * 0.8f), radius = r)
-            }
+        content(if (listening) Color(0xFF052528) else Ink.copy(alpha = if (enabled) 1f else 0.45f))
+    }
+}
+
+/**
+ * The listening orb, drawn behind the button (not clipped by it, so the breath can rise into the bar). Every glow is a
+ * radial gradient that reaches zero inside what is drawn, so nothing has an edge.
+ */
+private fun DrawScope.drawVoiceOrb(swirl: Float, breath: Float) {
+    val c = center
+    val r = size.minDimension / 2f
+    // The breath: an upright soft ellipse above the orb, tight below it.
+    val pivot = Offset(c.x, c.y - r * 0.42f)
+    scale(scaleX = 1f, scaleY = 1.12f + 0.08f * breath, pivot = pivot) {
+        val glow = r * (1.22f + 0.06f * breath)
+        drawCircle(
+            Brush.radialGradient(
+                0f to Teal.copy(alpha = 0.48f + 0.12f * breath),
+                0.5f to Teal.copy(alpha = 0.20f + 0.06f * breath),
+                1f to Teal.copy(alpha = 0f),
+                center = pivot, radius = glow,
+            ),
+            radius = glow, center = pivot,
+        )
+    }
+    // The sphere, lit from the shared light.
+    val lx = GlassLight.x
+    val ly = GlassLight.y
+    val len = kotlin.math.hypot(lx, ly).coerceAtLeast(0.001f)
+    val hx = lx / len
+    val hy = ly / len
+    val orb = Path().apply { addOval(Rect(c, r)) }
+    clipPath(orb) {
+        drawCircle(
+            Brush.radialGradient(
+                0f to Color(0xFF8FF3E8), 0.45f to Color(0xFF3CC4B8), 0.85f to Color(0xFF1B8C84), 1f to Color(0xFF116560),
+                center = Offset(c.x + hx * r * 0.35f, c.y + hy * r * 0.35f), radius = r * 1.35f,
+            ),
+            radius = r, center = c,
+        )
+        rotate(swirl, pivot = c) {
+            drawCircle(Brush.radialGradient(listOf(Color(0x59E6FFFB), Color(0x00E6FFFB)),
+                center = Offset(c.x - r * 0.32f, c.y - r * 0.28f), radius = r * 0.62f), radius = r, center = c)
+            drawCircle(Brush.radialGradient(listOf(Color(0x66074A46), Color(0x00074A46)),
+                center = Offset(c.x + r * 0.38f, c.y + r * 0.40f), radius = r * 0.7f), radius = r, center = c)
         }
-        content()
+        // A small soft highlight towards the light.
+        drawCircle(Brush.radialGradient(listOf(Color(0x6BFFFFFF), Color(0x00FFFFFF)),
+            center = Offset(c.x + hx * r * 0.45f, c.y + hy * r * 0.45f), radius = r * 0.42f), radius = r, center = c)
     }
 }
 
