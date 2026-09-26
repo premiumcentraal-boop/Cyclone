@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.43 dev2: the Cyclone app's own Ask and task screens on the same tilt-lit glass as the overlay.
+# Cyclone V5 alpha.43 dev3: the + drawer on the working card's glass, and a voice orb that is calm, soft and never stops itself.
 # Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.43.dev2"
+product_version = "5.0.0-alpha.43.dev3"
 channel = "development"
-android_version_code = 186
+android_version_code = 187
 python_version = "5.0.0-alpha.43.dev1"
 
 [components]
-mobile = "5.0.0-alpha.43.dev2"
+mobile = "5.0.0-alpha.43.dev3"
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line; pc_companion is Cyclone One.
 glass = "1.0.0-alpha.26"
@@ -24,4 +24,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha43-dev2-in-app-glass"
+candidate_generation = "cyclone-v5-alpha43-dev3-glass-drawer-voice"
