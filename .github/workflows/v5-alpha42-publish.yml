@@ -10,10 +10,10 @@ concurrency:
   group: v5-alpha42-publish
   cancel-in-progress: true
 env:
-  SOURCE_SHA: a569ef7259aaa40aaad6e4311ce2ae26c6bbeadb
-  MOBILE_RUN: '36252669877'
-  PC_RUN: '36252669687'
-  GLASS_UI_RUN: '36252669632'
+  SOURCE_SHA: ac78ccb662155f8ac6292763fab90a993f95c810
+  MOBILE_RUN: '36254692754'
+  PC_RUN: '36254692412'
+  GLASS_UI_RUN: '36254692482'
   APK_NAME: Cyclone-5.0.0-alpha.42.dev1.apk
   # The rotated release key (alpha.34 and the re-signed alpha.39) and the historical key its lineage starts from.
   RELEASE_CERT_SHA256: e78c6e0b32d66da05839243c65e9987ba54722d402543f00408b57b1585dbf60
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: a569ef7259aaa40aaad6e4311ce2ae26c6bbeadb
+          ref: ac78ccb662155f8ac6292763fab90a993f95c810
           persist-credentials: false
       - name: Download and verify existing successful builds
         env:
