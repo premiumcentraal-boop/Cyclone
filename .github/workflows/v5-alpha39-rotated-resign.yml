@@ -4,9 +4,8 @@ name: Re-sign V5 alpha.39 with the rotated release key
 # only) could not be installed over it. This re-signs the exact, already-verified alpha.39 CI build with the release
 # key and lineage (the same scheme as mobile-release.yml) and replaces the APK on the alpha.39 release.
 on:
-  push:
-    branches: ['claude/cyclone-v5-handoff-review-9qrs40']
-    paths: ['.github/workflows/v5-alpha39-rotated-resign.yml']
+  # Dispatched by scripts/release/upload-rotated-signing-for-alpha39.ps1 once the release key secrets are in place.
+  workflow_dispatch:
 permissions:
   contents: write
   actions: read
