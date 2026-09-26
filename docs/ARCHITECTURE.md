@@ -66,6 +66,22 @@ card, and the `go_to` tool walks a route through the ordinary act path, re-readi
 stopping at the first surprise; walks and surprises feed back into the store. The Lab variant knob `useMap` A/B-tests
 it.
 
+### Background always (since 5.0.0-alpha.42)
+
+`BackgroundCapabilities` turns the setup facts into one level (ready, needs start, needs setup, off, unsupported) with
+one action; the Background work switch, the `CycloneBackgroundTile` Quick Settings tile and `BackgroundWatch` (boot,
+update and app-start checks, one quiet notification) read it. The gateway's `POST /v1/devices/{id}/background/keep-on`
+(`cyclone_device_gateway/background/keep_on.py`) grants only the helper's start-on-boot permission and proves it.
+`StartPolicy.begin` decides the first plane from the mode, the fallback (`PlaneFallback`), the per-app choice
+(`PlaneOverride` in `AppPlaneCompat`) and who holds the app (`TargetHolder`: nobody, Recents, owner): launch, adopt
+from Recents, a second window (`WorkspaceUserService.launchSecond`, the owner's window restored if moved), wait, ask
+or the screen. `MissionPlaneSession` waits for the owner (Start now through Task Kit) and yields an app the owner
+opens, taking it back when they leave. The workspace path types with the Hands ladder on the background display, swipes
+sideways with the approval check, opens https/geo links in the app itself (`view`), sizes the display like the phone
+(`WorkspaceShape`) and accepts an existing frame on a still page. `reply_notification` answers through the message's
+reply action with approval (tier 0). `MissionQueue` holds separate tasks as Runs next. Plan:
+`Cyclone V5 plan/26-background-always.md`.
+
 ### Hands: text delivery (since 5.0.0-alpha.41)
 
 A Mind mission's environment is built with `ownerMission = true`: `phone.type` into an ordinary editable field is

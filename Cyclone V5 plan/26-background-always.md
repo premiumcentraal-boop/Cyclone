@@ -1,6 +1,7 @@
 # 26 — Background that always works (plan for alpha.42)
 
-**Status:** plan, 2026-09-26. Not built. Follows Planes (plan 25, alpha.40) and Hands (plan 21, alpha.41).
+**Status:** built in **alpha.42** (2026-09-26): A42-1 to A42-9. A42-0 (device evidence) and the Pixel acceptance bars
+are still owed; the still-page frame rule was changed before measuring it. Follows Planes (plan 25) and Hands (plan 21).
 Proposed as **alpha.42**, with parallel sessions in **alpha.43**. Drive (plan 24) moves to alpha.44–45: a voice
 assistant in the car must be able to rely on the background.
 
