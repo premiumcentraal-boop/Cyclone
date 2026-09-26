@@ -33,11 +33,13 @@ sealed class TaskCommand(val wire: String, val label: String) {
     data object MoveToForeground : TaskCommand("to_screen", "Show on screen")
     /** The pill's long-press: this app may always run in the background, whatever Cyclone learned. */
     data object AllowBackground : TaskCommand("allow_background", "Always in background")
+    /** Plan 26: the mission waits for an app the owner is using; start now, on the owner's screen. */
+    data object StartNow : TaskCommand("start_now", "Start now")
 
     companion object {
         // Lazy: the command objects extend this class, so they do not exist yet while its companion initializes.
         val ALL: List<TaskCommand> by lazy { listOf(Stop, TakeOver, Pause, Done, Autofill, Confirm(null), Approve, Decline, Reply(""), Fill(emptyMap(), false),
-            MoveToBackground, MoveToForeground, AllowBackground) }
+            MoveToBackground, MoveToForeground, AllowBackground, StartNow) }
 
         fun parse(action: String?, confirmation: String? = null, text: String? = null): TaskCommand? = when (action?.trim()?.lowercase()) {
             "reply" -> text?.trim()?.takeIf { it.isNotEmpty() }?.let { Reply(it.take(2_000)) }
@@ -52,6 +54,7 @@ sealed class TaskCommand(val wire: String, val label: String) {
             "to_background", "background" -> MoveToBackground
             "to_screen", "foreground", "screen" -> MoveToForeground
             "allow_background" -> AllowBackground
+            "start_now" -> StartNow
             else -> null
         }
     }

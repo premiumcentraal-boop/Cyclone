@@ -74,6 +74,11 @@ object LiveVisionRuntime {
             broker.latest(sessionId)?.frameId ?: 0, SystemClock.uptimeMillis())
     }
 
+    /** A frame arrived since this source started (it may be old: a still screen sends no new frames). */
+    fun hasFrame(sessionId: String): Boolean = synchronized(lock) {
+        sources.containsKey(sessionId) && broker.latest(sessionId) != null
+    }
+
     fun healthy(sessionId: String = ExecutionSession.DEFAULT_FOREGROUND_SESSION_ID): Boolean = synchronized(lock) {
         sources.containsKey(sessionId) && broker.ageMs(sessionId, SystemClock.uptimeMillis())?.let { it in 0..750 } == true
     }

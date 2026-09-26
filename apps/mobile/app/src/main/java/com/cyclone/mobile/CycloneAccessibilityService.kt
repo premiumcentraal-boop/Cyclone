@@ -546,6 +546,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         value: CharSequence,
         displayId: Int,
         targetPackage: String,
+        /** True for secrets (set-text only, exact in-process match); false for ordinary text (the full ladder). */
+        redact: Boolean = true,
     ): PhoneTypeEngine.LiveResult {
         if (displayId <= 0 || targetPackage.isBlank()) {
             return PhoneTypeEngine.LiveResult(
@@ -559,7 +561,7 @@ class CycloneAccessibilityService : AccessibilityService() {
             plan,
             value,
             AccessibilityTypeLive(displayId = displayId, targetPackage = targetPackage),
-            redactObservedText = true,
+            redactObservedText = redact,
         )
     }
 
@@ -642,7 +644,7 @@ class CycloneAccessibilityService : AccessibilityService() {
         override fun paste(handle: Any, value: CharSequence): Boolean {
             val target = handle as? AccessibilityTypeHandle ?: return false
             val node = target.node
-            if (node.isPassword || displayId != 0) return false
+            if (node.isPassword) return false
             val clipboard = getSystemService(android.content.ClipboardManager::class.java) ?: return false
             val previous = runCatching { clipboard.primaryClip }.getOrNull()
             val clip = android.content.ClipData.newPlainText("Cyclone", value).apply {
@@ -660,8 +662,10 @@ class CycloneAccessibilityService : AccessibilityService() {
                         putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, length)
                     })
                 }
-                val rect = Rect().also { node.getBoundsInScreen(it) }
-                TraceField.acted(TraceActKind.TYPE, rect.exactCenterX(), rect.exactCenterY())
+                if (displayId == 0) {
+                    val rect = Rect().also { node.getBoundsInScreen(it) }
+                    TraceField.acted(TraceActKind.TYPE, rect.exactCenterX(), rect.exactCenterY())
+                }
                 node.performAction(AccessibilityNodeInfo.ACTION_PASTE).also {
                     // Give the app a moment to read the clip before it is replaced.
                     Thread.sleep(PASTE_SETTLE_MS)

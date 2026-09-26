@@ -34,6 +34,8 @@ data class PlaneUi(
     val note: String? = null,
     /** The app the mission works in, when known. */
     val appLabel: String? = null,
+    /** Plan 26: the mission waits for the owner to be done with this app (or yields it to them right now). */
+    val waitingFor: String? = null,
 )
 
 /**
@@ -120,6 +122,12 @@ object MissionPlanes {
         return true
     }
 
+    /** Plan 26 (A42-5): the owner pressed Start now while the mission waits for an app they are using. */
+    fun startNow(): Boolean {
+        val session = current ?: return false
+        return session.startNow()
+    }
+
     /** The mission is stopping: nothing may stay held at a step boundary. */
     fun release() {
         current?.releaseGate()
@@ -162,6 +170,12 @@ class MissionPlaneSession internal constructor(
     /** The task came from the owner's screen (the pill), so it goes back there when the mission ends. */
     @Volatile private var returnToScreen = false
     @Volatile private var note: String? = null
+    /** Plan 26: the app the mission waits for (the owner holds it), shown on the pill with Start now. */
+    @Volatile private var waitingFor: String? = null
+    @Volatile private var startNowPressed = false
+    @Volatile private var stopping = false
+    /** Asks the owner a question with choices (the mission's own card); null when unanswered. */
+    @Volatile private var askOwner: ((String, List<String>) -> String?)? = null
     private val compat = MissionPlanes.compat(context)
     private val port = AndroidPlanePort()
     private val switcher = PlaneSwitcher(port, MissionPlanes.journal(context))
@@ -177,9 +191,16 @@ class MissionPlaneSession internal constructor(
     }
 
     /** The toolbox this session drives; set once, right after it is built. */
-    fun attach(toolbox: PhoneMindToolbox) {
+    fun attach(toolbox: PhoneMindToolbox, ask: ((String, List<String>) -> String?)? = null) {
         this.toolbox = toolbox
+        this.askOwner = ask
         refresh()
+    }
+
+    fun startNow(): Boolean {
+        if (waitingFor == null) return false
+        startNowPressed = true
+        return true
     }
 
     fun packageName(): String? = when (val p = plane) {
@@ -214,7 +235,16 @@ class MissionPlaneSession internal constructor(
                 if (pkg == here) return null
                 moveApp(background, pkg)
             }
-            "open_link", "open_settings", "set_timer", "set_alarm", "open_notification" ->
+            "open_link" -> {
+                // Plan 26 (A42-3): a link opens in the background too: in this app when it handles it, otherwise in the
+                // app that does, on its own background screen.
+                val handler = linkHandler(arguments.optString("url"))
+                when {
+                    handler == null -> switchTo(PlaneKind.SCREEN, "This link opens something that needs your screen.", null)
+                    handler != here -> moveApp(background, handler)
+                }
+            }
+            "open_settings", "set_timer", "set_alarm", "open_notification" ->
                 switchTo(PlaneKind.SCREEN, "This step opens another app, so it runs on your screen.", null)
         }
         return null
@@ -231,40 +261,144 @@ class MissionPlaneSession internal constructor(
 
     // ---- start ---------------------------------------------------------------------------------------------------
 
-    @Synchronized
-    private fun startPlane(pkg: String) {
+    private fun startFacts(pkg: String): StartFacts {
         val blocker = MissionPlanes.blocker(context)
         val foreground = BackgroundSetup.foregroundPackage()
-        val decision = PlanePolicy.start(PlaneFacts(
+        val holder = if (blocker == null) runCatching { WorkspaceRuntime.holder(context, pkg) }.getOrDefault(TargetHolder.NOBODY)
+            else if (pkg == foreground) TargetHolder.OWNER else TargetHolder.NOBODY
+        return StartFacts(
             mode = mode,
+            fallback = MissionPlanes.fallback(context),
+            override = compat.override(pkg),
             backgroundReady = blocker == null,
             backgroundBlocker = blocker,
             ownerBusyElsewhere = ownerBusy(foreground),
             targetCompat = compat.status(pkg, MissionPlanes.versionOf(context, pkg)),
             needsHands = HANDS.containsMatchIn(goal),
-        ))
-        trace("PLANE_START", "${decision.plane.label}: ${decision.reason}")
-        if (decision.plane != PlaneKind.BACKGROUND) { note = decision.reason; refresh(); return }
-        // The app the owner is looking at stays theirs; Cyclone does not take it off their screen at the start.
-        if (pkg == foreground) { note = "You are using this app, so Cyclone works on screen."; refresh(); return }
-        val started = runCatching { WorkspaceRuntime.create(context, pkg) }
+            holder = holder,
+            secondWindow = compat.secondWindow(pkg) ?: (pkg in LIKELY_SECOND_WINDOW),
+            appLabel = label(pkg) ?: "this app",
+        )
+    }
+
+    /** Plan 26 (A42-4, A42-5): where the first app of the mission runs, with the owner's preferences and who holds it. */
+    @Synchronized
+    private fun startPlane(pkg: String) {
+        var facts = startFacts(pkg)
+        var plan = StartPolicy.begin(facts)
+        trace("PLANE_START", "${plan.javaClass.simpleName}: ${plan.reason}")
+        if (plan is StartPlan.Ask) {
+            val answer = askOwner?.invoke("${plan.reason} Where should Cyclone work in ${facts.appLabel}?", StartPolicy.ASK_CHOICES)
+            plan = when (answer?.let(StartPolicy::answer)) {
+                StartChoice.WHEN_DONE -> StartPlan.Wait("You asked Cyclone to start when you are done with ${facts.appLabel}.")
+                StartChoice.TAKE_TO_BACKGROUND -> StartPlan.Background("You moved ${facts.appLabel} to the background.",
+                    if (facts.holder == TargetHolder.OWNER) BackgroundEntry.TAKE_FROM_OWNER else BackgroundEntry.LAUNCH)
+                else -> StartPlan.Screen("You asked Cyclone to work on your screen.")
+            }
+            if (plan is StartPlan.Background && !facts.backgroundReady) plan = StartPlan.Screen(facts.backgroundBlocker ?: "Background work is not available.")
+        }
+        if (plan is StartPlan.Wait) {
+            if (!waitForOwner(pkg, facts.appLabel)) { note = "You asked Cyclone to start now, on your screen."; refresh(); return }
+            facts = startFacts(pkg)
+            plan = if (facts.backgroundReady && facts.holder != TargetHolder.OWNER) StartPlan.Background("You are done with ${facts.appLabel}; Cyclone works behind your screen.",
+                if (facts.holder == TargetHolder.RECENTS) BackgroundEntry.ADOPT_FROM_RECENTS else BackgroundEntry.LAUNCH)
+                else StartPlan.Screen(facts.backgroundBlocker ?: "Cyclone works on your screen.")
+        }
+        when (plan) {
+            is StartPlan.Screen -> { note = plan.reason; refresh() }
+            is StartPlan.Background -> enterBackground(pkg, plan.entry, plan.reason, facts)
+            else -> { note = plan.reason; refresh() }
+        }
+    }
+
+    /** Bring [pkg] onto a new background screen the way the plan says; on failure the mission stays where it is. */
+    private fun enterBackground(pkg: String, entry: BackgroundEntry, reason: String, facts: StartFacts, from: TaskPlane.Background? = null): Boolean {
+        val version = MissionPlanes.versionOf(context, pkg)
+        val started = runCatching {
+            when (entry) {
+                BackgroundEntry.SECOND_WINDOW -> WorkspaceRuntime.openSecond(context, pkg)
+                BackgroundEntry.TAKE_FROM_OWNER -> WorkspaceRuntime.adopt(context, pkg).also { returnToScreen = true }
+                BackgroundEntry.LAUNCH, BackgroundEntry.ADOPT_FROM_RECENTS -> WorkspaceRuntime.create(context, pkg)
+            }
+        }
+        if (entry == BackgroundEntry.SECOND_WINDOW) compat.recordSecondWindow(pkg, started.isSuccess)
         started.onSuccess { session ->
+            from?.let { runCatching { WorkspaceRuntime.close(it.sessionId) } }
             startedIn = PlaneKind.BACKGROUND
-            land(TaskPlane.Background(session.sessionId, session.displayId), "Cyclone now works on a background screen with only this app. " +
-                "The owner keeps using their phone. The app starts at its first screen.")
-            compat.record(pkg, MissionPlanes.versionOf(context, pkg), PlaneOutcome.WORKED)
-        }.onFailure { error ->
-            note = BackgroundSetup.failure(context, pkg, error as? Exception ?: IllegalStateException(error))
-            compat.record(pkg, MissionPlanes.versionOf(context, pkg), PlaneOutcome.SWITCH_FAILED, error.message?.take(120))
-            trace("PLANE_START_FAILED", note.orEmpty())
+            land(TaskPlane.Background(session.sessionId, session.displayId), when (entry) {
+                BackgroundEntry.LAUNCH -> "Cyclone now works on a background screen with only ${facts.appLabel}. The owner keeps using their phone. The app starts at its first screen."
+                BackgroundEntry.ADOPT_FROM_RECENTS -> "Cyclone now works on a background screen with ${facts.appLabel}, on the page it was left on. Look at the screen before acting."
+                BackgroundEntry.SECOND_WINDOW -> "Cyclone works in a second window of ${facts.appLabel} on a background screen; the owner keeps theirs."
+                BackgroundEntry.TAKE_FROM_OWNER -> "The owner moved ${facts.appLabel} to the background for Cyclone, on the same page. Look at the screen before acting."
+            })
+            note = reason
+            compat.record(pkg, version, PlaneOutcome.WORKED)
+            return true
+        }
+        val error = started.exceptionOrNull()
+        trace("PLANE_START_FAILED", "${entry.name.lowercase()}: ${error?.message.orEmpty().take(160)}")
+        if (entry == BackgroundEntry.SECOND_WINDOW) {
+            // One window only: fall back to what the owner chose for an app they are using.
+            val retry = StartPolicy.begin(facts.copy(secondWindow = false))
+            if (retry is StartPlan.Background) return enterBackground(pkg, retry.entry, retry.reason, facts, from)
+            note = retry.reason
+            refresh()
+            return false
+        }
+        compat.record(pkg, version, PlaneOutcome.SWITCH_FAILED, error?.message?.take(120))
+        note = BackgroundSetup.failure(context, pkg, error as? Exception ?: IllegalStateException(error))
+        refresh()
+        return false
+    }
+
+    /**
+     * Plan 26 (A42-5): wait until the owner is done with [pkg] (it leaves their screen). False when they pressed
+     * Start now or the mission stopped. The Mind waits at its step boundary; nothing is typed meanwhile.
+     */
+    private fun waitForOwner(pkg: String, appLabel: String): Boolean {
+        waitingFor = appLabel
+        startNowPressed = false
+        note = "Waiting for you to finish with $appLabel."
+        refresh()
+        trace("PLANE_WAIT", "Waiting for the owner to finish with $appLabel")
+        try {
+            while (!ended && !stopping && !startNowPressed) {
+                val foreground = BackgroundSetup.foregroundPackage()
+                if (foreground != pkg && DeviceState.currentPackage != pkg && foreground != null) {
+                    // A short grace: switching between apps passes through others.
+                    Thread.sleep(OWNER_LEFT_GRACE_MS)
+                    if (BackgroundSetup.foregroundPackage() != pkg) return true
+                }
+                Thread.sleep(WAIT_POLL_MS)
+            }
+            return false
+        } catch (_: InterruptedException) {
+            return false
+        } finally {
+            waitingFor = null
             refresh()
         }
     }
 
+    private fun linkHandler(url: String): String? = runCatching {
+        val uri = android.net.Uri.parse(url.trim().let { if (it.contains(":")) it else "https://$it" })
+        context.packageManager.resolveActivity(Intent(Intent.ACTION_VIEW, uri), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName?.takeUnless { it == "android" || it.contains("resolver", ignoreCase = true) }
+    }.getOrNull()
+
     /** Background work moves to another app: a new background screen for it, the old one closed. */
     @Synchronized
     private fun moveApp(from: TaskPlane.Background, pkg: String) {
-        if (pkg == BackgroundSetup.foregroundPackage()) {
+        val facts = startFacts(pkg)
+        if (facts.holder == TargetHolder.OWNER) {
+            // Plan 26 (A42-5): the owner is using that app: a second window, waiting, asking, or the screen, as chosen.
+            when (val plan = StartPolicy.begin(facts)) {
+                is StartPlan.Background -> { stopWatchdog(); if (!enterBackground(pkg, plan.entry, plan.reason, facts, from)) startWatchdog(); return }
+                is StartPlan.Wait -> if (waitForOwner(pkg, facts.appLabel)) {
+                    stopWatchdog(); if (!enterBackground(pkg, BackgroundEntry.ADOPT_FROM_RECENTS, "You are done with ${facts.appLabel}.", startFacts(pkg), from)) startWatchdog(); return
+                }
+                else -> Unit
+            }
             switchTo(PlaneKind.SCREEN, "You have that app open, so Cyclone continues on your screen.", PlaneSignal.OWNER_OPENED_APP)
             return
         }
@@ -376,6 +510,7 @@ class MissionPlaneSession internal constructor(
 
     /** Lets a held Mind step go (the mission is stopping); a later step on a broken plane fails on its own. */
     fun releaseGate() {
+        stopping = true
         toolbox?.gate?.resume()
     }
 
@@ -514,6 +649,13 @@ class MissionPlaneSession internal constructor(
             val background = plane as? TaskPlane.Background ?: return
             if (switcher.switching) continue
             val (service, present, _) = WorkspaceRuntime.probe(background.sessionId)
+            // Plan 26 (A42-5): the owner opened the app Cyclone was using. They win: Cyclone waits at its next step and
+            // takes the app back from Recents when they leave it.
+            val pkg = WorkspaceRuntime.packageOf(background.sessionId)
+            if (!present && pkg != null && BackgroundSetup.foregroundPackage() == pkg) {
+                yieldToOwner(background, pkg)
+                continue
+            }
             val verdict = BackgroundHealth.judge(HealthFacts(
                 binderAlive = runCatching { Shizuku.pingBinder() }.getOrDefault(false),
                 serviceAlive = service,
@@ -528,6 +670,44 @@ class MissionPlaneSession internal constructor(
                 HealthVerdict.Locked -> Unit
                 is HealthVerdict.Broken -> recover(background, verdict.problem)
             }
+        }
+    }
+
+    @Synchronized
+    private fun yieldToOwner(background: TaskPlane.Background, pkg: String) {
+        val gate = toolbox?.gate
+        if (gate != null && !gate.pause(PAUSE_TIMEOUT_MS)) return
+        val appLabel = label(pkg) ?: "this app"
+        trace("PLANE_YIELD", "The owner opened $appLabel; Cyclone pauses until they leave it")
+        try {
+            runCatching { WorkspaceRuntime.close(background.sessionId) }
+            plane = TaskPlane.Screen
+            DeviceState.setController(DeviceState.Controller.HUMAN)
+            waitingFor = appLabel
+            note = "Paused: you have $appLabel. Cyclone continues when you leave it."
+            refresh()
+            while (!ended && !stopping && !startNowPressed && BackgroundSetup.foregroundPackage() == pkg) Thread.sleep(WAIT_POLL_MS)
+            waitingFor = null
+            if (ended || stopping) return
+            if (startNowPressed) {
+                startNowPressed = false
+                land(TaskPlane.Screen, "The owner opened $appLabel and asked Cyclone to continue on their screen, in that app. Look at the screen before acting.")
+                return
+            }
+            val facts = startFacts(pkg)
+            val session = if (facts.backgroundReady) runCatching { WorkspaceRuntime.create(context, pkg) }.getOrNull() else null
+            if (session != null) {
+                land(TaskPlane.Background(session.sessionId, session.displayId), "The owner used $appLabel for a moment; Cyclone has it " +
+                    "back on the background screen. The page may have changed: look at the screen before acting.")
+            } else {
+                land(TaskPlane.Screen, "The owner used $appLabel; Cyclone could not take it back to the background and continues on the " +
+                    "owner's screen. Look at the screen before acting.")
+            }
+        } catch (_: InterruptedException) {
+            return
+        } finally {
+            gate?.resume()
+            refresh()
         }
     }
 
@@ -618,7 +798,7 @@ class MissionPlaneSession internal constructor(
 
     private fun ui(): PlaneUi {
         val blocker = MissionPlanes.blocker(context)
-        return PlaneUi(missionId, plane.kind, switcher.switching, blocker == null, note ?: blocker, label(packageName()))
+        return PlaneUi(missionId, plane.kind, switcher.switching, blocker == null, note ?: blocker, label(packageName()), waitingFor)
     }
 
     private fun refresh() {
@@ -629,6 +809,11 @@ class MissionPlaneSession internal constructor(
         const val PAUSE_TIMEOUT_MS = 2_500L
         const val VERIFY_MS = 1_500L
         const val WATCH_MS = 1_000L
+        const val WAIT_POLL_MS = 700L
+        const val OWNER_LEFT_GRACE_MS = 1_500L
+        /** Apps known to open a second window; others are learned (AppPlaneCompat.secondWindow). */
+        private val LIKELY_SECOND_WINDOW = setOf("com.android.chrome", "com.google.android.apps.docs.editors.docs",
+            "com.google.android.apps.docs.editors.sheets", "com.google.android.apps.docs.editors.slides")
         private val HANDS = Regex("(?i)\\b(sign in|log in|login|inloggen|password|wachtwoord|camera|photo|foto|selfie|scan|captcha)\\b")
 
         /** A frame is black when no sampled pixel is brighter than a dark UI's darkest text would be. */

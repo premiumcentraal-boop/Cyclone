@@ -91,7 +91,7 @@ object MindTaskController : TaskController {
     override val supported: Set<Class<out TaskCommand>> = setOf(TaskCommand.Stop::class.java, TaskCommand.TakeOver::class.java,
         TaskCommand.Pause::class.java, TaskCommand.Done::class.java, TaskCommand.Approve::class.java, TaskCommand.Decline::class.java,
         TaskCommand.Reply::class.java, TaskCommand.Fill::class.java, TaskCommand.MoveToBackground::class.java,
-        TaskCommand.MoveToForeground::class.java, TaskCommand.AllowBackground::class.java)
+        TaskCommand.MoveToForeground::class.java, TaskCommand.AllowBackground::class.java, TaskCommand.StartNow::class.java)
 
     private fun open(kind: OwnerRequestKind) = MindMissions.inbox.pending.value?.takeIf { it.kind == kind }
 
@@ -139,6 +139,8 @@ object MindTaskController : TaskController {
         TaskCommand.AllowBackground -> if (MissionPlanes.allowCurrentApp(TaskCommands.context()))
             TaskCommandResult.done(engine, "This app may run in the background from now on.")
             else TaskCommandResult.refused(engine, "Cyclone is not working in an app right now.")
+        TaskCommand.StartNow -> if (MissionPlanes.startNow()) TaskCommandResult.done(engine, "Starting now, on your screen.")
+            else TaskCommandResult.refused(engine, "Cyclone is not waiting for an app.")
         else -> TaskCommandResult.refused(engine, "${command.label} is not available for Cyclone Mind.")
     }
 

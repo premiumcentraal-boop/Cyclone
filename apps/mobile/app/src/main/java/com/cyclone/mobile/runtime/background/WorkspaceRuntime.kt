@@ -58,9 +58,40 @@ object WorkspaceRuntime {
         appContext = context.applicationContext
         connect(context)
         require(packageName != context.packageName && packageName != DeviceState.currentPackage) { "Choose an app that is not on your main screen" }
+        // Plan 26 (A42-2): an app that is only in Recents keeps its task and state: adopt it instead of refusing.
+        if (mainTaskPresent(packageName)) return@synchronized open(packageName) { id -> checked(backend!!.adopt(id, packageName)) }
         val component = context.packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToString()
             ?: error("No launchable app for that package")
         open(packageName) { id -> checked(backend!!.launch(id, component)) }
+    }
+
+    /** Plan 26: where the app is now: on the owner's screen, only in Recents, or nowhere. */
+    fun holder(context: Context, packageName: String): com.cyclone.mobile.runtime.plane.TargetHolder = synchronized(lock) {
+        if (packageName == DeviceState.currentPackage || packageName == BackgroundSetup.foregroundPackage()) {
+            return@synchronized com.cyclone.mobile.runtime.plane.TargetHolder.OWNER
+        }
+        runCatching { connect(context) }
+        if (runCatching { mainTaskPresent(packageName) }.getOrDefault(false)) com.cyclone.mobile.runtime.plane.TargetHolder.RECENTS
+        else com.cyclone.mobile.runtime.plane.TargetHolder.NOBODY
+    }
+
+    private fun mainTaskPresent(packageName: String): Boolean =
+        backend?.mainTask(packageName)?.let { it.getBoolean("ok") && it.getBoolean("present") } == true
+
+    /** Plan 26 (A42-5): a second window of an app the owner is using; fails (and restores) for single-window apps. */
+    fun openSecond(context: Context, packageName: String): ExecutionSession = synchronized(lock) {
+        appContext = context.applicationContext
+        connect(context)
+        val component = context.packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToString()
+            ?: error("No launchable app for that package")
+        open(packageName) { id -> checked(backend!!.launchSecond(id, component)) }
+    }
+
+    /** Plan 26 (A42-3): open a link in the app this background screen holds. */
+    fun view(sessionId: String, uri: String) = synchronized(lock) {
+        entries[sessionId] ?: error("STALE_SESSION")
+        checked(backend?.view(sessionId, uri) ?: error("BACKEND_DISCONNECTED"))
+        com.cyclone.mobile.gateway.GatewayObservationStore.clear(sessionId)
     }
 
     /**
@@ -91,10 +122,13 @@ object WorkspaceRuntime {
 
     private fun open(packageName: String, attach: (String) -> Bundle): ExecutionSession {
         val id = "workspace-${UUID.randomUUID()}"
-        val reader = ImageReader.newInstance(720, 1280, PixelFormat.RGBA_8888, 2)
+        // Plan 26 (A42-3): the background screen has the phone's own shape and density (scaled to at most 1080 px
+        // wide), so apps pick the same layout as on the phone and learned maps keep matching.
+        val (width, height, density) = screenShape()
+        val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         val thread = HandlerThread("cyclone-workspace-frames").apply { start() }
         try {
-            val created = checked(backend!!.create(id, reader.surface, 720, 1280, 240))
+            val created = checked(backend!!.create(id, reader.surface, width, height, density))
             val displayId = created.getInt("displayId", -1)
             require(displayId > 0)
             val launched = attach(id)
@@ -127,6 +161,16 @@ object WorkspaceRuntime {
             }
             throw error
         }
+    }
+
+    private fun screenShape(): Triple<Int, Int, Int> {
+        val metrics = android.util.DisplayMetrics()
+        runCatching {
+            @Suppress("DEPRECATION")
+            appContext?.getSystemService(android.hardware.display.DisplayManager::class.java)
+                ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.getRealMetrics(metrics)
+        }
+        return WorkspaceShape.of(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
     }
 
     fun requireScope(scope: ExecutionContext): ExecutionSession = synchronized(lock) {
@@ -191,7 +235,11 @@ object WorkspaceRuntime {
             pause(scope.sessionId)
             error("SCREEN_LOCKED: unlock and resume the task")
         }
-        check(LiveVisionRuntime.healthy(scope.sessionId)) { "FRAME_STREAM_STALLED: no fresh workspace vision" }
+        // Plan 26 (A42-3): a still page sends no new frames. The accessibility fingerprint check before every action
+        // already proves the page is current, so a frame that exists is enough; none at all is still a stall.
+        check(LiveVisionRuntime.healthy(scope.sessionId) || LiveVisionRuntime.hasFrame(scope.sessionId)) {
+            "FRAME_STREAM_STALLED: no workspace vision"
+        }
         val remote = checked(backend!!.status(scope.sessionId))
         check(remote.getBoolean("agent")) { "HUMAN_HAS_CONTROL: stale input authority" }
     }

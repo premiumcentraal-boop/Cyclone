@@ -335,7 +335,9 @@ object MindMissions {
                 skill = if (useMap && mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, mission.goal) }.getOrNull()
                     ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
                 planes = planes)
-            planes?.attach(toolbox)
+            // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
+            // own owner question, answered on the same card as any other.
+            planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()

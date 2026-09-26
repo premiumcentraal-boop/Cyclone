@@ -332,6 +332,7 @@ object PhoneToolExecutor {
             val commands = com.cyclone.mobile.runtime.background.WorkspaceCommands
             val humanize = humanizePreference(p)
             val viewport = runtime.authorizeTouch(scope, generation)
+            var typed: JSONObject? = null
             when (request.tool) {
                 "phone.click", "phone.tap", "phone.long_press" -> {
                     val node = guardedPoint()
@@ -366,9 +367,23 @@ object PhoneToolExecutor {
                 "phone.swipe" -> {
                     val x1 = p.optDouble("x1").toFloat(); val y1 = p.optDouble("y1").toFloat()
                     val x2 = p.optDouble("x2").toFloat(); val y2 = p.optDouble("y2").toFloat()
-                    check(kotlin.math.abs(y2 - y1) > kotlin.math.abs(x2 - x1) && snapshot.nodes.any {
+                    check(snapshot.nodes.any {
                         it.scrollable && it.bounds.contains(x1.toInt(), y1.toInt()) && it.bounds.contains(x2.toInt(), y2.toInt())
-                    }) { "UNSUPPORTED: workspace swipes require a vertical scrollable target" }
+                    }) { "UNSUPPORTED: workspace swipes require a scrollable target" }
+                    // Plan 26 (A42-3): sideways swipes (carousels, tabs) are allowed; swipe-to-delete or slide-to-pay
+                    // under the start point asks the owner first, like a tap on it would.
+                    if (kotlin.math.abs(x2 - x1) > kotlin.math.abs(y2 - y1)) {
+                        snapshot.nodes.filter { it.clickable && it.bounds.contains(x1.toInt(), y1.toInt()) }
+                            .minByOrNull { it.bounds.width * it.bounds.height }?.let { under ->
+                                val gate = com.cyclone.mobile.policy.GateClassifier.classify(request.tool,
+                                    com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(under, under, null))
+                                if (gate != null && !runtime.consumeConfirmation(scope.sessionId, request.tool, under.id, snapshot.fingerprint, gate.jsonKey)) {
+                                    runtime.requestConfirmation(scope.sessionId, request.tool, under.id, snapshot.fingerprint, gate.jsonKey)
+                                    runtime.pause(scope.sessionId, com.cyclone.mobile.runtime.background.WorkspaceState.BACKGROUND_NEEDS_HANDOFF)
+                                    error("POLICY_DENIED: human review is required")
+                                }
+                            }
+                    }
                     val landed = HumanGestureDispatch.swipe(
                         service, x1, y1, x2, y2, p.optLong("durationMs", 350),
                         humanize, RuntimeGestureKind.SWIPE, request.commandId, scope.displayId, viewport,
@@ -377,14 +392,26 @@ object PhoneToolExecutor {
                 }
                 "phone.back" -> runtime.input(scope, generation, commands.BACK)
                 "phone.type", "phone.replace_text" -> {
-                    val node = chosen?.takeIf { it.editable && it.text.isBlank() } ?: error("UNSUPPORTED: background typing currently requires an empty editable control")
-                    guardedPoint()
-                    val value = PhoneTypeEngine.typedValue(p).orEmpty()
-                    commands.input(scope.displayId, commands.TEXT, floatArrayOf(), value)
-                    runtime.input(scope, generation, commands.TAP, floatArrayOf(node.bounds.centerX, node.bounds.centerY))
-                    runtime.input(scope, generation, commands.TEXT, text = value)
+                    // Plan 26 (A42-3): the same delivery as on the main screen (set-text, read-back, paste), on this
+                    // display, for any ordinary field or the focused one. Secret fields stay with the Secrets Card.
+                    val catalog = PhoneTypeEngine.catalog(observation.id, observation.elements.values.map {
+                        PhoneTypeEngine.ObservationElementInput(it.id, it.source, it.role, it.evidence)
+                    }, snapshot)
+                    when (val decision = PhoneTypeEngine.decide(p, catalog)) {
+                        is PhoneTypeEngine.Decision.Reject -> return PhoneToolResult(request.commandId, request.tool, false, started,
+                            System.currentTimeMillis(), error = PhoneToolError(decision.deny.code, decision.deny.message))
+                        is PhoneTypeEngine.Decision.Execute -> {
+                            val live = service.typeEditableOnDisplay(decision.plan, PhoneTypeEngine.typedValue(p).orEmpty(), scope.displayId,
+                                session.targetPackage.orEmpty(), redact = false)
+                            if (!live.ok) return PhoneToolResult(request.commandId, request.tool, false, started, System.currentTimeMillis(),
+                                error = live.error ?: PhoneToolError(PhoneToolErrorCode.ACTION_FAILED, "Type failed"))
+                            typed = live.toPayload()
+                        }
+                    }
                 }
                 "phone.open_app" -> check(p.optString("package") == session.targetPackage) { "UNSUPPORTED: open another workspace for a different app" }
+                // Plan 26 (A42-3): a link the background app itself handles opens on its background screen.
+                "phone.launch_intent" -> runtime.view(scope.sessionId, p.optString("uri"))
                 else -> error("UNSUPPORTED: this operation cannot safely target a workspace")
             }
             if (request.tool in humanizeAwareTools) {
@@ -405,6 +432,7 @@ object PhoneToolExecutor {
                 .put("fastPath", settle.toJson())
                 .put("sessionId", scope.sessionId)
                 .put("displayId", scope.displayId)
+            typed?.let { t -> t.keys().forEach { key -> if (!payload.has(key)) payload.put(key, t.get(key)) } }
             if (request.tool in humanizeAwareTools) {
                 payload.put("humanGesture", workspaceGestureEvidence(request, scope, HumanGestureDispatch.consumeTrace(request.commandId)))
             }

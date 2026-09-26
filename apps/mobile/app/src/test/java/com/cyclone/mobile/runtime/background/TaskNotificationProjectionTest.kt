@@ -23,6 +23,8 @@ class TaskNotificationProjectionTest {
         assertEquals("unavailable background offers no move", listOf("cancel"),
             TaskNotificationProjection.actions(working, "screen", backgroundAvailable = false).map { it.first })
         assertEquals("tasks without planes are unchanged", listOf("cancel"), TaskNotificationProjection.actions(working).map { it.first })
+        assertEquals("a waiting mission offers Start now", listOf("start_now", "cancel"),
+            TaskNotificationProjection.actions(working, "screen", waiting = true).map { it.first })
     }
     @Test fun failedIsTerminalRatherThanActionNeeded() {
         val failed = TaskHarnessState.normalize(task, task.copy(phase = TaskPhase.FAILED, resumable = false))

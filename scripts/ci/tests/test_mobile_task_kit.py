@@ -37,7 +37,7 @@ class TaskKitGuards(unittest.TestCase):
 
     def test_plane_moves_only_from_task_kit(self):
         # Planes (plan 25): the pill, notification actions and Glass move a task only through the bus.
-        self.assertEqual(callers(r"MissionPlanes\.(request|allowCurrentApp)\("), {"task/TaskCommands.kt"})
+        self.assertEqual(callers(r"MissionPlanes\.(request|allowCurrentApp|startNow)\("), {"task/TaskCommands.kt"})
 
     def test_the_plane_pill_only_speaks_task_kit(self):
         pill = (BASE / "ui/overlay/PlanePill.kt").read_text(encoding="utf-8")

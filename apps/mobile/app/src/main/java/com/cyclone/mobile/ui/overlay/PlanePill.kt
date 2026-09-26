@@ -64,11 +64,12 @@ import com.cyclone.mobile.ui.v32.SignatureMuted
 private val PillTeal = Color(0xFF83DBD7)
 
 /** What the pill's symbol shows; pure so the states can be tested without Compose. */
-enum class PlanePillLook { SCREEN, BACKGROUND, SWITCHING, UNAVAILABLE }
+enum class PlanePillLook { SCREEN, BACKGROUND, SWITCHING, UNAVAILABLE, WAITING }
 
 object PlanePillModel {
     fun look(ui: PlaneUi): PlanePillLook = when {
         ui.switching -> PlanePillLook.SWITCHING
+        ui.waitingFor != null -> PlanePillLook.WAITING
         ui.kind == PlaneKind.BACKGROUND -> PlanePillLook.BACKGROUND
         !ui.available -> PlanePillLook.UNAVAILABLE
         else -> PlanePillLook.SCREEN
@@ -77,6 +78,7 @@ object PlanePillModel {
     /** What a tap does; null when a tap cannot do anything useful right now (the long-press explains). */
     fun tap(ui: PlaneUi): TaskCommand? = when (look(ui)) {
         PlanePillLook.SWITCHING, PlanePillLook.UNAVAILABLE -> null
+        PlanePillLook.WAITING -> TaskCommand.StartNow
         PlanePillLook.SCREEN -> TaskCommand.MoveToBackground
         PlanePillLook.BACKGROUND -> TaskCommand.MoveToForeground
     }
@@ -86,6 +88,7 @@ object PlanePillModel {
         PlanePillLook.BACKGROUND -> "Cyclone works in the background" + (ui.appLabel?.let { " in $it" } ?: "")
         PlanePillLook.SWITCHING -> "Moving the task"
         PlanePillLook.UNAVAILABLE -> "Background work is unavailable"
+        PlanePillLook.WAITING -> "Waiting for you to finish with ${ui.waitingFor}"
     }
 
     fun action(ui: PlaneUi): String = when (look(ui)) {
@@ -93,6 +96,7 @@ object PlanePillModel {
         PlanePillLook.BACKGROUND -> "Show on screen"
         PlanePillLook.SWITCHING -> "Please wait"
         PlanePillLook.UNAVAILABLE -> "Shows why"
+        PlanePillLook.WAITING -> "Start now"
     }
 }
 
@@ -166,6 +170,7 @@ internal fun PlanePill(modifier: Modifier = Modifier) {
 private fun PlaneSymbol(look: PlanePillLook) {
     val target = when (look) {
         PlanePillLook.BACKGROUND -> 1f
+        PlanePillLook.WAITING -> 0.5f
         else -> 0f
     }
     val settled by animateFloatAsState(target, tween(320, easing = FastOutSlowInEasing), label = "Plane light")

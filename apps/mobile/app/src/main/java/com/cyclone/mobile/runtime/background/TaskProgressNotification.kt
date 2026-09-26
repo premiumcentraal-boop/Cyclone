@@ -65,7 +65,7 @@ internal object TaskProgressNotification {
         } else {
             val plane = com.cyclone.mobile.runtime.plane.MissionPlanes.ui.value
                 ?.takeIf { com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX + it.missionId == task.taskId }
-            val projected = TaskNotificationProjection.actions(task, plane?.kind?.wire, plane?.available == true)
+            val projected = TaskNotificationProjection.actions(task, plane?.kind?.wire, plane?.available == true, waiting = plane?.waitingFor != null)
             projected.forEach { (command, label) ->
                 val parsed = com.cyclone.mobile.task.TaskCommand.parse(command, task.confirmation?.token) ?: return@forEach
                 val action = com.cyclone.mobile.task.TaskCommands.pendingIntent(context, task, parsed)

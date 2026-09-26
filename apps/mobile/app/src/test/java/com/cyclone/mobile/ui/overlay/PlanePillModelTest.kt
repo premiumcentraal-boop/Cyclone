@@ -32,4 +32,11 @@ class PlanePillModelTest {
         val broken = screen.copy(kind = PlaneKind.BACKGROUND, available = false)
         assertEquals(TaskCommand.MoveToForeground, PlanePillModel.tap(broken))
     }
+
+    @Test fun waitingForTheOwnersAppOffersStartNow() {
+        val waiting = screen.copy(waitingFor = "WhatsApp")
+        assertEquals(PlanePillLook.WAITING, PlanePillModel.look(waiting))
+        assertEquals(TaskCommand.StartNow, PlanePillModel.tap(waiting))
+        assertTrue(PlanePillModel.describe(waiting).contains("WhatsApp"))
+    }
 }

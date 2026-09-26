@@ -14,7 +14,9 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
     private val displays = shellContext.getSystemService(DisplayManager::class.java)
     private val readers = Executors.newCachedThreadPool()
     private data class Owned(val display: VirtualDisplay, val width: Int, val height: Int,
-        var generation: Long = 1, var agent: Boolean = true, var packageName: String? = null, var handedOffTask: Int? = null)
+        var generation: Long = 1, var agent: Boolean = true, var packageName: String? = null, var handedOffTask: Int? = null,
+        /** A second window of an app the owner also has open (plan 26): the owner's task stays on display 0. */
+        var sharedWithOwner: Boolean = false)
     private val workspaces = mutableMapOf<String, Owned>()
 
     @Synchronized override fun create(sessionId: String, surface: Surface, width: Int, height: Int, density: Int): Bundle = result {
@@ -125,10 +127,62 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
         describe(sessionId, owned).apply { putInt("taskId", task.taskId) }
     }
 
+    /** Plan 26 (A42-2): does the app have a task on the main display (visible or only in Recents)? */
+    @Synchronized override fun mainTask(packageName: String): Bundle = result {
+        require(packageName.matches(PACKAGE)) { "Invalid package" }
+        val present = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list")))
+            .any { it.packageName == packageName && it.displayId == 0 }
+        Bundle().apply { putBoolean("ok", true); putBoolean("present", present) }
+    }
+
+    /**
+     * Plan 26 (A42-3): open a link in the app this background screen holds, on this display. The caller checked that
+     * the app itself handles the link; the scheme is allowlisted and the argument is passed as one list element.
+     */
+    @Synchronized override fun view(sessionId: String, uri: String): Bundle = result {
+        val owned = valid(sessionId)
+        require(owned.agent)
+        val packageName = owned.packageName ?: error("STALE_SESSION: no app on this background screen")
+        require(uri.length <= 2_000 && VIEW_URI.matches(uri)) { "Unsupported link" }
+        command(listOf("/system/bin/am", "start", "-W", "--display", owned.display.display.displayId.toString(),
+            "-a", "android.intent.action.VIEW", "-d", uri, "-p", packageName))
+        requireTask(owned)
+        describe(sessionId, owned)
+    }
+
+    /**
+     * Plan 26 (A42-5): a second window of an app the owner is using, when the app supports several windows. If Android
+     * moved the owner's own window instead, it is put straight back and this fails.
+     */
+    @Synchronized override fun launchSecond(sessionId: String, component: String): Bundle = result {
+        val owned = valid(sessionId)
+        require(owned.agent && owned.packageName == null)
+        val packageName = component.substringBefore('/')
+        val before = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list")))
+            .filter { it.packageName == packageName && it.displayId == 0 }
+        val displayId = owned.display.display.displayId
+        command(listOf("/system/bin/am", "start", "-W", "--display", displayId.toString(), "-f", "0x18080000", "-n", component))
+        val after = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list"))).filter { it.packageName == packageName }
+        val moved = before.filter { owner -> after.any { it.taskId == owner.taskId && it.displayId == displayId } }
+        if (moved.isNotEmpty()) {
+            moved.forEach { command(listOf("/system/bin/am", "display", "move-stack", it.rootTaskId.toString(), "0")) }
+            error("SECOND_WINDOW_UNSUPPORTED: the app has one window; the owner's window was put back")
+        }
+        after.singleOrNull { it.displayId == displayId } ?: error("SECOND_WINDOW_UNSUPPORTED: no second window appeared")
+        owned.packageName = packageName
+        owned.sharedWithOwner = true
+        describe(sessionId, owned)
+    }
+
     @Synchronized override fun close(sessionId: String) { workspaces.remove(sessionId)?.display?.release() }
     @Synchronized override fun destroy() {
         workspaces.keys.toList().forEach(::close)
         readers.shutdownNow()
+    }
+
+    private companion object {
+        val PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")
+        val VIEW_URI = Regex("^(https?://|market://|geo:)[^\\s'\"`\\\\]+$")
     }
 
     private fun valid(id: String): Owned = workspaces[id]?.also {
@@ -138,7 +192,7 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
     private fun requireTask(owned: Owned): WorkspaceCommands.Task {
         val tasks = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list")))
             .filter { it.packageName == owned.packageName }
-        check(tasks.none { it.displayId == 0 }) { "FOREGROUND_REQUIRED: app moved to the human display" }
+        check(owned.sharedWithOwner || tasks.none { it.displayId == 0 }) { "FOREGROUND_REQUIRED: app moved to the human display" }
         return tasks.singleOrNull { it.displayId == owned.display.display.displayId }
             ?: error("BACKGROUND_MODE_UNAVAILABLE: cannot prove unique task ownership")
     }
