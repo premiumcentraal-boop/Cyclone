@@ -30,11 +30,11 @@ class MindMapTest {
     }
 
     private fun Reader.move(from: String, label: String, to: String, ok: Int = 1, seen: Int = ok,
-                            risk: ActionRisk = ActionRisk.SAFE, state: KnowledgeState = KnowledgeState.UNDERSTOOD) {
+                            risk: ActionRisk = ActionRisk.SAFE, state: KnowledgeState = KnowledgeState.UNDERSTOOD, confidence: Double = 0.7) {
         val actionId = "a-$from-$label"
         actions += LearnedAction(actionId, pkg, from, label.lowercase(), label, listOf("click"),
             """{"resourceId":"id/$label","role":"button"}""", risk, knowledgeState = state)
-        transitions += LearnedTransition("t-$from-$label", pkg, from, actionId, to, successfulCount = ok, observedCount = seen)
+        transitions += LearnedTransition("t-$from-$label", pkg, from, actionId, to, successfulCount = ok, observedCount = seen, confidence = confidence)
     }
 
     /** Settings → Display → Screen timeout, Settings → Network, plus a risky and a flaky door that must not be used. */
@@ -148,5 +148,15 @@ class MindMapTest {
         assertEquals(2, builds)
         assertTrue(maps.firstVisit(pkg))
         assertTrue(!maps.firstVisit(pkg))
+    }
+
+    @Test fun aConfirmedRouteIsPreferredOverAShorterOneOnlySeenOnATestAccount() {
+        val reader = Reader().apply {
+            screen("home", "Settings"); screen("display", "Display"); screen("timeout", "Screen timeout")
+            move("home", "Display", "display"); move("display", "Screen timeout", "timeout")
+            move("home", "Timeout shortcut", "timeout", confidence = 0.5)
+        }
+        val map = MindMap.from(reader, pkg)!!
+        assertEquals(listOf("Display", "Screen timeout"), map.route("home", "timeout")!!.map { it.label })
     }
 }

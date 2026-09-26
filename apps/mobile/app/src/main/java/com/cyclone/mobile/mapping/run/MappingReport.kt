@@ -18,6 +18,8 @@ object MappingReport {
         atlas: AtlasStoreMappingPort,
         session: ControllerSessionPort,
         events: List<MappingDriverEvent>,
+        /** What the pass taught runs (one map); null until it ends. Counts only. */
+        learned: com.cyclone.mobile.mind.learn.LearnReport? = null,
     ): JSONObject = JSONObject()
         .put("schema", SCHEMA)
         .put("mappingJobId", job.mappingJobId)
@@ -46,6 +48,7 @@ object MappingReport {
             .put("darkDoors", atlas.darkDoorCount())
             .put("blockedDoorEncounters", session.blockedDoors)
             .put("noProgressDoorAttempts", session.noProgressDoors))
+        .put("runsCanUse", learned?.let { JSONObject().put("screens", it.screens).put("moves", it.transitions) } ?: JSONObject.NULL)
         .put("steps", JSONArray().also { out ->
             events.forEach { event ->
                 out.put(JSONObject()

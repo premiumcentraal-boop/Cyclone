@@ -19,6 +19,8 @@ data class MapMove(
     val role: String?,
     val successes: Int,
     val observed: Int,
+    /** How much the move is trusted; moves only seen on a test account start at 0.5 until a walk confirms them. */
+    val confidence: Double = 0.7,
 ) {
     val reliability: Double get() = if (observed <= 0) 0.0 else successes.toDouble() / observed
 }
@@ -63,7 +65,7 @@ class MindMap(val packageName: String, val screens: List<MapScreen>, val moves: 
             val d = depth[at] ?: 0
             if (d >= maxMoves) continue
             for (move in outgoing[at].orEmpty()) {
-                val next = spent + 1.0 + (1.0 - move.reliability)
+                val next = spent + 1.0 + (1.0 - move.reliability) + if (move.confidence < CONFIRMED_CONFIDENCE) UNCONFIRMED_COST else 0.0
                 if (next < (cost[move.to] ?: Double.MAX_VALUE)) {
                     cost[move.to] = next
                     via[move.to] = move
@@ -107,6 +109,8 @@ class MindMap(val packageName: String, val screens: List<MapScreen>, val moves: 
         const val MAX_MOVES = 8
         const val MAX_CARD_LINES = 40
         const val MIN_RELIABILITY = 0.5
+        const val CONFIRMED_CONFIDENCE = 0.6
+        const val UNCONFIRMED_COST = 1.5
         private val HANDLE_PREFIX = Regex("^(s\\d+)\\b", RegexOption.IGNORE_CASE)
         private val ROUTABLE_RISK = setOf(ActionRisk.SAFE, ActionRisk.UNKNOWN)
 
@@ -123,7 +127,7 @@ class MindMap(val packageName: String, val screens: List<MapScreen>, val moves: 
                 if (action.knowledgeState == KnowledgeState.STALE || action.risk !in ROUTABLE_RISK || action.label.isBlank()) return@mapNotNull null
                 val move = MapMove(t.id, action.id, t.fromScreenId, t.toScreenId, action.label,
                     runCatching { JSONObject(action.selectorJson).optString("role").takeIf { it.isNotBlank() } }.getOrNull(),
-                    t.successfulCount, t.observedCount.coerceAtLeast(t.successfulCount))
+                    t.successfulCount, t.observedCount.coerceAtLeast(t.successfulCount), t.confidence)
                 move.takeIf { it.reliability >= MIN_RELIABILITY }
             }
             // Screens with a move in or out first (they are the useful ones), then the rest; handles are stable per map.

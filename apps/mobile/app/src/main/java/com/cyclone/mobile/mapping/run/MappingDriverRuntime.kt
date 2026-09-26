@@ -63,6 +63,9 @@ object MappingDriverRuntime {
         val driver: MappingDriver,
         /** This pass in the run trace (Glass Runs); null if the trace store could not open. */
         val trace: MappingRunTrace.Session?,
+        /** One map: what the pass walked, learned into app knowledge when it ends. */
+        val trail: MappingTrailTap,
+        val learning: MappingLearning,
     )
 
     private val executor = Executors.newSingleThreadExecutor { runnable ->
@@ -117,6 +120,7 @@ object MappingDriverRuntime {
             } finally {
                 running.remove(job.mappingJobId)
                 runCatching { ctx.trace?.park(controller.status(job.mappingJobId)) }
+                learnIfEnded(appContext, ctx)
             }
         }
     }
@@ -143,8 +147,29 @@ object MappingDriverRuntime {
         val controller = MappingSessionRuntime.controller(context)
         controller.stop(jobId)
         // A paused pass has no driver thread to close its run; close it here.
-        if (jobId !in running) jobs[jobId]?.trace?.let { trace -> runCatching { trace.park(controller.status(jobId)) } }
+        if (jobId !in running) {
+            jobs[jobId]?.trace?.let { trace -> runCatching { trace.park(controller.status(jobId)) } }
+            jobs[jobId]?.let { learnIfEnded(context.applicationContext, it) }
+        }
     }
+
+    /**
+     * One map: when a pass has ended (done, stopped or failed), what it walked becomes app knowledge, the same store
+     * Learn writes and runs route on (`go_to`). Paused passes are learned when they end.
+     */
+    private fun learnIfEnded(appContext: Context, ctx: JobContext) {
+        val job = MappingSessionRuntime.controller(appContext).status(ctx.job.mappingJobId) ?: return
+        if (!job.state.terminal) return
+        runCatching {
+            AppLearnerRuntime.initialize(appContext)
+            val store = AppLearnerRuntime.store
+            val report = ctx.learning.learnOnce(ctx.trail.snapshot(), job.identity) { ctx.label } ?: return
+            report.apps.forEach { runCatching { store.mirror(it.packageName) } }
+        }
+    }
+
+    /** What the current or last pass taught runs (null before it ends). */
+    fun learned(context: Context): com.cyclone.mobile.mind.learn.LearnReport? = lastJobId?.let { jobs[it]?.learning?.report }
 
     fun current(context: Context): MappingRunUi? {
         val id = lastJobId ?: return null
@@ -168,7 +193,7 @@ object MappingDriverRuntime {
         val id = lastJobId ?: return null
         val ctx = jobs[id] ?: return null
         val job = MappingSessionRuntime.controller(context).status(id) ?: return null
-        return MappingReport.build(job, ctx.atlas, ctx.session, ctx.driver.events).toString(2)
+        return MappingReport.build(job, ctx.atlas, ctx.session, ctx.driver.events, ctx.learning.report).toString(2)
     }
 
     private fun create(appContext: Context, job: MappingJob): JobContext {
@@ -188,12 +213,13 @@ object MappingDriverRuntime {
         val secrets = Run1MappingSecretsPort(appContext) { resolution ->
             if (resolution.taskMayResume) resume(appContext, job.mappingJobId)
         }
+        val trail = MappingTrailTap(job.mappingJobId)
         val walker = SafeMapperWalker(
             session = session,
-            observations = GatewayMappingObservationPort(appContext),
+            observations = GatewayMappingObservationPort(appContext, trail),
             atlas = atlas,
             safety = ExistingGateMappingSafetyPort(job.identity),
-            mutations = PhoneToolMappingMutationPort(appContext),
+            mutations = PhoneToolMappingMutationPort(appContext, trail),
             secrets = secrets,
         )
         val trace = runCatching { MappingRunTrace.Session(appContext, label, job.placeId, version?.versionName) }.getOrNull()
@@ -202,12 +228,13 @@ object MappingDriverRuntime {
             jobId = job.mappingJobId,
             walker = walker,
             session = session,
-            navigation = PhoneToolMappingNavigationPort(appContext),
+            navigation = PhoneToolMappingNavigationPort(appContext, trail),
             atlas = atlas,
             publishChanges = { changes -> controller.appendAtlasChanges(job.mappingJobId, changes) },
             onEvent = { event -> trace?.record(event) },
         )
-        return JobContext(job, label, atlas, session, driver, trace)
+        val learning = MappingLearning(com.cyclone.mobile.mind.learn.AppKnowledgeSink(AppLearnerRuntime.store))
+        return JobContext(job, label, atlas, session, driver, trace, trail, learning)
     }
 }
 

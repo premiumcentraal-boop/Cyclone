@@ -30,6 +30,8 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class GatewayMappingObservationPort(
     context: Context,
+    /** One map: the pass's trail, learned into app knowledge when the pass ends (plan 23). */
+    private val trail: com.cyclone.mobile.mapping.run.MappingTrailTap? = null,
 ) : MappingObservationPort {
     private val appContext = context.applicationContext
 
@@ -45,6 +47,9 @@ class GatewayMappingObservationPort(
                 }
             val captured = GatewayObservationAdapter.capture(appContext, args, AtlasPersona.MAPPING)
             val page = ObservationProjections.pageCard(captured, "", captured.generation, actionable = true)
+            runCatching {
+                trail?.observed(captured.id, captured.page, captured.elements.mapValues { (_, element) -> element.label to element.role })
+            }
             MappingStructuralProjection.fromGateway(captured)
                 .copy(inPlace = PlaceResolver.matchesCurrent(page, session.placeId))
         }.getOrNull()
@@ -94,6 +99,7 @@ internal fun MappingStructuralProjection.fromGateway(
  */
 class PhoneToolMappingNavigationPort(
     context: Context,
+    private val trail: com.cyclone.mobile.mapping.run.MappingTrailTap? = null,
 ) : MappingNavigationPort {
     private val appContext = context.applicationContext
     private val sequence = AtomicLong(0)
@@ -114,6 +120,7 @@ class PhoneToolMappingNavigationPort(
     }
 
     private fun run(session: MappingSessionSnapshot, tool: String, params: JSONObject): MappingMutationResult {
+        trail?.navigated()
         params.put("sessionId", session.sessionId).put("displayId", session.displayId)
         session.workspaceId?.let { params.put("workspaceId", it) }
         session.workspaceGeneration?.let { params.put("workspaceGeneration", it) }
@@ -194,6 +201,7 @@ class ExistingGateMappingSafetyPort(private val identity: MappingIdentity? = nul
  */
 class PhoneToolMappingMutationPort(
     context: Context,
+    private val trail: com.cyclone.mobile.mapping.run.MappingTrailTap? = null,
 ) : MappingMutationPort {
     private val appContext = context.applicationContext
     private val sequence = AtomicLong(0)
@@ -220,6 +228,7 @@ class PhoneToolMappingMutationPort(
             params = params,
         )
         val result = PhoneToolExecutor.execute(appContext, request)
+        runCatching { trail?.pressed(action.observationId, action.elementId, result.ok) }
         return MappingMutationResult(
             performed = result.ok,
             verifiedByExecutor = result.ok,

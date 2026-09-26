@@ -64,7 +64,15 @@ data class LearnReport(val apps: List<AppLearned>, val failedSteps: Int, val atM
  * (screen → control → screen). Controls it pressed successfully are marked understood; controls it only saw are marked
  * discovered. A move that failed is never recorded as a route.
  */
-class MissionLearner(private val sink: LearnSink, private val clock: () -> Long = System::currentTimeMillis) {
+class MissionLearner(
+    private val sink: LearnSink,
+    /**
+     * False for what a mapping pass on a test account walked: those moves are learned as less trusted (confidence
+     * 0.5, discovered) so the map prefers moves confirmed on the owner's own account until a walk confirms them.
+     */
+    private val confirmed: Boolean = true,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     fun learn(trail: MissionTrail, appLabel: (String) -> String): LearnReport {
         val now = clock()
         val used = trail.steps.filter { it.controlKey != null }.groupBy { it.fromPageKey to it.controlKey }
@@ -141,8 +149,8 @@ class MissionLearner(private val sink: LearnSink, private val clock: () -> Long 
                     fromScreenId = screenIds.getValue(from.pageKey),
                     actionId = action,
                     toScreenId = screenIds.getValue(to.pageKey),
-                    knowledgeState = KnowledgeState.UNDERSTOOD,
-                    confidence = 0.7,
+                    knowledgeState = if (confirmed) KnowledgeState.UNDERSTOOD else KnowledgeState.DISCOVERED,
+                    confidence = if (confirmed) 0.7 else UNCONFIRMED_CONFIDENCE,
                     observedCount = 1,
                     successfulCount = 1,
                     lastObservedAt = now,
@@ -155,6 +163,10 @@ class MissionLearner(private val sink: LearnSink, private val clock: () -> Long 
             trail.steps.count { !it.ok },
             now,
         )
+    }
+
+    companion object {
+        const val UNCONFIRMED_CONFIDENCE = 0.5
     }
 
     private fun digest(value: String): String =
