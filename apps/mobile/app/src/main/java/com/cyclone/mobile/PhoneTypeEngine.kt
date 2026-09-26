@@ -12,7 +12,9 @@ import java.security.MessageDigest
  * authoritative; user_authorized=true is required at this boundary.
  */
 object PhoneTypeEngine {
-    const val MAX_VALUE_CHARS = 4_096
+    /** Plan 21 (Hands): long drafts are delivered by paste; set-text stays the first try up to [PASTE_FIRST_CHARS]. */
+    const val MAX_VALUE_CHARS = 20_000
+    const val PASTE_FIRST_CHARS = 4_000
     private const val REDACTED = "<redacted>"
     private val FORBIDDEN_SELECTOR_KEYS = setOf(
         "text", "textContains", "contentDescription", "contentDescriptionContains",
@@ -92,6 +94,10 @@ object PhoneTypeEngine {
         fun setText(handle: Any, value: CharSequence): Boolean
         fun matchesText(handle: Any, value: CharSequence): Boolean = false
         fun refresh(handle: Any): Any?
+        /** The field's current text for an in-process read-back (never exported); "" while it shows its hint; null if unreadable. */
+        fun readText(handle: Any): CharSequence? = null
+        /** Deliver [value] through the clipboard and ACTION_PASTE, replacing the field's text. False when not possible. */
+        fun paste(handle: Any, value: CharSequence): Boolean = false
     }
 
     data class LiveResult(
@@ -104,11 +110,17 @@ object PhoneTypeEngine {
         val textDigest: String? = null,
         val elementId: String? = null,
         val rawNodeId: String? = null,
+        /** How the text went in: set_text or paste (plan 21). */
+        val method: String = "set_text",
+        /** The field was read back and holds exactly the text (normalised). False: Cyclone could not prove it. */
+        val textVerified: Boolean = false,
     ) {
         fun toPayload(): JSONObject = JSONObject()
             .put("performed", ok)
             .put("setText", setTextPerformed)
-            .put("action", "ACTION_SET_TEXT")
+            .put("action", if (method == "paste") "ACTION_PASTE" else "ACTION_SET_TEXT")
+            .put("method", method)
+            .put("textVerified", textVerified)
             .put("focusRecovered", focusRecovered)
             .put("afterStateVerified", afterStateVerified)
             .put("charCount", charCount)
@@ -179,6 +191,7 @@ object PhoneTypeEngine {
         if (value.length > MAX_VALUE_CHARS) {
             return reject(PhoneToolErrorCode.INVALID_REQUEST, "value exceeds the bounded type length")
         }
+        if (elementId(params).isNullOrBlank() && params.optBoolean("focused") && catalog != null) return decideFocused(value, catalog)
         val elementId = elementId(params)
         if (elementId.isNullOrBlank()) {
             return reject(
@@ -265,11 +278,31 @@ object PhoneTypeEngine {
 
         val beforeDigest = view.textDigest
         val beforeLength = view.textLength
-        val set = host.setText(handle, value)
-        val afterHandle = host.refresh(handle) ?: handle
-        val after = host.view(afterHandle, redactObservedText)
+        // Plan 21 (Hands): the executor owns delivery. Set-text, then read the field back; when it does not hold the
+        // text, paste it and read again. Long drafts go straight to paste. Secret fields keep the set-text-only path.
+        val order = when {
+            redactObservedText -> listOf("set_text")
+            value.length > PASTE_FIRST_CHARS -> listOf("paste", "set_text")
+            else -> listOf("set_text", "paste")
+        }
+        var set = false
+        var method = order.first()
+        var afterHandle = handle
+        var after: LiveView? = null
+        var strict = false
+        for (attempt in order) {
+            val performed = if (attempt == "paste") host.paste(afterHandle, value) else host.setText(afterHandle, value)
+            if (!performed && attempt == "paste") continue
+            set = set || performed
+            method = attempt
+            afterHandle = host.refresh(afterHandle) ?: afterHandle
+            after = host.view(afterHandle, redactObservedText)
+            strict = !redactObservedText && after != null &&
+                ((after.textDigest == plan.valueDigest && after.textLength == plan.valueLength) ||
+                    host.readText(afterHandle)?.let { normalized(it) == normalized(value) } == true)
+            if (strict) break
+        }
         val stillEditableFocused = after != null && after.editable && after.focused
-        val digestMatches = after != null && after.textDigest == plan.valueDigest && after.textLength == plan.valueLength
         val textChanged = after != null && (after.textDigest != beforeDigest || after.textLength != beforeLength)
         val unchangedAsLabel = after != null && after.textDigest == beforeDigest && after.textLength == beforeLength
         val exactRedactedMatch = redactObservedText && after != null && host.matchesText(afterHandle, value)
@@ -277,10 +310,12 @@ object PhoneTypeEngine {
             after?.password == true &&
             beforeLength != after.textLength &&
             after.textLength == value.length
-        val verified = stillEditableFocused && if (redactObservedText) {
+        // Legacy acceptance (a field whose accessibility text never reflects its content) stays possible, but it is
+        // reported as unverified text, never as proof that the text is in.
+        val verified = strict || stillEditableFocused && if (redactObservedText) {
             exactRedactedMatch || maskedPasswordFilled
         } else {
-            digestMatches || textChanged || unchangedAsLabel
+            textChanged || unchangedAsLabel
         }
         if (!set) {
             return LiveResult(
@@ -293,6 +328,7 @@ object PhoneTypeEngine {
                 textDigest = after?.textDigest,
                 elementId = plan.elementId,
                 rawNodeId = plan.rawNodeId,
+                method = method,
             )
         }
         if (!verified) {
@@ -300,7 +336,7 @@ object PhoneTypeEngine {
                 ok = false,
                 error = PhoneToolError(
                     PhoneToolErrorCode.ASSERTION_FAILED,
-                    "ACTION_SET_TEXT reported success but after-state text did not change",
+                    "The text was sent to the field but the field does not hold it",
                 ),
                 focusRecovered = focusRecovered,
                 setTextPerformed = true,
@@ -309,6 +345,7 @@ object PhoneTypeEngine {
                 textDigest = after?.textDigest,
                 elementId = plan.elementId,
                 rawNodeId = plan.rawNodeId,
+                method = method,
             )
         }
         return LiveResult(
@@ -320,7 +357,32 @@ object PhoneTypeEngine {
             textDigest = if (redactObservedText) REDACTED else plan.valueDigest,
             elementId = plan.elementId,
             rawNodeId = plan.rawNodeId,
+            method = method,
+            textVerified = strict || exactRedactedMatch,
         )
+    }
+
+    /** Fields may trim, fold line endings or add invisible marks; the owner's text is the same text. */
+    fun normalized(text: CharSequence): String = text.toString()
+        .replace("\r\n", "\n").replace(Regex("[\u200B-\u200D\uFEFF]"), "")
+        .replace(Regex("[ \t]+"), " ").trim()
+
+    /**
+     * Plan 21 (Hands): type into the one text box that has input focus, as a person does after tapping it. It must be
+     * editable, enabled, not a password and not sensitive-looking; several focused representations of one node count once.
+     */
+    private fun decideFocused(value: String, catalog: Catalog): Decision {
+        val focused = catalog.elements.values.filter { it.focused && it.editable && !it.rawNodeId.isNullOrBlank() && !it.path.isNullOrBlank() }
+            .distinctBy { it.rawNodeId }
+        val element = when (focused.size) {
+            0 -> return reject(PhoneToolErrorCode.STALE_ELEMENT, "No text box has focus. Tap the box first, then type with focused=true.")
+            1 -> focused.single()
+            else -> return reject(PhoneToolErrorCode.STALE_ELEMENT, "More than one text box reports focus; type into one by its ref.")
+        }
+        if (!element.enabled) return reject(PhoneToolErrorCode.ACTION_FAILED, "Editable target is disabled")
+        if (isSensitiveField(element)) return reject(PhoneToolErrorCode.POLICY_DENIED, "Typing into a sensitive field is denied by Android policy")
+        return Decision.Execute(ExecutePlan(element.elementId, element.rawNodeId!!, element.path!!, needsFocus = false,
+            valueLength = value.length, valueDigest = digest(value)))
     }
 
     fun isUserAuthorized(params: JSONObject): Boolean {

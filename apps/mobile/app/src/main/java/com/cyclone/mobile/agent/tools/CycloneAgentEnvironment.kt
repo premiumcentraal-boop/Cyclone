@@ -228,7 +228,9 @@ class CycloneAgentEnvironment internal constructor(
             )
         var visibleGeneration = scope.generation
         var rawElementId = elementId(params, before)
-        if (tool in ELEMENT_ID_REQUIRED_TOOLS && rawElementId == null) {
+        // Plan 21 (Hands): a Mind mission may type into the text box that has focus, without a ref.
+        val focusedType = ownerMission && tool == "phone.type" && rawElementId == null && params.optBoolean("focused")
+        if (tool in ELEMENT_ID_REQUIRED_TOOLS && rawElementId == null && !focusedType) {
             return@synchronized failureEnvelope(
                 tool,
                 effectiveGoal,
@@ -324,6 +326,22 @@ class CycloneAgentEnvironment internal constructor(
                     normalizedParams.put("user_authorized", true)
                 }
             }
+        }
+
+        if (focusedType) {
+            val value = normalizedParams.optString("value", normalizedParams.optString("text"))
+            val focusedField = before.elements.values.firstOrNull {
+                it.evidence.optBoolean("focused") && it.evidence.optBoolean("editable") && it.source != "raw_accessibility"
+            } ?: before.elements.values.firstOrNull { it.evidence.optBoolean("focused") && it.evidence.optBoolean("editable") }
+            normalizedParams.remove("user_authorized")
+            normalizedParams.remove("selector")
+            normalizedParams.remove("elementId")
+            normalizedParams.put("focused", true).put("currentObservationId", before.id)
+            if (focusedField == null) return@synchronized failureEnvelope(tool, effectiveGoal,
+                AgentFailure(AgentFailureClass.TARGET_NOT_FOUND, AgentFailureLayer.OBSERVATION, false,
+                    "No text box has focus. Tap the box first, then type with focused=true.", "NO_FOCUSED_FIELD"),
+                before, visibleGeneration)
+            if (OwnerMissionTyping.allows(focusedField.evidence, value)) normalizedParams.put("user_authorized", true)
         }
 
         runtime.readinessFailure()?.let { failure ->
@@ -445,7 +463,10 @@ class CycloneAgentEnvironment internal constructor(
             afterObservationId = after?.id,
             observationGeneration = visibleGeneration,
             learning = learning,
-            safeMessage = failure?.message,
+            // Plan 21 (Hands): typed text the executor could not read back is reported, never passed off as typed.
+            safeMessage = failure?.message ?: (result.payload as? JSONObject)?.takeIf { tool in setOf("phone.type", "phone.replace_text") }
+                ?.let { payload -> "TYPE_METHOD=${payload.optString("method", "set_text")}" +
+                    if (payload.has("textVerified") && !payload.optBoolean("textVerified")) " TEXT_UNVERIFIED" else "" },
             executorInvoked = true,
         )
         remember(envelope)

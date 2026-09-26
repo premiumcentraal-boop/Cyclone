@@ -101,6 +101,7 @@ class CycloneAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        private const val PASTE_SETTLE_MS = 150L
         @Volatile var instance: CycloneAccessibilityService? = null
             private set
     }
@@ -626,6 +627,50 @@ class CycloneAccessibilityService : AccessibilityService() {
             val target = handle as? AccessibilityTypeHandle ?: return null
             val node = nodeAtTaskPath(target.path, displayId, targetPackage) ?: return null
             return if (node.isEditable) AccessibilityTypeHandle(target.path, node, target.rawNodeId) else null
+        }
+
+        override fun readText(handle: Any): CharSequence? {
+            val target = handle as? AccessibilityTypeHandle ?: return null
+            if (target.node.isPassword) return null
+            return if (target.node.isShowingHintText) "" else target.node.text ?: ""
+        }
+
+        /**
+         * Plan 21 (Hands): clipboard + ACTION_PASTE over the field's whole text. The clip is marked sensitive (no
+         * preview), and afterwards the owner's previous clip is put back, or ours is cleared. Never for passwords.
+         */
+        override fun paste(handle: Any, value: CharSequence): Boolean {
+            val target = handle as? AccessibilityTypeHandle ?: return false
+            val node = target.node
+            if (node.isPassword || displayId != 0) return false
+            val clipboard = getSystemService(android.content.ClipboardManager::class.java) ?: return false
+            val previous = runCatching { clipboard.primaryClip }.getOrNull()
+            val clip = android.content.ClipData.newPlainText("Cyclone", value).apply {
+                description.extras = android.os.PersistableBundle().apply {
+                    putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+                }
+            }
+            return try {
+                clipboard.setPrimaryClip(clip)
+                if (!node.isFocused) node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                val length = if (node.isShowingHintText) 0 else node.text?.length ?: 0
+                if (length > 0) {
+                    node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, length)
+                    })
+                }
+                val rect = Rect().also { node.getBoundsInScreen(it) }
+                TraceField.acted(TraceActKind.TYPE, rect.exactCenterX(), rect.exactCenterY())
+                node.performAction(AccessibilityNodeInfo.ACTION_PASTE).also {
+                    // Give the app a moment to read the clip before it is replaced.
+                    Thread.sleep(PASTE_SETTLE_MS)
+                }
+            } catch (_: Exception) {
+                false
+            } finally {
+                runCatching { if (previous != null) clipboard.setPrimaryClip(previous) else clipboard.clearPrimaryClip() }
+            }
         }
     }
 

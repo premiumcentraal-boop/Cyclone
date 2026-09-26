@@ -377,6 +377,30 @@ class CycloneAgentEnvironmentTest {
         assertFalse(typed(true, field("m3", "Verification code")).optBoolean("user_authorized"))
     }
 
+    @Test fun aMindMissionTypesIntoTheFocusedTextBoxWithoutARef() {
+        val obs = observation("f1", "chat", "fp-f1", "Reply to ChatGPT")
+        obs.elements.values.single().evidence.put("editable", true).put("enabled", true).put("focused", true)
+        val runtime = FakeRuntime(obs, obs)
+        val env = CycloneAgentEnvironment(runtime, userTaskGoal = "ask ChatGPT", ownerMission = true)
+        env.observe("type")
+        env.act("phone.type", JSONObject().put("focused", true).put("value", "Find better examples"), "type")
+        val sent = runtime.lastParams!!
+        assertTrue(sent.getBoolean("focused"))
+        assertTrue(sent.optBoolean("user_authorized"))
+        assertFalse(sent.has("elementId"))
+
+        val unfocused = observation("f2", "chat", "fp-f2", "Reply to ChatGPT")
+        val none = FakeRuntime(unfocused, unfocused)
+        val env2 = CycloneAgentEnvironment(none, userTaskGoal = "ask ChatGPT", ownerMission = true)
+        env2.observe("type")
+        val refused = env2.act("phone.type", JSONObject().put("focused", true).put("value", "x"), "type")
+        assertFalse(refused.executorInvoked)
+        assertEquals(0, none.executionCalls)
+        val step = CycloneAgentEnvironment(FakeRuntime(obs, obs), userTaskGoal = "ask ChatGPT")
+        step.observe("type")
+        assertFalse("the step agent still needs a ref", step.act("phone.type", JSONObject().put("focused", true).put("value", "x"), "type").executorInvoked)
+    }
+
     @Test fun agentInputCannotOverrideCycloneAiPolicyDenial() {
         val params = JSONObject()
             .put("user_authorized", true)

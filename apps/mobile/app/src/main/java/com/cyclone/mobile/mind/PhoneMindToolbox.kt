@@ -353,6 +353,7 @@ class PhoneMindToolbox(
     }
 
     private fun typeText(arguments: JSONObject): MindToolResult {
+        if (arguments.optBoolean("focused") && arguments.optString("ref").isBlank()) return typeFocused(arguments)
         val (ref, error) = target(arguments)
         if (ref == null) return error!!
         if (!arguments.has("text")) return MindToolResult.error("text is required.")
@@ -364,6 +365,16 @@ class PhoneMindToolbox(
         if (!typed.ok || !arguments.optBoolean("press_enter")) return typed
         val again = refs.resolve(ref.ref) ?: return typed.copy(text = typed.text + "\n\nEnter was not pressed: the field is gone.")
         return act("phone.submit_text", JSONObject().put("elementId", again.elementId), "Typed into ${ref.ref} and pressed Enter", again)
+    }
+
+    /** Plan 21 (Hands): the text box with input focus (tap it first). The executor refuses secret-looking fields. */
+    private fun typeFocused(arguments: JSONObject): MindToolResult {
+        if (!arguments.has("text")) return MindToolResult.error("text is required.")
+        val text = arguments.optString("text")
+        val typed = act("phone.type", JSONObject().put("focused", true).put("value", text),
+            "Typed ${text.length} characters into the focused text box", changesScreen = false)
+        if (!typed.ok || !arguments.optBoolean("press_enter")) return typed
+        return MindToolResult(typed.text + "\n\nTo submit, tap the send button (or press_enter with the box's ref).", typed.brief, ok = true)
     }
 
     private fun scroll(arguments: JSONObject): MindToolResult {
@@ -532,7 +543,19 @@ class PhoneMindToolbox(
         val ok = okOverride ?: (envelope?.androidExecutionOk == true)
         invalidate()
         val result = observeAndRender(header)
-        return result.copy(ok = ok, changedScreen = changesScreen && ok || tool in NAVIGATION, ownerWaitMs = waited)
+        // Plan 21 (Hands): a tap that opened the keyboard changes nothing the fingerprint sees, but it is progress.
+        val focus = if (ok && tool in TAP_TOOLS) focusedField() else null
+        val text = focus?.let { result.text.replaceFirst(header, "$header $it") } ?: result.text
+        return result.copy(text = text, ok = ok, changedScreen = changesScreen && ok || tool in NAVIGATION || focus != null, ownerWaitMs = waited)
+    }
+
+    /** "The text box e5 "Message" has focus (keyboard open)." when an editable holds input focus on the new screen. */
+    private fun focusedField(): String? {
+        val focused = controlsById.values.firstOrNull { it.evidence.optBoolean("focused") && it.evidence.optBoolean("editable") &&
+            !it.evidence.optBoolean("password") } ?: return null
+        val ref = refs.all().firstOrNull { it.elementId == focused.elementId }?.ref
+        return "The text box ${ref ?: ""}${if (ref != null) " " else ""}\"${focused.label.take(60)}\" has focus (keyboard open): " +
+            "type_text with focused=true${if (ref != null) " or ref $ref" else ""}."
     }
 
     private fun describe(tool: String, envelope: AgentActionEnvelope, done: String): String {
@@ -547,6 +570,10 @@ class PhoneMindToolbox(
                 "Not done: Cyclone Accessibility is not connected, so the phone cannot be operated right now."
             envelope.errorClass == AgentFailureClass.CAPABILITY_UNAVAILABLE -> "Not available: ${message ?: tool}."
             !envelope.androidExecutionOk -> "Failed: ${message ?: "Android could not perform it"}."
+            tool == "phone.type" && message.orEmpty().contains("TEXT_UNVERIFIED") ->
+                "$done, but Cyclone could not read the text back from the field. Look at the screen to check it is there " +
+                    "before sending."
+            tool == "phone.type" && message.orEmpty().contains("TYPE_METHOD=paste") -> "$done (pasted)."
             tool == "phone.type" -> "$done."
             envelope.pageChanged -> "$done. The screen changed."
             else -> "$done. The screen did not visibly change."
@@ -846,6 +873,7 @@ class PhoneMindToolbox(
         private val PHONE_TOOLS = setOf("screen_read", "screen_look", "screen_find", "tap", "tap_point", "long_press", "type_text",
             "press_enter", "scroll", "swipe", "back", "home", "wait", "open_app", "open_link", "open_settings", "set_timer",
             "set_alarm", "vault_fill", "open_notification", "go_to")
+        private val TAP_TOOLS = setOf("phone.click", "phone.tap", "phone.tap_point")
         private val REVALIDATION = Regex("Target revalidation: ([A-Z_]+)")
         private val NAVIGATION = setOf("phone.open_app", "phone.launch_intent", "phone.open_settings", "phone.set_timer", "phone.set_alarm", "phone.back", "phone.home")
         private val SENSITIVE = Regex("(?i)password|passcode|wachtwoord|\\bpin\\b|one[- ]time|otp|verification code|verificatiecode|cvv|cvc|card number|kaartnummer|security code")
@@ -885,9 +913,11 @@ class PhoneMindToolbox(
             MindToolSpec("tap_point", "Tap a point of the last screenshot, for things that have no ref (unlabelled icons, images, games, maps). Use refs whenever one exists.",
                 objectSchema("x" to integer("Pixels from the left of the screenshot."), "y" to integer("Pixels from the top of the screenshot."),
                     required = listOf("x", "y"))),
-            MindToolSpec("type_text", "Replace the text in a text field. Not for passwords, codes or card numbers (use vault_fill). Set press_enter to submit, e.g. to search.",
+            MindToolSpec("type_text", "Replace the text in a text field. Not for passwords, codes or card numbers (use vault_fill). " +
+                "Set press_enter to submit, e.g. to search. If a ref is refused, tap the box (tap or tap_point), then type_text with focused=true and no ref.",
                 objectSchema("ref" to REF, "text" to string("The full text the field should contain."),
-                    "press_enter" to boolean("Press the keyboard's Enter/Search key afterwards."), required = listOf("ref", "text"))),
+                    "focused" to boolean("Type into the text box that has focus (after tapping it) instead of a ref."),
+                    "press_enter" to boolean("Press the keyboard's Enter/Search key afterwards."), required = listOf("text"))),
             MindToolSpec("press_enter", "Press the keyboard's Enter/Search/Go key in a text field.", objectSchema("ref" to REF, required = listOf("ref"))),
             MindToolSpec("scroll", "Scroll the screen, or one list when ref is given.",
                 objectSchema("direction" to string("down shows more below, up goes back.", listOf("down", "up")), "ref" to REF, required = listOf("direction"))),

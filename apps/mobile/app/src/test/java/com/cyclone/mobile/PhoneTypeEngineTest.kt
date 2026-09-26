@@ -212,6 +212,73 @@ class PhoneTypeEngineTest {
     }
 
     @Test
+    fun whenSetTextDoesNothingTheLadderPastesAndProvesTheText() {
+        val screen = phoneTaskScreen(observationId = "obs-paste", focused = true, rawNodeId = "raw-paste")
+        val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, taskValue), screen.catalog)
+            as PhoneTypeEngine.Decision.Execute).plan
+        val host = FakeLiveHost.from(screen, initialText = "", applySetText = false, reportSetText = true, pasteWorks = true)
+        val result = PhoneTypeEngine.perform(plan, taskValue, host)
+        assertTrue(result.ok)
+        assertEquals("paste", result.method)
+        assertTrue(result.textVerified)
+        assertEquals(taskValue, host.textOf("raw-paste"))
+        assertEquals("ACTION_PASTE", result.toPayload().getString("action"))
+        assertFalse(result.toPayload().toString().contains(taskValue))
+    }
+
+    @Test
+    fun setTextThatWorksIsProvenWithoutPasting() {
+        val screen = phoneTaskScreen(observationId = "obs-set", focused = true, rawNodeId = "raw-set")
+        val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, taskValue), screen.catalog)
+            as PhoneTypeEngine.Decision.Execute).plan
+        val host = FakeLiveHost.from(screen, initialText = "", pasteWorks = true)
+        val result = PhoneTypeEngine.perform(plan, taskValue, host)
+        assertTrue(result.ok && result.textVerified)
+        assertEquals("set_text", result.method)
+        assertEquals(0, host.pastes)
+    }
+
+    @Test
+    fun aFieldThatNeverShowsTheTextIsReportedUnverified() {
+        val screen = phoneTaskScreen(observationId = "obs-none", focused = true, rawNodeId = "raw-none")
+        val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, taskValue), screen.catalog)
+            as PhoneTypeEngine.Decision.Execute).plan
+        val host = FakeLiveHost.from(screen, initialText = "", applySetText = false, reportSetText = true)
+        val result = PhoneTypeEngine.perform(plan, taskValue, host)
+        assertFalse(result.textVerified)
+        assertFalse(result.toPayload().getBoolean("textVerified"))
+        assertEquals(1, host.pastes)
+    }
+
+    @Test
+    fun longDraftsArePastedFirst() {
+        val long = "word ".repeat(1_000)
+        val screen = phoneTaskScreen(observationId = "obs-long", focused = true, rawNodeId = "raw-long")
+        val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, long), screen.catalog)
+            as PhoneTypeEngine.Decision.Execute).plan
+        val host = FakeLiveHost.from(screen, initialText = "", pasteWorks = true)
+        val result = PhoneTypeEngine.perform(plan, long, host)
+        assertTrue(result.ok && result.textVerified)
+        assertEquals("paste", result.method)
+        assertEquals(0, host.setTexts)
+    }
+
+    @Test
+    fun focusedTypingPicksTheOneFocusedTextBoxAndRefusesSecrets() {
+        val params = JSONObject().put("focused", true).put("value", taskValue).put("user_authorized", true)
+        val focused = phoneTaskScreen(observationId = "obs-f", focused = true, rawNodeId = "raw-f")
+        val plan = (PhoneTypeEngine.decide(params, focused.catalog) as PhoneTypeEngine.Decision.Execute).plan
+        assertEquals("raw-f", plan.rawNodeId)
+        val none = phoneTaskScreen(observationId = "obs-n", focused = false, rawNodeId = "raw-n")
+        assertTrue(PhoneTypeEngine.decide(params, none.catalog) is PhoneTypeEngine.Decision.Reject)
+        val secret = phoneTaskScreen(observationId = "obs-s", focused = true, rawNodeId = "raw-s", password = true)
+        assertEquals(PhoneToolErrorCode.POLICY_DENIED,
+            (PhoneTypeEngine.decide(params, secret.catalog) as PhoneTypeEngine.Decision.Reject).deny.code)
+        assertTrue(PhoneTypeEngine.decide(JSONObject(params.toString()).put("user_authorized", false), focused.catalog)
+            is PhoneTypeEngine.Decision.Reject)
+    }
+
+    @Test
     fun overlayComposerTypePassesWhenSetTextTrueAndFieldStaysFocused() {
         val screen = phoneTaskScreen(observationId = "obs-empty", focused = true, rawNodeId = "raw-empty")
         val plan = (PhoneTypeEngine.decide(authorizedType(screen.taskElementId, taskValue), screen.catalog)
@@ -458,7 +525,20 @@ class PhoneTypeEngineTest {
         private val applySetText: Boolean,
         private val reportSetText: Boolean,
         private val maskSetText: Boolean,
+        private val pasteWorks: Boolean = false,
     ) : PhoneTypeEngine.LiveHost {
+        var pastes = 0
+        var setTexts = 0
+
+        override fun readText(handle: Any): CharSequence? = (handle as? FakeNode)?.takeUnless { it.password }?.text
+
+        override fun paste(handle: Any, value: CharSequence): Boolean {
+            val node = handle as? FakeNode ?: return false
+            pastes++
+            if (pasteWorks) node.text = value.toString()
+            return pasteWorks
+        }
+
         override fun resolve(plan: PhoneTypeEngine.ExecutePlan): Any? {
             val raw = pathToRaw[plan.path] ?: plan.rawNodeId
             return nodes[raw]
@@ -493,6 +573,7 @@ class PhoneTypeEngineTest {
         }
 
         override fun setText(handle: Any, value: CharSequence): Boolean {
+            setTexts++
             val node = handle as FakeNode
             if (!reportSetText && !applySetText) return false
             if (applySetText) {
@@ -520,6 +601,7 @@ class PhoneTypeEngineTest {
                 applySetText: Boolean = true,
                 reportSetText: Boolean = true,
                 maskSetText: Boolean = false,
+                pasteWorks: Boolean = false,
             ): FakeLiveHost {
                 val nodes = screen.snapshot.nodes.associate { node ->
                     node.id to FakeNode(
@@ -539,6 +621,7 @@ class PhoneTypeEngineTest {
                     applySetText = applySetText,
                     reportSetText = reportSetText,
                     maskSetText = maskSetText,
+                    pasteWorks = pasteWorks,
                 )
             }
         }

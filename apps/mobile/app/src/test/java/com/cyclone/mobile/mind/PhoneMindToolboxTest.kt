@@ -206,6 +206,18 @@ class PhoneMindToolboxTest {
         assertTrue(box.run("tap", """{"ref":"e3"}""").text.contains("no longer on the screen"))
     }
 
+    @Test fun typeTextWithFocusedNeedsNoRef() {
+        val env = FakeEnv(login)
+        val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")
+        box.run("screen_read")
+        val typed = box.run("type_text", """{"focused":true,"text":"hello"}""")
+        assertTrue(typed.ok)
+        assertEquals("phone.type", env.acts.last().first)
+        assertTrue(env.acts.last().second.getBoolean("focused"))
+        assertFalse(env.acts.last().second.has("elementId"))
+        assertTrue(typed.text.contains("focused text box"))
+    }
+
     @Test fun refsStayStableAcrossReobservation() {
         val env = FakeEnv(login)
         val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")
