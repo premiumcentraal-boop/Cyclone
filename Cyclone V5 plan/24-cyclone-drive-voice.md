@@ -1,6 +1,7 @@
 # 24 — Cyclone Drive: a voice assistant on top of the Mind (plan)
 
-**Status:** plan, 2026-09-26. Not built yet. Proposed releases: alpha.42 (Drive: talk) and alpha.43 (Drive:
+**Status:** plan, 2026-09-26. Not built yet. Moved after plan 26 (background that always works, alpha.42) and
+parallel sessions (alpha.43): Drive is now alpha.44–45. Originally proposed: alpha.42 (Drive: talk) and alpha.43 (Drive:
 conversations), after alpha.40 Planes (plan 25: background work and the switch pill, so Maps can stay on screen) and
 alpha.41 Hands (plan 21: reliable typing of dictated replies).
 

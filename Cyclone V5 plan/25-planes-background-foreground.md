@@ -5,7 +5,7 @@ planes (step gate, rebind), Automatic start with the *Where Cyclone works* setti
 compatibility memory, the watchdog and recovery ladder, the pill, notification actions and Task Kit commands. Still to
 come: approvals that bring the app to the screen first, frame-stall detection with a frame heartbeat, return to the
 background after an escalation, the Lab planes suite, and Glass's Phone toggle and plane lane in run replay. Drive
-(plan 24) builds on it; Hands is alpha.41 and Drive alpha.42–43.
+(plan 24) builds on it. What remains is scoped in plan 26 (alpha.42); Drive is alpha.44–45.
 
 **The owner's ask:**
 - Make background work rock solid.
