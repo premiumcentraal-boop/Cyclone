@@ -36,6 +36,8 @@ data class PlaneUi(
     val appLabel: String? = null,
     /** Plan 26: the mission waits for the owner to be done with this app (or yields it to them right now). */
     val waitingFor: String? = null,
+    /** The background screen's session while the mission works there (the approval card shows a glimpse of it). */
+    val backgroundSessionId: String? = null,
 )
 
 /**
@@ -91,10 +93,10 @@ object MissionPlanes {
     /** Why background work is not possible right now, in the owner's words; null when it is. */
     fun blocker(context: Context): String? = capability(context).takeUnless { it.ready }?.headline
 
-    fun begin(context: Context, missionId: String, goal: String, traceId: String?): MissionPlaneSession {
+    fun begin(context: Context, missionId: String, goal: String, traceId: String?, modeOverride: PlaneMode? = null): MissionPlaneSession {
         current?.end()
         val app = context.applicationContext
-        return MissionPlaneSession(app, missionId, goal, traceId, mode(context)) { next ->
+        return MissionPlaneSession(app, missionId, goal, traceId, modeOverride ?: mode(context)) { next ->
             val changed = uiState.value?.let { it.kind != next?.kind || it.available != next?.available } ?: true
             uiState.value = next
             // The task notification carries the move action: keep it in step with the plane.
@@ -798,7 +800,8 @@ class MissionPlaneSession internal constructor(
 
     private fun ui(): PlaneUi {
         val blocker = MissionPlanes.blocker(context)
-        return PlaneUi(missionId, plane.kind, switcher.switching, blocker == null, note ?: blocker, label(packageName()), waitingFor)
+        return PlaneUi(missionId, plane.kind, switcher.switching, blocker == null, note ?: blocker, label(packageName()), waitingFor,
+            (plane as? TaskPlane.Background)?.sessionId)
     }
 
     private fun refresh() {

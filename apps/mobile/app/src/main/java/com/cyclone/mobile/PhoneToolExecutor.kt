@@ -668,6 +668,9 @@ object PhoneToolExecutor {
                 launchedOutcome(service, before, p, eventGeneration, JSONObject().put("package", packageName).put("launched", true))
             }
             "phone.get_notifications" -> Outcome(notificationJson())
+            // Plan 26 (A42-6, tier 0): reply through the message's own notification. No screen is touched, so it runs
+            // while the owner uses the phone; it is a send, so the caller has the owner's approval for this exact text.
+            "phone.reply_notification" -> replyNotification(context, p.optString("key").takeIf { it.isNotBlank() }, p.optString("text"))
             "phone.open_notification" -> {
                 val generation = DeviceState.uiGeneration()
                 val opened = openNotification(p.optString("key").takeIf { it.isNotBlank() })
@@ -1172,6 +1175,26 @@ object PhoneToolExecutor {
             Outcome(JSONObject().put("key", sbn.key).put("opened", true))
         } catch (e: PendingIntent.CanceledException) {
             errorResult(PhoneToolErrorCode.ACTION_FAILED, "Notification intent is no longer valid")
+        }
+    }
+
+    private fun replyNotification(context: Context, key: String?, text: String): Outcome {
+        if (text.isBlank() || text.length > 2_000) return errorResult(PhoneToolErrorCode.INVALID_REQUEST, "Reply text must be 1-2000 characters")
+        if (com.cyclone.mobile.mind.PhoneMindToolbox.sensitive(text)) {
+            return errorResult(PhoneToolErrorCode.POLICY_DENIED, "Replies never carry passwords, codes or card numbers")
+        }
+        val sbn = DeviceState.notification(key) ?: return errorResult(PhoneToolErrorCode.NOTIFICATION_NOT_FOUND, "Notification not found")
+        val action = sbn.notification.actions.orEmpty().firstOrNull { action ->
+            action.remoteInputs.orEmpty().any { it.allowFreeFormInput }
+        } ?: return errorResult(PhoneToolErrorCode.CAPABILITY_UNAVAILABLE, "This notification has no reply action")
+        val input = action.remoteInputs.first { it.allowFreeFormInput }
+        val fill = Intent()
+        android.app.RemoteInput.addResultsToIntent(action.remoteInputs, fill, android.os.Bundle().apply { putCharSequence(input.resultKey, text) })
+        return try {
+            action.actionIntent.send(context, 0, fill)
+            Outcome(JSONObject().put("key", sbn.key).put("replied", true).put("package", sbn.packageName).put("charCount", text.length))
+        } catch (e: PendingIntent.CanceledException) {
+            errorResult(PhoneToolErrorCode.ACTION_FAILED, "The reply action is no longer valid")
         }
     }
 

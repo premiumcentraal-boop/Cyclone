@@ -29,6 +29,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -198,4 +202,36 @@ private fun DrawScope.screen(topLeft: Offset, size: Size, lit: Float) {
     drawRoundRect(Color(0xFF0E2A2E), topLeft, size, radius)
     if (lit > 0.02f) drawRoundRect(PillTeal.copy(alpha = .85f * lit), topLeft, size, radius)
     drawRoundRect(SignatureInk.copy(alpha = .55f + .45f * lit), topLeft, size, radius, style = Stroke(1.3.dp.toPx()))
+}
+
+/**
+ * Plan 26 (A42-7): an approval for a task working in the background shows what is being approved: a live glimpse of
+ * the background screen, and Show on my screen (a Task Kit move). Nothing shows for tasks on the owner's screen.
+ */
+@Composable
+fun BackgroundGlimpse(taskId: String, modifier: Modifier = Modifier) {
+    val state by MissionPlanes.ui.collectAsState()
+    val ui = state?.takeIf { TaskEngines.MIND_TASK_PREFIX + it.missionId == taskId && it.kind == PlaneKind.BACKGROUND } ?: return
+    val sessionId = ui.backgroundSessionId ?: return
+    val context = LocalContext.current
+    var image by remember(sessionId) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    androidx.compose.runtime.LaunchedEffect(sessionId) {
+        while (true) {
+            com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.glimpse(sessionId)?.let { bitmap ->
+                image = bitmap.asImageBitmap()
+            }
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("On the background screen" + (ui.appLabel?.let { " · $it" } ?: ""), color = SignatureMuted, fontSize = 12.sp)
+        image?.let { bitmap ->
+            androidx.compose.foundation.Image(bitmap, contentDescription = "What Cyclone sees on the background screen",
+                modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).clip(RoundedCornerShape(12.dp)),
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+        }
+        Text("Show on my screen", color = PillTeal, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clickable(role = Role.Button) { TaskCommands.send(context, taskId, TaskCommand.MoveToForeground) }
+                .padding(vertical = 6.dp))
+    }
 }

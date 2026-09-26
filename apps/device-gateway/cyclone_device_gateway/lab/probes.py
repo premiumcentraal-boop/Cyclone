@@ -176,6 +176,10 @@ class PhoneProbe:
     def wake(self) -> None:
         self.adb.shell("input", "keyevent", "KEYCODE_WAKEUP", timeout=10)
 
+    def launch(self, package: str) -> None:
+        """Open an app's launcher screen (a fixed monkey launch of the LAUNCHER category; the package is checked)."""
+        self.adb.shell("monkey", "-p", _package(package), "-c", "android.intent.category.LAUNCHER", "1", timeout=15)
+
     def force_stop(self, package: str) -> None:
         if _package(package) == CYCLONE_PACKAGE:
             raise ProbeError("the lab never stops Cyclone itself")

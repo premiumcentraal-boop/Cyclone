@@ -54,6 +54,7 @@ internal class AndroidMindDevice(private val context: Context) : MindDevicePort 
                 postedAtMs = sbn.postTime,
                 actions = sbn.notification.actions.orEmpty().mapNotNull { it.title?.toString() },
                 openable = sbn.notification.contentIntent != null,
+                replyable = sbn.notification.actions.orEmpty().any { action -> action.remoteInputs.orEmpty().any { it.allowFreeFormInput } },
             )
         }
 
@@ -65,6 +66,12 @@ internal class AndroidMindDevice(private val context: Context) : MindDevicePort 
             keyguard?.isKeyguardLocked == true -> "the phone is locked"
             else -> null
         }
+    }
+
+    override fun replyNotification(key: String, text: String): String? {
+        val result = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+            "mind-reply-${java.util.UUID.randomUUID()}", "phone.reply_notification", org.json.JSONObject().put("key", key).put("text", text)))
+        return if (result.ok) null else result.error?.message ?: "The reply could not be sent."
     }
 
     override fun copy(text: String): Boolean = runCatching {

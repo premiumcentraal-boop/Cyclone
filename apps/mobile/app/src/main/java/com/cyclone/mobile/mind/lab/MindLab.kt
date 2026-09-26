@@ -34,6 +34,11 @@ data class MindLabVariant(
      * learns each mission when it ends, so later trials of the arm start from what earlier ones saw.
      */
     val useMap: Boolean = true,
+    /**
+     * Plan 26 (A42-9): where the mission works, for the Lab planes suite: automatic, screen or background. Null keeps
+     * lab runs on the screen (as before), so older experiments measure the same thing.
+     */
+    val plane: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
@@ -44,9 +49,11 @@ data class MindLabVariant(
         .put("freshMemory", freshMemory)
         .put("promptAddendum", promptAddendum)
         .put("useMap", useMap)
+        .put("plane", plane ?: JSONObject.NULL)
 
     companion object {
-        val KEYS = setOf("name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap")
+        val KEYS = setOf("name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane")
+        val PLANES = setOf("automatic", "screen", "background")
         private val NAME = Regex("^[A-Za-z0-9 ._-]{1,40}$")
         private val MODEL = Regex("^[a-z0-9][a-z0-9._-]{0,60}/[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$")
         private val EFFORTS = setOf("low", "medium", "high")
@@ -72,8 +79,10 @@ data class MindLabVariant(
             val addendum = json.optString("promptAddendum", "").trim()
             require(addendum.length <= MAX_ADDENDUM) { "variant.promptAddendum is longer than $MAX_ADDENDUM characters." }
             require(!INLINE_SECRET.containsMatchIn(addendum)) { "Do not put secrets in a lab prompt." }
+            val plane = json.optNullableString("plane")
+            require(plane == null || plane in PLANES) { "variant.plane must be automatic, screen or background." }
             MindLabVariant(name, model, effort, minutes, json.optBooleanStrict("marks", true), json.optBooleanStrict("freshMemory", true), addendum,
-                json.optBooleanStrict("useMap", true))
+                json.optBooleanStrict("useMap", true), plane)
         }
 
         private fun JSONObject.optNullableString(key: String): String? =

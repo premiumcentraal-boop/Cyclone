@@ -74,6 +74,20 @@ object LiveVisionRuntime {
             broker.latest(sessionId)?.frameId ?: 0, SystemClock.uptimeMillis())
     }
 
+    /**
+     * Plan 26 (A42-7): the latest frame of a background screen for the approval card, however old (a still page sends
+     * no new frames). UI-only, no capture, no side effects; the caller recycles it.
+     */
+    fun glimpse(sessionId: String, maxWidth: Int = 360): Bitmap? = synchronized(lock) {
+        if (!sources.containsKey(sessionId)) return null
+        val frame = broker.latest(sessionId) ?: return null
+        if (frame.sessionId != sessionId) return null
+        val source = pixels[frame.payloadHandle] ?: return null
+        val scale = minOf(1f, maxWidth.toFloat() / source.width.coerceAtLeast(1))
+        Bitmap.createScaledBitmap(source, (source.width * scale).toInt().coerceAtLeast(1), (source.height * scale).toInt().coerceAtLeast(1), true)
+            .let { if (it === source) source.copy(Bitmap.Config.ARGB_8888, false) else it }
+    }
+
     /** A frame arrived since this source started (it may be old: a still screen sends no new frames). */
     fun hasFrame(sessionId: String): Boolean = synchronized(lock) {
         sources.containsKey(sessionId) && broker.latest(sessionId) != null

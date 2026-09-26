@@ -26,7 +26,9 @@ from .verdict import Measure, TrialFacts, judge
 
 EXPERIMENT_ID = re.compile(r"^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$")
 VARIANT_NAME = re.compile(r"^[A-Za-z0-9 ._-]{1,40}$")
-VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap"})
+VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane"})
+#: Plan 26: where the mission works; absent keeps lab runs on the screen.
+PLANES = frozenset({"automatic", "screen", "background"})
 BOOLEAN_KNOBS = ("marks", "freshMemory", "useMap")
 MAX_TRIALS = 600
 POLL_SECONDS = 2.0
@@ -73,6 +75,8 @@ def validate_variants(raw: Any) -> list[dict[str, Any]]:
             raise LabError("A variant has a name and only known knobs.")
         if any(key in variant and not isinstance(variant[key], bool) for key in BOOLEAN_KNOBS):
             raise LabError("marks, freshMemory and useMap are true or false.")
+        if "plane" in variant and variant["plane"] is not None and variant["plane"] not in PLANES:
+            raise LabError("plane is automatic, screen or background.")
         name = variant["name"].strip()
         if not VARIANT_NAME.match(name) or name in names:
             raise LabError("Variant names are unique, 1..40 letters, digits, space, dot, dash or underscore.")
@@ -325,6 +329,9 @@ class LabService:
                 probe.home()
             elif kind == "force_stop":
                 probe.force_stop(step["package"])
+            elif kind == "launch":
+                probe.launch(step["package"])
+                self.sleep(1.5)
             elif kind == "setting":
                 ns, key = step["namespace"], step["key"]
                 before = probe.setting(ns, key)

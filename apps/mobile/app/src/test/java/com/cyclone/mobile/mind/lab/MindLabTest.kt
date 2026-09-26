@@ -102,4 +102,11 @@ class MindLabTest {
         override val vision = false
         override fun complete(request: com.cyclone.mobile.mind.MindModelRequest): com.cyclone.mobile.mind.MindModelReply = error("unused")
     }
+
+    @Test fun thePlaneKnobIsOptionalAndChecked() {
+        org.junit.Assert.assertNull(MindLabVariant.parse(org.json.JSONObject().put("name", "a")).getOrThrow().plane)
+        org.junit.Assert.assertEquals("background",
+            MindLabVariant.parse(org.json.JSONObject().put("name", "a").put("plane", "background")).getOrThrow().plane)
+        org.junit.Assert.assertTrue(MindLabVariant.parse(org.json.JSONObject().put("name", "a").put("plane", "sideways")).isFailure)
+    }
 }

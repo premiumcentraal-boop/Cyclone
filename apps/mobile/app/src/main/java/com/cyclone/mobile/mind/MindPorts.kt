@@ -56,7 +56,9 @@ interface MindOwnerPort {
 data class MindMark(val ref: String, val left: Int, val top: Int, val right: Int, val bottom: Int)
 
 data class MindNotification(val key: String, val app: String, val title: String, val text: String, val postedAtMs: Long,
-    val actions: List<String> = emptyList(), val openable: Boolean = true)
+    val actions: List<String> = emptyList(), val openable: Boolean = true,
+    /** Plan 26: the notification has a reply action (answer without opening the app). */
+    val replyable: Boolean = false)
 
 data class MindImage(val dataUrl: String, val width: Int, val height: Int)
 
@@ -83,4 +85,10 @@ interface MindDevicePort {
      * secret fields before a draft can exist). The Mind writes the clipboard; it never reads it.
      */
     fun copy(text: String): Boolean = false
+
+    /**
+     * Plan 26 (A42-6, tier 0): reply to a message through its notification, without the screen. The caller has the
+     * owner's approval for this exact text. Null when it worked, otherwise why not.
+     */
+    fun replyNotification(key: String, text: String): String? = "Replying from a notification is not available here."
 }

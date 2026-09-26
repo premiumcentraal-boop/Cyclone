@@ -236,6 +236,29 @@ class PhoneMindToolboxTest {
         assertTrue(results[3].text.contains("entered the text by hand"))
     }
 
+    @Test fun aReplyFromTheNotificationNeedsTheOwnersApprovalEveryTime() {
+        val env = FakeEnv(login)
+        val sent = mutableListOf<Pair<String, String>>()
+        val phone = object : MindDevicePort by device {
+            override fun notifications() = listOf(
+                MindNotification("k1", "com.whatsapp", "Louella", "Are you coming?", System.currentTimeMillis(), listOf("Reply"), replyable = true),
+                MindNotification("k2", "com.google.android.gm", "Newsletter", "Deals", System.currentTimeMillis()))
+            override fun replyNotification(key: String, text: String): String? { sent += key to text; return null }
+        }
+        val owner = FakeOwner()
+        val box = PhoneMindToolbox(env, owner, phone, "reply to Louella")
+        assertTrue(box.run("notifications").text.contains("[can reply]"))
+        assertTrue(box.run("reply_notification", """{"id":"n1","text":"On my way"}""").ok)
+        assertEquals(listOf("k1" to "On my way"), sent)
+        owner.approval = MindApproval.DECLINED
+        assertFalse(box.run("reply_notification", """{"id":"n1","text":"Later"}""").ok)
+        assertEquals(1, sent.size)
+        assertFalse(box.run("reply_notification", """{"id":"n2","text":"Hi"}""").ok)
+        assertFalse(box.run("reply_notification", """{"id":"n1","text":"my password is x"}""").ok)
+        assertEquals(1, sent.size)
+        assertTrue("no screen was touched", env.acts.isEmpty())
+    }
+
     @Test fun refsStayStableAcrossReobservation() {
         val env = FakeEnv(login)
         val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")

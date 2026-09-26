@@ -479,3 +479,18 @@ def test_the_hands_suite_checks_text_on_screen_and_never_sends():
         if any(word in mission.goal.lower() for word in ("don't send", "not send")):
             assert {"check": "approval", "requested": False} in [dict(c) for c in mission.checks], mission.id
     assert {m.id for m in missions} >= {"hands.chatgpt.prompt", "hands.keep.long", "hands.gmail.draft"}
+
+
+def test_the_planes_suite_keeps_the_owners_screen_and_the_plane_knob_is_checked():
+    from cyclone_device_gateway.lab.runner import LabError, validate_variants
+    missions = [m for m in builtin_missions() if "planes" in m.suites]
+    assert len(missions) >= 4
+    for mission in missions:
+        assert {"check": "foreground", "package": "com.android.settings"} in [dict(c) for c in mission.checks], mission.id
+        assert any(step["do"] == "launch" for step in mission.setup), mission.id
+    assert validate_variants([{"name": "bg", "plane": "background"}])[0]["plane"] == "background"
+    try:
+        validate_variants([{"name": "bad", "plane": "sideways"}])
+        raise AssertionError("an unknown plane must be refused")
+    except LabError:
+        pass

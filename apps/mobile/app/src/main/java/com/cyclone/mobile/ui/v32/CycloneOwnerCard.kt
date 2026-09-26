@@ -80,7 +80,12 @@ private fun OwnerCardContent(moment: OwnerMoment) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ActionRow(moment.actions, send)
             }
-            MomentKind.APPROVAL, MomentKind.HANDOVER -> ActionRow(moment.actions, send)
+            MomentKind.APPROVAL -> {
+                // Plan 26 (A42-7): a background task's approval shows what is being approved.
+                com.cyclone.mobile.ui.overlay.BackgroundGlimpse(moment.taskId)
+                ActionRow(moment.actions, send)
+            }
+            MomentKind.HANDOVER -> ActionRow(moment.actions, send)
         }
     }
 }
