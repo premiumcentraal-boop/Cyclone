@@ -1,5 +1,5 @@
 # Cyclone V5 alpha.39 dev1: one map (mapping passes teach runs), skills and routines grounded on the map, skills on Glass's map.
-# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
+# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested. Release candidate.
 schema = 1
 product_version = "5.0.0-alpha.39.dev1"
 channel = "development"
