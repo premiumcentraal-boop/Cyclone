@@ -110,7 +110,7 @@ Glass could not show what went wrong, which is how a wrong diagnosis got written
 **Exit:** a unit test that feeds the captured ChatGPT tree to `CurrentTargetRevalidation` reproduces the refusal and
 names the rule that fired.
 
-### Phase 1: Hands (alpha.40, the release that makes typing just work)
+### Phase 1: Hands (alpha.41, after Planes — plan 25; the release that makes typing just work)
 
 | # | Work | Where |
 |---|---|---|
@@ -130,7 +130,7 @@ names the rule that fired.
 - No regression on the Lab core suite. No secret values in clipboard telemetry. The Owner-moment handoff fires on a
   forced-failure fixture.
 
-### Phase 2: Desk (alpha.43, after Cyclone Drive — plan 24)
+### Phase 2: Desk (after Cyclone Drive — plan 24)
 
 A mission-scoped scratchpad the Mind can manage like files.
 
@@ -229,8 +229,8 @@ Delivery takes a desk file wherever it takes text:
 |---|---|
 | **alpha.37** | Map-guided runs (plan 20), as the owner decided on 2026-09-25: built. |
 | **alpha.38** | Mapping missions from Glass and the Glass Atlas (plan 22), as the owner decided on 2026-09-26. |
-| **alpha.40** | Hands: Phase 0 + Phase 1, with the Lab Hands suite as the gate. |
-| **alpha.43** | Desk (Phase 2), after Cyclone Drive (plan 24, alpha.41–42). |
+| **alpha.41** | Hands: Phase 0 + Phase 1, with the Lab Hands suite as the gate (alpha.40 is Planes, plan 25). |
+| **alpha.44** | Desk (Phase 2), after Cyclone Drive (plan 24, alpha.42–43). |
 
 ---
 

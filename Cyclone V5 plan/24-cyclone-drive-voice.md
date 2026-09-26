@@ -1,7 +1,8 @@
 # 24 — Cyclone Drive: a voice assistant on top of the Mind (plan)
 
-**Status:** plan, 2026-09-26. Not built yet. Proposed releases: alpha.41 (Drive: talk) and alpha.42 (Drive:
-conversations), after alpha.40 Hands (plan 21), which Drive depends on for reliable typing of dictated replies.
+**Status:** plan, 2026-09-26. Not built yet. Proposed releases: alpha.42 (Drive: talk) and alpha.43 (Drive:
+conversations), after alpha.40 Planes (plan 25: background work and the switch pill, so Maps can stay on screen) and
+alpha.41 Hands (plan 21: reliable typing of dictated replies).
 
 **The owner's ask, in short:**
 - A **Driver mode** toggle in Settings.
@@ -145,7 +146,8 @@ Queried `GET /api/v1/models?output_modalities=speech|transcription` and read the
      does the task, and returns you to it.
    - Navigation audio keeps playing. Our speech ducks it through audio focus
      (`AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`).
-   - Running Drive missions on a background virtual display, leaving Maps untouched, is a later step (§9).
+   - With plan 25 (Planes), Drive missions run on a background display by default and Maps is never touched; screen
+     borrowing is the fallback when background is unavailable.
 
 ## 5. The build
 
@@ -293,7 +295,7 @@ with the chat in view.
    - "change the end to …" → the Mind edits, then a new readback.
    - "no" → Decline.
 
-**Announcing incoming messages** (alpha.42, opt-in per app and per contact, driver mode only):
+**Announcing incoming messages** (alpha.43, opt-in per app and per contact, driver mode only):
 - When a notification arrives from an allowed chat app, Cyclone says: "Louella wrote: 'I will be home late.' Reply?"
 - "yes" starts step 2 above, with the message as the starting point.
 - Rules:
@@ -406,9 +408,9 @@ Task ends → "Sent." / "Done: timer set for 10 minutes." → back to the button
 
 | Release | Contents | Gate |
 |---|---|---|
-| **alpha.40 Hands** (plan 21, already planned) | Reliable typing into composers and the check that the typed text arrived. | Lab Hands suite. Voice replies depend on it. |
-| **alpha.41 Drive: talk** | The setting, driver button (hold-drag, tap), AI mode UI, recording and end-of-speech, OpenRouter STT, understanding, the confirmation line, OpenRouter streaming TTS with local fallback, done / failed lines, screen borrowing (return to the previous app), Voice settings with Test voice, the Lab voice suite, guards. | Confirmation p50 ≤ 2.0 s in Test voice on the Pixel 8; zero network on silent opens. |
-| **alpha.42 Drive: conversations** | Owner Moments by voice (question, values, send readback, deferred approvals), reply drafting in the owner's style, "change it to…", message announcements (opt-in), Bluetooth car mic routing, interrupting while it speaks. | 100% readback-equals-sent; the Louella flow passes end to end on a phone. |
+| **alpha.40 Planes** (plan 25) + **alpha.41 Hands** (plan 21) | Background work with the switch pill (Maps stays on screen); reliable typing into composers with a check that the text arrived. | Lab planes and Hands suites. Drive depends on both. |
+| **alpha.42 Drive: talk** | The setting, driver button (hold-drag, tap), AI mode UI, recording and end-of-speech, OpenRouter STT, understanding, the confirmation line, OpenRouter streaming TTS with local fallback, done / failed lines, screen borrowing (return to the previous app), Voice settings with Test voice, the Lab voice suite, guards. | Confirmation p50 ≤ 2.0 s in Test voice on the Pixel 8; zero network on silent opens. |
+| **alpha.43 Drive: conversations** | Owner Moments by voice (question, values, send readback, deferred approvals), reply drafting in the owner's style, "change it to…", message announcements (opt-in), Bluetooth car mic routing, interrupting while it speaks. | 100% readback-equals-sent; the Louella flow passes end to end on a phone. |
 | later | Missions on a background virtual display (Maps never leaves the screen), a wake phrase (only if the owner asks), on-device STT model, Android Auto surface. | — |
 
 ## 9. Not in this plan (on purpose)
