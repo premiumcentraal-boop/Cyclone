@@ -1,5 +1,5 @@
 # Cyclone V5 alpha.40 dev1: Planes - the Mind works on your screen or behind it, switched in one tap by the pill, with rollback, app memory and a watchdog.
-# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
+# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested. Release candidate.
 schema = 1
 product_version = "5.0.0-alpha.40.dev1"
 channel = "development"
