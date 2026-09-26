@@ -59,8 +59,35 @@ object MissionPlanes {
     fun compat(context: Context) = AppPlaneCompat(File(context.applicationContext.filesDir, "Cyclone Brain/Planes/app-compat.json"))
     fun journal(context: Context) = FilePlaneJournal(File(context.applicationContext.filesDir, "Cyclone Brain/Planes/switches.jsonl"))
 
+    private const val ON_KEY = "background_on"
+    private const val FALLBACK_KEY = "fallback"
+
+    /** Plan 26 (A42-1): the owner's one switch. On by default where the phone can do it. */
+    fun backgroundOn(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ON_KEY, true)
+
+    fun setBackgroundOn(context: Context, on: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(ON_KEY, on).apply()
+    }
+
+    /** Plan 26 (A42-4): what to do when background is wanted but not possible right now. */
+    fun fallback(context: Context): PlaneFallback =
+        PlaneFallback.fromWire(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(FALLBACK_KEY, null))
+            ?: PlaneFallback.defaultFor(mode(context))
+
+    fun setFallback(context: Context, fallback: PlaneFallback) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(FALLBACK_KEY, fallback.wire).apply()
+    }
+
+    /** One answer, with one next step (plan 26, A42-1). */
+    fun capability(context: Context): BackgroundCapability {
+        val r = BackgroundSetup.read(context)
+        return BackgroundCapabilities.judge(BackgroundFacts(backgroundOn(context), r.android, r.installed, r.running, r.authorized,
+            r.accessibility, r.notifications))
+    }
+
     /** Why background work is not possible right now, in the owner's words; null when it is. */
-    fun blocker(context: Context): String? = BackgroundSetup.read(context).setupFailure
+    fun blocker(context: Context): String? = capability(context).takeUnless { it.ready }?.headline
 
     fun begin(context: Context, missionId: String, goal: String, traceId: String?): MissionPlaneSession {
         current?.end()

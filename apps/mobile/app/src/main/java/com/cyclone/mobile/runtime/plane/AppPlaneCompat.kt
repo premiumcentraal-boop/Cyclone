@@ -75,6 +75,48 @@ class AppPlaneCompat(private val file: File, private val clock: () -> Long = Sys
 
     fun all(): Map<String, CompatRecord> = synchronized(lock) { read() }
 
+    // ---- Plan 26 (A42-4): the owner's per-app choice, and whether the app opens a second window ------------------
+
+    private val choicesFile = File(file.parentFile, "app-plane-choices.json")
+
+    /** The owner's choice for [packageName]; banking, camera and game apps start as "always on my screen". */
+    fun override(packageName: String): PlaneOverride = synchronized(lock) {
+        readChoices().optJSONObject(packageName)?.optString("override")?.let(PlaneOverride::fromWire) ?: seedOverride(packageName)
+    }
+
+    fun setOverride(packageName: String, choice: PlaneOverride) = synchronized(lock) {
+        val all = readChoices()
+        all.put(packageName, (all.optJSONObject(packageName) ?: JSONObject()).put("override", choice.wire))
+        writeChoices(all)
+    }
+
+    /** Apps the owner chose for, or that Cyclone met, with their current choice. */
+    fun choices(): Map<String, PlaneOverride> = synchronized(lock) {
+        val all = readChoices()
+        val seen = all.keys().asSequence().toSet() + read().keys.map { it.substringBefore('|') }
+        seen.associateWith { override(it) }
+    }
+
+    /** Null until Cyclone has tried to open a second window of this app on a background screen. */
+    fun secondWindow(packageName: String): Boolean? = synchronized(lock) {
+        readChoices().optJSONObject(packageName)?.takeIf { it.has("secondWindow") }?.optBoolean("secondWindow")
+    }
+
+    fun recordSecondWindow(packageName: String, worked: Boolean) = synchronized(lock) {
+        val all = readChoices()
+        all.put(packageName, (all.optJSONObject(packageName) ?: JSONObject()).put("secondWindow", worked))
+        writeChoices(all)
+    }
+
+    private fun readChoices(): JSONObject = runCatching { JSONObject(choicesFile.readText()) }.getOrDefault(JSONObject())
+
+    private fun writeChoices(json: JSONObject) {
+        choicesFile.parentFile?.mkdirs()
+        val tmp = File(choicesFile.parentFile, choicesFile.name + ".tmp")
+        tmp.writeText(json.toString())
+        if (!tmp.renameTo(choicesFile)) { choicesFile.writeText(tmp.readText()); tmp.delete() }
+    }
+
     private fun key(packageName: String, version: String?) = "$packageName|${version ?: "?"}"
 
     private fun read(): Map<String, CompatRecord> = runCatching {
@@ -90,6 +132,12 @@ class AppPlaneCompat(private val file: File, private val clock: () -> Long = Sys
     }
 
     companion object {
+        private val MONEY = Regex("(?i)(bank|banking|\\.ing\\.|rabo|abnamro|knab|bunq|revolut|paypal|wallet|finance|invest|broker|crypto)")
+
+        /** Money apps start on the owner's screen: they approve what they see. Cameras and games cannot run behind it. */
+        fun seedOverride(packageName: String): PlaneOverride =
+            if (MONEY.containsMatchIn(packageName) || seed(packageName).needsScreen) PlaneOverride.SCREEN else PlaneOverride.AUTO
+
         /** Classes of apps that need the screen before anyone tries: cameras and games (known virtual-display trouble). */
         fun seed(packageName: String): BackgroundCompat {
             val p = packageName.lowercase()

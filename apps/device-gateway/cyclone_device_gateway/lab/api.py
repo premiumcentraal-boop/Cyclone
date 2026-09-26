@@ -32,6 +32,19 @@ def create_lab_router(runtime: Any, token: str) -> APIRouter:
         except DesktopRuntimeError as exc:
             raise HTTPException(status_code=409, detail=exc.to_dict()) from exc
 
+    # Plan 26 (A42-1): the owner keeps background work on after restarts. A fixed, typed step; no command input.
+    @router.post("/v1/devices/{device_id}/background/keep-on", dependencies=[Depends(auth)])
+    def keep_background_on(device_id: str):
+        from ..background.keep_on import keep_background_on as keep_on
+
+        def run():
+            session = runtime.fleet.get(device_id)
+            adb = getattr(session, "adb", None)
+            if adb is None:
+                raise LabError("Connect the phone to this PC over USB (or wireless debugging) first.")
+            return keep_on(adb).public()
+        return call(run)
+
     @router.get("/v1/lab/missions", dependencies=[Depends(auth)])
     def missions():
         return call(lambda: lab().catalog())

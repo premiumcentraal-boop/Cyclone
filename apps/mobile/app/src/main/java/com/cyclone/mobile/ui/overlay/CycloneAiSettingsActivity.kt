@@ -255,6 +255,67 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                     Text("Background work is not available yet: $it", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                // Plan 26 (A42-4): what happens when background is wanted but not possible right now.
+                if (planeMode != com.cyclone.mobile.runtime.plane.PlaneMode.SCREEN) {
+                    var fallback by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.fallback(context)) }
+                    Text("When background isn't possible", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.runtime.plane.PlaneFallback.entries.forEach { choice ->
+                            FilterChip(selected = fallback == choice, onClick = {
+                                fallback = choice
+                                com.cyclone.mobile.runtime.plane.MissionPlanes.setFallback(context, choice)
+                            }, label = { Text(choice.label) })
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
+                // Plan 26 (A42-1): one switch, one answer, one next step.
+                var capability by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.capability(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Background work", fontWeight = FontWeight.Bold)
+                        Text(capability.headline, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = capability.level != com.cyclone.mobile.runtime.plane.CapabilityLevel.OFF &&
+                            capability.level != com.cyclone.mobile.runtime.plane.CapabilityLevel.UNSUPPORTED,
+                        enabled = capability.level != com.cyclone.mobile.runtime.plane.CapabilityLevel.UNSUPPORTED,
+                        onCheckedChange = { on ->
+                            com.cyclone.mobile.runtime.plane.MissionPlanes.setBackgroundOn(context, on)
+                            capability = com.cyclone.mobile.runtime.plane.MissionPlanes.capability(context)
+                        },
+                    )
+                }
+                capability.action?.takeIf { it != com.cyclone.mobile.runtime.plane.CapabilityAction.TURN_ON }?.let { action ->
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(com.cyclone.mobile.runtime.plane.BackgroundWatch.fixIntent(context, action)) }
+                    }) { Text(action.label) }
+                }
+                Text("Also in Quick Settings: add the Cyclone background tile. Glass on your PC can keep it on after restarts.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Per app: seeded (banking, camera, games on your screen) and learned; the owner's choice wins.
+                val compat = remember { com.cyclone.mobile.runtime.plane.MissionPlanes.compat(context) }
+                var choices by remember { mutableStateOf(compat.choices()) }
+                if (choices.isNotEmpty()) {
+                    Text("Per app", style = MaterialTheme.typography.bodyMedium)
+                    choices.entries.sortedBy { it.key }.take(30).forEach { (pkg, choice) ->
+                        val label = remember(pkg) { runCatching { context.packageManager.getApplicationLabel(
+                            context.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                val next = com.cyclone.mobile.runtime.plane.PlaneOverride.entries.let { it[(it.indexOf(choice) + 1) % it.size] }
+                                compat.setOverride(pkg, next)
+                                choices = compat.choices()
+                            }) { Text(choice.label) }
+                        }
+                    }
+                }
             }
         }
 

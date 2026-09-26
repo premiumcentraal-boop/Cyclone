@@ -95,3 +95,114 @@ object PlanePolicy {
 
     const val RETURN_IDLE_MS = 5_000L
 }
+
+/** Plan 26 (A42-4): what to do when background is wanted but not possible right now. */
+enum class PlaneFallback(val wire: String, val label: String) {
+    SCREEN("screen", "Use my screen"),
+    WAIT("wait", "Wait until I'm done with the app"),
+    ASK("ask", "Ask me each time"),
+    ;
+
+    companion object {
+        fun fromWire(raw: String?): PlaneFallback? = entries.firstOrNull { it.wire == raw }
+        /** Automatic prefers the screen; someone who chose the background would rather wait than lose their screen. */
+        fun defaultFor(mode: PlaneMode): PlaneFallback = if (mode == PlaneMode.BACKGROUND) WAIT else SCREEN
+    }
+}
+
+/** Plan 26 (A42-4): the owner's choice for one app. */
+enum class PlaneOverride(val wire: String, val label: String) {
+    AUTO("auto", "Cyclone decides"),
+    SCREEN("screen", "Always on my screen"),
+    BACKGROUND("background", "Always in the background"),
+    ;
+
+    companion object {
+        fun fromWire(raw: String?): PlaneOverride = entries.firstOrNull { it.wire == raw } ?: AUTO
+    }
+}
+
+/** Where the app a task needs is right now. */
+enum class TargetHolder {
+    /** Not running, or only in memory without a task. */
+    NOBODY,
+    /** It has a task in Recents but the owner is not looking at it. */
+    RECENTS,
+    /** It is on the owner's screen: the owner holds it. */
+    OWNER,
+}
+
+/** How a background start gets its app onto the background screen. */
+enum class BackgroundEntry { LAUNCH, ADOPT_FROM_RECENTS, SECOND_WINDOW, TAKE_FROM_OWNER }
+
+sealed class StartPlan {
+    abstract val reason: String
+    data class Screen(override val reason: String) : StartPlan()
+    data class Background(override val reason: String, val entry: BackgroundEntry) : StartPlan()
+    /** Wait until the owner is done with the app (it leaves their screen or the screen turns off). */
+    data class Wait(override val reason: String) : StartPlan()
+    /** Ask: when you're done / now on your screen / take it to the background. */
+    data class Ask(override val reason: String) : StartPlan()
+}
+
+data class StartFacts(
+    val mode: PlaneMode,
+    val fallback: PlaneFallback,
+    val override: PlaneOverride = PlaneOverride.AUTO,
+    val backgroundReady: Boolean,
+    val backgroundBlocker: String? = null,
+    val ownerBusyElsewhere: Boolean = false,
+    val driverMode: Boolean = false,
+    val longTask: Boolean = false,
+    val targetCompat: BackgroundCompat = BackgroundCompat.UNKNOWN,
+    val needsHands: Boolean = false,
+    val holder: TargetHolder = TargetHolder.NOBODY,
+    /** The app can open a second window (multi-instance), known from what Cyclone learned. */
+    val secondWindow: Boolean = false,
+    /** Words for the app, for the reasons. */
+    val appLabel: String = "this app",
+)
+
+/**
+ * Plan 26 (A42-4, A42-5): the start decision with the owner's preference, per-app choice, fallback and who holds the
+ * app. Pure; one table test covers it.
+ */
+object StartPolicy {
+    fun begin(f: StartFacts): StartPlan {
+        if (f.override == PlaneOverride.SCREEN) return StartPlan.Screen("You chose to have ${f.appLabel} run on your screen.")
+        if (f.mode == PlaneMode.SCREEN && f.override != PlaneOverride.BACKGROUND) return StartPlan.Screen("You chose to have Cyclone work on screen.")
+        if (f.needsHands) return StartPlan.Screen("This task needs your hands on the phone.")
+        if (f.targetCompat.needsScreen && f.override != PlaneOverride.BACKGROUND) return StartPlan.Screen("${f.appLabel.replaceFirstChar { it.uppercase() }} ${f.targetCompat.why}.")
+        val wanted = f.override == PlaneOverride.BACKGROUND || f.mode == PlaneMode.BACKGROUND ||
+            f.driverMode || f.ownerBusyElsewhere || f.longTask
+        if (!wanted) return StartPlan.Screen("You are not using your phone, so Cyclone works where you can watch.")
+        if (!f.backgroundReady) {
+            val why = f.backgroundBlocker ?: "Background work is not available right now."
+            // Waiting cannot fix a stopped helper; only asking or the screen can.
+            return if (f.fallback == PlaneFallback.ASK) StartPlan.Ask(why) else StartPlan.Screen(why)
+        }
+        return when (f.holder) {
+            TargetHolder.NOBODY -> StartPlan.Background("Cyclone works behind your screen.", BackgroundEntry.LAUNCH)
+            TargetHolder.RECENTS -> StartPlan.Background("Cyclone takes ${f.appLabel} from your recent apps and works behind your screen.",
+                BackgroundEntry.ADOPT_FROM_RECENTS)
+            TargetHolder.OWNER -> when {
+                f.secondWindow -> StartPlan.Background("${f.appLabel.replaceFirstChar { it.uppercase() }} opens a second window behind your screen; you keep yours.",
+                    BackgroundEntry.SECOND_WINDOW)
+                f.fallback == PlaneFallback.WAIT -> StartPlan.Wait("You are using ${f.appLabel}; Cyclone starts when you are done with it.")
+                f.fallback == PlaneFallback.ASK -> StartPlan.Ask("You are using ${f.appLabel}.")
+                else -> StartPlan.Screen("You are using ${f.appLabel}, so Cyclone works in it on your screen.")
+            }
+        }
+    }
+
+    /** The owner's answer to the Ask card. */
+    fun answer(text: String): StartChoice = when {
+        text.contains("done", ignoreCase = true) || text.contains("wait", ignoreCase = true) -> StartChoice.WHEN_DONE
+        text.contains("background", ignoreCase = true) -> StartChoice.TAKE_TO_BACKGROUND
+        else -> StartChoice.NOW_ON_SCREEN
+    }
+
+    val ASK_CHOICES = listOf("When I'm done", "Now on my screen", "Take it to the background")
+}
+
+enum class StartChoice { WHEN_DONE, NOW_ON_SCREEN, TAKE_TO_BACKGROUND }

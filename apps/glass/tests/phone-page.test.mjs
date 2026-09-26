@@ -25,6 +25,7 @@ function phone({ locked = false, askError = null } = {}) {
     },
     "POST /v1/devices/d1/ask/status": () => state.ask,
     "GET /v1/devices/d1/runs": () => ({ runs: state.runs ?? [] }),
+    "POST /v1/devices/d1/background/keep-on": () => ({ ok: true, state: "on", message: "Done. Turn on Start on boot in Shizuku once." }),
   });
   return { state, gateway };
 }
@@ -335,4 +336,19 @@ test("Share over Wi-Fi asks the phone; the owner taps the notification; then the
   assert.deepEqual(calls, ["request"]);
   assert.match(opened.page.element.querySelector(".share-box").textContent, /tap the notification on the phone/);
   opened.page.destroy();
+});
+
+test("Keep background work on asks the gateway's fixed step and shows its answer", async () => {
+  const fake = phone();
+  const { page } = open(fake);
+  await flush();
+  const button = [...page.element.querySelectorAll(".background-card .btn")].find((b) => /Keep background work on/.test(b.textContent));
+  assert.ok(button);
+  button.click();
+  await flush();
+  const call = fake.gateway.calls.find((c) => c.path.endsWith("/background/keep-on"));
+  assert.ok(call);
+  assert.deepEqual(call.body, {});
+  assert.match(page.element.querySelector(".background-card").textContent, /Start on boot/);
+  page.destroy();
 });

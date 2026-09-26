@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Cyclone Mind: a bounded partial wake lock so a model call finishes if the screen turns off mid-mission. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <queries>
@@ -173,5 +174,23 @@
             </intent-filter>
         </service>
     <receiver android:name=".gateway.LivePhoneControlReceiver" android:exported="false" />
+    <!-- Plan 26: background work that stays on (boot check) and its Quick Settings tile. -->
+    <receiver android:name=".runtime.plane.BackgroundBootReceiver" android:exported="false">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+    </receiver>
+    <service
+        android:name=".runtime.plane.CycloneBackgroundTile"
+        android:exported="true"
+        android:icon="@drawable/ic_cyclone_status"
+        android:label="Cyclone background"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+        <intent-filter>
+            <action android:name="android.service.quicksettings.action.QS_TILE" />
+        </intent-filter>
+        <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />
+    </service>
     </application>
 </manifest>

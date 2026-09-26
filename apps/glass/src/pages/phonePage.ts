@@ -14,6 +14,7 @@ import { createAskPanel, type AskPanelDeps } from "./askPanel.js";
 import { listRuns, normalizeGoal } from "../services/runs.js";
 import { deviceGate } from "./deviceGate.js";
 import { liveViewProblem } from "../services/devices.js";
+import { keepBackgroundOn } from "../services/background.js";
 import type { GlassPage } from "./page.js";
 
 export interface PhonePageDeps {
@@ -245,8 +246,23 @@ export function createPhonePage(ctx: GlassContext, deps: PhonePageDeps = {}): Gl
   void refreshHere();
   void refreshShare();
 
+  // Plan 26 (A42-1): background work that comes back by itself after a phone restart.
+  const background = el("section", "card background-card");
+  const backgroundNote = el("p", "muted", "Cyclone's background work needs a helper that stops when the phone restarts. Keep it on once from here.");
+  backgroundNote.setAttribute("role", "status");
+  const keepOn = actionButton("Keep background work on");
+  keepOn.addEventListener("click", () => {
+    keepOn.disabled = true;
+    backgroundNote.textContent = "Asking the phone…";
+    keepBackgroundOn(ctx.client, device.id)
+      .then((result) => { backgroundNote.textContent = result.message; })
+      .catch((error) => { backgroundNote.textContent = error instanceof Error ? error.message : String(error); })
+      .finally(() => { keepOn.disabled = false; });
+  });
+  background.append(el("span", "cause-kicker", "Background work"), backgroundNote, keepOn);
+
   const side = el("div", "phone-side");
-  side.append(here, ask.element);
+  side.append(here, background, ask.element);
   const layout = el("div", "phone-layout");
   layout.append(stage, side);
   element.append(layout);

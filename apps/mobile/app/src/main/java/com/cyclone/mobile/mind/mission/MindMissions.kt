@@ -125,6 +125,8 @@ object MindMissions {
      */
     fun onServiceReady(context: Context) {
         refresh(context)
+        // Plan 26: is background work still ready? Told once, quietly, not in the middle of a task.
+        runCatching { com.cyclone.mobile.runtime.plane.BackgroundWatch.check(context) }
         val id = resumeCandidate ?: return
         resumeCandidate = null
         if (!enabled(context) || isLive()) return
