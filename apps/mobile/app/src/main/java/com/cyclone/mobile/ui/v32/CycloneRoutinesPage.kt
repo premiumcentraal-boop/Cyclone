@@ -346,6 +346,11 @@ private fun RoutineListCard(
                 routine.categories.firstOrNull()?.let { category ->
                     Text(category, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 }
+                val ground = com.cyclone.mobile.automation.RoutineGrounding.of(routine)
+                if (ground != com.cyclone.mobile.automation.RoutineGround.NO_PHONE) {
+                    Text(ground.label, style = MaterialTheme.typography.labelSmall,
+                        color = if (ground == com.cyclone.mobile.automation.RoutineGround.GROUNDED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             if (routine.enabled) {
                 TextButton(onClick = onRun) {

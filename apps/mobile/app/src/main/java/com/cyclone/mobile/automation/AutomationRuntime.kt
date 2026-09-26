@@ -246,6 +246,13 @@ class CyclonePhoneToolAdapter(private val context: Context) : PhoneToolGateway {
 }
 
 private class CycloneIntegrationGateway(private val context: Context) : IntegrationGateway {
+    /** A saved skill runs through the same entry as a typed Ask (Marketplace.run): GATE, approvals, Secrets Card. */
+    override fun runGroundedSkill(skillId: String): PhoneToolResult {
+        val refusal = com.cyclone.mobile.market.Marketplace.run(context, skillId)
+            ?: return PhoneToolResult(true, output = mapOf("skillStarted" to skillId), message = "skill_started")
+        return PhoneToolResult(false, errorCode = refusal.code, message = refusal.message)
+    }
+
     override fun refreshObservation(): Boolean = PhoneToolExecutor.execute(
         context, NativePhoneToolRequest("automation-observe-${UUID.randomUUID()}", "phone.observe", JSONObject())
     ).ok

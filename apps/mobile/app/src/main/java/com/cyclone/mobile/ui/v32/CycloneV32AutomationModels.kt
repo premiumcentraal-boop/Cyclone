@@ -22,6 +22,7 @@ enum class V32TriggerChoice(
 }
 
 enum class V32ActionChoice(val label: String, val description: String) {
+    RUN_SKILL("Run one of your skills", "Runs a saved skill. It finds its way on the app's map and finishes with the same checks as an Ask."),
     OPEN_APP("Open an app", "Launch a package on this phone."),
     HOME("Go Home", "Return to the Android home screen."),
     BACK("Go Back", "Navigate back one screen."),
@@ -35,6 +36,7 @@ data class V32ActionDraft(
     val value: String = "",
 ) {
     fun toStep(): StepDefinition = when (choice) {
+        V32ActionChoice.RUN_SKILL -> com.cyclone.mobile.automation.RoutineGrounding.skillStep(id, value.trim())
         V32ActionChoice.OPEN_APP -> StepDefinition(
             id = id,
             name = "Open ${value.trim()}",
@@ -60,6 +62,7 @@ data class V32ActionDraft(
     }
 
     fun validationIssue(): String? = when {
+        choice == V32ActionChoice.RUN_SKILL && !value.trim().startsWith("you.") -> "Choose one of your skills."
         choice == V32ActionChoice.OPEN_APP && value.trim().isBlank() -> "Choose an app package."
         choice == V32ActionChoice.OPEN_APP && !PACKAGE_PATTERN.matches(value.trim()) -> "Use an Android package such as com.example.app."
         choice == V32ActionChoice.WAIT && value.isNotBlank() && value.toLongOrNull() == null -> "Wait time must be milliseconds."
@@ -162,6 +165,7 @@ fun StepDefinition.v32ReadableName(): String = name.ifBlank {
         StepType.PHONE_TOOL -> parameters["tool"].orEmpty().removePrefix("phone.").replace('_', ' ').ifBlank { "Phone action" }
         StepType.DELAY -> "Wait"
         StepType.REQUEST_HUMAN_TAKEOVER -> "Ask for help"
+        StepType.RUN_GROUNDED_SKILL -> "Run skill"
         else -> type.name.lowercase().replace('_', ' ').replaceFirstChar(Char::titlecase)
     }
 }

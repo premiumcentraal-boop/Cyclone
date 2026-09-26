@@ -12,6 +12,8 @@ interface IntegrationGateway {
     fun restartApp(packageName: String?): Boolean = false
     fun http(method: String, url: String, body: String?): PhoneToolResult = PhoneToolResult(false, errorCode = "HTTP_NOT_CONFIGURED")
     fun sendCycloneEvent(type: String, payload: Map<String, String>): PhoneToolResult = PhoneToolResult(false, errorCode = "CYCLONE_NOT_CONFIGURED")
+    /** Starts one of the owner's saved skills as a Mind mission (grounded on the map). */
+    fun runGroundedSkill(skillId: String): PhoneToolResult = PhoneToolResult(false, errorCode = "SKILLS_NOT_CONFIGURED")
 }
 fun interface ConfirmationGateway { fun confirm(step: StepDefinition, variables: Map<String, String>): Boolean }
 fun interface TakeoverGateway { fun request(reason: String, runId: String, stepId: String): Boolean }
@@ -218,6 +220,11 @@ class AutomationRunner(
                 StepExecution(true, mapOf(target to match))
             }
             StepType.INVOKE_SKILL -> invokeSkill(runId, step.parameters["skillId"], variables, depth + 1)
+            StepType.RUN_GROUNDED_SKILL -> {
+                val skillId = step.parameters["skillId"]?.takeIf { it.startsWith("you.") } ?: return StepExecution(false, message = "missing_skill_id")
+                val result = integrations.runGroundedSkill(skillId)
+                StepExecution(result.success, output = result.output, message = result.message ?: result.errorCode)
+            }
             StepType.STOCK_SKILL -> {
                 val skillId = step.parameters["skillId"] ?: return StepExecution(false, message = "missing_stock_skill_id")
                 val arguments = resolveMap(step.parameters - "skillId", variables)
