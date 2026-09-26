@@ -98,15 +98,17 @@ class OverlayToolsSheetTest {
         assertTrue(shader.contains("m *= chromeFade;"))
     }
 
-    @Test fun workPanelHandleRidesOnTopAndChromeReportsItsBounds() {
+    @Test fun theStackIsPillThenCardThenAskBarAndChromeReportsItsBounds() {
         val drawer = source("ui/overlay/SignatureOverlayDrawer.kt")
-        val column = drawer.substringAfter("Column(modifier.fillMaxWidth()")
-        // Handle first, then the work panel, then the Ask bar.
-        val handle = column.indexOf("Drag down or tap to minimize Cyclone chat")
-        val panel = column.indexOf("CycloneConversationPanel(")
+        val column = drawer.substringAfter("horizontalAlignment = Alignment.CenterHorizontally,")
+        // Plan 27: the plane pill on top, 10 dp, the card, 14 dp, then the Ask bar (or the island).
+        val pill = column.indexOf("top()")
+        val pillGap = column.indexOf("OverlayStackGeometry.PILL_GAP_DP")
+        val card = column.indexOf("content = content")
+        val cardGap = column.indexOf("OverlayStackGeometry.CARD_GAP_DP")
         val composer = column.indexOf("composer()")
-        assertTrue(handle in 0 until panel)
-        assertTrue(panel < composer)
+        assertTrue(pill in 0 until pillGap)
+        assertTrue(pillGap < card && card < cardGap && cardGap < composer)
         val chrome = source("ui/overlay/OverlayChrome.kt")
         assertTrue(chrome.contains("TraceFieldRuntime.chromeBounds("))
         assertTrue(chrome.contains("onSizeChanged { workCardPx = it.height }"))

@@ -171,7 +171,7 @@ internal fun PlanePill(modifier: Modifier = Modifier) {
 
 /** Two stacked screens. The lit one is where Cyclone works; while moving, the light slides between them. */
 @Composable
-private fun PlaneSymbol(look: PlanePillLook) {
+internal fun PlaneSymbol(look: PlanePillLook) {
     val target = when (look) {
         PlanePillLook.BACKGROUND -> 1f
         PlanePillLook.WAITING -> 0.5f

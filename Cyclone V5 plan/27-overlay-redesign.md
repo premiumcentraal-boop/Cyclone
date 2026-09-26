@@ -1,8 +1,17 @@
 # 27 — The overlay, redesigned (in-between update after alpha.42)
 
-**Status:** plan, waiting for the owner's green light (2026-09-26). Proposed as **5.0.0-alpha.42.dev2** (version code
-185), a quick update between alpha.42 (Background always) and alpha.43 (parallel sessions). Nothing else in the
-roadmap moves.
+**Status:** built in **alpha.43** (5.0.0-alpha.43.dev1, version code 185, 2026-09-26), after the owner agreed the
+design in the Overlay Studio rounds and asked for a new alpha. It follows the studio's final round, which superseded
+§2's first sketch:
+- tilt-lit glass instead of the fingerprint whorls;
+- the one-word pill stays above the island;
+- the app logos lead the card.
+
+Not built:
+- the fly-into-pill motion (the phone goes home and the stack folds instead);
+- the PC `planes.journal` view (the reason shows on the phone).
+
+Parallel sessions move to alpha.44 and Drive to alpha.45–46.
 
 **The owner's ask** (with two Pixel screenshots of a running Mind task in WhatsApp):
 - The working card sits too close to the Ask Cyclone bar. It needs natural separation.

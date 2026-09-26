@@ -20,7 +20,8 @@ class CycloneConversationSystem472Test {
         val bubble = source("ui/v32/CycloneConversationBubble.kt")
 
         assertTrue(page.contains("CycloneConversationBubble("))
-        assertTrue(overlay.contains("CycloneConversationBubble("))
+        // Plan 27: the overlay shows the task on its glass card, not as a conversation.
+        assertTrue(overlay.contains("OverlayWorkCard(task, minimize)"))
         assertTrue(bubble.contains("enum class CycloneConversationSpeaker { USER, CYCLONE }"))
         assertTrue(bubble.contains("CycloneConversationSpeaker.CYCLONE ->"))
         assertTrue(bubble.contains("CycloneConversationSpeaker.USER ->"))
@@ -65,7 +66,7 @@ class CycloneConversationSystem472Test {
     @Test
     fun overlayTaskCardIsNotWrappedInAnotherGlassCard() {
         val overlay = source("ui/overlay/OverlayChrome.kt")
-        val taskIndex = overlay.indexOf("task != null -> CycloneAskTaskPanel(task)")
+        val taskIndex = overlay.indexOf("task != null -> OverlayWorkCard(task, minimize)")
         assertTrue(taskIndex >= 0)
         val nearby = overlay.substring((taskIndex - 1400).coerceAtLeast(0), (taskIndex + 300).coerceAtMost(overlay.length))
         assertFalse(nearby.contains("OverlayAppleGlass("))
@@ -77,7 +78,6 @@ class CycloneConversationSystem472Test {
         val page = source("ui/v32/CycloneV39AiChatPage.kt")
         val overlay = source("ui/overlay/OverlayChrome.kt")
         val bubble = source("ui/v32/CycloneConversationBubble.kt")
-        assertTrue(drawer.contains("CycloneConversationPanel("))
         assertTrue(page.contains("CycloneConversationPanel(Modifier.weight(1f).fillMaxWidth())"))
         assertEquals(1, Regex("verticalScroll\\(").findAll(drawer).count())
         val content = overlay.substringAfter("private fun ComposerPanel(").substringBefore("private fun GatePanel(")

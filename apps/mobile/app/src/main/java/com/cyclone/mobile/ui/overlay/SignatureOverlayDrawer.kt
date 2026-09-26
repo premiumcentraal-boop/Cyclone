@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,7 +60,12 @@ internal object SignatureDrawerGeometry {
         (start - dragPx / heightPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
 }
 
-/** A single bottom-anchored composer survives every expanded/minimized transition. */
+/**
+ * Plan 27: one bottom-anchored stack. From the top: the plane pill ([top], shown in every height while a mission has
+ * one), 10 dp, the working card (revealed or folded away), 14 dp, then the Ask bar or the island. Drag down anywhere
+ * on the stack folds one height lower (card → island → notification only); drag up opens it again. The composer is
+ * never translated, faded, reparented or clipped by the card's animated bounds.
+ */
 @Composable
 internal fun SignatureOverlayDrawer(
     expanded: Boolean,
@@ -66,8 +73,9 @@ internal fun SignatureOverlayDrawer(
     onCollapse: () -> Unit,
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
-    /** Cap for the work panel above the composer; it scrolls, anchored to its newest (bottom) content. */
+    /** Cap for the card above the composer. */
     upperMaxHeight: Dp = Dp.Unspecified,
+    top: (@Composable () -> Unit)? = null,
     composer: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -78,13 +86,21 @@ internal fun SignatureOverlayDrawer(
     var fullHeight by remember { mutableFloatStateOf(1f) }
     var drag by remember { mutableFloatStateOf(0f) }
     var dragStart by remember { mutableFloatStateOf(0f) }
+    var follow by remember { mutableFloatStateOf(0f) }
     var settleJob by remember { mutableStateOf<Job?>(null) }
-    val threshold = with(LocalDensity.current) { 56.dp.toPx() }
+    val density = LocalDensity.current
+    val threshold = with(density) { 48.dp.toPx() }
 
     fun settle(target: Float, after: () -> Unit = {}) {
         settleJob?.cancel()
         settleJob = scope.launch {
-            animate(reveal, target, animationSpec = spring(dampingRatio = 1f, stiffness = 420f)) { value, _ ->
+            val fromFollow = follow
+            animate(0f, 1f, animationSpec = spring(dampingRatio = 0.86f, stiffness = 380f)) { t, _ ->
+                follow = fromFollow * (1f - t)
+            }
+        }
+        scope.launch {
+            animate(reveal, target, animationSpec = spring(dampingRatio = 0.86f, stiffness = 380f)) { value, _ ->
                 reveal = value.coerceIn(0f, 1f)
             }
             after()
@@ -92,51 +108,49 @@ internal fun SignatureOverlayDrawer(
     }
     LaunchedEffect(expanded) { settle(if (expanded) 1f else 0f) }
 
-    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        // The handle rides on top of the work panel. When the panel is collapsed it has no height,
-        // so the same handle then sits directly above the Ask bar.
-        Box(
-            Modifier.fillMaxWidth().height(24.dp)
-                .semantics {
-                    contentDescription = if (minimized) "Drag up to expand or down to hide Cyclone chat"
-                    else "Drag down or tap to minimize Cyclone chat"
-                }
-                .clickable(role = Role.Button) {
-                    if (minimized) expand() else settle(0f) { collapse() }
-                }
-                .pointerInput(minimized, expanded, threshold) {
-                    detectVerticalDragGestures(
-                        onDragStart = {
-                            settleJob?.cancel()
-                            drag = 0f
-                            dragStart = reveal
-                        },
-                        onVerticalDrag = { change, amount ->
-                            change.consume()
-                            drag += amount
-                            reveal = SignatureDrawerGeometry.revealAfterDrag(dragStart, drag, fullHeight)
-                        },
-                        onDragCancel = { settle(if (expanded) 1f else 0f) },
-                        onDragEnd = {
-                            when {
-                                drag >= threshold -> settle(0f) { collapse() }
-                                minimized && drag <= -threshold * .6f -> expand()
-                                else -> settle(if (expanded) 1f else 0f)
-                            }
-                        },
-                    )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(32.dp, 3.dp).background(SignatureMuted.copy(alpha = .38f), CircleShape))
+    Column(
+        modifier.fillMaxWidth()
+            .graphicsLayer { translationY = follow }
+            .semantics {
+                contentDescription = if (minimized) "Cyclone. Drag up to open, down to hide." else "Cyclone. Drag down to make smaller."
+            }
+            .pointerInput(minimized, expanded, threshold) {
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        settleJob?.cancel()
+                        drag = 0f
+                        dragStart = reveal
+                    },
+                    onVerticalDrag = { change, amount ->
+                        change.consume()
+                        drag += amount
+                        // The stack follows the finger: freely downwards, a little resistance upwards.
+                        follow = if (drag > 0f) drag * 0.55f else maxOf(-36f * density.density, drag * 0.3f)
+                        if (!minimized && expanded) reveal = SignatureDrawerGeometry.revealAfterDrag(dragStart, drag, fullHeight)
+                    },
+                    onDragCancel = { settle(if (expanded) 1f else 0f) },
+                    onDragEnd = {
+                        when {
+                            drag >= threshold -> settle(0f) { collapse() }
+                            minimized && drag <= -threshold * .6f -> { settle(0f); expand() }
+                            else -> settle(if (expanded) 1f else 0f)
+                        }
+                    },
+                )
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (top != null) {
+            Box(Modifier.fillMaxWidth()) { top() }
+            Spacer(Modifier.height(OverlayStackGeometry.PILL_GAP_DP.dp))
         }
-        // Clip only the upper content. The composer below is never translated, faded,
-        // reparented, or clipped by the drawer's animated bounds.
+        // Clip only the card. The composer below is never translated, faded, reparented, or clipped by it.
         Box(
             Modifier.weight(1f, fill = false).fillMaxWidth()
                 .then(if (upperMaxHeight != Dp.Unspecified) Modifier.heightIn(max = upperMaxHeight) else Modifier)
-                .clip(RoundedCornerShape(30.dp))
+                .clip(RoundedCornerShape(OverlayStackGeometry.CARD_RADIUS_DP.dp))
                 .then(if (reveal == 0f) Modifier.clearAndSetSemantics {} else Modifier)
+                .graphicsLayer { alpha = (reveal * 1.6f).coerceIn(0f, 1f) }
                 .layout { measurable, constraints ->
                     val measured = measurable.measure(constraints.copy(minHeight = 0))
                     fullHeight = measured.height.toFloat().coerceAtLeast(1f)
@@ -146,16 +160,16 @@ internal fun SignatureOverlayDrawer(
                     }
                 },
         ) {
-            CycloneConversationPanel(Modifier.fillMaxWidth()) {
-                Column(
-                    // Reverse scrolling starts at the bottom: the live work card is always in view and
-                    // earlier messages (the first prompt) are one scroll up.
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState(), reverseScrolling = true),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    content = content,
-                )
-            }
+            // Bottom-anchored. It scrolls only when a large font makes the card taller than its room, so the scroll
+            // never takes the fold gesture from the stack otherwise.
+            val scroll = rememberScrollState()
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(scroll, enabled = scroll.maxValue > 0, reverseScrolling = true),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                content = content,
+            )
         }
+        Spacer(Modifier.height((OverlayStackGeometry.CARD_GAP_DP * reveal).dp))
         composer()
     }
 }

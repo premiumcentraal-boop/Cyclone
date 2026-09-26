@@ -144,7 +144,7 @@ class Cyclone422TaskGlassTest {
     @Test fun overlayVisualStateCannotManufactureCurrentTask() {
         val overlay = source("ui/overlay/OverlayChrome.kt")
         assertTrue(overlay.contains("val task = workspace?.takeIf"))
-        assertTrue(overlay.contains("foregroundWorking -> CycloneForegroundWorkCard(snapshot)"))
+        assertTrue(overlay.contains("else -> OverlayForegroundCard(snapshot, minimize)"))
         assertFalse(overlay.contains("WorkspaceTaskUi("))
         assertFalse(overlay.contains("Current phone task"))
     }
@@ -163,8 +163,8 @@ class Cyclone422TaskGlassTest {
         val drawer = source("ui/overlay/SignatureOverlayDrawer.kt")
         assertTrue(overlay.contains("SignatureDrawerGeometry.availableHeight("))
         assertTrue(overlay.contains("heightIn(max = panelHeight.dp)"))
-        // Bottom-anchored: the live work card stays in view, earlier messages scroll up.
-        assertTrue(drawer.contains("verticalScroll(rememberScrollState(), reverseScrolling = true)"))
+        // Bottom-anchored: the card scrolls only when a large font makes it taller than its room.
+        assertTrue(drawer.contains("verticalScroll(scroll, enabled = scroll.maxValue > 0, reverseScrolling = true)"))
         assertTrue(drawer.contains("heightIn(max = upperMaxHeight)"))
         assertTrue(overlay.contains("OverlayChromeContract.WORK_PANEL_PEEK_DP"))
         assertTrue(drawer.contains("Modifier.weight(1f, fill = false)"))

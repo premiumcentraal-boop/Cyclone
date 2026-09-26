@@ -68,6 +68,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.capture.LiveCaptureConsentActivity
+import com.cyclone.mobile.ui.overlay.glass.tiltGlass
 import com.cyclone.mobile.capture.LiveCaptureService
 import com.cyclone.mobile.capture.LiveCaptureSessionManager
 import com.cyclone.mobile.capture.ScreenSharePhase
@@ -189,7 +190,14 @@ fun OverlayChrome(
             when (mode) {
                 "secret" -> com.cyclone.mobile.secrets.SecretsCardOverlay(secretCardState!!)
                 "owner" -> ownerMoment?.let { moment ->
-                    Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) { com.cyclone.mobile.ui.v32.CycloneOwnerCard(moment) }
+                    com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        if (moment.taskId.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX)) {
+                            PlaneRow(moment.taskId)
+                            androidx.compose.foundation.layout.Spacer(Modifier.height(OverlayStackGeometry.PILL_GAP_DP.dp))
+                        }
+                        OverlayOwnerCard(moment)
+                    }
                 }
                 "idle" -> if (snapshot.idleChipVisible) {
                     IdleActivationHotspot(
@@ -212,7 +220,7 @@ fun OverlayChrome(
                     Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
                 }
                 "gate" -> GatePanel(snapshot, onAction)
-                else -> ComposerPanel(
+                else -> { com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight(); ComposerPanel(
                     snapshot = snapshot,
                     minimized = snapshot.minimized,
                     onAction = onAction,
@@ -221,7 +229,7 @@ fun OverlayChrome(
                     onVoiceInput = onVoiceInput,
                     aiSettings = aiSettings,
                     onAiSettingsChanged = onAiSettingsChanged,
-                )
+                ) }
             }
         }
     }
@@ -274,55 +282,27 @@ internal fun OverlayIdleHalo(
         pulseAlpha.animateTo(0f, tween(170))
     }
 
-    Canvas(
-        modifier
-            .size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp)
-            .graphicsLayer {
-                scaleX = pulseScale.value
-                scaleY = pulseScale.value
-            },
+    // Plan 27: a small, slightly oval, see-through glass bubble with a thin shine and Cyclone's mark; taps light it up.
+    Box(
+        modifier.size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        val center = Offset(size.width / 2f, size.height / 2f)
         val response = pulseAlpha.value
-        drawLine(
-            brush = Brush.horizontalGradient(
-                listOf(
-                    Color.Transparent,
-                    AuroraBlue.copy(alpha = 0.07f + response * 0.07f),
-                    AuroraCyan.copy(alpha = 0.15f + response * 0.11f),
-                    AuroraWhite.copy(alpha = 0.10f + response * 0.09f),
-                    Color.Transparent,
-                ),
-            ),
-            start = Offset(size.width * 0.08f, center.y),
-            end = Offset(size.width * 0.92f, center.y),
-            strokeWidth = 1.2.dp.toPx(),
-            cap = StrokeCap.Round,
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                listOf(
-                    AuroraCyan.copy(alpha = 0.06f + response * 0.13f),
-                    AuroraBlue.copy(alpha = 0.025f + response * 0.06f),
-                    Color.Transparent,
-                ),
-                center = center,
-                radius = 31.dp.toPx(),
-            ),
-            radius = 31.dp.toPx(),
-            center = center,
-        )
-        drawCircle(
-            color = Color.White.copy(alpha = 0.34f + response * 0.34f),
-            radius = if (state.activating) 3.2.dp.toPx() else 2.3.dp.toPx(),
-            center = center,
-        )
-        drawCircle(
-            color = AuroraCyan.copy(alpha = 0.13f + response * 0.20f),
-            radius = 20.dp.toPx(),
-            center = center,
-            style = Stroke(width = 1.dp.toPx()),
-        )
+        Box(
+            Modifier.size(58.dp, 50.dp)
+                .graphicsLayer {
+                    scaleX = pulseScale.value
+                    scaleY = pulseScale.value
+                }
+                .tiltGlass(25.dp, dots = false, thin = true, seeThrough = 0.42f + 0.3f * response),
+            contentAlignment = Alignment.Center,
+        ) {
+            androidx.compose.material3.Icon(
+                androidx.compose.ui.res.painterResource(com.cyclone.mobile.R.drawable.ic_cyclone_status), null,
+                Modifier.size(if (state.activating) 22.dp else 20.dp),
+                tint = Color(0xFFE0F5F3).copy(alpha = 0.82f + 0.18f * response),
+            )
+        }
     }
 }
 
@@ -388,6 +368,24 @@ private fun ComposerPanel(
 
     val upperVisible = !minimized && (task != null || foregroundWorking || queued.isNotEmpty() ||
         sharing.phase != ScreenSharePhase.OFF || attached)
+    // Plan 27: folded while working, the Ask bar becomes the island with the live status.
+    val island = minimized && activeWork
+    val mindTaskId = task?.taskId?.takeIf { it.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX) }
+    val islandSnapshot = task?.let { remember(it) { com.cyclone.mobile.runtime.background.TaskPresentationProjector.project(it) } }
+    // After the owner moves the task behind the screen, the stack settles into the island (their home screen shows).
+    val planeState by com.cyclone.mobile.runtime.plane.MissionPlanes.ui.collectAsState()
+    val moveSeq = planeState?.moveSeq ?: 0L
+    var seenMove by remember { mutableStateOf(moveSeq) }
+    LaunchedEffect(moveSeq) {
+        if (moveSeq != seenMove) {
+            seenMove = moveSeq
+            when (planeState?.movedTo) {
+                com.cyclone.mobile.runtime.plane.PlaneKind.BACKGROUND -> if (!minimized) onAction(OverlayUserAction.MINIMIZE)
+                com.cyclone.mobile.runtime.plane.PlaneKind.SCREEN -> if (minimized) onAction(OverlayUserAction.ASK_CYCLONE)
+                null -> Unit
+            }
+        }
+    }
     SignatureOverlayDrawer(
         expanded = upperVisible,
         minimized = minimized,
@@ -410,70 +408,72 @@ private fun ComposerPanel(
                 )
             },
         upperMaxHeight = upperMaxHeight,
+        top = mindTaskId?.let { id -> { PlaneRow(id) } },
         composer = {
-        OverlayAppleComposerBar(
-            text = snapshot.composerText,
-            onTextChanged = onComposerChanged,
-            focusRequester = focusRequester,
-            onFocusChanged = {},
-            placeholder = when {
-                snapshot.voiceListening -> OverlayCopy.LISTENING
-                else -> OverlayCopy.COMPOSER
-            },
-            menuOpen = accessory != ComposerAccessory.NONE,
-            voiceListening = snapshot.voiceListening,
-            working = foregroundWorking || snapshot.userPaused,
-            paused = snapshot.userPaused,
-            taskKey = snapshot.sessionId,
-            onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
-            onStop = { onAction(OverlayUserAction.STOP_TASK) },
-            onMenu = {
-                focusManager.clearFocus()
-                keyboard?.hide()
-                OverlayToolsSheetState.toggle(ComposerAccessory.ATTACHMENTS)
-            },
-            onDictate = onVoiceInput,
-            onPrimary = {
-                if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
-            },
-
-        )
+            AnimatedContent(
+                targetState = island,
+                transitionSpec = {
+                    (fadeIn(tween(220)) + slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it / 5 })
+                        .togetherWith(fadeOut(tween(140)))
+                },
+                label = "Ask bar or island",
+            ) { showIsland ->
+                if (showIsland) {
+                    val lines = islandSnapshot?.let {
+                        OverlayGlassCopy.island(it.currentMilestone, it.title, it.completedCount, it.totalCount)
+                    } ?: OverlayGlassCopy.island(snapshot.statusMessage ?: snapshot.bullets.firstOrNull(), "Cyclone is working", 0, null)
+                    WorkIsland(
+                        appPackage = task?.let { TaskAppTrail.record(it.taskId, it.packageName).lastOrNull() },
+                        lines = lines,
+                        fraction = islandSnapshot?.progressFraction,
+                        working = foregroundWorking || task?.working == true || snapshot.userPaused,
+                        paused = snapshot.userPaused,
+                        taskKey = snapshot.sessionId,
+                        onOpen = { onAction(OverlayUserAction.ASK_CYCLONE) },
+                        onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
+                        onStop = { onAction(OverlayUserAction.STOP_TASK) },
+                    )
+                } else {
+                    OverlayAppleComposerBar(
+                        text = snapshot.composerText,
+                        onTextChanged = onComposerChanged,
+                        focusRequester = focusRequester,
+                        onFocusChanged = {},
+                        placeholder = when {
+                            snapshot.voiceListening -> OverlayCopy.LISTENING
+                            else -> OverlayCopy.COMPOSER
+                        },
+                        menuOpen = accessory != ComposerAccessory.NONE,
+                        voiceListening = snapshot.voiceListening,
+                        working = foregroundWorking || snapshot.userPaused,
+                        paused = snapshot.userPaused,
+                        taskKey = snapshot.sessionId,
+                        onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
+                        onStop = { onAction(OverlayUserAction.STOP_TASK) },
+                        onMenu = {
+                            focusManager.clearFocus()
+                            keyboard?.hide()
+                            OverlayToolsSheetState.toggle(ComposerAccessory.ATTACHMENTS)
+                        },
+                        onDictate = onVoiceInput,
+                        onPrimary = {
+                            if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
+                        },
+                    )
+                }
+            }
         },
     ) {
-        if (task != null || foregroundWorking || queued.isNotEmpty()) {
-            Column(
-                Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (task != null) {
-                    com.cyclone.mobile.ui.v32.CycloneConversationBubble(
-                        text = task.goal,
-                        speaker = com.cyclone.mobile.ui.v32.CycloneConversationSpeaker.USER,
-                        userContainer = com.cyclone.mobile.ui.v32.SignatureTeal.copy(alpha = .12f),
-                        userContent = Color(0xFFF5F5F7),
-                        assistantContent = Color(0xFFF5F5F7),
-                    )
-                    com.cyclone.mobile.ui.v32.CycloneConversationBubble(
-                        text = "Got it. I'll keep working on that on your phone.",
-                        speaker = com.cyclone.mobile.ui.v32.CycloneConversationSpeaker.CYCLONE,
-                        userContainer = com.cyclone.mobile.ui.v32.SignatureTeal.copy(alpha = .12f),
-                        userContent = Color(0xFFF5F5F7),
-                        assistantContent = Color(0xFFD1D1D6),
-                    )
+        val minimize = { onAction(OverlayUserAction.MINIMIZE) }
+        if (task != null || foregroundWorking) {
+            Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
+                when {
+                    task != null -> OverlayWorkCard(task, minimize)
+                    else -> OverlayForegroundCard(snapshot, minimize) { onAction(OverlayUserAction.STOP_TASK) }
                 }
-                // Planes (plan 25): where the mission works, one tap to move it.
-                if (task != null && task.taskId.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX)) {
-                    PlanePill(Modifier.fillMaxWidth())
-                }
-                Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
-                    when {
-                        task != null -> CycloneAskTaskPanel(task)
-                        foregroundWorking -> CycloneForegroundWorkCard(snapshot)
-                    }
-                }
-                CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
             }
         }
+        if (queued.isNotEmpty()) CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
 
         if (sharing.phase != ScreenSharePhase.OFF) {
             OverlayAppleStatusPill(
@@ -490,7 +490,6 @@ private fun ComposerPanel(
                 onAction = if (sharing.active) ({ LiveCaptureService.stop(context) }) else null,
             )
         }
-
 
         if (attached) {
             OverlayAppleStatusPill(

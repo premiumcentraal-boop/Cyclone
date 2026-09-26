@@ -177,7 +177,8 @@ class OverlayChromeMachineTest {
         assertEquals(OverlayChromeState.LIVE, machine.state())
         assertTrue(machine.snapshot().minimized)
         assertTrue(machine.snapshot().launcherCollapsed)
-        assertTrue(machine.snapshot().idleChipVisible)
+        // Plan 27: folded away while a task runs, only the live notification remains (its Show brings the island back).
+        assertFalse(machine.snapshot().idleChipVisible)
         assertEquals("next request", machine.snapshot().composerText)
 
         // This is the action emitted after the launcher receives its deliberate triple tap.
@@ -263,5 +264,17 @@ class OverlayChromeMachineTest {
         override fun resumeAgent() {
             resumes += 1
         }
+    }
+}
+
+class OverlayNotificationOnlyTest {
+    @Test fun foldingAFinishedTaskAwayLeavesTheLauncher() {
+        val machine = OverlayChromeMachine(emit = {})
+        machine.enterWorking("done-task")
+        machine.completeDone("done-task")
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        assertTrue(machine.snapshot().launcherCollapsed)
+        assertTrue(machine.snapshot().idleChipVisible)
     }
 }

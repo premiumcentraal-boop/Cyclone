@@ -64,6 +64,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cyclone.mobile.ui.v32.CycloneSignatureGlass
+import com.cyclone.mobile.ui.overlay.glass.GlassRoundButton
+import com.cyclone.mobile.ui.overlay.glass.VoiceOrbButton
+import com.cyclone.mobile.ui.overlay.glass.litRim
+import com.cyclone.mobile.ui.overlay.glass.tiltGlass
+import com.cyclone.mobile.ui.overlay.glass.veilPill
 import com.cyclone.mobile.ui.v32.SignatureAction
 import com.cyclone.mobile.ui.v32.SignatureGlyph
 import com.cyclone.mobile.ui.v32.SignatureIcon
@@ -111,41 +116,40 @@ internal fun OverlayAppleComposerBar(
     onPrimary: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    CycloneSignatureGlass(
-        modifier = modifier.fillMaxWidth().heightIn(min = 66.dp),
-        listening = voiceListening,
-    ) {
+    // Plan 27: the Ask bar on tilt-lit glass. Round controls carry the lit edge; the words sit on one soft pill that
+    // fills the space between + and the voice button; the voice button becomes the glowing orb only while listening.
+    Box(modifier.fillMaxWidth().heightIn(min = 66.dp).tiltGlass(33.dp)) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().heightIn(min = 66.dp).clip(RoundedCornerShape(33.dp)).padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SignatureAction(
-                SignatureGlyph.ADD, if (menuOpen) "Close tools" else "Open tools", onMenu,
-                selected = menuOpen,
-            )
+            GlassRoundButton(if (menuOpen) "Close tools" else "Open tools", onMenu) {
+                SignatureIcon(SignatureGlyph.ADD, color = SignatureInk)
+            }
             BasicTextField(
                 value = text,
                 onValueChange = onTextChanged,
                 singleLine = true,
-                textStyle = TextStyle(color = SignatureInk, fontSize = 16.sp, lineHeight = 22.sp,
-                    fontWeight = FontWeight.Normal),
+                textStyle = TextStyle(color = SignatureInk, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal),
                 cursorBrush = SolidColor(OverlayBlue),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { if (!working && text.isNotBlank()) onPrimary() }),
                 modifier = Modifier.weight(1f).focusRequester(focusRequester)
                     .onFocusChanged { onFocusChanged(it.isFocused) }
-                    .heightIn(min = 48.dp).padding(horizontal = 5.dp, vertical = 12.dp)
+                    .heightIn(min = 46.dp).veilPill().padding(horizontal = 18.dp, vertical = 12.dp)
                     .semantics { contentDescription = "Ask Cyclone" },
                 decorationBox = { field ->
                     Box(contentAlignment = Alignment.CenterStart) {
-                        if (text.isEmpty()) Text(placeholder, color = SignatureInk, fontSize = 16.sp, maxLines = 1)
+                        if (text.isEmpty()) Text(placeholder, color = SignatureInk, fontSize = 17.sp, maxLines = 1)
                         field()
                     }
                 },
             )
-            SignatureAction(SignatureGlyph.MIC,
-                if (voiceListening) "Listening" else "Dictate request", onDictate,
-                enabled = !working, selected = voiceListening)
+            VoiceOrbButton(
+                listening = voiceListening, enabled = !working,
+                description = if (voiceListening) "Listening. Tap to stop" else "Dictate request", onClick = onDictate,
+            ) { SignatureIcon(SignatureGlyph.MIC, color = SignatureInk.copy(alpha = if (!working) 1f else .45f)) }
             OverlayRequestAction(working, paused, taskKey, text.isNotBlank(), onPrimary, onPause, onStop)
         }
     }
@@ -315,7 +319,7 @@ internal fun OverlayAppleStatusPill(
 }
 
 @Composable
-private fun OverlayRequestAction(
+internal fun OverlayRequestAction(
     working: Boolean, paused: Boolean, taskKey: String, canSend: Boolean,
     onSend: () -> Unit, onPauseOrResume: () -> Unit, onStop: () -> Unit,
 ) {
@@ -368,7 +372,9 @@ private fun OverlayRequestAction(
         }
     else Modifier.clickable(enabled = canSend, role = Role.Button, onClick = onSend)
         .semantics { contentDescription = "Send request" }
-    Box(Modifier.size(48.dp).clip(CircleShape)
+    Box(Modifier.size(46.dp).clip(CircleShape)
+        .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color.White.copy(alpha = .07f), Color.White.copy(alpha = .02f))))
+        .litRim()
         .then(action), contentAlignment = Alignment.Center) {
         SignatureIcon(if (!working) SignatureGlyph.SEND else if (paused) SignatureGlyph.PLAY else SignatureGlyph.PAUSE,
             color = SignatureInk.copy(alpha = if (working || canSend) 1f else .50f))

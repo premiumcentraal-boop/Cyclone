@@ -50,7 +50,9 @@ class TaskKitGuards(unittest.TestCase):
         self.assertNotRegex(card, r"MindMissions|OverlayChromeRuntime|WorkspaceTasks|inbox\.")
 
     def test_every_surface_renders_the_one_owner_card(self):
-        for surface in ("ui/overlay/OverlayChrome.kt", "ui/v32/CycloneAskTaskPanel.kt", "ui/v32/CycloneMissionPanel.kt"):
+        # Plan 27: the overlay renders moments on its glass card, which keeps the owner card's bodies.
+        self.assertIn("OverlayOwnerCard(moment)", (BASE / "ui/overlay/OverlayChrome.kt").read_text(encoding="utf-8"))
+        for surface in ("ui/overlay/OverlayGlassStack.kt", "ui/v32/CycloneAskTaskPanel.kt", "ui/v32/CycloneMissionPanel.kt"):
             self.assertIn("CycloneOwnerCard(", (BASE / surface).read_text(encoding="utf-8"), surface)
 
     def test_consequential_shade_buttons_need_an_unlocked_phone(self):

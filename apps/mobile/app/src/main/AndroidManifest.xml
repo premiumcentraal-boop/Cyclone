@@ -175,6 +175,12 @@
         </service>
     <receiver android:name=".gateway.LivePhoneControlReceiver" android:exported="false" />
     <!-- Plan 26: background work that stays on (boot check) and its Quick Settings tile. -->
+    <!-- Plan 27: the task notification's Show brings the overlay island back. -->
+    <receiver android:name=".ui.overlay.OverlayShowReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="com.cyclone.mobile.action.SHOW_OVERLAY" />
+      </intent-filter>
+    </receiver>
     <receiver android:name=".runtime.plane.BackgroundBootReceiver" android:exported="false">
         <intent-filter>
             <action android:name="android.intent.action.BOOT_COMPLETED" />

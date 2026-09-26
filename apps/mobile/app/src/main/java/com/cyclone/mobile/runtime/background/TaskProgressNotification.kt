@@ -43,7 +43,17 @@ internal object TaskProgressNotification {
         appIcon(context, task.packageName)?.let { builder.setLargeIcon(it) }
         if (task.working) {
             val percent = TaskNotificationProjection.progressPercent(task)
-            builder.setProgress(100, percent ?: 0, percent == null)
+            // Plan 27: on Android 16 the Live Update shows the task's real steps as segments.
+            val segmented = android.os.Build.VERSION.SDK_INT >= 36 && runCatching {
+                val snapshot = TaskPresentationProjector.project(task)
+                val total = snapshot.totalCount?.takeIf { it in 1..20 }
+                val style = Notification.ProgressStyle().setStyledByProgress(true)
+                if (total == null) style.setProgressIndeterminate(true)
+                else style.setProgressSegments(List(total) { Notification.ProgressStyle.Segment(1) })
+                    .setProgress(snapshot.completedCount.coerceIn(0, total))
+                builder.setStyle(style)
+            }.isSuccess
+            if (!segmented) builder.setProgress(100, percent ?: 0, percent == null)
         }
         // A task that needs its owner shows its Owner Moment: the same buttons as the card, answered from the shade.
         // Otherwise preserve every available interruption/confirmation command. The card itself always opens
@@ -66,18 +76,30 @@ internal object TaskProgressNotification {
             val plane = com.cyclone.mobile.runtime.plane.MissionPlanes.ui.value
                 ?.takeIf { com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX + it.missionId == task.taskId }
             val projected = TaskNotificationProjection.actions(task, plane?.kind?.wire, plane?.available == true, waiting = plane?.waitingFor != null)
+                .let { if (showOverlay(task)) it.take(2) else it }
+            // Plan 27: Show first, so the owner can bring the overlay back after folding it to the notification.
+            if (showOverlay(task)) {
+                val show = PendingIntent.getBroadcast(context, task.taskId.hashCode(),
+                    android.content.Intent(com.cyclone.mobile.ui.overlay.OverlayShowReceiver.ACTION).setPackage(context.packageName),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                builder.addAction(Notification.Action.Builder(null, "Show", show).build())
+            }
             projected.forEach { (command, label) ->
                 val parsed = com.cyclone.mobile.task.TaskCommand.parse(command, task.confirmation?.token) ?: return@forEach
                 val action = com.cyclone.mobile.task.TaskCommands.pendingIntent(context, task, parsed)
                 builder.addAction(Notification.Action.Builder(null, label, action).build())
             }
-            projected.size
+            projected.size + if (showOverlay(task)) 1 else 0
         }
         if (count < 3) {
             builder.addAction(Notification.Action.Builder(null, "View progress", progress).build())
         }
         return builder.build()
     }
+
+    /** The overlay can come back for this running task (it is attached and Cyclone runs the task on the phone). */
+    private fun showOverlay(task: WorkspaceTaskUi): Boolean =
+        task.working && runCatching { com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.isAttached() }.getOrDefault(false)
 
     private fun appIcon(context: Context, packageName: String): Icon? = appIcons.get(packageName) ?: runCatching {
         val drawable = context.packageManager.getApplicationIcon(packageName).mutate()

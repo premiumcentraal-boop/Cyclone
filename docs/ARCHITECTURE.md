@@ -66,6 +66,29 @@ card, and the `go_to` tool walks a route through the ordinary act path, re-readi
 stopping at the first surprise; walks and surprises feed back into the store. The Lab variant knob `useMap` A/B-tests
 it.
 
+### Glass overlay (since 5.0.0-alpha.43)
+
+The overlay's surfaces share one material, `Modifier.tiltGlass` (`ui/overlay/glass/TiltGlass.kt`). It draws a body, a
+sheen, halftone edge dots batched with `drawPoints`, a hairline and the rim shine. Its light comes from `GlassLight`,
+which `FollowPhoneLight` drives from the gravity sensor while the chrome is open; it rests when animations are off.
+The optics are pure (`GlassOptics`) and unit-tested.
+
+Round controls use `litRim` and `pressGlow`; the voice button becomes `VoiceOrbButton` while listening.
+
+`SignatureOverlayDrawer` stacks the plane pill (`PlaneRow`), 10 dp, the card (`OverlayWorkCard`,
+`OverlayForegroundCard`), 14 dp, then the Ask bar or `WorkIsland`. A drag down anywhere on the stack is
+`OverlayUserAction.MINIMIZE`: card → island → notification only. While a task runs, the second fold sets
+`idleChipVisible = false`, and the notification's **Show** (`OverlayShowReceiver`) brings the island back.
+
+Owner Moments render as `OverlayOwnerCard`. Approvals are split by `OverlayGlassCopy.approval`; other kinds keep
+`CycloneOwnerCard`'s bodies. `TaskAppTrail` keeps the apps a task has worked in, for the header logos.
+
+`MissionPlaneSession` publishes:
+- `PlaneUi.outcome`, the reason a move did not happen, shown beside the pill;
+- `movedTo`/`moveSeq`, after which an owner's background move goes home through `guidedHome()` and folds the stack.
+
+An owner's tap waits up to `OWNER_PAUSE_MS` for the step boundary. Plan: `Cyclone V5 plan/27-overlay-redesign.md`.
+
 ### Background always (since 5.0.0-alpha.42)
 
 `BackgroundCapabilities` turns the setup facts into one level (ready, needs start, needs setup, off, unsupported) with

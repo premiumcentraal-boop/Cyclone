@@ -48,10 +48,10 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 21 | [Mind hands and desk](21-mind-hands-and-desk.md) | **Hands built (alpha.41)**: reliable text delivery; mission desk scratchpad (after Drive) |
 | 22 | [Glass Atlas and mapping missions](22-glass-atlas-and-mapping-missions.md) | **Built in alpha.38**: semantic-zoom map, coverage, mission control, safe mapping identities |
 | 23 | [One map, grounded skills and routines](23-one-map-grounded-skills.md) | **Built in alpha.39**: mapping passes teach runs, skills and routines anchored on the map, skills on Glass's map |
-| 24 | [Cyclone Drive: voice assistant](24-cyclone-drive-voice.md) | **Plan**: driver mode AI button, Siri-like AI mode, voice pipeline on OpenRouter (alpha.44–45, after Planes, Hands and Background always) |
+| 24 | [Cyclone Drive: voice assistant](24-cyclone-drive-voice.md) | **Plan**: driver mode AI button, Siri-like AI mode, voice pipeline on OpenRouter (alpha.45–46, after Planes, Hands, Background always and the Glass overlay) |
 | 25 | [Planes: background and foreground](25-planes-background-foreground.md) | **First step built (alpha.40)**: the Mind in the background, one-tap switch pill, transactional plane switches, automatic plane choice, self-healing background |
-| 26 | [Background that always works](26-background-always.md) | **Built (alpha.42)**: switch it on once, start from Recents, background parity, start preference, app leases for the same-app case, tier 0, see-to-approve, Lab planes suite; parallel sessions alpha.43 |
-| 27 | [The overlay, redesigned](27-overlay-redesign.md) | **Plan, awaiting green light**: one glass material, the stacked plane pill with one word, four heights (expanded, island, notification, idle), fly-into-pill background switch, never-silent switches, Live Update notification (alpha.42.dev2) |
+| 26 | [Background that always works](26-background-always.md) | **Built (alpha.42)**: switch it on once, start from Recents, background parity, start preference, app leases for the same-app case, tier 0, see-to-approve, Lab planes suite; parallel sessions alpha.44 |
+| 27 | [The overlay, redesigned](27-overlay-redesign.md) | **Built (alpha.43)**: tilt-lit glass, the one-word plane pill above card and island, four heights (card, island, notification only, idle), app logos, a background switch that goes home and is never silent, notification Show and Android 16 step segments |
 
 ## Identity
 

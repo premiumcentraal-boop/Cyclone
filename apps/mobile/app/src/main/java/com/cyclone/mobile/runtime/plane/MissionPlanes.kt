@@ -38,6 +38,12 @@ data class PlaneUi(
     val waitingFor: String? = null,
     /** The background screen's session while the mission works there (the approval card shows a glimpse of it). */
     val backgroundSessionId: String? = null,
+    /** Plan 27: why the last move did not happen, shown beside the pill (never silent); [outcomeSeq] counts them. */
+    val outcome: String? = null,
+    val outcomeSeq: Long = 0L,
+    /** Plan 27: the owner's last move that committed, so the overlay can settle (island after moving behind). */
+    val movedTo: PlaneKind? = null,
+    val moveSeq: Long = 0L,
 )
 
 /**
@@ -172,6 +178,12 @@ class MissionPlaneSession internal constructor(
     /** The task came from the owner's screen (the pill), so it goes back there when the mission ends. */
     @Volatile private var returnToScreen = false
     @Volatile private var note: String? = null
+    @Volatile private var outcome: String? = null
+    @Volatile private var outcomeSeq = 0L
+    @Volatile private var movedTo: PlaneKind? = null
+    @Volatile private var moveSeq = 0L
+    /** How long a switch may wait for the Mind's step boundary; an owner's tap waits longer than an automatic move. */
+    @Volatile private var pauseBudgetMs = PAUSE_TIMEOUT_MS
     /** Plan 26: the app the mission waits for (the owner holds it), shown on the pill with Start now. */
     @Volatile private var waitingFor: String? = null
     @Volatile private var startNowPressed = false
@@ -429,17 +441,28 @@ class MissionPlaneSession internal constructor(
         val target = to ?: plane.kind.other
         if (target == plane.kind) return
         if (target == PlaneKind.BACKGROUND) {
-            MissionPlanes.blocker(context)?.let { note = it; refresh(); return }
+            MissionPlanes.blocker(context)?.let { tell(it); return }
             val pkg = packageName()
             if (pkg == null || pkg == context.packageName || pkg == launcher()) {
-                note = "Cyclone is not working in an app right now."; refresh(); return
+                tell("Cyclone is not working in an app right now."); return
             }
             val known = compat.status(pkg, MissionPlanes.versionOf(context, pkg))
             if (known.needsScreen) {
-                note = "${label(pkg) ?: "This app"} ${known.why}. Long-press to allow it anyway."; refresh(); return
+                tell("${label(pkg) ?: "This app"} ${known.why}. Long-press to allow it anyway."); return
             }
         }
-        switchTo(target, if (byOwner) "You moved the task ${target.label.lowercase()}." else "Moved ${target.label.lowercase()}.", null)
+        // An owner's tap waits for the Mind's current step to finish instead of giving up after a moment.
+        if (byOwner) pauseBudgetMs = OWNER_PAUSE_MS
+        val moved = try {
+            switchTo(target, if (byOwner) "You moved the task ${target.label.lowercase()}." else "Moved ${target.label.lowercase()}.", null)
+        } finally { pauseBudgetMs = PAUSE_TIMEOUT_MS }
+        if (moved && byOwner) {
+            movedTo = target
+            moveSeq++
+            // Behind the screen now: the owner lands on their home screen, not on whatever Android shows next.
+            if (target == PlaneKind.BACKGROUND) runCatching { com.cyclone.mobile.CycloneAccessibilityService.instance?.guidedHome() }
+            refresh()
+        }
     }
 
     /** Something during a background task calls for the screen. */
@@ -471,10 +494,12 @@ class MissionPlaneSession internal constructor(
             }
             is SwitchOutcome.RolledBack -> {
                 note = "Couldn't move: ${outcome.reason}"
+                this.outcome = "Couldn't move ${label(pkg) ?: "the task"}: ${outcome.reason.trimEnd('.').replaceFirstChar { it.lowercase() }}."
+                outcomeSeq++
                 trace("PLANE_ROLLBACK", "${from.kind.label} → ${to.label} rolled back after ${outcome.tookMs} ms: ${outcome.reason}")
                 if (pkg != null && to == PlaneKind.BACKGROUND) compat.record(pkg, version, PlaneOutcome.SWITCH_FAILED, outcome.reason.take(120))
             }
-            is SwitchOutcome.Refused -> note = outcome.reason
+            is SwitchOutcome.Refused -> { note = outcome.reason; this.outcome = outcome.reason; outcomeSeq++ }
         }
         if (plane is TaskPlane.Background) startWatchdog()
         refresh()
@@ -540,7 +565,7 @@ class MissionPlaneSession internal constructor(
 
         override fun pause(from: TaskPlane): Boolean {
             val gate = toolbox?.gate ?: return true
-            pausedGate = gate.pause(PAUSE_TIMEOUT_MS)
+            pausedGate = gate.pause(pauseBudgetMs)
             if (pausedGate && from is TaskPlane.Background) runCatching { WorkspaceRuntime.pause(from.sessionId) }
             return pausedGate
         }
@@ -801,15 +826,25 @@ class MissionPlaneSession internal constructor(
     private fun ui(): PlaneUi {
         val blocker = MissionPlanes.blocker(context)
         return PlaneUi(missionId, plane.kind, switcher.switching, blocker == null, note ?: blocker, label(packageName()), waitingFor,
-            (plane as? TaskPlane.Background)?.sessionId)
+            (plane as? TaskPlane.Background)?.sessionId, outcome, outcomeSeq, movedTo, moveSeq)
     }
 
     private fun refresh() {
         if (!ended) publish(ui())
     }
 
+    /** Plan 27: tell the owner why a move did not happen, beside the pill. */
+    private fun tell(text: String) {
+        note = text
+        outcome = text
+        outcomeSeq++
+        refresh()
+    }
+
     companion object {
         const val PAUSE_TIMEOUT_MS = 2_500L
+        /** Plan 27: an owner's move waits up to this long for the Mind's step boundary (the pill says Moving). */
+        const val OWNER_PAUSE_MS = 20_000L
         const val VERIFY_MS = 1_500L
         const val WATCH_MS = 1_000L
         const val WAIT_POLL_MS = 700L

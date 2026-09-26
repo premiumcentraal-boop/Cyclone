@@ -321,10 +321,14 @@ class OverlayChromeMachine(
             return
         }
         if (!snapshot.launcherCollapsed) {
+            // Plan 27: folding the island away while a task runs leaves only its live notification (Show brings the
+            // island back); with nothing running it is the tiny triple-tap launcher, as before.
+            val running = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE ||
+                snapshot.state == OverlayChromeState.GATE
             snapshot = snapshot.copy(
                 minimized = true,
                 launcherCollapsed = true,
-                idleChipVisible = true,
+                idleChipVisible = !running,
                 voiceListening = false,
                 voiceMessage = null,
             )

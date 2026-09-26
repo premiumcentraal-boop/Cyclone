@@ -263,8 +263,8 @@ release key (same publisher as alpha.40/41).
 
 | Release | Contents |
 |---|---|
-| **alpha.43 Parallel sessions** | `MindMissions` becomes a host of missions, each with its own worker, inbox, task card, plane session and lease set. Up to 2 background sessions plus the owner's screen, capped by memory. Per-session notifications and pill. The Lab concurrency suite. |
-| **alpha.44–45 Drive** | Plan 24, now standing on tier 0 replies, leases (Maps holds the screen) and a background that stays on. |
+| **alpha.44 Parallel sessions** (alpha.43 became the Glass overlay, plan 27) | `MindMissions` becomes a host of missions, each with its own worker, inbox, task card, plane session and lease set. Up to 2 background sessions plus the owner's screen, capped by memory. Per-session notifications and pill. The Lab concurrency suite. |
+| **alpha.45–46 Drive** | Plan 24, now standing on tier 0 replies, leases (Maps holds the screen) and a background that stays on. |
 | **later: Desk** | Plan 21 Phase 2. |
 | **longer term** | A privileged tier (OEM or system-permission install) and platform agent APIs behind the same `PlanePort`, where available. |
 
