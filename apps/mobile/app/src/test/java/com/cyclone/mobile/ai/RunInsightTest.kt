@@ -284,4 +284,24 @@ class RunInsightTest {
         assertEquals("model-gave-up", GatewayV5RunsAdapter.dispatch("runs.get", JSONObject().put("runId", run)).getJSONObject("cause").getString("kind"))
         GatewayV5RunsAdapter.doorTargets = { _, _ -> null }
     }
+
+    @Test fun aMindMissionHasOneStepPerToolAndItsCauseIsTheLastFailedTool() {
+        val events = mutableListOf(
+            ev("START", "Starting task", "task.start"),
+            ev("MIND_TURN", "Turn 1: reading", "MIND_TURN"),
+            ev("MIND_ACTION", "screen_read", "screen_read"),
+            ev("MIND_RESULT", "Read the screen", "screen_read", ok = true),
+            ev("MIND_ACTION", "type_text", "type_text"),
+            ev("MIND_RESULT", "Not done: Cyclone could not tell that control apart", "type_text", ok = false),
+            ev("MIND_ACTION", "type_text", "type_text"),
+            ev("MIND_RESULT", "Not done: Cyclone could not tell that control apart", "type_text", ok = false),
+        )
+        val detail = RunInsight.detailJson(session("FAILED"), events)
+        assertEquals(4, detail.getInt("stepCount"))
+        assertEquals(3, detail.getJSONObject("metrics").getInt("toolCalls"))
+        assertEquals(2, detail.getJSONObject("metrics").getInt("toolFailures"))
+        val cause = detail.getJSONObject("cause")
+        assertEquals("text-not-delivered", cause.getString("kind"))
+        assertEquals(3, cause.getInt("stepIndex"))
+    }
 }

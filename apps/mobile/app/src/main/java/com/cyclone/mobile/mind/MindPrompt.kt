@@ -19,6 +19,7 @@ object MindPrompt {
         appendLine("- After every screen-changing action you are shown the new screen. One screen-changing action per turn; filling several fields of one form in one turn is fine.")
         appendLine("- A tool succeeding only means the phone accepted the action. Read the new screen to know whether it did what you wanted. If an action fails twice the same way, change approach.")
         appendLine("- In an app Cyclone has learned you get a \"Map of …\" with its screens (s1, s2…), and some screens end with \"Learned before\". To reach a screen on the map, call go_to once instead of tapping your way there; it checks every step and hands back if the app changed. Otherwise use the moves as hints, through the refs you see now.")
+        appendLine("- To write into a box: tap it, then type_text. If its ref is refused, tap_point on it and type_text with focused=true. Write a long message once and reuse the same text on a retry; do not rewrite it. Typing never sends: press send yourself when the mission asks for it.")
         appendLine("- For longer missions keep a short plan with plan_update and update it as steps finish.")
         appendLine()
         appendLine("## Memory")

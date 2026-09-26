@@ -218,6 +218,24 @@ class PhoneMindToolboxTest {
         assertTrue(typed.text.contains("focused text box"))
     }
 
+    @Test fun fourFailedAttemptsCopyTheDraftAndAskTheOwnerToPaste() {
+        val env = FakeEnv(login)
+        val owner = FakeOwner().apply { answer = "Done" }
+        val copied = mutableListOf<String>()
+        val clipboardDevice = object : MindDevicePort by device {
+            override fun copy(text: String): Boolean { copied += text; return true }
+        }
+        val box = PhoneMindToolbox(env, owner, clipboardDevice, "goal")
+        box.run("screen_read")
+        repeat(4) { env.nextFailures.addLast(AgentFailureClass.EXECUTION_FAILED) }
+        val results = (1..4).map { box.run("type_text", """{"ref":"e1","text":"Find better examples"}""") }
+        assertTrue("second identical refusal adds the harness hint", results[1].text.contains("(Harness:"))
+        assertEquals(listOf("Find better examples"), copied)
+        assertTrue(owner.asked.single().contains("It's copied"))
+        assertTrue(results[3].ok)
+        assertTrue(results[3].text.contains("entered the text by hand"))
+    }
+
     @Test fun refsStayStableAcrossReobservation() {
         val env = FakeEnv(login)
         val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")

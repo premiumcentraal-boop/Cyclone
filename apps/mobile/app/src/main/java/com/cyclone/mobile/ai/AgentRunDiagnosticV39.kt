@@ -56,7 +56,7 @@ object AgentRunDiagnosticV39 {
             toolCalls = groups.sumOf { group ->
                 maxOf(group.count { it.kind in setOf("ACTION_REQUESTED", "TOOL_CALL") },
                     group.count { it.kind == "TOOL_REQUESTED" })
-            },
+            } + events.count { it.kind == "MIND_ACTION" },
             executorInvocations = events.count { it.kind == "ANDROID_EXECUTION" && it.detail.orEmpty().contains("executorInvoked=true") },
             androidAcceptedExecutions = events.count { it.kind == "ANDROID_EXECUTION" && it.ok == true },
             freshAfterStates = events.count { it.kind == "AFTER_OBSERVATION" && it.ok == true },
@@ -64,7 +64,7 @@ object AgentRunDiagnosticV39 {
             toolFailures = groups.sumOf { group ->
                 val detailed = group.filter { it.kind in setOf("ANDROID_EXECUTION", "ACTION_REJECTED") }
                 (detailed.takeIf { it.isNotEmpty() } ?: group.filter { it.kind == "TOOL_RESULT" }).count { it.ok == false }
-            },
+            } + events.count { it.kind == "MIND_RESULT" && it.ok == false },
             verificationFailures = groups.sumOf { group ->
                 var accepted: Boolean? = null
                 val detailed = group.filter { it.kind == "VERIFICATION" }

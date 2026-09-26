@@ -360,19 +360,58 @@ class PhoneMindToolbox(
         if (ref.password || sensitive(ref.label)) return MindToolResult.error(
             "${ref.ref} \"${ref.label}\" is a secret field. Use vault_fill so the owner fills it through the Secrets Card.")
         val text = arguments.optString("text")
-        val typed = act("phone.type", JSONObject().put("elementId", ref.elementId).put("value", text),
-            "Typed ${text.length} characters into ${ref.ref} \"${ref.label}\"", ref, changesScreen = false)
+        val typed = delivered(ref.identity, text, act("phone.type", JSONObject().put("elementId", ref.elementId).put("value", text),
+            "Typed ${text.length} characters into ${ref.ref} \"${ref.label}\"", ref, changesScreen = false))
         if (!typed.ok || !arguments.optBoolean("press_enter")) return typed
         val again = refs.resolve(ref.ref) ?: return typed.copy(text = typed.text + "\n\nEnter was not pressed: the field is gone.")
         return act("phone.submit_text", JSONObject().put("elementId", again.elementId), "Typed into ${ref.ref} and pressed Enter", again)
+    }
+
+    private val typing = TypingTracker()
+
+    /**
+     * Plan 21 (Hands): a failed attempt to put text in a box feeds the loop breaker. Repeated identical refusals add
+     * one harness line; after four failures in a row the draft is copied and the owner is asked to paste it.
+     */
+    private fun delivered(key: String, draft: String, result: MindToolResult): MindToolResult {
+        if (result.ok) {
+            typing.success()
+            return result
+        }
+        if (cancelled()) return result
+        val reason = result.text.lineSequence().firstOrNull().orEmpty().take(120)
+        return when (val advice = typing.failure(key, reason)) {
+            TypingTracker.Advice.None -> result
+            is TypingTracker.Advice.Hint -> result.copy(text = "${result.text}\n\n(Harness: ${advice.text})")
+            TypingTracker.Advice.Handoff -> handoff(draft, result)
+        }
+    }
+
+    private fun handoff(draft: String, result: MindToolResult): MindToolResult {
+        typing.success()
+        val copied = device.copy(draft)
+        val question = if (copied) "I wrote this but could not enter it. It's copied: tap the text box and paste, then tap Done. " +
+            "Or tap Try again." else "I wrote this but could not enter it. Please type it in, then tap Done, or tap Try again:\n\n${draft.take(1_000)}"
+        val reply = owner.ask(question, listOf("Done", "Try again"), ownerTimeoutMs)
+        val header = when {
+            !reply.answered -> "The text could not be entered after ${TypingTracker.HANDOFF_AFTER} tries. " +
+                (if (copied) "It is on the clipboard for the owner" else "The owner has it") +
+                "; they have not answered. Do not retype it; tell the owner in your final answer that it is ready to paste."
+            reply.text.contains("try", ignoreCase = true) -> "The owner asked you to try again: tap the box first (tap or tap_point), " +
+                "then type_text with focused=true."
+            else -> "The owner entered the text by hand. Look at the screen before the next step."
+        }
+        invalidate()
+        return observeAndRender(header).copy(ok = reply.answered && !reply.text.contains("try", ignoreCase = true),
+            ownerWaitMs = result.ownerWaitMs + reply.waitedMs)
     }
 
     /** Plan 21 (Hands): the text box with input focus (tap it first). The executor refuses secret-looking fields. */
     private fun typeFocused(arguments: JSONObject): MindToolResult {
         if (!arguments.has("text")) return MindToolResult.error("text is required.")
         val text = arguments.optString("text")
-        val typed = act("phone.type", JSONObject().put("focused", true).put("value", text),
-            "Typed ${text.length} characters into the focused text box", changesScreen = false)
+        val typed = delivered("focused", text, act("phone.type", JSONObject().put("focused", true).put("value", text),
+            "Typed ${text.length} characters into the focused text box", changesScreen = false))
         if (!typed.ok || !arguments.optBoolean("press_enter")) return typed
         return MindToolResult(typed.text + "\n\nTo submit, tap the send button (or press_enter with the box's ref).", typed.brief, ok = true)
     }

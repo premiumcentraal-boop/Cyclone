@@ -67,6 +67,12 @@ internal class AndroidMindDevice(private val context: Context) : MindDevicePort 
         }
     }
 
+    override fun copy(text: String): Boolean = runCatching {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return false
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Cyclone draft", text))
+        true
+    }.getOrDefault(false)
+
     override fun device(): String {
         val locales = context.resources.configuration.locales
         val languages = (0 until locales.size()).map { locales[it].displayLanguage }.distinct().joinToString(", ")

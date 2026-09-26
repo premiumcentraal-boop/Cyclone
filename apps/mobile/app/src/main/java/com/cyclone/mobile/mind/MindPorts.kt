@@ -78,4 +78,9 @@ interface MindDevicePort {
     fun notifications(): List<MindNotification> = emptyList()
     /** Why the phone cannot be operated right now (locked, screen off), or null when it can. */
     fun blocker(): String? = null
+    /**
+     * Plan 21 (Hands): put a draft the Mind wrote on the clipboard for the owner to paste. Never secrets (typing refuses
+     * secret fields before a draft can exist). The Mind writes the clipboard; it never reads it.
+     */
+    fun copy(text: String): Boolean = false
 }

@@ -16,9 +16,10 @@ object RunInsight {
     private const val MAX_TEXT = 360
     private const val MAX_DETAIL = 600
 
-    private val BOUNDARY = setOf("TOOL_REQUESTED", "ACTION_REQUESTED", "TOOL_CALL")
-    private val ACTION_RESULTS = setOf("ANDROID_EXECUTION", "ACTION_REJECTED", "TOOL_RESULT")
+    private val BOUNDARY = setOf("TOOL_REQUESTED", "ACTION_REQUESTED", "TOOL_CALL", "MIND_ACTION")
+    private val ACTION_RESULTS = setOf("ANDROID_EXECUTION", "ACTION_REJECTED", "TOOL_RESULT", "MIND_RESULT")
     private val TERMINAL_FAILURES = setOf("HARD_BLOCKER", "NON_CONVERGENCE", "ERROR")
+    private val TEXT_TOOLS = setOf("type_text", "press_enter", "vault_fill", "owner_fill")
     private val UNVERIFIED_CODES = setOf("completion.unverified", "completion.still_unverified")
 
     /**
@@ -234,6 +235,17 @@ object RunInsight {
 
         events.lastOrNull { it.kind == "ERROR" || it.code.orEmpty().startsWith("provider.") || it.kind == "PROVIDER_PHASE" && it.ok == false }?.let { error ->
             return cause("provider-error", stepOf(error), "The model provider failed", error, "Check the model and API key in Settings on the phone, then ask again.")
+        }
+
+        // Cyclone Mind missions (plan 21): the cause is the last tool that failed, named for what it was doing.
+        events.lastOrNull { it.kind == "MIND_RESULT" && it.ok == false }?.let { failed ->
+            return if (failed.code in TEXT_TOOLS) {
+                cause("text-not-delivered", stepOf(failed), "Couldn't put the text in the box", failed,
+                    "Open this step: the refusal names why. Capture the screen with debug.snapshot if it keeps refusing.")
+            } else {
+                cause("tool-failed", stepOf(failed), "The last action failed: ${wireText(failed.displayText, 120)}", failed,
+                    "Open this step to see what the screen showed and why the action was refused.")
+            }
         }
 
         val lastFailed = steps.lastOrNull { it.outcome == StepOutcome.FAILED || it.outcome == StepOutcome.UNVERIFIED }

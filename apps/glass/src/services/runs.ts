@@ -358,6 +358,8 @@ const CAUSE_LABELS: Record<string, string> = {
   "clause-failed": "Clause not completed",
   "model-gave-up": "Model stuck",
   "provider-error": "Model provider failed",
+  "text-not-delivered": "Text not entered",
+  "tool-failed": "Action failed",
   blocked: "Hard blocker",
   unknown: "Stopped",
 };
