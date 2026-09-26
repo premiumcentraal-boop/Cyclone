@@ -24,6 +24,8 @@ ALLOWED_OPS = {
     "market.catalog", "market.install", "market.remove", "market.run",
     # Learn: one press per run turns what it saw and did into app knowledge on the phone.
     "learn.run",
+    # Grounded skills: the owner's saved skills and where each lives on the map.
+    "skills.list",
 }
 UNAUTHENTICATED_OPS = {
     "trust.negotiate", "trust.begin", "trust.complete", "trust.session.begin", "trust.session.complete",

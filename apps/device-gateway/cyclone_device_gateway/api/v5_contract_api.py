@@ -67,6 +67,10 @@ def create_v5_contract_router(runtime: Any, token: str) -> APIRouter:
             raise HTTPException(status_code=422, detail={"code": "INVALID_REQUEST", "message": "Send {\"expected\": true|false}."})
         return _call(lambda: service.runs_mark(device_id, run_id, body["expected"]))
 
+    @router.get("/v1/devices/{device_id}/skills", dependencies=[Depends(auth)])
+    def skills_list(device_id: str):
+        return _call(lambda: service.skills_list(device_id))
+
     @router.post("/v1/devices/{device_id}/runs/{run_id}/learn", dependencies=[Depends(auth)])
     def runs_learn(device_id: str, run_id: str):
         return _call(lambda: service.learn_run(device_id, run_id))

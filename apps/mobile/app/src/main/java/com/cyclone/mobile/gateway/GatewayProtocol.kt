@@ -148,6 +148,8 @@ internal object GatewayProtocol {
         "market.run",
         // Learn: one press per run turns what it saw and did into app knowledge.
         "learn.run",
+        // Grounded skills: the owner's saved skills and where each lives on the map.
+        "skills.list",
     )
 
     fun parse(line: String): GatewayRequest {

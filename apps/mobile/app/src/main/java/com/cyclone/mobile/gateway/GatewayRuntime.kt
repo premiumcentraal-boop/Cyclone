@@ -414,6 +414,10 @@ internal object GatewayDispatcher {
             GatewayV5MarketAdapter.install(context)
             GatewayV5MarketAdapter.dispatch(request.op, request.args)
         }
+        "skills.list" -> {
+            GatewayV5SkillsAdapter.install(context)
+            GatewayV5SkillsAdapter.dispatch(request.op, request.args)
+        }
         "learn.run" -> {
             GatewayV5LearnAdapter.install(context)
             GatewayV5LearnAdapter.dispatch(request.op, request.args)

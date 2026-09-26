@@ -41,6 +41,7 @@ V5_OPS = frozenset({
     "market.remove",
     "market.run",
     "learn.run",
+    "skills.list",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -876,6 +877,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op == "learn.run":
         _validate_learn_response(value, args)
         return value
+    if op == "skills.list":
+        _validate_skills_response(value)
+        return value
     if op == "atlas.here":
         if set(value) != {"placeId", "roomId", "appVersion", "observedAt"}:
             raise _bad_knowledge("atlas.here")
@@ -996,6 +1000,45 @@ def _validate_learn_response(value: dict[str, Any], args: dict[str, Any]) -> Non
     elif (not isinstance(refusal, dict) or set(refusal) != {"code", "message"} or refusal["code"] not in LEARN_REFUSALS
           or not _short_text(refusal["message"], 200) or apps):
         raise _bad_learn("refusal")
+
+
+SKILL_ID = re.compile(r"^you\.[a-f0-9]{12}$")
+SKILL_GROUNDS = frozenset({"grounded", "partial", "needs-recheck", "not-grounded"})
+SKILL_KEYS = frozenset({"skillId", "name", "placeId", "ground", "detail", "routeMoves", "route", "finishSteps", "savedAt"})
+
+
+def _bad_skills(message: str) -> DesktopRuntimeError:
+    return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Phone skills.list response is invalid: {message}.")
+
+
+def _validate_skills_response(value: dict[str, Any]) -> None:
+    """Saved skills: names, structural screen titles, health and counts only; never a goal's inputs or screen content."""
+    if set(value) != {"skills", "truncated"} or not isinstance(value["truncated"], bool):
+        raise _bad_skills("keys")
+    skills = value["skills"]
+    if not isinstance(skills, list) or len(skills) > 200:
+        raise _bad_skills("skills")
+    for skill in skills:
+        if not isinstance(skill, dict) or set(skill) != SKILL_KEYS:
+            raise _bad_skills("skill keys")
+        if not isinstance(skill["skillId"], str) or not SKILL_ID.match(skill["skillId"]) or not _short_text(skill["name"], 80):
+            raise _bad_skills("skill id")
+        if skill["placeId"] is not None and (not isinstance(skill["placeId"], str) or not KNOWLEDGE_PLACE_ID.match(skill["placeId"])):
+            raise _bad_skills("place")
+        if skill["ground"] not in SKILL_GROUNDS or not _short_text(skill["detail"], 200):
+            raise _bad_skills("ground")
+        if skill["routeMoves"] is not None and not _is_int(skill["routeMoves"]):
+            raise _bad_skills("moves")
+        if not _is_int(skill["finishSteps"]) or (skill["savedAt"] is not None and not _is_int(skill["savedAt"])):
+            raise _bad_skills("counts")
+        route = skill["route"]
+        if not isinstance(route, list) or len(route) > 12 or (route and skill["placeId"] is None):
+            raise _bad_skills("route")
+        for point in route:
+            if not isinstance(point, dict) or set(point) != {"title", "screenId"} or not _short_text(point["title"], 60):
+                raise _bad_skills("waypoint")
+            if point["screenId"] is not None and (not isinstance(point["screenId"], str) or not SCREEN_ID.fullmatch(point["screenId"])):
+                raise _bad_skills("waypoint screen")
 
 
 MARKET_OPS = frozenset({"market.catalog", "market.install", "market.remove", "market.run"})
@@ -1236,6 +1279,10 @@ class V5ContractService:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "runId is malformed.")
         return self._call(device_id, "learn.run", {"runId": run_id})
 
+    def skills_list(self, device_id: str) -> dict[str, Any]:
+        """The owner's saved skills and where each lives on the map (plan 23). Titles, health and counts only."""
+        return self._call(device_id, "skills.list", {})
+
     def market_catalog(self, device_id: str) -> dict[str, Any]:
         return self._call(device_id, "market.catalog", {})
 
@@ -1279,6 +1326,10 @@ class V5ContractService:
             if set(args) != {"runId"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "runs.get takes runId only.")
             return self.runs_get(device_id, args["runId"])
+        if op == "skills.list":
+            if args:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "skills.list takes no arguments.")
+            return self.skills_list(device_id)
         if op == "learn.run":
             if set(args) != {"runId"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "learn.run takes runId only.")
