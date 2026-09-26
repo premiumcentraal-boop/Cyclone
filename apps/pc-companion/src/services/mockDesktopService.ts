@@ -10,6 +10,12 @@ import type {
   DeviceSessionDescriptor,
   DeviceSessionList,
   DeviceSessionResult,
+  DeviceTask,
+  DeviceTaskRequest,
+  RootCommandRequest,
+  RootCommandResult,
+  Scene,
+  SceneStep,
   FleetWsEvent,
   Layer2Operation,
   Layer2Status,
@@ -19,8 +25,25 @@ import type {
   PairQrConfirmResult,
   StreamDiagnosticEvent,
   StreamProfile,
+  McpTunnelMode,
+  McpTunnelSmokeResult,
+  McpTunnelStatus,
+  McpTunnelToken,
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptSyncResult,
 } from "./types.js";
+import {
+  emptyChatgptAttachConfig,
+  emptyShareStatus,
+  localCloudControlBase,
+  localStubSession,
+  publicControlApi,
+  publicShareControlApi,
+  type ChatgptShareStatus,
+} from "../core/chatgptAttach.js";
 import { bindLayer2Status, LAYER2_PROTOCOL } from "../core/layer2.js";
+import { stoppedTunnelStatus } from "../core/mcpTunnel.js";
 import { bindSessionTile, DEFAULT_FOREGROUND_SESSION_ID, isDefaultForegroundSession, jpegFocusTarget, readExactSessionSnapshotHeaders } from "../core/sessionTiles.js";
 
 const MOCK_CODE = "NOVA";
@@ -34,6 +57,12 @@ export class MockDesktopService implements DesktopService {
   private sessions = new Map<string, DeviceSessionDescriptor[]>();
   private layer2 = new Map<string, MockLayer2State>();
   private fleetListeners: Array<(event?: FleetWsEvent) => void> = [];
+  private tunnel: McpTunnelStatus = stoppedTunnelStatus(
+    "Mock Settings terminal. Packaged Cyclone One starts the real HTTPS tunnel from here.",
+  );
+  private chatgptConfig: ChatgptAttachConfig = emptyChatgptAttachConfig();
+  private chatgptSecrets = new Map<string, string>();
+  private chatgptShare: ChatgptShareStatus = emptyShareStatus("http://127.0.0.1:8765/cloud");
 
   constructor(deviceCount = 4) {
     this.devices = createMockDevices(deviceCount);
@@ -42,6 +71,10 @@ export class MockDesktopService implements DesktopService {
       this.sessions.set(device.id, seedMockSessions(device.id));
       this.layer2.set(device.id, seedMockLayer2());
     }
+    // Seed a couple of nicknames so the command box / scenes are usable
+    // immediately in mock mode, without first clicking Rename on each card.
+    if (this.devices[0]) { this.nicknames.set(this.devices[0].id, "Work Phone"); this.devices[0].nickname = "Work Phone"; }
+    if (this.devices[1]) { this.nicknames.set(this.devices[1].id, "Tablet"); this.devices[1].nickname = "Tablet"; }
   }
 
   async listDevices(): Promise<DesktopDevice[]> { return this.devices.map(copyDevice); }
@@ -269,11 +302,14 @@ export class MockDesktopService implements DesktopService {
     return [
       {
         id: "codex", name: "Codex", description: "Use Cyclone phones from Codex.", state: "READY_TO_CONNECT", actionLabel: "Connect",
-        detected: true, configured: false, gatewayState: "READY", gatewayReachable: true,
-        readyDeviceCount: 3, deviceCount: 4, toolCount: 14, transport: "stdio", approvalMode: "writes",
+        aiState: "DETECTED", detected: true, configured: false, gatewayState: "READY", gatewayReachable: true,
+        readyDeviceCount: 3, deviceCount: 4, toolCount: 14, transport: "stdio", approvalMode: "writes", phoneState: "READY",
       },
-      { id: "deepseek-mcp", name: "DeepSeek / MCP harness", description: "Connect an MCP-capable reasoning harness.", state: "CONNECTED" },
-      { id: "generic-mcp", name: "Generic MCP", description: "Use a compatible MCP client.", state: "NOT_INSTALLED", actionLabel: "Set up" },
+      { id: "grok", name: "Grok", description: "Connect Grok on this PC.", state: "CONNECTED", aiState: "CONNECTED", detected: true, configured: true },
+      { id: "cursor", name: "Cursor", description: "Connect Cursor on this PC.", state: "READY_TO_CONNECT", aiState: "DETECTED", detected: true, configured: false },
+      { id: "opencode", name: "OpenCode", description: "Connect OpenCode on this PC.", state: "CONNECTED", aiState: "CONNECTED", detected: true, configured: true },
+      { id: "copilot", name: "Copilot", description: "Connect Copilot on this PC.", state: "NOT_INSTALLED", aiState: "UNKNOWN", detected: false },
+      { id: "generic", name: "Generic MCP", description: "Use a compatible MCP client.", state: "READY_TO_CONNECT", aiState: "DETECTED", detected: true },
     ];
   }
   async runConnectorAction(_connectorId: string, _action: "connect" | "install" | "repair"): Promise<ConnectorActionResult> {
@@ -292,6 +328,159 @@ export class MockDesktopService implements DesktopService {
     if (!pairing || pairing.pairingId !== pairingId) return { ok: false, pending: false, reason: "STALE_CODE" };
     return { ok: false, pending: true };
   }
+  async getMcpTunnelStatus(): Promise<McpTunnelStatus> { return { ...this.tunnel }; }
+  async startMcpTunnel(mode?: McpTunnelMode): Promise<McpTunnelStatus> {
+    this.tunnel = {
+      ...this.tunnel,
+      ok: true,
+      state: "running",
+      mode: mode ?? this.tunnel.mode,
+      tokenLast4: this.tunnel.tokenLast4 ?? "mock",
+      publicUrl: "https://mock-cyclone.trycloudflare.com",
+      mcpUrl: "https://mock-cyclone.trycloudflare.com/mcp",
+      healthUrl: "https://mock-cyclone.trycloudflare.com/health",
+      gatewayAlive: true,
+      cloudflaredAlive: true,
+      healthOk: true,
+      message: "Mock tunnel running. Packaged Cyclone One uses a real cloudflared hostname.",
+    };
+    return { ...this.tunnel };
+  }
+  async stopMcpTunnel(): Promise<McpTunnelStatus> {
+    this.tunnel = stoppedTunnelStatus("Mock tunnel stopped.");
+    return { ...this.tunnel };
+  }
+  async restartMcpTunnel(): Promise<McpTunnelStatus> {
+    const mode = this.tunnel.mode;
+    await this.stopMcpTunnel();
+    return this.startMcpTunnel(mode);
+  }
+  async rotateMcpTunnelToken(): Promise<McpTunnelStatus> {
+    this.tunnel = { ...this.tunnel, tokenLast4: "rot4", rotated: true, message: "Mock bearer rotated (last4 rot4)." };
+    return { ...this.tunnel };
+  }
+  async setMcpTunnelMode(mode: McpTunnelMode): Promise<McpTunnelStatus> {
+    this.tunnel = { ...this.tunnel, mode };
+    return { ...this.tunnel };
+  }
+  async copyMcpTunnelToken(): Promise<McpTunnelToken> {
+    return { token: "mock-tunnel-token-not-for-production", last4: "tion" };
+  }
+  async smokeMcpTunnel(): Promise<McpTunnelSmokeResult> {
+    return {
+      ok: true,
+      message: "SMOKE PASSED (mock)",
+      checks: [
+        { name: "GET /health 200", ok: true, detail: "status=200" },
+        { name: "POST /mcp without auth -> 401", ok: true, detail: "got 401" },
+        { name: "initialize 200 with bearer", ok: true, detail: "status=200" },
+      ],
+    };
+  }
+  async openMcpTunnelDocs(): Promise<string> {
+    return "mock://connector-setup";
+  }
+
+  async loadChatgptAttachConfig(): Promise<ChatgptAttachConfig> {
+    return publicChatgptConfig(this.chatgptConfig, this.chatgptSecrets);
+  }
+
+  async saveChatgptAttachConfig(config: ChatgptAttachConfig): Promise<ChatgptAttachConfig> {
+    const pads = config.pads.map((pad, index) => {
+      const id = pad.id || `pad-${index + 1}`;
+      if (pad.connectKey) this.chatgptSecrets.set(id, pad.connectKey);
+      return {
+        id,
+        label: pad.label || id,
+        sshHost: pad.sshHost,
+        sshPort: pad.sshPort || 1824,
+        sshUser: pad.sshUser || "s",
+        localAdbPort: pad.localAdbPort || 63670 + index,
+        remoteAdbSpec: pad.remoteAdbSpec || "localhost:1",
+        hasConnectKey: Boolean(pad.connectKey || this.chatgptSecrets.get(id)),
+      };
+    });
+    this.chatgptConfig = {
+      controlApiBase: config.controlApiBase || "",
+      defaultGoal: config.defaultGoal || this.chatgptConfig.defaultGoal,
+      hasVmosApiKey: Boolean(config.vmosApiKey) || this.chatgptConfig.hasVmosApiKey,
+      pads,
+    };
+    return this.loadChatgptAttachConfig();
+  }
+
+  async syncChatgptAttachFleet(): Promise<ChatgptSyncResult> {
+    const pads = this.chatgptConfig.pads.map((pad) => {
+      const session = localStubSession();
+      return {
+        id: pad.id,
+        label: pad.label,
+        ok: true,
+        deviceId: `dev_${pad.id}`,
+        serial: `localhost:${pad.localAdbPort}`,
+        adb: "device" as const,
+        mobile: "running" as const,
+        sessionId: session.sessionId,
+        sessionToken: session.sessionToken,
+        sessionSource: "control-api" as const,
+      };
+    });
+    return {
+      ok: pads.length > 0,
+      controlApi: publicControlApi(
+        this.chatgptConfig.controlApiBase || this.chatgptShare.url || this.cloudControlLocalBase(),
+        8765,
+      ),
+      generatedAt: new Date().toISOString(),
+      pads,
+      message: pads.length ? "Mock fleet synced." : "Add a pad first.",
+    };
+  }
+
+  async copyChatgptHandoff(markdown: string): Promise<{ ok: boolean; markdown?: string }> {
+    return { ok: true, markdown };
+  }
+
+  async saveChatgptHandoff(_markdown: string): Promise<string> {
+    return "mock://FLEET_HANDOFF.md";
+  }
+
+  async chatgptAttachResources(): Promise<ChatgptAttachResources> {
+    return {
+      openapi: "openapi: 3.1.0\ninfo:\n  title: Cyclone Cloud Control API\nservers:\n  - url: https://CONTROL_API_HOST_PLACEHOLDER\n",
+      instructions: "You control VMOS phones through Actions only.",
+      exampleFleet: "{\"pads\":[]}",
+    };
+  }
+
+  cloudControlLocalBase(): string {
+    return localCloudControlBase("http://127.0.0.1:8765");
+  }
+
+  async probeCloudControl(base?: string): Promise<{ ok: boolean; localBase: string }> {
+    return { ok: true, localBase: localCloudControlBase(base) || this.cloudControlLocalBase() };
+  }
+
+  async chatgptShareStatus(): Promise<ChatgptShareStatus> {
+    return { ...this.chatgptShare };
+  }
+
+  async chatgptShareStart(): Promise<ChatgptShareStatus> {
+    this.chatgptShare = {
+      ok: true,
+      running: true,
+      url: publicShareControlApi("https://mock-share.trycloudflare.com"),
+      localBase: this.cloudControlLocalBase(),
+      message: "ChatGPT can reach Cloud Control over HTTPS.",
+    };
+    return this.chatgptShareStatus();
+  }
+
+  async chatgptShareStop(): Promise<ChatgptShareStatus> {
+    this.chatgptShare = emptyShareStatus(this.cloudControlLocalBase());
+    return this.chatgptShareStatus();
+  }
+
   async getRuntimeStatus(): Promise<DesktopRuntimeStatus> {
     return {
       backendReachable: true,
@@ -421,7 +610,143 @@ export class MockDesktopService implements DesktopService {
       ...extra,
     });
   }
+
+  // --- Multi-device AI tasks / nicknames / scenes (mock) ------------------
+  // Enough of a simulation to demo the whole flow - command box, per-device
+  // Ask, and saved routines - in a plain browser with `?mock=N`, no real
+  // gateway, phone, or OpenRouter key required.
+  private nicknames = new Map<string, string>();
+  private tasks = new Map<string, DeviceTask>();
+  private scenes = new Map<string, Scene>();
+
+  async setDeviceNickname(deviceId: string, nickname: string): Promise<{ deviceId: string; nickname: string | null }> {
+    const clean = nickname.trim();
+    if (!clean) {
+      this.nicknames.delete(deviceId);
+      return { deviceId, nickname: null };
+    }
+    this.nicknames.set(deviceId, clean);
+    return { deviceId, nickname: clean };
+  }
+
+  private startOneTask(deviceId: string, goal: string, model: string, missionId?: string): DeviceTask {
+    const busy = [...this.tasks.values()].some((t) => t.deviceId === deviceId && t.status === "RUNNING");
+    const taskId = `mock_task_${this.tasks.size + 1}_${Date.now().toString(36)}`;
+    const task: DeviceTask = busy
+      ? {
+          taskId, deviceId, goal, model, status: "FAILED", turns: 0, maxTurns: MOCK_TASK_TURNS,
+          startedAtEpochMs: Date.now(), finishedAtEpochMs: Date.now(),
+          result: "This device already has a task running.", log: [], missionId,
+        }
+      : {
+          taskId, deviceId, goal, model, status: "RUNNING", turns: 0, maxTurns: MOCK_TASK_TURNS,
+          startedAtEpochMs: Date.now(), finishedAtEpochMs: null, result: null,
+          log: [{ at: Date.now(), kind: "started", goal, model }], missionId,
+        };
+    this.tasks.set(taskId, task);
+    return { ...task, log: [...task.log] };
+  }
+
+  async startDeviceTasks(requests: DeviceTaskRequest[]): Promise<DeviceTask[]> {
+    return requests.map((r) => this.startOneTask(r.deviceId, r.goal, r.model, r.missionId));
+  }
+
+  async getDeviceTask(taskId: string): Promise<DeviceTask> {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new Error("Mock task not found");
+    if (task.status === "RUNNING") {
+      task.turns += 1;
+      const finishing = task.turns >= MOCK_TASK_TURNS;
+      task.log.push({ at: Date.now(), kind: "acted", tool: MOCK_STEP_TOOLS[task.turns % MOCK_STEP_TOOLS.length], ok: true });
+      if (finishing) {
+        task.status = "COMPLETE";
+        task.result = `Finished (mock): ${task.goal}`;
+        task.finishedAtEpochMs = Date.now();
+        task.log.push({ at: Date.now(), kind: "planned", directive: "DONE", reason: task.result });
+      }
+    }
+    return { ...task, log: [...task.log] };
+  }
+
+  async listDeviceTasks(missionId?: string): Promise<DeviceTask[]> {
+    const all = [...this.tasks.values()];
+    const filtered = missionId ? all.filter((t) => t.missionId === missionId) : all;
+    return filtered.map((task) => ({ ...task, log: [...task.log] }));
+  }
+
+  async cancelDeviceTask(taskId: string): Promise<DeviceTask> {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new Error("Mock task not found");
+    if (task.status === "RUNNING") {
+      task.status = "CANCELLED";
+      task.result = "Cancelled by user.";
+      task.finishedAtEpochMs = Date.now();
+      task.log.push({ at: Date.now(), kind: "cancelled" });
+    }
+    return { ...task, log: [...task.log] };
+  }
+
+  async runRootCommand(request: RootCommandRequest): Promise<RootCommandResult> {
+    // Mock splitter: naive "Name: goal" / "Name, goal" segment matching
+    // against known nicknames, good enough to demo the concept without a
+    // real OpenRouter call. Anything it can't confidently match becomes a
+    // clarification, same refuse-don't-guess rule as the real splitter.
+    const knownDevices = request.deviceIds && request.deviceIds.length > 0 ? request.deviceIds : [...this.nicknames.keys()];
+    const segments = request.command.split(/,| and then | then /i).map((s) => s.trim()).filter(Boolean);
+    const assignments: { deviceId: string; goal: string }[] = [];
+    for (const segment of segments) {
+      const match = [...this.nicknames.entries()].find(([id, name]) =>
+        knownDevices.includes(id) && segment.toLowerCase().includes(name.toLowerCase()),
+      );
+      if (!match) {
+        return { dispatched: false, clarification: `I couldn't tell which device this part is for: "${segment}"`, tasks: [] };
+      }
+      assignments.push({ deviceId: match[0], goal: segment.replace(new RegExp(match[1], "i"), "").replace(/^(on|for)\s+/i, "").trim() || segment });
+    }
+    if (!assignments.length) {
+      return { dispatched: false, clarification: "I couldn't find any device names in that command.", tasks: [] };
+    }
+    const missionId = `mock_mission_${Date.now().toString(36)}`;
+    const tasks = assignments.map((a) => this.startOneTask(a.deviceId, a.goal, request.model, missionId));
+    return { dispatched: true, clarification: null, missionId, tasks };
+  }
+
+  async listScenes(): Promise<Scene[]> {
+    return [...this.scenes.values()];
+  }
+
+  async saveScene(sceneId: string, name: string, steps: SceneStep[]): Promise<Scene> {
+    const scene: Scene = { sceneId, name, steps };
+    this.scenes.set(sceneId, scene);
+    return scene;
+  }
+
+  async deleteScene(sceneId: string): Promise<void> {
+    this.scenes.delete(sceneId);
+  }
+
+  async runScene(sceneId: string, credentials: { model: string; providers: string[]; apiKey: string }): Promise<RootCommandResult> {
+    const scene = this.scenes.get(sceneId);
+    if (!scene) return { dispatched: false, clarification: "That routine no longer exists.", tasks: [] };
+    const missing: string[] = [];
+    const resolved: { deviceId: string; goal: string }[] = [];
+    for (const step of scene.steps) {
+      const found = [...this.nicknames.entries()].find(([, name]) => name.toLowerCase() === step.nickname.toLowerCase());
+      if (!found) { missing.push(step.nickname); continue; }
+      resolved.push({ deviceId: found[0], goal: step.goal });
+    }
+    if (missing.length) {
+      return { dispatched: false, clarification: `These devices in the routine aren't paired: ${missing.join(", ")}`, tasks: [] };
+    }
+    const missionId = `mock_mission_${Date.now().toString(36)}`;
+    const tasks = resolved.map((r) => this.startOneTask(r.deviceId, r.goal, credentials.model, missionId));
+    return { dispatched: true, clarification: null, missionId, tasks };
+  }
 }
+
+const MOCK_TASK_TURNS = 4;
+const MOCK_STEP_TOOLS = ["phone.observe", "phone.open_app", "phone.click", "phone.type", "phone.scroll"];
+
 
 export function createMockDevices(count: number): DesktopDevice[] {
   const states: DesktopDevice["state"][] = ["READY", "READY", "SLEEPING", "UNPAIRED", "READY", "DISCONNECTED"];
@@ -585,4 +910,17 @@ function mockFrameDataUrl(
     : "";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="540" height="1200" viewBox="0 0 540 1200">${comment}<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="hsl(${hueA} 42% 16%)"/><stop offset="1" stop-color="hsl(${hueB} 52% 8%)"/></linearGradient></defs><rect width="540" height="1200" fill="url(#g)"/><rect x="28" y="70" width="484" height="120" rx="28" fill="rgba(255,255,255,.08)"/><rect x="28" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.07)"/><rect x="284" y="218" width="228" height="228" rx="36" fill="rgba(255,255,255,.05)"/><rect x="28" y="474" width="484" height="190" rx="36" fill="rgba(255,255,255,.06)"/><rect x="28" y="692" width="484" height="320" rx="36" fill="rgba(255,255,255,.045)"/><circle cx="54" cy="1136" r="22" fill="#8b5cf6"/><text x="88" y="1146" fill="white" opacity=".82" font-family="system-ui" font-size="30">${label}</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function publicChatgptConfig(config: ChatgptAttachConfig, secrets: Map<string, string>): ChatgptAttachConfig {
+  return {
+    controlApiBase: config.controlApiBase,
+    defaultGoal: config.defaultGoal,
+    hasVmosApiKey: config.hasVmosApiKey,
+    pads: config.pads.map((pad) => ({
+      ...pad,
+      connectKey: undefined,
+      hasConnectKey: Boolean(pad.hasConnectKey || secrets.get(pad.id)),
+    })),
+  };
 }

@@ -12,7 +12,7 @@ _GROUP_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
 
 
 class FleetWorkspaceStore:
-    """Persistent user-owned groups and explicit wall selection."""
+    """Persistent user-owned groups, nicknames, and explicit wall selection."""
 
     SCHEMA_VERSION = 1
 
@@ -21,6 +21,7 @@ class FleetWorkspaceStore:
         self._lock = threading.RLock()
         self._groups: dict[str, dict[str, Any]] = {}
         self._selected: list[str] = []
+        self._nicknames: dict[str, str] = {}
         self._load()
 
     def public(self) -> dict[str, Any]:
@@ -29,7 +30,50 @@ class FleetWorkspaceStore:
                 "schemaVersion": self.SCHEMA_VERSION,
                 "groups": [dict(self._groups[key]) for key in sorted(self._groups)],
                 "selectedDeviceIds": list(self._selected),
+                "nicknames": dict(self._nicknames),
             }
+
+    def set_nickname(self, device_id: str, nickname: str) -> dict[str, Any]:
+        if not isinstance(device_id, str) or not device_id.startswith("dev_") or len(device_id) > 64:
+            raise ValueError("deviceId is not a valid Cyclone device ID")
+        clean = nickname.strip()
+        if not clean:
+            with self._lock:
+                self._nicknames.pop(device_id, None)
+                self._persist()
+            return {"deviceId": device_id, "nickname": None}
+        if len(clean) > 40:
+            raise ValueError("nickname must be 1..40 characters")
+        with self._lock:
+            # Nicknames must stay unique so a spoken/typed name always resolves
+            # to exactly one device - collisions are exactly the ambiguity a
+            # command splitter cannot safely guess through.
+            for other_id, other_name in self._nicknames.items():
+                if other_id != device_id and other_name.casefold() == clean.casefold():
+                    raise ValueError(f"'{clean}' is already used for another device")
+            self._nicknames[device_id] = clean
+            self._persist()
+        return {"deviceId": device_id, "nickname": clean}
+
+    def nickname_for(self, device_id: str) -> str | None:
+        with self._lock:
+            return self._nicknames.get(device_id)
+
+    def nickname_map(self) -> dict[str, str]:
+        with self._lock:
+            return dict(self._nicknames)
+
+    def resolve_nickname(self, name: str) -> str | None:
+        """Case-insensitive nickname -> deviceId lookup, used by the command
+        splitter and voice input to turn 'the tablet' back into a real ID."""
+        term = name.strip().casefold()
+        if not term:
+            return None
+        with self._lock:
+            for device_id, nickname in self._nicknames.items():
+                if nickname.casefold() == term:
+                    return device_id
+        return None
 
     def put_group(self, group_id: str, name: str, device_ids: list[str]) -> dict[str, Any]:
         if not _GROUP_ID.fullmatch(group_id):
@@ -103,9 +147,16 @@ class FleetWorkspaceStore:
                         "deviceIds": self._unique_ids(list(group.get("deviceIds") or [])),
                     }
             self._selected = self._unique_ids(list(payload.get("selectedDeviceIds") or []))
+            nicknames = payload.get("nicknames")
+            if isinstance(nicknames, dict):
+                self._nicknames = {
+                    str(k): str(v)[:40] for k, v in nicknames.items()
+                    if isinstance(k, str) and k.startswith("dev_") and isinstance(v, str) and v.strip()
+                }
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             self._groups = {}
             self._selected = []
+            self._nicknames = {}
 
     def _persist(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

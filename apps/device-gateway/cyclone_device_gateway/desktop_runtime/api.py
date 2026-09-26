@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
+import json
 import hashlib
 import hmac
 import queue
@@ -20,6 +22,7 @@ from ..backends.desktop_android import DesktopAndroidBackend
 from ..virtual import AndroidEmulatorProvider, VirtualDeviceConfig, VirtualDeviceRegistry, VirtualDeviceService
 from .agent import DesktopAgentService
 from .batch import FleetBatchService
+from .command_splitter import DeviceRef, OpenRouterCommandSplitter, SplitterError
 from .controls import ClipboardService, ManualControlService
 from .diagnostics import FleetDiagnosticSupervisor
 from .fleet import DeviceFleetManager
@@ -27,10 +30,16 @@ from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorC
 from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
 from .layer2 import Layer2WorkspaceService
+from ..glass import LaunchCodes, create_glass_router, resolve_glass_dist
+from .scenes import SceneError, SceneStore
 from .sessions import ExecutionSessionService
+from .lan_share import LanShareDirectory
+from .task_runner import MultiDeviceTaskRunner, OpenRouterActionPlanner, TaskRunnerError
+from .v5_contract import V5ContractService
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 from .workspace import FleetWorkspaceStore
+from ..cloud_control import create_cloud_control_router
 
 
 class PairCompleteBody(BaseModel):
@@ -120,6 +129,11 @@ class FleetGroupBody(BaseModel):
     device_ids: list[str] = Field(default_factory=list, max_length=32)
 
 
+class DeviceNicknameBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nickname: str = Field(max_length=40)
+
+
 class FleetSelectionBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     device_ids: list[str] = Field(default_factory=list, max_length=32)
@@ -130,6 +144,53 @@ class FleetBatchBody(BaseModel):
     device_ids: list[str] = Field(min_length=1, max_length=32)
     operation: Literal["home", "back", "open_app", "screenshot", "recover"]
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeviceTaskRequestBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_id: str = Field(min_length=1, max_length=160, alias="deviceId")
+    goal: str = Field(min_length=1, max_length=2000)
+    model: str = Field(min_length=1, max_length=200)
+    providers: list[str] = Field(min_length=1, max_length=8)
+    # Never persisted anywhere: forwarded to OpenRouter for this task's
+    # lifetime only, kept out of task logs, discarded when the task ends.
+    api_key: str = Field(min_length=1, alias="apiKey")
+    mission_id: str | None = Field(default=None, max_length=64, alias="missionId")
+
+
+class DeviceTasksBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tasks: list[DeviceTaskRequestBody] = Field(min_length=1, max_length=16)
+
+
+class RootCommandBody(BaseModel):
+    """The one-command-box request: one sentence, split across every
+    currently paired+nicknamed device unless a specific subset is given."""
+    model_config = ConfigDict(extra="forbid")
+    command: str = Field(min_length=1, max_length=2000)
+    model: str = Field(min_length=1, max_length=200)
+    providers: list[str] = Field(min_length=1, max_length=8)
+    api_key: str = Field(min_length=1, alias="apiKey")
+    device_ids: list[str] | None = Field(default=None, max_length=32, alias="deviceIds")
+
+
+class SceneStepBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nickname: str = Field(min_length=1, max_length=40)
+    goal: str = Field(min_length=1, max_length=2000)
+
+
+class SceneBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+    steps: list[SceneStepBody] = Field(min_length=1, max_length=16)
+
+
+class SceneRunBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: str = Field(min_length=1, max_length=200)
+    providers: list[str] = Field(min_length=1, max_length=8)
+    api_key: str = Field(min_length=1, alias="apiKey")
 
 
 class VirtualCreateBody(BaseModel):
@@ -184,10 +245,28 @@ class DesktopRuntime:
         self.batches = FleetBatchService(lambda device_id: DesktopAndroidBackend(
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
         ))
+        # Multi-device orchestration: one independent task loop per device
+        # (see task_runner.py), a shared cross-device notes area, saved
+        # multi-device routines, and the one-sentence-to-many-devices splitter.
+        # None of these store an OpenRouter key - every call carries its own.
+        self.tasks = MultiDeviceTaskRunner(self.agent, self._make_task_planner)
+        self.scenes = SceneStore(settings.runtime_dir / "fleet-scenes.json")
         self.video_limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
+        # Wi-Fi screen share: the phone's own stream when it shares (AnyDesk-style), ADB screenshots otherwise.
+        share_contract = V5ContractService(self.fleet)
+        # Cyclone Lab: measured Mind missions, scored from the phone's real state through the lab's fixed probes.
+        from ..lab.probes import PhoneProbe
+        from ..lab.runner import LabService
+        self.lab = LabService(settings.runtime_dir / "lab", share_contract, lambda device_id: PhoneProbe(self.fleet.get(device_id).adb))
+        self.lan_share = LanShareDirectory(
+            status=share_contract.share_status,
+            trust_record=self.trust.store.record,
+            sign=self.trust.identity.sign,
+        )
         self.fleet.set_video_factory(lambda session: VideoStreamController(
             session,
             self.video_limiter,
+            lan_share=self.lan_share.for_device(session.device_id),
             diagnostic=lambda stage, details, device_id=session.device_id: self.live_diagnostics.mark(
                 device_id,
                 stage,
@@ -195,11 +274,19 @@ class DesktopRuntime:
             ),
         ))
 
+    @staticmethod
+    def _make_task_planner(model: str, providers: list[str], api_key: str) -> OpenRouterActionPlanner:
+        return OpenRouterActionPlanner(api_key, model, providers)
+
+    @staticmethod
+    def _make_command_splitter(model: str, providers: list[str], api_key: str) -> OpenRouterCommandSplitter:
+        return OpenRouterCommandSplitter(api_key, model, providers)
+
     def _snapshot_for_batch(self, device_id: str, profile: str) -> dict[str, Any]:
         session = self.fleet.get(device_id)
         if session.video is None:
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture is unavailable.")
-        capture = session.video.snapshot()
+        capture = session.video.snapshot(fresh=True) if profile == "live-phone" else session.video.snapshot()
         data = capture.get("data")
         if not isinstance(data, bytes):
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture returned no image.")
@@ -207,7 +294,7 @@ class DesktopRuntime:
         suffix = ".png" if codec == "image/png" else ".jpg"
         root = self.settings.runtime_dir / "fleet-screenshots"
         root.mkdir(parents=True, exist_ok=True)
-        path = root / f"{device_id}-{int(time.time() * 1000)}{suffix}"
+        path = root / (f"{device_id}-live-phone{suffix}" if profile == "live-phone" else f"{device_id}-{int(time.time() * 1000)}{suffix}")
         path.write_bytes(data)
         return {
             "deviceId": device_id, "filePath": str(path.resolve()), "codec": codec,
@@ -259,6 +346,101 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
     @router.get("/v1/fleet/workspace", dependencies=[Depends(auth)])
     def fleet_workspace() -> dict[str, Any]:
         return runtime.workspace.public()
+
+    @router.post("/v1/fleet/devices/{device_id}/nickname", dependencies=[Depends(auth)])
+    def fleet_device_nickname(device_id: str, body: DeviceNicknameBody) -> dict[str, Any]:
+        # Nicknames are what let a single spoken/typed command unambiguously
+        # address a device ("the tablet") instead of a raw device_id.
+        return _service_call(lambda: runtime.workspace.set_nickname(device_id, body.nickname))
+
+    # --- Multi-device AI tasks --------------------------------------------
+    @router.post("/v1/fleet/tasks", dependencies=[Depends(auth)])
+    def fleet_tasks_start(body: DeviceTasksBody) -> dict[str, Any]:
+        # One independent observe/plan/act/verify loop per device, run
+        # concurrently - "device A do X, device B do Y" at the same time.
+        return {"tasks": runtime.tasks.start_many([t.model_dump(by_alias=True) for t in body.tasks])}
+
+    @router.get("/v1/fleet/tasks", dependencies=[Depends(auth)])
+    def fleet_tasks_list(mission_id: str | None = Query(default=None, max_length=64, alias="missionId")) -> dict[str, Any]:
+        return {"tasks": runtime.tasks.list_tasks(mission_id)}
+
+    @router.get("/v1/fleet/tasks/{task_id}", dependencies=[Depends(auth)])
+    def fleet_task_status(task_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.tasks.status(task_id))
+
+    @router.post("/v1/fleet/tasks/{task_id}/cancel", dependencies=[Depends(auth)])
+    def fleet_task_cancel(task_id: str) -> dict[str, Any]:
+        return _service_call(lambda: runtime.tasks.cancel(task_id))
+
+    # --- One command box: one sentence -> a goal per device ---------------
+    @router.post("/v1/fleet/command", dependencies=[Depends(auth)])
+    def fleet_command(body: RootCommandBody) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            candidate_ids = body.device_ids or [d["deviceId"] for d in _public_devices(runtime) if d.get("paired")]
+            refs: list[DeviceRef] = []
+            for device_id in candidate_ids:
+                refs.append(DeviceRef(
+                    device_id=device_id,
+                    nickname=runtime.workspace.nickname_for(device_id),
+                    name=None,
+                ))
+            if not refs:
+                raise SplitterError("NO_DEVICES", "No paired devices are available to run this command on.")
+            splitter = runtime._make_command_splitter(body.model, body.providers, body.api_key)
+            result = splitter.split(body.command, refs)
+            if result.clarification:
+                return {"dispatched": False, "clarification": result.clarification, "tasks": []}
+            import secrets
+            mission_id = f"mission_{secrets.token_hex(6)}"
+            tasks = runtime.tasks.start_many([
+                {
+                    "deviceId": a.device_id, "goal": a.goal, "model": body.model,
+                    "providers": body.providers, "apiKey": body.api_key, "missionId": mission_id,
+                }
+                for a in result.assignments
+            ])
+            return {"dispatched": True, "clarification": None, "missionId": mission_id, "tasks": tasks}
+
+        return _service_call(run)
+
+    # --- Saved multi-device routines ("scenes") ----------------------------
+    @router.get("/v1/fleet/scenes", dependencies=[Depends(auth)])
+    def fleet_scenes_list() -> dict[str, Any]:
+        return {"scenes": runtime.scenes.list_scenes()}
+
+    @router.post("/v1/fleet/scenes/{scene_id}", dependencies=[Depends(auth)])
+    def fleet_scene_put(scene_id: str, body: SceneBody) -> dict[str, Any]:
+        return _service_call(lambda: runtime.scenes.put_scene(
+            scene_id, body.name, [s.model_dump() for s in body.steps],
+        ))
+
+    @router.post("/v1/fleet/scenes/{scene_id}/delete", dependencies=[Depends(auth)])
+    def fleet_scene_delete(scene_id: str) -> dict[str, Any]:
+        runtime.scenes.delete_scene(scene_id)
+        return {"sceneId": scene_id, "deleted": True}
+
+    @router.post("/v1/fleet/scenes/{scene_id}/run", dependencies=[Depends(auth)])
+    def fleet_scene_run(scene_id: str, body: SceneRunBody) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            resolved, missing = runtime.scenes.resolve_for_dispatch(scene_id, runtime.workspace.resolve_nickname)
+            if missing:
+                # Never silently run on fewer devices than the scene expects.
+                raise SceneError(
+                    "DEVICE_NOT_PAIRED",
+                    "These devices in the scene aren't currently paired: " + ", ".join(missing),
+                )
+            import secrets
+            mission_id = f"mission_{secrets.token_hex(6)}"
+            tasks = runtime.tasks.start_many([
+                {
+                    "deviceId": step["deviceId"], "goal": step["goal"], "model": body.model,
+                    "providers": body.providers, "apiKey": body.api_key, "missionId": mission_id,
+                }
+                for step in resolved
+            ])
+            return {"dispatched": True, "clarification": None, "missionId": mission_id, "tasks": tasks}
+
+        return _service_call(run)
 
     @router.post("/v1/fleet/groups/{group_id}", dependencies=[Depends(auth)])
     def fleet_group_put(group_id: str, body: FleetGroupBody) -> dict[str, Any]:
@@ -689,32 +871,40 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             return
         try:
             session = runtime.fleet.get(device_id)
-            adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
-            if adb_state != "device":
-                raise DesktopRuntimeError(
-                    RuntimeErrorCode.DEVICE_UNAUTHORIZED if adb_state == "unauthorized" else RuntimeErrorCode.DEVICE_DISCONNECTED,
-                    "ADB authorization is required for live display.",
-                    retryable=True,
-                )
             controller = session.video
             if controller is None:
                 raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Video runtime is unavailable.")
-        except DesktopRuntimeError as exc:
-            close_code = 4403 if exc.code == RuntimeErrorCode.DEVICE_UNAUTHORIZED.value else 4404
-            await websocket.close(code=close_code)
+        except DesktopRuntimeError:
+            await websocket.close(code=4404)
             return
         await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
-        if profile == "focus":
-            session.input_owner = "HUMAN"
+        # Self-healing live view: a phone that is known but not ready over USB right now (cable moved, debugging prompt
+        # pending, ADB restarting) gets a retryable reason instead of a closed door. The producer keeps capturing and
+        # frames flow again as soon as ADB is back, like a remote-desktop client that reconnects on its own.
+        adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
+        if adb_state != "device":
+            reason = {"unauthorized": "USB_UNAUTHORIZED", "offline": "USB_OFFLINE"}.get(adb_state, "USB_ABSENT")
+            runtime.live_diagnostics.mark(device_id, "server.ws.usb_not_ready", details={"profile": profile, "code": reason})
+            await websocket.send_text(json.dumps({"type": "stream.error", "code": reason, "retryable": True}, separators=(",", ":")))
         q = controller.subscribe(profile)
         runtime.live_diagnostics.mark(device_id, "server.ws.accepted", details={"profile": profile, "transport": "websocket"})
         first_binary = True
+        async def watch_disconnect() -> None:
+            # Sending alone does not notice a closed browser while the encoder is quiet.
+            # Receive close frames so reloads cannot leave orphan subscriber queues.
+            while (await websocket.receive())["type"] != "websocket.disconnect":
+                pass
+
+        disconnect = asyncio.create_task(watch_disconnect())
         try:
-            while True:
+            while not disconnect.done():
                 try:
                     message: StreamMessage = await asyncio.to_thread(q.get, True, 1.0)
                 except queue.Empty:
                     continue
+                if message.kind == "close":
+                    await websocket.close(code=1012)
+                    break
                 if message.kind == "binary":
                     await websocket.send_bytes(message.data)  # type: ignore[arg-type]
                     if first_binary:
@@ -732,6 +922,9 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             )
         finally:
             controller.unsubscribe(profile, q)
+            disconnect.cancel()
+            with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                await disconnect
 
     return router
 
@@ -756,6 +949,14 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.state.desktop_runtime = desktop
     app.include_router(create_desktop_router(desktop, settings.token))
     app.include_router(create_stream_router(desktop, settings.token))
+    app.include_router(create_cloud_control_router(desktop, settings.token))
+    from ..lab.api import create_lab_router
+    app.include_router(create_lab_router(desktop, settings.token))
+    from ..market.api import create_market_router
+    app.include_router(create_market_router(desktop, settings.token))
+    # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
+    app.state.glass_codes = LaunchCodes()
+    app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))
     app.add_event_handler("startup", desktop.start)
     app.add_event_handler("shutdown", desktop.stop)
     return app
@@ -795,9 +996,14 @@ def _public_devices(runtime: DesktopRuntime) -> list[dict[str, Any]]:
         if not device_id:
             continue
         try:
-            result.append(enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id)))
+            entry = enrich_device_public(runtime.fleet.get(device_id), _safe_trust_status(runtime, device_id))
         except DesktopRuntimeError:
             continue
+        nickname = runtime.workspace.nickname_for(device_id)
+        entry["nickname"] = nickname
+        if nickname:
+            entry["name"] = nickname  # the model/product string moves to entry["model"], already present
+        result.append(entry)
     return result
 
 
@@ -861,6 +1067,7 @@ def _call(fn):
             RuntimeErrorCode.TRUST_REVOKED.value: 403,
             RuntimeErrorCode.TRUST_EXPIRED.value: 401,
             RuntimeErrorCode.TRUST_AUTH_FAILED.value: 403,
+            RuntimeErrorCode.TRUST_REJECTED.value: 403,
             RuntimeErrorCode.PROTOCOL_MISMATCH.value: 426,
             RuntimeErrorCode.PHONE_LOCKED.value: 423,
             RuntimeErrorCode.HUMAN_HAS_CONTROL.value: 409,
@@ -883,9 +1090,15 @@ def _call(fn):
         raise HTTPException(status_code=status, detail=exc.to_dict()) from exc
 
 
+_ERROR_STATUS_OVERRIDES = {"NOT_FOUND": 404, "DEVICE_BUSY": 409}
+
+
 def _service_call(fn):
     try:
         return fn()
+    except (TaskRunnerError, SceneError, SplitterError) as exc:
+        status = _ERROR_STATUS_OVERRIDES.get(exc.code, 400)
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message}) from exc
     except (KeyError, StopIteration) as exc:
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Requested fleet resource was not found."}) from exc
     except ValueError as exc:

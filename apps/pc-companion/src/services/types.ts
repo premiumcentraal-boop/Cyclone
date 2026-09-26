@@ -1,3 +1,18 @@
+import type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptShareStatus,
+  ChatgptSyncResult,
+} from "../core/chatgptAttach.js";
+import type {
+  McpTunnelMode,
+  McpTunnelSmokeCheck,
+  McpTunnelSmokeResult,
+  McpTunnelState,
+  McpTunnelStatus,
+  McpTunnelToken,
+} from "../core/mcpTunnel.js";
+
 export type DeviceLifecycleState =
   | "READY"
   | "UNPAIRED"
@@ -98,6 +113,18 @@ export interface ConnectionDiagnosticBundle {
   createdAtEpochMs: number;
 }
 
+export type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptSyncResult,
+  McpTunnelMode,
+  McpTunnelSmokeCheck,
+  McpTunnelSmokeResult,
+  McpTunnelState,
+  McpTunnelStatus,
+  McpTunnelToken,
+};
+
 export interface DeviceVideoDescriptor {
   mode: StreamBackendMode;
   width: number;
@@ -170,6 +197,11 @@ export interface DesktopDevice {
   provider?: string | null;
   providerInstanceId?: string | null;
   inputOwner?: "AI" | "HUMAN" | string;
+  /** Cyclone Mobile version when the fleet payload includes it. Absent ⇒ not 5.x (fail closed). */
+  mobileVersion?: string;
+  /** User-assigned name ("Work Phone"). Lets one command unambiguously
+   * address a specific device instead of a raw id. */
+  nickname?: string | null;
 }
 
 export interface FleetGroup {
@@ -178,10 +210,75 @@ export interface FleetGroup {
   deviceIds: string[];
 }
 
+/** What you fill in once to run a task, split a command, or run a scene:
+ * which model to think with, and the key for it. Never stored - sent fresh
+ * with every request and kept only for that request's lifetime. */
+export interface ModelCredentials {
+  model: string;
+  providers: string[];
+  apiKey: string;
+}
+
+export type DeviceTaskStatus = "RUNNING" | "COMPLETE" | "BLOCKED" | "FAILED" | "CANCELLED";
+
+export interface DeviceTaskLogEntry {
+  at: number;
+  kind: string;
+  [key: string]: unknown;
+}
+
+/** One device's independent goal-driven run. Several of these can be
+ * RUNNING at once, one per device - that's what makes "device A does X
+ * while device B does Y" actually happen. */
+export interface DeviceTask {
+  taskId: string;
+  deviceId: string;
+  goal: string;
+  model: string;
+  status: DeviceTaskStatus;
+  turns: number;
+  maxTurns: number;
+  startedAtEpochMs: number;
+  finishedAtEpochMs?: number | null;
+  result?: string | null;
+  log: DeviceTaskLogEntry[];
+  missionId?: string | null;
+}
+
+export interface DeviceTaskRequest extends ModelCredentials {
+  deviceId: string;
+  goal: string;
+  missionId?: string;
+}
+
+export interface RootCommandRequest extends ModelCredentials {
+  command: string;
+  deviceIds?: string[];
+}
+
+export interface RootCommandResult {
+  dispatched: boolean;
+  clarification: string | null;
+  missionId?: string;
+  tasks: DeviceTask[];
+}
+
+export interface SceneStep {
+  nickname: string;
+  goal: string;
+}
+
+export interface Scene {
+  sceneId: string;
+  name: string;
+  steps: SceneStep[];
+}
+
 export interface FleetWorkspace {
   schemaVersion: number;
   groups: FleetGroup[];
   selectedDeviceIds: string[];
+  nicknames: Record<string, string>;
 }
 
 export type FleetBatchOperation = "home" | "back" | "open_app" | "screenshot" | "recover";
@@ -328,10 +425,11 @@ export type ConnectorState =
   | "NEEDS_ATTENTION";
 
 export interface ConnectorCard {
-  id: "codex" | "deepseek-mcp" | "generic-mcp" | string;
+  id: "codex" | "grok" | "cursor" | "opencode" | "copilot" | "deepseek-mcp" | "generic-mcp" | string;
   name: string;
   description: string;
   state: ConnectorState;
+  aiState?: "UNKNOWN" | "DETECTED" | "CONFIGURED" | "CONNECTED" | "FAILED";
   actionLabel?: string;
   detected?: boolean;
   configured?: boolean;
@@ -343,6 +441,7 @@ export interface ConnectorCard {
   toolCount?: number;
   transport?: string;
   approvalMode?: string;
+  phoneState?: "UNKNOWN" | "CONNECTED" | "READY" | "DISCONNECTED";
 }
 
 export interface ConnectorActionResult {
@@ -417,6 +516,11 @@ export interface DesktopRuntimeStatus {
 
 export interface DesktopService {
   readonly mode: "real" | "mock";
+  /** Real HttpDesktopService only. Mock omits this. getBearer is for Authorization; never print it. */
+  readonly glassGateway?: {
+    httpBase: string;
+    getBearer: () => string;
+  };
   listDevices(): Promise<DesktopDevice[]>;
   scanDevices(): Promise<DesktopDevice[]>;
   watchFleet(onChange: (event?: FleetWsEvent) => void): () => void;
@@ -447,6 +551,26 @@ export interface DesktopService {
   listConnectors(): Promise<ConnectorCard[]>;
   runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<ConnectorActionResult>;
   getRuntimeStatus(): Promise<DesktopRuntimeStatus>;
+  getMcpTunnelStatus(): Promise<McpTunnelStatus>;
+  startMcpTunnel(mode?: McpTunnelMode): Promise<McpTunnelStatus>;
+  stopMcpTunnel(): Promise<McpTunnelStatus>;
+  restartMcpTunnel(): Promise<McpTunnelStatus>;
+  rotateMcpTunnelToken(): Promise<McpTunnelStatus>;
+  setMcpTunnelMode(mode: McpTunnelMode): Promise<McpTunnelStatus>;
+  copyMcpTunnelToken(): Promise<McpTunnelToken>;
+  smokeMcpTunnel(): Promise<McpTunnelSmokeResult>;
+  openMcpTunnelDocs(): Promise<string>;
+  loadChatgptAttachConfig(): Promise<ChatgptAttachConfig>;
+  saveChatgptAttachConfig(config: ChatgptAttachConfig): Promise<ChatgptAttachConfig>;
+  syncChatgptAttachFleet(): Promise<ChatgptSyncResult>;
+  copyChatgptHandoff(markdown: string): Promise<{ ok: boolean; markdown?: string }>;
+  saveChatgptHandoff(markdown: string): Promise<string>;
+  chatgptAttachResources(): Promise<ChatgptAttachResources>;
+  chatgptShareStatus(): Promise<ChatgptShareStatus>;
+  chatgptShareStart(): Promise<ChatgptShareStatus>;
+  chatgptShareStop(): Promise<ChatgptShareStatus>;
+  cloudControlLocalBase(): string;
+  probeCloudControl(base?: string): Promise<{ ok: boolean; localBase: string }>;
   getFleetWorkspace?(): Promise<FleetWorkspace>;
   saveFleetGroup?(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup>;
   deleteFleetGroup?(groupId: string): Promise<void>;
@@ -454,4 +578,19 @@ export interface DesktopService {
   submitFleetBatch?(deviceIds: string[], operation: FleetBatchOperation, params?: Record<string, unknown>): Promise<FleetBatchTask>;
   getFleetBatch?(batchId: string): Promise<FleetBatchTask>;
   cancelFleetBatch?(batchId: string): Promise<FleetBatchTask>;
+
+  // --- Multi-device AI tasks --------------------------------------------
+  setDeviceNickname?(deviceId: string, nickname: string): Promise<{ deviceId: string; nickname: string | null }>;
+  startDeviceTasks?(requests: DeviceTaskRequest[]): Promise<DeviceTask[]>;
+  getDeviceTask?(taskId: string): Promise<DeviceTask>;
+  listDeviceTasks?(missionId?: string): Promise<DeviceTask[]>;
+  cancelDeviceTask?(taskId: string): Promise<DeviceTask>;
+  /** The one-command-box entry point: one sentence, split across every
+   * paired+nicknamed device (or an explicit subset). If the split is
+   * ambiguous, nothing is dispatched and `clarification` explains why. */
+  runRootCommand?(request: RootCommandRequest): Promise<RootCommandResult>;
+  listScenes?(): Promise<Scene[]>;
+  saveScene?(sceneId: string, name: string, steps: SceneStep[]): Promise<Scene>;
+  deleteScene?(sceneId: string): Promise<void>;
+  runScene?(sceneId: string, credentials: ModelCredentials): Promise<RootCommandResult>;
 }

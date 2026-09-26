@@ -1,6 +1,8 @@
 import { computeVirtualRange, fleetColumnCount } from "../core/grid.js";
 import type { DesktopDevice, DesktopService, FleetBatchOperation } from "../services/types.js";
 import { createLivePhoneView, type LivePhoneViewHandle } from "../ui/livePhoneView.js";
+import { createDeviceTaskPanel, type DeviceTaskPanelHandle } from "../ui/deviceTaskPanel.js";
+import { createMissionControl, type MissionControlHandle } from "../ui/missionControl.js";
 import { operatorRecovery } from "../core/operatorHealth.js";
 import { button, el } from "../ui/dom.js";
 
@@ -23,7 +25,7 @@ export function createFleetPage(
   onDiagnostics: () => void,
   gatewayStatus: FleetGatewayStatus,
 ): FleetPageHandle {
-  const page = el("section", "page fleet-page");
+  const page = el("section", `page fleet-page${devices.length <= 1 ? " single-phone" : ""}`);
   const header = el("header", "page-header fleet-header");
   const titleGroup = el("div");
   titleGroup.append(el("h1", "page-title", "Phones"), el("p", "page-subtitle", fleetSubtitle(devices)));
@@ -113,6 +115,8 @@ export function createFleetPage(
   }
 
   const selected = new Set<string>();
+  const missionControl = createMissionControl(service, devices);
+  page.append(missionControl.element);
   let query = "";
   let source = "ALL";
   const tools = el("div", "fleet-tools");
@@ -136,7 +140,7 @@ export function createFleetPage(
   const saveGroup = button("Save group", "button secondary compact");
   const batchStatus = el("span", "fleet-batch-status");
   tools.append(search, sourceFilter, selectedCount, selectAll, clear, home, back, screenshot, saveGroup, batchStatus);
-  page.append(tools);
+  if (devices.length > 1) page.append(tools);
 
   const viewport = el("div", "fleet-viewport");
   const grid = el("div", "fleet-grid");
@@ -144,6 +148,7 @@ export function createFleetPage(
   page.append(viewport);
 
   let handles: LivePhoneViewHandle[] = [];
+  let taskPanels: DeviceTaskPanelHandle[] = [];
   let resizeObserver: ResizeObserver | null = null;
 
   const filteredDevices = () => devices.filter((device) => {
@@ -166,8 +171,11 @@ export function createFleetPage(
   const render = () => {
     handles.forEach((handle) => handle.destroy());
     handles = [];
+    taskPanels.forEach((panel) => panel.destroy());
+    taskPanels = [];
     const width = viewport.clientWidth || window.innerWidth;
     const matching = filteredDevices();
+    missionControl.setDevices(matching);
     const columns = fleetColumnCount(matching.length, width);
     grid.style.setProperty("--fleet-columns", String(columns));
     grid.replaceChildren();
@@ -206,6 +214,11 @@ export function createFleetPage(
       });
       chooser.append(checkbox, el("span", "fleet-device-source", device.source === "VIRTUAL" ? `Virtual · ${device.provider ?? "provider"}` : (device.source ?? "USB")));
       handle.element.prepend(chooser);
+      if (device.paired) {
+        const taskPanel = createDeviceTaskPanel(service, device);
+        taskPanels.push(taskPanel);
+        handle.element.append(taskPanel.element);
+      }
       grid.append(handle.element);
       attachConnectionRecovery(handle.element, service, device, () => onScan(), onPair, onDiagnostics);
     }
@@ -271,6 +284,8 @@ export function createFleetPage(
       if (scrollRaf) cancelAnimationFrame(scrollRaf);
       resizeObserver?.disconnect();
       handles.forEach((handle) => handle.destroy());
+      taskPanels.forEach((panel) => panel.destroy());
+      missionControl.destroy();
     },
   };
 }
