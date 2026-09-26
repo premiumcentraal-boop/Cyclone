@@ -53,6 +53,7 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 26 | [Background that always works](26-background-always.md) | **Built (alpha.42)**: switch it on once, start from Recents, background parity, start preference, app leases for the same-app case, tier 0, see-to-approve, Lab planes suite; stabilised in plan 28, parallel sessions alpha.45 |
 | 27 | [The overlay, redesigned](27-overlay-redesign.md) | **Built (alpha.43)**: tilt-lit glass, the one-word plane pill above card and island, four heights (card, island, notification only, idle), app logos, a background switch that goes home and is never silent, notification Show and Android 16 step segments |
 | 28 | [Background that stays working](28-background-stable.md) | **Built (alpha.44)**: an audit of the whole background path and its fixes (interrupts no longer close background screens, a lock no longer pauses them for good, approvals work in the background, only steps that need the screen move the task, apps with several tasks, dialogs from other apps, a second route for gestures) and the one-tap Background Check |
+| 29 | [The background engine in one tap](29-one-tap-engine.md) | **Plan (alpha.45)**: Cyclone's own engine replaces Shizuku; setup is a Cyclone mission (you type your PIN and tap Allow once); restarts silently after reboots on Wi-Fi; wireless debugging closed after start; self-healing; preinstall needs an OEM partner |
 
 ## Identity
 
