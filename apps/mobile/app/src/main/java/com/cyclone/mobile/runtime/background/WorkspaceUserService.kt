@@ -182,7 +182,7 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
 
     private companion object {
         val PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")
-        val VIEW_URI = Regex("^(https?://|market://|geo:)[^\\s'\"`\\\\]+$")
+        val VIEW_URI = Regex("^(https?://|geo:)[^\\s'\"`\\\\]+$")
     }
 
     private fun valid(id: String): Owned = workspaces[id]?.also {
