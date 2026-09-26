@@ -333,15 +333,15 @@ class MissionPlaneSession internal constructor(
             }
             TaskPlane.Screen -> {
                 DeviceState.setController(DeviceState.Controller.AGENT)
-                toolbox?.rebind(CycloneAgentEnvironment(context, userTaskGoal = goal), modelNote)
+                toolbox?.rebind(CycloneAgentEnvironment(context, userTaskGoal = goal, ownerMission = true), modelNote)
             }
         }
         refresh()
     }
 
     private fun environment(plane: TaskPlane): CycloneAgentEnvironmentApi = when (plane) {
-        TaskPlane.Screen -> CycloneAgentEnvironment(context, userTaskGoal = goal)
-        is TaskPlane.Background -> CycloneAgentEnvironment(context, ExecutionContext(plane.sessionId, plane.displayId), goal)
+        TaskPlane.Screen -> CycloneAgentEnvironment(context, userTaskGoal = goal, ownerMission = true)
+        is TaskPlane.Background -> CycloneAgentEnvironment(context, ExecutionContext(plane.sessionId, plane.displayId), goal, ownerMission = true)
     }
 
     /** The environment the mission starts with (the main screen; a background start happens at the first open_app). */

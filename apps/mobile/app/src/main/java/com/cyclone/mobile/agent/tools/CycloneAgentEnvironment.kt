@@ -69,9 +69,16 @@ class CycloneAgentEnvironment internal constructor(
     private val userTaskGoal: String? = null,
     private val revalidateTargets: Boolean = false,
     private val projectionMode: ObservationProjectionMode = ObservationProjectionMode.AUTHORITATIVE,
+    /** A Cyclone Mind mission: the owner's own request may type into ordinary fields ([OwnerMissionTyping]). */
+    private val ownerMission: Boolean = false,
 ) : CycloneAgentEnvironmentApi {
-    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
-        this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal, revalidateTargets = true)
+    constructor(
+        context: Context,
+        execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT,
+        userTaskGoal: String? = null,
+        ownerMission: Boolean = false,
+    ) : this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal, revalidateTargets = true,
+        ownerMission = ownerMission)
 
     private val scope = AgentObservationScope()
     private val actionHistory = ArrayDeque<AgentActionEnvelope>()
@@ -311,8 +318,9 @@ class CycloneAgentEnvironment internal constructor(
                 normalizedParams.remove("user_authorized")
                 normalizedParams.remove("selector")
                 normalizedParams.put("currentObservationId", before.id)
-                if (TaskTypingAuthorization.allows(userTaskGoal, before.page.packageName, evidence,
-                        normalizedParams.optString("value", normalizedParams.optString("text")))) {
+                val value = normalizedParams.optString("value", normalizedParams.optString("text"))
+                if (TaskTypingAuthorization.allows(userTaskGoal, before.page.packageName, evidence, value) ||
+                    ownerMission && OwnerMissionTyping.allows(evidence, value)) {
                     normalizedParams.put("user_authorized", true)
                 }
             }

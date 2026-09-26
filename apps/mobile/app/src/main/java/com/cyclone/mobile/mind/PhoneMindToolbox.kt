@@ -541,7 +541,7 @@ class PhoneMindToolbox(
             envelope.errorClass == AgentFailureClass.AUTH_REQUIRED ->
                 "Not typed: this is a sensitive field. Use vault_fill so the owner fills it through the Secrets Card."
             envelope.errorClass == AgentFailureClass.STALE_OBSERVATION || envelope.errorClass == AgentFailureClass.TARGET_NOT_FOUND ->
-                "Not done: the element moved or disappeared before Cyclone could act. Here is the screen now."
+                refusal(message)
             envelope.errorClass == AgentFailureClass.POLICY_DENIED -> "Not allowed: ${message ?: "Cyclone's access settings block this action"}."
             envelope.errorClass == AgentFailureClass.ACCESSIBILITY_UNAVAILABLE ->
                 "Not done: Cyclone Accessibility is not connected, so the phone cannot be operated right now."
@@ -551,6 +551,22 @@ class PhoneMindToolbox(
             envelope.pageChanged -> "$done. The screen changed."
             else -> "$done. The screen did not visibly change."
         }
+    }
+
+    /**
+     * Plan 21 (Hands): a refused target names its real reason and the next thing to try, so the model does not keep
+     * retrying a refusal it can never pass.
+     */
+    private fun refusal(message: String?): String = when (REVALIDATION.find(message.orEmpty())?.groupValues?.get(1)) {
+        "AMBIGUOUS" -> "Not done: Cyclone could not tell that control apart from other controls that overlap or match it " +
+            "(a safety check, nothing was pressed). For a text box: tap_point on it, then type_text with focused=true. " +
+            "Otherwise use screen_find with more specific words, or tap_point."
+        "DISAPPEARED" -> "Not done: that control is no longer on the screen. Here is the screen now."
+        "OCCLUDED" -> "Not done: that control is covered or disabled right now (a dialog or overlay may be on top). " +
+            "Close what covers it, or wait for it to become available."
+        "SCOPE_MISMATCH" -> "Not done: the screen moved to another page or app before Cyclone could act. Here is the screen now."
+        "STALE_FRAME" -> "Not done: that ref belongs to an older screen. Use a ref from the screen below."
+        else -> "Not done: the element moved or disappeared before Cyclone could act. Here is the screen now."
     }
 
     // ---- knowing ------------------------------------------------------------------------------------------------
@@ -830,6 +846,7 @@ class PhoneMindToolbox(
         private val PHONE_TOOLS = setOf("screen_read", "screen_look", "screen_find", "tap", "tap_point", "long_press", "type_text",
             "press_enter", "scroll", "swipe", "back", "home", "wait", "open_app", "open_link", "open_settings", "set_timer",
             "set_alarm", "vault_fill", "open_notification", "go_to")
+        private val REVALIDATION = Regex("Target revalidation: ([A-Z_]+)")
         private val NAVIGATION = setOf("phone.open_app", "phone.launch_intent", "phone.open_settings", "phone.set_timer", "phone.set_alarm", "phone.back", "phone.home")
         private val SENSITIVE = Regex("(?i)password|passcode|wachtwoord|\\bpin\\b|one[- ]time|otp|verification code|verificatiecode|cvv|cvc|card number|kaartnummer|security code")
         fun sensitive(label: String): Boolean = SENSITIVE.containsMatchIn(label)

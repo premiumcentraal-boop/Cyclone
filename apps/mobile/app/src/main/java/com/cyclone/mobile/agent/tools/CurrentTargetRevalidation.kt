@@ -22,12 +22,21 @@ internal object CurrentTargetRevalidation {
 
         val old = before.elements[id] ?: return TargetRevalidation(TargetDrift.STALE_FRAME)
         val resource = old.evidence.optString("resourceId")
-        if (old.label.isBlank() || old.label == "<redacted>") return TargetRevalidation(TargetDrift.AMBIGUOUS)
+        val editable = isEditable(old)
+        // A text box's label is its hint or its current text, which changes as it gains focus or content (plan 21).
+        // An editable keeps its identity through its resource id or its raw path.
+        val editableIdentity = editable && (resource.isNotBlank() || rawPath(old).isNotBlank())
+        if ((old.label.isBlank() || old.label == "<redacted>") && !editableIdentity) return TargetRevalidation(TargetDrift.AMBIGUOUS)
 
-        val matches = after.elements.values.filter {
+        val byLabel = after.elements.values.filter {
             it.role == old.role && it.label == old.label && it.semanticName == old.semanticName &&
                 (resource.isBlank() || it.evidence.optString("resourceId") == resource)
         }
+        val matches = if (!editableIdentity) byLabel else (byLabel + after.elements.values.filter { candidate ->
+            candidate.role == old.role && isEditable(candidate) && !candidate.evidence.optBoolean("password") &&
+                if (resource.isNotBlank()) candidate.evidence.optString("resourceId") == resource
+                else rawPath(candidate).isNotBlank() && rawPath(candidate) == rawPath(old)
+        }).distinctBy { it.id }
         if (matches.isEmpty()) return TargetRevalidation(TargetDrift.DISAPPEARED)
 
         val target = uniqueLogicalTarget(old, matches)
@@ -44,6 +53,9 @@ internal object CurrentTargetRevalidation {
             if (other.id == target.id || !other.evidence.optBoolean("visibleToUser", true) ||
                 !other.evidence.optBoolean("enabled", true) || !other.evidence.optBoolean("clickable")) return@any false
             if (sameLogicalControl(target, other)) return@any false
+            // A composer's text box sits inside a clickable input container (and may hold clickable spans): a node
+            // nested with an editable target is the same logical control, not a competing one. Siblings stay closed.
+            if (isEditable(target) && nestedWith(target, other)) return@any false
             val b = other.evidence.optJSONObject("bounds") ?: return@any false
             b.optInt("left") < rect.optInt("right") && b.optInt("right") > rect.optInt("left") &&
                 b.optInt("top") < rect.optInt("bottom") && b.optInt("bottom") > rect.optInt("top")
@@ -81,8 +93,25 @@ internal object CurrentTargetRevalidation {
             val group = groups.firstOrNull { sameLogicalControl(it.first(), candidate) }
             if (group == null) groups += mutableListOf(candidate) else group += candidate
         }
-        if (groups.size != 1) return null
+        if (groups.size != 1) {
+            // Representations of one text box (semantic, supplement, raw) share its node or path even when their labels
+            // differ; distinct fields with the same id stay ambiguous.
+            if (isEditable(old)) {
+                val nodes = matches.map { underlyingNodeId(it).ifBlank { rawPath(it) } }.filter { it.isNotBlank() }.toSet()
+                if (nodes.size == 1 && matches.all { underlyingNodeId(it).ifBlank { rawPath(it) }.isNotBlank() }) return preferredRepresentation(matches)
+            }
+            return null
+        }
         return preferredRepresentation(groups.single())
+    }
+
+    private fun isEditable(element: GatewayElement): Boolean =
+        element.evidence.optBoolean("editable") || element.role.lowercase() in setOf("edit_text", "textbox", "edittext", "text_field")
+
+    private fun nestedWith(a: GatewayElement, b: GatewayElement): Boolean {
+        val aPath = rawPath(a)
+        val bPath = rawPath(b)
+        return aPath.isNotBlank() && bPath.isNotBlank() && nestedPath(aPath, bPath)
     }
 
     private fun preferredRepresentation(elements: List<GatewayElement>): GatewayElement =

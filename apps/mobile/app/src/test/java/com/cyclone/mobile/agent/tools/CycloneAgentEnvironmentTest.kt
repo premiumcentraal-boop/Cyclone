@@ -357,6 +357,26 @@ class CycloneAgentEnvironmentTest {
         assertEquals(1, runtime.executionCalls)
     }
 
+    @Test fun mindMissionsMayTypeIntoOrdinaryFieldsButTheStepAgentMayNot() {
+        fun field(id: String, label: String, password: Boolean = false): GatewayObservation {
+            val obs = observation(id, "chat", "fp-$id", label)
+            obs.elements.values.single().evidence.put("editable", true).put("enabled", true).put("password", password)
+            return obs
+        }
+        fun typed(ownerMission: Boolean, obs: GatewayObservation): JSONObject {
+            val runtime = FakeRuntime(obs, obs)
+            val env = CycloneAgentEnvironment(runtime, userTaskGoal = "ask ChatGPT for better examples", ownerMission = ownerMission)
+            env.observe("type")
+            env.act("phone.type", JSONObject().put("elementId", elementId(obs)).put("value", "Find better examples")
+                .put("user_authorized", true), "type")
+            return runtime.lastParams!!
+        }
+        assertTrue(typed(true, field("m1", "Reply to ChatGPT")).optBoolean("user_authorized"))
+        assertFalse("the step agent keeps its narrow rule", typed(false, field("s1", "Reply to ChatGPT")).optBoolean("user_authorized"))
+        assertFalse(typed(true, field("m2", "Password", password = true)).optBoolean("user_authorized"))
+        assertFalse(typed(true, field("m3", "Verification code")).optBoolean("user_authorized"))
+    }
+
     @Test fun agentInputCannotOverrideCycloneAiPolicyDenial() {
         val params = JSONObject()
             .put("user_authorized", true)

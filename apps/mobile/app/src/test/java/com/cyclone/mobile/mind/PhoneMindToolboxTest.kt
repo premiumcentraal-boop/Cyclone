@@ -40,6 +40,7 @@ class PhoneMindToolboxTest {
         var nextFailures = ArrayDeque<AgentFailureClass>()
         var onAct: (String, JSONObject) -> Unit = { _, _ -> }
         var images = 0
+        var nextMessage: String? = null
         private var lastAll: List<AgentElementCandidate> = emptyList()
         private var lastId: String? = null
 
@@ -108,7 +109,7 @@ class PhoneMindToolboxTest {
             errorClass = failure, failureLayer = if (failure == AgentFailureClass.NONE) AgentFailureLayer.NONE else AgentFailureLayer.POLICY,
             retryable = false, semanticSuccessClaimed = false, beforeObservationId = null, afterObservationId = null,
             observationGeneration = null, learning = AgentLearningResult(false, ""),
-            safeMessage = if (failure == AgentFailureClass.NONE) null else "blocked: $failure",
+            safeMessage = if (failure == AgentFailureClass.NONE) null else (nextMessage ?: "blocked: $failure"),
         )
     }
 
@@ -188,6 +189,21 @@ class PhoneMindToolboxTest {
         assertTrue(first.acts.none { it.first == "phone.click" })
         assertFalse("the note is shown once", box.run("screen_read").text.contains("background screen)"))
         assertEquals(listOf("screen_read", "home", "tap", "screen_read"), seen)
+    }
+
+    @Test fun aRefusedTargetNamesItsRealReasonAndTheNextStep() {
+        val env = FakeEnv(login)
+        val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")
+        box.run("screen_read")
+        env.nextFailures.addLast(AgentFailureClass.STALE_OBSERVATION)
+        env.nextMessage = "Target revalidation: AMBIGUOUS. Inspect a fresh same-scope control."
+        val ambiguous = box.run("tap", """{"ref":"e3"}""")
+        assertFalse(ambiguous.ok)
+        assertTrue(ambiguous.text.contains("focused=true"))
+        assertFalse(ambiguous.text.contains("moved or disappeared"))
+        env.nextFailures.addLast(AgentFailureClass.STALE_OBSERVATION)
+        env.nextMessage = "Target revalidation: DISAPPEARED. Inspect a fresh same-scope control."
+        assertTrue(box.run("tap", """{"ref":"e3"}""").text.contains("no longer on the screen"))
     }
 
     @Test fun refsStayStableAcrossReobservation() {

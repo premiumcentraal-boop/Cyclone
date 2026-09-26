@@ -318,7 +318,7 @@ object MindMissions {
             // Planes (plan 25): the owner's missions may move between the main screen and a background screen. Lab
             // runs stay on the screen so a measurement never depends on where it ran.
             val planes = if (mission.lab == null) com.cyclone.mobile.runtime.plane.MissionPlanes.begin(context, mission.id, mission.goal, trace).also { livePlanes = it } else null
-            val environment = planes?.initialEnvironment() ?: CycloneAgentEnvironment(context, userTaskGoal = mission.goal)
+            val environment = planes?.initialEnvironment() ?: CycloneAgentEnvironment(context, userTaskGoal = mission.goal, ownerMission = true)
             // Fresh lab runs neither read nor write the owner's memory: each run starts from the same place.
             val fresh = variant?.freshMemory == true
             val labMemoryFile = if (fresh) File(context.cacheDir, "lab-memory-${mission.id}.json").also { it.delete() } else null
