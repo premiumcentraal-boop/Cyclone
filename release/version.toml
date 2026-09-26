@@ -1,5 +1,5 @@
 # Cyclone V5 alpha.41 dev1: Hands - the Mind can type into any app: owner-mission typing, honest refusals, set-text/paste with read-back, focused typing, clipboard handoff.
-# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
+# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested. Release candidate.
 schema = 1
 product_version = "5.0.0-alpha.41.dev1"
 channel = "development"
