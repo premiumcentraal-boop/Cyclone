@@ -1,18 +1,18 @@
-# Cyclone V5 alpha.38 dev1: mapping missions from Glass - own (look only) or test account, 10 min / 30 min / 2 h, live board and report; Atlas overview, fleet and run replay.
+# Cyclone V5 alpha.39 dev1: one map (mapping passes teach runs), skills and routines grounded on the map, skills on Glass's map.
 # Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.38.dev1"
+product_version = "5.0.0-alpha.39.dev1"
 channel = "development"
-android_version_code = 180
-python_version = "5.0.0-alpha.38.dev1"
+android_version_code = 181
+python_version = "5.0.0-alpha.39.dev1"
 
 [components]
-mobile = "5.0.0-alpha.38.dev1"
-pc_companion = "1.6.0-alpha.38"
+mobile = "5.0.0-alpha.39.dev1"
+pc_companion = "1.6.0-alpha.39"
 # Cyclone Glass web app (apps/glass). Its own line; pc_companion is Cyclone One.
-glass = "1.0.0-alpha.21"
-device_gateway = "5.0.0-alpha.38.dev1"
-mcp = "5.0.0-alpha.38.dev1"
+glass = "1.0.0-alpha.22"
+device_gateway = "5.0.0-alpha.39.dev1"
+mcp = "5.0.0-alpha.39.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -24,4 +24,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha38-dev1-missions"
+candidate_generation = "cyclone-v5-alpha39-dev1-grounded"
