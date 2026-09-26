@@ -1,5 +1,5 @@
 # Cyclone V5 alpha.42 dev1: Background always - one switch that stays on, start from Recents, background parity, start preference, the owner's app, reply from notifications.
-# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested. Release candidate.
+# Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested. Release candidate 2.
 schema = 1
 product_version = "5.0.0-alpha.42.dev1"
 channel = "development"
