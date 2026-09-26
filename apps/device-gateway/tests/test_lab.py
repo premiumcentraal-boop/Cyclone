@@ -469,3 +469,13 @@ def test_a_comparison_reports_turns_time_and_map_moves():
     assert result["turnsRatio"] == pytest.approx(6.5 / 11)
     assert result["timeRatio"] == pytest.approx(41 / 65)
     assert stats.arm_stats([t for t in trials if t["variant"] == "on"])["mapMoves"]["total"] == 7
+
+
+def test_the_hands_suite_checks_text_on_screen_and_never_sends():
+    missions = [m for m in builtin_missions() if "hands" in m.suites]
+    assert len(missions) >= 8
+    for mission in missions:
+        assert any(c["check"] == "screen" for c in mission.checks), mission.id
+        if any(word in mission.goal.lower() for word in ("don't send", "not send")):
+            assert {"check": "approval", "requested": False} in [dict(c) for c in mission.checks], mission.id
+    assert {m.id for m in missions} >= {"hands.chatgpt.prompt", "hands.keep.long", "hands.gmail.draft"}
