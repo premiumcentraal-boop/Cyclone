@@ -298,6 +298,7 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 }
                 Text("Also in Quick Settings: add the Cyclone background tile. Glass on your PC can keep it on after restarts.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                BackgroundCheckSection(onDone = { capability = com.cyclone.mobile.runtime.plane.MissionPlanes.capability(context) })
                 // Per app: seeded (banking, camera, games on your screen) and learned; the owner's choice wins.
                 val compat = remember { com.cyclone.mobile.runtime.plane.MissionPlanes.compat(context) }
                 var choices by remember { mutableStateOf(compat.choices()) }
@@ -500,6 +501,43 @@ internal fun ColumnScope.WorkingIndicatorSettings(context: Context) {
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * Plan 28: the Background Check. One tap runs the real background path on a hidden screen and shows each step; a
+ * failed step names what to do. The same result decides whether Automatic uses the background.
+ */
+@Composable
+private fun ColumnScope.BackgroundCheckSection(onDone: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val check = com.cyclone.mobile.runtime.plane.BackgroundCheck
+    remember { check.last(context) }
+    val report by check.report.collectAsState()
+    var running by remember { mutableStateOf(check.running) }
+    androidx.compose.runtime.LaunchedEffect(report, running) {
+        if (running && !check.running) { running = false; onDone() }
+        if (running) { kotlinx.coroutines.delay(400); running = check.running; if (!running) onDone() }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Background check", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(report?.headline ?: "Opens a harmless app on a hidden screen, reads it and scrolls it once. About 10 seconds.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        OutlinedButton(enabled = !running, onClick = { if (check.start(context)) running = true }) {
+            Text(if (running) "Checking…" else "Check")
+        }
+    }
+    report?.steps?.forEach { step ->
+        val mark = when (step.result) {
+            com.cyclone.mobile.runtime.plane.CheckResult.PASSED -> "✓"
+            com.cyclone.mobile.runtime.plane.CheckResult.FAILED -> "✗"
+            com.cyclone.mobile.runtime.plane.CheckResult.SKIPPED -> "–"
+        }
+        Text("$mark ${step.step.label}: ${step.detail}", style = MaterialTheme.typography.bodySmall,
+            color = if (step.result == com.cyclone.mobile.runtime.plane.CheckResult.FAILED) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable

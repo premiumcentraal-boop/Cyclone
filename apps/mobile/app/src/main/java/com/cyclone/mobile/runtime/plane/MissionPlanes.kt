@@ -96,8 +96,12 @@ object MissionPlanes {
             r.accessibility, r.notifications))
     }
 
-    /** Why background work is not possible right now, in the owner's words; null when it is. */
+    /**
+     * Why background work is not possible right now, in the owner's words; null when it is. Plan 28: a phone whose
+     * last Background Check failed in the engine itself works on the screen and says why, instead of failing mid-task.
+     */
     fun blocker(context: Context): String? = capability(context).takeUnless { it.ready }?.headline
+        ?: BackgroundCheck.blocker(context)
 
     fun begin(context: Context, missionId: String, goal: String, traceId: String?, modeOverride: PlaneMode? = null): MissionPlaneSession {
         current?.end()
@@ -265,11 +269,19 @@ class MissionPlaneSession internal constructor(
     }
 
     override fun after(tool: String, result: MindToolResult) {
-        if (ended || plane !is TaskPlane.Background || result.ok) return
-        val text = result.text
-        // The executor refuses what it cannot do safely on a background screen; the screen can.
-        if (text.contains("current scope", true) || text.contains("UNSUPPORTED", false) || text.contains("FOREGROUND_REQUIRED")) {
-            switchTo(PlaneKind.SCREEN, "This step can't be done in the background.", null)
+        if (ended || result.ok) return
+        val background = plane as? TaskPlane.Background ?: return
+        when (BackgroundFailure.classify(result.text)) {
+            // The executor refuses what it cannot do safely on a background screen; the screen can.
+            BackgroundFailure.NEEDS_SCREEN -> switchTo(PlaneKind.SCREEN, "This step can't be done in the background.", null)
+            // A pause that nothing undid (an old approval path, a lock): Cyclone still holds this screen, so it takes
+            // input back; the Mind looks again before its next action.
+            BackgroundFailure.AUTHORITY_LOST -> if (!switcher.switching && waitingFor == null) {
+                if (WorkspaceRuntime.reclaim(background.sessionId)) trace("PLANE_RECLAIM", "Input authority restored on the background screen")
+            }
+            // The owner opened the app (the watchdog yields it), the screen broke (the watchdog repairs it), the phone
+            // is locked (the mission waits), or an ordinary miss: the plane stays where it is.
+            else -> Unit
         }
     }
 

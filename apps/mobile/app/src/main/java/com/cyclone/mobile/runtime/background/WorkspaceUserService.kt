@@ -114,8 +114,7 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
         val owned = valid(sessionId)
         require(owned.packageName == null) { "This background screen already has an app" }
         require(packageName.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+"))) { "Invalid package" }
-        val task = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list")))
-            .firstOrNull { it.packageName == packageName && it.displayId == 0 }
+        val task = WorkspaceCommands.mainTask(WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list"))), packageName)
             ?: error("FOREGROUND_REQUIRED: the app is not on the main screen")
         val displayId = owned.display.display.displayId
         command(listOf("/system/bin/am", "display", "move-stack", task.rootTaskId.toString(), displayId.toString()))
@@ -189,13 +188,9 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
         check(it.display.display.displayId > 0 && it.display.display.isValid) { "DISPLAY_GONE" }
     } ?: error("STALE_SESSION")
 
-    private fun requireTask(owned: Owned): WorkspaceCommands.Task {
-        val tasks = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list")))
-            .filter { it.packageName == owned.packageName }
-        check(owned.sharedWithOwner || tasks.none { it.displayId == 0 }) { "FOREGROUND_REQUIRED: app moved to the human display" }
-        return tasks.singleOrNull { it.displayId == owned.display.display.displayId }
-            ?: error("BACKGROUND_MODE_UNAVAILABLE: cannot prove unique task ownership")
-    }
+    private fun requireTask(owned: Owned): WorkspaceCommands.Task =
+        WorkspaceCommands.ownedTask(WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list"))),
+            owned.packageName, owned.display.display.displayId, owned.sharedWithOwner)
 
     private fun describe(id: String, owned: Owned) = Bundle().apply {
         putBoolean("ok", true); putString("sessionId", id); putInt("displayId", owned.display.display.displayId)

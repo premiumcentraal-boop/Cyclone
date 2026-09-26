@@ -1131,8 +1131,7 @@ private class AndroidCycloneAgentRuntimePort(
             "Cyclone Accessibility is not connected.",
             "ACCESSIBILITY_UNAVAILABLE",
         )
-        (if (background) !com.cyclone.mobile.runtime.background.WorkspaceRuntime.ownsInput(execution.sessionId)
-            else DeviceState.controller != DeviceState.Controller.AGENT) -> AgentFailure(
+        (if (background) !backgroundInput() else DeviceState.controller != DeviceState.Controller.AGENT) -> AgentFailure(
             AgentFailureClass.HUMAN_HAS_CONTROL,
             AgentFailureLayer.DEVICE,
             true,
@@ -1147,6 +1146,18 @@ private class AndroidCycloneAgentRuntimePort(
             "STALE_OBSERVATION",
         )
         else -> null
+    }
+
+    /**
+     * Plan 28: a Mind mission's background screen whose input was paused while no switch runs has lost it by accident
+     * (nobody else holds it): take it back instead of waiting for an owner hand-back that will never come.
+     */
+    private fun backgroundInput(): Boolean {
+        val runtime = com.cyclone.mobile.runtime.background.WorkspaceRuntime
+        if (runtime.ownsInput(execution.sessionId)) return true
+        val plane = com.cyclone.mobile.runtime.plane.MissionPlanes.ui.value
+        if (plane?.backgroundSessionId != execution.sessionId || plane.switching || plane.waitingFor != null) return false
+        return runtime.reclaim(execution.sessionId) && runtime.ownsInput(execution.sessionId)
     }
 
     override fun policyFailure(tool: String, params: JSONObject): AgentFailure? {

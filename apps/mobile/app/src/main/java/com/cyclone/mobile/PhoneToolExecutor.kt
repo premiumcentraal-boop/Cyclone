@@ -320,13 +320,8 @@ object PhoneToolExecutor {
                     val x = p.optDouble("x"); val y = p.optDouble("y")
                     x >= it.bounds.left && x < it.bounds.right && y >= it.bounds.top && y < it.bounds.bottom && it.clickable
                 }.minByOrNull { it.bounds.width * it.bounds.height } ?: error("UNSUPPORTED: a grounded control is required")
-                val gate = com.cyclone.mobile.policy.GateClassifier.classify(request.tool,
-                    com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector))
-                if (gate != null && !runtime.consumeConfirmation(scope.sessionId, request.tool, node.id, snapshot.fingerprint, gate.jsonKey)) {
-                    runtime.requestConfirmation(scope.sessionId, request.tool, node.id, snapshot.fingerprint, gate.jsonKey)
-                    runtime.pause(scope.sessionId, com.cyclone.mobile.runtime.background.WorkspaceState.BACKGROUND_NEEDS_HANDOFF)
-                    error("POLICY_DENIED: human review is required")
-                }
+                workspaceGate(scope, request.tool, com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(node, node, selector),
+                    node.id, snapshot.fingerprint)
                 return node
             }
             val commands = com.cyclone.mobile.runtime.background.WorkspaceCommands
@@ -341,13 +336,13 @@ object PhoneToolExecutor {
                         HumanGestureDispatch.longPress(
                             service, x, y, 650L, humanize, RuntimeGestureKind.LONG_PRESS,
                             request.commandId, node.bounds, scope.displayId, viewport,
-                        )
+                        ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x.toFloat(), y.toFloat(), x.toFloat(), y.toFloat(), 650f))
                     } else {
                         HumanGestureDispatch.tap(
                             service, x, y, humanize,
                             if (request.tool == "phone.tap") RuntimeGestureKind.COORDINATE_TAP else RuntimeGestureKind.FALLBACK_TAP,
                             request.commandId, node.bounds, scope.displayId, viewport,
-                        )
+                        ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x.toFloat(), y.toFloat()))
                     }
                     workspaceTouchFailure(request, scope, snapshot, started, landed)?.let { return it }
                 }
@@ -358,10 +353,12 @@ object PhoneToolExecutor {
                     val top = node.bounds.top + node.bounds.height * 0.25f
                     val bottom = node.bounds.top + node.bounds.height * 0.75f
                     val backwards = p.optString("direction") == "backward"
+                    val y1 = if (backwards) top else bottom
+                    val y2 = if (backwards) bottom else top
                     val landed = HumanGestureDispatch.swipe(
-                        service, x, if (backwards) top else bottom, x, if (backwards) bottom else top,
+                        service, x, y1, x, y2,
                         350L, humanize, RuntimeGestureKind.SCROLL, request.commandId, scope.displayId, viewport,
-                    )
+                    ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x.toFloat(), y1, x.toFloat(), y2, 350f))
                     workspaceTouchFailure(request, scope, snapshot, started, landed)?.let { return it }
                 }
                 "phone.swipe" -> {
@@ -375,19 +372,15 @@ object PhoneToolExecutor {
                     if (kotlin.math.abs(x2 - x1) > kotlin.math.abs(y2 - y1)) {
                         snapshot.nodes.filter { it.clickable && it.bounds.contains(x1.toInt(), y1.toInt()) }
                             .minByOrNull { it.bounds.width * it.bounds.height }?.let { under ->
-                                val gate = com.cyclone.mobile.policy.GateClassifier.classify(request.tool,
-                                    com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(under, under, null))
-                                if (gate != null && !runtime.consumeConfirmation(scope.sessionId, request.tool, under.id, snapshot.fingerprint, gate.jsonKey)) {
-                                    runtime.requestConfirmation(scope.sessionId, request.tool, under.id, snapshot.fingerprint, gate.jsonKey)
-                                    runtime.pause(scope.sessionId, com.cyclone.mobile.runtime.background.WorkspaceState.BACKGROUND_NEEDS_HANDOFF)
-                                    error("POLICY_DENIED: human review is required")
-                                }
+                                workspaceGate(scope, request.tool, com.cyclone.mobile.ui.overlay.ClickGateIntercept.labelsFor(under, under, null),
+                                    under.id, snapshot.fingerprint)
                             }
                     }
+                    val duration = p.optLong("durationMs", 350)
                     val landed = HumanGestureDispatch.swipe(
-                        service, x1, y1, x2, y2, p.optLong("durationMs", 350),
+                        service, x1, y1, x2, y2, duration,
                         humanize, RuntimeGestureKind.SWIPE, request.commandId, scope.displayId, viewport,
-                    )
+                    ) || shellGesture(request.commandId, scope, generation, floatArrayOf(x1, y1, x2, y2, duration.coerceIn(100L, 3000L).toFloat()))
                     workspaceTouchFailure(request, scope, snapshot, started, landed)?.let { return it }
                 }
                 "phone.back" -> runtime.input(scope, generation, commands.BACK)
@@ -443,8 +436,61 @@ object PhoneToolExecutor {
         } catch (error: Exception) {
             if (request.tool in mutatingTools) runCatching { GatewayObservationStore.clear(scope.sessionId) }
             PhoneToolResult(request.commandId, request.tool, false, started, System.currentTimeMillis(),
-                error = PhoneToolError(scopeErrorCode(error), "Workspace operation could not complete in its current scope."))
+                // Plan 28: keep the reason code (never typed text) so the plane can tell a missed tap from a lost screen.
+                error = PhoneToolError(scopeErrorCode(error), "Background screen: ${workspaceReason(error)}"))
         }
+    }
+
+    /**
+     * Pay, send, delete and the other approval boundaries on a background screen. A Mind mission gets exactly the main
+     * screen's approval: the overlay card, then a one-shot grant for this action on this control, and the background
+     * screen stays as it is while the owner decides (plan 28: pausing it here left it paused after the approval, so
+     * the approved tap could never run). Other background sessions keep their own confirmation and hand-off.
+     */
+    /**
+     * Plan 28: when an Accessibility gesture does not land on the background display (some phones do not route them to
+     * a private display), the same gesture goes once through the helper's display-bound input: a tap for two
+     * coordinates, a swipe (or a long press, as a swipe that stays put) for five. The authority checks run again.
+     * Only when Android never queued the gesture: a cancelled or timed-out one may have reached the app, and a second
+     * tap is never sent after it.
+     */
+    private fun shellGesture(
+        commandId: String?,
+        scope: com.cyclone.mobile.runtime.session.ExecutionContext,
+        generation: Long,
+        coordinates: FloatArray,
+    ): Boolean = runCatching {
+        if (HumanGestureDispatch.peekTrace(commandId)?.reason != HumanGestureDispatch.REASON_NOT_QUEUED) return false
+        val commands = com.cyclone.mobile.runtime.background.WorkspaceCommands
+        com.cyclone.mobile.runtime.background.WorkspaceRuntime.input(scope, generation,
+            if (coordinates.size == 2) commands.TAP else commands.SWIPE, coordinates)
+            .getBoolean("performed")
+    }.getOrDefault(false)
+
+    /** The failure's reason for the model and the plane: its code and first words, one line, bounded. */
+    internal fun workspaceReason(error: Exception): String =
+        (error.message ?: error.javaClass.simpleName).lineSequence().first().trim().take(160).ifBlank { "ACTION_FAILED" }
+
+    private fun workspaceGate(
+        scope: com.cyclone.mobile.runtime.session.ExecutionContext,
+        tool: String,
+        labels: List<String>,
+        nodeId: String,
+        fingerprint: String,
+    ) {
+        val runtime = com.cyclone.mobile.runtime.background.WorkspaceRuntime
+        val gate = com.cyclone.mobile.policy.GateClassifier.classify(tool, labels) ?: return
+        if (runtime.consumeConfirmation(scope.sessionId, tool, nodeId, fingerprint, gate.jsonKey)) return
+        if (com.cyclone.mobile.runtime.plane.MissionPlanes.ui.value?.backgroundSessionId == scope.sessionId) {
+            val overlay = com.cyclone.mobile.ui.overlay.ClickGateIntercept.overlayClass(gate)
+            if (com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.consumeGateApproval(overlay, tool, labels)) return
+            com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.registerGateChallenge(overlay, tool, labels)
+            com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.enterGate(overlay)
+            error("POLICY_DENIED: GATE human review is required")
+        }
+        runtime.requestConfirmation(scope.sessionId, tool, nodeId, fingerprint, gate.jsonKey)
+        runtime.pause(scope.sessionId, com.cyclone.mobile.runtime.background.WorkspaceState.BACKGROUND_NEEDS_HANDOFF)
+        error("POLICY_DENIED: human review is required")
     }
 
     private fun workspaceTouchFailure(
