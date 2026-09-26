@@ -323,7 +323,9 @@ object MindMissions {
             val toolbox = PhoneMindToolbox(environment, owner, device, mission.goal, { stopRequested }, memory = memory, missionId = mission.id,
                 marker = if (variant?.marks == false) null else AndroidMindImageMarker, trail = trail,
                 learned = if (useMap) learnedHints(context) else null,
-                maps = if (useMap) missionMaps(context) else null)
+                maps = if (useMap) missionMaps(context) else null,
+                skill = if (useMap && mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, mission.goal) }.getOrNull()
+                    ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null)
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
@@ -384,6 +386,10 @@ object MindMissions {
                 }
             }
             runCatching { File(context.cacheDir, "lab-memory-${mission.id}.json").delete() }
+            // A saved skill that ran to the end keeps its place on the map fresh (plan 23). Lab runs never touch skills.
+            if (mission.status == MissionStatus.COMPLETED && mission.lab == null) {
+                runCatching { com.cyclone.mobile.market.Marketplace.regroundAfterRun(context, mission.id, mission.goal) }
+            }
             val ok = mission.status == MissionStatus.COMPLETED
             traceId?.let { trace ->
                 AgentTraceRuntime.finish(context, trace, when (mission.status) {

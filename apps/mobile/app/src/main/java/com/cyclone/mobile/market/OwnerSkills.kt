@@ -14,10 +14,14 @@ class OwnerSkills(private val file: File) {
 
     fun list(): List<MarketListing> = synchronized(lock) { read() }
 
-    /** Saves [goal] as the owner's skill and returns it. Saving the same goal again returns the existing skill. */
-    fun save(goal: String, apps: List<String>): MarketListing = synchronized(lock) {
+    /**
+     * Saves [goal] as the owner's skill and returns it. Saving the same goal again returns the existing skill; a newer
+     * [anchor] (where the run worked on the app's map) replaces the old one, which is how a skill is re-grounded.
+     */
+    fun save(goal: String, apps: List<String>, anchor: SkillAnchor? = null): MarketListing = synchronized(lock) {
         val listing = draft(goal, apps)
         val current = read()
+        anchor?.let { writeAnchor(listing.id, it) }
         current.firstOrNull { it.id == listing.id }?.let { return it }
         write(current + listing)
         listing
@@ -27,7 +31,30 @@ class OwnerSkills(private val file: File) {
         val current = read()
         val next = current.filterNot { it.id == id }
         if (next.size != current.size) write(next)
+        if (next.size != current.size) anchorsWithout(id)
         next.size != current.size
+    }
+
+    /** Where the skill lives on the map; null for skills saved before alpha.39 or from runs outside any app. */
+    fun anchor(id: String): SkillAnchor? = synchronized(lock) { readAnchors()[id] }
+
+    private val anchorFile: File get() = File(file.parentFile, file.nameWithoutExtension + "-anchors.json")
+
+    private fun readAnchors(): Map<String, SkillAnchor> = runCatching {
+        val json = JSONObject(anchorFile.readText())
+        json.keys().asSequence().mapNotNull { id -> SkillAnchor.fromJson(json.optJSONObject(id))?.let { id to it } }.toMap()
+    }.getOrDefault(emptyMap())
+
+    private fun writeAnchor(id: String, anchor: SkillAnchor) = writeAnchors(readAnchors() + (id to anchor))
+
+    private fun anchorsWithout(id: String) = readAnchors().let { if (id in it) writeAnchors(it - id) }
+
+    private fun writeAnchors(anchors: Map<String, SkillAnchor>) {
+        anchorFile.parentFile?.mkdirs()
+        val out = JSONObject().also { json -> anchors.forEach { (id, anchor) -> json.put(id, anchor.toJson()) } }
+        val tmp = File(anchorFile.parentFile, anchorFile.name + ".tmp")
+        tmp.writeText(out.toString())
+        if (!tmp.renameTo(anchorFile)) { anchorFile.writeText(tmp.readText()); tmp.delete() }
     }
 
     private fun read(): List<MarketListing> = runCatching {

@@ -19,6 +19,9 @@ import org.json.JSONObject
  * observation freshness, policy and GATE, the canonical PhoneToolExecutor, settle and verification. After every action
  * the model is shown the new screen, so it always decides against what is really there.
  */
+/** A saved skill the mission runs: its name and where it works on the app's map. */
+data class MindSkillBrief(val name: String, val anchor: com.cyclone.mobile.market.SkillAnchor)
+
 class PhoneMindToolbox(
     private val env: CycloneAgentEnvironmentApi,
     private val owner: MindOwnerPort,
@@ -35,6 +38,8 @@ class PhoneMindToolbox(
     private val learned: ((String, String) -> String?)? = null,
     /** Learned maps for route-walking (go_to) and the map card; null when the map is off (Lab A/B). */
     private val maps: com.cyclone.mobile.mind.map.MindMaps? = null,
+    /** When the mission runs a saved skill: where it works on the map (plan 23). Shown with the first situation. */
+    private val skill: MindSkillBrief? = null,
 ) : MindToolbox {
     private val refs = MindRefBook()
     private var screen: AgentPageCard? = null
@@ -55,7 +60,14 @@ class PhoneMindToolbox(
         val observed = env.observe(goal)
         val page = observed.page ?: return "The screen could not be read yet (${observed.failure?.message ?: "unknown reason"})."
         bind(page)
-        return "Time: ${device.now()}\nThe phone is currently ${MindScreen.brief(page, appLabel(page.packageName))}."
+        val card = skill?.let { brief ->
+            runCatching {
+                com.cyclone.mobile.market.SkillGrounding.card(brief.name, appLabel(brief.anchor.packageName) ?: brief.anchor.packageName,
+                    brief.anchor, maps?.map(brief.anchor.packageName))
+            }.getOrNull()
+        }
+        return "Time: ${device.now()}\nThe phone is currently ${MindScreen.brief(page, appLabel(page.packageName))}." +
+            card?.let { "\n\n$it" }.orEmpty()
     }
 
     override fun execute(call: MindToolCall, arguments: JSONObject): MindToolResult {

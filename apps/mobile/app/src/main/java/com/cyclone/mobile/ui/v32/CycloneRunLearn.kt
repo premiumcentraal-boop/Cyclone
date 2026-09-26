@@ -92,10 +92,10 @@ fun CycloneRunLearnActions(mission: Mission, modifier: Modifier = Modifier) {
                         scope.launch {
                             note = withContext(Dispatchers.IO) {
                                 try {
-                                    val apps = MindMissions.store(context).loadTrail(mission.id)?.screens.orEmpty()
-                                        .map { it.packageName }.filterNot { it.contains("launcher", ignoreCase = true) }
-                                    val skill = Marketplace.saveSkill(context, mission.goal, apps)
-                                    "Saved “${skill.name}” to Your skills in the Marketplace."
+                                    val skill = Marketplace.saveSkillFromRun(context, mission.id, mission.goal)
+                                    val grounded = Marketplace.ownerSkills(context).anchor(skill.id)
+                                    if (grounded != null) "Saved “${skill.name}” to Your skills, grounded on “${grounded.destination.title}” in the app's map."
+                                    else "Saved “${skill.name}” to Your skills in the Marketplace."
                                 } catch (error: MarketError) {
                                     error.message
                                 }

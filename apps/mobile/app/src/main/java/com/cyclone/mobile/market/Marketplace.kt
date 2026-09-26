@@ -64,12 +64,56 @@ object Marketplace {
      * "Save skill" on a run: the run's goal becomes the owner's own recipe, added and ready to Run. Throws
      * [MarketError] when the goal cannot be a skill.
      */
-    fun saveSkill(context: Context, goal: String, apps: List<String>): MarketListing {
-        val listing = ownerSkills(context).save(goal, apps)
+    fun saveSkill(context: Context, goal: String, apps: List<String>, anchor: SkillAnchor? = null): MarketListing {
+        val listing = ownerSkills(context).save(goal, apps, anchor)
         val store = installs(context)
         if (store.get(listing.id) == null) store.add(listing, emptyMap(), "saved")
         changes.value++
         return listing
+    }
+
+    /**
+     * Save skill on a finished Mind run, grounded (plan 23): the run is learned (so its screens and moves are on the
+     * map) and the skill remembers where it worked: the app, the way in and the destination.
+     */
+    fun saveSkillFromRun(context: Context, missionId: String, goal: String): MarketListing {
+        val app = context.applicationContext
+        val trail = MindMissions.store(app).loadTrail(missionId)
+        runCatching { com.cyclone.mobile.mind.learn.MissionLearning.learn(app, missionId) }
+        val apps = trail?.screens.orEmpty().map { it.packageName }.filterNot { it.contains("launcher", ignoreCase = true) }
+        return saveSkill(app, goal, apps, trail?.let { SkillAnchor.fromTrail(it, System.currentTimeMillis()) })
+    }
+
+    /**
+     * A saved skill ran to the end: learn the run and move the skill's anchor to where it worked this time, so the
+     * skill follows the app as it changes. Runs of goals that are not saved skills are left alone.
+     */
+    fun regroundAfterRun(context: Context, missionId: String, goal: String) {
+        val skill = savedSkillFor(context, goal) ?: return
+        val app = context.applicationContext
+        val trail = MindMissions.store(app).loadTrail(missionId) ?: return
+        val anchor = SkillAnchor.fromTrail(trail, System.currentTimeMillis()) ?: return
+        runCatching { com.cyclone.mobile.mind.learn.MissionLearning.learn(app, missionId) }
+        ownerSkills(app).save(skill.goal, skill.apps, anchor)
+        changes.value++
+    }
+
+    /** A saved skill with its anchor, for the Mind's skill card; null when the goal is not a saved skill. */
+    fun groundedSkillFor(context: Context, goal: String): Pair<MarketListing, SkillAnchor?>? =
+        savedSkillFor(context, goal)?.let { it to ownerSkills(context).anchor(it.id) }
+
+    /** Health of every owner skill against the map as it is now (Glass, the phone's Your skills). */
+    fun skillsWithHealth(context: Context): List<Triple<MarketListing, SkillAnchor?, SkillHealth>> {
+        val app = context.applicationContext
+        val maps = runCatching {
+            com.cyclone.mobile.applearner.AppLearnerRuntime.initialize(app)
+            com.cyclone.mobile.mind.map.MindMaps(com.cyclone.mobile.mind.learn.AppKnowledgeReader(com.cyclone.mobile.applearner.AppLearnerRuntime.store))
+        }.getOrNull()
+        val owner = ownerSkills(app)
+        return owner.list().map { listing ->
+            val anchor = owner.anchor(listing.id)
+            Triple(listing, anchor, SkillGrounding.health(anchor, anchor?.let { maps?.map(it.packageName) }))
+        }
     }
 
     /** The owner's skill saved from this goal, if any. */
