@@ -45,7 +45,7 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 18 | [Cyclone Lab](18-cyclone-lab.md) | Measured missions on the real phone, A/B |
 | 19 | [Marketplace](19-marketplace.md) | Recipes, connections, and the road to a community store |
 | 20 | [App mapping build plan](20-app-mapping-build-plan.md) | **Final build plan alpha.36–39**: Learn (36), map-guided runs (37, built), mapping missions |
-| 21 | [Mind hands and desk](21-mind-hands-and-desk.md) | **Final build plan**: reliable text delivery (alpha.41), mission desk scratchpad (after Drive) |
+| 21 | [Mind hands and desk](21-mind-hands-and-desk.md) | **Hands built (alpha.41)**: reliable text delivery; mission desk scratchpad (after Drive) |
 | 22 | [Glass Atlas and mapping missions](22-glass-atlas-and-mapping-missions.md) | **Built in alpha.38**: semantic-zoom map, coverage, mission control, safe mapping identities |
 | 23 | [One map, grounded skills and routines](23-one-map-grounded-skills.md) | **Built in alpha.39**: mapping passes teach runs, skills and routines anchored on the map, skills on Glass's map |
 | 24 | [Cyclone Drive: voice assistant](24-cyclone-drive-voice.md) | **Plan**: driver mode AI button, Siri-like AI mode, voice pipeline on OpenRouter (alpha.42–43, after Planes and Hands) |

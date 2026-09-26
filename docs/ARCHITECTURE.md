@@ -66,6 +66,18 @@ card, and the `go_to` tool walks a route through the ordinary act path, re-readi
 stopping at the first surprise; walks and surprises feed back into the store. The Lab variant knob `useMap` A/B-tests
 it.
 
+### Hands: text delivery (since 5.0.0-alpha.41)
+
+A Mind mission's environment is built with `ownerMission = true`: `phone.type` into an ordinary editable field is
+authorized by the mission itself (`OwnerMissionTyping`; never password or secret-looking fields), and the step agent
+keeps `TaskTypingAuthorization`. `PhoneTypeEngine.perform` owns delivery: set-text, strict read-back, then
+clipboard + `ACTION_PASTE` (sensitive clip, owner's clip restored) and read-back; the result carries `method` and
+`textVerified`, and unverified text is reported to the Mind as unverified. `CurrentTargetRevalidation` treats nodes
+nested with an editable target as the same control and matches a text box whose label changed by resource id or raw
+path. `type_text focused=true` types into the focused editable. The toolbox names each refusal, reports a tap that gave
+focus, and `TypingTracker` hints after two identical refusals and hands the draft to the owner (clipboard + owner
+question) after four. Mind missions appear in `RunInsight` step by step. Plan: `Cyclone V5 plan/21-mind-hands-and-desk.md`.
+
 ### Planes: the screen or a background screen (since 5.0.0-alpha.40)
 
 A Mind mission works on one `TaskPlane` at a time: `Screen` (display 0) or `Background` (a Shizuku-backed private

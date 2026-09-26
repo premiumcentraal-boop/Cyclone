@@ -32,7 +32,7 @@ const PC = { available: true, reason: null, connections: [
 
 function ctx(fetch) {
   const devices = [parseDevice(READY_DEVICE)];
-  return { client: new GatewayClient({ token: "t", fetch }), version: "1.0.0-alpha.23", devices, device: devices[0], devicesError: null, navigate() {}, selectDevice() {}, refreshDevices: async () => {} };
+  return { client: new GatewayClient({ token: "t", fetch }), version: "1.0.0-alpha.24", devices, device: devices[0], devicesError: null, navigate() {}, selectDevice() {}, refreshDevices: async () => {} };
 }
 
 test("the marketplace route belongs to its own section; helpers read the gateway's data", () => {

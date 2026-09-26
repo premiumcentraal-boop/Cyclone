@@ -1,6 +1,7 @@
 # 21 — Mind Hands and Desk: reliable text delivery and a working scratchpad
 
-**Status:** final build plan, 2026-09-25. Supersedes the "Mind Desk" plan (`BUILD_PLAN_MIND_DESK_2026-09-25.md`) where
+**Status:** Phase 0 + Phase 1 (Hands) built in **alpha.41** (2026-09-26); the real ChatGPT capture (0.1) and the
+on-phone Hands suite results are still owed. Desk (Phase 2) follows Cyclone Drive. Final build plan written 2026-09-25. Supersedes the "Mind Desk" plan (`BUILD_PLAN_MIND_DESK_2026-09-25.md`) where
 they differ.
 **Evidence used:**
 - the failed run `ai-5b3ed992-7ae7-4e62-8aed-24d236a8c4c1` ("please prompt this current [chat] on ChatGPT to find
