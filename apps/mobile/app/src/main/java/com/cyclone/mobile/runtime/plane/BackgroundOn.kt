@@ -1,5 +1,6 @@
 package com.cyclone.mobile.runtime.plane
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -112,6 +113,8 @@ class CycloneBackgroundTile : TileService() {
         render()
     }
 
+    // The Intent overload is only reached below Android 14 (minSdk 33), where it is the supported call.
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     private fun open(action: CapabilityAction) {
         val intent = BackgroundWatch.fixIntent(this, action)
         if (Build.VERSION.SDK_INT >= 34) {
