@@ -53,3 +53,17 @@ Suggested checks:
 2. Ask "set a 10 minute timer", then press **Save skill** on the finished run. Glass → Clock → Skills shows it as
    *Route known*; *Show on the map* draws its way.
 3. Routines → New → **Run one of your skills** → pick it → save; run the routine.
+
+## Re-signed with the rotated release key (signing blocker closed)
+
+Alpha.34 moved Cyclone to the rotated release key (`CN=Cyclone Mobile, OU=Release`, SHA-256 `e78c6e0b…dbf60`, with a
+lineage from the historical key `cc2a7a5d…f3965`). Phones on alpha.34 refused alpha.35–39, which were signed with the
+historical key only. On 2026-09-26 the owner supplied the release-key secrets to `mobile-release-approval`, and
+`v5-alpha39-rotated-resign.yml` (run 36237463252) re-signed the exact alpha.39 CI build (Mobile CI run 36234949941,
+source `7d6ac2ca`) and replaced the APK on the tag. Verified afterwards:
+- signer `e78c6e0b…dbf60`, the same as alpha.34; the lineage includes `cc2a7a5d…f3965` (old installs can update too);
+- `versionCode 181`, `versionName 5.0.0-alpha.39.dev1`; the published SHA-256 `56d7ed5c…c834` matches the sidecar and
+  `release-manifest.json`;
+- all 200 code and resource entries are identical to the CI build; only signature files changed.
+
+Alpha.35–38 were not re-signed.
