@@ -40,7 +40,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.cyclone.mobile.ui.v32.CycloneModelIntelligencePanel
-import com.cyclone.mobile.ui.v32.CycloneSignatureGlass
+import com.cyclone.mobile.ui.overlay.glass.TiltGlassTheme
+import com.cyclone.mobile.ui.overlay.glass.tiltGlass
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -186,61 +187,64 @@ internal fun OverlayToolsSheet(
                     onDragStopped = { velocity -> settle(velocity) },
                 ),
         ) {
-            CycloneSignatureGlass(
-                modifier = Modifier
+            // Tilt Glass: the drawer is a working card (same glass, grabber and inner veil); every control on it is a
+            // lit capsule or round button with the press glow, and the model page uses the glass palette.
+            Box(
+                Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(30.dp))
+                    .tiltGlass(OverlayStackGeometry.CARD_RADIUS_DP.dp)
+                    .clip(RoundedCornerShape(OverlayStackGeometry.CARD_RADIUS_DP.dp))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) { /* Taps inside the sheet never fall through to the scrim. */ },
-                textured = false,
-                solidBacking = true,
-                cornerRadius = 30.dp,
             ) {
-                Column(
-                    Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // Handle: the whole sheet drags, this is the visible affordance and a click target.
-                    Box(
-                        Modifier
-                            .padding(top = 10.dp, bottom = 6.dp)
-                            .size(width = 64.dp, height = 24.dp)
-                            .semantics {
-                                contentDescription = "Tools drawer handle"
-                                onClick(label = "Close tools") { animateClosed(); true }
-                            },
-                        contentAlignment = Alignment.Center,
+                TiltGlassTheme {
+                    Column(
+                        Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
+                        // Handle: the whole sheet drags; this is the card's grabber and a click target.
                         Box(
                             Modifier
-                                .size(width = 40.dp, height = 5.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = .42f)),
-                        )
-                    }
-                    AnimatedContent(
-                        targetState = page,
-                        transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
-                        label = "Tools drawer page",
-                    ) { shown ->
-                        when (shown) {
-                            ComposerAccessory.MODEL -> Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                CycloneModelIntelligencePanel(aiSettings.modelId, aiSettings.reasoningEffort) { model, effort ->
-                                    onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort))
+                                .size(width = 64.dp, height = 22.dp)
+                                .semantics {
+                                    contentDescription = "Tools drawer handle"
+                                    onClick(label = "Close tools") { animateClosed(); true }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(Modifier.size(width = 32.dp, height = 3.dp).background(GlassMuted.copy(alpha = 0.38f), CircleShape))
+                        }
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp)
+                                .background(Color(0x4D04181D), RoundedCornerShape(22.dp))
+                                .padding(12.dp),
+                        ) {
+                            AnimatedContent(
+                                targetState = page,
+                                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                                label = "Tools drawer page",
+                            ) { shown ->
+                                when (shown) {
+                                    ComposerAccessory.MODEL -> Box(Modifier.fillMaxWidth()) {
+                                        CycloneModelIntelligencePanel(aiSettings.modelId, aiSettings.reasoningEffort) { model, effort ->
+                                            onAiSettingsChanged(aiSettings.copy(modelId = model, reasoningEffort = effort))
+                                        }
+                                    }
+                                    else -> OverlayAppleToolsContent(
+                                        sharingActive = sharingActive,
+                                        onCamera = actions.onCamera,
+                                        onPhotos = actions.onPhotos,
+                                        onFiles = actions.onFiles,
+                                        onShareScreen = actions.onShareScreen,
+                                        onCrossAppShare = actions.onCrossAppShare,
+                                        onModelAndIntelligence = { OverlayToolsSheetState.show(ComposerAccessory.MODEL) },
+                                    )
                                 }
                             }
-                            else -> OverlayAppleToolsContent(
-                                sharingActive = sharingActive,
-                                onCamera = actions.onCamera,
-                                onPhotos = actions.onPhotos,
-                                onFiles = actions.onFiles,
-                                onShareScreen = actions.onShareScreen,
-                                onCrossAppShare = actions.onCrossAppShare,
-                                onModelAndIntelligence = { OverlayToolsSheetState.show(ComposerAccessory.MODEL) },
-                                modifier = Modifier.padding(horizontal = 12.dp),
-                            )
                         }
                     }
                 }

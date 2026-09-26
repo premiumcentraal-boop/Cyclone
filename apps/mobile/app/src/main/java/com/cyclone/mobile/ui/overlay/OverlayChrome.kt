@@ -161,6 +161,7 @@ fun OverlayChrome(
     onComposerChanged: (String) -> Unit = {},
     onRequestSubmitted: (String) -> Unit = {},
     onVoiceInput: () -> Unit = {},
+    onVoiceStop: () -> Unit = {},
     aiSettings: OverlayAiSettings = OverlayAiSettings(),
     onAiSettingsChanged: (OverlayAiSettings) -> Unit = {},
     idleVisualState: OverlayIdleVisualState = OverlayIdleVisualState(),
@@ -227,6 +228,7 @@ fun OverlayChrome(
                     onComposerChanged = onComposerChanged,
                     onRequestSubmitted = onRequestSubmitted,
                     onVoiceInput = onVoiceInput,
+                    onVoiceStop = onVoiceStop,
                     aiSettings = aiSettings,
                     onAiSettingsChanged = onAiSettingsChanged,
                 ) }
@@ -314,6 +316,7 @@ private fun ComposerPanel(
     onComposerChanged: (String) -> Unit,
     onRequestSubmitted: (String) -> Unit,
     onVoiceInput: () -> Unit,
+    onVoiceStop: () -> Unit,
     aiSettings: OverlayAiSettings,
     onAiSettingsChanged: (OverlayAiSettings) -> Unit,
 ) {
@@ -456,6 +459,7 @@ private fun ComposerPanel(
                             OverlayToolsSheetState.toggle(ComposerAccessory.ATTACHMENTS)
                         },
                         onDictate = onVoiceInput,
+                        onStopDictation = onVoiceStop,
                         onPrimary = {
                             if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
                         },

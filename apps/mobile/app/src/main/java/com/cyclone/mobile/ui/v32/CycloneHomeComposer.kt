@@ -1,5 +1,8 @@
 package com.cyclone.mobile.ui.v32
 
+import com.cyclone.mobile.ui.overlay.glass.GlassToolRow
+import com.cyclone.mobile.ui.overlay.glass.GlassToolTile
+import com.cyclone.mobile.ui.overlay.glass.LocalTiltGlass
 import android.app.Activity
 import android.content.Intent
 import android.speech.RecognizerIntent
@@ -207,7 +210,7 @@ internal fun CycloneAttachmentTools(
         Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        if (!LocalTiltGlass.current) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Box(
                 Modifier
                     .padding(top = 2.dp, bottom = 2.dp)
@@ -255,6 +258,10 @@ private fun CyclonePlusTile(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    if (LocalTiltGlass.current) {
+        GlassToolTile(icon, label, onClick, modifier, minHeight = 104.dp)
+        return
+    }
     Surface(
         modifier = modifier
             .heightIn(min = 104.dp)
@@ -281,6 +288,10 @@ private fun CycloneAttachmentToolRow(
     label: String,
     onClick: () -> Unit,
 ) {
+    if (LocalTiltGlass.current) {
+        GlassToolRow(icon, label, onClick)
+        return
+    }
     Row(
         Modifier
             .fillMaxWidth()

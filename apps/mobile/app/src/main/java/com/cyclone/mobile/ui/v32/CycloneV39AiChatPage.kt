@@ -479,6 +479,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         toolsOpen = true
                     },
                     onVoice = { startVoice() },
+                    onVoiceStop = { voiceOpen = false },
                     onSubmit = { submit() },
                     sendEnabled = minimizedSendEnabled,
                     busy = session.busy,
@@ -554,6 +555,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     if (toolsOpen) modelMenuOpen = false
                 },
                 onVoice = { startVoice() },
+                onVoiceStop = { voiceOpen = false },
                 onSend = { submit() },
                 sendEnabled = sendEnabled,
                 busy = session.busy,
@@ -582,24 +584,15 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                             onClick = { toolsOpen = false },
                         ),
                 )
-                Surface(
-                    modifier = Modifier
+                // Tilt Glass: the + drawer is a working card, like the overlay's.
+                InAppGlassSheet(
+                    Modifier
                         .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp)
+                        .heightIn(max = 460.dp)
                         .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-                    shape = RoundedCornerShape(CycloneConversationTokens.sheetRadius),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
+                    handle = { CycloneSheetDismissHandle(onDismiss = { toolsOpen = false }, handleColor = GlassMutedHandle) },
                 ) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
-                            .padding(bottom = 8.dp),
-                    ) {
-                        CycloneSheetDismissHandle(onDismiss = { toolsOpen = false })
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                         CycloneAttachmentTools(
                             onCamera = { openCamera() },
                             onPhotos = { openPhotos() },
@@ -635,19 +628,14 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                             onClick = { modelMenuOpen = false },
                         ),
                 )
-                Surface(
-                    modifier = Modifier
+                InAppGlassSheet(
+                    Modifier
                         .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .heightIn(max = 390.dp)
+                        .heightIn(max = 430.dp)
                         .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-                    shape = RoundedCornerShape(CycloneConversationTokens.sheetRadius),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
+                    handle = { CycloneSheetDismissHandle(onDismiss = { modelMenuOpen = false }, handleColor = GlassMutedHandle) },
                 ) {
-                    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).semantics { contentDescription = "Model and intelligence" }) {
-                        CycloneSheetDismissHandle(onDismiss = { modelMenuOpen = false })
+                    Column(Modifier.fillMaxWidth().semantics { contentDescription = "Model and intelligence" }) {
                         CycloneModelIntelligencePanel(
                             modelId = selectedModelId,
                             effort = reasoningEffort,

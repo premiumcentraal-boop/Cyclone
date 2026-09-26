@@ -2,7 +2,6 @@ package com.cyclone.mobile.ui.overlay
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cyclone.mobile.ui.v32.CycloneSignatureGlass
 import com.cyclone.mobile.ui.overlay.glass.GlassRoundButton
+import com.cyclone.mobile.ui.overlay.glass.GlassToolRow
+import com.cyclone.mobile.ui.overlay.glass.GlassToolTile
 import com.cyclone.mobile.ui.overlay.glass.VoiceOrbButton
 import com.cyclone.mobile.ui.overlay.glass.litRim
 import com.cyclone.mobile.ui.overlay.glass.tiltGlass
@@ -76,7 +77,6 @@ import com.cyclone.mobile.ui.v32.SignatureInk
 import com.cyclone.mobile.ui.v32.SignatureMuted
 import androidx.compose.ui.draw.clip
 
-private val OverlayGlassInner = Color.White.copy(alpha = 0.10f)
 private val OverlayText = SignatureInk
 private val OverlaySecondaryText = SignatureMuted
 private val OverlayBlue = Color(0xFF83DBD7)
@@ -113,6 +113,7 @@ internal fun OverlayAppleComposerBar(
     onStop: () -> Unit,
     onMenu: () -> Unit,
     onDictate: () -> Unit,
+    onStopDictation: () -> Unit = {},
     onPrimary: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -146,10 +147,12 @@ internal fun OverlayAppleComposerBar(
                     }
                 },
             )
+            // Tap to talk, or hold while speaking and let go; a bounce or a quick second touch never stops it.
             VoiceOrbButton(
                 listening = voiceListening, enabled = !working,
-                description = if (voiceListening) "Listening. Tap to stop" else "Dictate request", onClick = onDictate,
-            ) { SignatureIcon(SignatureGlyph.MIC, color = SignatureInk.copy(alpha = if (!working) 1f else .45f)) }
+                description = if (voiceListening) "Listening. Tap to stop" else "Dictate request. Tap, or hold while you speak",
+                onStart = onDictate, onStop = onStopDictation,
+            ) { tint -> SignatureIcon(SignatureGlyph.MIC, color = tint) }
             OverlayRequestAction(working, paused, taskKey, text.isNotBlank(), onPrimary, onPause, onStop)
         }
     }
@@ -190,12 +193,12 @@ internal fun OverlayAppleToolsContent(
 ) {
     run {
         Column(
-            modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
+            modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 OverlayAppleToolTile(Icons.Rounded.PhotoLibrary, "Photos", onPhotos, Modifier.weight(1f))
                 OverlayAppleToolTile(Icons.Rounded.CameraAlt, "Camera", onCamera, Modifier.weight(1f))
@@ -213,6 +216,7 @@ internal fun OverlayAppleToolsContent(
     }
 }
 
+/** Photos / Camera: a lit glass capsule, like the working card's buttons (Tilt Glass). */
 @Composable
 private fun OverlayAppleToolTile(
     icon: ImageVector,
@@ -220,34 +224,10 @@ private fun OverlayAppleToolTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier
-            .heightIn(min = 76.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF174047).copy(alpha = .75f))
-            .border(.7.dp, Color.White.copy(alpha = .08f), RoundedCornerShape(24.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 13.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        Box(
-            Modifier
-                .size(38.dp)
-                .background(Color.White.copy(alpha = .08f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, Modifier.size(21.dp), tint = OverlayText)
-        }
-        Text(
-            label,
-            color = OverlayText,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-        )
-    }
+    GlassToolTile(icon, label, onClick, modifier)
 }
 
+/** One drawer row: the icon on a lit round glass button, the label beside it. */
 @Composable
 private fun OverlayAppleMenuRow(
     icon: ImageVector,
@@ -255,37 +235,7 @@ private fun OverlayAppleMenuRow(
     onClick: () -> Unit,
     enabled: Boolean = true,
 ) {
-    val alpha = if (enabled) 1f else .42f
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 52.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Box(
-            Modifier
-                .size(38.dp)
-                .background(OverlayGlassInner.copy(alpha = OverlayGlassInner.alpha * alpha), CircleShape)
-                .border(0.7.dp, Color.White.copy(alpha = .08f * alpha), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = OverlayText.copy(alpha = alpha),
-                modifier = Modifier.size(24.dp),
-            )
-        }
-        Text(
-            label,
-            color = OverlayText.copy(alpha = alpha),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-        )
-    }
+    GlassToolRow(icon, label, onClick, enabled = enabled)
 }
 
 @Composable

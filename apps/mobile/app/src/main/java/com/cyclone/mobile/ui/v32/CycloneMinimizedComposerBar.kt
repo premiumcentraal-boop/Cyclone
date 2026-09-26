@@ -54,6 +54,7 @@ internal fun CycloneMinimizedComposerBar(
     busy: Boolean,
     modifier: Modifier = Modifier,
     voiceActive: Boolean = false,
+    onVoiceStop: () -> Unit = {},
 ) {
     // Plan 27: the folded composer is the same glass Ask bar, with a small open button.
     GlassComposerBar(
@@ -62,6 +63,7 @@ internal fun CycloneMinimizedComposerBar(
         placeholder = "Ask Cyclone…",
         onAdd = onAdd,
         onVoice = onVoice,
+        onVoiceStop = onVoiceStop,
         onSend = onSubmit,
         sendEnabled = sendEnabled,
         busy = busy,

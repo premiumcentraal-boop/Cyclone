@@ -183,7 +183,7 @@ class OverlayChromeController(
     private fun hideLockedWindows(): Boolean {
         if (!lockScreenBlocked()) return false
         val attached = listOfNotNull(root, haloRoot, shareRoot, sheetRoot)
-        if (attached.any { it.visibility == View.VISIBLE }) speechRecognizer?.cancel()
+        if (attached.any { it.visibility == View.VISIBLE }) { speechRecognizer?.cancel(); voiceSession = false }
         attached.forEach { it.visibility = View.GONE }
         return true
     }
@@ -266,6 +266,9 @@ class OverlayChromeController(
     private var navigationBottomPx by mutableStateOf(0)
     private var reportedImeBottomPx = 0
     private var speechRecognizer: SpeechRecognizer? = null
+    /** A recognition session is running; a second start must not restart it (a restart ends it with an error). */
+    private var voiceSession = false
+    private var voiceSessionAt = 0L
     @Volatile private var hostGestureYielded = false
 
     fun show(snapshot: OverlayChromeSnapshot) {
@@ -318,6 +321,7 @@ class OverlayChromeController(
                                 onComposerChanged = onComposerChanged,
                                 onRequestSubmitted = onRequestSubmitted,
                                 onVoiceInput = ::beginVoiceInput,
+                                onVoiceStop = ::stopVoiceInput,
                                 aiSettings = aiSettings,
                                 onAiSettingsChanged = { next ->
                                     aiSettings = next
@@ -421,6 +425,7 @@ class OverlayChromeController(
             hostGestureYielded = false
             resetIdleActivation()
             speechRecognizer?.destroy()
+            voiceSession = false
             speechRecognizer = null
             lifecycle.destroy()
         }
@@ -831,10 +836,16 @@ class OverlayChromeController(
                 onVoiceStateChanged(false, null, "Voice recognition is not available on this phone.")
                 return@onMain
             }
+            val now = android.os.SystemClock.uptimeMillis()
+            if (voiceSession && now - voiceSessionAt < 60_000L) return@onMain
             val recognizer = speechRecognizer ?: SpeechRecognizer.createSpeechRecognizer(service).also {
                 it.setRecognitionListener(OverlayRecognitionListener())
                 speechRecognizer = it
             }
+            // Clear any session the recognizer still holds, so starting never fails as busy.
+            recognizer.cancel()
+            voiceSession = true
+            voiceSessionAt = now
             onVoiceStateChanged(true, null, OverlayCopy.LISTENING)
             recognizer.startListening(
                 Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -846,6 +857,24 @@ class OverlayChromeController(
         }
     }
 
+    /**
+     * The owner stopped talking (tap on the orb, or let go after holding it). The recognizer finishes what it heard,
+     * so the words land in the Ask field instead of being thrown away.
+     */
+    fun stopVoiceInput() {
+        onMain {
+            if (!voiceSession) {
+                // Nothing is running (it was cancelled elsewhere): just put the button back.
+                onVoiceStateChanged(false, null, null)
+                return@onMain
+            }
+            speechRecognizer?.stopListening() ?: run {
+                voiceSession = false
+                onVoiceStateChanged(false, null, null)
+            }
+        }
+    }
+
     private inner class OverlayRecognitionListener : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) = Unit
         override fun onBeginningOfSpeech() = Unit
@@ -854,6 +883,7 @@ class OverlayChromeController(
         override fun onEndOfSpeech() = Unit
 
         override fun onError(error: Int) {
+            voiceSession = false
             val message = when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH -> "I didn't catch that. Try speaking again."
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech heard. Tap the microphone to retry."
@@ -864,6 +894,7 @@ class OverlayChromeController(
         }
 
         override fun onResults(results: Bundle?) {
+            voiceSession = false
             val transcript = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
             onVoiceStateChanged(false, transcript, if (transcript.isNullOrBlank()) "I didn't catch that." else null)
         }

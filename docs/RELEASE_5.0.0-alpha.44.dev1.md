@@ -1,7 +1,7 @@
 # Cyclone V5 Alpha 44 — Background that stays working
 
-Developer alpha for owner testing, built on Alpha 43 dev2 (the Glass redesign in the app), which it includes. Mobile is
-`5.0.0-alpha.44.dev1` (version code 187). Glass stays `1.0.0-alpha.26`. The Windows companion is not part of this
+Developer alpha for owner testing, built on Alpha 43 dev3 (the Glass drawer and the calmer voice button), which it includes. Mobile is
+`5.0.0-alpha.44.dev1` (version code 188). Glass stays `1.0.0-alpha.26`. The Windows companion is not part of this
 release: keep Cyclone PC Companion `1.6.0-alpha.43` installed.
 
 This is plan 28. The whole background path was read again, from the Shizuku helper to the way Cyclone decides, and

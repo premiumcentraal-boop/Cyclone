@@ -3,7 +3,7 @@
 schema = 1
 product_version = "5.0.0-alpha.44.dev1"
 channel = "development"
-android_version_code = 187
+android_version_code = 188
 python_version = "5.0.0-alpha.43.dev1"
 
 [components]
