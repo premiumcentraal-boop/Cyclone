@@ -469,7 +469,8 @@ object OverlayChromeRuntime {
         // Cyclone Mind: one model, one conversation, one mission. The classic agent remains for owners who turn it off.
         if (launchPackage == null && com.cyclone.mobile.mind.mission.MindMissions.enabled(context)) {
             if (!com.cyclone.mobile.mind.mission.MindMissions.start(context, request, attachment)) {
-                com.cyclone.mobile.mind.mission.MindMissions.steer(request)
+                // Plan 26: a clearly separate task waits as "Runs next"; anything else steers the running mission.
+                com.cyclone.mobile.mind.mission.MindMissions.offer(context, request)
             }
             return
         }

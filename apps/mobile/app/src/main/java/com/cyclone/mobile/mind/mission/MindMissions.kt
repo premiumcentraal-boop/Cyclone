@@ -60,6 +60,7 @@ object MindMissions {
     @Volatile private var resumeCandidate: String? = null
     private const val AUTO_RESUME_WINDOW_MS = 5 * 60_000L
     private const val AUTO_RESUME_LIMIT = 3
+    private const val QUEUE_START_DELAY_MS = 1_500L
     @Volatile private var memory: com.cyclone.mobile.mind.MindMemory? = null
     @Volatile private var livePlanes: com.cyclone.mobile.runtime.plane.MissionPlaneSession? = null
 
@@ -136,6 +137,25 @@ object MindMissions {
     }
 
     fun isLive(): Boolean = synchronized(lock) { worker?.isAlive == true }
+
+    @Volatile private var queue: MissionQueue? = null
+
+    fun queue(context: Context): MissionQueue = queue ?: synchronized(lock) {
+        queue ?: MissionQueue(File(context.applicationContext.filesDir, "Cyclone Brain/Missions/queue.json")).also { queue = it }
+    }
+
+    /**
+     * Plan 26 (A42-8): owner text while a mission runs. A clearly separate task waits as "Runs next"; anything else
+     * steers the running mission as before. Returns the queued goal, or null when it steered.
+     */
+    fun offer(context: Context, text: String): String? {
+        if (!isLive() || !MissionQueue.isNewTask(text)) { steer(text); return null }
+        val next = queue(context).add(text) ?: run { steer(text); return null }
+        liveState.value?.let { mission ->
+            WorkspaceTasks.update("mission-${mission.id}") { it.copy(message = "Runs next: ${next.goal.take(80)}") }
+        }
+        return next.goal
+    }
 
     /** Starts a new mission. Returns false when another mission is still running. */
     fun start(context: Context, goal: String, attachment: TaskAttachment? = null): Boolean {
@@ -425,6 +445,12 @@ object MindMissions {
             liveState.value = null
             historyState.value = runCatching { missions.list() }.getOrDefault(historyState.value)
             WorkspaceTasks.scheduleQueuePromotion(context)
+            // Plan 26 (A42-8): the next queued task starts once this one has fully ended (not after a Stop).
+            if (mission.status != MissionStatus.CANCELLED) {
+                runCatching { queue(context).take() }.getOrNull()?.let { next ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start(context, next.goal) }, QUEUE_START_DELAY_MS)
+                }
+            }
         }
     }
 
