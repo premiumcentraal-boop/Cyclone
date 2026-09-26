@@ -51,6 +51,7 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 24 | [Cyclone Drive: voice assistant](24-cyclone-drive-voice.md) | **Plan**: driver mode AI button, Siri-like AI mode, voice pipeline on OpenRouter (alpha.44–45, after Planes, Hands and Background always) |
 | 25 | [Planes: background and foreground](25-planes-background-foreground.md) | **First step built (alpha.40)**: the Mind in the background, one-tap switch pill, transactional plane switches, automatic plane choice, self-healing background |
 | 26 | [Background that always works](26-background-always.md) | **Built (alpha.42)**: switch it on once, start from Recents, background parity, start preference, app leases for the same-app case, tier 0, see-to-approve, Lab planes suite; parallel sessions alpha.43 |
+| 27 | [The overlay, redesigned](27-overlay-redesign.md) | **Plan, awaiting green light**: one glass material, the stacked plane pill with one word, four heights (expanded, island, notification, idle), fly-into-pill background switch, never-silent switches, Live Update notification (alpha.42.dev2) |
 
 ## Identity
 
