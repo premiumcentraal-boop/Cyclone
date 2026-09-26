@@ -15,6 +15,7 @@ OVERLAY_COMPOSER = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/o
 TASK_PRESENTATION = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/runtime/background/TaskPresentationSnapshot.kt"
 TASK_PANEL = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneAskTaskPanel.kt"
 MINIMIZED_COMPOSER = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneMinimizedComposerBar.kt"
+GLASS_COMPOSER = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/InAppGlass.kt"
 BRAIN_V39 = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/CycloneV39BrainPage.kt"
 MANIFEST = ROOT / "apps/mobile/app/src/main/AndroidManifest.xml"
 MAIN = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/MainActivity.kt"
@@ -103,12 +104,21 @@ REQUIRED_TASK_PANEL = (
     "TaskFollowUpAction.OPEN_APP",
     "CycloneSignatureCard(",
 )
+# Plan 27: the folded composer is the glass Ask bar and stays a real composer: type, add, voice, send, open.
 REQUIRED_MINIMIZED_COMPOSER = (
+    "GlassComposerBar(",
+    'fieldDescription = "Ask Cyclone minimized composer"',
+    "onAdd = onAdd",
+    "onVoice = onVoice",
+    "onSend = onSubmit",
+    "onExpand = onExpand",
+)
+REQUIRED_GLASS_COMPOSER = (
     "BasicTextField(",
-    'contentDescription = "Ask Cyclone minimized composer"',
-    "Icons.Rounded.Add",
-    "Icons.Rounded.GraphicEq",
-    "Icons.Rounded.ArrowUpward",
+    "SignatureGlyph.ADD",
+    "SignatureGlyph.MIC",
+    "SignatureGlyph.SEND",
+    "ImeAction.Send",
 )
 REQUIRED_BRAIN_V39 = (
     "internal fun CycloneV39BrainPage",
@@ -162,6 +172,7 @@ def check() -> list[str]:
         (TASK_PRESENTATION, REQUIRED_TASK_PRESENTATION),
         (TASK_PANEL, REQUIRED_TASK_PANEL),
         (MINIMIZED_COMPOSER, REQUIRED_MINIMIZED_COMPOSER),
+        (GLASS_COMPOSER, REQUIRED_GLASS_COMPOSER),
         (BRAIN_V39, REQUIRED_BRAIN_V39),
         (MANIFEST, REQUIRED_MANIFEST),
         (MAIN, REQUIRED_MAIN),

@@ -74,24 +74,26 @@ class CycloneV39AiChatPageTest {
 
     @Test fun composerIsMultilineLiquidChromeWithOnePrimarySendControl() {
         val page = source("CycloneV39AiChatPage.kt")
-        assertTrue(page.contains("CycloneLiquidPanel("))
-        assertTrue(page.contains("BasicTextField("))
-        assertTrue(page.contains("contentDescription = \"Ask Cyclone composer\""))
-        assertTrue(page.contains("maxLines = 4"))
-        assertTrue(page.contains("ImeAction.Send"))
-        assertTrue(page.contains("SignatureAction(SignatureGlyph.SEND"))
-        assertTrue(page.contains("SignatureAction(SignatureGlyph.MIC"))
+        // Plan 27: the glass Ask bar (InAppGlass.kt), multi-line, one send and one voice control.
+        val glass = source("InAppGlass.kt")
+        assertTrue(page.contains("GlassComposerBar("))
+        assertTrue(glass.contains("BasicTextField("))
+        assertTrue(glass.contains("fieldDescription: String = \"Ask Cyclone composer\""))
+        assertTrue(glass.contains("maxLines: Int = 4"))
+        assertTrue(glass.contains("ImeAction.Send"))
+        assertEquals(1, Regex("SignatureGlyph.SEND").findAll(glass).count())
+        assertEquals(1, Regex("SignatureGlyph.MIC").findAll(glass).count())
         assertFalse(page.contains("FilledIconButton("))
     }
 
     @Test fun modelIntelligenceControlLivesInPlusSheetWithoutDuplicateHeaderPill() {
         val page = source("CycloneV39AiChatPage.kt")
-        val askGlass = page.indexOf("CycloneLiquidPanel(")
+        // Plan 27: the Ask bar is the glass composer; model and intelligence stay in the + sheet below it.
+        val askGlass = page.indexOf("GlassComposerBar(")
         val quickControl = page.indexOf("contentDescription = \"Model and intelligence\"", askGlass)
-        val composer = page.indexOf("BasicTextField(", askGlass)
         assertTrue(askGlass >= 0)
         assertTrue(quickControl > askGlass)
-        assertTrue(composer in askGlass until quickControl)
+        assertTrue(source("InAppGlass.kt").contains("BasicTextField("))
         assertTrue(page.contains("CycloneModelIntelligencePanel("))
         assertTrue(page.contains("showModelSelector = true"))
         assertTrue(page.contains("if (modelMenuOpen && !keyboardOpen)"))
@@ -151,11 +153,11 @@ class CycloneV39AiChatPageTest {
 
     @Test fun taskAndForegroundWorkAreFirstClassConversationItemsAboveComposer() {
         val page = source("CycloneV39AiChatPage.kt")
-        val task = page.indexOf("CycloneAskTaskPanel(current)")
-        val foreground = page.indexOf("CycloneForegroundWorkCard(foregroundSnapshot)")
+        val task = page.indexOf("InAppTaskStack(current)")
+        val foreground = page.indexOf("InAppForegroundCard(foregroundSnapshot)")
         val queued = page.indexOf("CyclonePendingRequests()")
         val drawer = page.indexOf("CycloneChatDrawerSurface(")
-        val composer = page.lastIndexOf("BasicTextField(")
+        val composer = page.lastIndexOf("GlassComposerBar(")
         assertTrue(task in 0 until drawer)
         assertTrue(foreground in 0 until drawer)
         assertTrue(queued in 0 until drawer)
@@ -216,8 +218,9 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("CycloneCollapsedAskPill("))
         assertTrue(page.contains("CycloneSheetDismissHandle("))
         assertTrue(page.contains("keyboardController?.hide()"))
-        assertTrue(minimized.contains("BasicTextField("))
-        assertTrue(minimized.contains("contentDescription = \"Ask Cyclone minimized composer\""))
+        assertTrue(minimized.contains("GlassComposerBar("))
+        assertTrue(source("InAppGlass.kt").contains("BasicTextField("))
+        assertTrue(minimized.contains("fieldDescription = \"Ask Cyclone minimized composer\""))
         assertFalse(minimized.contains("modelLabel"))
         assertTrue(drawer.contains("Drag down or tap to minimize Cyclone chat"))
     }
@@ -239,7 +242,8 @@ class CycloneV39AiChatPageTest {
         assertFalse(page.contains("Open app"))
         assertTrue(page.contains("AskCycloneVoiceMode"))
         assertTrue(page.contains("Listening…"))
-        assertEquals(1, Regex("SignatureIcon\\(SignatureGlyph.ADD").findAll(page).count())
+        assertEquals(0, Regex("SignatureIcon\\(SignatureGlyph.ADD").findAll(page).count())
+        assertEquals(1, Regex("SignatureIcon\\(SignatureGlyph.ADD").findAll(source("InAppGlass.kt")).count())
     }
 
     @Test fun askPlusContainsModelAndIntelligenceSelector() {

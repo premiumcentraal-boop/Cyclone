@@ -232,7 +232,10 @@ private fun V32HomePage(
 
             live?.let { current ->
                 item { CycloneMatrixSectionHeader("Current task") }
-                item { CycloneAskTaskPanel(current) }
+                item {
+                    com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
+                    InAppTaskStack(current)
+                }
             }
 
             if (history.isNotEmpty()) {

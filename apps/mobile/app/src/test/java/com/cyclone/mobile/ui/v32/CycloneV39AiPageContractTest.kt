@@ -37,11 +37,11 @@ class CycloneV39AiPageContractTest {
 
     @Test fun taskConversationAndQuickModelControlStayAboveOneLiquidComposer() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
-        val current = text.indexOf("CycloneAskTaskPanel(current)")
+        val current = text.indexOf("InAppTaskStack(current)")
         val queued = text.indexOf("CyclonePendingRequests()")
         val drawer = text.indexOf("CycloneChatDrawerSurface(")
         val quickModel = text.indexOf("contentDescription = \"Model and intelligence\"", drawer)
-        val composer = text.lastIndexOf("BasicTextField(")
+        val composer = text.lastIndexOf("GlassComposerBar(")
         assertTrue(current in 0 until drawer)
         assertTrue(queued in 0 until drawer)
         assertTrue(drawer in 0 until quickModel)

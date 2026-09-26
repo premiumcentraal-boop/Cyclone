@@ -15,7 +15,7 @@ class CycloneVisual42ContractTest {
         assertTrue(home.contains("WorkspaceTasks.state.collectAsState()"))
         assertTrue(home.contains("takeIf { it.phase != TaskPhase.STOPPED }"))
         assertTrue(home.contains("V39AiChatSessionRuntime.pendingRequest = request"))
-        assertTrue(home.contains("CycloneAskTaskPanel(current)"))
+        assertTrue(home.contains("InAppTaskStack(current)"))
         assertTrue(home.contains("cyclonePageInsets()"))
         assertTrue(home.contains("CycloneStatusPill(readinessLabel"))
         assertTrue(home.contains("ProfileRescueBar()"))

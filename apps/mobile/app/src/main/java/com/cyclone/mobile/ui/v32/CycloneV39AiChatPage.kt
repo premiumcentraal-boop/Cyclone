@@ -361,6 +361,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             .background(askCycloneCanvasBrush()),
     ) {
         AskCycloneDotField(Modifier.matchParentSize())
+        com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
 
         Column(
             Modifier.fillMaxSize().padding(
@@ -395,17 +396,19 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                             items(session.messages, key = { it.id }) { V39ChatBubble(it) }
                         }
 
+                        // Plan 27: the task on the same glass as the overlay (pill above, card, island, moments).
                         val mission = liveMission
-                        if (mission != null) {
+                        val missionTask = mission?.let { m -> task?.takeIf { it.taskId == "mission-${m.id}" } }
+                        if (mission != null && missionTask == null) {
                             item(key = "mission-${mission.id}") { CycloneLiveMissionCard(mission) }
-                        } else task?.let { current ->
+                        } else (missionTask ?: task)?.let { current ->
                             item(key = "current-${current.taskId}") {
-                                CycloneAskTaskPanel(current)
+                                InAppTaskStack(current)
                             }
                         }
                         if (foregroundWorking) {
                             item(key = "foreground-${foregroundSnapshot.sessionId}") {
-                                CycloneForegroundWorkCard(foregroundSnapshot)
+                                InAppForegroundCard(foregroundSnapshot)
                             }
                         }
                         if (queuedRequests.isNotEmpty()) {
@@ -479,6 +482,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     onSubmit = { submit() },
                     sendEnabled = minimizedSendEnabled,
                     busy = session.busy,
+                    voiceActive = voiceOpen,
                     modifier = Modifier.padding(bottom = CycloneConversationTokens.space8),
                 )
             } else {
@@ -522,86 +526,40 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 Text("Attachment ready", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
             }
 
-            CycloneLiquidPanel(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                cornerRadius = 33.dp,
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
-            ) {
-                Column(Modifier.fillMaxWidth()) {
-                    if (session.busy) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = 8.dp, end = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Answering",
-                                Modifier.weight(1f),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                            TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
-                        }
-                    }
-
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CycloneTrayIconAction(
-                            onClick = {
-                                toolsOpen = !toolsOpen
-                                if (toolsOpen) modelMenuOpen = false
-                            },
-                            enabled = !session.busy,
-                            modifier = Modifier.size(48.dp).semantics { contentDescription = "Add attachment" },
-                        ) {
-                            SignatureIcon(SignatureGlyph.ADD)
-
-                        }
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            BasicTextField(
-                                value = composer,
-                                onValueChange = { composer = it },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 34.dp, max = 78.dp)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    .semantics { contentDescription = "Ask Cyclone composer" },
-                                maxLines = 4,
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                keyboardActions = KeyboardActions(onSend = { submit() }),
-                                decorationBox = { field ->
-                                    Box(contentAlignment = Alignment.CenterStart) {
-                                        if (composer.isEmpty()) {
-                                            Text(
-                                                V39AiChatContract.PLACEHOLDER,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
-                                        field()
-                                    }
-                                },
-                            )
-                        }
-
-                        val sendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
-                            RequestIntent.PHONE_TASK -> true
-                            RequestIntent.CHAT -> hasKey && !session.busy
-                        }
-                        SignatureAction(SignatureGlyph.MIC, "Voice mode", { startVoice() }, enabled = !session.busy)
-                        SignatureAction(SignatureGlyph.SEND, "Send request", { submit() }, enabled = sendEnabled)
-
-                    }
+            if (session.busy) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Answering",
+                        Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
                 }
             }
+            val sendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
+                RequestIntent.PHONE_TASK -> true
+                RequestIntent.CHAT -> hasKey && !session.busy
+            }
+            // Plan 27: the same glass Ask bar as the overlay.
+            GlassComposerBar(
+                text = composer,
+                onTextChanged = { composer = it },
+                placeholder = V39AiChatContract.PLACEHOLDER,
+                onAdd = {
+                    toolsOpen = !toolsOpen
+                    if (toolsOpen) modelMenuOpen = false
+                },
+                onVoice = { startVoice() },
+                onSend = { submit() },
+                sendEnabled = sendEnabled,
+                busy = session.busy,
+                voiceActive = voiceOpen,
+                modifier = Modifier.padding(bottom = 12.dp),
+            )
         }
                 }
             }

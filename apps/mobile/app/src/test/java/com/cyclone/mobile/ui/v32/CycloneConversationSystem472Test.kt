@@ -34,10 +34,12 @@ class CycloneConversationSystem472Test {
         val minimized = source("ui/v32/CycloneMinimizedComposerBar.kt")
         assertTrue(page.contains("CycloneMinimizedComposerBar("))
         assertFalse(page.contains("CycloneCollapsedAskPill("))
-        assertTrue(minimized.contains("BasicTextField("))
-        assertTrue(minimized.contains("Icons.Rounded.Add"))
-        assertTrue(minimized.contains("Icons.Rounded.GraphicEq"))
-        assertTrue(minimized.contains("Icons.Rounded.ArrowUpward"))
+        // Plan 27: the folded composer is the glass Ask bar: type, add, voice and send, plus open.
+        val glass = source("ui/v32/InAppGlass.kt")
+        assertTrue(minimized.contains("GlassComposerBar("))
+        assertTrue(minimized.contains("onExpand = onExpand"))
+        assertTrue(glass.contains("BasicTextField("))
+        assertTrue(glass.contains("SignatureGlyph.ADD") && glass.contains("SignatureGlyph.MIC") && glass.contains("SignatureGlyph.SEND"))
         assertFalse(minimized.contains("modelLabel"))
     }
 
