@@ -3,6 +3,9 @@
 Teal Matrix is Cyclone's single in-app visual language, introduced in 5.0.0-alpha.8. It started as the
 Ask Cyclone capsule's material and now applies to every screen.
 
+The task surfaces (Ask bar, task card, island, owner moments, plane pill) use [Cyclone Tilt Glass](CYCLONE_TILT_GLASS.md)
+since 5.0.0-alpha.43.
+
 ## Principles
 
 - **One palette.** Deep teal canvas, teal ink, mint for success, coral for attention. A light device
