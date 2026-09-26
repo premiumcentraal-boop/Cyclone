@@ -103,6 +103,28 @@ class WorkspaceUserService(context: Context) : IWorkspaceService.Stub() {
         describe(sessionId, owned).apply { putBoolean("handedOff", true) }
     }
 
+    /**
+     * Planes (plan 25): move the task Cyclone is working in from the main screen onto this empty background display.
+     * The top task of [packageName] on display 0 is moved as a whole (`am display move-stack`), then proven to be on
+     * this display with the same task id. Cyclone gets input authority with a fresh generation.
+     */
+    @Synchronized override fun adopt(sessionId: String, packageName: String): Bundle = result {
+        val owned = valid(sessionId)
+        require(owned.packageName == null) { "This background screen already has an app" }
+        require(packageName.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+"))) { "Invalid package" }
+        val task = WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list")))
+            .firstOrNull { it.packageName == packageName && it.displayId == 0 }
+            ?: error("FOREGROUND_REQUIRED: the app is not on the main screen")
+        val displayId = owned.display.display.displayId
+        command(listOf("/system/bin/am", "display", "move-stack", task.rootTaskId.toString(), displayId.toString()))
+        WorkspaceCommands.exactTask(WorkspaceCommands.tasks(command(listOf("/system/bin/am", "stack", "list"))),
+            task.taskId, displayId, packageName)
+        owned.packageName = packageName
+        owned.handedOffTask = null
+        owned.generation++; owned.agent = true
+        describe(sessionId, owned).apply { putInt("taskId", task.taskId) }
+    }
+
     @Synchronized override fun close(sessionId: String) { workspaces.remove(sessionId)?.display?.release() }
     @Synchronized override fun destroy() {
         workspaces.keys.toList().forEach(::close)

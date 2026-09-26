@@ -60,6 +60,36 @@ object WorkspaceRuntime {
         require(packageName != context.packageName && packageName != DeviceState.currentPackage) { "Choose an app that is not on your main screen" }
         val component = context.packageManager.getLaunchIntentForPackage(packageName)?.component?.flattenToString()
             ?: error("No launchable app for that package")
+        open(packageName) { id -> checked(backend!!.launch(id, component)) }
+    }
+
+    /**
+     * Planes (plan 25): move the app Cyclone is working in from the main screen into a new background screen, keeping
+     * its task (and so its page and state). The main screen shows whatever was underneath.
+     */
+    fun adopt(context: Context, packageName: String): ExecutionSession = synchronized(lock) {
+        appContext = context.applicationContext
+        connect(context)
+        require(packageName != context.packageName) { "Cyclone itself cannot move to the background" }
+        open(packageName) { id -> checked(backend!!.adopt(id, packageName)) }
+    }
+
+    /** The app a background session holds; null when unknown. */
+    fun packageOf(sessionId: String): String? = synchronized(lock) { entries[sessionId]?.session?.targetPackage }
+
+    /** True after [handoff]: the task is on the main screen and this session waits to take it back. */
+    fun handedOff(sessionId: String): Boolean = synchronized(lock) {
+        entries[sessionId]?.lifecycle?.state == WorkspaceState.WAITING_FOR_CONFIRMATION
+    }
+
+    /** Health facts for the plane watchdog: service alive, display and task present, frames fresh. */
+    fun probe(sessionId: String): Triple<Boolean, Boolean, Boolean> = synchronized(lock) {
+        val service = backend?.asBinder()?.isBinderAlive == true
+        val present = service && entries[sessionId] != null && runCatching { backend!!.status(sessionId).getBoolean("ok") }.getOrDefault(false)
+        Triple(service, present, present && LiveVisionRuntime.healthy(sessionId))
+    }
+
+    private fun open(packageName: String, attach: (String) -> Bundle): ExecutionSession {
         val id = "workspace-${UUID.randomUUID()}"
         val reader = ImageReader.newInstance(720, 1280, PixelFormat.RGBA_8888, 2)
         val thread = HandlerThread("cyclone-workspace-frames").apply { start() }
@@ -67,7 +97,7 @@ object WorkspaceRuntime {
             val created = checked(backend!!.create(id, reader.surface, 720, 1280, 240))
             val displayId = created.getInt("displayId", -1)
             require(displayId > 0)
-            val launched = checked(backend!!.launch(id, component))
+            val launched = attach(id)
             val session = LiveVisionRuntime.sessions.registerOwned(id, displayId, packageName)
             val revision = LiveVisionRuntime.startSource(id, displayId, FrameSourceType.VIRTUAL_DISPLAY_SURFACE)
             val lifecycle = WorkspaceLifecycle(id, displayId).apply { transition(WorkspaceState.BACKGROUND_OK) }
@@ -88,7 +118,7 @@ object WorkspaceRuntime {
                     }
                 }
             }, Handler(thread.looper))
-            session
+            return session
         } catch (error: Exception) {
             runCatching { backend?.close(id) }; reader.close(); thread.quitSafely()
             entries.remove(id)

@@ -61,6 +61,7 @@ object MindMissions {
     private const val AUTO_RESUME_WINDOW_MS = 5 * 60_000L
     private const val AUTO_RESUME_LIMIT = 3
     @Volatile private var memory: com.cyclone.mobile.mind.MindMemory? = null
+    @Volatile private var livePlanes: com.cyclone.mobile.runtime.plane.MissionPlaneSession? = null
 
     private val hooks = object : OverlayChromeRuntime.MissionHooks {
         override fun stop() = MindMissions.stop()
@@ -178,6 +179,7 @@ object MindMissions {
 
     fun stop() {
         stopRequested = true
+        com.cyclone.mobile.runtime.plane.MissionPlanes.release()
         synchronized(lock) { cancellation?.cancel() }
         inbox.withdrawAll()
     }
@@ -227,6 +229,7 @@ object MindMissions {
     /** The owner took the phone from the task card; the mission's next action waits until they hand it back. */
     fun ownerTakesPhone(): Boolean {
         if (!isLive()) return false
+        com.cyclone.mobile.runtime.plane.MissionPlanes.ownerNeedsScreen()
         OverlayChromeRuntime.missionHandoff()
         liveState.value?.let { mission ->
             WorkspaceTasks.update("mission-${mission.id}") {
@@ -312,7 +315,10 @@ object MindMissions {
                     human(context, taskId, instruction)
                     save { it.copy(status = if (instruction == null) MissionStatus.RUNNING else MissionStatus.WAITING, waitingFor = instruction) }
                 })
-            val environment = CycloneAgentEnvironment(context, userTaskGoal = mission.goal)
+            // Planes (plan 25): the owner's missions may move between the main screen and a background screen. Lab
+            // runs stay on the screen so a measurement never depends on where it ran.
+            val planes = if (mission.lab == null) com.cyclone.mobile.runtime.plane.MissionPlanes.begin(context, mission.id, mission.goal, trace).also { livePlanes = it } else null
+            val environment = planes?.initialEnvironment() ?: CycloneAgentEnvironment(context, userTaskGoal = mission.goal)
             // Fresh lab runs neither read nor write the owner's memory: each run starts from the same place.
             val fresh = variant?.freshMemory == true
             val labMemoryFile = if (fresh) File(context.cacheDir, "lab-memory-${mission.id}.json").also { it.delete() } else null
@@ -325,7 +331,9 @@ object MindMissions {
                 learned = if (useMap) learnedHints(context) else null,
                 maps = if (useMap) missionMaps(context) else null,
                 skill = if (useMap && mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, mission.goal) }.getOrNull()
-                    ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null)
+                    ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
+                planes = planes)
+            planes?.attach(toolbox)
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
@@ -366,6 +374,8 @@ object MindMissions {
             failure = error.message ?: error.javaClass.simpleName
             save { it.copy(status = MissionStatus.FAILED, summary = "Cyclone could not run this mission: $failure", waitingFor = null) }
         } finally {
+            livePlanes?.end()
+            livePlanes = null
             liveMetrics?.let { live -> if (mission.metrics == null) save { it.copy(metrics = live.toJson()) } }
             liveMetrics = null
             // A resumed mission adds to the trail it already had.

@@ -23,7 +23,7 @@ import org.json.JSONObject
 data class MindSkillBrief(val name: String, val anchor: com.cyclone.mobile.market.SkillAnchor)
 
 class PhoneMindToolbox(
-    private val env: CycloneAgentEnvironmentApi,
+    env: CycloneAgentEnvironmentApi,
     private val owner: MindOwnerPort,
     private val device: MindDevicePort,
     private val goal: String,
@@ -40,7 +40,14 @@ class PhoneMindToolbox(
     private val maps: com.cyclone.mobile.mind.map.MindMaps? = null,
     /** When the mission runs a saved skill: where it works on the map (plan 23). Shown with the first situation. */
     private val skill: MindSkillBrief? = null,
+    /** Where the mission works (plan 25); null keeps it on the main screen as before. */
+    private val planes: MindPlanes? = null,
 ) : MindToolbox {
+    /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
+    @Volatile private var env: CycloneAgentEnvironmentApi = env
+    /** Phone tools run one at a time inside this gate, so a plane switch happens only between steps. */
+    val gate = MindStepGate()
+    @Volatile private var planeNote: String? = null
     private val refs = MindRefBook()
     private var screen: AgentPageCard? = null
     private var controlsById: Map<String, AgentElementCandidate> = emptyMap()
@@ -71,9 +78,44 @@ class PhoneMindToolbox(
     }
 
     override fun execute(call: MindToolCall, arguments: JSONObject): MindToolResult {
-        if (call.name !in PHONE_TOOLS) return dispatch(call, arguments)
+        if (call.name !in PHONE_TOOLS) {
+            // Handing the phone to the owner needs the main screen first.
+            if (call.name == "owner_takeover") runCatching { planes?.before(call.name, arguments) }
+            return noted(dispatch(call, arguments))
+        }
+        runCatching { planes?.before(call.name, arguments) }.getOrNull()?.let { refusal ->
+            return noted(MindToolResult(refusal, "${call.name}: not run here", ok = false))
+        }
+        val result = phoneStep(call, arguments)
+        runCatching { planes?.after(call.name, result) }
+        return noted(result)
+    }
+
+    /**
+     * The mission moved to another plane (plan 25): from now on the Mind acts on [next]. Everything it knew about the
+     * old screen is dropped, so its next action starts from a fresh look; [note] tells the model what happened.
+     * Called between steps (the caller holds [gate]).
+     */
+    fun rebind(next: CycloneAgentEnvironmentApi, note: String) {
+        env = next
+        screen = null
+        controlsById = emptyMap()
+        fieldValues = emptyMap()
+        shotScale = null
+        shotSize = null
+        fresh = false
+        planeNote = note
+    }
+
+    private fun noted(result: MindToolResult): MindToolResult {
+        val note = planeNote ?: return result
+        planeNote = null
+        return result.copy(text = "($note)\n\n${result.text}")
+    }
+
+    private fun phoneStep(call: MindToolCall, arguments: JSONObject): MindToolResult {
         // A locked phone or a dark screen is not the model's problem to solve: wait for the owner, then carry on.
-        val blocked = device.blocker() ?: return dispatch(call, arguments)
+        val blocked = device.blocker() ?: return gate.step { dispatch(call, arguments) }
         owner.status("Unlock your phone to let Cyclone continue ($blocked)")
         var waited = 0L
         while (device.blocker() != null && waited < ownerTimeoutMs && !cancelled()) {
@@ -85,8 +127,10 @@ class PhoneMindToolbox(
             return MindToolResult("NOT RUN: the phone is still unavailable ($it) after ${waited / 60_000} min. Wait with the wait tool or give up.",
                 "phone unavailable: $it", ok = false, ownerWaitMs = waited)
         }
-        invalidate()
-        val result = dispatch(call, arguments)
+        val result = gate.step {
+            invalidate()
+            dispatch(call, arguments)
+        }
         return result.copy(text = "(The phone was $blocked; the owner made it available again.)\n\n${result.text}",
             ownerWaitMs = result.ownerWaitMs + waited)
     }

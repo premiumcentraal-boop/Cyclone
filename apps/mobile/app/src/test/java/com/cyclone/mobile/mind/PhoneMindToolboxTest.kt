@@ -164,6 +164,32 @@ class PhoneMindToolboxTest {
         assertFalse("element ids never reach the model", text.contains("semantic:"))
     }
 
+    @Test fun planesRebindMovesActionsToTheNewPlaneAndTellsTheModelOnce() {
+        val first = FakeEnv(login)
+        val second = FakeEnv(login)
+        val seen = mutableListOf<String>()
+        lateinit var box: PhoneMindToolbox
+        val planes = object : MindPlanes {
+            override fun before(tool: String, arguments: JSONObject): String? {
+                seen += tool
+                if (tool == "home") return "NOT RUN: no Home screen on a background screen."
+                if (tool == "tap") box.rebind(second, "Cyclone now works on a background screen")
+                return null
+            }
+        }
+        box = PhoneMindToolbox(first, FakeOwner(), device, "goal", planes = planes)
+        box.run("screen_read")
+        val refused = box.run("home")
+        assertFalse(refused.ok)
+        assertTrue(first.acts.none { it.first == "phone.home" })
+        val tap = box.run("tap", """{"ref":"e3"}""")
+        assertTrue(tap.text.startsWith("(Cyclone now works on a background screen)"))
+        assertTrue("the action ran on the new plane", second.acts.isNotEmpty() || !tap.ok)
+        assertTrue(first.acts.none { it.first == "phone.click" })
+        assertFalse("the note is shown once", box.run("screen_read").text.contains("background screen)"))
+        assertEquals(listOf("screen_read", "home", "tap", "screen_read"), seen)
+    }
+
     @Test fun refsStayStableAcrossReobservation() {
         val env = FakeEnv(login)
         val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")
