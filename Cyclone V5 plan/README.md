@@ -49,7 +49,7 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 22 | [Glass Atlas and mapping missions](22-glass-atlas-and-mapping-missions.md) | **Built in alpha.38**: semantic-zoom map, coverage, mission control, safe mapping identities |
 | 23 | [One map, grounded skills and routines](23-one-map-grounded-skills.md) | **Built in alpha.39**: mapping passes teach runs, skills and routines anchored on the map, skills on Glass's map |
 | 24 | [Cyclone Drive: voice assistant](24-cyclone-drive-voice.md) | **Plan**: driver mode AI button, Siri-like AI mode, voice pipeline on OpenRouter (alpha.42–43, after Planes and Hands) |
-| 25 | [Planes: background and foreground](25-planes-background-foreground.md) | **Plan (alpha.40)**: the Mind in the background, one-tap switch pill, transactional plane switches, automatic plane choice, self-healing background |
+| 25 | [Planes: background and foreground](25-planes-background-foreground.md) | **First step built (alpha.40)**: the Mind in the background, one-tap switch pill, transactional plane switches, automatic plane choice, self-healing background |
 
 ## Identity
 

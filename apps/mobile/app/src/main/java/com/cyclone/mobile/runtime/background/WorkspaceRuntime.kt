@@ -50,7 +50,7 @@ object WorkspaceRuntime {
             override fun onServiceDisconnected(name: ComponentName?) { backend = null; invalidateAll() }
         }
         Shizuku.bindUserService(Shizuku.UserServiceArgs(ComponentName(context, WorkspaceUserService::class.java))
-            .daemon(false).processNameSuffix("workspace").version(1), connection)
+            .daemon(false).processNameSuffix("workspace").version(2), connection)
         check(ready.await(8, TimeUnit.SECONDS) && backend != null) { "BACKGROUND_MODE_UNAVAILABLE: workspace service did not connect" }
     }
 

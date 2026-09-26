@@ -66,6 +66,20 @@ card, and the `go_to` tool walks a route through the ordinary act path, re-readi
 stopping at the first surprise; walks and surprises feed back into the store. The Lab variant knob `useMap` A/B-tests
 it.
 
+### Planes: the screen or a background screen (since 5.0.0-alpha.40)
+
+A Mind mission works on one `TaskPlane` at a time: `Screen` (display 0) or `Background` (a Shizuku-backed private
+virtual display). `runtime/plane/` holds the pure core — `PlaneSwitcher` (pause at a step boundary → move → verify →
+grant, or restore and roll back; journaled in `FilePlaneJournal`, closed after a restart by `recover()`),
+`PlanePolicy` (Automatic start and escalation signals), `AppPlaneCompat` (per app and version) and `BackgroundHealth`
+with its `RecoveryLadder` — and `MissionPlanes`, the Android side: the mission's `MissionPlaneSession` implements the
+Mind's `MindPlanes` hooks and a `PlanePort` over `WorkspaceRuntime` (`adopt` moves the app's task from display 0 into
+the background display with `am display move-stack`; `handoff`/`resume` move it back and forth). Phone tools run inside
+`MindStepGate`; after a move the toolbox is rebound to a `CycloneAgentEnvironment` for the new `ExecutionContext`, so
+every action still goes through `PhoneToolExecutor` with its session and display. The pill (`ui/overlay/PlanePill.kt`),
+and the task notification move tasks only with Task Kit (`MoveToBackground` / `MoveToForeground` /
+`AllowBackground`). Plan: `Cyclone V5 plan/25-planes-background-foreground.md`.
+
 ### One map, grounded skills and routines (since 5.0.0-alpha.39)
 
 A mapping pass records a Mind-style trail (`mapping/run/MappingTrailTap.kt`) and, when it ends, learns it into app

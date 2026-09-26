@@ -1,7 +1,11 @@
 # 25 — Planes: background work that just works, and one tap to switch it (plan)
 
-**Status:** plan, 2026-09-26. Not built. Proposed as **alpha.40**: Drive (plan 24) depends on it, so Hands moves to
-alpha.41 and Drive to alpha.42–43.
+**Status:** first step built in **alpha.40** (2026-09-26): the switch transaction with journal and rollback, the Mind on
+planes (step gate, rebind), Automatic start with the *Where Cyclone works* setting, escalation to the screen, app
+compatibility memory, the watchdog and recovery ladder, the pill, notification actions and Task Kit commands. Still to
+come: approvals that bring the app to the screen first, frame-stall detection with a frame heartbeat, return to the
+background after an escalation, the Lab planes suite, and Glass's Phone toggle and plane lane in run replay. Drive
+(plan 24) builds on it; Hands is alpha.41 and Drive alpha.42–43.
 
 **The owner's ask:**
 - Make background work rock solid.
