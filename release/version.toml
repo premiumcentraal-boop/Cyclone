@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.44 dev1: background that stays working - the background path audited and fixed, plus the one-tap Background Check.
+# Cyclone V5 alpha.45 dev1: direct first - calendar, contacts, alarms and timers without any screen, on every phone.
 # Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.44.dev1"
+product_version = "5.0.0-alpha.45.dev1"
 channel = "development"
-android_version_code = 188
+android_version_code = 189
 python_version = "5.0.0-alpha.43.dev1"
 
 [components]
-mobile = "5.0.0-alpha.44.dev1"
+mobile = "5.0.0-alpha.45.dev1"
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line; pc_companion is Cyclone One.
 glass = "1.0.0-alpha.26"
@@ -24,4 +24,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha44-dev1-background-stable"
+candidate_generation = "cyclone-v5-alpha45-dev1-direct-first"

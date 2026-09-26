@@ -262,7 +262,9 @@ class MissionPlaneSession internal constructor(
                     handler != here -> moveApp(background, handler)
                 }
             }
-            "open_settings", "set_timer", "set_alarm", "open_notification" ->
+            // Plan 29: timers and alarms go straight to the clock without its screen, so they no longer pull the task
+            // onto the owner's screen (only a clock without that contract falls back, and after() moves it then).
+            "open_settings", "open_notification" ->
                 switchTo(PlaneKind.SCREEN, "This step opens another app, so it runs on your screen.", null)
         }
         return null

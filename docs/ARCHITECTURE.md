@@ -89,6 +89,17 @@ Owner Moments render as `OverlayOwnerCard`. Approvals are split by `OverlayGlass
 
 An owner's tap waits up to `OWNER_PAUSE_MS` for the step boundary. Plan: `Cyclone V5 plan/27-overlay-redesign.md`.
 
+### Direct first (since 5.0.0-alpha.45)
+
+Tasks that need no screen run first. The Mind's `calendar_find`, `calendar_add` and `contact_find`, plus `set_timer`
+and `set_alarm`, call `MindDevicePort.direct`, which reaches the executor's `phone.direct_*` tools. Those tools use
+`direct/DirectActions` (Android's calendar and contacts providers, and the clock's `EXTRA_SKIP_UI` contract). The pure
+rules live in `DirectPlan`: time parsing, event checks, windows, alarm proof. Every result is proven or said as
+unconfirmed: an event is read back, an alarm is matched against `AlarmManager.nextAlarmClock`, a timer against the
+clock's notification. A missing permission is asked for by `DirectAccessActivity` (Android's dialog only) and the
+action runs once more. These tools never observe a screen, start a plane or wait for an unlock. Guard:
+`scripts/ci/tests/test_mobile_direct_first.py`. Plan: `Cyclone V5 plan/29-one-tap-engine.md`.
+
 ### Background that stays working (since 5.0.0-alpha.44)
 
 Only a real loss ends a background screen: `onDestroy` of the Accessibility service, not `onInterrupt`. A locked phone

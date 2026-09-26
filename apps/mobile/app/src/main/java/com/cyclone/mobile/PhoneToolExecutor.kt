@@ -717,6 +717,12 @@ object PhoneToolExecutor {
             // Plan 26 (A42-6, tier 0): reply through the message's own notification. No screen is touched, so it runs
             // while the owner uses the phone; it is a send, so the caller has the owner's approval for this exact text.
             "phone.reply_notification" -> replyNotification(context, p.optString("key").takeIf { it.isNotBlank() }, p.optString("text"))
+            // Plan 29 (direct first): no screen at all: Android's calendar and contacts, and the clock's contract.
+            "phone.direct_calendar_find" -> direct(com.cyclone.mobile.direct.DirectActions.calendarFind(context, p))
+            "phone.direct_calendar_add" -> direct(com.cyclone.mobile.direct.DirectActions.calendarAdd(context, p))
+            "phone.direct_contacts_find" -> direct(com.cyclone.mobile.direct.DirectActions.contactsFind(context, p))
+            "phone.direct_alarm" -> direct(com.cyclone.mobile.direct.DirectActions.alarm(context, p))
+            "phone.direct_timer" -> direct(com.cyclone.mobile.direct.DirectActions.timer(context, p))
             "phone.open_notification" -> {
                 val generation = DeviceState.uiGeneration()
                 val opened = openNotification(p.optString("key").takeIf { it.isNotBlank() })
@@ -1243,6 +1249,14 @@ object PhoneToolExecutor {
             errorResult(PhoneToolErrorCode.ACTION_FAILED, "The reply action is no longer valid")
         }
     }
+
+    private fun direct(result: com.cyclone.mobile.direct.DirectResult): Outcome = if (result.ok) Outcome(result.payload ?: JSONObject())
+        else errorResult(when (result.code) {
+            com.cyclone.mobile.direct.DirectResult.PERMISSION -> PhoneToolErrorCode.SECURITY_RESTRICTION
+            com.cyclone.mobile.direct.DirectResult.INVALID -> PhoneToolErrorCode.INVALID_REQUEST
+            com.cyclone.mobile.direct.DirectResult.UNAVAILABLE -> PhoneToolErrorCode.CAPABILITY_UNAVAILABLE
+            else -> PhoneToolErrorCode.ACTION_FAILED
+        }, "${result.code}: ${result.message}")
 
     private fun errorResult(code: PhoneToolErrorCode, message: String, attempts: Int = 1): Outcome =
         Outcome(error = PhoneToolError(code, message), attempts = attempts)

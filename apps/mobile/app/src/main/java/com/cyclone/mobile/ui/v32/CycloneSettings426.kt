@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudQueue
@@ -460,6 +461,8 @@ private fun Permissions426Card(context: Context) {
     val overlay = CyclonePermissionSetup.overlayEnabled(context)
     val exactTiming = CyclonePermissionSetup.exactTimingEnabled(context)
     val calendar = CyclonePermissionSetup.calendarEnabled(context)
+    val calendarWrite = CyclonePermissionSetup.calendarWriteEnabled(context)
+    val contacts = CyclonePermissionSetup.contactsEnabled(context)
     val microphone = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     Settings426Surface {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -472,8 +475,12 @@ private fun Permissions426Card(context: Context) {
             CyclonePermissionRow(Icons.Rounded.Schedule, "Precise timing", "Optional exact scheduling for strict routine times.", exactTiming, if (exactTiming) "Manage" else "Allow") {
                 open426(context, CyclonePermissionSetup.exactTimingSettings(context))
             }
-            CyclonePermissionRow(Icons.Rounded.CalendarMonth, "Calendar context", "Optional read-only matching for calendar-aware routines.", calendar, if (calendar) "Manage" else "Allow") {
-                if (!calendar) (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_CALENDAR), 321) }
+            CyclonePermissionRow(Icons.Rounded.CalendarMonth, "Calendar", "Read your events and add the ones you ask for, without opening an app.", calendar && calendarWrite, if (calendar && calendarWrite) "Manage" else "Allow") {
+                if (!calendar || !calendarWrite) (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR), 321) }
+                else open426(context, CyclonePermissionSetup.appDetails(context))
+            }
+            CyclonePermissionRow(Icons.Rounded.Contacts, "Contacts", "Look up a number or address when a task asks for someone. Cyclone never changes your contacts.", contacts, if (contacts) "Manage" else "Allow") {
+                if (!contacts) (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.READ_CONTACTS), 323) }
                 else open426(context, CyclonePermissionSetup.appDetails(context))
             }
             CyclonePermissionRow(Icons.Rounded.Mic, "Voice requests", "Speak directly into Ask Cyclone.", microphone, if (microphone) "Manage" else "Allow") {
