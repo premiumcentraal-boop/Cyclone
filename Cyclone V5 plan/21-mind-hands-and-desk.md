@@ -130,6 +130,32 @@ names the rule that fired.
 - No regression on the Lab core suite. No secret values in clipboard telemetry. The Owner-moment handoff fires on a
   forced-failure fixture.
 
+### Alpha.41 build plan (2026-09-26, from the code as it is now)
+
+Reading the code again before building found a second wall behind the first. **Even when targeting passes, a Mind
+`type_text` outside Chrome's address bar is refused.** `CycloneAgentEnvironment.act` strips `user_authorized` from
+`phone.type` and only grants it back through `TaskTypingAuthorization` (Chrome URL bars for "open X" / "search X"
+goals); `PhoneTypeEngine.decide` then rejects the type as `POLICY_DENIED`, which the toolbox shows as "Not allowed".
+So ChatGPT, Keep, Gmail and WhatsApp could never be typed into by the Mind, whatever the gate did. Second, the type
+verification accepts "the text did not change" as success (`unchangedAsLabel`), so a set-text that silently does
+nothing is reported as typed.
+
+| # | Work | Where | Test |
+|---|---|---|---|
+| H1 | **Owner missions may type.** A Mind mission is the owner's own request; its environment grants typing into an ordinary editable field (enabled, not password, not a sensitive hint). The engine keeps its own sensitive-field refusal; sending stays with GATE. The step agent keeps `TaskTypingAuthorization`. | `CycloneAgentEnvironment` (`ownerMission` flag), `MindMissions` | env test: Mind env authorizes a composer, never a password field; step env unchanged |
+| H2 | **Honest refusals** (0.2). The revalidation status travels in the failure code; the toolbox names it with the next step to try. | `CycloneAgentEnvironment`, `PhoneMindToolbox.describe` | toolbox test per status |
+| H3 | **Revalidation fixes** (1.1), from a synthetic ChatGPT-composer fixture shaped like the failed run (editable inside a clickable container, hint label that changes on focus, repeated long labels): nested clickable around an editable target is the same control; an editable matches by role + resource id or raw path when its label changed. Distinct siblings stay ambiguous. | `CurrentTargetRevalidation` | fixture test reproduces AMBIGUOUS / DISAPPEARED before, MATCHED after; sibling cases stay closed |
+| H4 | **Delivery ladder** (1.3): set-text, strict read-back; if the field does not hold the text, paste (selection over the field + `ACTION_PASTE`, clip marked sensitive), read back; then restore the owner's clip or clear ours. Over 4 000 characters goes straight to paste (limit raised to 20 000 for paste). The result says `method` and `textVerified`; an unverified type is reported to the model as unverified, never as typed. Secret fields: unchanged. | `PhoneTypeEngine`, `CycloneAccessibilityService` | engine tests with a host where set-text no-ops, where paste works, where neither works |
+| H5 | **Focused typing** (1.2): `type_text` with `focused: true` types into the one editable with input focus (visible, not password, not sensitive). | toolbox, env (`phone.type` without id when `focused`), `PhoneTypeEngine.decide` | engine + toolbox tests |
+| H6 | **Focus is a change** (1.4): after a tap, "The text box has focus (keyboard open)" when an editable gained focus. | toolbox | toolbox test |
+| H7 | **Loop breaker + handoff** (1.5): two identical failures on one field add one harness line with the next step; four failed attempts to put text in → the draft is copied to the clipboard and an owner question says "I wrote this but could not enter it. It's copied: tap the box and paste." with Done / Try again. | toolbox (`TypingTracker`), owner port, prompt | tracker tests |
+| H8 | **Prompt** (1.6) and **run record** (0.3): Mind steps are `MIND_ACTION`/`MIND_RESULT` steps in RunInsight with counts and a cause from the last failed tool. | `MindPrompt`, `RunInsight`, `AgentRunDiagnosticV39` | RunInsight test on a Mind trace |
+| H9 | **Lab Hands suite** (Phase 3): text-delivery missions (Keep note, Gmail draft body, Chrome search, Settings search, Play search, Messages draft, WhatsApp draft, ChatGPT prompt) checked by the typed token on screen; nothing is sent. | gateway `lab/missions.py` | gateway tests |
+
+Physical capture of the real ChatGPT tree (0.1) stays an owner step with `debug.snapshot`; the synthetic fixture
+is replaced by the real one when it arrives. Release gate: the Hands suite on the Pixel (≥ 95%) is reported with
+the release as UNVERIFIED until run.
+
 ### Phase 2: Desk (after Cyclone Drive — plan 24)
 
 A mission-scoped scratchpad the Mind can manage like files.
