@@ -39,6 +39,21 @@ Keep parallel agents on non-overlapping paths whenever possible.
 
 The authoritative product/component metadata is `release/version.toml`. Android `versionName` and `versionCode` live in `apps/mobile/app/build.gradle.kts` and must agree with release metadata. Increment `versionCode` for every distributed Android build.
 
+### Fast release lane (since 5.0.0-alpha.43)
+
+Releases ship **Android and Glass only**. The Windows companion, device gateway and MCP stay frozen at the installed
+`1.6.0-alpha.43` / `5.0.0-alpha.43.dev1` build: leave `pc_companion`, `device_gateway`, `mcp` and `python_version`
+in `release/version.toml` unchanged, and do not touch `apps/pc-companion/**` versions.
+
+To release: bump `product_version`, `components.mobile`, `android_version_code` (+ `build.gradle.kts`), and
+`components.glass` only when `apps/glass` changed; add `docs/RELEASE_<mobile>.md`; push to the dev branch.
+`.github/workflows/v5-publish.yml` waits for Mobile CI on that commit, signs the APK with the rotated key, builds the
+Glass zip and publishes the release. No RC branch and no per-release publisher. Do not push other commits to the dev
+branch until the publish finishes (Mobile CI cancels in-progress runs per branch).
+
+The PC gateway serves Glass from `CYCLONE_GLASS_DIST` first, so a new Glass zip is installed by unzipping it and
+pointing that variable at the folder — the companion itself is not rebuilt.
+
 ## Validation
 
 For mobile changes:

@@ -18,7 +18,7 @@ on:
       - '.github/actions/stage-glass-ci/**'
       - 'scripts/pc-companion/verify-v5-release-artifact.py'
   push:
-    branches: [main, 'codex/cyclone-4.4.2-one-1.5.5-camera', 'codex/live-phone', 'release/cyclone-mobile-v*', 'release/cyclone-one-v*', 'release/cyclone-v5-*']
+    branches: [main, 'codex/cyclone-4.4.2-one-1.5.5-camera', 'codex/live-phone', 'release/cyclone-one-v*', 'release/cyclone-v5-*']
     paths:
       - 'apps/pc-companion/**'
       - 'apps/glass/**'

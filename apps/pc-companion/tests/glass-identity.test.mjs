@@ -38,21 +38,24 @@ test("Cargo.toml crate version is 1.6.0-alpha.43", () => {
   assert.equal(tomlString(packageBlock[0], "version"), GLASS_VERSION);
 });
 
-test("version.toml keeps Glass and the V5 phone components coherent", () => {
+test("version.toml keeps the frozen PC side coherent while the phone moves on", () => {
+  // Since the fast release lane, only Android and Glass ship. The companion, gateway and MCP stay frozen together at
+  // the alpha.43 build that is installed on the PC; the phone version moves on without them.
   const versionToml = readFileSync(resolve(repoRoot, "release/version.toml"), "utf8");
   const mobileVersion = tomlString(versionToml, "mobile");
-  assert.match(mobileVersion, /^5\.0\.0-alpha\.43(?:\.dev\d+)?$/);
+  assert.match(mobileVersion, /^5\.0\.0-alpha\.\d+(?:\.dev\d+)?$/);
   assert.equal(tomlString(versionToml, "pc_companion"), GLASS_VERSION);
-  assert.equal(tomlString(versionToml, "device_gateway"), mobileVersion);
-  assert.equal(tomlString(versionToml, "mcp"), mobileVersion);
+  const pcPython = tomlString(versionToml, "python_version");
+  assert.match(pcPython, /^5\.0\.0-alpha\.\d+(?:\.dev\d+)?$/);
+  assert.equal(tomlString(versionToml, "device_gateway"), pcPython);
+  assert.equal(tomlString(versionToml, "mcp"), pcPython);
   assert.equal(tomlString(versionToml, "product_version"), mobileVersion);
-  assert.equal(tomlString(versionToml, "python_version"), mobileVersion);
   assert.match(
     readFileSync(resolve(repoRoot, "apps/mobile/app/build.gradle.kts"), "utf8"),
     new RegExp(`versionName = "${mobileVersion.replaceAll(".", "\\.")}"`),
   );
   assert.equal(
     tomlString(readFileSync(resolve(repoRoot, "apps/device-gateway/pyproject.toml"), "utf8"), "version"),
-    mobileVersion,
+    pcPython,
   );
 });
