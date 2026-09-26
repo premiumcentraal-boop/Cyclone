@@ -11,12 +11,17 @@ object TaskNotificationProjection {
     /** No invented percentage when the agent has no stable plan. */
     fun progressPercent(task: WorkspaceTaskUi): Int? = if (!task.working) null else
         TaskPresentationProjector.project(task).progressFraction?.let { (it * 100).toInt().coerceIn(0, 100) }
-    fun actions(task: WorkspaceTaskUi): List<Pair<String, String>> = buildList {
+    /** [plane] is where a Mind mission works now ("screen" / "background"), when planes apply to it (plan 25). */
+    fun actions(task: WorkspaceTaskUi, plane: String? = null, backgroundAvailable: Boolean = true): List<Pair<String, String>> = buildList {
         if (task.interruption?.canTakeOver == true) add("handoff" to "Take Over")
         if (task.interruption?.canAutofill == true) add("autofill" to "Autofill")
         if (task.interruption?.canResumeAfterHuman == true) add("resume" to "I'm Done")
         if (task.confirmation != null && task.interruption?.confirmationToken == task.confirmation.token)
             add("confirm" to task.confirmation.button)
+        if (task.working && task.interruption == null) when {
+            plane == "background" -> add("to_screen" to "Show on screen")
+            plane == "screen" && backgroundAvailable -> add("to_background" to "Work in background")
+        }
         if (task.working) add("cancel" to "Stop task")
     }.take(3)
 }

@@ -100,7 +100,8 @@ class TaskKitTest {
         )
         states.forEach { state ->
             val controller = controllers.first { it.engine == TaskEngines.of(state) }
-            TaskNotificationProjection.actions(state).forEach { (wire, label) ->
+            val planes = if (TaskEngines.of(state) == TaskEngine.MIND) listOf(null, "screen", "background") else listOf(null)
+            planes.flatMap { TaskNotificationProjection.actions(state, it) }.forEach { (wire, label) ->
                 val command = TaskCommand.parse(wire, state.confirmation?.token)
                 assertNotNull("$label parses", command)
                 assertTrue("${controller.engine} handles the '$label' button", controller.supports(command!!))

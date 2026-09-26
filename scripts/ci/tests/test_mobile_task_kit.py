@@ -35,6 +35,15 @@ class TaskKitGuards(unittest.TestCase):
     def test_owner_answers_only_from_task_kit(self):
         self.assertEqual(callers(r"MindMissions\.answer\("), {"task/TaskCommands.kt"})
 
+    def test_plane_moves_only_from_task_kit(self):
+        # Planes (plan 25): the pill, notification actions and Glass move a task only through the bus.
+        self.assertEqual(callers(r"MissionPlanes\.(request|allowCurrentApp)\("), {"task/TaskCommands.kt"})
+
+    def test_the_plane_pill_only_speaks_task_kit(self):
+        pill = (BASE / "ui/overlay/PlanePill.kt").read_text(encoding="utf-8")
+        self.assertIn("TaskCommands.send(context, taskId", pill)
+        self.assertNotRegex(pill, r"MindMissions|WorkspaceRuntime|MissionPlanes\.(request|allow)")
+
     def test_the_owner_card_only_speaks_task_kit(self):
         card = (BASE / "ui/v32/CycloneOwnerCard.kt").read_text(encoding="utf-8")
         self.assertIn("TaskCommands.send(context, moment.taskId", card)

@@ -16,6 +16,14 @@ class TaskNotificationProjectionTest {
                 TaskNotificationProjection.actions(state).any { it.first == "autofill" })
         }
     }
+    @Test fun aWorkingMissionOffersTheOtherPlaneBeforeStop() {
+        val working = task.copy(phase = TaskPhase.WORKING)
+        assertEquals(listOf("to_background", "cancel"), TaskNotificationProjection.actions(working, "screen").map { it.first })
+        assertEquals(listOf("to_screen", "cancel"), TaskNotificationProjection.actions(working, "background").map { it.first })
+        assertEquals("unavailable background offers no move", listOf("cancel"),
+            TaskNotificationProjection.actions(working, "screen", backgroundAvailable = false).map { it.first })
+        assertEquals("tasks without planes are unchanged", listOf("cancel"), TaskNotificationProjection.actions(working).map { it.first })
+    }
     @Test fun failedIsTerminalRatherThanActionNeeded() {
         val failed = TaskHarnessState.normalize(task, task.copy(phase = TaskPhase.FAILED, resumable = false))
         val snapshot = TaskPresentationProjector.project(failed)

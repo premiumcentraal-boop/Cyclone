@@ -63,12 +63,15 @@ internal object TaskProgressNotification {
             }
             actions.size
         } else {
-            TaskNotificationProjection.actions(task).forEach { (command, label) ->
+            val plane = com.cyclone.mobile.runtime.plane.MissionPlanes.ui.value
+                ?.takeIf { com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX + it.missionId == task.taskId }
+            val projected = TaskNotificationProjection.actions(task, plane?.kind?.wire, plane?.available == true)
+            projected.forEach { (command, label) ->
                 val parsed = com.cyclone.mobile.task.TaskCommand.parse(command, task.confirmation?.token) ?: return@forEach
                 val action = com.cyclone.mobile.task.TaskCommands.pendingIntent(context, task, parsed)
                 builder.addAction(Notification.Action.Builder(null, label, action).build())
             }
-            TaskNotificationProjection.actions(task).size
+            projected.size
         }
         if (count < 3) {
             builder.addAction(Notification.Action.Builder(null, "View progress", progress).build())

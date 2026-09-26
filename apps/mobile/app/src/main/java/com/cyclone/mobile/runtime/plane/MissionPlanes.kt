@@ -64,7 +64,15 @@ object MissionPlanes {
 
     fun begin(context: Context, missionId: String, goal: String, traceId: String?): MissionPlaneSession {
         current?.end()
-        return MissionPlaneSession(context.applicationContext, missionId, goal, traceId, mode(context)) { uiState.value = it }
+        val app = context.applicationContext
+        return MissionPlaneSession(app, missionId, goal, traceId, mode(context)) { next ->
+            val changed = uiState.value?.let { it.kind != next?.kind || it.available != next?.available } ?: true
+            uiState.value = next
+            // The task notification carries the move action: keep it in step with the plane.
+            if (changed) com.cyclone.mobile.runtime.background.WorkspaceTasks.state.value?.let { task ->
+                runCatching { com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.renderTask(app, task) }
+            }
+        }
             .also { current = it }
     }
 

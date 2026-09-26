@@ -226,6 +226,40 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
+                // Planes (plan 25): where missions work. The pill on a running task switches either way.
+                var planeMode by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.mode(context)) }
+                val blocker = remember { com.cyclone.mobile.runtime.plane.MissionPlanes.blocker(context) }
+                Text("Where Cyclone works", fontWeight = FontWeight.Bold)
+                Text(
+                    when (planeMode) {
+                        com.cyclone.mobile.runtime.plane.PlaneMode.AUTOMATIC -> "Automatic: when you are using your phone, Cyclone works on a background screen behind it; otherwise on your screen, where you can watch. Protected screens and apps that need you always come to your screen."
+                        com.cyclone.mobile.runtime.plane.PlaneMode.SCREEN -> "Always on your screen, where you can watch every step."
+                        com.cyclone.mobile.runtime.plane.PlaneMode.BACKGROUND -> "In the background whenever the app allows it. Steps that need you or your screen still come to it."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.cyclone.mobile.runtime.plane.PlaneMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = planeMode == mode,
+                            onClick = {
+                                planeMode = mode
+                                com.cyclone.mobile.runtime.plane.MissionPlanes.setMode(context, mode)
+                            },
+                            label = { Text(mode.label) },
+                        )
+                    }
+                }
+                blocker?.let {
+                    Text("Background work is not available yet: $it", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
                 val memory = remember { com.cyclone.mobile.mind.mission.MindMissions.memory(context) }
                 var facts by remember { mutableStateOf(memory.all()) }
                 Text("What Cyclone Mind remembers", fontWeight = FontWeight.Bold)

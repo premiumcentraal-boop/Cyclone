@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -58,7 +59,9 @@ fun CycloneLiveMissionCard(mission: Mission) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             moment?.takeIf { it.taskId == "mission-${mission.id}" }?.let { CycloneOwnerCard(it, framed = false) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                // Planes (plan 25): the same pill as on the overlay.
+                com.cyclone.mobile.ui.overlay.PlanePill()
                 TextButton(onClick = { com.cyclone.mobile.task.TaskCommands.send(context, "mission-${mission.id}", com.cyclone.mobile.task.TaskCommand.Stop) }, shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Stop the mission" }) { Text("Stop") }
             }

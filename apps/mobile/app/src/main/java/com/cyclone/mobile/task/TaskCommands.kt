@@ -10,6 +10,8 @@ import com.cyclone.mobile.mind.mission.MindMissions
 import com.cyclone.mobile.mind.mission.OwnerRequestKind
 import com.cyclone.mobile.mind.mission.OwnerResponse
 import com.cyclone.mobile.runtime.background.WorkspaceTaskUi
+import com.cyclone.mobile.runtime.plane.MissionPlanes
+import com.cyclone.mobile.runtime.plane.PlaneKind
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
@@ -88,7 +90,8 @@ object MindTaskController : TaskController {
     override val engine = TaskEngine.MIND
     override val supported: Set<Class<out TaskCommand>> = setOf(TaskCommand.Stop::class.java, TaskCommand.TakeOver::class.java,
         TaskCommand.Pause::class.java, TaskCommand.Done::class.java, TaskCommand.Approve::class.java, TaskCommand.Decline::class.java,
-        TaskCommand.Reply::class.java, TaskCommand.Fill::class.java)
+        TaskCommand.Reply::class.java, TaskCommand.Fill::class.java, TaskCommand.MoveToBackground::class.java,
+        TaskCommand.MoveToForeground::class.java, TaskCommand.AllowBackground::class.java)
 
     private fun open(kind: OwnerRequestKind) = MindMissions.inbox.pending.value?.takeIf { it.kind == kind }
 
@@ -130,7 +133,20 @@ object MindTaskController : TaskController {
                 OwnerResponse.Answer("I'd rather not answer that; continue without it."), "Question skipped.")
             else -> TaskCommandResult.refused(engine, "Nothing is waiting for you.")
         }
+        // Planes: the switch runs as a transaction off the caller's thread; the pill shows how it went.
+        TaskCommand.MoveToBackground -> move(PlaneKind.BACKGROUND)
+        TaskCommand.MoveToForeground -> move(PlaneKind.SCREEN)
+        TaskCommand.AllowBackground -> if (MissionPlanes.allowCurrentApp(TaskCommands.context()))
+            TaskCommandResult.done(engine, "This app may run in the background from now on.")
+            else TaskCommandResult.refused(engine, "Cyclone is not working in an app right now.")
         else -> TaskCommandResult.refused(engine, "${command.label} is not available for Cyclone Mind.")
+    }
+
+    private fun move(to: PlaneKind): TaskCommandResult {
+        if (!MindMissions.isLive()) return TaskCommandResult.refused(engine, "The mission is not running.")
+        MissionPlanes.blocker(TaskCommands.context())?.takeIf { to == PlaneKind.BACKGROUND }?.let { return TaskCommandResult.refused(engine, it) }
+        return if (MissionPlanes.request(to)) TaskCommandResult.done(engine, if (to == PlaneKind.BACKGROUND) "Moving to the background." else "Moving to your screen.")
+            else TaskCommandResult.refused(engine, "The mission is not running.")
     }
 }
 

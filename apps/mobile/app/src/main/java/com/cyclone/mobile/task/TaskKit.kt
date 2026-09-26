@@ -27,10 +27,17 @@ sealed class TaskCommand(val wire: String, val label: String) {
     data class Reply(val text: String) : TaskCommand("reply", "Send")
     /** Values the owner typed on the check-in card, keyed by field label. */
     data class Fill(val values: Map<String, String>, val remember: Boolean) : TaskCommand("fill", "Fill in")
+    /** Planes (plan 25): Cyclone keeps working behind the owner's screen. */
+    data object MoveToBackground : TaskCommand("to_background", "Work in background")
+    /** Planes: the task comes to the owner's screen, on the page it is on. */
+    data object MoveToForeground : TaskCommand("to_screen", "Show on screen")
+    /** The pill's long-press: this app may always run in the background, whatever Cyclone learned. */
+    data object AllowBackground : TaskCommand("allow_background", "Always in background")
 
     companion object {
         // Lazy: the command objects extend this class, so they do not exist yet while its companion initializes.
-        val ALL: List<TaskCommand> by lazy { listOf(Stop, TakeOver, Pause, Done, Autofill, Confirm(null), Approve, Decline, Reply(""), Fill(emptyMap(), false)) }
+        val ALL: List<TaskCommand> by lazy { listOf(Stop, TakeOver, Pause, Done, Autofill, Confirm(null), Approve, Decline, Reply(""), Fill(emptyMap(), false),
+            MoveToBackground, MoveToForeground, AllowBackground) }
 
         fun parse(action: String?, confirmation: String? = null, text: String? = null): TaskCommand? = when (action?.trim()?.lowercase()) {
             "reply" -> text?.trim()?.takeIf { it.isNotEmpty() }?.let { Reply(it.take(2_000)) }
@@ -42,6 +49,9 @@ sealed class TaskCommand(val wire: String, val label: String) {
             "confirm" -> Confirm(confirmation)
             "approve" -> Approve
             "decline" -> Decline
+            "to_background", "background" -> MoveToBackground
+            "to_screen", "foreground", "screen" -> MoveToForeground
+            "allow_background" -> AllowBackground
             else -> null
         }
     }

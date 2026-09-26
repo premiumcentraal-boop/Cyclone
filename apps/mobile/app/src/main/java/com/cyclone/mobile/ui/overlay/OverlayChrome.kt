@@ -461,6 +461,10 @@ private fun ComposerPanel(
                         assistantContent = Color(0xFFD1D1D6),
                     )
                 }
+                // Planes (plan 25): where the mission works, one tap to move it.
+                if (task != null && task.taskId.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX)) {
+                    PlanePill(Modifier.fillMaxWidth())
+                }
                 Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
                     when {
                         task != null -> CycloneAskTaskPanel(task)
