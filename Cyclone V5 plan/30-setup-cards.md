@@ -1,6 +1,6 @@
 # 30 — Setup cards (alpha.46)
 
-**Status:** plan. Nothing is built yet.
+**Status:** built in **alpha.46** (2026-09-27). Physical Pixel acceptance is still owed.
 
 **The owner's ask:** "Make a small welcome helper path for settings with instructions so clear anyone understands, for
 all the important settings, in super short, super clear human language. A clear Setup button that takes them to the
@@ -43,27 +43,28 @@ Card 6 is only shown on Android 15 or later. The copy says nothing technical (no
     setting is now done.
   - **Skip:** smaller, bottom right. Moves to the next card; the skipped card stays open to set up later.
   - **X:** top right. Closes the whole flow. It does not come back by itself, except for a new card after an update.
-- **End:** a short "You're set" card listing anything still skipped, each with its own Setup.
-- **Info buttons (ⓘ):** in Settings, next to Phone control, Notifications, Background work and Permissions. Tapping one
-  shows that one card, with the same buttons.
+- **End:** a short "You're set" card naming anything still off, and where to set it up later (ⓘ in Settings).
+- **Info buttons (ⓘ):** in Settings, next to Phone control, Notifications and Background work. Tapping one shows that
+  one card, with the same buttons (Skip then closes it). Settings → Phone → **Set up Cyclone** runs the whole flow
+  again and shows how many settings are on.
 - **Never:** Cyclone never turns a setting on for the owner and never taps inside Android's settings screens during this
   flow. The owner flips every switch; Android keeps the permission dialogs.
 
 ## 3. Code shape
 
-- **Pure model** (for example `setup/SetupCards.kt`): the card list, and `next(done, skipped, dismissed)` deciding which
+- **Pure model** (`setup/SetupCards.kt`: `SetupCard`, `SetupCopy`, `SetupFlow`): the card list, and `next(done, skipped, dismissed)` deciding which
   card comes next. No Android types, so it is unit-tested directly.
-- **Android glue:** a small `SetupState` that reads the checks in `CyclonePermissionSetup` and the background capability,
+- **Android glue** (`setup/SetupState.kt`): a small `SetupState` that reads the checks in `CyclonePermissionSetup` and the background capability,
   and a `SetupStore` with seen, skipped and dismissed card ids. It keeps nothing else.
-- **UI:** a Tilt Glass card sheet (Compose) and the ⓘ buttons on the `Settings426Row` entries in
+- **UI:** a Tilt Glass card sheet (`ui/v32/SetupCardSheet.kt`, hosted in `CycloneV32App`) and the ⓘ buttons on the `Settings426Row` entries in
   `ui/v32/CycloneSettings426.kt`.
-- **Routing:** reuse the existing "Quick setup" entry point or replace it; do not leave two competing setup paths.
+- **Routing:** "Quick setup" stays for rooted phones only; "Set up Cyclone" is the one guided path.
 
 ## 4. Proof
 
-- Unit tests for `next(...)`: done cards skipped, skip order, X ends the flow, a card added by an update shows again,
+- Unit tests (`SetupCardsTest`) for `next(...)`: done cards skipped, skip order, X ends the flow, a card added by an update shows again,
   and card 6 is hidden below Android 15.
-- A CI guard: every card opens an Android settings intent or Android's own dialog, and none uses accessibility actions
+- A CI guard (`scripts/ci/tests/test_mobile_setup_cards.py`): every card opens an Android settings intent or Android's own dialog, and none uses accessibility actions
   or the executor.
 - `./gradlew :app:testDebugUnitTest`; `python scripts/ci/release_versions.py --check`;
   `python scripts/ci/mobile_product_guard.py`.

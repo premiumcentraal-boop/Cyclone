@@ -88,64 +88,80 @@ fun CycloneMobileV32App() {
             onDispose { lifecycle?.removeObserver(observer) }
         }
 
+        // Plan 30: the setup cards open by themselves only when a setting is off that the owner has never seen.
+        var setupOpen by rememberSaveable { mutableStateOf(false) }
+        var setupOnly by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) { if (com.cyclone.mobile.setup.SetupState.shouldOpen(context)) setupOpen = true }
+
         val phoneReady = v32AccessibilityEnabled(context)
         // Teal Matrix owns every destination, so the system bars always match the teal canvas.
         CycloneSignatureSystemBars(enabled = true)
         CycloneSignatureTheme(enabled = destination == V32Destination.AI && !settingsOpen) {
-            Scaffold(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                topBar = {
-                    if (settingsOpen) {
-                        CycloneV32TopBar(
-                            title = destination.label,
-                            settingsOpen = true,
-                            ready = phoneReady,
-                            onSettings = {},
-                            onBack = { backFromSettings() },
-                        )
-                    }
-                },
-                bottomBar = {
-                    // The Marketplace opens over Routines; any tab closes it.
-                    if (!settingsOpen) CycloneV32BottomBar(destination) {
-                        destination = it
-                        marketOpen = false
-                    }
-                },
-            ) { padding ->
-                Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-                    Column(Modifier.fillMaxSize()) {
-                        ProfileRescueBar()
-                        Box(Modifier.weight(1f).fillMaxSize()) {
-                            if (settingsOpen) {
-                                CycloneSettingsPage426(context, refreshTick, { refreshTick++ }, settingsSection) { settingsSection = it }
-                            } else if (marketOpen) {
-                                CycloneMarketplacePage(context, onBack = { marketOpen = false }) {
-                                    marketOpen = false
-                                    settingsSection = "Model & API"
-                                    settingsOpen = true
-                                }
-                            } else {
-                                when (destination) {
-                                    V32Destination.HOME -> V32HomePage(
-                                        context = context,
-                                        refreshTick = refreshTick,
-                                        onAi = { destination = V32Destination.AI },
-                                        onRoutines = { destination = V32Destination.ROUTINES },
-                                        onSettings = { settingsOpen = true },
-                                    )
-                                    V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick) { destination = V32Destination.AI }
-                                    V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }
-                                    V32Destination.ROUTINES -> CycloneRoutinesPage(
-                                        context,
-                                        refreshTick,
-                                        { destination = V32Destination.AI },
-                                        onMarketplace = { marketOpen = true },
-                                    ) { refreshTick++ }
-                                    V32Destination.BRAIN -> CycloneV39BrainPage(context, refreshTick)
+            Box(Modifier.fillMaxSize()) {
+                Scaffold(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    topBar = {
+                        if (settingsOpen) {
+                            CycloneV32TopBar(
+                                title = destination.label,
+                                settingsOpen = true,
+                                ready = phoneReady,
+                                onSettings = {},
+                                onBack = { backFromSettings() },
+                            )
+                        }
+                    },
+                    bottomBar = {
+                        // The Marketplace opens over Routines; any tab closes it.
+                        if (!settingsOpen) CycloneV32BottomBar(destination) {
+                            destination = it
+                            marketOpen = false
+                        }
+                    },
+                ) { padding ->
+                    Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+                        Column(Modifier.fillMaxSize()) {
+                            ProfileRescueBar()
+                            Box(Modifier.weight(1f).fillMaxSize()) {
+                                if (settingsOpen) {
+                                    CycloneSettingsPage426(context, refreshTick, { refreshTick++ }, settingsSection, onSetup = { card ->
+                                        setupOnly = card?.id
+                                        setupOpen = true
+                                    }) { settingsSection = it }
+                                } else if (marketOpen) {
+                                    CycloneMarketplacePage(context, onBack = { marketOpen = false }) {
+                                        marketOpen = false
+                                        settingsSection = "Model & API"
+                                        settingsOpen = true
+                                    }
+                                } else {
+                                    when (destination) {
+                                        V32Destination.HOME -> V32HomePage(
+                                            context = context,
+                                            refreshTick = refreshTick,
+                                            onAi = { destination = V32Destination.AI },
+                                            onRoutines = { destination = V32Destination.ROUTINES },
+                                            onSettings = { settingsOpen = true },
+                                        )
+                                        V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick) { destination = V32Destination.AI }
+                                        V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }
+                                        V32Destination.ROUTINES -> CycloneRoutinesPage(
+                                            context,
+                                            refreshTick,
+                                            { destination = V32Destination.AI },
+                                            onMarketplace = { marketOpen = true },
+                                        ) { refreshTick++ }
+                                        V32Destination.BRAIN -> CycloneV39BrainPage(context, refreshTick)
+                                    }
                                 }
                             }
                         }
+                    }
+                }
+                if (setupOpen) {
+                    SetupCardSheet(context, refreshTick, com.cyclone.mobile.setup.SetupCard.byId(setupOnly)) {
+                        setupOpen = false
+                        setupOnly = null
                     }
                 }
             }

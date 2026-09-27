@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.45 dev1: direct first - calendar, contacts, alarms and timers without any screen, on every phone.
+# Cyclone V5 alpha.46 dev1: setup cards - one short plain-language card per important setting, on Tilt Glass.
 # Owner-requested developer candidate; physical phone acceptance remains UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.45.dev1"
+product_version = "5.0.0-alpha.46.dev1"
 channel = "development"
-android_version_code = 189
+android_version_code = 190
 python_version = "5.0.0-alpha.43.dev1"
 
 [components]
-mobile = "5.0.0-alpha.45.dev1"
+mobile = "5.0.0-alpha.46.dev1"
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line; pc_companion is Cyclone One.
 glass = "1.0.0-alpha.26"

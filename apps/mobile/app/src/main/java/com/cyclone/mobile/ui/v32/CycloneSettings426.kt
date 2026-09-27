@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
@@ -55,6 +56,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +80,8 @@ private data class Settings426Row(
     val title: String,
     val icon: ImageVector,
     val value: String? = null,
+    /** Plan 30: the setup card the ⓘ button shows again. */
+    val info: com.cyclone.mobile.setup.SetupCard? = null,
 )
 
 private val settingsAutonomyProfiles = listOf(
@@ -95,6 +102,7 @@ internal fun CycloneSettingsPage426(
     refreshTick: Int,
     refresh: () -> Unit,
     section: String,
+    onSetup: (com.cyclone.mobile.setup.SetupCard?) -> Unit = {},
     onSection: (String) -> Unit,
 ) {
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
@@ -112,6 +120,8 @@ internal fun CycloneSettingsPage426(
     val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
     val background = remember(refreshTick) { BackgroundSetup.read(context) }
     val essentialsReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
+    val setupCards = remember { com.cyclone.mobile.setup.SetupState.cards() }
+    val setupDone = remember(refreshTick) { com.cyclone.mobile.setup.SetupState.done(context).size }
 
     fun modelValue(): String = V39AiChatContract.modelForStored(selectedModel).label
     fun effortValue(): String = reasoningEffort.takeIf { it.isNotBlank() }?.let(::reasoningEffortLabel) ?: "Model default"
@@ -144,10 +154,12 @@ internal fun CycloneSettingsPage426(
                     Settings426Row("Working indicator", "Working indicator", Icons.Rounded.Tune, workingIndicatorValue()),
                 ),
                 "Phone" to listOf(
+                    Settings426Row(SET_UP_CYCLONE, SET_UP_CYCLONE, Icons.Rounded.CheckCircle, "$setupDone/${setupCards.size}"),
                     Settings426Row("Quick setup", "Quick setup", Icons.Rounded.Bolt, "With root"),
-                    Settings426Row("Phone control", "Phone control", Icons.Rounded.Smartphone, phoneValue()),
-                    Settings426Row("Notifications", "Notifications", Icons.Rounded.Notifications, if (resultNotifications) "On" else "Off"),
-                    Settings426Row("Background work", "Background work", Icons.Rounded.CloudQueue, backgroundValue()),
+                    Settings426Row("Phone control", "Phone control", Icons.Rounded.Smartphone, phoneValue(), com.cyclone.mobile.setup.SetupCard.PHONE_CONTROL),
+                    Settings426Row("Notifications", "Notifications", Icons.Rounded.Notifications, if (resultNotifications) "On" else "Off", com.cyclone.mobile.setup.SetupCard.RESULTS),
+                    Settings426Row("Background work", "Background work", Icons.Rounded.CloudQueue, backgroundValue(),
+                        com.cyclone.mobile.setup.SetupCard.BACKGROUND.takeIf { it in setupCards }),
                     Settings426Row("Permissions", "Permissions", Icons.Rounded.Security, "$essentialsReady/4"),
                 ),
                 "Profiles" to listOf(
@@ -168,7 +180,8 @@ internal fun CycloneSettingsPage426(
                     Settings426Row("About", "Cyclone", Icons.Rounded.Info, CycloneRelease.label),
                 ),
             ),
-            onOpen = onSection,
+            onOpen = { id -> if (id == SET_UP_CYCLONE) onSetup(null) else onSection(id) },
+            onInfo = onSetup,
         )
         return
     }
@@ -380,8 +393,14 @@ internal fun CycloneSettingsPage426(
     }
 }
 
+private const val SET_UP_CYCLONE = "Set up Cyclone"
+
 @Composable
-private fun Settings426Root(groups: List<Pair<String, List<Settings426Row>>>, onOpen: (String) -> Unit) {
+private fun Settings426Root(
+    groups: List<Pair<String, List<Settings426Row>>>,
+    onOpen: (String) -> Unit,
+    onInfo: (com.cyclone.mobile.setup.SetupCard) -> Unit,
+) {
     LazyColumn(
         contentPadding = cyclonePageInsets(top = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -398,7 +417,7 @@ private fun Settings426Root(groups: List<Pair<String, List<Settings426Row>>>, on
                     CycloneSurface(Modifier.fillMaxWidth()) {
                         Column {
                             rows.forEachIndexed { index, row ->
-                                Settings426ListRow(row, onClick = { onOpen(row.id) })
+                                Settings426ListRow(row, onClick = { onOpen(row.id) }, onInfo = onInfo)
                                 if (index != rows.lastIndex) {
                                     CycloneHairline(Modifier.padding(start = 58.dp, end = 14.dp))
                                 }
@@ -412,7 +431,7 @@ private fun Settings426Root(groups: List<Pair<String, List<Settings426Row>>>, on
 }
 
 @Composable
-private fun Settings426ListRow(row: Settings426Row, onClick: () -> Unit) {
+private fun Settings426ListRow(row: Settings426Row, onClick: () -> Unit, onInfo: (com.cyclone.mobile.setup.SetupCard) -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -424,6 +443,15 @@ private fun Settings426ListRow(row: Settings426Row, onClick: () -> Unit) {
             }
         }
         Text(row.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+        row.info?.let { card ->
+            Box(
+                Modifier.size(32.dp).clip(CircleShape).clickable(role = Role.Button) { onInfo(card) }
+                    .semantics { contentDescription = "What is ${row.title}?" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Info, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         row.value?.let {
             Text(
                 it,
