@@ -69,6 +69,8 @@ Function OpenCyclone
 FunctionEnd
 
 Section "Cyclone" SecMain
+  ; $PLUGINSDIR exists only once a page or plugin has run; a silent install (/S) shows no page, so create it here.
+  InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File "${PAYLOAD}\Cyclone-PC.zip"
   File "${PAYLOAD}\Cyclone-PC.zip.sha256"

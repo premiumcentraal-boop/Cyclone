@@ -52,6 +52,8 @@ class WebOnlyPcGuards(unittest.TestCase):
         text = SETUP.read_text(encoding="utf-8")
         self.assertTrue(text.isascii())
         self.assertIn("RequestExecutionLevel user", text)
+        # A silent install (/S, the CI test and scripted installs) shows no page, so $PLUGINSDIR must be created.
+        self.assertLess(text.index("InitPluginsDir"), text.index('SetOutPath "$PLUGINSDIR"'))
         self.assertNotRegex(text, r"(?i)HKLM|RequestExecutionLevel admin")
         # The same verified install as the one-line install; the setup adds shortcuts and Apps & features.
         self.assertIn('install.ps1" -Zip "$PLUGINSDIR\\Cyclone-PC.zip" -NoStart', text)
