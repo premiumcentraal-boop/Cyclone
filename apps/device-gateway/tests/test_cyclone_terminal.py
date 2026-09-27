@@ -9,17 +9,17 @@ import pytest
 from cyclone_device_gateway.terminal import release as rel
 from cyclone_device_gateway.terminal import updater
 from cyclone_device_gateway.terminal.app import TerminalIO, check_for_update, parse
-from cyclone_device_gateway.terminal.install import UPDATE_EXIT_CODE, path_with, path_without, shim_text
+from cyclone_device_gateway.terminal.install import UPDATE_EXIT_CODE, migrate_window_runtime, path_with, path_without, shim_text
 from cyclone_device_gateway.terminal.window import app_window_args, find_browser
 
 
-def _release(tag: str, *, draft: bool = False, setup: bool = True, sums: bool = True) -> dict:
+def _release(tag: str, *, draft: bool = False, package: bool = True, manifest: bool = True) -> dict:
     assets = []
-    if setup:
-        assets.append({"name": "Cyclone-PC-Companion-1.6.0-alpha.23-Setup.exe",
-                       "browser_download_url": f"https://github.com/o/r/releases/download/{tag}/Cyclone-PC-Companion-1.6.0-alpha.23-Setup.exe"})
-    if sums:
-        assets.append({"name": "SHA256SUMS.txt", "browser_download_url": f"https://github.com/o/r/releases/download/{tag}/SHA256SUMS.txt"})
+    if package:
+        assets.append({"name": f"Cyclone-PC-{tag.lstrip('v')}.zip",
+                       "browser_download_url": f"https://github.com/o/r/releases/download/{tag}/Cyclone-PC-{tag.lstrip('v')}.zip"})
+    if manifest:
+        assets.append({"name": "release-manifest.json", "browser_download_url": f"https://github.com/o/r/releases/download/{tag}/release-manifest.json"})
     return {"tag_name": tag, "draft": draft, "html_url": f"https://github.com/o/r/releases/tag/{tag}", "assets": assets}
 
 
@@ -34,27 +34,31 @@ def test_latest_release_skips_drafts_incomplete_and_foreign_tags():
     picked = rel.pick_latest([
         _release("v5.0.0-alpha.9.dev1"),
         _release("v5.0.0-alpha.25.dev1", draft=True),
-        _release("v5.0.0-alpha.24.dev1", sums=False),
+        _release("v5.0.0-alpha.24.dev1", manifest=False),
+        _release("v5.0.0-alpha.26.dev1", package=False),
         _release("v5.0.0-alpha.23.dev1"),
         _release("mobile-v4.8.0"),
     ])
     assert picked is not None and picked.version == "5.0.0-alpha.23.dev1"
-    assert picked.setup_name.endswith("-Setup.exe")
+    assert picked.package_name == "Cyclone-PC-5.0.0-alpha.23.dev1.zip"
 
 
-def test_installer_is_refused_unless_its_checksum_matches(tmp_path: Path):
-    good = b"MZ installer bytes"
+def test_package_is_refused_unless_its_checksum_matches_the_manifest(tmp_path: Path):
+    good = b"PK zip bytes"
     found = rel.pick_latest([_release("v5.0.0-alpha.24.dev1")])
-    sums = f"{hashlib.sha256(good).hexdigest()}  {found.setup_name}\n"
+    manifest = json.dumps({"sha256": {found.package_name: hashlib.sha256(good).hexdigest()}}).encode()
 
     def fetch(payload):
-        return lambda url, timeout: sums.encode() if url.endswith("SHA256SUMS.txt") else payload
+        return lambda url, timeout: manifest if url.endswith("release-manifest.json") else payload
 
-    target = updater.download_installer(found, tmp_path / "Cyclone-Setup.exe", fetch=fetch(good))
+    target = updater.download_package(found, tmp_path / "Cyclone-PC.zip", fetch=fetch(good))
     assert target.read_bytes() == good
+    assert (tmp_path / "Cyclone-PC.zip.sha256").read_text() == hashlib.sha256(good).hexdigest()
     with pytest.raises(updater.UpdateError):
-        updater.download_installer(found, tmp_path / "other.exe", fetch=fetch(b"tampered"))
-    assert not (tmp_path / "other.exe").exists() and not (tmp_path / "other.part").exists()
+        updater.download_package(found, tmp_path / "other.zip", fetch=fetch(b"tampered"))
+    assert not (tmp_path / "other.zip").exists() and not (tmp_path / "other.part").exists()
+    with pytest.raises(updater.UpdateError):
+        updater.download_package(found, tmp_path / "x.zip", fetch=lambda url, timeout: b'{"sha256": {}}' if url.endswith(".json") else good)
 
 
 def test_release_check_is_cached_and_never_blocks_offline(tmp_path: Path):
@@ -102,9 +106,41 @@ def test_shim_runs_the_runtime_then_the_installer_only_on_the_update_code():
     assert text.startswith("@echo off\r\n")
     assert '"%CYCLONE_RUNTIME%" terminal %*' in text
     assert f'if not "%CYCLONE_EXIT%"=="{UPDATE_EXIT_CODE}" exit /b %CYCLONE_EXIT%' in text
-    assert 'start "" /wait "C:\\Users\\me\\AppData\\Local\\Cyclone One\\updates\\Cyclone-Setup.exe" /S' in text
-    assert text.index("terminal %*") < text.index("/wait")
+    update = text.splitlines()[-1]
+    # The batch file ends itself before PowerShell may replace it.
+    assert update.startswith("(goto) 2>nul & powershell.exe ")
+    assert '-File "C:\\Users\\me\\AppData\\Local\\Cyclone One\\install.ps1"' in update
+    assert '-Zip "C:\\Users\\me\\AppData\\Local\\Cyclone One\\updates\\Cyclone-PC.zip" -Relaunch' in update
+    assert text.index("terminal %*") < text.index("(goto)")
     assert text.isascii()
+
+
+def test_window_runtime_is_copied_once_and_never_overwrites(tmp_path: Path):
+    old = tmp_path / "local" / "com.cyclone.pccompanion" / "runtime"
+    (old / "state").mkdir(parents=True)
+    (old / "state" / "trust.json").write_text("paired")
+    (old / "gateway-token.dpapi").write_text("old-token")
+    (old / "diagnostics").mkdir()
+    target = tmp_path / "local" / "Cyclone One" / "runtime"
+    target.mkdir(parents=True)
+    (target / "gateway-token.dpapi").write_text("new-token")
+    assert migrate_window_runtime(tmp_path / "local", target) == ["state"]
+    assert (target / "state" / "trust.json").read_text() == "paired"
+    assert (target / "gateway-token.dpapi").read_text() == "new-token"
+    assert not (target / "diagnostics").exists()
+    assert migrate_window_runtime(tmp_path / "local", target) == []
+    assert migrate_window_runtime(tmp_path / "nowhere", target) == []
+
+
+def test_terminal_card_says_how_to_stop_start_and_update():
+    from cyclone_device_gateway.terminal.banner import run_stop_card
+
+    for fancy in (True, False):
+        card = run_stop_card(fancy=fancy)
+        text = "\n".join(card)
+        assert "Ctrl+C" in text and "cyclone update" in text and "type  cyclone" in text
+        assert len({len(line) for line in card}) == 1, "every line of the box is the same width"
+    assert "\n".join(run_stop_card(fancy=False)).isascii()
 
 
 def test_user_path_is_appended_once_and_removed_cleanly():

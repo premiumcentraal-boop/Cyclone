@@ -3,7 +3,7 @@
 **Status:**
 - **Layer 1 (direct first):** built in **alpha.45**.
 - **Layer 2 (background screen):** stays on Shizuku; no Cyclone engine (see §4). Alpha.46 is the setup cards (plan 30).
-- **Next after that:** parallel sessions in alpha.47, Drive in alpha.48–49.
+- **Next after that:** the web-only PC in alpha.47 (plan 31), parallel sessions in alpha.48, Drive in alpha.49–50.
 
 The first version of this plan was only the one-tap engine (Cyclone's own replacement for Shizuku). The owner asked
 for the *true* best solution across all Android phones, and that changed the answer.

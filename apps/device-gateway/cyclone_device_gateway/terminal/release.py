@@ -11,7 +11,9 @@ from typing import Any, Iterable
 REPO = "premiumcentraal-boop/Cyclone"
 RELEASES_API = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 _VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+)(?:\.dev(\d+))?)?$")
-_SETUP = re.compile(r"^Cyclone-PC-Companion-[0-9A-Za-z.\-]+-Setup\.exe$")
+# Plan 31: the web-only PC ships as one zip per release, verified against the release's manifest.
+_PACKAGE = re.compile(r"^Cyclone-PC-[0-9A-Za-z.\-]+\.zip$")
+MANIFEST = "release-manifest.json"
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -30,9 +32,9 @@ class Release:
     tag: str
     version: str
     page_url: str
-    setup_name: str
-    setup_url: str
-    sums_url: str
+    package_name: str
+    package_url: str
+    manifest_url: str
 
 
 def pick_latest(releases: Iterable[dict[str, Any]]) -> Release | None:
@@ -45,11 +47,11 @@ def pick_latest(releases: Iterable[dict[str, Any]]) -> Release | None:
         if key is None:
             continue
         assets = {str(a.get("name")): str(a.get("browser_download_url") or "") for a in item.get("assets") or [] if isinstance(a, dict)}
-        setup = next((name for name in assets if _SETUP.match(name)), None)
-        sums = assets.get("SHA256SUMS.txt")
-        if not setup or not sums or not assets[setup].startswith("https://github.com/"):
+        package = next((name for name in assets if _PACKAGE.match(name)), None)
+        manifest = assets.get(MANIFEST)
+        if not package or not manifest or not assets[package].startswith("https://github.com/") or not manifest.startswith("https://github.com/"):
             continue
-        release = Release(tag, tag.lstrip("v"), str(item.get("html_url") or ""), setup, assets[setup], sums)
+        release = Release(tag, tag.lstrip("v"), str(item.get("html_url") or ""), package, assets[package], manifest)
         if best is None or key > best[0]:
             best = (key, release)
     return best[1] if best else None
@@ -60,12 +62,11 @@ def is_newer(latest: str, installed: str) -> bool:
     return a is not None and b is not None and a > b
 
 
-def expected_sha256(sums_text: str, name: str) -> str | None:
-    for line in sums_text.splitlines():
-        parts = line.strip().split()
-        if len(parts) >= 2 and parts[-1].lstrip("*") == name and _SHA.match(parts[0].lower()):
-            return parts[0].lower()
-    return None
+def expected_sha256(manifest: Any, name: str) -> str | None:
+    """The package's SHA-256 from the release manifest (`{"sha256": {name: hex}}`)."""
+    table = manifest.get("sha256") if isinstance(manifest, dict) else None
+    value = table.get(name) if isinstance(table, dict) else None
+    return value.lower() if isinstance(value, str) and _SHA.match(value.lower()) else None
 
 
 def sha256_file(path: Path) -> str:

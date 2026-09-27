@@ -57,7 +57,7 @@ class PcConnections:
         cards = [{"id": host, "name": name, "description": about, "state": "unknown", "detected": False, "configured": False}
                  for host, (name, about) in HOSTS.items()]
         if base is None:
-            return {"available": False, "reason": "The Cyclone agent connector is not installed next to this gateway. Use Cyclone One → Connections.",
+            return {"available": False, "reason": "The Cyclone agent connector is not installed next to this gateway. Reinstall Cyclone (it ships CycloneAgentMCP.exe next to the runtime).",
                     "connections": cards}
         try:
             code, out = self._run([*base, "status", "--probe-gateway"], 30.0)
@@ -82,7 +82,7 @@ class PcConnections:
             raise ValueError("Unknown connection.")
         base = self._command()
         if base is None:
-            raise RuntimeError("The Cyclone agent connector is not installed next to this gateway. Use Cyclone One → Connections.")
+            raise RuntimeError("The Cyclone agent connector is not installed next to this gateway. Reinstall Cyclone (it ships CycloneAgentMCP.exe next to the runtime).")
         argv = [*base, "copy-config", "generic"] if host == "generic" else [*base, "connect", host, "--verify"]
         code, out = self._run(argv, 60.0)
         if host == "generic":

@@ -138,6 +138,12 @@ def build_serve_app(settings: Settings):
     # Part B transport onboarding is attached only to Cyclone One's authenticated loopback API.
     # The router itself is allowlisted and exposes no generic adb/shell command surface.
     app.include_router(create_transport_router(app.state.desktop_runtime, settings.token))
+    # Plan 31: Remote MCP, ChatGPT Attach and share, which used to live in the Cyclone One window.
+    from .pc.api import create_pc_router
+
+    pc_router, share = create_pc_router(settings.token, settings.port)
+    app.include_router(pc_router)
+    app.add_event_handler("shutdown", share.stop)
     attach_to_app(app)
     return app
 

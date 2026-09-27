@@ -11,6 +11,7 @@ import "./styles/knowledge.css";
 import "./styles/lab.css";
 import "./styles/market.css";
 import "./styles/home.css";
+import "./styles/pc.css";
 import { GlassApp } from "./app.js";
 import { establishSession, forgetSession } from "./core/session.js";
 import { GatewayClient } from "./services/gateway.js";
@@ -31,7 +32,7 @@ async function boot(): Promise<void> {
   });
   if (session.state !== "ready") {
     root.className = "glass-launch";
-    const code = el("code", "launch-command", "cyclone-device-gateway glass");
+    const code = el("code", "launch-command", "cyclone");
     const body =
       session.reason === "code-rejected"
         ? "That launch link was already used or has expired. Open Glass again from the launcher."

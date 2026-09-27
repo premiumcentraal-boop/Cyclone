@@ -13,7 +13,7 @@ that switching "still doesn't work" on the Pixel. Alpha.44 therefore does two th
 - **Evidence:** give the phone a one-tap Background Check, so the next failure names its exact step instead of "does
   nothing".
 
-Parallel sessions move to alpha.47 and Drive to alpha.48–49 (plans 29 and 30 took alpha.45–46).
+Parallel sessions move to alpha.48 and Drive to alpha.49–50 (plans 29, 30 and 31 took alpha.45–47).
 
 ---
 
@@ -107,5 +107,6 @@ phone) on a hidden background screen and runs every layer once, stopping at the 
 |---|---|
 | alpha.45 | Direct first (plan 29). |
 | alpha.46 | Setup cards (plan 30). |
-| alpha.47 | Parallel sessions (was alpha.44 in plan 26 §6). |
-| alpha.48–49 | Drive (plan 24). |
+| alpha.47 | Web-only PC (plan 31). |
+| alpha.48 | Parallel sessions (was alpha.44 in plan 26 §6). |
+| alpha.49–50 | Drive (plan 24). |

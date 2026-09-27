@@ -75,7 +75,44 @@ def render(view: Overview, color: bool) -> list[str]:
         row("Phones", "none yet · connect over USB or pair in Glass → Devices", WARN)
     row("Glass", view.glass)
     lines.append("")
-    lines.append(paint("  cyclone update · cyclone --browser · cyclone version · Ctrl+C to stop", DIM, color))
+    lines.extend("  " + paint(line, TEAL, color) for line in run_stop_card(fancy=_can_draw_boxes()))
+    lines.append(paint("  cyclone update · cyclone --browser · cyclone version", DIM, color))
+    return lines
+
+
+RUN_STOP = [
+    ("Stop", "close this window, or press Ctrl+C"),
+    ("Again", "open a terminal and type  cyclone"),
+    ("Update", "type  cyclone update"),
+]
+RUN_STOP_NOTE = "Keep this window open while Codex or ChatGPT uses your phone."
+
+
+def _can_draw_boxes() -> bool:
+    try:
+        "╭─│╯".encode(getattr(sys.stdout, "encoding", None) or "ascii")
+        return True
+    except (LookupError, UnicodeEncodeError):
+        return False
+
+
+def run_stop_card(width: int = 58, fancy: bool = True) -> list[str]:
+    """The run/stop card (plan 31): the same words as Glass's card; plain ASCII where the terminal can't draw boxes."""
+    tl, tr, bl, br, h, v = ("╭", "╮", "╰", "╯", "─", "│") if fancy else ("+", "+", "+", "+", "-", "|")
+    inner = width - 4
+    title = " Cyclone is running "
+    lines = [tl + h + title + h * (width - 3 - len(title)) + tr]
+    for label, text in RUN_STOP:
+        lines.append(v + " " + f"{label.ljust(7)} {text}".ljust(inner) + " " + v)
+    words, row = RUN_STOP_NOTE.split(), ""
+    for word in words:
+        if len(row) + len(word) + 1 > inner:
+            lines.append(v + " " + row.ljust(inner) + " " + v)
+            row = word
+        else:
+            row = f"{row} {word}".strip()
+    lines.append(v + " " + row.ljust(inner) + " " + v)
+    lines.append(bl + h * (width - 2) + br)
     return lines
 
 

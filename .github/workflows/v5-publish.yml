@@ -1,8 +1,8 @@
-name: Publish V5 phone and Glass developer alpha (rotated release key)
+name: Publish V5 phone, Glass and PC developer alpha (rotated release key)
 # One push releases: when release/version.toml changes on the development branch, this waits for the phone build of
-# that exact commit (Cyclone Mobile CI), builds Glass, signs the APK with the rotated release key, proves the signer
-# and version, and publishes. The Windows companion is frozen and is not rebuilt or attached (the owner keeps the
-# installed one; Glass ships as its own zip).
+# that exact commit (Cyclone Mobile CI), builds Glass, builds the web-only Cyclone for Windows package on Windows and
+# proves it installs and serves Glass (plan 31), signs the APK with the rotated release key, proves the signer and
+# version, and publishes. The retired Cyclone One desktop window is not built.
 on:
   push:
     branches: ['claude/cyclone-v5-handoff-review-9qrs40']
@@ -19,7 +19,39 @@ env:
   RELEASE_CERT_SHA256: e78c6e0b32d66da05839243c65e9987ba54722d402543f00408b57b1585dbf60
   HISTORICAL_CERT_SHA256: cc2a7a5d8e5e3686d8f7afe0a0e6e76ca42a1e6e6306e26f0eba84e4e69f3965
 jobs:
+  pc-package:
+    # Plan 31: Cyclone for Windows is the runtime + Glass + the `cyclone` command, one zip, no desktop window.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13.7'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Test the PC stack on Windows
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -e 'apps/device-gateway[test]' -e 'tools/cyclone-agent-mcp[test]' -e tools/codex-phone-mcp
+          # What the package runs on Windows: the PC features, the cyclone command, Glass hosting and the tooling seam.
+          python -m pytest -q apps/device-gateway/tests/test_pc_features.py apps/device-gateway/tests/test_cyclone_terminal.py apps/device-gateway/tests/test_glass_hosting.py apps/device-gateway/tests/test_tooling_seam.py apps/device-gateway/tests/test_market.py
+      - name: Build, install and smoke-test Cyclone-PC
+        shell: pwsh
+        run: |
+          $product = (python -c "import tomllib; print(tomllib.load(open('release/version.toml','rb'))['product_version'])").Trim()
+          ./scripts/pc/build-pc-package.ps1 -Version $product -OutDir dist/pc-package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cyclone-pc-package
+          path: dist/pc-package/
+          if-no-files-found: error
+
   publish:
+    needs: pc-package
     environment: mobile-release-approval
     runs-on: ubuntu-latest
     steps:
@@ -42,6 +74,7 @@ jobs:
           print(f"code={data['android_version_code']}")
           print(f"glass={data['components']['glass']}")
           print(f"pc={data['components']['pc_companion']}")
+          print(f"product={data['product_version']}")
           print(f"tag=v{mobile}")
           print(f"apk=Cyclone-{mobile}.apk")
           PY
@@ -103,6 +136,25 @@ jobs:
           mkdir -p glass
           (cd apps/glass/dist && zip -qr "../../../glass/Cyclone-Glass-$GLASS.zip" .)
           (cd glass && sha256sum "Cyclone-Glass-$GLASS.zip" > "Cyclone-Glass-$GLASS.zip.sha256")
+
+      - name: Collect the Windows package
+        if: steps.release.outputs.skip == 'false'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cyclone-pc-package
+          path: pc
+
+      - name: Verify the Windows package and add its installer
+        if: steps.release.outputs.skip == 'false'
+        env:
+          PRODUCT: ${{ steps.release.outputs.product }}
+        run: |
+          set -euo pipefail
+          test -f "pc/Cyclone-PC-$PRODUCT.zip"
+          (cd pc && sha256sum --check "Cyclone-PC-$PRODUCT.zip.sha256")
+          unzip -l "pc/Cyclone-PC-$PRODUCT.zip" | grep -q ' CyclonePCRuntime.exe$'
+          if unzip -l "pc/Cyclone-PC-$PRODUCT.zip" | grep -Eq 'gateway\.env$|fleet\.dpapi$'; then echo "The package carries owner secrets" >&2; exit 1; fi
+          cp packaging/pc/install.ps1 pc/install.ps1
 
       - name: Set up Android SDK
         if: steps.release.outputs.skip == 'false'
@@ -186,7 +238,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MOBILE: ${{ steps.release.outputs.mobile }}
           GLASS: ${{ steps.release.outputs.glass }}
-          PC: ${{ steps.release.outputs.pc }}
+          PRODUCT: ${{ steps.release.outputs.product }}
           TAG: ${{ steps.release.outputs.tag }}
           APK_NAME: ${{ steps.release.outputs.apk }}
         run: |
@@ -196,23 +248,30 @@ jobs:
           from pathlib import Path
           apk = Path('signed') / os.environ['APK_NAME']
           glass = Path('glass') / f"Cyclone-Glass-{os.environ['GLASS']}.zip"
+          pc = Path('pc') / f"Cyclone-PC-{os.environ['PRODUCT']}.zip"
+          installer = Path('pc') / 'install.ps1'
           manifest = {
               'source_sha': os.environ['GITHUB_SHA'],
               'mobile_ci_run_id': int(os.environ['MOBILE_RUN']),
               'glass_version': os.environ['GLASS'],
-              'pc_companion': f"{os.environ['PC']} (unchanged, not part of this release)",
+              'pc_package': pc.name,
+              'pc_windows_signing': 'CI_UNSIGNED',
               'physical_acceptance': 'NOT_YET_VERIFIED_OWNER_TEST_BUILD',
               'signing': 'ROTATED_RELEASE_KEY_WITH_LINEAGE',
-              'sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (apk, glass)},
+              # `cyclone` and install.ps1 refuse a package whose SHA-256 is not listed here.
+              'sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (apk, glass, pc, installer)},
           }
           Path('release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
           notes = Path(f"docs/RELEASE_{os.environ['MOBILE']}.md").read_text()
           title = next(line[2:].strip() for line in notes.splitlines() if line.startswith('# '))
           Path('release-title.txt').write_text(f"{title} (developer alpha)")
-          downloads = (f"Download **{apk.name}** for Android. Glass: **{glass.name}**. "
-                       f"The Windows companion is unchanged: keep Cyclone PC Companion {os.environ['PC']}.\n\n")
+          install = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/install.ps1"
+          downloads = (f"Download **{apk.name}** for Android.\n\n"
+                       f"**Windows** (web-only Cyclone: the runtime, Glass and the `cyclone` command). In PowerShell:\n\n"
+                       f"```\nirm {install} | iex\n```\n\n"
+                       f"Already installed? Type `cyclone update`. Glass alone: **{glass.name}**.\n\n")
           Path('RELEASE_NOTES.md').write_text(downloads + notes)
           PY
-          gh release create "$TAG" signed/* glass/* release-manifest.json \
+          gh release create "$TAG" signed/* glass/* pc/* release-manifest.json \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$(cat release-title.txt)" --prerelease --draft --notes-file RELEASE_NOTES.md
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease

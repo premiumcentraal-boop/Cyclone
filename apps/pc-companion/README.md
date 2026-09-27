@@ -1,3 +1,8 @@
+> **Retired (plan 31, alpha.47).** Cyclone for Windows is now web-only: install it with one line in PowerShell, type
+> `cyclone`, and Glass opens in its own browser window. Remote MCP and ChatGPT Attach moved into Glass; AI connections
+> are in Glass → Marketplace. This desktop window is no longer built; the source stays here for reference. See
+> `Cyclone V5 plan/31-web-only-pc.md` and the release notes for the install line.
+
 # Cyclone One
 
 Tauri 2 + TypeScript desktop glass for controlling one or many Cyclone phones.

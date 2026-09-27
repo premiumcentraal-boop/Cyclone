@@ -19,6 +19,10 @@ import { createAppKnowledgePage } from "./pages/appKnowledgePage.js";
 import { createKnowledgePage } from "./pages/knowledgePage.js";
 import { createLabPage } from "./pages/labPage.js";
 import { createMarketPage } from "./pages/marketPage.js";
+import { createRemotePage } from "./pages/remotePage.js";
+import { createAttachPage } from "./pages/attachPage.js";
+import { welcome } from "./services/pc.js";
+import { createWelcomeCard } from "./ui/welcomeCard.js";
 
 export const DEVICE_STORAGE_KEY = "cyclone.glass.device.v1";
 const DEVICE_REFRESH_MS = 5_000;
@@ -63,6 +67,8 @@ const PAGES: Record<Route["name"], PageFactory> = {
   knowledge: (ctx) => createKnowledgePage(ctx),
   lab: (ctx, route) => createLabPage(ctx, route as Extract<Route, { name: "lab" }>),
   market: (ctx) => createMarketPage(ctx),
+  remote: (ctx) => createRemotePage(ctx),
+  attach: (ctx) => createAttachPage(ctx),
   settings: (ctx) => createSettingsPage(ctx),
 };
 
@@ -107,6 +113,23 @@ export class GlassApp {
     this.unlistenHash = this.options.onHashChange(() => this.onHashChange());
     await this.refreshDevices();
     this.timer = this.options.setInterval(() => void this.refreshDevices(), DEVICE_REFRESH_MS);
+    // Plan 31: the run/stop card, once, the first time Glass opens on this PC.
+    const seen = await welcome.seen(this.options.client).catch(() => true);
+    if (!seen) this.showWelcome(true);
+  }
+
+  private welcomeCard: HTMLElement | null = null;
+
+  showWelcome(first: boolean): void {
+    if (this.welcomeCard) return;
+    const card = createWelcomeCard(() => {
+      card.remove();
+      this.welcomeCard = null;
+      if (first) void welcome.markSeen(this.options.client).catch(() => undefined);
+    });
+    this.welcomeCard = card;
+    this.options.root.append(card);
+    (card.querySelector(".welcome-close") as HTMLElement | null)?.focus?.();
   }
 
   stop(): void {
@@ -202,7 +225,16 @@ export class GlassApp {
     brand.append(mark, names);
 
     for (const item of NAV) this.nav.append(this.navItem(item.section, item.label, item.icon, item.route));
-    this.footerNav.append(this.navItem("settings", "Settings", "settings", { name: "settings" }));
+    this.footerNav.append(
+      this.navItem("remote", "Remote MCP", "send", { name: "remote" }),
+      this.navItem("attach", "ChatGPT Attach", "chat", { name: "attach" }),
+      this.navItem("settings", "Settings", "settings", { name: "settings" }),
+    );
+    const help = el("button", "nav-item nav-help");
+    help.type = "button";
+    help.append(icon("help"), el("span", "nav-label", "Start and stop"));
+    help.addEventListener("click", () => this.showWelcome(false));
+    this.footerNav.append(help);
 
     const note = el("p", "sidebar-note", "Cyclone thinks on the phone. Glass shows what it knows and did.");
     sidebar.append(brand, this.picker, this.nav, el("div", "sidebar-spacer"), this.footerNav, note);
