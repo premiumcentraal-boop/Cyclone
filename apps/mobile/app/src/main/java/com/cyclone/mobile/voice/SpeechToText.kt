@@ -38,12 +38,12 @@ class OnDeviceStt(private val context: Context) {
     }
 
     /** Listens with Android's recognizer until the owner stops; [onLevel] follows the voice. */
-    suspend fun listen(language: String, onLevel: (Float) -> Unit): Result = withContext(Dispatchers.Main) {
+    suspend fun listen(language: String, onLevel: (Float) -> Unit): Result = withContext<Result>(Dispatchers.Main) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) return@withContext Result.Failed(VoiceFailure.NOT_HEARD)
         val recognizer = if (SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             else SpeechRecognizer.createSpeechRecognizer(context)
         try {
-            suspendCancellableCoroutine { continuation ->
+            suspendCancellableCoroutine<Result> { continuation ->
                 fun finish(result: Result) { if (continuation.isActive) continuation.resume(result) }
                 recognizer.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) = Unit

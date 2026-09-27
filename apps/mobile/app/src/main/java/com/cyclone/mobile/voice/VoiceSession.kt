@@ -163,7 +163,7 @@ class VoiceSession(context: Context) {
         clip = null
         workJob = scope.launch {
             val started = SystemClock.elapsedRealtime()
-            val event = withContext(Dispatchers.IO) {
+            val event = withContext<VoiceEvent>(Dispatchers.IO) {
                 try {
                     val key = OpenRouterSecretStore.read(app)
                     if (key.isBlank()) return@withContext VoiceEvent.Failed(VoiceFailure.NO_KEY)
@@ -183,7 +183,7 @@ class VoiceSession(context: Context) {
     private fun understand(transcript: String, context: VoiceContext) {
         workJob = scope.launch {
             val started = SystemClock.elapsedRealtime()
-            val event = withContext(Dispatchers.IO) {
+            val event = withContext<VoiceEvent>(Dispatchers.IO) {
                 try {
                     val key = OpenRouterSecretStore.read(app)
                     if (key.isBlank()) return@withContext VoiceEvent.Failed(VoiceFailure.NO_KEY)

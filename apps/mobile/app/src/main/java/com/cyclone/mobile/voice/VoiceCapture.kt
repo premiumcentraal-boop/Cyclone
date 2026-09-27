@@ -37,7 +37,7 @@ class VoiceCapture(private val context: Context) {
 
     /** Records until the detector decides; [onLevel] gets the voice level (0..1) about 50 times a second. */
     @SuppressLint("MissingPermission")
-    suspend fun record(tuning: VoiceActivity.Tuning, onLevel: (Float) -> Unit): Outcome = withContext(Dispatchers.IO) {
+    suspend fun record(tuning: VoiceActivity.Tuning, onLevel: (Float) -> Unit): Outcome = withContext<Outcome>(Dispatchers.IO) {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return@withContext Outcome.Failed(VoiceFailure.NO_MIC)
         finishEarly = false
         val rate = VoiceActivity.SAMPLE_RATE
