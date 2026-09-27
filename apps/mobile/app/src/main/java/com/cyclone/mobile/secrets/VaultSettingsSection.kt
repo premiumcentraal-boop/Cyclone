@@ -101,6 +101,7 @@ fun VaultSettingsSection(
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(com.cyclone.mobile.ui.v32.CycloneSpacing.Section)) {
         CycloneSectionTitle("Vault")
+        DeviceKeyCard()
         if (slots.isEmpty()) {
             CycloneSimpleCard(Modifier.fillMaxWidth()) {
                 Text(
@@ -151,5 +152,29 @@ fun VaultSettingsSection(
                 }
             }
         }
+    }
+}
+
+/**
+ * Plan 33 C2: this phone's key for passwords sent from the Command Center. The owner compares the fingerprint with the
+ * one Glass shows before trusting the phone. Public information only.
+ */
+@Composable
+private fun DeviceKeyCard() {
+    val key = remember { runCatching { DeviceKey.ensure() }.getOrNull() }
+    CycloneSimpleCard(Modifier.fillMaxWidth()) {
+        Text("Command Center key", style = MaterialTheme.typography.titleSmall)
+        Text(
+            key?.fingerprint ?: "Not available on this phone",
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+        )
+        Text(
+            if (key == null) "Passwords can't be sent to this phone from the PC." else
+                "Glass shows the same letters under Vault → Phones. Trust this phone only if they match." +
+                    if (key.strongBox) " Kept in this phone's StrongBox chip." else " Kept in this phone's secure hardware.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

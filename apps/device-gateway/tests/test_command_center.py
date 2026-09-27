@@ -272,7 +272,7 @@ def test_contract_validates_the_phone_s_status():
     moment = {"kind": "approval", "requestId": "req-1", "text": "Send?", "gate": "send",
               "send": {"text": "hi", "recipient": "Anna", "app": "WhatsApp"}, "choices": [], "fields": [], "approvableHere": True}
     value = {"missionId": "mabcdefg1", "status": "running", "live": True, "turns": 2, "workingMs": 5, "costUsd": 0.0,
-             "summary": "", "moment": moment}
+             "summary": "", "moment": moment, "leases": []}
     assert validate_android_response("cc.status", value, {"missionId": "mabcdefg1"})
     with pytest.raises(DesktopRuntimeError):
         validate_android_response("cc.status", {**value, "moment": {**moment, "typedValue": "x"}}, {"missionId": "mabcdefg1"})

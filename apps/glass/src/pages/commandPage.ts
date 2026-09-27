@@ -30,6 +30,7 @@ import { actionButton, card, chip, emptyState, errorState, loadingState, pageHea
 import { relativeTime } from "../ui/format.js";
 import type { GlassPage } from "./page.js";
 import { createVaultView, type VaultView } from "./vaultView.js";
+import { vaultApi } from "../services/vault.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -293,6 +294,23 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     goal.placeholder = "What should the phone do? For example: Post today's product photo to @mybrand with the caption from Notes.";
     const phone = phoneSelect("Phone");
     const account = accountSelect();
+    // C2: sign in with a vault login of this account. Only ids and kinds are read here; the password stays sealed.
+    const vaultPick = el("select", "cc-input");
+    vaultPick.setAttribute("aria-label", "Sign in with");
+    vaultPick.append(option("", "Nothing from the vault"));
+    const refreshVaultPick = async () => {
+      vaultPick.replaceChildren(option("", "Nothing from the vault"));
+      if (!account.value) return;
+      try {
+        const vault = await vaultApi.get(ctx.client);
+        for (const item of vault.items.filter((i) => i.accountId === account.value && (i.kind === "login" || i.kind === "totp"))) {
+          vaultPick.append(option(item.id, `${item.kind === "login" ? "Vault login" : "Vault authenticator"}, saved ${relativeTime(item.updatedAt ?? 0)}`));
+        }
+      } catch {
+        /* no vault yet */
+      }
+    };
+    account.addEventListener("change", () => void refreshVaultPick());
     const at = el("input", "cc-input");
     at.type = "datetime-local";
     at.setAttribute("aria-label", "Start at");
@@ -330,6 +348,10 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       if (name) body.title = name;
       if (phone.value) body.deviceId = phone.value;
       if (account.value) body.accountId = account.value;
+      if (vaultPick.value) {
+        if (!phone.value) return say("A task that signs in with the vault needs one chosen phone.", "error");
+        body.vaultItemId = vaultPick.value;
+      }
       if (recipes.value) body.recipe = recipes.value;
       if (at.value) {
         const due = new Date(String(at.value)).getTime();
@@ -343,7 +365,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       });
     });
     const grid = el("div", "cc-grid");
-    grid.append(title.wrap, labelled("Phone", phone), labelled("Account", account), labelled("Start at (empty = now)", at), labelled("Recipe", recipes));
+    grid.append(title.wrap, labelled("Phone", phone), labelled("Account", account), labelled("Sign in with", vaultPick), labelled("Start at (empty = now)", at), labelled("Recipe", recipes));
     const actions = el("div", "cc-actions");
     actions.append(create, loadRecipes);
     box.append(grid, labelled("Goal", goal), actions);
@@ -366,7 +388,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
         cancel.append(button);
       }
       row.append(
-        cell(t.title, t.routineId ? "From a routine" : t.recipe ? `Recipe ${t.recipe}` : undefined),
+        cell(t.title, [t.routineId ? "From a routine" : t.recipe ? `Recipe ${t.recipe}` : "", t.vaultItemId ? `Signs in with the vault${t.leases[0] ? ` · password ${t.leases[0].state}` : ""}` : ""].filter(Boolean).join(" · ") || undefined),
         cell(deviceName(t.run?.deviceId ?? t.deviceId)),
         cell(accountName(t.accountId)),
         chipCell(taskStatusLabel(t.status), taskStatusTone(t.status)),

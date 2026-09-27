@@ -155,6 +155,39 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def vault_audit(body: dict[str, Any]):
         return call(lambda: cc().vault.client_audit(body))
 
+    # Plan 33 (C2): phones' device keys and sealed leases. Envelopes are opaque bytes the gateway cannot open.
+    @router.get("/v1/cc/phones", dependencies=[Depends(auth)])
+    def phones():
+        return call(lambda: {"phones": cc().delivery.phones()})
+
+    @router.post("/v1/cc/phones/{device_id}/key", dependencies=[Depends(auth)])
+    def phone_key(device_id: str):
+        return call(lambda: cc().delivery.fetch_key(device_id))
+
+    @router.post("/v1/cc/phones/{device_id}/trust", dependencies=[Depends(auth)])
+    def phone_trust(device_id: str, body: dict[str, Any]):
+        return call(lambda: cc().delivery.trust(device_id, body_of(body)))
+
+    @router.post("/v1/cc/phones/{device_id}/untrust", dependencies=[Depends(auth)])
+    def phone_untrust(device_id: str):
+        return call(lambda: cc().delivery.untrust(device_id))
+
+    @router.get("/v1/cc/leases", dependencies=[Depends(auth)])
+    def leases(limit: int = Query(default=200, ge=1, le=1000)):
+        return call(lambda: {"leases": cc().delivery.leases(limit)})
+
+    @router.get("/v1/cc/leases/pending", dependencies=[Depends(auth)])
+    def leases_pending():
+        return call(lambda: {"pending": cc().delivery.pending()})
+
+    @router.post("/v1/cc/tasks/{task_id}/leases", dependencies=[Depends(auth)])
+    def lease_submit(task_id: str, body: dict[str, Any]):
+        return call(lambda: cc().delivery.submit(task_id, body_of(body)))
+
+    @router.post("/v1/cc/leases/{lease_id}/revoke", dependencies=[Depends(auth)])
+    def lease_revoke(lease_id: str):
+        return call(lambda: cc().delivery.revoke(lease_id))
+
     @router.get("/v1/cc/audit", dependencies=[Depends(auth)])
     def audit(limit: int = Query(default=200, ge=1, le=1000)):
         return call(lambda: cc().audit(limit))

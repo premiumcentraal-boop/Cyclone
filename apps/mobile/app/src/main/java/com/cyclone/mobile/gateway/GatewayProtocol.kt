@@ -154,6 +154,7 @@ internal object GatewayProtocol {
         "cc.start",
         "cc.status",
         "cc.answer",
+        "cc.key",
     )
 
     fun parse(line: String): GatewayRequest {

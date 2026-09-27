@@ -262,6 +262,22 @@ internal class AndroidMindOwner(
         val fillTarget = runCatching { SecretFillTarget(target.elementId, target.observationId, page.sessionId, page.displayId) }.getOrElse {
             return MindSecretReply(MindSecretOutcome.FAILED, detail = "the field is not addressable")
         }
+        // Plan 33 C2: a secret the owner sealed to this phone for this task and this app or site fills once, without
+        // the Secrets Card. The value goes straight from the one-shot lease to the field; the Mind never sees it.
+        com.cyclone.mobile.secrets.SealedDelivery.take(missionId, slot, place.id)?.let { taken ->
+            val execution = try {
+                taken.lease.consume { com.cyclone.mobile.secrets.PhoneToolSecretFillExecutor(context).fill(fillTarget, it) }
+            } catch (_: Exception) {
+                null
+            } finally {
+                taken.lease.revoke()
+            }
+            val ok = execution?.performed == true && execution.verified
+            com.cyclone.mobile.secrets.SealedDelivery.report(taken.leaseId, if (ok) "used" else "failed")
+            DeviceState.setController(DeviceState.Controller.AGENT)
+            return if (ok) MindSecretReply(MindSecretOutcome.FILLED, 0)
+            else MindSecretReply(MindSecretOutcome.FAILED, 0, "the field did not accept the delivered value; it was used up")
+        }
         val result = AtomicReference<SecretUseResult?>(null)
         val request = inbox.post(missionId, OwnerRequestKind.SECRET, "Fill ${target.label} for ${place.origin ?: place.id.substringAfter(':')}")
         onWaiting("Secure input: ${target.label}")

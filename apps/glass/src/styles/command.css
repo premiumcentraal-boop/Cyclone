@@ -64,3 +64,10 @@
 .vault-secret .vault-mask { font-family: var(--font-mono); font-size: var(--text-sm); word-break: break-all; }
 .vault-health .chip { font-size: var(--text-xs); }
 .vault-editor { border-left: 3px solid var(--accent); }
+
+/* Plan 33 (C2): phones and sealed delivery. */
+.vault-phone { display: grid; gap: var(--space-2); padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+.vault-phone:first-of-type { border-top: 0; }
+.vault-fingerprint { font-family: var(--font-mono); font-size: var(--text-md); letter-spacing: 0.06em; }
+.vault-pending { padding: var(--space-2) 0; }
+.card-subtitle { font-size: var(--text-sm); margin: var(--space-2) 0 0; color: var(--text-muted); }

@@ -13,6 +13,9 @@ import {
   type ItemFields, type ItemKind, type OpenItem, type Unlocker, type VaultRecord, type VaultState,
 } from "../services/vault.js";
 import { parseExport, type ImportResult } from "../services/vaultImport.js";
+import { deliveryApi, leaseStateLabel, placeLabel, sealForTask, type Lease, type PendingLease, type Phone } from "../services/delivery.js";
+import { fingerprint } from "../services/hpke.js";
+import { fromB64 } from "../services/vault.js";
 import { copyText } from "../ui/clipboard.js";
 import { actionButton, card, chip, emptyState, errorState, loadingState } from "../ui/components.js";
 import { el, setChildren } from "../ui/dom.js";
@@ -68,6 +71,7 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
     lastProof = 0;
     if (idle) clearTimeout(idle);
     idle = null;
+    if (deliveryTimer) clearTimeout(deliveryTimer);
     if (!destroyed) {
       say(message);
       render();
@@ -313,7 +317,7 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
     list.append(itemsTable());
     wrap.append(bar, summary);
     if (editing) wrap.append(editor(editing === "new" ? null : editing));
-    wrap.append(list, importCard(), settingsCard());
+    wrap.append(list, deliveryCard(), phonesCard(), importCard(), settingsCard());
     return wrap;
   }
 
@@ -484,6 +488,156 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
     return box;
   }
 
+  // ------------------------------------------------------------------ sealed delivery (C2)
+
+  let autoSend = true;
+  const tried = new Map<string, number>();
+  let deliveryBox: HTMLElement | null = null;
+  let phonesBox: HTMLElement | null = null;
+
+  /** Seal every waiting task's secret this tab can: the vault is unlocked and the phone's key is trusted. */
+  async function sendPending(pending: PendingLease[], only?: string): Promise<void> {
+    if (!vk) return;
+    for (const p of pending) {
+      if (only && p.taskId !== only) continue;
+      if (!p.deviceKey) continue;
+      if (!only && Date.now() - (tried.get(p.taskId) ?? 0) < 60_000) continue;
+      tried.set(p.taskId, Date.now());
+      const item = items.find((i) => i.id === p.vaultItemId);
+      if (!item) {
+        say(`"${p.title}" uses a vault item this vault does not have.`, "error");
+        continue;
+      }
+      try {
+        const envelopes = await sealForTask(p, item);
+        await deliveryApi.submit(ctx.client, p.taskId, envelopes);
+        say(`Sealed for "${p.title}": only that phone can open it, for this task, on ${placeLabel(p.place)}.`);
+      } catch (error) {
+        say((error as Error).message, "error");
+      }
+    }
+  }
+
+  async function refreshDelivery(): Promise<void> {
+    if (!vk || !deliveryBox || destroyed) return;
+    try {
+      let [pending, leases] = await Promise.all([deliveryApi.pending(ctx.client), deliveryApi.leases(ctx.client)]);
+      if (autoSend && pending.some((p) => p.deviceKey && Date.now() - (tried.get(p.taskId) ?? 0) >= 60_000)) {
+        await sendPending(pending);
+        [pending, leases] = await Promise.all([deliveryApi.pending(ctx.client), deliveryApi.leases(ctx.client)]);
+      }
+      renderDelivery(pending, leases);
+    } catch (error) {
+      setChildren(deliveryBox, el("p", "cc-hint", (error as Error).message));
+    }
+    refreshDeliveryLater();
+  }
+
+  let deliveryTimer: ReturnType<typeof setTimeout> | null = null;
+  function refreshDeliveryLater(): void {
+    if (deliveryTimer) clearTimeout(deliveryTimer);
+    deliveryTimer = setTimeout(() => void refreshDelivery(), 10_000);
+  }
+
+  function renderDelivery(pending: PendingLease[], leases: Lease[]): void {
+    if (!deliveryBox) return;
+    const auto = el("input");
+    auto.type = "checkbox";
+    auto.checked = autoSend;
+    auto.addEventListener("change", () => {
+      autoSend = auto.checked;
+    });
+    const autoLabel = el("label", "cc-check");
+    autoLabel.append(auto, el("span", undefined, "Send automatically while this tab is open and the vault unlocked"));
+    const rows: HTMLElement[] = [];
+    for (const p of pending) {
+      const row = el("div", "cc-row vault-pending");
+      row.append(el("strong", undefined, p.title), el("span", "muted", `${p.handle} · ${placeLabel(p.place)}`));
+      if (!p.deviceKey) row.append(chip("Trust the phone first", "warning"));
+      else {
+        const send = actionButton("Seal and send", { variant: "primary" });
+        send.addEventListener("click", () => void sendPending([p], p.taskId).then(() => refreshDelivery()));
+        row.append(send);
+      }
+      rows.push(row);
+    }
+    const recent = leases.slice(0, 8).map((l) => {
+      const state = leaseStateLabel(l.state);
+      const row = el("div", "cc-row");
+      row.append(chip(state.label, state.tone), el("span", "muted", `${l.slot === "otp" ? "Authenticator code" : "Password"} · ${placeLabel(l.place)} · ${relativeTime(l.createdAt)}`));
+      if (l.state === "ready") {
+        const revoke = actionButton("Revoke", { variant: "ghost" });
+        revoke.addEventListener("click", () => void deliveryApi.revoke(ctx.client, l.id).then(() => refreshDelivery()));
+        row.append(revoke);
+      }
+      return row;
+    });
+    setChildren(deliveryBox,
+      el("h2", "card-title", "Passwords for tasks"),
+      el("p", "cc-hint", "A task that signs in with a vault login waits here. Glass seals the password to that one phone, for that one task, on that one app or site, for 30 minutes; the phone uses it once and wipes it. The PC only passes the sealed bytes on."),
+      autoLabel,
+      ...(rows.length ? rows : [el("p", "cc-hint", "Nothing is waiting.")]),
+      ...(recent.length ? [el("h3", "card-subtitle", "Recent"), ...recent] : []),
+    );
+  }
+
+  function deliveryCard(): HTMLElement {
+    deliveryBox = card("cc-card vault-card");
+    deliveryBox.append(loadingState("Checking tasks…"));
+    void refreshDelivery();
+    return deliveryBox;
+  }
+
+  async function refreshPhones(): Promise<void> {
+    if (!phonesBox) return;
+    let phones: Phone[] = [];
+    try {
+      phones = await deliveryApi.phones(ctx.client);
+    } catch (error) {
+      setChildren(phonesBox, el("p", "cc-hint", (error as Error).message));
+      return;
+    }
+    const rows: HTMLElement[] = [];
+    for (const phone of phones) {
+      const row = el("div", "vault-phone");
+      const head = el("div", "cc-row");
+      head.append(el("strong", undefined, phone.name), el("span", "muted", phone.ready ? "connected" : "not connected"));
+      row.append(head);
+      if (!phone.key) {
+        const get = actionButton("Get its key", { variant: "secondary" });
+        get.disabled = !phone.ready;
+        get.addEventListener("click", () => void deliveryApi.fetchKey(ctx.client, phone.deviceId).then(() => refreshPhones(), (e) => say((e as Error).message, "error")));
+        row.append(el("p", "cc-hint", "Its key lets Glass seal passwords that only this phone can open."), get);
+      } else {
+        // Recompute the fingerprint from the key bytes here, so the PC cannot show one key and hand over another.
+        const shown = await fingerprint(fromB64(phone.key.publicKey)).catch(() => "");
+        const same = shown === phone.key.fingerprint;
+        row.append(el("code", "vault-fingerprint", shown || "?"));
+        if (!same) row.append(chip("Key and fingerprint differ: do not trust", "danger"));
+        if (phone.key.trusted) {
+          row.append(chip(phone.key.strongBox ? "Trusted · StrongBox" : "Trusted · secure hardware", "success"));
+          const stop = actionButton("Stop trusting", { variant: "ghost" });
+          stop.addEventListener("click", () => void deliveryApi.untrust(ctx.client, phone.deviceId).then(() => refreshPhones()));
+          row.append(stop);
+        } else if (same) {
+          row.append(el("p", "cc-hint", "On the phone, open Settings → Vault → Command Center key. Trust it only if the letters match exactly."));
+          const match = actionButton("They match, trust this phone", { variant: "primary" });
+          match.addEventListener("click", () => void deliveryApi.trust(ctx.client, phone.deviceId, shown).then(() => refreshPhones(), (e) => say((e as Error).message, "error")));
+          row.append(match);
+        }
+      }
+      rows.push(row);
+    }
+    setChildren(phonesBox, el("h2", "card-title", "Phones"), ...(rows.length ? rows : [el("p", "cc-hint", "No phone is connected.")]));
+  }
+
+  function phonesCard(): HTMLElement {
+    phonesBox = card("cc-card vault-card");
+    phonesBox.append(loadingState("Loading phones…"));
+    void refreshPhones();
+    return phonesBox;
+  }
+
   // ------------------------------------------------------------------ import, backup, settings
 
   function importCard(): HTMLElement {
@@ -589,6 +743,7 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
       revealed.clear();
       if (idle) clearTimeout(idle);
       for (const t of timers) clearTimeout(t);
+      if (deliveryTimer) clearTimeout(deliveryTimer);
       timers.clear();
     },
   };

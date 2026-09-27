@@ -9,6 +9,8 @@ import com.cyclone.mobile.owner.MomentKind
 import com.cyclone.mobile.owner.OwnerMoment
 import com.cyclone.mobile.owner.OwnerMomentsRuntime
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.secrets.DeviceKey
+import com.cyclone.mobile.secrets.SealedDelivery
 import com.cyclone.mobile.task.TaskCommand
 import com.cyclone.mobile.task.TaskCommandResult
 import com.cyclone.mobile.task.TaskCommands
@@ -42,27 +44,60 @@ internal object GatewayV5CommandAdapter {
     internal var load: (String) -> Mission? = { MindMissions.store(app()).load(it) }
     internal var moment: () -> OwnerMoment? = { OwnerMomentsRuntime.current() }
     internal var send: (String, TaskCommand) -> TaskCommandResult = { taskId, command -> TaskCommands.send(app(), taskId, command) }
+    internal var deviceKey: () -> DeviceKey.Public = { DeviceKey.ensure() }
+    /** Leases handed to each mission, so status can report their outcomes (ids only). */
+    private val missionLeases = mutableMapOf<String, List<String>>()
 
     @Volatile private var context: Context? = null
-    fun install(context: Context) { this.context = context.applicationContext }
+    fun install(context: Context) {
+        this.context = context.applicationContext
+        SealedDelivery.install(context)
+    }
     private fun app(): Context = checkNotNull(context) { "command adapter not installed" }
 
     fun dispatch(op: String, args: JSONObject): JSONObject = when (op) {
         "cc.start" -> start(args)
         "cc.status" -> status(args)
         "cc.answer" -> answer(args)
+        "cc.key" -> key(args)
         else -> throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported Command Center operation: $op")
     }
 
+    /** Plan 33 C2: this phone's device key for sealed delivery. The public half and its fingerprint only. */
+    fun key(args: JSONObject): JSONObject {
+        requireOnly(args, emptySet())
+        val key = runCatching { deviceKey() }.getOrElse { throw GatewayProtocolException("KEY_UNAVAILABLE", "This phone could not make its device key.") }
+        return JSONObject().put("publicKey", java.util.Base64.getEncoder().encodeToString(key.raw)).put("fingerprint", key.fingerprint)
+            .put("strongBox", key.strongBox).put("suite", "DHKEM(P-256,HKDF-SHA256)/HKDF-SHA256/AES-256-GCM")
+    }
+
     fun start(args: JSONObject): JSONObject {
-        requireOnly(args, setOf("goal"))
+        requireOnly(args, setOf("goal", "taskId", "sealed"))
         val goal = (args.opt("goal") as? String)?.trim().orEmpty()
         if (goal.isBlank() || goal.length > MAX_GOAL) throw invalid("goal must be 1..$MAX_GOAL characters of text.")
         if (INLINE_SECRET.containsMatchIn(goal)) throw invalid("Do not put secrets in a task; Cyclone asks on the phone.")
         if (!overlayReady()) throw GatewayProtocolException("OVERLAY_UNAVAILABLE", "Turn on Cyclone's accessibility service on the phone.")
         if (humanHasControl()) throw GatewayProtocolException("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
         if (busy()) throw GatewayProtocolException("ASK_BUSY", "The phone is already running a task.")
-        val id = start(goal) ?: throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
+        // Sealed secrets (C2) are checked and opened before the mission starts, all or nothing.
+        val sealed = args.optJSONArray("sealed")
+        val opened = if (sealed == null || sealed.length() == 0) emptyMap() else {
+            if (sealed.length() > 2) throw invalid("At most two sealed secrets per task.")
+            val taskId = (args.opt("taskId") as? String).orEmpty()
+            try {
+                SealedDelivery.open(taskId, (0 until sealed.length()).map { SealedDelivery.parse(sealed.getJSONObject(it)) })
+            } catch (rejected: SealedDelivery.Rejected) {
+                throw GatewayProtocolException("SEALED_REJECTED", "${rejected.code}:${rejected.leaseId}")
+            }
+        }
+        val id = start(goal) ?: run {
+            SealedDelivery.wipe(opened)
+            throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
+        }
+        if (opened.isNotEmpty()) {
+            SealedDelivery.hold(id, opened)
+            synchronized(missionLeases) { missionLeases[id] = opened.values.map { it.first.leaseId } }
+        }
         return JSONObject().put("accepted", true).put("missionId", id)
     }
 
@@ -80,6 +115,14 @@ internal object GatewayV5CommandAdapter {
             .put("costUsd", mission.usage.costUsd)
             .put("summary", MindRedaction.scrubText(mission.summary).take(600))
             .put("moment", open?.let(::momentJson) ?: JSONObject.NULL)
+            .put("leases", leasesJson(id, finished = running == null))
+    }
+
+    /** Each delivered lease's outcome (delivered, used, failed, expired, unused). A finished mission forgets its values. */
+    private fun leasesJson(missionId: String, finished: Boolean): JSONArray {
+        val ids = synchronized(missionLeases) { missionLeases[missionId] } ?: return JSONArray()
+        if (finished) SealedDelivery.finish(missionId)
+        return JSONArray().also { out -> SealedDelivery.outcomes(ids).forEach { (id, state) -> out.put(JSONObject().put("leaseId", id).put("state", state)) } }
     }
 
     fun answer(args: JSONObject): JSONObject {

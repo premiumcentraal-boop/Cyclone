@@ -143,6 +143,11 @@ class CommandCenter:
         # Plan 33 (C1): the zero-knowledge vault shares this file, lock and audit chain; it stores ciphertext only.
         from .vault import VaultStore
         self.vault = VaultStore(self)
+        # Plan 33 (C2): sealed delivery. Tasks may name a vault item; its secret travels sealed to one trusted phone.
+        if "vault_item_id" not in {r["name"] for r in self._db.execute("PRAGMA table_info(task)")}:
+            self._db.execute("ALTER TABLE task ADD COLUMN vault_item_id TEXT")
+        from .delivery import DeliveryStore
+        self.delivery = DeliveryStore(self)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -320,7 +325,7 @@ class CommandCenter:
         return device, account
 
     def create_task(self, body: dict[str, Any], *, actor: str = "owner") -> dict[str, Any]:
-        _only(body, {"title", "goal", "deviceId", "accountId", "recipe", "dueAt", "requestId"})
+        _only(body, {"title", "goal", "deviceId", "accountId", "recipe", "dueAt", "requestId", "vaultItemId"})
         title = _clean_text(body.get("title") or str(body.get("goal", ""))[:80], "title", 80)
         goal = _clean_text(body.get("goal"), "goal", MAX_GOAL)
         recipe = _clean_text(body.get("recipe"), "recipe", 64, required=False) or None
@@ -336,7 +341,27 @@ class CommandCenter:
                 existing = self._db.execute("SELECT id FROM task WHERE idempotency_key = ?", (f"req:{key}",)).fetchone()
                 if existing:
                     return self.get_task(existing["id"])
-            return self._insert_task(title, goal, device, account, recipe, None, due, f"req:{key}" if key else None, actor)
+            item = self._vault_item_for(body.get("vaultItemId"), device, account)
+            created = self._insert_task(title, goal, device, account, recipe, None, due, f"req:{key}" if key else None, actor)
+            if item:
+                self._db.execute("UPDATE task SET vault_item_id = ? WHERE id = ?", (item, created["id"]))
+                created = self.get_task(created["id"])
+            return created
+
+    def _vault_item_for(self, item_id: Any, device: str | None, account: str | None) -> str | None:
+        """A task may use one vault item's secret (C2): its own account's login or authenticator, on one trusted phone."""
+        if item_id is None:
+            return None
+        if not isinstance(item_id, str) or not re.match(r"^vi_[A-Za-z0-9_-]{16,40}$", item_id):
+            raise CommandError("vaultItemId is malformed.")
+        if not account or not device:
+            raise CommandError("A task that uses a vault password needs its account and one phone.")
+        row = self._db.execute("SELECT account_id, kind FROM vault_item WHERE id = ?", (item_id,)).fetchone()
+        if row is None or row["account_id"] != account or row["kind"] not in ("login", "totp"):
+            raise CommandError("That vault item is not a login or authenticator of this account.")
+        if self.delivery.trusted_key(device) is None:
+            raise CommandError("Trust that phone's key first (Command Center -> Vault -> Phones).")
+        return item_id
 
     def _insert_task(self, title: str, goal: str, device: str | None, account: str | None, recipe: str | None,
                      routine: str | None, due: int | None, key: str | None, actor: str) -> dict[str, Any]:
@@ -361,6 +386,7 @@ class CommandCenter:
                 except DesktopRuntimeError:
                     pass  # the phone may be offline; the task is cancelled here and the phone's own Stop still works
                 self._finish_run(run, "cancelled", "Cancelled from the Command Center.")
+            self._db.execute("UPDATE lease SET state = 'revoked', updated_at = ? WHERE task_id = ? AND state = 'ready'", (self._clock(), task_id))
             self._set_task(task_id, "cancelled", "Cancelled from the Command Center.")
             self._audit("owner", "task.cancel", task_id)
             return self.get_task(task_id)
@@ -392,6 +418,9 @@ class CommandCenter:
             "recipe": r["recipe"], "routineId": r["routine_id"], "dueAt": r["due_at"], "status": r["status"],
             "cause": r["cause"], "createdAt": r["created_at"], "updatedAt": r["updated_at"],
             "run": self._run_public(run) if run else None,
+            "vaultItemId": r["vault_item_id"],
+            "leases": [{"id": l["id"], "slot": l["slot"], "state": l["state"], "expiresAt": l["expires_at"]}
+                       for l in self._db.execute("SELECT id, slot, state, expires_at FROM lease WHERE task_id = ? ORDER BY created_at DESC LIMIT 4", (r["id"],))],
         }
 
     @staticmethod
@@ -690,12 +719,27 @@ class CommandCenter:
             goal = task["goal"]
             if account:
                 goal = f"{goal}\n\nUse the account {account['handle']} ({account['service']})."
+            sealed: list[dict[str, Any]] = []
+            if task["vault_item_id"]:
+                sealed = self.delivery.envelopes_for(task["id"])
+                if not sealed:
+                    self._wait(task, "Waiting for the vault: unlock it in Glass so it can send the password to this phone.")
+                    continue
+                slots = {e["slot"] for e in sealed}
+                goal += "\n\nThe owner sent this phone the account's " + (
+                    "password and authenticator code" if slots == {"password", "otp"} else "authenticator code" if slots == {"otp"} else "password"
+                ) + " for this task only. On its field, use vault_fill (what=password" + (", what=one_time_code for the code" if "otp" in slots else "") + "); you never see the value."
             try:
-                ack = self._contract.cc_start(device, goal)
+                ack = self._contract.cc_start(device, goal, task_id=task["id"], sealed=sealed) if sealed else self._contract.cc_start(device, goal)
             except DesktopRuntimeError as exc:
                 code = str(exc.code)
                 if code in WAIT_CODES:
                     self._wait(task, _wait_reason(code))
+                    continue
+                if code == "SEALED_REJECTED":
+                    self.delivery.mark_rejected(task["id"])
+                    self._set_task(task["id"], "failed", "The phone refused the sealed password (another phone's key, expired or already used).")
+                    self._audit("engine", "task.refused", task["id"], {"device": device, "code": code})
                     continue
                 self._set_task(task["id"], "failed", f"The phone refused the task ({code}).")
                 self._audit("engine", "task.refused", task["id"], {"device": device, "code": code})
@@ -706,6 +750,8 @@ class CommandCenter:
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (run_id, task["id"], device, ack["missionId"], "running", "", "", 0, 0, 0.0, now, None, now))
             self._set_task(task["id"], "running", "", waiting_since=None)
+            if sealed:
+                self.delivery.mark_delivered(task["id"], run_id, [e["leaseId"] for e in sealed])
             self._audit("engine", "task.start", task["id"], {"device": device, "run": run_id})
             busy.add(device)
 
@@ -735,6 +781,8 @@ class CommandCenter:
                 continue
             self._db.execute("UPDATE run SET turns = ?, working_ms = ?, cost_usd = ?, summary = ?, last_seen_at = ? WHERE id = ?",
                              (status["turns"], status["workingMs"], float(status["costUsd"]), status["summary"], now, run["id"]))
+            if status.get("leases"):
+                self.delivery.report(run["id"], status["leases"])
             moment = status.get("moment")
             self._sync_approvals(run, moment)
             if status["live"]:
@@ -770,6 +818,7 @@ class CommandCenter:
         now = self._clock()
         self._db.execute("UPDATE run SET status = ?, cause = ?, ended_at = ? WHERE id = ?", (outcome, cause[:300], now, run["id"]))
         self._db.execute("UPDATE approval SET state = 'withdrawn' WHERE run_id = ? AND state = 'open'", (run["id"],))
+        self.delivery.finish_run(run["id"])
         task = self._db.execute("SELECT status FROM task WHERE id = ?", (run["task_id"],)).fetchone()
         if task and task["status"] in OPEN_TASK_STATES:
             self._set_task(run["task_id"], outcome, cause)

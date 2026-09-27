@@ -67,6 +67,37 @@ class CommandCenterGuard(unittest.TestCase):
         assert "passphrase" not in api.lower() and "recovery" not in api.lower(), "the gateway API never takes a passphrase or recovery key"
         assert "IDLE_LOCK_MS" in view and "STEP_UP_MS" in view
 
+    # Plan 33 (C2): sealed delivery. The PC relays bytes it cannot open; the phone opens, fills once, forgets.
+    def test_the_gateway_cannot_open_a_lease(self):
+        delivery = (COMMAND / "delivery.py").read_text(encoding="utf-8")
+        for word in ("cryptography", "AESGCM", "decrypt(", "private_key", "exchange("):
+            assert word not in delivery, f"the gateway's delivery store must not hold keys or decrypt ({word})"
+        schema = delivery[delivery.index('DELIVERY_SCHEMA = """'):delivery.index('"""', delivery.index('DELIVERY_SCHEMA = """') + 25)].lower()
+        for word in ("password", "plaintext", "secret", "value"):
+            assert word not in schema, f"lease schema must not hold {word}"
+
+    def test_the_phone_binds_uses_once_and_never_persists_the_value(self):
+        phone = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/secrets"
+        sealed = (phone / "SealedDelivery.kt").read_text(encoding="utf-8")
+        for bound in ('"NOT_FOR_THIS_PHONE"', '"AAD_TASK"', '"EXPIRED"', '"REPLAYED"', '"AAD_PLACE"'):
+            assert bound in sealed, f"the phone must check {bound}"
+        assert "placeMatches(currentPlace, entry.place)" in sealed, "a delivered secret fills only on its app or site"
+        assert "OneShotSecretLease(value)" in sealed
+        prefs = sealed[sealed.index("class Prefs"):]
+        assert 'putStringSet("used"' in prefs and "value" not in prefs.split("override fun claim")[1].split("return true")[0].replace("leaseId", ""), \
+            "only lease ids are persisted"
+        key = (phone / "DeviceKey.kt").read_text(encoding="utf-8")
+        assert "AndroidKeyStore" in key and "PURPOSE_AGREE_KEY" in key and "getEncoded" not in key, "the device key stays in Keystore"
+        ports = (ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile/mind/mission/AndroidMindPorts.kt").read_text(encoding="utf-8")
+        assert "SealedDelivery.take(missionId, slot, place.id)" in ports and "taken.lease.revoke()" in ports
+
+    def test_glass_seals_to_the_key_it_verified_and_wipes_plaintext(self):
+        delivery = (GLASS / "services/delivery.ts").read_text(encoding="utf-8")
+        assert "await fingerprint(publicKey)) !== pending.deviceKey.fingerprint" in delivery
+        assert "plain.fill(0)" in delivery and "item.moved" in delivery
+        hpke = (GLASS / "services/hpke.ts").read_text(encoding="utf-8")
+        assert "AEAD_AES256GCM" in hpke and "KEM_P256" in hpke
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 # 33 — Cyclone Command Center: the final plan
 
-**Status:** final plan, 2026-09-27. **C0 built in alpha.51** (§12.1), **C1 built in alpha.54** (§12.2); C2–C6 not started. Physical acceptance
+**Status:** final plan, 2026-09-27. **C0 built in alpha.51** (§12.1), **C1 in alpha.54** (§12.2), **C2 in alpha.55** (§12.3); C3–C6 not started. Physical acceptance
 of C0 is UNVERIFIED.
 
 **The owner's ask:**
@@ -368,6 +368,34 @@ stated as owed until you test it.
   runtime unlocked with the recovery key.
 - **Deferred:** passkey (WebAuthn PRF) unlock, because Glass runs at 127.0.0.1 and WebAuthn needs a domain name;
   planned for C6 or a local hostname.
+
+### 12.3 C2 as built (alpha.55)
+
+- **Device key:**
+  - An Android Keystore P-256 `PURPOSE_AGREE_KEY` pair (`DeviceKey.kt`). StrongBox when present; an agreement
+    self-test falls back to the TEE if StrongBox can't agree.
+  - Fingerprint: the first 16 bytes of SHA-256 over the raw key. It is shown in phone Settings → Vault and recomputed
+    in Glass.
+  - `cc.key` returns the public half; the gateway keeps `device_key` with `trusted_at`, set by the owner.
+- **HPKE:**
+  - RFC 9180 base mode, DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM; info `cyclone-sealed-delivery/v1`.
+  - Glass seals (`hpke.ts`, WebCrypto) and the phone opens (`Hpke.kt`, ECDH inside Keystore).
+  - Both are tested against RFC 9180 A.3.1 and a shared fixture. A third implementation (Python) was used in the
+    end-to-end run.
+- **Bound data (the AAD):** `{deviceKey, expiresAt, leaseId, place, slot, taskId}`.
+  - `place` is added beyond §4.2: a delivered secret fills only on its account's app or site.
+  - Slots are `password` and `otp`; `otp` is the authenticator seed, turned into a code on the phone.
+- **Leases:**
+  - Glass seals for tasks listed by `/v1/cc/leases/pending`. The gateway checks every bound field against the task
+    and stores `lease` rows (`ready → delivered → used | failed | unused | expired | rejected`, or
+    `revoked`/`replaced`).
+  - A task with a `vault_item_id` starts only with a ready lease, and the envelopes ride in `cc.start`.
+  - The phone opens them before the mission starts (all or nothing), holds the values in memory for that mission,
+    and fills through `OneShotSecretLease` from `AndroidMindPorts.fillSecret` ahead of the Secrets Card. It reports
+    outcomes in `cc.status.leases`.
+  - Replay is refused on both sides (the phone keeps accepted lease ids only).
+- **Deferred:** pre-authorised leases for routines that run while Glass is closed; "remember on this phone"; SMS and
+  email code relay.
 
 **Start with C0 → C2.** That is the core of the ask: one place for your accounts and tasks, and phones that log in
 for a task without the password ever being visible to anything but you and that phone.

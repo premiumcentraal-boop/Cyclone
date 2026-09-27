@@ -135,3 +135,33 @@ test("accounts list shows whose account it is and never asks for a password", as
   assert.equal(page.element.querySelectorAll("input").some((i) => i.type === "password"), false);
   page.destroy();
 });
+
+test("a task can sign in with a vault login of its account, on one chosen phone", async () => {
+  installMiniDom();
+  const created = [];
+  const gateway = fakeGateway(routes({
+    "GET /v1/cc/tasks": () => ({ tasks: [] }),
+    "GET /v1/cc/vault": () => ({ exists: true, items: [{ id: "vi_shoplogin000000000", accountId: ACCOUNT.id, kind: "login", updatedAt: Date.now() },
+      { id: "vi_othernote0000000000", accountId: ACCOUNT.id, kind: "note", updatedAt: Date.now() }] }),
+    "POST /v1/cc/tasks": ({ body }) => { created.push(body); return { id: "tsk_3", title: "x", goal: body.goal, status: "scheduled" }; },
+  }));
+  const page = createCommandPage(ctx(gateway.fetch), "tasks");
+  await flush();
+  const [phone, account, signIn] = page.element.querySelectorAll("select");
+  account.value = ACCOUNT.id;
+  account.dispatchEvent({ type: "change" });
+  await flush();
+  const choices = signIn.querySelectorAll("option").map((o) => o.value);
+  assert.deepEqual(choices, ["", "vi_shoplogin000000000"], "logins only, never notes");
+  page.element.querySelector("textarea").value = "Check orders";
+  signIn.value = "vi_shoplogin000000000";
+  buttons(page, "Create task")[0].click();
+  await flush();
+  assert.equal(created.length, 0, "a vault sign-in needs one chosen phone");
+  phone.value = "phone-a";
+  buttons(page, "Create task")[0].click();
+  await flush();
+  assert.equal(created[0].vaultItemId, "vi_shoplogin000000000");
+  assert.equal(JSON.stringify(created[0]).includes("password"), false);
+  page.destroy();
+});

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import ipaddress
 import re
 import secrets
@@ -45,6 +46,7 @@ V5_OPS = frozenset({
     "cc.start",
     "cc.status",
     "cc.answer",
+    "cc.key",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -1047,10 +1049,15 @@ def _validate_skills_response(value: dict[str, Any]) -> None:
                 raise _bad_skills("waypoint screen")
 
 
-CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer"})
+CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key"})
+CC_LEASE_ID = re.compile(r"^ls_[A-Za-z0-9_-]{12,40}$")
+CC_TASK_ID = re.compile(r"^tsk_[A-Za-z0-9_-]{6,40}$")
+CC_LEASE_STATES = frozenset({"delivered", "used", "failed", "expired", "unused", "unknown"})
+CC_SEALED_SLOTS = frozenset({"password", "otp"})
+_B64 = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 CC_ANSWERS = frozenset({"approve", "decline", "reply", "fill", "stop"})
 CC_REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
-CC_STATUS_KEYS = frozenset({"missionId", "status", "live", "turns", "workingMs", "costUsd", "summary", "moment"})
+CC_STATUS_KEYS = frozenset({"missionId", "status", "live", "turns", "workingMs", "costUsd", "summary", "moment", "leases"})
 CC_MOMENT_KEYS = frozenset({"kind", "requestId", "text", "gate", "send", "choices", "fields", "approvableHere"})
 
 
@@ -1064,6 +1071,17 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
         if set(value) != {"accepted", "missionId"} or value["accepted"] is not True or not LAB_MISSION_ID.match(str(value["missionId"])):
             raise _bad_cc("start")
         return
+    if op == "cc.key":
+        if set(value) != {"publicKey", "fingerprint", "strongBox", "suite"} or not isinstance(value["strongBox"], bool):
+            raise _bad_cc("key")
+        key = value["publicKey"]
+        if not isinstance(key, str) or not _B64.match(key) or len(base64.b64decode(key)) != 65 or base64.b64decode(key)[0] != 4:
+            raise _bad_cc("key shape")
+        if not isinstance(value["fingerprint"], str) or not re.fullmatch(r"(?:[0-9A-F]{4} ){7}[0-9A-F]{4}", value["fingerprint"]):
+            raise _bad_cc("fingerprint")
+        if value["suite"] != "DHKEM(P-256,HKDF-SHA256)/HKDF-SHA256/AES-256-GCM":
+            raise _bad_cc("suite")
+        return
     if op == "cc.answer":
         if set(value) != {"handled", "detail"} or not isinstance(value["handled"], bool) or not _short_text(value["detail"], 200):
             raise _bad_cc("answer")
@@ -1074,6 +1092,12 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
         raise _bad_cc("status counters")
     if not isinstance(value["costUsd"], (int, float)) or isinstance(value["costUsd"], bool) or not _short_text(value["summary"], 600):
         raise _bad_cc("status facts")
+    leases = value["leases"]
+    if not isinstance(leases, list) or len(leases) > 4 or not all(
+        isinstance(l, dict) and set(l) == {"leaseId", "state"} and CC_LEASE_ID.match(str(l["leaseId"])) and l["state"] in CC_LEASE_STATES
+        for l in leases
+    ):
+        raise _bad_cc("leases")
     moment = value["moment"]
     if moment is None:
         return
@@ -1340,11 +1364,32 @@ class V5ContractService:
         """The owner's saved skills and where each lives on the map (plan 23). Titles, health and counts only."""
         return self._call(device_id, "skills.list", {})
 
-    def cc_start(self, device_id: str, goal: str) -> dict[str, Any]:
-        """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret."""
+    def cc_start(self, device_id: str, goal: str, *, task_id: str | None = None,
+                 sealed: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret.
+
+        C2: [sealed] envelopes (HPKE to the phone's device key, made in the owner's browser) ride along as opaque bytes.
+        The gateway cannot open them; it checks their shape only.
+        """
         if not isinstance(goal, str) or not goal.strip() or len(goal) > MAX_GOAL or INLINE_SECRET.search(goal):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A task goal is 1..2000 characters without secrets.")
-        return self._call(device_id, "cc.start", {"goal": goal.strip()})
+        args: dict[str, Any] = {"goal": goal.strip()}
+        if sealed:
+            if not isinstance(task_id, str) or not CC_TASK_ID.match(task_id) or len(sealed) > 2:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Sealed secrets need their task and are at most two.")
+            for envelope in sealed:
+                if (not isinstance(envelope, dict) or set(envelope) != {"leaseId", "slot", "enc", "ct", "aad"}
+                        or not CC_LEASE_ID.match(str(envelope["leaseId"])) or envelope["slot"] not in CC_SEALED_SLOTS
+                        or not all(isinstance(envelope[k], str) and _B64.match(envelope[k]) for k in ("enc", "ct"))
+                        or not isinstance(envelope["aad"], str) or len(envelope["aad"]) > 1000):
+                    raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A sealed envelope is {leaseId, slot, enc, ct, aad} only.")
+            reject_secret_payload(args)
+            return self._call(device_id, "cc.start", {**args, "taskId": task_id, "sealed": sealed}, checked=True)
+        return self._call(device_id, "cc.start", args)
+
+    def cc_key(self, device_id: str) -> dict[str, Any]:
+        """Plan 33 (C2): the phone's device key (public half and fingerprint) for sealed delivery."""
+        return self._call(device_id, "cc.key", {})
 
     def cc_status(self, device_id: str, mission_id: str) -> dict[str, Any]:
         return self._call(device_id, "cc.status", {"missionId": _lab_mission(mission_id)})
@@ -1534,8 +1579,10 @@ class V5ContractService:
             raise DesktopRuntimeError(RuntimeErrorCode.PAIRING_REQUIRED, "Pair this phone before V5 contract access.")
         return session
 
-    def _call(self, device_id: str, op: str, args: dict[str, Any]) -> dict[str, Any]:
-        reject_secret_payload(args)
+    def _call(self, device_id: str, op: str, args: dict[str, Any], *, checked: bool = False) -> dict[str, Any]:
+        # [checked]: the caller already screened every field that is not opaque ciphertext (sealed envelopes).
+        if not checked:
+            reject_secret_payload(args)
         session = self._paired(device_id)
         try:
             value = session.bridge().request(op, args, request_id=f"v5-{secrets.token_urlsafe(18)}")
@@ -1560,6 +1607,8 @@ class V5ContractService:
                 "OVERLAY_UNAVAILABLE": RuntimeErrorCode.OVERLAY_UNAVAILABLE,
                 "MOMENT_CHANGED": RuntimeErrorCode.MOMENT_CHANGED,
                 "ANSWER_ON_PHONE": RuntimeErrorCode.ANSWER_ON_PHONE,
+                "SEALED_REJECTED": RuntimeErrorCode.SEALED_REJECTED,
+                "KEY_UNAVAILABLE": RuntimeErrorCode.KEY_UNAVAILABLE,
             }
             raise DesktopRuntimeError(
                 mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE),

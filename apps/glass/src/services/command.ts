@@ -54,6 +54,9 @@ export interface CcTask {
   cause: string;
   createdAt: number;
   run: CcRun | null;
+  /** C2: the vault login this task signs in with (an id; the value stays sealed). */
+  vaultItemId: string | null;
+  leases: Array<{ id: string; slot: string; state: string; expiresAt: number }>;
 }
 
 export interface CcResult extends CcRun {
@@ -167,6 +170,11 @@ export function parseTask(raw: unknown): CcTask {
     cause: str(r.cause),
     createdAt: num(r.createdAt),
     run: r.run ? parseRun(r.run) : null,
+    vaultItemId: optStr(r.vaultItemId),
+    leases: list(r.leases).map((l) => {
+      const x = (l ?? {}) as Record<string, unknown>;
+      return { id: str(x.id), slot: str(x.slot), state: str(x.state), expiresAt: num(x.expiresAt) };
+    }),
   };
 }
 
