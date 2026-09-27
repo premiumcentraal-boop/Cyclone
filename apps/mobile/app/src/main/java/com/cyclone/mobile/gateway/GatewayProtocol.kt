@@ -150,6 +150,10 @@ internal object GatewayProtocol {
         "learn.run",
         // Grounded skills: the owner's saved skills and where each lives on the map.
         "skills.list",
+        // Command Center (plan 33): the PC assigns a task, follows it and answers its Owner Moments.
+        "cc.start",
+        "cc.status",
+        "cc.answer",
     )
 
     fun parse(line: String): GatewayRequest {

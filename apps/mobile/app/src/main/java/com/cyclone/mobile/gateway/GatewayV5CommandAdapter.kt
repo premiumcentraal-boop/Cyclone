@@ -1,0 +1,172 @@
+package com.cyclone.mobile.gateway
+
+import android.content.Context
+import com.cyclone.mobile.DeviceState
+import com.cyclone.mobile.mind.mission.MindMissions
+import com.cyclone.mobile.mind.mission.MindRedaction
+import com.cyclone.mobile.mind.mission.Mission
+import com.cyclone.mobile.owner.MomentKind
+import com.cyclone.mobile.owner.OwnerMoment
+import com.cyclone.mobile.owner.OwnerMomentsRuntime
+import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.task.TaskCommand
+import com.cyclone.mobile.task.TaskCommandResult
+import com.cyclone.mobile.task.TaskCommands
+import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * Plan 33 (C0): the Command Center on the phone (`cc.start` / `cc.status` / `cc.answer`). The owner's PC assigns a
+ * task; the phone runs it as an ordinary Mind mission (same PhoneToolExecutor, GATE and Secrets Card), reports how it
+ * goes, and takes the owner's answers from the PC's Approvals inbox.
+ *
+ * Unlike the lab, the Command Center is the owner at their dashboard, so it may approve. It approves only the exact
+ * request it was shown: [answer] names the request id, and a send is approvable at the PC only when the text it saw is
+ * the text that will be sent (nothing redacted). Secure input and handing the phone over are never answered here.
+ * Every answer is a [TaskCommand] through Task Kit, like any button.
+ */
+internal object GatewayV5CommandAdapter {
+    const val MAX_GOAL = 2_000
+    private val MISSION_ID = Regex("^m[a-z0-9]{6,40}$")
+    private val REQUEST_ID = Regex("^[A-Za-z0-9._:-]{1,120}$")
+    private val INLINE_SECRET = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]")
+    val ANSWERS = setOf("approve", "decline", "reply", "fill", "stop")
+
+    /** Seams for JVM tests; production uses the overlay, the Mind and Task Kit. */
+    internal var overlayReady: () -> Boolean = { OverlayChromeRuntime.isAttached() }
+    internal var busy: () -> Boolean = { OverlayChromeRuntime.hasExecutingTask() || MindMissions.isLive() || !WorkspaceTasks.canStartRequest() }
+    internal var humanHasControl: () -> Boolean = { DeviceState.controller == DeviceState.Controller.HUMAN }
+    internal var start: (String) -> String? = { goal -> MindMissions.startAssigned(app(), goal) }
+    internal var live: () -> Mission? = { MindMissions.live.value }
+    internal var load: (String) -> Mission? = { MindMissions.store(app()).load(it) }
+    internal var moment: () -> OwnerMoment? = { OwnerMomentsRuntime.current() }
+    internal var send: (String, TaskCommand) -> TaskCommandResult = { taskId, command -> TaskCommands.send(app(), taskId, command) }
+
+    @Volatile private var context: Context? = null
+    fun install(context: Context) { this.context = context.applicationContext }
+    private fun app(): Context = checkNotNull(context) { "command adapter not installed" }
+
+    fun dispatch(op: String, args: JSONObject): JSONObject = when (op) {
+        "cc.start" -> start(args)
+        "cc.status" -> status(args)
+        "cc.answer" -> answer(args)
+        else -> throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported Command Center operation: $op")
+    }
+
+    fun start(args: JSONObject): JSONObject {
+        requireOnly(args, setOf("goal"))
+        val goal = (args.opt("goal") as? String)?.trim().orEmpty()
+        if (goal.isBlank() || goal.length > MAX_GOAL) throw invalid("goal must be 1..$MAX_GOAL characters of text.")
+        if (INLINE_SECRET.containsMatchIn(goal)) throw invalid("Do not put secrets in a task; Cyclone asks on the phone.")
+        if (!overlayReady()) throw GatewayProtocolException("OVERLAY_UNAVAILABLE", "Turn on Cyclone's accessibility service on the phone.")
+        if (humanHasControl()) throw GatewayProtocolException("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
+        if (busy()) throw GatewayProtocolException("ASK_BUSY", "The phone is already running a task.")
+        val id = start(goal) ?: throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
+        return JSONObject().put("accepted", true).put("missionId", id)
+    }
+
+    fun status(args: JSONObject): JSONObject {
+        val id = missionId(args, setOf("missionId"))
+        val running = live()?.takeIf { it.id == id }
+        val mission = running ?: load(id) ?: throw GatewayProtocolException("RUN_NOT_FOUND", "No such mission.")
+        val open = moment()?.takeIf { running != null && it.taskId == "mission-$id" }
+        return JSONObject()
+            .put("missionId", id)
+            .put("status", mission.status.name.lowercase())
+            .put("live", running != null)
+            .put("turns", mission.turns)
+            .put("workingMs", mission.workingMs)
+            .put("costUsd", mission.usage.costUsd)
+            .put("summary", MindRedaction.scrubText(mission.summary).take(600))
+            .put("moment", open?.let(::momentJson) ?: JSONObject.NULL)
+    }
+
+    fun answer(args: JSONObject): JSONObject {
+        requireOnly(args, setOf("missionId", "requestId", "action", "text", "values"))
+        val id = missionId(args, null)
+        val action = (args.opt("action") as? String).orEmpty()
+        if (action !in ANSWERS) throw invalid("action must be one of ${ANSWERS.joinToString()}.")
+        live()?.takeIf { it.id == id } ?: throw GatewayProtocolException("RUN_NOT_FOUND", "That mission is not running.")
+        if (action == "stop") return result(send("mission-$id", TaskCommand.Stop))
+
+        // Every other answer is to one open moment, named by its request id, so a changed request is never answered.
+        val requestId = (args.opt("requestId") as? String).orEmpty()
+        if (!REQUEST_ID.matches(requestId)) throw invalid("requestId is required.")
+        val open = moment()?.takeIf { it.taskId == "mission-$id" && it.requestId == requestId }
+            ?: throw GatewayProtocolException("MOMENT_CHANGED", "Cyclone is not waiting for that any more.")
+        if (open.kind == MomentKind.SECRET || open.kind == MomentKind.HANDOVER) {
+            throw GatewayProtocolException("ANSWER_ON_PHONE", "Secure input and taking over happen on the phone.")
+        }
+        val command = when (action) {
+            "approve" -> {
+                if (open.kind != MomentKind.APPROVAL) throw invalid("Nothing is waiting for approval.")
+                if (!approvableHere(open)) throw GatewayProtocolException("ANSWER_ON_PHONE", "Approve this one on the phone; part of it is hidden here.")
+                TaskCommand.Approve
+            }
+            "decline" -> TaskCommand.Decline
+            "reply" -> (args.opt("text") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 500 }
+                ?.also { if (INLINE_SECRET.containsMatchIn(it)) throw invalid("Do not put secrets in an answer.") }
+                ?.let { TaskCommand.Reply(it) } ?: throw invalid("reply needs text of 1..500 characters.")
+            else -> {
+                if (open.kind != MomentKind.VALUES) throw invalid("Cyclone is not asking for details.")
+                TaskCommand.Fill(values(args.optJSONObject("values")), remember = false)
+            }
+        }
+        return result(send("mission-$id", command))
+    }
+
+    /**
+     * The owner may approve at the PC only what the PC can show in full: the moment's text and a send's exact
+     * message, recipient and app, with nothing redacted on the way.
+     */
+    internal fun approvableHere(moment: OwnerMoment): Boolean {
+        if (moment.kind != MomentKind.APPROVAL) return false
+        val shown = listOfNotNull(moment.text, moment.send?.text, moment.send?.recipient, moment.send?.app)
+        return shown.all { MindRedaction.scrubText(it) == it && it.length <= 1_000 }
+    }
+
+    /** What the PC needs to show and answer a moment. Never includes typed values. */
+    internal fun momentJson(moment: OwnerMoment): JSONObject = JSONObject()
+        .put("kind", moment.kind.name.lowercase())
+        .put("requestId", moment.requestId ?: JSONObject.NULL)
+        .put("text", MindRedaction.scrubText(moment.text).take(1_000))
+        .put("gate", moment.gate?.take(40) ?: JSONObject.NULL)
+        .put("send", moment.send?.let {
+            JSONObject().put("text", MindRedaction.scrubText(it.text).take(1_000)).put("recipient", MindRedaction.scrubText(it.recipient).take(200))
+                .put("app", it.app.take(120))
+        } ?: JSONObject.NULL)
+        .put("choices", JSONArray(moment.choices.take(6).map { it.take(80) }))
+        .put("fields", JSONArray().also { out ->
+            moment.fields.take(8).forEach { out.put(JSONObject().put("label", it.label.take(60)).put("kind", it.kind.take(20))) }
+        })
+        .put("approvableHere", approvableHere(moment))
+
+    private fun result(result: TaskCommandResult) = JSONObject().put("handled", result.handled).put("detail", result.detail.take(200))
+
+    private fun values(json: JSONObject?): Map<String, String> {
+        json ?: throw invalid("fill needs values.")
+        val out = linkedMapOf<String, String>()
+        json.keys().forEach { key ->
+            val value = json.opt(key) as? String ?: throw invalid("fill values must be text.")
+            if (key.length > 60 || value.length > 300) throw invalid("fill values are too long.")
+            if (INLINE_SECRET.containsMatchIn("$key: $value") || INLINE_SECRET.containsMatchIn("$key=")) throw invalid("Secrets are typed on the phone, never sent from the PC.")
+            if (value.isNotBlank()) out[key] = value.trim()
+        }
+        if (out.isEmpty() || out.size > 8) throw invalid("fill needs 1..8 values.")
+        return out
+    }
+
+    private fun missionId(args: JSONObject, only: Set<String>?): String {
+        only?.let { requireOnly(args, it) }
+        val id = (args.opt("missionId") as? String).orEmpty()
+        if (!MISSION_ID.matches(id)) throw invalid("missionId is malformed.")
+        return id
+    }
+
+    private fun invalid(message: String) = GatewayProtocolException("INVALID_REQUEST", message)
+
+    private fun requireOnly(args: JSONObject, allowed: Set<String>) {
+        if (args.keys().asSequence().any { it !in allowed }) throw invalid("Unexpected Command Center field.")
+    }
+}

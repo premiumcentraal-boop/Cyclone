@@ -197,6 +197,9 @@ class DesktopRuntime:
         from ..lab.probes import PhoneProbe
         from ..lab.runner import LabService
         self.lab = LabService(settings.runtime_dir / "lab", share_contract, lambda device_id: PhoneProbe(self.fleet.get(device_id).adb))
+        # Plan 33 (C0): the Command Center's accounts, tasks, routines, results and approvals, in one local SQLite file.
+        from ..command.center import CommandCenter
+        self.command = CommandCenter(settings.runtime_dir / "command" / "command.db", share_contract, self.fleet.list_public)
         self.lan_share = LanShareDirectory(
             status=share_contract.share_status,
             trust_record=self.trust.store.record,
@@ -239,8 +242,10 @@ class DesktopRuntime:
         # an authorized phone, it records a bounded baseline and follows only the Cyclone app PID.
         self.live_diagnostics.start()
         self.trust.start()
+        self.command.start()
 
     def stop(self) -> None:
+        self.command.stop()
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
         self.trust.stop()
         self.live_diagnostics.stop()
@@ -790,6 +795,8 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.include_router(create_lab_router(desktop, settings.token))
     from ..market.api import create_market_router
     app.include_router(create_market_router(desktop, settings.token))
+    from ..command.api import create_command_router
+    app.include_router(create_command_router(desktop, settings.token))
     # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
     app.state.glass_codes = LaunchCodes()
     app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))

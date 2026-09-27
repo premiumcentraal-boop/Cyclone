@@ -1,9 +1,13 @@
 /** Hash routes. Hash routing keeps the gateway's static mount trivial (one index.html under /glass/). */
 export type AppTab = "map" | "coverage" | "skills" | "screens" | "scenarios" | "versions" | "runs" | "issues";
 const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios", "versions", "runs", "issues"];
+/** Plan 33 (C0): the Command Center's sections. */
+export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts";
+const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts"];
 
 export type Route =
   | { name: "home" }
+  | { name: "command"; tab: CommandTab }
   | { name: "apps" }
   | { name: "app"; placeId: string; tab: AppTab; route?: string[]; runId?: string; skill?: string }
   | { name: "runs" }
@@ -52,6 +56,10 @@ export function parseRoute(hash: string): Route {
     const id = safeDecode(parts[1] ?? "");
     return /^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$/.test(id) ? { name: "lab", experimentId: id } : { name: "lab" };
   }
+  if (parts[0] === "command") {
+    const tab = COMMAND_TABS.includes(parts[1] as CommandTab) ? (parts[1] as CommandTab) : "approvals";
+    return { name: "command", tab };
+  }
   if (parts[0] === "market") return { name: "market" };
   if (parts[0] === "remote") return { name: "remote" };
   if (parts[0] === "attach") return { name: "attach" };
@@ -68,6 +76,8 @@ export function routeHref(route: Route): string {
   switch (route.name) {
     case "home":
       return "#/home";
+    case "command":
+      return `#/command/${route.tab}`;
     case "apps":
       return "#/apps";
     case "app": {
@@ -103,7 +113,7 @@ export function routeHref(route: Route): string {
 }
 
 /** Sidebar section that owns a route. */
-export function sectionOf(route: Route): "home" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market" | "remote" | "attach" | "settings" {
+export function sectionOf(route: Route): "home" | "command" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market" | "remote" | "attach" | "settings" {
   if (route.name === "app") return "apps";
   if (route.name === "run") return "runs";
   return route.name;

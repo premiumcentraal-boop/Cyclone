@@ -21,6 +21,7 @@ import { createLabPage } from "./pages/labPage.js";
 import { createMarketPage } from "./pages/marketPage.js";
 import { createRemotePage } from "./pages/remotePage.js";
 import { createAttachPage } from "./pages/attachPage.js";
+import { createCommandPage } from "./pages/commandPage.js";
 import { welcome } from "./services/pc.js";
 import { createWelcomeCard } from "./ui/welcomeCard.js";
 
@@ -55,6 +56,7 @@ type PageFactory = (ctx: GlassContext, route: Route) => GlassPage;
 
 const PAGES: Record<Route["name"], PageFactory> = {
   home: (ctx) => createHomePage(ctx),
+  command: (ctx, route) => createCommandPage(ctx, route.name === "command" ? route.tab : "approvals"),
   apps: (ctx, route) => createAppsPage(ctx, route),
   app: (ctx, route) =>
     route.name === "app" && route.tab !== "map"
@@ -72,8 +74,9 @@ const PAGES: Record<Route["name"], PageFactory> = {
   settings: (ctx) => createSettingsPage(ctx),
 };
 
-const NAV: Array<{ section: "home" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market"; label: string; icon: IconName; route: Route }> = [
+const NAV: Array<{ section: "home" | "command" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market"; label: string; icon: IconName; route: Route }> = [
   { section: "home", label: "Home", icon: "home", route: { name: "home" } },
+  { section: "command", label: "Command Center", icon: "layers", route: { name: "command", tab: "approvals" } },
   { section: "devices", label: "Devices", icon: "plug", route: { name: "devices" } },
   { section: "apps", label: "Apps", icon: "apps", route: { name: "apps" } },
   { section: "runs", label: "Runs", icon: "runs", route: { name: "runs" } },
@@ -176,7 +179,7 @@ export class GlassApp {
   }
 
   private routeKey(): string {
-    return `${this.route.name}:${this.route.name === "app" ? `${this.route.placeId}/${this.route.tab}/${this.route.route?.join(",") ?? ""}` : this.route.name === "run" ? this.route.runId : this.route.name === "lab" ? this.route.experimentId ?? "" : ""}`;
+    return `${this.route.name}:${this.route.name === "app" ? `${this.route.placeId}/${this.route.tab}/${this.route.route?.join(",") ?? ""}` : this.route.name === "run" ? this.route.runId : this.route.name === "lab" ? this.route.experimentId ?? "" : this.route.name === "command" ? this.route.tab : ""}`;
   }
 
   private deviceSignature(): string {

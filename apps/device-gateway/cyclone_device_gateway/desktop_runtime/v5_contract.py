@@ -42,6 +42,9 @@ V5_OPS = frozenset({
     "market.run",
     "learn.run",
     "skills.list",
+    "cc.start",
+    "cc.status",
+    "cc.answer",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -874,6 +877,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op in MARKET_OPS:
         _validate_market_response(op, value, args)
         return value
+    if op in CC_OPS:
+        _validate_cc_response(op, value, args)
+        return value
     if op == "learn.run":
         _validate_learn_response(value, args)
         return value
@@ -1039,6 +1045,57 @@ def _validate_skills_response(value: dict[str, Any]) -> None:
                 raise _bad_skills("waypoint")
             if point["screenId"] is not None and (not isinstance(point["screenId"], str) or not SCREEN_ID.fullmatch(point["screenId"])):
                 raise _bad_skills("waypoint screen")
+
+
+CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer"})
+CC_ANSWERS = frozenset({"approve", "decline", "reply", "fill", "stop"})
+CC_REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
+CC_STATUS_KEYS = frozenset({"missionId", "status", "live", "turns", "workingMs", "costUsd", "summary", "moment"})
+CC_MOMENT_KEYS = frozenset({"kind", "requestId", "text", "gate", "send", "choices", "fields", "approvableHere"})
+
+
+def _bad_cc(message: str) -> DesktopRuntimeError:
+    return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Android Command Center result is malformed: {message}.")
+
+
+def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) -> None:
+    """Plan 33 (C0): a task's start, status and answers. Bounded text only; a moment never carries a typed value."""
+    if op == "cc.start":
+        if set(value) != {"accepted", "missionId"} or value["accepted"] is not True or not LAB_MISSION_ID.match(str(value["missionId"])):
+            raise _bad_cc("start")
+        return
+    if op == "cc.answer":
+        if set(value) != {"handled", "detail"} or not isinstance(value["handled"], bool) or not _short_text(value["detail"], 200):
+            raise _bad_cc("answer")
+        return
+    if set(value) != CC_STATUS_KEYS or value["missionId"] != args.get("missionId") or value["status"] not in LAB_STATUSES:
+        raise _bad_cc("status")
+    if not isinstance(value["live"], bool) or not _is_int(value["turns"]) or not _is_int(value["workingMs"]):
+        raise _bad_cc("status counters")
+    if not isinstance(value["costUsd"], (int, float)) or isinstance(value["costUsd"], bool) or not _short_text(value["summary"], 600):
+        raise _bad_cc("status facts")
+    moment = value["moment"]
+    if moment is None:
+        return
+    if not isinstance(moment, dict) or set(moment) != CC_MOMENT_KEYS or moment["kind"] not in LAB_MOMENT_KINDS:
+        raise _bad_cc("moment")
+    if moment["requestId"] is not None and (not isinstance(moment["requestId"], str) or not CC_REQUEST_ID.match(moment["requestId"])):
+        raise _bad_cc("moment request")
+    if not _short_text(moment["text"], 1000) or not _short_text(moment["gate"], 40, nullable=True):
+        raise _bad_cc("moment text")
+    if not isinstance(moment["approvableHere"], bool) or not _text_list(moment["choices"], 80, 6):
+        raise _bad_cc("moment choices")
+    send = moment["send"]
+    if send is not None and (
+        not isinstance(send, dict) or set(send) != {"text", "recipient", "app"}
+        or not _short_text(send["text"], 1000) or not _short_text(send["recipient"], 200) or not _short_text(send["app"], 120)
+    ):
+        raise _bad_cc("moment send")
+    fields = moment["fields"]
+    if not isinstance(fields, list) or len(fields) > 8 or not all(
+        isinstance(f, dict) and set(f) == {"label", "kind"} and _short_text(f["label"], 60) and _short_text(f["kind"], 20) for f in fields
+    ):
+        raise _bad_cc("moment fields")
 
 
 MARKET_OPS = frozenset({"market.catalog", "market.install", "market.remove", "market.run"})
@@ -1283,6 +1340,39 @@ class V5ContractService:
         """The owner's saved skills and where each lives on the map (plan 23). Titles, health and counts only."""
         return self._call(device_id, "skills.list", {})
 
+    def cc_start(self, device_id: str, goal: str) -> dict[str, Any]:
+        """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret."""
+        if not isinstance(goal, str) or not goal.strip() or len(goal) > MAX_GOAL or INLINE_SECRET.search(goal):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A task goal is 1..2000 characters without secrets.")
+        return self._call(device_id, "cc.start", {"goal": goal.strip()})
+
+    def cc_status(self, device_id: str, mission_id: str) -> dict[str, Any]:
+        return self._call(device_id, "cc.status", {"missionId": _lab_mission(mission_id)})
+
+    def cc_answer(self, device_id: str, mission_id: str, action: str, *, request_id: str | None = None,
+                  text: str | None = None, values: dict[str, str] | None = None) -> dict[str, Any]:
+        """The owner's answer from the Approvals inbox. The phone approves only the request id it showed."""
+        if action not in CC_ANSWERS:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unknown answer.")
+        args: dict[str, Any] = {"missionId": _lab_mission(mission_id), "action": action}
+        if action != "stop":
+            if not isinstance(request_id, str) or not CC_REQUEST_ID.match(request_id):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "requestId is required.")
+            args["requestId"] = request_id
+        if action == "reply":
+            if not isinstance(text, str) or not text.strip() or len(text) > 500 or INLINE_SECRET.search(text):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "An answer is 1..500 characters without secrets.")
+            args["text"] = text.strip()
+        if action == "fill":
+            if not isinstance(values, dict) or not 1 <= len(values) <= 8 or not all(
+                isinstance(k, str) and isinstance(v, str) and len(k) <= 60 and len(v) <= 300 for k, v in values.items()
+            ):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Details are 1..8 short text values.")
+            if any(_secret_name(k) or INLINE_SECRET.search(f"{k}: {v}") for k, v in values.items()):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Secrets are typed on the phone, never sent from the PC.")
+            args["values"] = values
+        return self._call(device_id, "cc.answer", args)
+
     def market_catalog(self, device_id: str) -> dict[str, Any]:
         return self._call(device_id, "market.catalog", {})
 
@@ -1468,6 +1558,8 @@ class V5ContractService:
                 "MAPPING_INVALID_STATE": RuntimeErrorCode.MAPPING_INVALID_STATE,
                 "ASK_BUSY": RuntimeErrorCode.ASK_BUSY,
                 "OVERLAY_UNAVAILABLE": RuntimeErrorCode.OVERLAY_UNAVAILABLE,
+                "MOMENT_CHANGED": RuntimeErrorCode.MOMENT_CHANGED,
+                "ANSWER_ON_PHONE": RuntimeErrorCode.ANSWER_ON_PHONE,
             }
             raise DesktopRuntimeError(
                 mapping.get(exc.code, RuntimeErrorCode.CAPABILITY_UNAVAILABLE),

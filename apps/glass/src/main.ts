@@ -12,6 +12,7 @@ import "./styles/lab.css";
 import "./styles/market.css";
 import "./styles/home.css";
 import "./styles/pc.css";
+import "./styles/command.css";
 import { GlassApp } from "./app.js";
 import { establishSession, forgetSession } from "./core/session.js";
 import { GatewayClient } from "./services/gateway.js";

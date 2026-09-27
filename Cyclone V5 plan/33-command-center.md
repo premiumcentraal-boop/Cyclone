@@ -1,7 +1,7 @@
 # 33 — Cyclone Command Center: the final plan
 
-**Status:** final plan, 2026-09-27. Nothing built yet. It comes after the Drive releases (plan 32) unless the owner
-reorders.
+**Status:** final plan, 2026-09-27. **C0 built in alpha.51** (see §12.1); C1–C6 not started. Physical acceptance
+of C0 is UNVERIFIED.
 
 **The owner's ask:**
 > "Credentials can be safely sent to the phone in tasks, and managed and saved in the dashboard. It should hold all
@@ -332,6 +332,21 @@ stated as owed until you test it.
 | **C4: Coordinator** | The coordinator service with fixed tools, budgets, daily report page, the Lab coordinator suite | The suite passes; a week of reports matches the Results data |
 | **C5: Pages** | Block editor with live blocks, templates, saved views | Owner builds a "Weekly content" page from a template |
 | **C6: Hosted and multi-site** | Cloud Command Center (Postgres, Temporal), PC as an outbound edge, members and roles, SSO | A second site's phones run tasks from the cloud; the vault is still zero-knowledge (the cloud DB holds ciphertext only) |
+
+### 12.1 C0 as built (alpha.51)
+
+- **Phone:** `cc.start` / `cc.status` / `cc.answer` (`GatewayV5CommandAdapter`). A task is an ordinary Mind mission
+  (`MindMissions.startAssigned`). Answers go through Task Kit; approve only for the moment's request id, only when
+  nothing in it is redacted; secure input and handover never from the PC.
+- **Gateway:** `command/` holds one SQLite file (`runtime/command/command.db`) with account, routine, task, run,
+  approval and a hash-chained audit. A job loop runs every 5 s: fire routines (no replay), dispatch to paired and
+  ready phones with the account lock, follow runs, and mirror Owner Moments into approvals. Routes are
+  `/v1/cc/{overview,accounts,tasks,routines,results,approvals,audit}`, all behind the bearer.
+- **Glass:** **Command Center** (`#/command/<tab>`): Approvals, Tasks (recipes from a phone's Marketplace), Routines,
+  Results, Accounts.
+- **Deferred from the §12 row:** schedules are "daily at HH:MM on weekdays" or "every N minutes" (no RRULE or
+  triggers yet); the inbox holds Command Center tasks only (not tasks started on the phone); no retries after a
+  mission started (no double posts).
 
 **Start with C0 → C2.** That is the core of the ask: one place for your accounts and tasks, and phones that log in
 for a task without the password ever being visible to anything but you and that phone.

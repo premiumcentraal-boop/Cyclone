@@ -169,6 +169,18 @@ object MindMissions {
     }
 
     /**
+     * Plan 33 (C0): starts a mission the PC's Command Center assigned. The same Mind and boundaries as a mission the
+     * owner types; returns the mission id so the PC can follow it, or null when another mission is running.
+     */
+    fun startAssigned(context: Context, goal: String): String? {
+        val app = context.applicationContext
+        val now = System.currentTimeMillis()
+        val id = "m" + now.toString(36) + UUID.randomUUID().toString().take(8)
+        val mission = Mission(id, goal.trim().take(2_000), MissionStatus.RUNNING, now, now, "", "")
+        return id.takeIf { launch(app, mission, resume = null, attachment = null) }
+    }
+
+    /**
      * Starts a Cyclone Lab mission: same Mind, same boundaries, with [variant] applied to this one mission and the
      * run tagged so the PC can score it. Returns the mission id, or null when another mission is running.
      */
