@@ -1,270 +1,353 @@
-# 33 — Cyclone Command Center: one dashboard for your accounts, tasks, routines and phones (research)
+# 33 — Cyclone Command Center: the final plan
 
-**Status:** research, 2026-09-27. Not scheduled; plans 24–32 come first.
+**Status:** final plan, 2026-09-27. Nothing built yet. It comes after the Drive releases (plan 32) unless the owner
+reorders.
 
 **The owner's ask:**
 > "Credentials can be safely sent to the phone in tasks, and managed and saved in the dashboard. It should hold all
 > this data safely and manage my accounts, new tasks and routine automations in one dashboard. AI should be able to
 > manage the fleet of phone agents doing legitimate work on the phones."
 
-**In one sentence:** a Notion-like workspace on top of a password vault and a job system, where you (and an AI
-coordinator you supervise) hand work to your own Cyclone phones. The phones fill secrets themselves, report results
-back, and never show a password to any model.
+**In one sentence:** Glass grows into a Command Center with Accounts, Tasks, Routines, Phones, Results, an Approvals
+inbox, Connections and an AI coordinator. It sits on:
+- a zero-knowledge vault;
+- a durable job engine;
+- a **sealed delivery** path that sends a secret to one phone for one task.
+
+The gateway, the dashboard's server and every model only ever see ciphertext or slot names.
 
 ---
 
-## 1. What already exists and carries over
+## 0. Decisions (locked unless the owner changes them)
 
-| Need | Cyclone today |
+| # | Decision | Why |
+|---|---|---|
+| D1 | **Local-first.** The Command Center runs in the Cyclone PC runtime you already install (`cyclone`, plan 31), with its data on your PC. A hosted version reuses the same code later (C6). | Your passwords never leave hardware you own; no cloud needed to start; one codebase. |
+| D2 | **Zero-knowledge vault.** Items are encrypted with keys only you (and phones you enrolled) can unlock; the runtime stores ciphertext. | A stolen PC disk or database leaks nothing usable. |
+| D3 | **Sealed delivery (new contract).** A phone receives a secret only as an HPKE-sealed envelope (RFC 9180) addressed to its hardware-bound device key, for one task, once. The gateway relays bytes it cannot open. | Keeps plan 05's rule "the gateway cannot fetch, accept or forward a secret *value*" while letting the dashboard hand phones credentials. |
+| D4 | **Models never see values.** The Mind and the AI coordinator work with vault references (`vault:ig-brand/password`) only; filling happens in the phone's vault layer (`useOnce` → `SecretFillExecutor`). | The prompt-injection and log-leak surface stays at zero. |
+| D5 | **Approvals stay human.** GATE (pay, send, delete, grant) and new-login approvals go to one Approvals inbox; no AI can approve. | The existing safety boundary, now fleet-wide. |
+| D6 | **Owned accounts only.** Each account records its owner and its basis ("mine", "my company", "client under contract"). Automations run only on accounts in the vault. | Keeps the product the legitimate kind; sets up audit. |
+| D7 | **Glass stays intelligence-free.** The AI coordinator is a runtime service with a fixed toolset; Glass only renders and commands (the Glass guard stays). | The architecture law since plan 03. |
+
+## 1. What the owner gets
+
+- **Accounts:** every account you own, its vault items, which phones may use it, its 2FA method, its health (weak,
+  reused, old, login failing) and its history.
+- **Tasks:** "Post this video to @mybrand at 18:00 with this caption", with a target (a phone, or any phone with the
+  app), the accounts allowed, the connections allowed and a due time. The status is live.
+- **Routines:** tasks on a schedule or trigger (for example every weekday 07:30, or when an email arrives), with pause
+  and run-now.
+- **Phones:** live tiles showing online, battery, storage, Android and Cyclone versions, apps, and the current task.
+  A live screen is one click away (scrcpy, as today).
+- **Results:** every run with its outcome, steps, masked screenshots, files produced, cost and cause of death, linked
+  to the run inspector.
+- **Approvals:** one inbox for every phone's questions, sends, logins and codes, answerable from the dashboard, the
+  phone or a notification.
+- **Connections:** outside tools over MCP (Higgsfield first), each with OAuth, a spending cap and an approval rule.
+- **Coordinator:** "Every Monday make a 10-second product video, post it to both brand accounts and send me a
+  report." It plans, schedules, watches and writes the report. You approve what GATE requires.
+
+## 2. Architecture
+
+```
+PC (your Cyclone runtime: `cyclone`)                             Phones (Cyclone Mobile)
+┌──────────────────────────────────────────────────────────┐    ┌───────────────────────────┐
+│ Glass (web UI, no intelligence)                           │    │ Mind + PhoneToolExecutor   │
+│   pages · databases · approvals · live screens            │    │ GATE · Owner Moments        │
+│ Command API (/v1/cc/*, bearer + passkey session)          │◄──►│ Vault layer (Keystore):     │
+│ Job engine (durable, SQLite; Postgres in hosted mode)     │    │   device key (HPKE recv)    │
+│ Vault service (ciphertext store, leases, audit chain)     │    │   useOnce → fill → revoke   │
+│ Coordinator service (model + fixed tools, no secrets)     │    │ Job agent: inbox, lease,    │
+│ MCP gateway (OAuth grants, caps, artifacts)               │    │   heartbeat, run reports    │
+│ Artifact store (content-addressed files)                  │    └───────────────────────────┘
+└──────────────────────────────────────────────────────────┘      ▲ USB / Wi-Fi / cloud-phone link
+                          ▲ (C6) outbound mTLS to a hosted Command Center for multi-site
+```
+
+**Rules:**
+- **Phones do the work and decide how; the Command Center assigns and records.** A phone that loses its link finishes
+  its task and queues the report.
+- **Every command is idempotent** (a request id). "Done" means verified by the phone (transport success is not task
+  success).
+- **One store per kind of data:**
+  - secrets in the vault;
+  - schedules in the job engine;
+  - results in the run store;
+  - pages link to them and never copy them.
+- **Hosted mode (C6)** adds a cloud Command Center. The PC becomes an **edge** that dials out; the vault stays
+  zero-knowledge, so the cloud holds ciphertext only.
+
+## 3. Data model
+
+| Table | Key fields | Notes |
+|---|---|---|
+| `workspace` | id, name | One for you; more for teams or clients in hosted mode |
+| `member` | id, workspace, role (`owner`, `admin`, `operator`, `viewer`), passkeys | Only owner and admin may see vault values, and only in the UI after a passkey step-up |
+| `device` | id, name, model, android, cyclone_version, device_pubkey (HPKE), enrolled_at, status, labels, last_heartbeat | The public key comes from Keystore at enrolment |
+| `account` | id, service (app package + web domain), handle, owner_basis, twofa (`none`/`totp`/`passkey`/`sms`/`email`/`app`), allowed_devices, status, health, notes | No secret values |
+| `vault_item` | id, account, kind (`password`/`totp_seed`/`recovery_codes`/`note`), ciphertext, item_key_wrapped, version, created_by, rotated_at | Encrypted client-side; `created_by` records provenance (you, a task, an import) |
+| `connection` | id, kind (`mcp`), url, oauth_grant (encrypted), allowed_recipes, daily_cap, approval (`always`/`over_cap`/`never`) | Higgsfield = `https://mcp.higgsfield.ai/mcp` |
+| `recipe` | id, version, goal template, inputs, allowed tools, required apps, success check | Existing recipes (plan 19), versioned and immutable per version |
+| `task` | id, recipe@version, inputs, target (device or selector), accounts, connections, due, status, idempotency_key | |
+| `routine` | id, task template, schedule (RRULE) or trigger, paused, next_run | |
+| `run` | id, task, device, attempt, status, started/ended, cause, cost, step count | Linked to the phone's run record |
+| `artifact` | sha256, kind, size, source (run, step or connection), storage path | Content-addressed |
+| `approval` | id, run, kind (`question`/`values`/`send`/`pay`/`delete`/`grant`/`secret`/`login`), payload (exact text), state, answered_by, answered_at | One row per Owner Moment |
+| `lease` | id, vault_item, device, run, expires_at, used_at, state | One-use |
+| `audit` | seq, at, actor, action, object, prev_hash, hash | Append-only hash chain |
+
+## 4. The vault and sealed delivery (the core)
+
+### 4.1 Keys
+
+- **The vault key (VK),** 256-bit.
+  - It is wrapped by a key derived from your **passkey** (WebAuthn PRF extension) on supported browsers, or from a
+    master passphrase with Argon2id (m=64 MiB, t=3, p=1) as a fallback.
+  - **A recovery kit** (a printed or saved 24-word phrase) is a second wrap of VK, created at setup.
+  - VK only exists unwrapped in the browser tab's memory while the vault is unlocked (auto-lock after 10 minutes).
+- **Item keys (IK):** one per vault item, wrapped by VK. Items are encrypted with XChaCha20-Poly1305 using the item id
+  and version as associated data, so items cannot be swapped between accounts.
+- **Device keys (DK):**
+  - each phone creates an X25519 or P-256 key pair in Android Keystore (StrongBox when available) at enrolment;
+  - the private key never leaves the chip;
+  - the public key is registered and shown as a fingerprint that you confirm on both screens (as with pairing today).
+- **The runtime holds only ciphertext and wrapped keys.** It cannot decrypt.
+
+### 4.2 Sealed delivery (secret → phone, one task, one use)
+
+1. **The lease is prepared in your browser.** When a task that uses `vault:ig-brand/password` is started, and the vault
+   is unlocked in your browser, the browser:
+   - decrypts the item (VK → IK → value);
+   - seals it with HPKE to the target phone's DK, binding the associated data `{run_id, lease_id, device_id, slot,
+     expires_at}`;
+   - wipes the plaintext.
+2. **A routine can run while you're away** by choosing, per routine, **pre-authorised leases.** At schedule time the
+   browser seals the next N leases in advance; each is valid only for that run's time window. If none is prepared, the
+   run waits with a `login` approval.
+3. **The runtime** stores the sealed envelope with the lease, and relays it to the phone with the job over the existing
+   gateway channel. The payload schema is fixed: `{lease_id, enc, ct, aad}`, base64 only.
+4. **The phone:**
+   - opens the envelope with DK inside Cyclone's vault layer;
+   - checks the associated data matches its current run, its device id and the time;
+   - stores the value as a **transient slot** (`SealedSecret`, the same record type as today);
+   - fills through the existing `useOnce` → `OneShotSecretLease` → `SecretFillExecutor` path, confirmed by reading the
+     field back;
+   - revokes the lease;
+   - reports `lease.used`.
+5. **Replay is impossible:** the lease id is single-use on both sides, and the time window is enforced by both.
+
+**Optional "remember on this phone":** you can let the phone keep the secret in its own Keystore vault as a normal
+slot. It is then used offline like today's vault slots, and still revocable from the dashboard (the next heartbeat
+deletes it).
+
+### 4.3 Codes and two-factor
+
+- **TOTP (only if you store the seed):** the seed travels sealed like a password. The phone computes the code at fill
+  time, and the code is never sent or stored.
+- **Passkeys and app approvals:** the run raises a `login` approval ("Approve on your device").
+- **SMS or email codes:** a `values` approval asks you. Alternatively, if you connected that mailbox or allowed
+  notification reading for that account, the phone reads the code locally, fills it, and never stores or reports it.
+
+### 4.4 New accounts you sign up for
+
+1. The task raises a `grant` approval: "Sign up to service X as handle Y?"
+2. On yes, the phone generates the password inside the vault layer (a 20-character random password, adjusted to the
+   site's rules).
+3. It fills the form and seals the new value **back** to the browser. The phone encrypts to your vault's public
+   enrolment key, so the runtime still sees only ciphertext.
+4. The new `account` and `vault_item` rows appear with `created_by: task`.
+5. Verification steps (CAPTCHA, ID, SMS) always go to you as approvals; Cyclone does not try to get around them.
+
+### 4.5 Viewing, rotating, exporting
+
+- **Viewing** a value in Glass needs a passkey step-up, is shown for 30 seconds and is audited.
+- **Rotation** is a recipe:
+  1. make the new value;
+  2. the phone changes the password in the app;
+  3. the phone verifies it by logging in again;
+  4. the vault commits the new version;
+  5. the old version is kept 7 days for rollback.
+- **Export** is an encrypted file (age or JSON with Argon2id), and import supports Bitwarden or 1Password CSV
+  (converted in the browser, then encrypted).
+
+### 4.6 Where secrets must never appear (CI-guarded)
+
+**The places:**
+- run records;
+- Brain or learning stores;
+- diagnostics;
+- screenshots (password fields are masked on the phone before capture leaves it);
+- model prompts;
+- MCP arguments;
+- gateway access logs;
+- Glass `localStorage` or `sessionStorage`;
+- crash reports.
+
+**The guards:**
+- the existing Glass guard;
+- plan 05's forbidden list;
+- a new `test_cc_vault_boundaries.py`, which checks that the runtime vault code has no decrypt function and that the
+  sealed-envelope schema is the only secret-bearing message;
+- an end-to-end test that injects a canary password and greps every output (logs, DB, artifacts, prompts) for it.
+
+### 4.7 Threat model
+
+| Threat | Mitigation |
 |---|---|
-| A worker on each phone | The Mind, missions, `PhoneToolExecutor`, direct-first tools, background screens |
-| Asking a human | Owner Moments (question, values, approval, secret, handover), GATE on pay/send/delete, Task Kit |
-| Secrets | Vault slots: values live in the phone's Keystore; the wire and the model only see slot names (plan 05) |
-| Proof that work happened | Verified completion, run records, cause of death, the run inspector (plan 11) |
-| Quality | Lab: measured missions and suites (plan 18) |
-| Reusable work | Recipes (plan 19), grounded skills and routines (plan 23) |
-| A dashboard | Glass, served by the local gateway (plans 03, 31) |
-| Outside tools | MCP in both directions (agent MCP, Remote MCP; phone-side MCP planned in plan 19 Phase 3) |
+| PC stolen or database copied | Ciphertext only; VK never at rest unwrapped |
+| Runtime compromised | It can relay and delay but not decrypt; leases are bound to device and run; the audit chain shows tampering |
+| Phone stolen | Transient secrets are gone after use; remembered slots are Keystore-bound behind the screen lock; remote revoke on the next heartbeat; enrolment can be revoked |
+| Prompt injection from app content | Models never hold values; tools can't read the vault; GATE approvals are human |
+| Rogue AI plan | The coordinator's tools can't approve, can't change account permissions and can't read secrets; there are spending caps; everything is audited |
+| MCP server misuse | Per-connection allowlist, caps and approval rules; OAuth tokens held by the gateway only; no secrets in arguments |
+| Lost passkey | Recovery kit; a second passkey encouraged at setup |
 
-The Command Center is mostly these, **centralised**:
-- one vault instead of one per phone;
-- one schedule instead of routines per phone;
-- one place where every result lands;
-- many phones instead of one.
+## 5. Tasks, routines and the job engine
 
-## 2. The workspace (what you see)
+**Local mode:** a durable queue in SQLite (the transactional outbox pattern) inside the runtime. **Hosted mode (C6):**
+Temporal. The same task and run states apply to both.
 
-**Five sections, each a database with table, board, calendar and gallery views, and pages that embed live blocks:**
+**Task states:** `draft` → `scheduled` → `waiting_device` → `running` → (`needs_you`) → `succeeded` | `failed` |
+`cancelled`.
 
-| Section | Rows | Useful views |
+**Assignment:**
+1. Filter phones that are online, have the required apps, are allowed for the task's accounts, are healthy, and are
+   not busy (or have a free background session once parallel sessions exist).
+2. Take the **account lock**: one phone per account at a time.
+3. Prefer the phone that last succeeded with that account.
+
+**Retries:**
+- the job engine retries only on infrastructure causes (the phone went offline, or a lease expired before use);
+- task causes (for example `wrong-room` or `app-blocked`) go to Results with the fix suggested by the inspector;
+- the coordinator may retry once.
+
+**Routines:**
+- RRULE schedules in local time, and triggers (a notification, an email, a webhook, another task's result);
+- **missed runs are not replayed**; the next run is shown instead;
+- pause-all is one switch.
+
+**The phone side:** the job agent in Cyclone Mobile receives the task, starts a Mind mission with the recipe's goal
+and inputs, streams step events, and reports the run record at the end. It uses the existing mission journal, so it
+survives restarts.
+
+## 6. The Approvals inbox
+
+- **Source:** every Owner Moment from every phone, plus `login`, `grant` and connection-spend approvals, lands as an
+  `approval` row with its **exact payload** (plan 32's readback rule: what you approve is exactly what is sent).
+- **Answering:** Glass, the phone's own card or notification, or Drive by voice (sends only).
+- **The same Task Kit command** reaches the owning mission (`TaskCommands.send`); the first answer wins.
+- **Timeouts:** per kind, with a default of 1 hour for sends and 24 hours for sign-ups. When it times out the run
+  pauses; it never auto-approves.
+- **Batching:** "Approve all 3 posts" is allowed only for identical kinds, with each payload shown.
+
+## 7. The AI coordinator
+
+- **Where it runs:** a runtime service using your OpenRouter key and model choice (the existing catalogue), never in
+  Glass.
+- **Its tools** (fixed JSON schemas, audited):
+  - `accounts.list` (names and health only);
+  - `devices.list/status`;
+  - `recipes.list/get`;
+  - `tasks.create/update/cancel`;
+  - `routines.create/pause/resume`;
+  - `runs.list/get` (masked);
+  - `artifacts.list`;
+  - `connections.list`;
+  - `reports.write` (a page);
+  - `approvals.list` (read only).
+- **It cannot:** read vault values, approve anything, change account permissions or members, enrol phones, add
+  connections, or run any shell.
+- **Budgets:** tasks per day, and connection credits per day, both set by you. It stops and asks when either is
+  reached.
+- **Untrusted content:** run text and app content are passed as quoted data with the existing untrusted-content framing.
+- **Evaluation:** a coordinator suite in Lab. Given a goal, it must produce the right tasks and schedules; must not
+  exceed budgets; and must refuse to act outside the owned accounts. It runs on every coordinator prompt change.
+
+## 8. Connections (MCP), with Higgsfield first
+
+- **The MCP gateway** in the runtime, starting with the existing `/v1/pc` patterns:
+  - it registers servers (URL, transport);
+  - it runs the OAuth 2.1 flow in your browser and stores the grant encrypted (a vault item of kind `oauth`);
+  - it proxies tool calls, enforcing allowlists, caps and approval rules;
+  - it saves outputs as artifacts.
+- **Higgsfield:**
+  - add `https://mcp.higgsfield.ai/mcp` and sign in with OAuth (it uses your plan's credits);
+  - the recipe step `generate_video{prompt, model, duration, aspect}` produces an artifact (the file plus its prompt);
+  - a later phone step `post_video{artifact, account, caption}` pushes the file to the phone (media store) and posts
+    it through the app, with a `send` approval.
+- **Open-source gateway choice:** start with the runtime's own proxy (small, fits the no-generic-shell rule). Evaluate
+  IBM ContextForge or Obot for hosted mode when many connections and teams arrive.
+- **The other direction:** the Command Center exposes itself as an MCP server (the same tools as the coordinator,
+  behind the same approvals), so Claude or Codex can create tasks.
+
+## 9. Dashboard UX (Glass)
+
+- **New sections:** Accounts, Tasks, Routines, Results and Approvals, next to Phones (today's Devices), Connections
+  (today's Remote MCP and Marketplace connections) and Knowledge.
+- **Databases:** table, board, calendar and gallery views; filters saved per view; bulk actions (pause and resume
+  only; never bulk approve different kinds).
+- **Pages (C5):** a block editor (BlockNote on Yjs) with live blocks for a task, routine, run list, phone tile,
+  approval queue or artifact gallery. Templates: "Weekly content", "Daily app check", "Password health".
+- **Vault UI:** unlock (passkey), an item list without values, reveal-with-step-up, a generator, a health view,
+  import and export.
+- **Design:** Glass's web design system (Teal Matrix, plan 03). Tilt Glass stays on the phone's surfaces.
+
+## 10. Phones in the fleet
+
+- **Enrolment:** the existing pairing (a code plus Allow on the phone), extended to:
+  - create the DK in Keystore and show its fingerprint on both screens;
+  - install the job agent's permissions through the setup cards (plan 30).
+- **For company-owned phones:** optional Android Management API or Headwind MDM enrolment for silent installs and
+  policies.
+- **Health:** a heartbeat every 30 s (battery, temperature, storage, network, app versions, background capability).
+  **Quarantine** after 3 infrastructure failures in a row, released by you.
+- **Updates:** Cyclone app updates through the existing release lane; the Command Center shows which phones are behind.
+- **Cloud phones:** the existing Attach flow (plan 31) registers them as devices with the same DK enrolment.
+
+## 11. Observability and reports
+
+- **Per run:** the phone's run record (steps, decisions, cause) and masked screenshots, linked from Results.
+- **Metrics:**
+  - success rate per recipe, account, phone and app version;
+  - time to pick up;
+  - approval wait time;
+  - connection spend.
+- **Reports:** the coordinator writes a daily or weekly page (what ran, what failed and why, what's next), and you can
+  export it as PDF or CSV.
+- **Alerts:** a phone offline for more than 10 minutes, a recipe success rate below 80%, a login failing twice, a spend
+  cap reached. Delivered by notification on your phone, or by email.
+
+## 12. Releases
+
+Each step ships through the fast lane with release notes, honest limits and new CI guards. Physical acceptance is
+stated as owed until you test it.
+
+| Release | Contents | Exit criteria |
 |---|---|---|
-| **Accounts** | One per account you own: service, login name, which vault item holds its secret, which phones may use it, 2FA type, notes, last used, health | Table; "needs attention" (password expired, login failed) |
-| **Tasks** | One-off work: goal sentence, inputs, target phone or "any phone that has app X", accounts it may use, due time, status | Board by status; calendar by due date |
-| **Routines** | Repeating work: schedule or trigger, recipe, accounts, which phones, pause switch | Calendar; "next 24 h" |
-| **Phones** | Every device: model, Android, Cyclone version, online/battery/storage, apps, current task | Grid of live tiles; health table |
-| **Results** | Every run: outcome, steps, screenshots (secrets masked), files produced, cost | Timeline; per-task history; "failed this week" |
+| **C0: Command Center shell** | Glass sections Accounts (metadata only), Tasks, Routines, Results, Approvals across all connected phones; tasks start existing recipes on a chosen phone; one Approvals inbox fed by Owner Moments; SQLite job engine with account locks | One routine runs on two phones on schedule for 3 days, results listed, approvals answered from Glass |
+| **C1: Vault** | Zero-knowledge vault in the browser (passkey PRF or passphrase), items, generator, health, import/export, audit chain; no delivery yet (phones still use their own slots) | Canary test: no plaintext in DB, logs or runtime memory dumps; a restore from the recovery kit works |
+| **C2: Sealed delivery** | Device keys at enrolment, HPKE leases, phone job agent opens → `useOnce` → revoke, pre-authorised routine leases, TOTP at fill time, "remember on this phone", remote revoke | A task logs in on a phone that never had the password; canary absent everywhere; replayed envelope refused; expired lease refused |
+| **C3: Connections** | MCP gateway with OAuth, caps, approvals, artifacts; Higgsfield recipe (generate, then post with approval) | The "make and post a video" routine runs end to end with the approval shown; the cap stops a runaway loop |
+| **C4: Coordinator** | The coordinator service with fixed tools, budgets, daily report page, the Lab coordinator suite | The suite passes; a week of reports matches the Results data |
+| **C5: Pages** | Block editor with live blocks, templates, saved views | Owner builds a "Weekly content" page from a template |
+| **C6: Hosted and multi-site** | Cloud Command Center (Postgres, Temporal), PC as an outbound edge, members and roles, SSO | A second site's phones run tasks from the cloud; the vault is still zero-knowledge (the cloud DB holds ciphertext only) |
 
-**Pages** mix text and live blocks. For example, a "Monday social posts" page holds:
-- your notes;
-- an embedded routine;
-- the last three results with their screenshots;
-- a Run now button.
+**Start with C0 → C2.** That is the core of the ask: one place for your accounts and tasks, and phones that log in
+for a task without the password ever being visible to anything but you and that phone.
 
-Templates make repeat set-ups one click.
+## 13. Open decisions for the owner
 
-**The approval inbox** is one queue for everything waiting on you, across all phones:
-- a send to approve (with the exact text);
-- a question;
-- a verification code to enter;
-- a login that needs your fingerprint.
+1. **Pre-authorised routine leases** (routines log in while you're away), yes or no? Yes is convenient; no means every
+   login waits for you to unlock the vault. The default in this plan is yes, per routine.
+2. **"Remember on this phone"** as the default for your own phones? It is faster and works offline, but a secret then
+   stays on the phone.
+3. **Local-first only for now, or plan C6 soon?** Hosted mode is where teams and multiple sites come in.
+4. **The model for the coordinator:** the same OpenRouter model as the Mind, or a cheaper planner model?
 
-Every item is answered once, from the dashboard, your phone or a notification.
+## 14. Not in this plan
 
-## 3. Credentials: stored, sent and used safely
-
-This is the heart of the ask. The design goal is that **no model, log, screenshot or report ever contains a secret
-value**, while phones can still log in on their own.
-
-### 3.1 Where secrets live
-
-- **The central vault** holds each account's secrets (password, TOTP seed if you choose to store it, recovery codes,
-  passkey where the service allows).
-- **Zero-knowledge encryption** (the Bitwarden/1Password model): items are encrypted with keys derived on your devices.
-  The server stores ciphertext only, so a database leak does not expose passwords.
-- **Unlock** with a passkey or biometrics.
-- **Every read** is written to an append-only audit log (who, which item, which task, when).
-
-### 3.2 How a phone gets a secret for a task
-
-1. **The task names vault items, never values:** "log in to Instagram as @mybrand using `vault:ig-mybrand`."
-2. **A lease is issued.** When a phone starts that task, the control plane issues a short lease (for example
-   15 minutes, one use) for exactly those items to exactly that phone.
-3. **The secret travels end-to-end encrypted:**
-   - each phone has a device key pair in its hardware Keystore, created at enrollment;
-   - the secret is encrypted to that phone's public key, so the server and network only relay ciphertext.
-4. **The phone decrypts inside Cyclone's vault layer.** It fills the field through the existing `vault_fill` path (the
-   Mind asks for "fill slot ig-mybrand.password"; it never sees the value), then wipes it from memory when the lease
-   ends.
-5. **Masking:** screenshots of password fields are masked before they leave the phone, and the run record shows
-   "filled from vault".
-
-### 3.3 Two-factor codes
-
-The options, safest first:
-- **Passkeys or app approvals on your own device:** the task pauses with an approval ("Approve this login on your
-  phone").
-- **A TOTP seed you chose to store:** the phone computes the code locally at fill time, the same as the password.
-- **SMS or email codes:** the task asks you through the approval inbox, or reads it from your own inbox only if you
-  connected that mailbox and allowed it for that account.
-
-Codes are never stored after use.
-
-### 3.4 New accounts you sign up for
-
-When a task signs you up to a service:
-1. The phone asks you to approve the sign-up.
-2. It generates a strong password inside the vault layer.
-3. It fills the form.
-4. It saves the new item to your vault with its source ("created by task X on phone Y").
-
-Verification steps (CAPTCHAs, ID checks, SMS) are handed to you as approvals, and Cyclone does not try to get around
-them. The Accounts table gains the new row automatically.
-
-### 3.5 Rotation and hygiene
-
-- A routine can change a password: the vault makes a new value, the phone applies it, and the vault keeps the old one
-  until the login is verified.
-- A health view flags reused, weak or old passwords, and accounts with no 2FA.
-
-## 4. The AI coordinator
-
-**What it does:** an assistant in the dashboard that plans and supervises work across phones, while the phones'
-Minds still do the tapping.
-
-**What it can do**, through a fixed set of tools, the same way Glass talks to the gateway today:
-- `tasks.create`, `routines.create/pause`, `runs.list/get`, `phones.list/status`;
-- `approvals.list` (read only);
-- `reports.write` (a page in the workspace).
-
-**What it cannot do:**
-- read secret values (it only sees vault item names);
-- approve its own requests;
-- change who may use an account;
-- run any generic shell.
-
-Approvals stay with you (GATE and the approval inbox).
-
-**How it chooses phones:** a scheduler picks a phone that has the app, is online, has the account's lease available,
-and is not busy. Each account is used by one phone at a time.
-
-**What it reports:** a daily page of what ran, what failed and why (from the cause of death), and suggested fixes. It
-can re-run a failed task once, with the same inputs.
-
-**Guarding against instructions in content:** text the phones read from apps, messages and web pages is treated as
-data, never as instructions. This is the framing the Mind already uses for untrusted content.
-
-## 5. Connections (MCP) to other platforms
-
-Tasks can call outside tools, for example making a video with **Higgsfield**. Higgsfield has an official hosted MCP
-server at `mcp.higgsfield.ai/mcp` with OAuth sign-in.
-
-**How it works:**
-- **One MCP gateway in the control plane** holds each connection's OAuth grant. Phones and the coordinator call tools
-  through it and never hold the tokens.
-- **Per connection, you set:**
-  - which recipes and tasks may use it;
-  - a spending cap (credits per day);
-  - whether each call needs your approval.
-- **Results become artifacts,** for example the video file. A later step can hand the artifact to a phone ("post this
-  video to @mybrand with this caption"), with the post approved like any send.
-- **Candidate open-source gateways:** IBM ContextForge, Obot, Microsoft MCP Gateway. Each adds a registry, OAuth
-  brokering and policy.
-- **The other direction:** the Command Center itself can be an MCP server, so your other agents (Claude, Codex) can
-  create tasks or read results with the same permissions and approvals.
-
-## 6. Architecture
-
-```
-            Command Center (cloud or your own server)
-   ┌──────────────────────────────────────────────────────────────┐
-   │ Workspace UI (pages + databases)     AI coordinator (tools) │
-   │ API + auth (passkeys, roles) ─ Policy (who may use what)     │
-   │ Jobs & schedules (durable workflows) ─ Approval inbox        │
-   │ Vault (zero-knowledge items, leases, audit)                  │
-   │ MCP gateway (OAuth grants, caps)  ─  Results store + search │
-   └───────────────▲──────────────────────────────▲──────────────┘
-          outbound mTLS (phones/gateways dial out; nothing listens on your network)
-   ┌───────────────┴──────────────┐   ┌───────────┴──────────────┐
-   │ Edge gateway (a PC at home/  │   │ Cloud phones (e.g. VMOS)  │
-   │ office: today's cyclone      │   │ via their own gateway     │
-   │ gateway, grown up)           │   └──────────────────────────┘
-   └───────┬──────────────────────┘
-           USB / Wi-Fi
-   Cyclone phones: Mind + PhoneToolExecutor + GATE + vault layer (device key in Keystore)
-```
-
-**Principles:**
-- **The phones decide and act; the center assigns and records.** A phone that loses the uplink finishes its current
-  task and queues its report.
-- **Durable jobs:** each task is a workflow that survives restarts. Every step is idempotent, and "done" means
-  verified, not "the tap was sent".
-- **One source of truth per thing:**
-  - accounts and secrets in the vault;
-  - schedules in the job system;
-  - results in the results store;
-  - the workspace pages link to them rather than copying them.
-
-## 7. Open-source building blocks
-
-These are the candidates to evaluate. **Check each licence before adopting;** several changed licence in 2024–2026.
-
-| Layer | First choice | Alternatives | Notes |
-|---|---|---|---|
-| Vault engine | **OpenBao** (the MPL fork of Vault) | Infisical; Vaultwarden (the Bitwarden server API) for the password-manager UX | Zero-knowledge item encryption stays client-side, whatever the engine |
-| Password-manager UX reference | Bitwarden clients (GPL) | — | Study, don't copy: item model, sharing, passkeys |
-| Auth / SSO | Keycloak | Ory (Kratos/Hydra), Zitadel | Passkeys (WebAuthn) first |
-| Permissions | OpenFGA or SpiceDB (Zanzibar-style: "phone P may use account A for recipe R") | Cerbos, OPA/Cedar for policies | — |
-| Durable jobs | **Temporal** | Hatchet, Inngest, Prefect | Timers, retries and per-task history for free |
-| Messaging to edges | NATS JetStream (leaf nodes at each site) | MQTT (EMQX), Redis Streams | Outbound-only connections |
-| Database | PostgreSQL (row-level security per workspace) | — | The workspace databases are Postgres tables |
-| Results and events | ClickHouse | TimescaleDB | Fast "failed this week" queries |
-| Files and screenshots | S3-compatible storage (Garage, SeaweedFS, or a cloud bucket) | — | Content-addressed artifacts |
-| Notion-style editor | BlockNote or Tiptap on Yjs (Hocuspocus for sync) | AFFiNE and AppFlowy as whole-app references | Blocks that embed live tasks, runs and phones |
-| Database views | Build on your own tables; Baserow and NocoDB as references | Refine / TanStack Table for the grid | Keep one data model; don't bolt on a second app |
-| Live phone screens | Today's scrcpy path; LiveKit (WebRTC) to reach the cloud | — | View only, unless someone takes over |
-| Device enrolment and updates | Android Management API (for company-owned phones), Headwind MDM | Today's release lane for the Cyclone app | Device-owner mode makes installs silent |
-| Virtual phones | Cloud phones you already use (VMOS), Redroid or Cuttlefish for test devices | — | — |
-| Observability | OpenTelemetry, Grafana, Langfuse (model calls) | SigNoz | Secrets are redacted before any log |
-| MCP gateway | IBM ContextForge, Obot | Microsoft MCP Gateway | OAuth 2.1 per the MCP spec |
-| Billing (if sold) | Lago or OpenMeter for metering | Stripe | Per phone-hour + runs |
-
-## 8. What makes it rock solid (how a top company would run it)
-
-- **Reliability:**
-  - service levels per phone ("task picked up within 60 s, 99% of the time");
-  - canary rollout of Cyclone and recipe updates to 5% of phones first, gated by the Lab success rate;
-  - automatic quarantine of a phone that fails three tasks in a row;
-  - every failure has a cause-of-death code.
-- **Security:**
-  - zero-knowledge vault, device keys in hardware, short single-use leases;
-  - passkeys for people;
-  - least-privilege roles (viewer, operator, admin, vault admin);
-  - an append-only audit log;
-  - independent penetration tests;
-  - SOC 2 and GDPR once others use it.
-- **Safety:**
-  - GATE approvals for pay, send and delete stay on;
-  - per-account rate limits that follow each platform's rules;
-  - one kill switch that pauses every phone;
-  - automations run only on accounts you own or manage.
-- **Operations:**
-  - a status page;
-  - backups with tested restores (the vault is exported encrypted);
-  - on-call alerts for "phones offline" and "success rate dropped".
-- **Product quality:**
-  - every recipe carries a measured success rate (Lab);
-  - results always link to the run inspector;
-  - the AI coordinator's actions are visible and undoable where possible.
-
-## 9. Use cases this serves
-
-- **Your brands' social accounts:** make content (Higgsfield via MCP), post on schedule, answer comments with
-  approval, weekly report.
-- **Business apps that only exist on mobile:** daily data entry, order checks, exporting reports.
-- **Personal admin:** bills (read only, paying approved), appointments, calendar, messages.
-- **QA of your own apps:** run test recipes across phones and Android versions on every release.
-- **Monitoring:** check key mobile flows every hour, and alert when a login or checkout breaks.
-
-## 10. Build order (Cyclone-sized steps)
-
-| Step | What | Builds on |
-|---|---|---|
-| C0 | **Glass as a mini Command Center for your own phones:** Accounts list (vault item names from the phones), Tasks and Routines across connected phones, Results page | Glass, the gateway, phone vault slots, routines |
-| C1 | **Central vault:** zero-knowledge items, device keys at enrolment, leased end-to-end delivery to `vault_fill`, audit log | Plan 05 vault; phone Keystore |
-| C2 | **Durable jobs and the approval inbox:** Temporal-backed tasks and routines, one inbox for every phone's Owner Moments | Owner Moments, Task Kit |
-| C3 | **The MCP gateway:** connections with OAuth, caps and approvals; artifacts; Higgsfield as the first | The Remote MCP pages |
-| C4 | **The AI coordinator:** fixed tools, scheduler, daily report page | The run inspector, Lab |
-| C5 | **Multi-site and cloud:** edge gateways dialling out, cloud phones, the Notion-style editor, roles | Web-only PC (plan 31) |
-
-**Start with C0 + C1.** Together they deliver the core of the ask: your accounts and secrets in one safe place, and
-phones that can log in on their own for your tasks, without a model ever seeing a password.
+- Getting past sign-up protections (CAPTCHA, SMS or ID checks): these are always handed to you.
+- Running accounts you don't own or manage.
+- Generic shell or remote-code tools for the coordinator or MCP.
+- Bulk approval of different kinds of actions.
