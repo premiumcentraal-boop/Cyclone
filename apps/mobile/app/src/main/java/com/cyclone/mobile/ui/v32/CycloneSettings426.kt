@@ -23,6 +23,8 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Contacts
+import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudQueue
@@ -150,6 +152,11 @@ internal fun CycloneSettingsPage426(
                     Settings426Row("Phone autonomy", "Phone autonomy", Icons.Rounded.PhoneAndroid, settingsAutonomyLabel(accessProfile)),
                     Settings426Row("User notes", "User notes", Icons.Rounded.Person, if (com.cyclone.mobile.brain.UserMdRuntime.enabled) "On" else "Off"),
                 ),
+                "Drive" to listOf(
+                    Settings426Row("Driver mode", "Driver mode", Icons.Rounded.DirectionsCar,
+                        if (com.cyclone.mobile.voice.DriverMode.enabled(context)) "On" else "Off", com.cyclone.mobile.setup.SetupCard.DRIVER),
+                    Settings426Row("Voice", "Voice", Icons.Rounded.RecordVoiceOver, "OpenRouter"),
+                ),
                 "Appearance" to listOf(
                     Settings426Row("Working indicator", "Working indicator", Icons.Rounded.Tune, workingIndicatorValue()),
                 ),
@@ -210,6 +217,8 @@ internal fun CycloneSettingsPage426(
                 }
             }
 
+            "Driver mode" -> item { Settings426Surface { DriverModeSettings(context, refresh) } }
+            "Voice" -> item { Settings426Surface { VoiceSettings(context) } }
             "Quick setup" -> item { CycloneQuickSetup(context, refresh) { onSection("Permissions") } }
             "Model & API" -> item {
                 ModelApi426Card(
@@ -558,6 +567,8 @@ private fun Settings426Surface(content: @Composable () -> Unit) {
 }
 
 private fun Settings426DetailSubtitle(section: String): String? = when (section) {
+    "Driver mode" -> "A large voice button for the car: talk, and Cyclone tells you when it is done."
+    "Voice" -> "The voice, the models and how fast Cyclone answers on this phone."
     "Working indicator" -> "The Trace Field overlay shown while Cyclone works: mode, style and a live preview."
     "Model & API" -> "Choose the model Cyclone uses and secure your API access."
     "Default intelligence" -> "Set the default reasoning level for new tasks."

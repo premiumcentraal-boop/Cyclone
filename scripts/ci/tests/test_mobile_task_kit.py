@@ -49,6 +49,17 @@ class TaskKitGuards(unittest.TestCase):
         self.assertIn("TaskCommands.send(context, moment.taskId", card)
         self.assertNotRegex(card, r"MindMissions|OverlayChromeRuntime|WorkspaceTasks|inbox\.")
 
+    def test_drive_voice_only_speaks_task_kit(self):
+        # Plan 32: voice is one more surface. Its answers and its Stop go through the bus like any button.
+        session = (BASE / "voice/VoiceSession.kt").read_text(encoding="utf-8")
+        self.assertIn("TaskCommands.send(app, taskId, command)", session)
+        for path in (BASE / "voice").glob("*.kt"):
+            self.assertNotRegex(path.read_text(encoding="utf-8"), r"MindMissions|WorkspaceRuntime|WorkspaceTasks\.|MissionPlanes\.", path.name)
+        # The Driver buttons (Stop, Not now, the orb) only reach the voice session.
+        overlay = (BASE / "ui/overlay/AiModeOverlay.kt").read_text(encoding="utf-8")
+        self.assertIn("onStop = session::stop", overlay)
+        self.assertNotRegex(overlay, r"TaskCommands\.send|MindMissions|dispatch\(OverlayUserAction")
+
     def test_every_surface_renders_the_one_owner_card(self):
         # Plan 27: the overlay renders moments on its glass card, which keeps the owner card's bodies.
         self.assertIn("OverlayOwnerCard(moment)", (BASE / "ui/overlay/OverlayChrome.kt").read_text(encoding="utf-8"))

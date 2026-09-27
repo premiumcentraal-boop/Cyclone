@@ -51,6 +51,10 @@ enum class SetupCard(
         "voice", "Talk to Cyclone",
         "Tap the mic and say what you need. Cyclone only listens while the mic is on.",
     ),
+    DRIVER(
+        "driver", "Drive with Cyclone",
+        "A big voice button for the car. Tap, talk, and Cyclone tells you when it's done. Paying or deleting waits until you stop.",
+    ),
     ;
 
     companion object {
@@ -85,6 +89,7 @@ object SetupCopy {
         SetupCard.CALENDAR -> "calendar"
         SetupCard.CONTACTS -> "contacts"
         SetupCard.VOICE -> "voice"
+        SetupCard.DRIVER -> "driver mode"
     }
 }
 

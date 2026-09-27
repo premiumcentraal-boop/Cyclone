@@ -26,6 +26,10 @@ INFRASTRUCTURE_PERMISSIONS = {
     # Normal install-time permission for AlarmClock intents (phone.set_alarm / phone.set_timer). No runtime dialog;
     # it only lets Cyclone ask the clock app to create an alarm/timer, which the clock app shows to the owner.
     "com.android.alarm.permission.SET_ALARM",
+    # Normal foreground-service permission for Drive (plan 32). No runtime dialog and no data of its own: the
+    # microphone itself is RECORD_AUDIO, which keeps its setup row. The service runs only while Cyclone listens
+    # after the owner taps the AI button.
+    "android.permission.FOREGROUND_SERVICE_MICROPHONE",
 }
 
 # Every permission in this set must appear in the Cyclone setup UI as a row that maps to the

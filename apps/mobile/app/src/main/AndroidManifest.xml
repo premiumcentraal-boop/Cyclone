@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Drive (plan 32): the microphone service runs only while Cyclone listens after a tap. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
@@ -199,6 +201,22 @@
             <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
         </intent-filter>
     </receiver>
+    <!-- Drive (plan 32): listening only after the owner taps the AI button; stopped as soon as the request is heard. -->
+    <service
+        android:name=".voice.VoiceService"
+        android:exported="false"
+        android:foregroundServiceType="microphone" />
+    <service
+        android:name=".voice.DriverTile"
+        android:exported="true"
+        android:icon="@drawable/ic_cyclone_status"
+        android:label="Cyclone Drive"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+        <intent-filter>
+            <action android:name="android.service.quicksettings.action.QS_TILE" />
+        </intent-filter>
+        <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />
+    </service>
     <service
         android:name=".runtime.plane.CycloneBackgroundTile"
         android:exported="true"

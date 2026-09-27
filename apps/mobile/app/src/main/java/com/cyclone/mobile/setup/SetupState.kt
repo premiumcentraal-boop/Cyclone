@@ -30,6 +30,8 @@ object SetupState {
         SetupCard.CALENDAR -> CyclonePermissionSetup.calendarEnabled(context) && CyclonePermissionSetup.calendarWriteEnabled(context)
         SetupCard.CONTACTS -> CyclonePermissionSetup.contactsEnabled(context)
         SetupCard.VOICE -> context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        SetupCard.DRIVER -> com.cyclone.mobile.voice.DriverMode.enabled(context) &&
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 
     fun shouldOpen(context: Context): Boolean = SetupFlow.shouldOpen(cards(), done(context), SetupStore.seen(context))
@@ -40,6 +42,13 @@ object SetupState {
      */
     fun open(context: Context, card: SetupCard): Boolean {
         val on = isOn(context, card)
+        // Driver mode is Cyclone's own setting: the owner's tap on this card turns it on (Settings → Driver mode turns
+        // it off); Android's microphone dialog follows when the microphone is not allowed yet.
+        if (card == SetupCard.DRIVER) {
+            com.cyclone.mobile.voice.DriverMode.setEnabled(context, true)
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return open(context, SetupCard.VOICE)
+            return true
+        }
         val runtime = runtimePermissions(card)
         if (runtime != null) {
             val activity = context as? Activity

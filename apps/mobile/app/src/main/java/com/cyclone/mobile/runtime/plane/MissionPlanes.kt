@@ -103,10 +103,19 @@ object MissionPlanes {
     fun blocker(context: Context): String? = capability(context).takeUnless { it.ready }?.headline
         ?: BackgroundCheck.blocker(context)
 
+    @Volatile private var nextMode: PlaneMode? = null
+
+    /**
+     * The next mission starts in [mode], once (Drive, plan 32: background first while driving, so Maps stays on the
+     * screen). Only set when background work is ready; the owner's own mode applies again after that mission.
+     */
+    fun preferOnce(mode: PlaneMode) { nextMode = mode }
+
     fun begin(context: Context, missionId: String, goal: String, traceId: String?, modeOverride: PlaneMode? = null): MissionPlaneSession {
         current?.end()
         val app = context.applicationContext
-        return MissionPlaneSession(app, missionId, goal, traceId, modeOverride ?: mode(context)) { next ->
+        val preferred = nextMode.also { nextMode = null }
+        return MissionPlaneSession(app, missionId, goal, traceId, modeOverride ?: preferred ?: mode(context)) { next ->
             val changed = uiState.value?.let { it.kind != next?.kind || it.available != next?.available } ?: true
             uiState.value = next
             // The task notification carries the move action: keep it in step with the plane.

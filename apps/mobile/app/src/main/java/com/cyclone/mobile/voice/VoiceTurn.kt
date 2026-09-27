@@ -1,0 +1,332 @@
+package com.cyclone.mobile.voice
+
+/**
+ * The turn-taking engine (plan 24 §5.2): the whole voice conversation as a pure state machine. The session feeds it
+ * events (a tap, the end of speech, a transcript, the model's reading, the end of a spoken line, the task ending) and
+ * carries out the effects it returns. There are no Android types here, so every path is a JVM test.
+ *
+ * Voice never acts (plan 32): its only ways to change anything are [VoiceEffect.Submit] (a new Ask, exactly as if
+ * typed) and [VoiceEffect.Send] (a Task Kit command to the running task).
+ */
+enum class VoicePhase { IDLE, LISTENING, TRANSCRIBING, UNDERSTANDING, ACKING, WORKING, ASKING, READBACK, DONE, CLOSED }
+
+enum class Earcon { LISTEN, CLOSE_SOFT, DONE, FAILED, NEEDS_YOU }
+
+/** What happens when a spoken line ends. */
+enum class AfterSpeech { LISTEN, WORK, CLOSE }
+
+/** A Task Kit command, as voice may send it. The session maps these to `TaskCommand`s. */
+sealed interface VoiceAnswer {
+    data class Reply(val text: String) : VoiceAnswer
+    data class Fill(val values: Map<String, String>) : VoiceAnswer
+    data object Approve : VoiceAnswer
+    data object Decline : VoiceAnswer
+    data object Stop : VoiceAnswer
+}
+
+enum class VoiceFailure { NO_KEY, OFFLINE, NOT_HEARD, MIC_BUSY, NO_MIC }
+
+enum class TaskOutcome { DONE, FAILED, STOPPED }
+
+/** An open Owner Moment, as voice sees it. */
+data class VoiceMoment(
+    val id: String,
+    val kind: Kind,
+    /** What the task asks, already redacted. */
+    val text: String,
+    val choices: List<String> = emptyList(),
+    val fields: List<String> = emptyList(),
+) {
+    enum class Kind { QUESTION, VALUES, SEND, APPROVAL, SECRET, HANDOVER }
+}
+
+sealed interface VoiceEvent {
+    /** The orb was tapped (or held and released). */
+    data object Tap : VoiceEvent
+    /** The owner spoke and stopped; the clip is ready to transcribe. */
+    data object Heard : VoiceEvent
+    /** Silence, noise or a blip: no call is made. */
+    data object NothingHeard : VoiceEvent
+    data class Transcript(val text: String) : VoiceEvent
+    data class Understood(val understanding: Understanding) : VoiceEvent
+    data class Failed(val failure: VoiceFailure) : VoiceEvent
+    /** A spoken line finished (or was cut off by the owner). */
+    data object SpeechEnded : VoiceEvent
+    /** A task is running (started by voice or not). */
+    data object TaskStarted : VoiceEvent
+    data class TaskEnded(val outcome: TaskOutcome, val summary: String = "") : VoiceEvent
+    /** Sixty seconds of work without news. */
+    data object StillWorking : VoiceEvent
+    data class MomentOpened(val moment: VoiceMoment) : VoiceEvent
+    data object MomentClosed : VoiceEvent
+    /** The big Stop button: ends the voice turn and the task. */
+    data object Stop : VoiceEvent
+    /** "Not now" while Cyclone asks: declines the open question and closes. */
+    data object NotNow : VoiceEvent
+}
+
+sealed interface VoiceEffect {
+    data class Play(val earcon: Earcon) : VoiceEffect
+    /** Open the microphone (the only way it opens: a tap, or right after Cyclone asks something). */
+    data object Listen : VoiceEffect
+    /** Close the microphone and drop the clip. */
+    data object StopListening : VoiceEffect
+    data object Transcribe : VoiceEffect
+    data class Understand(val transcript: String, val context: VoiceContext) : VoiceEffect
+    data class Say(val line: String, val then: AfterSpeech) : VoiceEffect
+    data object StopSpeaking : VoiceEffect
+    /** Start a new Ask with [goal], exactly as if typed. */
+    data class Submit(val goal: String) : VoiceEffect
+    data class Send(val answer: VoiceAnswer) : VoiceEffect
+}
+
+data class VoiceTurn(
+    val phase: VoicePhase = VoicePhase.IDLE,
+    val taskLive: Boolean = false,
+    /** What the owner said last (user caption). */
+    val heard: String = "",
+    /** What Cyclone says or said last (Cyclone caption). */
+    val said: String = "",
+    val speaking: Boolean = false,
+    val after: AfterSpeech = AfterSpeech.CLOSE,
+    val unclearCount: Int = 0,
+    val followUp: VoiceContext.FollowUp? = null,
+    val moment: VoiceMoment? = null,
+    /** The moments already announced, so one moment is spoken once. */
+    val announced: Set<String> = emptySet(),
+    val stillSaid: Boolean = false,
+    val stopping: Boolean = false,
+    /** A task ended while the owner was talking; said as soon as the turn is free. */
+    val pendingEnd: Pair<TaskOutcome, String>? = null,
+    val recentGoals: List<String> = emptyList(),
+    val language: String = "auto",
+) {
+    data class Step(val turn: VoiceTurn, val effects: List<VoiceEffect>)
+
+    /** AI mode is up (the panel shows) in these phases; otherwise only the button, with a ring while working. */
+    val panelOpen: Boolean get() = phase in setOf(VoicePhase.LISTENING, VoicePhase.TRANSCRIBING, VoicePhase.UNDERSTANDING,
+        VoicePhase.ACKING, VoicePhase.ASKING, VoicePhase.READBACK, VoicePhase.DONE)
+
+    /** The screen dims only while a request is live (plan 32). */
+    val dimmed: Boolean get() = phase in setOf(VoicePhase.LISTENING, VoicePhase.TRANSCRIBING, VoicePhase.UNDERSTANDING, VoicePhase.ASKING,
+        VoicePhase.READBACK)
+
+    /** Cyclone waits for an answer: the open moment, or its own follow-up question. */
+    val answering: Boolean get() = followUp != null || moment?.kind in VOICE_KINDS
+
+    fun on(event: VoiceEvent): Step = when (event) {
+        VoiceEvent.Tap -> tap()
+        VoiceEvent.Heard -> if (phase == VoicePhase.LISTENING) step(copy(phase = VoicePhase.TRANSCRIBING), VoiceEffect.Transcribe) else same()
+        VoiceEvent.NothingHeard -> if (phase == VoicePhase.LISTENING) rest(listOf(VoiceEffect.Play(Earcon.CLOSE_SOFT))) else same()
+        is VoiceEvent.Transcript -> if (phase == VoicePhase.TRANSCRIBING) transcript(event.text) else same()
+        is VoiceEvent.Understood -> if (phase == VoicePhase.UNDERSTANDING) understood(event.understanding) else same()
+        is VoiceEvent.Failed -> if (phase in LISTEN_PHASES) say(failure(event.failure), AfterSpeech.CLOSE, VoicePhase.DONE) else same()
+        VoiceEvent.SpeechEnded -> speechEnded()
+        VoiceEvent.TaskStarted -> step(copy(taskLive = true, stopping = false, phase = if (phase in setOf(VoicePhase.IDLE, VoicePhase.CLOSED)) VoicePhase.WORKING else phase))
+        is VoiceEvent.TaskEnded -> taskEnded(event.outcome, event.summary)
+        VoiceEvent.StillWorking -> if (phase == VoicePhase.WORKING && taskLive && !stillSaid && !speaking)
+            say(VoiceCopy.STILL_WORKING, AfterSpeech.WORK, VoicePhase.WORKING).let { Step(it.turn.copy(stillSaid = true), it.effects) } else same()
+        is VoiceEvent.MomentOpened -> momentOpened(event.moment)
+        VoiceEvent.MomentClosed -> step(copy(moment = null, phase = if (phase in setOf(VoicePhase.ASKING, VoicePhase.READBACK) && !speaking) restPhase() else phase))
+        VoiceEvent.Stop -> stop()
+        VoiceEvent.NotNow -> notNow()
+    }
+
+    // ---- events -----------------------------------------------------------------------------------------------------
+
+    private fun tap(): Step = when {
+        phase in setOf(VoicePhase.TRANSCRIBING, VoicePhase.UNDERSTANDING) -> same()
+        // While listening a tap means "I'm finished": the capture ends and delivers what it has.
+        phase == VoicePhase.LISTENING -> same()
+        // Barge-in: a tap while Cyclone speaks stops the line and listens, keeping any open question.
+        speaking -> step(copy(phase = VoicePhase.LISTENING, speaking = false), VoiceEffect.StopSpeaking, VoiceEffect.Play(Earcon.LISTEN), VoiceEffect.Listen)
+        else -> step(copy(phase = VoicePhase.LISTENING, heard = "", said = if (answering) said else ""), VoiceEffect.Play(Earcon.LISTEN), VoiceEffect.Listen)
+    }
+
+    private fun transcript(text: String): Step = when (val screen = VoiceRules.screen(text, answering)) {
+        VoiceRules.Screen.Empty, VoiceRules.Screen.Filler -> rest(listOf(VoiceEffect.Play(Earcon.CLOSE_SOFT)))
+        is VoiceRules.Screen.Cancel -> if (screen.stop && taskLive) {
+            val s = say(VoiceCopy.STOPPING, AfterSpeech.CLOSE, VoicePhase.DONE)
+            Step(s.turn.copy(stopping = true, heard = text.trim()), listOf(VoiceEffect.Send(VoiceAnswer.Stop)) + s.effects)
+        } else {
+            if (moment != null && moment.kind in VOICE_KINDS) declineMoment(text.trim())
+            else sayClosing(VoiceCopy.OKAY, text.trim())
+        }
+        is VoiceRules.Screen.Pass -> step(copy(phase = VoicePhase.UNDERSTANDING, heard = screen.text),
+            VoiceEffect.Understand(screen.text, VoiceContext(followUp, openAsk(), recentGoals, taskLive, language)))
+    }
+
+    private fun understood(u: Understanding): Step {
+        val open = moment?.takeIf { it.kind in VOICE_KINDS }
+        return when (u.kind) {
+            VoiceKind.NONE -> rest(listOf(VoiceEffect.Play(Earcon.CLOSE_SOFT)))
+            VoiceKind.CANCEL -> if (open != null) declineMoment(heard) else sayClosing(VoiceCopy.OKAY)
+            VoiceKind.UNCLEAR -> unclear(u)
+            VoiceKind.TASK, VoiceKind.REPLY -> when {
+                // A new request while a question is open is most likely the answer said differently.
+                open != null -> answer(open, u.goal)
+                taskLive -> sayClosing(VoiceCopy.BUSY)
+                else -> {
+                    val s = say(VoiceCopy.ack(u.ack), AfterSpeech.WORK, VoicePhase.ACKING)
+                    Step(s.turn.copy(taskLive = true, stillSaid = false, stopping = false, unclearCount = 0, followUp = null,
+                        recentGoals = (recentGoals + u.goal).takeLast(3)), listOf(VoiceEffect.Submit(u.goal)) + s.effects)
+                }
+            }
+            VoiceKind.ANSWER -> if (open != null) answer(open, u.goal) else if (!taskLive && u.goal.isNotBlank())
+                understood(u.copy(kind = VoiceKind.TASK)) else sayClosing(VoiceCopy.NOTHING_OPEN)
+            VoiceKind.CONFIRM -> if (open != null) confirm(open) else sayClosing(VoiceCopy.NOTHING_OPEN)
+            VoiceKind.DECLINE -> if (open != null) declineMoment(heard) else sayClosing(VoiceCopy.OKAY)
+        }
+    }
+
+    private fun unclear(u: Understanding): Step {
+        if (unclearCount >= 1) return sayClosing(VoiceCopy.UNCLEAR_AGAIN)
+        val question = VoiceCopy.question(u.missing)
+        // Keep the owner's first words: the answer to the question completes them.
+        val earlier = followUp?.earlier ?: heard
+        val s = say(question, AfterSpeech.LISTEN, VoicePhase.ASKING)
+        return Step(s.turn.copy(unclearCount = unclearCount + 1, followUp = VoiceContext.FollowUp(earlier, question)), s.effects)
+    }
+
+    private fun speechEnded(): Step {
+        if (!speaking) return same()
+        val quiet = copy(speaking = false)
+        return when (after) {
+            AfterSpeech.LISTEN -> Step(quiet.copy(phase = VoicePhase.LISTENING), listOf(VoiceEffect.Play(Earcon.LISTEN), VoiceEffect.Listen))
+            AfterSpeech.WORK -> quiet.freeOrPending(VoicePhase.WORKING)
+            AfterSpeech.CLOSE -> quiet.freeOrPending(null)
+        }
+    }
+
+    private fun taskEnded(outcome: TaskOutcome, summary: String): Step {
+        val ended = copy(taskLive = false, stillSaid = false, moment = null, followUp = if (moment != null) null else followUp)
+        // Stopped by the owner: they already know.
+        if (outcome == TaskOutcome.STOPPED && stopping) return Step(ended.copy(stopping = false), emptyList())
+        return if (phase in BUSY_PHASES || speaking) Step(ended.copy(pendingEnd = outcome to summary), emptyList())
+        else ended.announce(outcome, summary)
+    }
+
+    private fun momentOpened(m: VoiceMoment): Step {
+        if (moment?.id == m.id) return same()
+        val next = copy(moment = m)
+        // The owner is talking or Cyclone is speaking: the moment is said as soon as the turn is free.
+        if (phase in BUSY_PHASES || speaking) return Step(next, emptyList())
+        return next.speakMoment(m)
+    }
+
+    private fun stop(): Step {
+        val effects = buildList {
+            if (phase == VoicePhase.LISTENING) add(VoiceEffect.StopListening)
+            if (speaking) add(VoiceEffect.StopSpeaking)
+            if (taskLive) add(VoiceEffect.Send(VoiceAnswer.Stop))
+        }
+        return Step(copy(phase = VoicePhase.CLOSED, speaking = false, stopping = taskLive, followUp = null, unclearCount = 0,
+            pendingEnd = null, said = if (taskLive) VoiceCopy.STOPPED else said), effects)
+    }
+
+    private fun notNow(): Step {
+        val open = moment
+        val effects = buildList {
+            if (phase == VoicePhase.LISTENING) add(VoiceEffect.StopListening)
+            if (speaking) add(VoiceEffect.StopSpeaking)
+            if (open != null && open.kind in DECLINABLE) add(VoiceEffect.Send(VoiceAnswer.Decline))
+        }
+        return Step(copy(phase = restPhase(), speaking = false, followUp = null, unclearCount = 0, moment = if (open?.kind in DECLINABLE) null else open), effects)
+    }
+
+    // ---- moments (extended by plan 32 D2) ---------------------------------------------------------------------------
+
+    /** Speaks [m]: kinds voice can answer ask and listen; everything else needs the owner on screen. */
+    private fun speakMoment(m: VoiceMoment): Step {
+        val line = VoiceMoments.prompt(m)
+        val listens = m.kind in VOICE_KINDS
+        val s = say(line, if (listens) AfterSpeech.LISTEN else AfterSpeech.WORK,
+            if (m.kind == VoiceMoment.Kind.SEND) VoicePhase.READBACK else if (listens) VoicePhase.ASKING else VoicePhase.DONE)
+        return Step(s.turn.copy(unclearCount = 0, followUp = null, announced = (announced + m.id).toList().takeLast(20).toSet()),
+            listOf(VoiceEffect.Play(Earcon.NEEDS_YOU)) + s.effects)
+    }
+
+    private fun answer(open: VoiceMoment, text: String): Step = when (open.kind) {
+        VoiceMoment.Kind.QUESTION -> sendAnswer(VoiceAnswer.Reply(text), VoiceCopy.OKAY)
+        VoiceMoment.Kind.VALUES -> VoiceMoments.fill(open, text)?.let { sendAnswer(VoiceAnswer.Fill(it), VoiceCopy.OKAY) }
+            ?: sayClosing(VoiceCopy.NEEDS_SCREEN)
+        // "Change it to …": the Mind edits the draft and opens a new readback.
+        VoiceMoment.Kind.SEND -> sendAnswer(VoiceAnswer.Reply(VoiceMoments.edit(text)), VoiceMoments.EDITING)
+        else -> sayClosing(VoiceCopy.NEEDS_SCREEN)
+    }
+
+    private fun confirm(open: VoiceMoment): Step = when (open.kind) {
+        // Only send is approved by voice, and only after its verbatim readback was heard (plan 32).
+        VoiceMoment.Kind.SEND -> sendAnswer(VoiceAnswer.Approve, VoiceMoments.SENDING)
+        VoiceMoment.Kind.QUESTION -> sendAnswer(VoiceAnswer.Reply(heard.ifBlank { "Yes" }), VoiceCopy.OKAY)
+        else -> sayClosing(VoiceCopy.NEEDS_SCREEN)
+    }
+
+    private fun declineMoment(said: String): Step {
+        val open = moment ?: return sayClosing(VoiceCopy.OKAY, said)
+        return if (open.kind in DECLINABLE) sendAnswer(VoiceAnswer.Decline, if (open.kind == VoiceMoment.Kind.SEND) VoiceMoments.NOT_SENT else VoiceCopy.OKAY)
+        else sayClosing(VoiceCopy.OKAY, said)
+    }
+
+    private fun sendAnswer(answer: VoiceAnswer, line: String): Step {
+        val s = say(line, AfterSpeech.WORK, VoicePhase.ACKING)
+        return Step(s.turn.copy(moment = null, followUp = null, unclearCount = 0), listOf(VoiceEffect.Send(answer)) + s.effects)
+    }
+
+    private fun openAsk(): VoiceContext.OpenAsk? = moment?.takeIf { it.kind in VOICE_KINDS }?.let {
+        VoiceContext.OpenAsk(it.kind.name.lowercase(), VoiceMoments.prompt(it), it.choices)
+    }
+
+    // ---- helpers ----------------------------------------------------------------------------------------------------
+
+    private fun announce(outcome: TaskOutcome, summary: String): Step {
+        val (earcon, line) = when (outcome) {
+            TaskOutcome.DONE -> Earcon.DONE to VoiceCopy.done(summary)
+            TaskOutcome.FAILED -> Earcon.FAILED to VoiceCopy.failed(summary)
+            TaskOutcome.STOPPED -> Earcon.FAILED to VoiceCopy.STOPPED
+        }
+        val s = say(line, AfterSpeech.CLOSE, VoicePhase.DONE)
+        return Step(s.turn.copy(pendingEnd = null), listOf(VoiceEffect.Play(earcon)) + s.effects)
+    }
+
+    /** The turn is free: say what is waiting (a task that ended, a moment not yet spoken), or settle in [phase]. */
+    private fun freeOrPending(phase: VoicePhase?): Step {
+        pendingEnd?.let { (outcome, summary) -> return announce(outcome, summary) }
+        moment?.takeIf { it.id !in announced }?.let { return speakMoment(it) }
+        return step(copy(phase = phase ?: restPhase(), followUp = if (phase == null) null else followUp,
+            unclearCount = if (phase == null) 0 else unclearCount))
+    }
+
+    private fun say(line: String, then: AfterSpeech, phase: VoicePhase): Step {
+        val spoken = VoiceRedaction.spoken(line)
+        return step(copy(phase = phase, said = spoken, speaking = true, after = then), VoiceEffect.Say(spoken, then))
+    }
+
+    private fun sayClosing(line: String, heardText: String = heard): Step =
+        say(line, AfterSpeech.CLOSE, VoicePhase.DONE).let { Step(it.turn.copy(heard = heardText, followUp = null, unclearCount = 0), it.effects) }
+
+    private fun rest(effects: List<VoiceEffect>): Step =
+        Step(copy(phase = restPhase(), followUp = null, unclearCount = 0, speaking = false), effects)
+
+    private fun restPhase(): VoicePhase = if (taskLive) VoicePhase.WORKING else VoicePhase.CLOSED
+
+    private fun failure(f: VoiceFailure): String = when (f) {
+        VoiceFailure.NO_KEY -> VoiceCopy.NO_KEY
+        VoiceFailure.OFFLINE -> VoiceCopy.OFFLINE
+        VoiceFailure.NOT_HEARD -> VoiceCopy.NOT_HEARD
+        VoiceFailure.MIC_BUSY -> VoiceCopy.MIC_BUSY
+        VoiceFailure.NO_MIC -> VoiceCopy.NO_MIC
+    }
+
+    private fun same() = Step(this, emptyList())
+    private fun step(turn: VoiceTurn, vararg effects: VoiceEffect) = Step(turn, effects.toList())
+
+    companion object {
+        /** Moments the owner can answer by voice. Everything else waits for them on screen. */
+        val VOICE_KINDS: Set<VoiceMoment.Kind> get() = VoiceMoments.VOICE_KINDS
+        /** "Not now" and "no" decline these; approvals on screen are the owner's to answer there. */
+        private val DECLINABLE: Set<VoiceMoment.Kind> get() = VoiceMoments.VOICE_KINDS
+        private val LISTEN_PHASES = setOf(VoicePhase.LISTENING, VoicePhase.TRANSCRIBING, VoicePhase.UNDERSTANDING)
+        private val BUSY_PHASES = setOf(VoicePhase.LISTENING, VoicePhase.TRANSCRIBING, VoicePhase.UNDERSTANDING)
+    }
+}

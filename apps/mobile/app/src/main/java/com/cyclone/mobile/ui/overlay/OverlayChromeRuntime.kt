@@ -179,6 +179,8 @@ object OverlayChromeRuntime {
             controller = next
             OverlayGesturePassthrough.bind { next.syncHostGesturePassthrough() }
             next.show(machine.snapshot())
+            // Driver mode (plan 32): the AI button and AI mode, in their own windows next to the chrome.
+            DriverOverlay.attach(service)
             workspaceJob = aiScope.launch {
                 var previousTask: String? = null
                 com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collect { task ->
@@ -205,6 +207,7 @@ object OverlayChromeRuntime {
         val context = synchronized(lock) { service }
         synchronized(lock) {
             workspaceJob?.cancel(); workspaceJob = null
+            DriverOverlay.detach()
             OverlayGesturePassthrough.unbind()
             controller?.dismiss()
             controller = null
@@ -383,9 +386,14 @@ object OverlayChromeRuntime {
         aiJob?.isActive == true || suspendedTaskId != null || pendingGateChallenge != null || missionHooks != null
     }
 
-    fun submitRequest(text: String) {
+    /**
+     * A new request, typed or spoken. [driving] is Drive's (plan 32): the work goes to the background when the phone
+     * can do it, otherwise it borrows the screen and gives it back to the app the owner was in ([DriveScreen]).
+     */
+    fun submitRequest(text: String, driving: Boolean = false) {
         val request = text.trim().take(2_000)
         if (request.isBlank()) return
+        if (driving) synchronized(lock) { service }?.let { DriveScreen.begin(it) }
         if (missionHooks?.ownerText(request) == true) {
             updateComposer("")
             return

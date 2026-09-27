@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudQueue
 import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Sms
@@ -207,4 +208,5 @@ private val SetupCard.icon: ImageVector get() = when (this) {
     SetupCard.CALENDAR -> Icons.Rounded.CalendarMonth
     SetupCard.CONTACTS -> Icons.Rounded.Contacts
     SetupCard.VOICE -> Icons.Rounded.Mic
+    SetupCard.DRIVER -> Icons.Rounded.DirectionsCar
 }

@@ -452,9 +452,12 @@ class OverlayChromeController(
         val secretVisible = cardVisible()
         val compact = !secretVisible && isCompact(snapshot)
         val minimizedComposer = !secretVisible && isMinimizedComposer(snapshot)
+        // Driver mode (plan 32): the AI button replaces the idle bubble; everything else (task, cards) stays.
+        val driverIdle = com.cyclone.mobile.voice.DriverMode.settings.value.enabled && compact && !minimizedComposer &&
+            (snapshot.state == OverlayChromeState.IDLE || snapshot.launcherCollapsed) && !glass()
         val visible = (secretVisible || !compact || snapshot.idleChipVisible || glass()) &&
             !OverlayExternalInteraction.active.value &&
-            !yieldHost
+            !yieldHost && !driverIdle
 
         view.importantForAccessibility =
             if (yieldHost) View.IMPORTANT_FOR_ACCESSIBILITY_NO else View.IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -916,7 +919,7 @@ class OverlayChromeController(
     private fun dp(value: Int): Int = (value * service.resources.displayMetrics.density).toInt()
 }
 
-private class OverlayComposeLifecycle : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
+internal class OverlayComposeLifecycle : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val store = ViewModelStore()
     private val savedStateController = SavedStateRegistryController.create(this)
