@@ -92,6 +92,21 @@ class VoiceBoundaries(unittest.TestCase):
         mic = [s.get(f"{ANDROID}name") for s in manifest.iter("service") if "microphone" in (s.get(f"{ANDROID}foregroundServiceType") or "")]
         self.assertEqual(mic, [".voice.VoiceService"])
 
+    def test_the_readback_is_the_text_that_is_sent(self):
+        # Plan 32 D2: a spoken yes approves only the send that was read back, and the readback is the approval's own text.
+        source = code((VOICE / "VoiceMomentSource.kt").read_text(encoding="utf-8"))
+        self.assertIn('moment.gate == "send"', source)
+        self.assertIn("message = send.text", source)
+        self.assertIn("VoiceRedaction.spoken(line) == line", source)
+        session = code((VOICE / "VoiceSession.kt").read_text(encoding="utf-8"))
+        self.assertIn("open?.id != answer.momentId || open.kind != VoiceMoment.Kind.SEND", session)
+        # The Mind sends exactly what it asked approval for.
+        toolbox = code((BASE / "mind/PhoneMindToolbox.kt").read_text(encoding="utf-8"))
+        reply = toolbox[toolbox.index("private fun replyNotification("):]
+        reply = reply[: reply.index("\n    private fun ")]
+        self.assertIn("MindSend(text, recipient, app)", reply)
+        self.assertIn("device.replyNotification(key, text)", reply)
+
     def test_no_voice_cloning(self):
         for name, text in voice_sources():
             self.assertNotRegex(code(text).lower(), r"\b(voice_?)?clon(e|es|ed|ing)\b", name)

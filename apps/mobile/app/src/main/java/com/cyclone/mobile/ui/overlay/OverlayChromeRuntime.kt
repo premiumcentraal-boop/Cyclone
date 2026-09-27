@@ -87,6 +87,9 @@ object OverlayChromeRuntime {
         }
     }
 
+    /** The class of the action waiting at GATE (pay, send, delete, grant), or null when nothing waits. */
+    fun pendingGateClass(): OverlayGateClass? = synchronized(lock) { pendingGateChallenge?.gateClass }
+
     /** A mission may wait longer than a live user would; keep its exact challenge open while it waits. */
     fun keepGateChallengeAlive() = synchronized(lock) {
         pendingGateChallenge = pendingGateChallenge?.copy(expiresAtMs = System.currentTimeMillis() + GATE_CHALLENGE_TTL_MS)

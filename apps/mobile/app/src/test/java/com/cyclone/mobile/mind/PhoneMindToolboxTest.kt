@@ -259,6 +259,34 @@ class PhoneMindToolboxTest {
         assertTrue("no screen was touched", env.acts.isEmpty())
     }
 
+    /** Drive (plan 32): the text the owner approves (and Drive reads back) is exactly the text that is sent. */
+    @Test fun theApprovedReplyTextIsExactlyTheSentText() {
+        val env = FakeEnv(login)
+        val sent = mutableListOf<String>()
+        val approved = mutableListOf<MindSend>()
+        val phone = object : MindDevicePort by device {
+            override fun notifications() = listOf(
+                MindNotification("k1", "com.whatsapp", "Louella", "I will be home late", System.currentTimeMillis(), listOf("Reply"), replyable = true))
+            override fun replyNotification(key: String, text: String): String? { sent += text; return null }
+        }
+        val owner = object : MindOwnerPort by FakeOwner() {
+            var next = MindApprovalReply(MindApproval.APPROVED)
+            override fun awaitApproval(action: String, timeoutMs: Long, send: MindSend): MindApprovalReply { approved += send; return next }
+        }
+        val box = PhoneMindToolbox(env, owner, phone, "reply to Louella")
+        box.run("notifications")
+        val draft = "Hey baby, that's alright,\nhope to see you soon for the movie."
+        assertTrue(box.run("reply_notification", JSONObject().put("id", "n1").put("text", draft).toString()).ok)
+        assertEquals(listOf(draft), sent)
+        assertEquals(MindSend(draft, "Louella", "com.whatsapp"), approved.single())
+        // "Change it to …" sends nothing and tells the Mind what to change.
+        owner.next = MindApprovalReply(MindApproval.DECLINED, change = "say see you tonight instead")
+        val changed = box.run("reply_notification", JSONObject().put("id", "n1").put("text", "Sure").toString())
+        assertFalse(changed.ok)
+        assertTrue(changed.text.contains("say see you tonight instead"))
+        assertEquals(1, sent.size)
+    }
+
     @Test fun directToolsNeverTouchTheScreenAndAskForAccessOnce() {
         val env = FakeEnv(login)
         val calls = mutableListOf<String>()
@@ -373,6 +401,55 @@ class PhoneMindToolboxTest {
         assertEquals(2, env.acts.size)
         assertTrue(env.acts[1].second.getString("elementId").endsWith(":login"))
         assertEquals(12_000, result.ownerWaitMs)
+    }
+
+    /** Drive (plan 32), the chat route: the send approval carries the message box's exact text, and only that is sent. */
+    @Test fun aChatSendIsApprovedWithTheBoxsExactTextAndNotSentIfItChanged() {
+        val chat = { value: String? -> FakeScreen("com.whatsapp", listOf(Control("msg", "Message", "edit_text", editable = true), Control("send", "Send")),
+            values = value?.let { mapOf("msg" to it) } ?: emptyMap()) }
+        val env = FakeEnv(chat(null))
+        env.onAct = { tool, params -> if (tool == "phone.type") env.screen = chat(params.getString("value")) }
+        val approved = mutableListOf<MindSend>()
+        var changeBoxTo: String? = null
+        val owner = object : MindOwnerPort by FakeOwner() {
+            override fun awaitApproval(action: String, timeoutMs: Long) = MindApprovalReply(MindApproval.APPROVED)
+            override fun awaitApproval(action: String, timeoutMs: Long, send: MindSend): MindApprovalReply {
+                approved += send
+                changeBoxTo?.let { env.screen = chat(it) }
+                return MindApprovalReply(MindApproval.APPROVED)
+            }
+        }
+        val box = PhoneMindToolbox(env, owner, device, "reply to Louella")
+        box.run("screen_read")
+        assertTrue(box.run("type_text", """{"ref":"e1","text":"On my way, see you soon"}""").ok)
+        env.nextFailures.add(AgentFailureClass.GATE_REQUIRED)
+        assertTrue(box.run("tap", """{"ref":"e2"}""").ok)
+        assertEquals("On my way, see you soon", approved.single().text)
+
+        // The box changes between the approval and the tap: nothing is sent.
+        env.screen = chat("On my way, see you soon")
+        box.run("screen_read")
+        changeBoxTo = "something else"
+        val sendsBefore = env.acts.size
+        env.nextFailures.add(AgentFailureClass.GATE_REQUIRED)
+        val changed = box.run("tap", """{"ref":"e2"}""")
+        assertFalse(changed.ok)
+        assertTrue(changed.text.contains("changed after the owner approved"))
+        assertEquals(sendsBefore + 1, env.acts.size)
+    }
+
+    @Test fun textCycloneDidNotTypeIsNeverReadBackAsTheMessage() {
+        val env = FakeEnv(FakeScreen("com.whatsapp", listOf(Control("msg", "Message", "edit_text", editable = true), Control("send", "Send")),
+            values = mapOf("msg" to "typed by someone else")))
+        val approved = mutableListOf<MindSend>()
+        val owner = object : MindOwnerPort by FakeOwner() {
+            override fun awaitApproval(action: String, timeoutMs: Long, send: MindSend): MindApprovalReply { approved += send; return MindApprovalReply(MindApproval.APPROVED) }
+        }
+        val box = PhoneMindToolbox(env, owner, device, "send it")
+        box.run("screen_read")
+        env.nextFailures.add(AgentFailureClass.GATE_REQUIRED)
+        box.run("tap", """{"ref":"e2"}""")
+        assertTrue(approved.isEmpty())
     }
 
     @Test fun declinedApprovalIsReportedAndNotRetried() {

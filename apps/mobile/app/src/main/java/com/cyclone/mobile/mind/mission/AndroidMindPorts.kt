@@ -171,9 +171,43 @@ internal class AndroidMindOwner(
         }
     }
 
-    override fun awaitApproval(action: String, timeoutMs: Long): MindApprovalReply {
+    override fun awaitApproval(action: String, timeoutMs: Long): MindApprovalReply = gated(action, timeoutMs, null)
+
+    /**
+     * A message sent exactly as [send] says. On a screen action GATE already holds the exact challenge; a tier-0
+     * notification reply has no screen action, so the owner approves this exact text on the mission's own request
+     * (the card, the notification, or Drive after its verbatim readback).
+     */
+    override fun awaitApproval(action: String, timeoutMs: Long, send: com.cyclone.mobile.mind.MindSend): MindApprovalReply =
+        if (OverlayChromeRuntime.gateWait() == OverlayChromeRuntime.GateWait.PENDING) gated(action, timeoutMs, send)
+        else inboxApproval(action, timeoutMs, send)
+
+    private fun inboxApproval(action: String, timeoutMs: Long, send: com.cyclone.mobile.mind.MindSend): MindApprovalReply {
+        val request = inbox.post(missionId, OwnerRequestKind.APPROVAL, "Cyclone wants to: $action", gate = "send",
+            send = OwnerSend(send.text, send.recipient, send.app))
+        onWaiting("Approve: $action")
+        try {
+            val wait = inbox.await(request, timeoutMs, cancelled)
+            return when (wait.response) {
+                OwnerResponse.Approve -> MindApprovalReply(MindApproval.APPROVED, wait.waitedMs)
+                OwnerResponse.Decline -> MindApprovalReply(MindApproval.DECLINED, wait.waitedMs)
+                // "Change it to …": not sent; the Mind writes the change and asks again with the new exact text.
+                is OwnerResponse.Answer -> MindApprovalReply(MindApproval.DECLINED, wait.waitedMs,
+                    change = (wait.response as OwnerResponse.Answer).text.trim().take(1_000).ifBlank { null })
+                null -> MindApprovalReply(if (wait.cancelled || cancelled()) MindApproval.CANCELLED else MindApproval.TIMED_OUT, wait.waitedMs)
+                else -> MindApprovalReply(MindApproval.DECLINED, wait.waitedMs)
+            }
+        } finally {
+            inbox.withdraw(request.id)
+            onWaiting(null)
+        }
+    }
+
+    private fun gated(action: String, timeoutMs: Long, send: com.cyclone.mobile.mind.MindSend?): MindApprovalReply {
         if (OverlayChromeRuntime.gateWait() != OverlayChromeRuntime.GateWait.PENDING) return MindApprovalReply(MindApproval.NOT_PENDING)
-        val request = inbox.post(missionId, OwnerRequestKind.APPROVAL, "Cyclone wants to: $action")
+        val gate = OverlayChromeRuntime.pendingGateClass()
+        val request = inbox.post(missionId, OwnerRequestKind.APPROVAL, "Cyclone wants to: $action", gate = gate?.wire,
+            send = send?.takeIf { gate == com.cyclone.mobile.ui.overlay.OverlayGateClass.SEND }?.let { OwnerSend(it.text, it.recipient, it.app) })
         onWaiting("Approve: $action")
         val started = System.currentTimeMillis()
         try {
@@ -192,6 +226,12 @@ internal class AndroidMindOwner(
                     OwnerResponse.Decline -> {
                         OverlayChromeRuntime.declineGateForMission()
                         return MindApprovalReply(MindApproval.DECLINED, waited)
+                    }
+                    // "Change it to …" on a send: not sent; the Mind edits the box and presses send again.
+                    is OwnerResponse.Answer -> {
+                        OverlayChromeRuntime.declineGateForMission()
+                        val change = (inbox.poll(request.id) as? OwnerResponse.Answer)?.text?.trim()?.take(1_000)?.ifBlank { null }
+                        return MindApprovalReply(MindApproval.DECLINED, waited, change = change)
                     }
                     else -> Unit
                 }

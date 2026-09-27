@@ -9,6 +9,12 @@ enum class OwnerRequestKind { QUESTION, APPROVAL, SECRET, CONTROL, VALUES }
 /** One value the owner is asked to type on the check-in card. Never a secret: those go to the Secrets Card. */
 data class OwnerField(val label: String, val kind: String = "text", val choices: List<String> = emptyList())
 
+/**
+ * A message Cyclone will send once approved, exactly as it will be sent (Drive, plan 32: a send is approved by voice
+ * only after this exact text was read back). Only set where the sent text is this text by construction.
+ */
+data class OwnerSend(val text: String, val recipient: String, val app: String)
+
 /** Something the running mission needs from the owner. Never carries a secret value. */
 data class OwnerRequest(
     val id: String,
@@ -18,6 +24,10 @@ data class OwnerRequest(
     val choices: List<String> = emptyList(),
     val createdAtMs: Long,
     val fields: List<OwnerField> = emptyList(),
+    /** For an approval: its GATE class ("send", "pay", "delete", "grant"), when known. */
+    val gate: String? = null,
+    /** For a send approval: the exact message. */
+    val send: OwnerSend? = null,
 )
 
 sealed class OwnerResponse {
@@ -47,9 +57,10 @@ class OwnerInbox(private val clock: () -> Long = System::currentTimeMillis) {
     val pending: StateFlow<OwnerRequest?> = state
 
     fun post(missionId: String, kind: OwnerRequestKind, text: String, choices: List<String> = emptyList(),
-             fields: List<OwnerField> = emptyList()): OwnerRequest =
+             fields: List<OwnerField> = emptyList(), gate: String? = null, send: OwnerSend? = null): OwnerRequest =
         synchronized(lock) {
-            val request = OwnerRequest("req-${UUID.randomUUID()}", missionId, kind, text.take(600), choices.take(6), clock(), fields.take(MAX_FIELDS))
+            val request = OwnerRequest("req-${UUID.randomUUID()}", missionId, kind, text.take(600), choices.take(6), clock(), fields.take(MAX_FIELDS),
+                gate, send)
             response = null
             owner = request.id
             state.value = request

@@ -235,11 +235,16 @@ class VoiceSession(context: Context) {
 
     private fun send(answer: VoiceAnswer) {
         val taskId = liveTaskId ?: OwnerMomentsRuntime.task.value?.taskId ?: return
+        // A spoken yes approves the send that was read back, never whatever happens to be open by now.
+        if (answer is VoiceAnswer.Approve) {
+            val open = VoiceMomentSource.of(OwnerMomentsRuntime.current())
+            if (open?.id != answer.momentId || open.kind != VoiceMoment.Kind.SEND) return
+        }
         val command = when (answer) {
             is VoiceAnswer.Reply -> TaskCommand.Reply(answer.text)
             // Values said by voice are for this task only: never remembered (plan 32).
             is VoiceAnswer.Fill -> TaskCommand.Fill(answer.values, remember = false)
-            VoiceAnswer.Approve -> TaskCommand.Approve
+            is VoiceAnswer.Approve -> TaskCommand.Approve
             VoiceAnswer.Decline -> TaskCommand.Decline
             VoiceAnswer.Stop -> TaskCommand.Stop
         }

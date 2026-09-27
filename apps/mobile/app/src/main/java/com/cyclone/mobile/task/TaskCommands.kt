@@ -102,8 +102,13 @@ object MindTaskController : TaskController {
     }
 
     override fun handle(task: WorkspaceTaskUi, command: TaskCommand): TaskCommandResult = when (command) {
-        is TaskCommand.Reply -> if (command.text.isBlank()) TaskCommandResult.refused(engine, "The answer is empty.")
-            else answer(OwnerRequestKind.QUESTION, OwnerResponse.Answer(command.text.trim()), "Answer sent.")
+        is TaskCommand.Reply -> when {
+            command.text.isBlank() -> TaskCommandResult.refused(engine, "The answer is empty.")
+            // A send waiting for approval: the answer is a change to the message ("change it to …"); nothing is sent.
+            open(OwnerRequestKind.APPROVAL)?.send != null ->
+                answer(OwnerRequestKind.APPROVAL, OwnerResponse.Answer(command.text.trim()), "Cyclone will change the message first.")
+            else -> answer(OwnerRequestKind.QUESTION, OwnerResponse.Answer(command.text.trim()), "Answer sent.")
+        }
         is TaskCommand.Fill -> if (command.values.values.none { it.isNotBlank() }) TaskCommandResult.refused(engine, "No values were given.")
             else answer(OwnerRequestKind.VALUES, OwnerResponse.Values(command.values.filterValues { it.isNotBlank() }, command.remember), "Details sent.")
         TaskCommand.Stop -> if (MindMissions.isLive()) {

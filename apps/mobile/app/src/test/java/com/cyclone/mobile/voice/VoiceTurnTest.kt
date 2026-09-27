@@ -220,7 +220,7 @@ class VoiceTurnTest {
             // Even if the owner taps and says yes, nothing is approved.
             r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("yes approve it"))
             r.on(understood(VoiceKind.CONFIRM))
-            assertFalse(kind.name, r.effects.any { it is VoiceEffect.Send && it.answer == VoiceAnswer.Approve })
+            assertFalse(kind.name, r.effects.any { it is VoiceEffect.Send && it.answer is VoiceAnswer.Approve })
         }
     }
 
@@ -247,6 +247,115 @@ class VoiceTurnTest {
         assertTrue(fx.contains(VoiceEffect.Send(VoiceAnswer.Decline)))
         assertTrue(fx.contains(VoiceEffect.StopSpeaking))
         assertEquals(VoicePhase.WORKING, r.turn.phase)
+    }
+
+    // ---- plan 32 D2: conversations ------------------------------------------------------------------------------------
+
+    private val louella = VoiceMoment("a1", VoiceMoment.Kind.SEND, "Cyclone wants to: send a reply", recipient = "Louella",
+        message = "Hey baby, that's alright, hope to see you soon for the movie.")
+
+    @Test fun `a send is read back verbatim and a yes approves exactly that moment`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(louella))
+        assertEquals("I'll send Louella: \"Hey baby, that's alright, hope to see you soon for the movie.\". Send it?", r.said.last())
+        assertTrue(r.said.last().contains(louella.message))
+        assertEquals(VoicePhase.READBACK, r.turn.phase)
+        val calls = r.calls
+        r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("Yes, send it."))
+        // An explicit yes needs no model: only the transcription call was made.
+        assertEquals(calls + 1, r.calls)
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Approve("a1"))))
+        assertEquals(VoiceMoments.SENDING, r.said.last())
+    }
+
+    @Test fun `no declines the send`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(louella)); r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("no don't"))
+        r.on(understood(VoiceKind.DECLINE))
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Decline)))
+        assertFalse(r.effects.any { it is VoiceEffect.Send && it.answer is VoiceAnswer.Approve })
+        assertEquals(VoiceMoments.NOT_SENT, r.said.last())
+    }
+
+    @Test fun `change it asks Cyclone for an edit, then reads the new text back`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(louella)); r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard)
+        r.on(VoiceEvent.Transcript("change the end to see you tonight"))
+        r.on(understood(VoiceKind.ANSWER, "Change the end to: see you tonight."))
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Reply("Change the end to: see you tonight."))))
+        assertFalse(r.effects.any { it is VoiceEffect.Send && it.answer is VoiceAnswer.Approve })
+        r.on(VoiceEvent.SpeechEnded)
+        val edited = louella.copy(id = "a2", message = "Hey baby, that's alright, see you tonight.")
+        r.on(VoiceEvent.MomentOpened(edited))
+        assertEquals("I'll send Louella: \"Hey baby, that's alright, see you tonight.\". Send it?", r.said.last())
+    }
+
+    @Test fun `a bare yes is enough for a readback but never opens a new task`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(louella)); r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("Yes."))
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Approve("a1"))))
+        assertEquals(1, r.effects.count { it is VoiceEffect.Submit })
+    }
+
+    @Test fun `a yes the model calls an answer still approves, never becomes an edit`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(louella)); r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("uh yeah okay go on"))
+        r.on(understood(VoiceKind.ANSWER, "yes"))
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Approve("a1"))))
+        assertFalse(r.effects.any { it is VoiceEffect.Send && it.answer is VoiceAnswer.Reply })
+    }
+
+    @Test fun `a plain no declines without a model call`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(louella)); r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard)
+        val understands = r.effects.count { it is VoiceEffect.Understand }
+        r.on(VoiceEvent.Transcript("No."))
+        assertEquals(understands, r.effects.count { it is VoiceEffect.Understand })
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Decline)))
+    }
+
+    @Test fun `only explicit phrases count as yes`() {
+        assertEquals(true, VoiceRules.yesNo("Yes, send it."))
+        assertEquals(true, VoiceRules.yesNo("ja stuur maar"))
+        assertEquals(false, VoiceRules.yesNo("no"))
+        assertEquals(null, VoiceRules.yesNo("yes but change the end"))
+        assertEquals(null, VoiceRules.yesNo("maybe"))
+        assertEquals(null, VoiceRules.yesNo(""))
+    }
+
+    @Test fun `details are asked one field at a time and never remembered`() {
+        val r = working()
+        val card = VoiceMoment("v1", VoiceMoment.Kind.VALUES, "Cyclone needs a few details",
+            fields = listOf(VoiceMoment.Field("Date"), VoiceMoment.Field("Time", listOf("Morning", "Evening"))))
+        r.on(VoiceEvent.MomentOpened(card))
+        assertEquals("What's the date?", r.said.last())
+        r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("next friday"))
+        assertEquals("details", (r.effects.last() as VoiceEffect.Understand).context.open?.kind)
+        r.on(understood(VoiceKind.ANSWER, "next Friday"))
+        assertEquals("What's the time? Morning, or Evening?", r.said.last())
+        r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("evening"))
+        r.on(understood(VoiceKind.ANSWER, "Evening"))
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Fill(mapOf("Date" to "next Friday", "Time" to "Evening")))))
+        assertTrue(r.turn.filled.isEmpty())
+    }
+
+    @Test fun `a second unclear answer to a question closes politely and leaves the card`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(VoiceMoment("q1", VoiceMoment.Kind.QUESTION, "How should I answer?")))
+        r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("hmm well the thing"))
+        r.on(understood(VoiceKind.UNCLEAR, missing = "What should I tell her?"))
+        r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("the other thing"))
+        r.on(understood(VoiceKind.UNCLEAR))
+        assertEquals(VoiceCopy.UNCLEAR_AGAIN, r.said.last())
+        assertFalse(r.effects.any { it is VoiceEffect.Send })
+    }
+
+    @Test fun `readable drafts only - nothing masked, nothing too long, no quotes inside`() {
+        assertTrue(VoiceMoments.readable("Hey baby, that's alright, see you tonight."))
+        assertFalse(VoiceMoments.readable("my code is 482913"))
+        assertFalse(VoiceMoments.readable("word ".repeat(41)))
+        assertFalse(VoiceMoments.readable("she said \"hi\""))
+        assertFalse(VoiceMoments.readable("   "))
     }
 
     @Test fun `every spoken line is redacted`() {

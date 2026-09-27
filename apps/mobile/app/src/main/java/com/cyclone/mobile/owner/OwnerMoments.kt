@@ -35,6 +35,10 @@ data class OwnerMoment(
     val fields: List<OwnerField> = emptyList(),
     /** The Mind inbox request behind this moment; null for moments derived from task state. */
     val requestId: String? = null,
+    /** An approval's GATE class ("send", "pay", …) when known. */
+    val gate: String? = null,
+    /** A send approval's exact message: what is approved is what is sent. */
+    val send: com.cyclone.mobile.mind.mission.OwnerSend? = null,
 ) {
     val title: String get() = when (kind) {
         MomentKind.VALUES -> "Cyclone needs a few details"
@@ -116,7 +120,7 @@ object OwnerMoments {
         OwnerRequestKind.APPROVAL -> OwnerMoment(taskId, TaskEngine.MIND, MomentKind.APPROVAL, request.text, listOf(
             MomentAction(TaskCommand.Decline, "Decline"),
             MomentAction(TaskCommand.Approve, "Approve", primary = true),
-        ), requestId = request.id)
+        ), requestId = request.id, gate = request.gate, send = request.send)
         OwnerRequestKind.SECRET -> OwnerMoment(taskId, TaskEngine.MIND, MomentKind.SECRET,
             request.text.ifBlank { "Use the Secrets Card on screen." }, emptyList(), requestId = request.id)
         OwnerRequestKind.CONTROL -> OwnerMoment(taskId, TaskEngine.MIND, MomentKind.HANDOVER, request.text,

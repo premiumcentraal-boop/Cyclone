@@ -364,14 +364,35 @@ class PhoneMindToolbox(
         if (ref.password || sensitive(ref.label)) return MindToolResult.error(
             "${ref.ref} \"${ref.label}\" is a secret field. Use vault_fill so the owner fills it through the Secrets Card.")
         val text = arguments.optString("text")
-        val typed = delivered(ref.identity, text, act("phone.type", JSONObject().put("elementId", ref.elementId).put("value", text),
-            "Typed ${text.length} characters into ${ref.ref} \"${ref.label}\"", ref, changesScreen = false))
+        val typed = noteTyped(text, delivered(ref.identity, text, act("phone.type", JSONObject().put("elementId", ref.elementId).put("value", text),
+            "Typed ${text.length} characters into ${ref.ref} \"${ref.label}\"", ref, changesScreen = false)))
         if (!typed.ok || !arguments.optBoolean("press_enter")) return typed
         val again = refs.resolve(ref.ref) ?: return typed.copy(text = typed.text + "\n\nEnter was not pressed: the field is gone.")
         return act("phone.submit_text", JSONObject().put("elementId", again.elementId), "Typed into ${ref.ref} and pressed Enter", again)
     }
 
     private val typing = TypingTracker()
+
+    /** Texts Cyclone typed in this mission, newest last: a message box is only read back when it holds one of them. */
+    private val typedDrafts = ArrayDeque<String>()
+
+    private fun noteTyped(text: String, result: MindToolResult): MindToolResult {
+        if (result.ok && !result.text.contains("TEXT_UNVERIFIED")) {
+            typedDrafts.remove(text.trim()); typedDrafts.addLast(text.trim())
+            while (typedDrafts.size > 5) typedDrafts.removeFirst()
+        }
+        return result
+    }
+
+    /**
+     * The one filled message box on this screen, read live, when it holds exactly what Cyclone typed: what a send tap
+     * here sends. Null with no box, several, or text Cyclone did not write (then the owner checks it on screen).
+     */
+    private fun composerDraft(): String? {
+        val filled = refs.all().filter { it.editable && !it.password }
+            .mapNotNull { ref -> env.fieldValue(ref.elementId)?.trim()?.takeIf { it.isNotEmpty() } }
+        return filled.singleOrNull()?.takeIf { it in typedDrafts }
+    }
 
     /**
      * Plan 21 (Hands): a failed attempt to put text in a box feeds the loop breaker. Repeated identical refusals add
@@ -414,8 +435,8 @@ class PhoneMindToolbox(
     private fun typeFocused(arguments: JSONObject): MindToolResult {
         if (!arguments.has("text")) return MindToolResult.error("text is required.")
         val text = arguments.optString("text")
-        val typed = delivered("focused", text, act("phone.type", JSONObject().put("focused", true).put("value", text),
-            "Typed ${text.length} characters into the focused text box", changesScreen = false))
+        val typed = noteTyped(text, delivered("focused", text, act("phone.type", JSONObject().put("focused", true).put("value", text),
+            "Typed ${text.length} characters into the focused text box", changesScreen = false)))
         if (!typed.ok || !arguments.optBoolean("press_enter")) return typed
         return MindToolResult(typed.text + "\n\nTo submit, tap the send button (or press_enter with the box's ref).", typed.brief, ok = true)
     }
@@ -637,7 +658,12 @@ class PhoneMindToolbox(
         // The policy check raises GATE_REQUIRED; Accessibility's own click interceptor reports a refused click as a
         // policy denial while it puts the same approval card up. Either way the owner decides; with no card, it is a no.
         val gated = envelope.errorClass == AgentFailureClass.GATE_REQUIRED || envelope.errorClass == AgentFailureClass.POLICY_DENIED
-        val approval = if (gated) owner.awaitApproval(done.replaceFirstChar { it.lowercase() }, ownerTimeoutMs) else null
+        // A send from a chat's message box: the approval carries the box's exact text, read live, so the owner (or Drive,
+        // after reading it back word for word) approves exactly what the tap sends.
+        val draft = if (gated) composerDraft() else null
+        val approval = if (!gated) null else if (draft != null)
+            owner.awaitApproval(done.replaceFirstChar { it.lowercase() }, ownerTimeoutMs, MindSend(draft, "", appLabel(screen?.packageName.orEmpty()) ?: ""))
+            else owner.awaitApproval(done.replaceFirstChar { it.lowercase() }, ownerTimeoutMs)
         if (approval != null && !(approval.outcome == MindApproval.NOT_PENDING && envelope.errorClass == AgentFailureClass.POLICY_DENIED)) {
             waited += approval.waitedMs
             when (approval.outcome) {
@@ -646,6 +672,10 @@ class PhoneMindToolbox(
                     val retryParams = JSONObject(params.toString())
                     env.observe(goal).page?.let(::bind)
                     fresh = false
+                    // What was approved must still be what is in the box.
+                    if (draft != null && composerDraft() != draft) return finishAction(tool, null,
+                        "Not sent: the message box changed after the owner approved it. Check it and press send again; the owner approves the new text.",
+                        false, waited, changesScreen)
                     if (ref != null) {
                         val again = refs.resolve(ref.ref)?.takeIf { it.identity == ref.identity }
                             ?: return finishAction(tool, null, "The owner approved, but ${ref.ref} \"${ref.label}\" is no longer on the screen.", false, waited, changesScreen)
@@ -653,7 +683,9 @@ class PhoneMindToolbox(
                     }
                     envelope = env.act(tool, retryParams, goal)
                 }
-                MindApproval.DECLINED -> return finishAction(tool, null, "The owner declined: $done was not done. Respect this decision.", false, waited, changesScreen)
+                MindApproval.DECLINED -> return finishAction(tool, null, approval.change?.let { change ->
+                    "Not sent yet: the owner wants a change first: \"$change\". Edit the message box to make exactly that change, then press send again."
+                } ?: "The owner declined: $done was not done. Respect this decision.", false, waited, changesScreen)
                 MindApproval.CANCELLED -> return MindToolResult("NOT RUN: the owner stopped the mission.", ok = false, ownerWaitMs = waited)
                 MindApproval.TIMED_OUT -> return finishAction(tool, null, "The owner did not approve in time; $done was not done.", false, waited, changesScreen)
                 MindApproval.NOT_PENDING -> return finishAction(tool, null,
@@ -826,13 +858,19 @@ class PhoneMindToolbox(
         val target = device.notifications().firstOrNull { it.key == key } ?: return MindToolResult.error("That notification is gone; call notifications again.")
         if (!target.replyable) return MindToolResult.error("$id has no reply action; open the app instead (open_notification).")
         val app = device.apps().firstOrNull { it.packageName == target.app }?.label ?: target.app
-        val approval = owner.awaitApproval("send \"${text.take(300)}\" as a reply to ${target.title.take(60).ifBlank { "this message" }} in $app", ownerTimeoutMs)
+        val recipient = target.title.take(60).ifBlank { "this message" }
+        // The approval carries the exact text that replyNotification sends below: what the owner approves is what goes.
+        val approval = owner.awaitApproval("send \"${text.take(300)}\" as a reply to $recipient in $app", ownerTimeoutMs, MindSend(text, recipient, app))
         return when (approval.outcome) {
             MindApproval.APPROVED -> device.replyNotification(key, text)?.let { failure ->
                 MindToolResult("Not sent: $failure", "reply $id: failed", ok = false, ownerWaitMs = approval.waitedMs)
             } ?: MindToolResult("Sent the reply to ${target.title.take(60)} in $app from its notification (the owner approved it). " +
                 "Check it in the app only if the owner asked you to.", "reply $id: sent", ownerWaitMs = approval.waitedMs)
-            MindApproval.DECLINED -> MindToolResult("The owner declined: the reply was not sent. Respect this decision.", "reply $id: declined",
+            MindApproval.DECLINED -> approval.change?.let { change ->
+                MindToolResult("Not sent yet: the owner wants a change first: \"$change\". Write the reply again with that change " +
+                    "and call reply_notification with the new text; the owner approves the new text.", "reply $id: change asked",
+                    ok = false, ownerWaitMs = approval.waitedMs)
+            } ?: MindToolResult("The owner declined: the reply was not sent. Respect this decision.", "reply $id: declined",
                 ok = false, ownerWaitMs = approval.waitedMs)
             MindApproval.CANCELLED -> MindToolResult("NOT RUN: the owner stopped the mission.", ok = false, ownerWaitMs = approval.waitedMs)
             else -> MindToolResult("Not sent: the owner did not approve it.", "reply $id: not approved", ok = false, ownerWaitMs = approval.waitedMs)

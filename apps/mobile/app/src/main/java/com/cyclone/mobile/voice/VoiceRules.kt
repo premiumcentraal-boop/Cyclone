@@ -51,6 +51,24 @@ object VoiceRules {
         return tokens.joinToString(" ").trim().trimStart(',', '.', ' ')
     }
 
+    /**
+     * An explicit yes or no to a readback, decided locally (no model, no call): true, false, or null when it is
+     * anything else ("change the end to …" goes to the model). Only these exact phrases count as a yes.
+     */
+    fun yesNo(transcript: String?): Boolean? {
+        val phrase = normalize(transcript.orEmpty()).filterNot { it in FILLER_WORDS }.joinToString(" ")
+        return when (phrase) {
+            in YES -> true
+            in NO -> false
+            else -> null
+        }
+    }
+
+    private val YES = setOf("yes", "yes send it", "yes please", "yes send", "send it", "yeah send it", "yep send it", "yeah", "yep",
+        "go ahead", "sure send it", "ok send it", "okay send it", "send", "ja", "ja stuur maar", "stuur maar", "stuur het", "ja graag")
+    private val NO = setOf("no", "nope", "don't send it", "do not send it", "don't send", "no don't send it", "no thanks", "not now",
+        "nee", "niet sturen", "nee niet sturen", "stuur niet")
+
     const val MAX_TRANSCRIPT_CHARS = 600
 
     private val FILLER_WORDS = setOf(
