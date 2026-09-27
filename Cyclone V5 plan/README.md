@@ -56,7 +56,7 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 29 | [Direct first, then the background screen](29-one-tap-engine.md) | **Layer 1 built (alpha.45)**: calendar, contacts, timers and alarms with no screen on every phone, access asked by Android's own dialog. **Layer 2**: stays on Shizuku, no Cyclone engine (decided) |
 | 30 | [Setup cards](30-setup-cards.md) | **Built (alpha.46)**: a short guided setup in plain words, one Tilt Glass card per important setting (Shizuku included), with ⓘ in Settings to see a card again |
 | 31 | [Web-only PC](31-web-only-pc.md) | **Built (alpha.47)**: one-line install, type `cyclone`, Glass in the browser with Remote MCP and ChatGPT Attach; the Cyclone One desktop window is retired |
-| 32 | [Cyclone Drive build](32-cyclone-drive-build.md) | **D1 (alpha.49) and D2 (alpha.50) built**: Driver mode, the voice orb and AI mode; talk → confirmation → done; questions, details and sends by voice with a word-for-word readback. D3 (in the car) next |
+| 32 | [Cyclone Drive build](32-cyclone-drive-build.md) | **D1 (alpha.49), D2 (alpha.50) and "faster" (alpha.52) built**: Driver mode, the voice orb and AI mode; questions, details and sends by voice with a word-for-word readback; newest speech-to-text, instant commands, JEV watching. Owner car test, then D3 (in the car) |
 | 33 | [Command Center](33-command-center.md) | **Final plan**: one dashboard for accounts, tasks, routines, phones, results and approvals; zero-knowledge vault with sealed one-use delivery to a phone; MCP connections (Higgsfield first); an AI coordinator that can't see secrets or approve. Releases C0–C6. **C0 built in alpha.51** |
 
 ## Identity

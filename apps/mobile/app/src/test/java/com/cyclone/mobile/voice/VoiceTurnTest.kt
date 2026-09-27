@@ -58,18 +58,36 @@ class VoiceTurnTest {
     @Test fun `a task is confirmed, submitted, and the panel collapses while working`() {
         val r = Run()
         r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard)
-        r.on(VoiceEvent.Transcript("uh set a timer for ten minutes"))
+        r.on(VoiceEvent.Transcript("uh navigate home and avoid the highway"))
         val understand = r.effects.last() as VoiceEffect.Understand
-        assertEquals("set a timer for ten minutes", understand.transcript)
-        val fx = r.on(understood(VoiceKind.TASK, "Set a timer for 10 minutes.", "Setting a 10 minute timer."))
-        assertEquals(VoiceEffect.Submit("Set a timer for 10 minutes."), fx.first())
-        assertEquals(VoiceEffect.Say("Setting a 10 minute timer.", AfterSpeech.WORK), fx[1])
+        assertEquals("navigate home and avoid the highway", understand.transcript)
+        val fx = r.on(understood(VoiceKind.TASK, "Navigate home avoiding highways.", "Navigating home."))
+        assertEquals(VoiceEffect.Submit("Navigate home avoiding highways."), fx.first())
+        assertEquals(VoiceEffect.Say("Navigating home.", AfterSpeech.WORK), fx[1])
         assertEquals(VoicePhase.ACKING, r.turn.phase)
         assertTrue(r.turn.taskLive)
         r.on(VoiceEvent.SpeechEnded)
         assertEquals(VoicePhase.WORKING, r.turn.phase)
         assertFalse(r.turn.panelOpen)
         assertFalse(r.turn.dimmed)
+    }
+
+    @Test fun `an instant command confirms without a model call`() {
+        val r = Run()
+        r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard)
+        val fx = r.on(VoiceEvent.Transcript("set a timer for ten minutes"))
+        assertEquals(0, r.effects.count { it is VoiceEffect.Understand })
+        assertEquals(VoiceEffect.Submit("Set a timer for 10 minutes."), fx.first())
+        assertEquals(VoiceEffect.Say("Setting a 10 minute timer.", AfterSpeech.WORK), fx[1])
+    }
+
+    @Test fun `an instant command is not taken while Cyclone asks something`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(VoiceMoment("q1", VoiceMoment.Kind.QUESTION, "How long should the timer be?")))
+        r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard)
+        val before = r.effects.count { it is VoiceEffect.Understand }
+        r.on(VoiceEvent.Transcript("ten minute timer"))
+        assertEquals(before + 1, r.effects.count { it is VoiceEffect.Understand })
     }
 
     @Test fun `done is announced with a chime and one short line`() {

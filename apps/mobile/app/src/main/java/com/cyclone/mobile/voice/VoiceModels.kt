@@ -21,13 +21,21 @@ data class VoiceModel(
 data class VoiceChoice(val stt: String?, val tts: String?, val fast: String?, val voice: String?)
 
 object VoiceModels {
-    /** Fast and cheap first (plan 24 §3); the list decides what exists. */
-    val PREFERRED_STT = listOf("openai/whisper-large-v3-turbo", "openai/gpt-4o-mini-transcribe", "qwen/qwen3-asr-flash",
-        "deepgram/nova-3", "openai/whisper-large-v3")
-    val PREFERRED_TTS = listOf("google/gemini-3.8-flash-lite-tts", "openai/gpt-4o-mini-tts", "hexgrad/kokoro-82m",
-        "deepgram/aura-2", "mistralai/voxtral-mini-tts", "minimax/speech-2.8-turbo")
-    val PREFERRED_FAST = listOf("google/gemini-3.1-flash-lite", "google/gemini-2.5-flash-lite", "google/gemini-3-flash",
-        "openai/gpt-5-nano", "openai/gpt-4.1-nano", "mistralai/ministral-8b")
+    /**
+     * Newest first where it is better (alpha.52, researched 2026-09-27); the live list decides what exists, and a dated
+     * or numbered variant ("meta/muse-voice-transcribe-1.0") counts as the model it names.
+     * - Speech to text: Meta Muse Voice Transcribe (built for push-to-talk, ≈3% errors, final text ≈0.16 s after you
+     *   stop), then Microsoft MAI-Transcribe, Google Gemini 3.5 Transcribe, then the older, cheaper Whisper line.
+     * - Voice: Gemini 3.8 Flash-Lite TTS (fast); [PREFERRED_TTS_BEST] puts Gemini 3.8 Flash TTS first.
+     * - Understanding: Gemini Flash-Lite.
+     */
+    val PREFERRED_STT = listOf("meta/muse-voice-transcribe", "microsoft/mai-transcribe", "google/gemini-3.5-transcribe",
+        "openai/gpt-4o-mini-transcribe", "openai/whisper-large-v3-turbo", "qwen/qwen3-asr-flash", "deepgram/nova-3", "openai/whisper-large-v3")
+    val PREFERRED_TTS = listOf("google/gemini-3.8-flash-lite-tts", "google/gemini-3.8-flash-tts", "openai/gpt-4o-mini-tts",
+        "hexgrad/kokoro-82m", "deepgram/aura-2", "mistralai/voxtral-mini-tts", "minimax/speech-2.8-turbo")
+    val PREFERRED_TTS_BEST = listOf("google/gemini-3.8-flash-tts") + PREFERRED_TTS
+    val PREFERRED_FAST = listOf("google/gemini-3.1-flash-lite", "google/gemini-3.5-flash-lite", "google/gemini-2.5-flash-lite",
+        "google/gemini-3-flash", "openai/gpt-5-nano", "openai/gpt-4.1-nano", "mistralai/ministral-8b")
 
     /** Voices known to work per model family, used when the list names none. The first is the default. */
     private val FAMILY_VOICES = listOf(
@@ -78,7 +86,7 @@ object VoiceModels {
     }
 
     fun choose(stt: List<VoiceModel>, tts: List<VoiceModel>, text: List<VoiceModel>, settings: DriverSettings): VoiceChoice {
-        val ttsId = pick(tts, PREFERRED_TTS, settings.ttsModel)
+        val ttsId = pick(tts, if (settings.bestVoice) PREFERRED_TTS_BEST else PREFERRED_TTS, settings.ttsModel)
         return VoiceChoice(
             stt = if (settings.onDeviceStt) null else pick(stt, PREFERRED_STT, settings.sttModel),
             tts = ttsId,

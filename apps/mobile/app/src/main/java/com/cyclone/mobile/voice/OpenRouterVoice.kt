@@ -82,6 +82,41 @@ class OpenRouterVoice(private val key: String, private val http: OkHttpClient = 
         }
     }
 
+    /**
+     * Opens the connection to OpenRouter while the owner is still talking (a tiny authenticated GET of the key's own
+     * status), so the transcription call that follows skips the TLS handshake. Failures are ignored.
+     */
+    fun warm() {
+        val request = Request.Builder().url("$BASE/key").header("Authorization", "Bearer $key").build()
+        runCatching { http.newCall(request).execute().use { it.body?.close() } }
+    }
+
+    /**
+     * JEV, watching: one call to OpenRouter's Decisions API (alpha). Returns the raw answer for [JevShadow.parse]; any
+     * failure is a [VoiceCallException] and changes nothing in Drive.
+     */
+    fun decide(body: JSONObject, track: (Call) -> Unit = {}): String {
+        val request = Request.Builder().url(DECISIONS)
+            .header("Authorization", "Bearer $key")
+            .header("HTTP-Referer", "https://github.com/premiumcentraal-boop/Cyclone")
+            .header("X-Title", "Cyclone Drive")
+            .post(body.toString().toRequestBody(JSON))
+            .build()
+        val call = JEV_CLIENT.newCall(request)
+        track(call)
+        return try {
+            call.execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw failure(response.code, text)
+                text
+            }
+        } catch (error: VoiceCallException) {
+            throw error
+        } catch (error: IOException) {
+            throw VoiceCallException(VoiceFailure.OFFLINE, "decisions: ${error.javaClass.simpleName}")
+        }
+    }
+
     /** `GET /models?output_modalities=[modality]`: the live list Drive picks from. */
     fun models(modality: String): List<VoiceModel> {
         val request = Request.Builder().url("$BASE/models?output_modalities=$modality")
@@ -137,6 +172,7 @@ class OpenRouterVoice(private val key: String, private val http: OkHttpClient = 
 
     companion object {
         private const val BASE = "https://openrouter.ai/api/v1"
+        private const val DECISIONS = "https://openrouter.ai/api/alpha/decisions"
         private val JSON = "application/json".toMediaType()
 
         val CLIENT: OkHttpClient = OkHttpClient.Builder()
@@ -144,6 +180,9 @@ class OpenRouterVoice(private val key: String, private val http: OkHttpClient = 
             .callTimeout(20, TimeUnit.SECONDS)
             .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
             .build()
+
+        /** JEV only watches: it gets a short leash so it never holds anything up. */
+        private val JEV_CLIENT: OkHttpClient by lazy { CLIENT.newBuilder().callTimeout(3, TimeUnit.SECONDS).build() }
 
         /** ISO code for a language name, for transcription; null means auto-detect. */
         fun languageCode(language: String): String? = when (language.lowercase()) {

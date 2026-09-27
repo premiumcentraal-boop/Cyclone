@@ -99,6 +99,15 @@ class VoiceActivityTest {
         assertTrue((result as VoiceActivity.Result.Heard).endMs <= 15_000)
     }
 
+    @Test fun `speech time grows only with real speech, so a blip never counts as talking`() {
+        val detector = VoiceActivity()
+        detector.feed(silence(300))
+        val blip = detector.feed(speech(200)) as VoiceActivity.Result.Listening
+        assertTrue("blip ${blip.speechMs}", blip.speechMs < VoiceActivity.Tuning().minSpeechMs)
+        val talk = detector.feed(speech(600)) as VoiceActivity.Result.Listening
+        assertTrue("talk ${talk.speechMs}", talk.speechMs >= VoiceActivity.Tuning().minSpeechMs)
+    }
+
     @Test fun `the result is final`() {
         val detector = VoiceActivity()
         val first = detector.feed(silence(5_000))

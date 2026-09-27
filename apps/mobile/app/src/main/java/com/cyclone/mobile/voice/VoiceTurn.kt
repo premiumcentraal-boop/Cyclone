@@ -173,8 +173,13 @@ data class VoiceTurn(
             if (moment != null && moment.kind in VOICE_KINDS) declineMoment(text.trim())
             else sayClosing(VoiceCopy.OKAY, text.trim())
         }
-        is VoiceRules.Screen.Pass -> step(copy(phase = VoicePhase.UNDERSTANDING, heard = screen.text),
-            VoiceEffect.Understand(screen.text, VoiceContext(followUp, openAsk(), recentGoals, taskLive, language)))
+        is VoiceRules.Screen.Pass -> {
+            val understanding = copy(phase = VoicePhase.UNDERSTANDING, heard = screen.text)
+            // Instant commands (a timer, an alarm) need no model when nothing is being asked: the confirmation starts now.
+            val instant = if (!answering && followUp == null) VoiceIntents.parse(screen.text) else null
+            if (instant != null) understanding.understood(instant)
+            else step(understanding, VoiceEffect.Understand(screen.text, VoiceContext(followUp, openAsk(), recentGoals, taskLive, language)))
+        }
     }
 
     private fun understood(u: Understanding): Step {

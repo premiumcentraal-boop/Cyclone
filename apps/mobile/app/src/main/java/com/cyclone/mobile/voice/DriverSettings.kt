@@ -16,6 +16,10 @@ data class DriverSettings(
     val language: String = "auto",
     /** Trailing silence that ends a request. */
     val endSilenceMs: Int = 700,
+    /** "Best voice": the most natural voice the live list has, a little slower and dearer; otherwise the fastest. */
+    val bestVoice: Boolean = false,
+    /** JEV watches each request next to the understanding model (it never decides); its agreement shows in Settings. */
+    val jevWatch: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_BUTTON_DP = 84

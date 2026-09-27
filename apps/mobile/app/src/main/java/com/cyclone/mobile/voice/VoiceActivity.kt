@@ -37,8 +37,8 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
     }
 
     sealed interface Result {
-        /** Still listening. [level] is 0..1 for the orb. */
-        data class Listening(val level: Float, val speaking: Boolean) : Result
+        /** Still listening. [level] is 0..1 for the orb; [speechMs] is how long the owner has been talking so far. */
+        data class Listening(val level: Float, val speaking: Boolean, val speechMs: Int = 0) : Result
         /** The owner spoke and stopped: [voicedMs] of speech (pauses between words included) from [startMs] to [endMs]. */
         data class Heard(val voicedMs: Int, val startMs: Int, val endMs: Int) : Result
         /** Nothing but silence or noise: close, no network. */
@@ -76,7 +76,7 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
                 finished?.let { return it }
             }
         }
-        return Result.Listening(level, speechStartMs >= 0 && silenceMs == 0)
+        return Result.Listening(level, speechStartMs >= 0 && silenceMs == 0, if (speechStartMs >= 0) lastVoiceEndMs - speechStartMs else 0)
     }
 
     private fun frame(samples: ShortArray) {

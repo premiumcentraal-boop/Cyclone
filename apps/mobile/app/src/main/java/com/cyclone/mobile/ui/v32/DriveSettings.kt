@@ -39,6 +39,7 @@ import androidx.core.app.ActivityCompat
 import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.voice.DriverMode
 import com.cyclone.mobile.voice.DriverSettings
+import com.cyclone.mobile.voice.JevWatch
 import com.cyclone.mobile.voice.OpenRouterVoice
 import com.cyclone.mobile.voice.SpeechOut
 import com.cyclone.mobile.voice.VoiceCatalog
@@ -127,7 +128,15 @@ internal fun VoiceSettings(context: Context) {
             DriverMode.update(context) { it.copy(sttModel = id) }
         } else DriveNote("Android's own recognizer: offline and private where the phone supports it.")
 
-        ModelPicker("Voice model", lists.tts, VoiceModels.PREFERRED_TTS, choice.tts) { id ->
+        Text("Voice quality", style = MaterialTheme.typography.labelLarge)
+        CycloneLiquidChoiceBar(
+            options = listOf("Fast", "Best"),
+            selectedIndex = if (settings.bestVoice) 1 else 0,
+            onSelect = { i -> DriverMode.update(context) { it.copy(bestVoice = i == 1, ttsModel = null, voice = null) } },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        DriveNote("Fast is the quickest natural voice. Best is the most natural one OpenRouter lists, a little slower to start.")
+        ModelPicker("Voice model", lists.tts, if (settings.bestVoice) VoiceModels.PREFERRED_TTS_BEST else VoiceModels.PREFERRED_TTS, choice.tts) { id ->
             DriverMode.update(context) { it.copy(ttsModel = id, voice = null) }
         }
         val voices = VoiceModels.voices(lists.tts.firstOrNull { it.id == choice.tts })
@@ -144,6 +153,19 @@ internal fun VoiceSettings(context: Context) {
 
         ModelPicker("Understanding (fast model)", lists.text, VoiceModels.PREFERRED_FAST, choice.fast) { id ->
             DriverMode.update(context) { it.copy(fastModel = id) }
+        }
+
+        Text("Instant decisions (JEV, watching)", style = MaterialTheme.typography.labelLarge)
+        val jev by JevWatch.tally.collectAsState()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(jev.summary(), style = MaterialTheme.typography.bodyMedium)
+                Text("JEV, a new decision model, answers each request next to the understanding model. It never decides: " +
+                    "this shows how often it agreed and how fast it was, so a drive can prove whether it may take over simple requests.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(12.dp))
+            CycloneLiquidToggle(checked = settings.jevWatch, onCheckedChange = { on -> DriverMode.update(context) { it.copy(jevWatch = on) } })
         }
 
         Text("Language", style = MaterialTheme.typography.labelLarge)
@@ -181,6 +203,10 @@ internal fun VoiceSettings(context: Context) {
             TimingRow("Transcription", result.transcribeMs, VoiceTimings.TARGET_TRANSCRIBE_MS)
             TimingRow("Understanding", result.understandMs, VoiceTimings.TARGET_UNDERSTAND_MS)
             TimingRow("Confirmation after you stop", result.confirmMs, VoiceTimings.TARGET_P50_MS)
+            result.sttCompared.forEach { run ->
+                TimingRow("Also: ${run.model.substringAfter('/')}", run.ms, VoiceTimings.TARGET_TRANSCRIBE_MS)
+                DriveNote(run.error ?: "Heard \"${run.transcript}\"")
+            }
             if (result.transcript.isNotBlank()) DriveNote("Heard \"${result.transcript}\"" +
                 if (result.understood) ", understood as a timer." else ", not understood as the timer it was.")
             result.error?.let { DriveNote(it) }

@@ -58,6 +58,8 @@ object DriverMode {
         onDeviceStt = p.getBoolean("on_device_stt", false),
         language = p.getString("language", "auto")?.takeIf { it in DriverSettings.LANGUAGES } ?: "auto",
         endSilenceMs = p.getInt("end_silence_ms", 700).takeIf { it in DriverSettings.END_SILENCE } ?: 700,
+        bestVoice = p.getBoolean("best_voice", false),
+        jevWatch = p.getBoolean("jev_watch", true),
     )
 
     private fun write(p: SharedPreferences, s: DriverSettings) {
@@ -71,6 +73,8 @@ object DriverMode {
             .putBoolean("on_device_stt", s.onDeviceStt)
             .putString("language", s.language)
             .putInt("end_silence_ms", s.endSilenceMs)
+            .putBoolean("best_voice", s.bestVoice)
+            .putBoolean("jev_watch", s.jevWatch)
             .apply()
     }
 }
@@ -102,4 +106,17 @@ object VoiceCatalog {
     }
 
     fun choice(settings: DriverSettings): VoiceChoice = _lists.value.let { VoiceModels.choose(it.stt, it.tts, it.text, settings) }
+}
+
+/**
+ * JEV's running tally for this app session (alpha.52): how often it agreed with the understanding model and how fast
+ * it was. In memory only; it holds request kinds and timings, never what was said.
+ */
+object JevWatch {
+    private val _tally = MutableStateFlow(JevShadow.Tally())
+    val tally: StateFlow<JevShadow.Tally> = _tally
+
+    fun record(model: VoiceKind, jev: JevShadow.Decision?, ms: Long, error: String?) {
+        _tally.value = if (jev == null) _tally.value.failed(error ?: "no answer") else _tally.value.add(JevShadow.Sample(model, jev.kind, ms, jev.confidence))
+    }
 }

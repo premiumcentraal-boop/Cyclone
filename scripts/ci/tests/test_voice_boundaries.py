@@ -107,6 +107,16 @@ class VoiceBoundaries(unittest.TestCase):
         self.assertIn("MindSend(text, recipient, app)", reply)
         self.assertIn("device.replyNotification(key, text)", reply)
 
+    def test_jev_only_watches(self):
+        # alpha.51: JEV's answer is compared with the understanding model's and tallied; it never drives the turn.
+        session = code((VOICE / "VoiceSession.kt").read_text(encoding="utf-8"))
+        self.assertIn("JevWatch.record(event.understanding.kind, decision, ms, error)", session)
+        self.assertNotRegex(session, r"dispatch\([^)]*(decision|jev)", "a JEV answer must never become a voice event")
+        tally = code((VOICE / "JevShadow.kt").read_text(encoding="utf-8"))
+        sample = tally[tally.index("data class Sample("):]
+        sample = sample[: sample.index(")")]
+        self.assertNotIn("String", sample, "the tally keeps kinds and timings, never what was said")
+
     def test_no_voice_cloning(self):
         for name, text in voice_sources():
             self.assertNotRegex(code(text).lower(), r"\b(voice_?)?clon(e|es|ed|ing)\b", name)

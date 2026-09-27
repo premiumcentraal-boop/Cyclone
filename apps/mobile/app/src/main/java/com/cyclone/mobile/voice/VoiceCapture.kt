@@ -37,7 +37,7 @@ class VoiceCapture(private val context: Context) {
 
     /** Records until the detector decides; [onLevel] gets the voice level (0..1) about 50 times a second. */
     @SuppressLint("MissingPermission")
-    suspend fun record(tuning: VoiceActivity.Tuning, onLevel: (Float) -> Unit): Outcome = withContext<Outcome>(Dispatchers.IO) {
+    suspend fun record(tuning: VoiceActivity.Tuning, onSpeech: () -> Unit = {}, onLevel: (Float) -> Unit): Outcome = withContext<Outcome>(Dispatchers.IO) {
         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return@withContext Outcome.Failed(VoiceFailure.NO_MIC)
         finishEarly = false
         val rate = VoiceActivity.SAMPLE_RATE
@@ -54,6 +54,7 @@ class VoiceCapture(private val context: Context) {
         val all = ShortArray(rate * tuning.maxClipMs / 1000 + rate)
         var count = 0
         val chunk = ShortArray(rate / 50)
+        var spoke = false
         try {
             record.startRecording()
             if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) return@withContext Outcome.Failed(VoiceFailure.MIC_BUSY)
@@ -68,6 +69,8 @@ class VoiceCapture(private val context: Context) {
                 when (val result = detector.feed(chunk, n)) {
                     is VoiceActivity.Result.Listening -> {
                         onLevel(result.level)
+                        // Speech longer than a blip: never on a silent or blip-only open, which stays free.
+                        if (!spoke && result.speechMs >= tuning.minSpeechMs) { spoke = true; onSpeech() }
                         if (finishEarly) return@withContext early(all, count, detector)
                     }
                     is VoiceActivity.Result.Heard ->

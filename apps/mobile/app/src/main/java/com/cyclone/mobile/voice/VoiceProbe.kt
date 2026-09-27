@@ -11,6 +11,8 @@ import java.io.ByteArrayOutputStream
 object VoiceProbe {
     const val SAMPLE = "Set a timer for ten minutes."
 
+    data class SttRun(val model: String, val ms: Long?, val transcript: String, val error: String? = null)
+
     data class Result(
         val firstSoundMs: Long? = null,
         val transcribeMs: Long? = null,
@@ -19,6 +21,8 @@ object VoiceProbe {
         val kind: VoiceKind? = null,
         val goal: String = "",
         val error: String? = null,
+        /** The same clip through the other listed speech-to-text models (alpha.52): model, time, what it heard. */
+        val sttCompared: List<SttRun> = emptyList(),
     ) {
         /** What the owner would wait between stopping and hearing the confirmation start. */
         val confirmMs: Long? get() = if (transcribeMs != null && understandMs != null && firstSoundMs != null) transcribeMs + understandMs + firstSoundMs else null
@@ -45,6 +49,20 @@ object VoiceProbe {
             val t0 = SystemClock.elapsedRealtime()
             val text = api.transcribe(stt, Wav.encode(clip), language)
             result = result.copy(transcribeMs = SystemClock.elapsedRealtime() - t0, transcript = text)
+            // The same clip through up to two more listed transcription models, newest first, to compare on this phone.
+            val others = VoiceCatalog.lists.value.stt.map { it.id }
+                .let { ids -> VoiceModels.PREFERRED_STT.mapNotNull { want -> ids.firstOrNull { it == want || it.startsWith("$want-") } } }
+                .filter { it != stt }.distinct().take(2)
+            val wav = Wav.encode(clip)
+            result = result.copy(sttCompared = others.map { other ->
+                val t = SystemClock.elapsedRealtime()
+                try {
+                    val heard = api.transcribe(other, wav, language)
+                    SttRun(other, SystemClock.elapsedRealtime() - t, heard)
+                } catch (error: VoiceCallException) {
+                    SttRun(other, null, "", error.message)
+                }
+            })
             val fast = choice.fast ?: return result.copy(error = "OpenRouter lists no fast text model right now.")
             val t1 = SystemClock.elapsedRealtime()
             val u = api.understand(fast, text, VoiceContext(language = language))

@@ -10,6 +10,9 @@ import com.cyclone.mobile.task.TaskCommands
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.cyclone.mobile.ui.overlay.glass.VoicePress
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -69,7 +72,15 @@ class VoiceSession(context: Context) {
             if (voice != null) dispatch(VoiceEvent.MomentOpened(voice)) else if (_turn.value.moment != null) dispatch(VoiceEvent.MomentClosed)
         } }
         // The live model lists: fetched once per session in the background, so the first request does not wait.
-        scope.launch(Dispatchers.IO) { runCatching { VoiceCatalog.refresh(OpenRouterSecretStore.read(app)) } }
+        // Then the stock lines ("On it.", "Okay.", "Done.") are made once for this voice, so they play at once.
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val key = OpenRouterSecretStore.read(app)
+                VoiceCatalog.refresh(key)
+                val choice = VoiceCatalog.choice(DriverMode.settings.value)
+                if (key.isNotBlank() && choice.tts != null) speech.prewarm(OpenRouterVoice(key), choice.tts, choice.voice)
+            }
+        }
     }
 
     private var lastPressAt = 0L
@@ -119,7 +130,9 @@ class VoiceSession(context: Context) {
             VoiceEffect.StopListening -> stopListening()
             VoiceEffect.Transcribe -> transcribe()
             is VoiceEffect.Understand -> understand(effect.transcript, effect.context)
-            is VoiceEffect.Say -> say(effect.line)
+            // A confirmation of new work gets the stock "On it." if it is slow to start (alpha.52).
+            is VoiceEffect.Say -> say(effect.line, quick = VoiceCopy.DEFAULT_ACK.takeIf {
+                effect.then == AfterSpeech.WORK && _turn.value.phase == VoicePhase.ACKING && effect.line != it })
             VoiceEffect.StopSpeaking -> { speakJob?.cancel(); speech.stop() }
             is VoiceEffect.Submit -> OverlayChromeRuntime.submitRequest(effect.goal, driving = true)
             is VoiceEffect.Send -> send(effect.answer)
@@ -145,7 +158,12 @@ class VoiceSession(context: Context) {
                     }
                 } else {
                     val tuning = VoiceActivity.Tuning(endSilenceMs = settings.endSilenceMs)
-                    when (val result = capture.record(tuning) { micLevel.value = it }) {
+                    // Once the owner is really talking, open the connection to OpenRouter so the transcription skips
+                    // the handshake. A silent or blip-only open never gets here: it still costs no call at all.
+                    val warm = { scope.launch(Dispatchers.IO) {
+                        OpenRouterSecretStore.read(app).takeIf { it.isNotBlank() }?.let { runCatching { OpenRouterVoice(it).warm() } }
+                    }; Unit }
+                    when (val result = capture.record(tuning, onSpeech = warm) { micLevel.value = it }) {
                         is VoiceCapture.Outcome.Clip -> { clip = result.samples; heard(); dispatch(VoiceEvent.Heard) }
                         VoiceCapture.Outcome.NothingHeard -> dispatch(VoiceEvent.NothingHeard)
                         is VoiceCapture.Outcome.Failed -> dispatch(VoiceEvent.Failed(result.failure))
@@ -195,6 +213,7 @@ class VoiceSession(context: Context) {
     }
 
     private fun understand(transcript: String, context: VoiceContext) {
+        val jev = if (DriverMode.settings.value.jevWatch) watchJev(transcript, context) else null
         workJob = scope.launch {
             val started = SystemClock.elapsedRealtime()
             val event = withContext<VoiceEvent>(Dispatchers.IO) {
@@ -209,10 +228,29 @@ class VoiceSession(context: Context) {
             }
             _timings.value = _timings.value.copy(understandMs = SystemClock.elapsedRealtime() - started)
             dispatch(event)
+            // JEV only watches: its answer is compared with the model's, and never dispatched.
+            if (jev != null && event is VoiceEvent.Understood) scope.launch {
+                val (decision, ms, error) = withTimeoutOrNull(JEV_WAIT_MS) { jev.await() } ?: Triple(null, JEV_WAIT_MS, "no answer in time")
+                JevWatch.record(event.understanding.kind, decision, ms, error)
+            }
         }
     }
 
-    private fun say(line: String) {
+    /** Asks JEV the same question as the understanding model, in parallel; the answer is only compared. */
+    private fun watchJev(transcript: String, context: VoiceContext): Deferred<Triple<JevShadow.Decision?, Long, String?>> =
+        scope.async<Triple<JevShadow.Decision?, Long, String?>>(Dispatchers.IO) {
+            val started = SystemClock.elapsedRealtime()
+            try {
+                val key = OpenRouterSecretStore.read(app)
+                if (key.isBlank()) return@async Triple(null, 0L, "no key")
+                val decision = JevShadow.parse(OpenRouterVoice(key).decide(JevShadow.request(transcript, context), ::track))
+                Triple(decision, SystemClock.elapsedRealtime() - started, if (decision == null) "unreadable answer" else null)
+            } catch (error: VoiceCallException) {
+                Triple(null, SystemClock.elapsedRealtime() - started, error.message)
+            }
+        }
+
+    private fun say(line: String, quick: String? = null) {
         speakJob?.cancel()
         val job = scope.launch {
             earconJob?.join()
@@ -221,7 +259,7 @@ class VoiceSession(context: Context) {
             val choice = VoiceCatalog.choice(settings)
             val api = key.takeIf { it.isNotBlank() }?.let { OpenRouterVoice(it) }
             val started = SystemClock.elapsedRealtime()
-            val spoken = speech.say(line, api, choice.tts, choice.voice, settings.language)
+            val spoken = speech.say(line, api, choice.tts, choice.voice, settings.language, quick)
             if (awaitingAckSound) {
                 awaitingAckSound = false
                 // End of speech to the first sound of the answer: the number plan 24 §7 sets (p50 2.0 s, p90 3.0 s).
@@ -297,6 +335,7 @@ class VoiceSession(context: Context) {
 
     companion object {
         const val STILL_WORKING_MS = 60_000L
+        private const val JEV_WAIT_MS = 3_000L
         private val TERMINAL = setOf(TaskPhase.DONE, TaskPhase.FAILED, TaskPhase.STOPPED)
     }
 }
