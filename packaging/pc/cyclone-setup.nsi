@@ -100,6 +100,9 @@ Section "Cyclone" SecMain
   ${If} ${RunningX64}
     ${DisableX64FSRedirection}
   ${EndIf}
+  ; Started from a PowerShell 7 terminal, the setup would hand PowerShell 7's module path to Windows PowerShell, which
+  ; then cannot load its own cmdlets. Without the variable, Windows PowerShell uses its defaults.
+  System::Call 'Kernel32::SetEnvironmentVariable(t "PSModulePath", p 0)'
   nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\install.ps1" -Zip "$PLUGINSDIR\Cyclone-PC.zip" -NoStart -Log "${SETUP_LOG}"'
   Pop $0
   ${If} ${RunningX64}

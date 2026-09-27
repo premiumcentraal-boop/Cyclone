@@ -22,6 +22,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell started from PowerShell 7 (a pwsh terminal, the setup under CI) inherits PowerShell 7's module
+# path and then cannot load its own Get-FileHash, Expand-Archive and friends. Use its own modules first.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    $env:PSModulePath = (@("$PSHOME\Modules", "$env:ProgramFiles\WindowsPowerShell\Modules",
+        [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'),
+        (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules')) | Where-Object { $_ }) -join ';'
+}
 $ProgressPreference = 'SilentlyContinue'
 $Repo = 'premiumcentraal-boop/Cyclone'
 $Root = Join-Path $env:LOCALAPPDATA 'Cyclone One'
