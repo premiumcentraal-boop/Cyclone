@@ -24,8 +24,12 @@ class CommandCenterGuard(unittest.TestCase):
         api = (COMMAND / "api.py").read_text(encoding="utf-8")
         routes = [line.strip() for line in api.splitlines() if re.match(r"\s*@router\.(get|post|put|delete)\(", line)]
         assert len(routes) >= 15, "Command Center routes not found"
-        for line in routes:
-            assert "dependencies=[Depends(auth)]" in line, f"unauthenticated Command Center route: {line}"
+        open_routes = [line for line in routes if "dependencies=[Depends(auth)]" not in line]
+        # C3: the OAuth redirect from the sign-in page cannot carry the bearer. It is the one exception, it only finishes a
+        # sign-in Glass started (single-use state + PKCE verifier kept by the gateway), and it reflects nothing but a name.
+        assert open_routes == ['@router.get("/v1/cc/connections/oauth/callback", response_class=HTMLResponse)'], f"unauthenticated Command Center route: {open_routes}"
+        callback = api[api.index("def create_oauth_callback_router"):]
+        assert "finish_sign_in(state, code" in callback and "html.escape" in callback
 
     def test_agent_mcp_servers_never_reach_the_command_center(self):
         for folder in MCP_DIRS:
@@ -97,6 +101,50 @@ class CommandCenterGuard(unittest.TestCase):
         assert "plain.fill(0)" in delivery and "item.moved" in delivery
         hpke = (GLASS / "services/hpke.ts").read_text(encoding="utf-8")
         assert "AEAD_AES256GCM" in hpke and "KEM_P256" in hpke
+
+    # Plan 33 (C3): connections. Fixed MCP methods, owner allowlists and caps, sign-in grants kept out of the database.
+    def test_connections_call_only_allowed_tools_through_fixed_methods(self):
+        client = (COMMAND / "mcp.py").read_text(encoding="utf-8")
+        methods = set(re.findall(r'"method": "([^"]+)"', client)) | set(re.findall(r'self\.request\("([^"]+)"', client))
+        assert methods == {"initialize", "notifications/initialized", "tools/list", "tools/call"}, methods
+        store = (COMMAND / "connections.py").read_text(encoding="utf-8")
+        assert "is not allowed. Allow it in Connections first." in store and '"[]", 10, "always"' in store, "no tool is allowed by default; new connections ask first"
+        assert "MAX_PARALLEL" in store and "already waiting for your OK" in store and "daily cap" in store
+        for text in (client, store):
+            for word in ("subprocess", "os.system", "eval(", "exec(", "print(", "logging"):
+                assert word not in text, f"connections must not use {word}"
+
+    def test_sign_in_grants_never_reach_the_database_glass_or_the_audit(self):
+        store = (COMMAND / "connections.py").read_text(encoding="utf-8")
+        schema = store[store.index('CONNECTIONS_SCHEMA = """'):store.index('"""', store.index('CONNECTIONS_SCHEMA = """') + 25)].lower()
+        for word in ("token", "secret", "password", "refresh", "grant"):
+            assert word not in schema, f"connection schema must not hold {word}"
+        assert "_dpapi_transform" in store and "class GrantStore" in store
+        public = store[store.index("    def _public(self, r"):store.index("    def add(self")]
+        assert "access_token" not in public and "refresh_token" not in public
+        for line in store.splitlines():
+            if "_audit(" in line:
+                assert "token" not in line.lower() or "tokenendpoint" in line.lower(), f"audit must not carry a token: {line.strip()}"
+        for name in ("pages/connectionsView.ts", "services/command.ts"):
+            text = (GLASS / name).read_text(encoding="utf-8")
+            assert "access_token" not in text and "refresh_token" not in text, f"{name} must never handle sign-in tokens"
+
+    def test_a_posted_file_is_checked_and_its_share_is_a_send(self):
+        phone = ROOT / "apps/mobile/app/src/main/java/com/cyclone/mobile"
+        media = (phone / "gateway/CommandMedia.kt").read_text(encoding="utf-8")
+        assert '"MEDIA_CORRUPT"' in media and "MessageDigest.getInstance(\"SHA-256\")" in media and "(video|image|audio)/" in media
+        gate = (phone / "policy/GatePolicy.kt").read_text(encoding="utf-8")
+        assert "if (PublishGate.gates(selectedLabel)) return GateClass.SEND" in gate
+        adapter = PHONE.read_text(encoding="utf-8")
+        assert "PublishGate.missionId = if (publish == true) id else null" in adapter
+        center = (COMMAND / "center.py").read_text(encoding="utf-8")
+        assert 'extra["publish"] = True' in center and "needs the owner's OK" in center
+
+    def test_prepared_leases_are_bound_to_their_own_run(self):
+        delivery = (COMMAND / "delivery.py").read_text(encoding="utf-8")
+        assert "RUN_WINDOW_MS" in delivery and "MAX_AHEAD_MS" in delivery and 'ahead["due_at"] < expires <= ahead["due_at"] + RUN_WINDOW_MS' in delivery
+        center = (COMMAND / "center.py").read_text(encoding="utf-8")
+        assert "task_id=reserved" in center and "_clear_slots(routine_id" in center and "_login_approval(task)" in center
 
 
 if __name__ == "__main__":

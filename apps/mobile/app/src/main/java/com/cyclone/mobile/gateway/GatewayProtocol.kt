@@ -155,6 +155,7 @@ internal object GatewayProtocol {
         "cc.status",
         "cc.answer",
         "cc.key",
+        "cc.media",
     )
 
     fun parse(line: String): GatewayRequest {

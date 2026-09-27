@@ -36,8 +36,8 @@ DEVICE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,120}$")
 ID = re.compile(r"^[a-z]{1,4}_[A-Za-z0-9_-]{6,40}$")
 OWNER_BASIS = ("mine", "company", "client")
 TWOFA = ("none", "totp", "passkey", "sms", "email", "app")
-TASK_STATES = ("scheduled", "waiting_device", "running", "needs_you", "succeeded", "failed", "cancelled")
-OPEN_TASK_STATES = ("scheduled", "waiting_device", "running", "needs_you")
+TASK_STATES = ("scheduled", "making", "waiting_device", "running", "needs_you", "succeeded", "failed", "cancelled")
+OPEN_TASK_STATES = ("scheduled", "making", "waiting_device", "running", "needs_you")
 FINISHED = {"completed": "succeeded", "gave_up": "failed", "failed": "failed", "cancelled": "cancelled",
             "paused": "failed", "interrupted": "failed"}
 #: Phone refusals that mean "not now", so the task waits for a phone instead of failing.
@@ -47,6 +47,10 @@ WAIT_LIMIT_MS = 6 * 60 * 60_000
 UNREACHABLE_LIMIT_MS = 30 * 60_000
 MISSED_GRACE_MS = 10 * 60_000
 MAX_GOAL = 1_800
+#: Plan 33 (C3): a routine may seal its next runs' passwords ahead (pre-authorised leases), at most this many.
+MAX_PREAUTH = 7
+PREAUTH_WINDOW_MS = 30 * 60_000
+MEDIA_CHUNK = 256 * 1024
 
 
 class CommandError(ValueError):
@@ -58,6 +62,8 @@ class CommandContract(Protocol):
     def cc_status(self, device_id: str, mission_id: str) -> dict[str, Any]: ...
     def cc_answer(self, device_id: str, mission_id: str, action: str, *, request_id: str | None = None,
                   text: str | None = None, values: dict[str, str] | None = None) -> dict[str, Any]: ...
+    def cc_media(self, device_id: str, task_id: str, *, name: str, mime: str, size: int, sha256: str, offset: int,
+                 data: bytes) -> dict[str, Any]: ...
 
 
 def _now_ms() -> int:
@@ -126,7 +132,7 @@ CREATE INDEX IF NOT EXISTS approval_state ON approval(state);
 class CommandCenter:
     def __init__(self, path: Path, contract: CommandContract, devices: Callable[[], list[dict[str, Any]]], *,
                  clock: Callable[[], int] = _now_ms, local_now: Callable[[], datetime] | None = None,
-                 tick_seconds: float = 5.0) -> None:
+                 tick_seconds: float = 5.0, connections: dict[str, Any] | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
@@ -148,6 +154,19 @@ class CommandCenter:
             self._db.execute("ALTER TABLE task ADD COLUMN vault_item_id TEXT")
         from .delivery import DeliveryStore
         self.delivery = DeliveryStore(self)
+        # Plan 33 (C3): connections (MCP servers such as Higgsfield), their calls and the files they make.
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(task)")}
+        for column in ("make", "artifact_id", "media"):
+            if column not in columns:
+                self._db.execute(f"ALTER TABLE task ADD COLUMN {column} TEXT")
+        columns = {r["name"] for r in self._db.execute("PRAGMA table_info(routine)")}
+        for column, kind in (("make", "TEXT"), ("vault_item_id", "TEXT"), ("preauth", "INTEGER NOT NULL DEFAULT 0")):
+            if column not in columns:
+                self._db.execute(f"ALTER TABLE routine ADD COLUMN {column} {kind}")
+        self._db.execute("CREATE TABLE IF NOT EXISTS routine_slot (routine_id TEXT NOT NULL, due_at INTEGER NOT NULL, device_id TEXT NOT NULL,"
+                         " task_id TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, PRIMARY KEY(routine_id, due_at, device_id))")
+        from .connections import ConnectionStore
+        self.connections = ConnectionStore(self, path.parent, **(connections or {}))
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -325,7 +344,10 @@ class CommandCenter:
         return device, account
 
     def create_task(self, body: dict[str, Any], *, actor: str = "owner") -> dict[str, Any]:
-        _only(body, {"title", "goal", "deviceId", "accountId", "recipe", "dueAt", "requestId", "vaultItemId"})
+        _only(body, {"title", "goal", "deviceId", "accountId", "recipe", "dueAt", "requestId", "vaultItemId", "make"})
+        make = self._make_spec(body.get("make"))
+        if make and not body.get("goal") and json.loads(make)["then"] == "keep":
+            body = {**body, "goal": f"Make with {json.loads(make)['tool']}"}
         title = _clean_text(body.get("title") or str(body.get("goal", ""))[:80], "title", 80)
         goal = _clean_text(body.get("goal"), "goal", MAX_GOAL)
         recipe = _clean_text(body.get("recipe"), "recipe", 64, required=False) or None
@@ -342,11 +364,39 @@ class CommandCenter:
                 if existing:
                     return self.get_task(existing["id"])
             item = self._vault_item_for(body.get("vaultItemId"), device, account)
-            created = self._insert_task(title, goal, device, account, recipe, None, due, f"req:{key}" if key else None, actor)
-            if item:
-                self._db.execute("UPDATE task SET vault_item_id = ? WHERE id = ?", (item, created["id"]))
-                created = self.get_task(created["id"])
+            created = self._insert_task(title, goal, device, account, recipe, None, due, f"req:{key}" if key else None, actor,
+                                        vault_item=item, make=make)
             return created
+
+    def _make_spec(self, raw: Any) -> str | None:
+        """Plan 33 (C3): a task may first make a file with a connection's tool, then post it from a phone or keep it."""
+        if raw is None:
+            return None
+        if not isinstance(raw, dict) or not set(raw) <= {"connectionId", "tool", "arguments", "pollTool", "then"}:
+            raise CommandError("make is {connectionId, tool, arguments, pollTool?, then}.")
+        connection = raw.get("connectionId")
+        if not isinstance(connection, str) or not re.match(r"^con_[A-Za-z0-9_-]{6,40}$", connection):
+            raise CommandError("make.connectionId is malformed.")
+        row = self.connections._row(connection)
+        allowed = set(json.loads(row["allowed"]))
+        tool, poll = raw.get("tool"), raw.get("pollTool")
+        for name in (tool, poll):
+            if name is not None and (not isinstance(name, str) or name not in allowed):
+                raise CommandError(f"{row['name']}: allow the tool {name} in Connections first.")
+        if tool is None:
+            raise CommandError("make.tool is required.")
+        arguments = raw.get("arguments", {})
+        if not isinstance(arguments, dict) or len(json.dumps(arguments)) > 8_000:
+            raise CommandError("make.arguments are an object of at most 8 KB.")
+        for key, value in arguments.items():
+            if _secret_name(str(key)) or (isinstance(value, str) and INLINE_SECRET.search(value)):
+                raise CommandError("make.arguments look like they hold a secret.")
+            if not isinstance(value, (str, int, float, bool)) or (isinstance(value, str) and len(value) > 4_000):
+                raise CommandError("make.arguments are plain values (text up to 4000 characters, numbers, true/false).")
+        then = raw.get("then", "post")
+        if then not in ("post", "keep"):
+            raise CommandError("make.then is post (a phone posts the file) or keep (only keep the file).")
+        return json.dumps({"connectionId": connection, "tool": tool, "arguments": arguments, "pollTool": poll, "then": then}, sort_keys=True)
 
     def _vault_item_for(self, item_id: Any, device: str | None, account: str | None) -> str | None:
         """A task may use one vault item's secret (C2): its own account's login or authenticator, on one trusted phone."""
@@ -364,14 +414,16 @@ class CommandCenter:
         return item_id
 
     def _insert_task(self, title: str, goal: str, device: str | None, account: str | None, recipe: str | None,
-                     routine: str | None, due: int | None, key: str | None, actor: str) -> dict[str, Any]:
+                     routine: str | None, due: int | None, key: str | None, actor: str, *, task_id: str | None = None,
+                     vault_item: str | None = None, make: str | None = None) -> dict[str, Any]:
         now = self._clock()
-        task_id = _id("tsk")
+        task_id = task_id or _id("tsk")
         self._db.execute(
             "INSERT INTO task(id, title, goal, device_id, account_id, recipe, routine_id, due_at, status, cause, idempotency_key,"
-            " next_try_at, waiting_since, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (task_id, title, goal, device, account, recipe, routine, due, "scheduled", "", key, due or now, None, now, now))
-        self._audit(actor, "task.create", task_id, {"device": device, "account": account, "routine": routine})
+            " next_try_at, waiting_since, created_at, updated_at, vault_item_id, make) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (task_id, title, goal, device, account, recipe, routine, due, "scheduled", "", key, due or now, None, now, now, vault_item, make))
+        self._audit(actor, "task.create", task_id, {"device": device, "account": account, "routine": routine,
+                                                    "vault": bool(vault_item), "make": json.loads(make)["tool"] if make else None})
         return self.get_task(task_id)
 
     def cancel_task(self, task_id: str) -> dict[str, Any]:
@@ -387,6 +439,9 @@ class CommandCenter:
                     pass  # the phone may be offline; the task is cancelled here and the phone's own Stop still works
                 self._finish_run(run, "cancelled", "Cancelled from the Command Center.")
             self._db.execute("UPDATE lease SET state = 'revoked', updated_at = ? WHERE task_id = ? AND state = 'ready'", (self._clock(), task_id))
+            self._db.execute("UPDATE tool_call SET state = 'declined', summary = 'The task was cancelled.', finished_at = ? WHERE task_id = ? AND state = 'waiting'",
+                             (self._clock(), task_id))
+            self._withdraw_gateway_approvals(task_id)
             self._set_task(task_id, "cancelled", "Cancelled from the Command Center.")
             self._audit("owner", "task.cancel", task_id)
             return self.get_task(task_id)
@@ -419,9 +474,23 @@ class CommandCenter:
             "cause": r["cause"], "createdAt": r["created_at"], "updatedAt": r["updated_at"],
             "run": self._run_public(run) if run else None,
             "vaultItemId": r["vault_item_id"],
+            "make": json.loads(r["make"]) if r["make"] else None,
+            "artifact": self._artifact_of(r["artifact_id"]),
+            "call": self.connections.call_of_task(r["id"]) if r["make"] else None,
+            "media": json.loads(r["media"]) if r["media"] else None,
             "leases": [{"id": l["id"], "slot": l["slot"], "state": l["state"], "expiresAt": l["expires_at"]}
                        for l in self._db.execute("SELECT id, slot, state, expires_at FROM lease WHERE task_id = ? ORDER BY created_at DESC LIMIT 4", (r["id"],))],
         }
+
+    def _artifact_of(self, artifact_id: str | None) -> dict[str, Any] | None:
+        if not artifact_id:
+            return None
+        row = self._db.execute("SELECT * FROM artifact WHERE id = ?", (artifact_id,)).fetchone()
+        return self.connections._artifact_public(row) if row else None
+
+    def _withdraw_gateway_approvals(self, task_id: str) -> None:
+        """Approvals the gateway itself raised for a task (a spend OK, a login) end with it."""
+        self._db.execute("UPDATE approval SET state = 'withdrawn' WHERE task_id = ? AND run_id = '' AND state = 'open'", (task_id,))
 
     @staticmethod
     def _run_public(r: sqlite3.Row) -> dict[str, Any]:
@@ -454,7 +523,7 @@ class CommandCenter:
     # ---------------------------------------------------------------- routines
 
     def _routine_fields(self, body: dict[str, Any], *, partial: bool) -> dict[str, Any]:
-        _only(body, {"title", "goal", "deviceIds", "accountId", "schedule", "paused"})
+        _only(body, {"title", "goal", "deviceIds", "accountId", "schedule", "paused", "make", "vaultItemId", "preauth"})
         out: dict[str, Any] = {}
         if not partial or "title" in body:
             out["title"] = _clean_text(body.get("title"), "title", 80)
@@ -486,6 +555,19 @@ class CommandCenter:
             if not isinstance(body["paused"], bool):
                 raise CommandError("paused is true or false.")
             out["paused"] = 1 if body["paused"] else 0
+        if not partial or "make" in body:
+            out["make"] = self._make_spec(body.get("make"))
+        if not partial or "vaultItemId" in body:
+            item = body.get("vaultItemId")
+            if item is not None:
+                devices = json.loads(out.get("devices", "[]"))
+                self._vault_item_for(item, devices[0] if len(devices) == 1 else None, out.get("account_id") if "account_id" in out else body.get("accountId"))
+            out["vault_item_id"] = item
+        if not partial or "preauth" in body:
+            preauth = body.get("preauth", 0)
+            if type(preauth) is not int or not 0 <= preauth <= MAX_PREAUTH:
+                raise CommandError(f"preauth is how many runs to prepare the password for ahead, 0..{MAX_PREAUTH}.")
+            out["preauth"] = preauth
         return out
 
     def _next_run(self, schedule_json: str, after_ms: int | None = None) -> int:
@@ -499,18 +581,24 @@ class CommandCenter:
             now = self._clock()
             routine_id = _id("rtn")
             paused = fields.get("paused", 0)
+            if fields["preauth"] and not fields["vault_item_id"]:
+                raise CommandError("Preparing runs ahead needs a vault login.")
             self._db.execute(
-                "INSERT INTO routine(id, title, goal, devices, account_id, schedule, paused, next_run_at, last_run_at, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO routine(id, title, goal, devices, account_id, schedule, paused, next_run_at, last_run_at, created_at, updated_at,"
+                " make, vault_item_id, preauth) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (routine_id, fields["title"], fields["goal"], fields["devices"], fields["account_id"], fields["schedule"],
-                 paused, self._next_run(fields["schedule"]), None, now, now))
-            self._audit(actor, "routine.create", routine_id, {"schedule": json.loads(fields["schedule"])})
+                 paused, self._next_run(fields["schedule"]), None, now, now, fields["make"], fields["vault_item_id"], fields["preauth"]))
+            self._audit(actor, "routine.create", routine_id, {"schedule": json.loads(fields["schedule"]), "vault": bool(fields["vault_item_id"]),
+                                                              "preauth": fields["preauth"], "make": json.loads(fields["make"])["tool"] if fields["make"] else None})
+            self._plan_slots(self._db.execute("SELECT * FROM routine WHERE id = ?", (routine_id,)).fetchone())
             return self.get_routine(routine_id)
 
     def update_routine(self, routine_id: str, body: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             current = self.get_routine(routine_id)
-            merged = {"deviceIds": current["deviceIds"], **body} if "accountId" in body and "deviceIds" not in body else body
+            merged = {"deviceIds": current["deviceIds"], **body} if ("accountId" in body or "vaultItemId" in body) and "deviceIds" not in body else body
+            if "vaultItemId" in merged and "accountId" not in merged:
+                merged = {**merged, "accountId": current["accountId"]}
             fields = self._routine_fields(merged, partial=True)
             if "schedule" in fields or fields.get("paused") == 0:
                 fields["next_run_at"] = self._next_run(fields.get("schedule") or json.dumps(current["schedule"]))
@@ -518,11 +606,18 @@ class CommandCenter:
                 sets = ", ".join(f"{k} = ?" for k in fields)
                 self._db.execute(f"UPDATE routine SET {sets}, updated_at = ? WHERE id = ?", (*fields.values(), self._clock(), routine_id))
                 self._audit("owner", "routine.update", routine_id, {"fields": sorted(fields)})
+                row = self._db.execute("SELECT * FROM routine WHERE id = ?", (routine_id,)).fetchone()
+                if row["preauth"] and not row["vault_item_id"]:
+                    self._db.execute("UPDATE routine SET preauth = 0 WHERE id = ?", (routine_id,))
+                if set(fields) & {"schedule", "devices", "account_id", "vault_item_id", "preauth", "paused", "next_run_at"}:
+                    self._clear_slots(routine_id, "The routine changed.")
+                    self._plan_slots(self._db.execute("SELECT * FROM routine WHERE id = ?", (routine_id,)).fetchone())
             return self.get_routine(routine_id)
 
     def delete_routine(self, routine_id: str) -> dict[str, Any]:
         with self._lock:
             self.get_routine(routine_id)
+            self._clear_slots(routine_id, "The routine was deleted.")
             self._db.execute("DELETE FROM routine WHERE id = ?", (routine_id,))
             self._audit("owner", "routine.delete", routine_id)
             return {"id": routine_id, "deleted": True}
@@ -563,7 +658,47 @@ class CommandCenter:
             "accountId": r["account_id"], "schedule": schedule, "scheduleLabel": schedules.describe(schedule),
             "paused": bool(r["paused"]), "nextRunAt": None if r["paused"] else r["next_run_at"], "lastRunAt": r["last_run_at"],
             "succeeded": counts["ok"] or 0, "failed": counts["bad"] or 0,
+            "make": json.loads(r["make"]) if r["make"] else None, "vaultItemId": r["vault_item_id"], "preauth": r["preauth"],
+            "prepared": [{"dueAt": slot["due_at"], "taskId": slot["task_id"], "deviceId": slot["device_id"],
+                          "ready": bool(self.delivery.ready_leases(slot["task_id"]))}
+                         for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ? ORDER BY due_at", (r["id"],))],
         }
+
+    # ---------------------------------------------------------------- pre-authorised leases (C3 milestone)
+
+    def _plan_slots(self, routine: sqlite3.Row) -> None:
+        """Reserve task ids for a routine's next runs, so the owner's browser can seal each run's password ahead.
+        Each lease is bound to its run's own task id and expires 30 minutes after the run is due; the phone accepts it
+        for that task only, so it cannot be used for another run or earlier by another task."""
+        devices = json.loads(routine["devices"])
+        if routine["paused"] or not routine["preauth"] or not routine["vault_item_id"] or len(devices) != 1:
+            return
+        due, times = routine["next_run_at"], []
+        schedule = json.loads(routine["schedule"])
+        while due is not None and len(times) < routine["preauth"]:
+            times.append(due)
+            due = int(schedules.next_after(schedule, datetime.fromtimestamp(due / 1000).astimezone()).timestamp() * 1000)
+        now = self._clock()
+        for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ?", (routine["id"],)).fetchall():
+            if slot["due_at"] not in times or slot["device_id"] != devices[0]:
+                self._drop_slot(slot, "Its run is no longer scheduled." if slot["due_at"] > now else "Its run has passed.")
+        for due_at in times:
+            if not self._db.execute("SELECT 1 FROM routine_slot WHERE routine_id = ? AND due_at = ? AND device_id = ?",
+                                    (routine["id"], due_at, devices[0])).fetchone():
+                self._db.execute("INSERT INTO routine_slot(routine_id, due_at, device_id, task_id, created_at) VALUES (?,?,?,?,?)",
+                                 (routine["id"], due_at, devices[0], _id("tsk"), now))
+
+    def _drop_slot(self, slot: sqlite3.Row, why: str) -> None:
+        self._db.execute("DELETE FROM routine_slot WHERE task_id = ?", (slot["task_id"],))
+        if not self._db.execute("SELECT 1 FROM task WHERE id = ?", (slot["task_id"],)).fetchone():
+            n = self._db.execute("UPDATE lease SET state = 'revoked', updated_at = ? WHERE task_id = ? AND state = 'ready'",
+                                 (self._clock(), slot["task_id"])).rowcount
+            if n:
+                self._audit("engine", "lease.revoke", slot["task_id"], {"count": n, "why": why})
+
+    def _clear_slots(self, routine_id: str, why: str) -> None:
+        for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ?", (routine_id,)).fetchall():
+            self._drop_slot(slot, why)
 
     def _spawn(self, routine: sqlite3.Row, slot: str, *, actor: str) -> list[dict[str, Any]]:
         devices = json.loads(routine["devices"]) or [None]
@@ -572,8 +707,16 @@ class CommandCenter:
             key = f"rtn:{routine['id']}:{slot}:{device or 'any'}"
             if self._db.execute("SELECT 1 FROM task WHERE idempotency_key = ?", (key,)).fetchone():
                 continue
+            reserved = None
+            if slot.isdigit() and device:
+                row = self._db.execute("SELECT task_id FROM routine_slot WHERE routine_id = ? AND due_at = ? AND device_id = ?",
+                                       (routine["id"], int(slot), device)).fetchone()
+                if row:
+                    reserved = row["task_id"]
+                    self._db.execute("DELETE FROM routine_slot WHERE task_id = ?", (reserved,))
+            vault_item = routine["vault_item_id"] if device and len(devices) == 1 else None
             created.append(self._insert_task(routine["title"], routine["goal"], device, routine["account_id"], None,
-                                             routine["id"], None, key, actor))
+                                             routine["id"], None, key, actor, task_id=reserved, vault_item=vault_item, make=routine["make"]))
         self._db.execute("UPDATE routine SET last_run_at = ? WHERE id = ?", (self._clock(), routine["id"]))
         return created
 
@@ -582,11 +725,12 @@ class CommandCenter:
     def list_approvals(self, *, state: str = "open") -> list[dict[str, Any]]:
         with self._lock:
             if state == "all":
-                rows = self._db.execute("SELECT a.*, t.title FROM approval a JOIN task t ON t.id = a.task_id ORDER BY a.created_at DESC LIMIT 300").fetchall()
+                rows = self._db.execute("SELECT a.*, COALESCE(t.title, 'Connection call') AS title FROM approval a LEFT JOIN task t ON t.id = a.task_id"
+                                        " ORDER BY a.created_at DESC LIMIT 300").fetchall()
             else:
                 rows = self._db.execute(
-                    "SELECT a.*, t.title FROM approval a JOIN task t ON t.id = a.task_id WHERE a.state = ? ORDER BY a.created_at",
-                    (state,)).fetchall()
+                    "SELECT a.*, COALESCE(t.title, 'Connection call') AS title FROM approval a LEFT JOIN task t ON t.id = a.task_id"
+                    " WHERE a.state = ? ORDER BY a.created_at", (state,)).fetchall()
             return [self._approval_public(r) for r in rows]
 
     @staticmethod
@@ -595,7 +739,7 @@ class CommandCenter:
             "id": r["id"], "taskId": r["task_id"], "runId": r["run_id"], "title": r["title"], "deviceId": r["device_id"],
             "kind": r["kind"], "text": r["text"], "gate": r["gate"], "send": json.loads(r["send"]) if r["send"] else None,
             "choices": json.loads(r["choices"]), "fields": json.loads(r["fields"]), "approvableHere": bool(r["approvable_here"]),
-            "answerHere": r["kind"] in ("question", "values", "approval"),
+            "answerHere": r["kind"] in ("question", "values", "approval", "spend"),
             "state": r["state"], "answer": r["answer"], "createdAt": r["created_at"], "answeredAt": r["answered_at"],
         }
 
@@ -611,6 +755,18 @@ class CommandCenter:
                 raise CommandError("No such approval.")
             if row["state"] != "open":
                 raise CommandError("That was already answered or withdrawn.")
+            if row["kind"] == "spend":
+                # Plan 33 (C3): the owner's OK for a connection call (it may use credits). Only approve or decline.
+                if action not in ("approve", "decline"):
+                    raise CommandError("A connection call is approved or declined.")
+                result = self.connections.answer(row, action)
+                self._db.execute("UPDATE approval SET state = 'answered', answer = ?, answered_at = ? WHERE id = ?", (action, self._clock(), approval_id))
+                self._audit("owner", f"approval.{action}", approval_id, {"kind": "spend", "call": row["request_id"]})
+                return {"approval": self._approval_public(self._db.execute(
+                    "SELECT a.*, COALESCE(t.title, 'Connection call') AS title FROM approval a LEFT JOIN task t ON t.id = a.task_id WHERE a.id = ?",
+                    (approval_id,)).fetchone()), **result}
+            if row["kind"] == "login":
+                raise CommandError("Unlock the vault in Glass (Command Center -> Vault); this clears itself when the password is sent.")
             if row["kind"] not in ("question", "values", "approval"):
                 raise CommandError("Secure input and taking over happen on the phone.")
             if action == "approve" and (row["kind"] != "approval" or not row["approvable_here"]):
@@ -637,7 +793,8 @@ class CommandCenter:
                                  (action, self._clock(), approval_id))
                 self._audit("owner", f"approval.{action}", approval_id, {"task": row["task_id"], "kind": row["kind"], "gate": row["gate"]})
             return {"approval": self._approval_public(self._db.execute(
-                "SELECT a.*, t.title FROM approval a JOIN task t ON t.id = a.task_id WHERE a.id = ?", (approval_id,)).fetchone()),
+                "SELECT a.*, COALESCE(t.title, 'Connection call') AS title FROM approval a LEFT JOIN task t ON t.id = a.task_id WHERE a.id = ?",
+                (approval_id,)).fetchone()),
                 "handled": bool(result.get("handled")), "detail": str(result.get("detail", ""))[:200]}
 
     # ---------------------------------------------------------------- overview
@@ -676,6 +833,11 @@ class CommandCenter:
             else:
                 self._audit("routine", "routine.missed", routine["id"], {"due": due})
             self._db.execute("UPDATE routine SET next_run_at = ? WHERE id = ?", (self._next_run(routine["schedule"], max(now, due)), routine["id"]))
+        for routine in self._db.execute("SELECT * FROM routine WHERE preauth > 0 OR id IN (SELECT routine_id FROM routine_slot)").fetchall():
+            if routine["paused"] or not routine["preauth"]:
+                self._clear_slots(routine["id"], "The routine is paused.")
+            else:
+                self._plan_slots(routine)
 
     def _ready_devices(self) -> dict[str, dict[str, Any]]:
         try:
@@ -693,8 +855,17 @@ class CommandCenter:
         for task in tasks:
             if task["waiting_since"] and now - task["waiting_since"] > WAIT_LIMIT_MS:
                 self._set_task(task["id"], "failed", "No phone could take it for 6 hours.")
+                self._withdraw_gateway_approvals(task["id"])
                 self._audit("engine", "task.expired", task["id"])
                 continue
+            make = json.loads(task["make"]) if task["make"] else None
+            if make and not task["artifact_id"]:
+                self._start_make(task, make)
+                continue
+            if make and make["then"] == "post":
+                media = json.loads(task["media"]) if task["media"] else None
+                if media and media.get("state") == "sending":
+                    continue
             account = None
             if task["account_id"]:
                 row = self._db.execute("SELECT * FROM account WHERE id = ?", (task["account_id"],)).fetchone()
@@ -716,6 +887,11 @@ class CommandCenter:
                 self._wait(task, "Waiting for a ready phone." if not task["device_id"] else "Waiting for the phone to be ready.")
                 continue
             device = self._prefer(candidates, task["account_id"])
+            if make and make["then"] == "post":
+                media = json.loads(task["media"]) if task["media"] else None
+                if not media or media.get("deviceId") != device or media.get("state") != "sent":
+                    self._push_media(task, device)
+                    continue
             goal = task["goal"]
             if account:
                 goal = f"{goal}\n\nUse the account {account['handle']} ({account['service']})."
@@ -724,13 +900,27 @@ class CommandCenter:
                 sealed = self.delivery.envelopes_for(task["id"])
                 if not sealed:
                     self._wait(task, "Waiting for the vault: unlock it in Glass so it can send the password to this phone.")
+                    self._login_approval(task)
                     continue
+                self._withdraw_gateway_approvals(task["id"])
                 slots = {e["slot"] for e in sealed}
                 goal += "\n\nThe owner sent this phone the account's " + (
                     "password and authenticator code" if slots == {"password", "otp"} else "authenticator code" if slots == {"otp"} else "password"
                 ) + " for this task only. On its field, use vault_fill (what=password" + (", what=one_time_code for the code" if "otp" in slots else "") + "); you never see the value."
+            publish = bool(make and make["then"] == "post")
+            if publish:
+                media = json.loads(task["media"])
+                goal += (f"\n\nThe file to post is already on this phone: {media['name']} (the newest item in the gallery, folder {media['folder']})."
+                         " Post that file. The final Share or Post needs the owner's OK; ask for it and wait.")
+            extra: dict[str, Any] = {}
+            if sealed or publish:
+                extra["task_id"] = task["id"]
+            if sealed:
+                extra["sealed"] = sealed
+            if publish:
+                extra["publish"] = True
             try:
-                ack = self._contract.cc_start(device, goal, task_id=task["id"], sealed=sealed) if sealed else self._contract.cc_start(device, goal)
+                ack = self._contract.cc_start(device, goal, **extra)
             except DesktopRuntimeError as exc:
                 code = str(exc.code)
                 if code in WAIT_CODES:
@@ -754,6 +944,96 @@ class CommandCenter:
                 self.delivery.mark_delivered(task["id"], run_id, [e["leaseId"] for e in sealed])
             self._audit("engine", "task.start", task["id"], {"device": device, "run": run_id})
             busy.add(device)
+
+    # ---------------------------------------------------------------- C3: make with a connection, then post from a phone
+
+    def _start_make(self, task: sqlite3.Row, make: dict[str, Any]) -> None:
+        call = self.connections.call_of_task(task["id"])
+        if call and call["state"] in ("waiting", "running"):
+            return
+        try:
+            call = self.connections.call(make["connectionId"], make["tool"], make["arguments"], task_id=task["id"],
+                                         actor="routine" if task["routine_id"] else "engine", poll_tool=make.get("pollTool"))
+        except CommandError as exc:
+            message = str(exc)
+            if "already waiting" in message or "already running" in message:
+                self._wait(task, message)
+                return
+            self._set_task(task["id"], "failed", message)
+            self._audit("engine", "task.refused", task["id"], {"why": "connection"})
+            return
+        current = self._db.execute("SELECT status FROM task WHERE id = ?", (task["id"],)).fetchone()
+        if current and current["status"] in ("scheduled", "waiting_device"):  # an inline call may already have finished it
+            self._set_task(task["id"], "making", "Waiting for your OK to use the connection." if call["state"] == "waiting" else "Making the file.",
+                           waiting_since=None)
+
+    def _make_finished(self, task_id: str) -> None:
+        """A task's connection call ended (called by the connection store, under this lock)."""
+        task = self._db.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
+        if task is None or task["status"] not in OPEN_TASK_STATES:
+            return
+        call = self.connections.call_of_task(task_id)
+        make = json.loads(task["make"])
+        self._withdraw_gateway_approvals(task_id)
+        if call is None or call["state"] != "done" or not call["artifacts"]:
+            why = {"declined": "You declined the connection call.", "refused": "The connection refused the call."}.get(call["state"] if call else "", "")
+            self._set_task(task_id, "failed", why or f"Making the file failed: {(call or {}).get('summary', '')}"[:300])
+            return
+        artifact = call["artifacts"][0]
+        self._db.execute("UPDATE task SET artifact_id = ? WHERE id = ?", (artifact, task_id))
+        if make["then"] == "keep":
+            self._set_task(task_id, "succeeded", "Made and kept the file.")
+            self._audit("engine", "task.made", task_id, {"artifact": artifact})
+            return
+        self._set_task(task_id, "scheduled", "Made the file; sending it to a phone.", next_try_at=self._clock())
+        self._audit("engine", "task.made", task_id, {"artifact": artifact})
+
+    def _push_media(self, task: sqlite3.Row, device: str) -> None:
+        """Send the made file to [device]'s gallery in chunks, off the job loop. The task goes on once it is there."""
+        artifact, path = self.connections.artifact(task["artifact_id"])
+        self._db.execute("UPDATE task SET media = ?, cause = ? WHERE id = ?",
+                         (json.dumps({"deviceId": device, "state": "sending", "name": artifact["name"]}), "Sending the file to the phone.", task["id"]))
+        task_id = task["id"]
+
+        def push() -> None:
+            outcome: dict[str, Any] = {"deviceId": device, "state": "failed", "name": artifact["name"]}
+            try:
+                with open(path, "rb") as handle:
+                    offset = 0
+                    result: dict[str, Any] = {}
+                    while offset < artifact["size"] or offset == 0:
+                        chunk = handle.read(MEDIA_CHUNK)
+                        result = self._contract.cc_media(device, task_id, name=artifact["name"], mime=artifact["mime"], size=artifact["size"],
+                                                         sha256=artifact["sha256"], offset=offset, data=chunk)
+                        offset += len(chunk)
+                        if not chunk:
+                            break
+                if result.get("done"):
+                    outcome = {"deviceId": device, "state": "sent", "name": result.get("name") or artifact["name"],
+                               "folder": result.get("folder") or "Cyclone"}
+            except (DesktopRuntimeError, OSError) as exc:
+                outcome["why"] = str(getattr(exc, "code", "")) or exc.__class__.__name__
+            with self._lock:
+                self._db.execute("UPDATE task SET media = ?, next_try_at = ?, cause = ? WHERE id = ?",
+                                 (json.dumps(outcome), self._clock() + (0 if outcome["state"] == "sent" else 30_000),
+                                  "The file is on the phone." if outcome["state"] == "sent" else "Sending the file to the phone failed; trying again.", task_id))
+                self._audit("engine", f"media.{outcome['state']}", task_id, {"device": device, "artifact": artifact["id"]})
+
+        self.connections._spawn(push)
+
+    def _login_approval(self, task: sqlite3.Row) -> None:
+        """A run that needs the vault and has no sealed password: ask the owner to unlock it (never answered by itself)."""
+        if self._db.execute("SELECT 1 FROM approval WHERE task_id = ? AND kind = 'login' AND state = 'open'", (task["id"],)).fetchone():
+            return
+        account = self._db.execute("SELECT handle, service FROM account WHERE id = ?", (task["account_id"],)).fetchone()
+        approval_id = _id("apv")
+        self._db.execute(
+            "INSERT INTO approval(id, run_id, task_id, device_id, mission_id, request_id, kind, text, gate, send, choices, fields,"
+            " approvable_here, state, answer, created_at, answered_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (approval_id, "", task["id"], task["device_id"] or "", "", f"login:{task['id']}", "login",
+             f"Unlock the vault in Glass to send the password for {account['handle'] if account else 'this account'} to the phone.",
+             None, None, "[]", "[]", 0, "open", None, self._clock(), None))
+        self._audit("engine", "approval.open", approval_id, {"kind": "login", "task": task["id"]})
 
     def _prefer(self, candidates: list[str], account_id: str | None) -> str:
         if account_id:
@@ -822,6 +1102,7 @@ class CommandCenter:
         task = self._db.execute("SELECT status FROM task WHERE id = ?", (run["task_id"],)).fetchone()
         if task and task["status"] in OPEN_TASK_STATES:
             self._set_task(run["task_id"], outcome, cause)
+        self._withdraw_gateway_approvals(run["task_id"])
         self._audit("engine", f"run.{outcome}", run["id"], {"task": run["task_id"]})
 
 

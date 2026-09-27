@@ -66,6 +66,7 @@ object GateClassifier {
     fun classify(action: String, labels: List<String> = emptyList()): GateClass? {
         val normalizedLabels = labels.map(String::trim).filter(String::isNotBlank)
         val selectedLabel = normalizedLabels.firstOrNull().orEmpty()
+        if (PublishGate.gates(selectedLabel)) return GateClass.SEND
         val contextual = normalizedLabels.drop(1)
         val allText = (listOf(action) + normalizedLabels).joinToString(" ").lowercase().replace(Regex("[_-]+"), " ")
         val modalType = when {

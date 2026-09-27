@@ -37,6 +37,10 @@ B64 = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 FINGERPRINT = re.compile(r"^(?:[0-9A-F]{4} ){7}[0-9A-F]{4}$")
 SLOTS = ("password", "otp")
 MAX_LEASE_MS = 24 * 60 * 60_000
+#: Pre-authorised leases (C3 milestone): a routine's future run may be prepared up to 8 days ahead; its lease still ends
+#: 30 minutes after that run is due.
+MAX_AHEAD_MS = 8 * 24 * 60 * 60_000
+RUN_WINDOW_MS = 30 * 60_000
 FINAL = ("used", "failed", "unused", "expired", "rejected", "revoked", "replaced")
 
 
@@ -159,6 +163,20 @@ class DeliveryStore:
                     "taskId": t["id"], "title": t["title"], "deviceId": t["device_id"], "vaultItemId": t["vault_item_id"],
                     "accountId": t["account_id"], "handle": t["handle"], "place": place_for(t["service"]),
                     "dueAt": t["due_at"], "deviceKey": None if key is None else {"publicKey": key["public_key"], "fingerprint": key["fingerprint"]},
+                    "ahead": False, "routineId": t["routine_id"],
+                })
+            # Pre-authorised leases: a routine's next runs, each by the task id it will have.
+            for s in self._c._db.execute(
+                    "SELECT s.*, r.title, r.vault_item_id, r.account_id, a.service, a.handle FROM routine_slot s JOIN routine r ON r.id = s.routine_id"
+                    " JOIN account a ON a.id = r.account_id WHERE r.vault_item_id IS NOT NULL AND r.paused = 0 AND s.due_at > ? ORDER BY s.due_at", (now,)).fetchall():
+                if self.ready_leases(s["task_id"]):
+                    continue
+                key = self.trusted_key(s["device_id"])
+                out.append({
+                    "taskId": s["task_id"], "title": s["title"], "deviceId": s["device_id"], "vaultItemId": s["vault_item_id"],
+                    "accountId": s["account_id"], "handle": s["handle"], "place": place_for(s["service"]), "dueAt": s["due_at"],
+                    "deviceKey": None if key is None else {"publicKey": key["public_key"], "fingerprint": key["fingerprint"]},
+                    "ahead": True, "routineId": s["routine_id"],
                 })
             return out
 
@@ -173,9 +191,17 @@ class DeliveryStore:
         with self._c._lock:
             task = self._c._db.execute(
                 "SELECT t.*, a.service FROM task t JOIN account a ON a.id = t.account_id WHERE t.id = ?", (task_id,)).fetchone()
+            ahead = None
+            if task is None:
+                # A routine's future run (pre-authorised lease): the slot holds the task id that run will have.
+                ahead = self._c._db.execute(
+                    "SELECT s.task_id AS id, s.device_id, s.due_at, r.vault_item_id, 'scheduled' AS status, a.service FROM routine_slot s"
+                    " JOIN routine r ON r.id = s.routine_id JOIN account a ON a.id = r.account_id WHERE s.task_id = ? AND r.paused = 0",
+                    (task_id,)).fetchone()
+                task = ahead
             if task is None or task["vault_item_id"] is None:
                 raise CommandError("That task does not use a vault secret.")
-            if task["status"] not in ("scheduled", "waiting_device"):
+            if task["status"] not in ("scheduled", "waiting_device", "making"):
                 raise CommandError("That task has already started or finished.")
             key = self.trusted_key(task["device_id"])
             if key is None:
@@ -206,7 +232,10 @@ class DeliveryStore:
                 if not isinstance(bound, dict) or set(bound) != set(expected) | {"expiresAt"} or any(bound[k] != v for k, v in expected.items()):
                     raise CommandError("The sealed data is not bound to this task, phone, app and slot.")
                 expires = bound["expiresAt"]
-                if type(expires) is not int or not now + 60_000 < expires <= now + MAX_LEASE_MS:
+                if ahead is not None:
+                    if ahead["due_at"] > now + MAX_AHEAD_MS or type(expires) is not int or not ahead["due_at"] < expires <= ahead["due_at"] + RUN_WINDOW_MS:
+                        raise CommandError("A prepared lease ends within 30 minutes after its run is due, at most 8 days ahead.")
+                elif type(expires) is not int or not now + 60_000 < expires <= now + MAX_LEASE_MS:
                     raise CommandError("A lease lasts from one minute to 24 hours.")
                 if self._c._db.execute("SELECT 1 FROM lease WHERE id = ?", (lease_id,)).fetchone():
                     raise CommandError("That lease id was already used.")
@@ -222,8 +251,9 @@ class DeliveryStore:
                     " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (lease_id, task_id, task["device_id"], task["vault_item_id"], slot, place, key["fingerprint"], enc, ct, aad, expires, "ready", None, now, now))
                 self._c._audit("owner", "lease.create", lease_id, {"task": task_id, "device": task["device_id"], "slot": slot, "expires": expires})
-            # A task waiting for its secret may start at the next tick.
+            # A task waiting for its secret may start at the next tick; its "unlock the vault" request is answered.
             self._c._db.execute("UPDATE task SET next_try_at = ? WHERE id = ?", (now, task_id))
+            self._c._db.execute("UPDATE approval SET state = 'withdrawn' WHERE task_id = ? AND kind = 'login' AND state = 'open'", (task_id,))
             return {"taskId": task_id, "leases": [self._lease_public(r) for r in self._c._db.execute("SELECT * FROM lease WHERE task_id = ? ORDER BY created_at", (task_id,))], "replaced": replaced}
 
     def revoke(self, lease_id: str) -> dict[str, Any]:

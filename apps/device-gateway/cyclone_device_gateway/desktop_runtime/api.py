@@ -795,8 +795,9 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     app.include_router(create_lab_router(desktop, settings.token))
     from ..market.api import create_market_router
     app.include_router(create_market_router(desktop, settings.token))
-    from ..command.api import create_command_router
+    from ..command.api import create_command_router, create_oauth_callback_router
     app.include_router(create_command_router(desktop, settings.token))
+    app.include_router(create_oauth_callback_router(desktop))
     # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
     app.state.glass_codes = LaunchCodes()
     app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))

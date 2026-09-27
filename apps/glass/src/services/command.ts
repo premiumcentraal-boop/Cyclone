@@ -7,9 +7,9 @@ import type { GatewayClient } from "./gateway.js";
 
 export type OwnerBasis = "mine" | "company" | "client";
 export type TwoFactor = "none" | "totp" | "passkey" | "sms" | "email" | "app";
-export type TaskStatus = "scheduled" | "waiting_device" | "running" | "needs_you" | "succeeded" | "failed" | "cancelled";
+export type TaskStatus = "scheduled" | "making" | "waiting_device" | "running" | "needs_you" | "succeeded" | "failed" | "cancelled";
 export type RunStatus = "running" | "succeeded" | "failed" | "cancelled";
-export type ApprovalKind = "question" | "values" | "approval" | "secret" | "handover";
+export type ApprovalKind = "question" | "values" | "approval" | "secret" | "handover" | "spend" | "login";
 export type Schedule = { kind: "daily"; time: string; days: number[] } | { kind: "every"; minutes: number };
 
 export interface CcAccount {
@@ -57,6 +57,79 @@ export interface CcTask {
   /** C2: the vault login this task signs in with (an id; the value stays sealed). */
   vaultItemId: string | null;
   leases: Array<{ id: string; slot: string; state: string; expiresAt: number }>;
+  /** C3: made first with a connection's tool, then posted from a phone or kept. */
+  make: MakeStep | null;
+  artifact: CcArtifact | null;
+  call: CcCall | null;
+  media: { deviceId: string; state: string; name: string } | null;
+}
+
+export interface MakeStep {
+  connectionId: string;
+  tool: string;
+  arguments: Record<string, string | number | boolean>;
+  pollTool: string | null;
+  then: "post" | "keep";
+}
+
+export interface ToolField {
+  name: string;
+  type: "string" | "integer" | "number" | "boolean";
+  enum: Array<string | number>;
+  required: boolean;
+  description: string;
+  default: string | number | boolean | null;
+}
+
+export interface CcTool {
+  name: string;
+  title: string;
+  description: string;
+  fields: ToolField[];
+  readOnly: boolean;
+}
+
+export type ApprovalRule = "always" | "over_cap" | "cap";
+
+export interface CcConnection {
+  id: string;
+  name: string;
+  url: string;
+  auth: "none" | "oauth";
+  status: "new" | "ready" | "needs_sign_in" | "error";
+  detail: string;
+  signedIn: boolean;
+  grantKept: boolean;
+  tools: CcTool[];
+  allowed: string[];
+  dailyCap: number;
+  approval: ApprovalRule;
+  usedToday: number;
+}
+
+export interface CcCall {
+  id: string;
+  connectionId: string;
+  tool: string;
+  taskId: string | null;
+  state: "waiting" | "running" | "done" | "failed" | "declined" | "refused";
+  summary: string;
+  artifacts: string[];
+  arguments: Record<string, unknown>;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
+export interface CcArtifact {
+  id: string;
+  sha256: string;
+  name: string;
+  mime: string;
+  size: number;
+  tool: string;
+  taskId: string | null;
+  prompt: string;
+  createdAt: number;
 }
 
 export interface CcResult extends CcRun {
@@ -79,6 +152,11 @@ export interface CcRoutine {
   lastRunAt: number | null;
   succeeded: number;
   failed: number;
+  make: MakeStep | null;
+  vaultItemId: string | null;
+  /** How many next runs get their password sealed ahead (pre-authorised leases), and those runs. */
+  preauth: number;
+  prepared: Array<{ dueAt: number; taskId: string; deviceId: string; ready: boolean }>;
 }
 
 export interface CcApproval {
@@ -90,6 +168,8 @@ export interface CcApproval {
   text: string;
   gate: string | null;
   send: { text: string; recipient: string; app: string } | null;
+  /** A connection call waiting for the owner's OK (kind spend). */
+  spend: { connection: string; tool: string; arguments: Record<string, unknown> } | null;
   choices: string[];
   fields: Array<{ label: string; kind: string }>;
   approvableHere: boolean;
@@ -117,9 +197,56 @@ const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const oneOf = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
   allowed.includes(value as T) ? (value as T) : fallback;
 
-const TASK_STATES = ["scheduled", "waiting_device", "running", "needs_you", "succeeded", "failed", "cancelled"] as const;
+const TASK_STATES = ["scheduled", "making", "waiting_device", "running", "needs_you", "succeeded", "failed", "cancelled"] as const;
 const RUN_STATES = ["running", "succeeded", "failed", "cancelled"] as const;
-const KINDS = ["question", "values", "approval", "secret", "handover"] as const;
+const KINDS = ["question", "values", "approval", "secret", "handover", "spend", "login"] as const;
+
+const obj = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {});
+
+export function parseMake(raw: unknown): MakeStep | null {
+  const r = obj(raw);
+  if (!r.connectionId || !r.tool) return null;
+  const args: Record<string, string | number | boolean> = {};
+  for (const [k, v] of Object.entries(obj(r.arguments))) if (["string", "number", "boolean"].includes(typeof v)) args[k] = v as string | number | boolean;
+  return { connectionId: str(r.connectionId), tool: str(r.tool), arguments: args, pollTool: optStr(r.pollTool), then: r.then === "keep" ? "keep" : "post" };
+}
+
+export function parseArtifact(raw: unknown): CcArtifact {
+  const r = obj(raw);
+  return { id: str(r.id), sha256: str(r.sha256), name: str(r.name), mime: str(r.mime), size: num(r.size), tool: str(r.tool),
+    taskId: optStr(r.taskId), prompt: str(r.prompt), createdAt: num(r.createdAt) };
+}
+
+export function parseCall(raw: unknown): CcCall {
+  const r = obj(raw);
+  return { id: str(r.id), connectionId: str(r.connectionId), tool: str(r.tool), taskId: optStr(r.taskId),
+    state: oneOf(r.state, ["waiting", "running", "done", "failed", "declined", "refused"] as const, "failed"), summary: str(r.summary),
+    artifacts: list(r.artifacts).filter((a): a is string => typeof a === "string"), arguments: obj(r.arguments),
+    createdAt: num(r.createdAt), finishedAt: optNum(r.finishedAt) };
+}
+
+export function parseConnection(raw: unknown): CcConnection {
+  const r = obj(raw);
+  return {
+    id: str(r.id), name: str(r.name), url: str(r.url), auth: r.auth === "oauth" ? "oauth" : "none",
+    status: oneOf(r.status, ["new", "ready", "needs_sign_in", "error"] as const, "error"), detail: str(r.detail),
+    signedIn: r.signedIn === true, grantKept: r.grantKept === true,
+    tools: list(r.tools).map((t) => {
+      const x = obj(t);
+      return { name: str(x.name), title: str(x.title), description: str(x.description), readOnly: x.readOnly === true,
+        fields: list(x.fields).map((f) => {
+          const y = obj(f);
+          const d = y.default;
+          return { name: str(y.name), type: oneOf(y.type, ["string", "integer", "number", "boolean"] as const, "string"),
+            enum: list(y.enum).filter((e): e is string | number => typeof e === "string" || typeof e === "number"),
+            required: y.required === true, description: str(y.description),
+            default: typeof d === "string" || typeof d === "number" || typeof d === "boolean" ? d : null };
+        }) };
+    }),
+    allowed: list(r.allowed).filter((a): a is string => typeof a === "string"),
+    dailyCap: num(r.dailyCap, 10), approval: oneOf(r.approval, ["always", "over_cap", "cap"] as const, "always"), usedToday: num(r.usedToday),
+  };
+}
 
 export function parseAccount(raw: unknown): CcAccount {
   const r = (raw ?? {}) as Record<string, unknown>;
@@ -175,6 +302,10 @@ export function parseTask(raw: unknown): CcTask {
       const x = (l ?? {}) as Record<string, unknown>;
       return { id: str(x.id), slot: str(x.slot), state: str(x.state), expiresAt: num(x.expiresAt) };
     }),
+    make: parseMake(r.make),
+    artifact: r.artifact ? parseArtifact(r.artifact) : null,
+    call: r.call ? parseCall(r.call) : null,
+    media: r.media ? { deviceId: str(obj(r.media).deviceId), state: str(obj(r.media).state), name: str(obj(r.media).name) } : null,
   };
 }
 
@@ -197,6 +328,13 @@ export function parseRoutine(raw: unknown): CcRoutine {
     lastRunAt: optNum(r.lastRunAt),
     succeeded: num(r.succeeded),
     failed: num(r.failed),
+    make: parseMake(r.make),
+    vaultItemId: optStr(r.vaultItemId),
+    preauth: num(r.preauth),
+    prepared: list(r.prepared).map((p) => {
+      const x = obj(p);
+      return { dueAt: num(x.dueAt), taskId: str(x.taskId), deviceId: str(x.deviceId), ready: x.ready === true };
+    }),
   };
 }
 
@@ -211,7 +349,8 @@ export function parseApproval(raw: unknown): CcApproval {
     kind: oneOf(r.kind, KINDS, "question"),
     text: str(r.text),
     gate: optStr(r.gate),
-    send: send && typeof send === "object" ? { text: str(send.text), recipient: str(send.recipient), app: str(send.app) } : null,
+    send: r.kind !== "spend" && send && typeof send === "object" ? { text: str(send.text), recipient: str(send.recipient), app: str(send.app) } : null,
+    spend: r.kind === "spend" && send && typeof send === "object" ? { connection: str(send.connection), tool: str(send.tool), arguments: obj(send.arguments) } : null,
     choices: list(r.choices).filter((c): c is string => typeof c === "string"),
     fields: list(r.fields).map((f) => ({ label: str((f as Record<string, unknown>)?.label), kind: str((f as Record<string, unknown>)?.kind) })),
     approvableHere: r.approvableHere === true,
@@ -254,6 +393,20 @@ export const command = {
     list((await client.get<{ results?: unknown }>("/v1/cc/results"))?.results).map(parseResult),
   approvals: async (client: GatewayClient) =>
     list((await client.get<{ approvals?: unknown }>("/v1/cc/approvals"))?.approvals).map(parseApproval),
+  connections: async (client: GatewayClient) => {
+    const r = await client.get<{ connections?: unknown; higgsfield?: unknown }>("/v1/cc/connections");
+    return { connections: list(r?.connections).map(parseConnection), higgsfield: str(r?.higgsfield, "https://mcp.higgsfield.ai/mcp") };
+  },
+  addConnection: async (client: GatewayClient, body: { name: string; url: string }) => parseConnection(await client.post("/v1/cc/connections", body)),
+  refreshConnection: async (client: GatewayClient, id: string) => parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/refresh`)),
+  connectionSettings: async (client: GatewayClient, id: string, body: { allowed?: string[]; dailyCap?: number; approval?: ApprovalRule }) =>
+    parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/settings`, body)),
+  signIn: async (client: GatewayClient, id: string) =>
+    str((await client.post<{ authorizationUrl?: unknown }>(`/v1/cc/connections/${encodeURIComponent(id)}/sign-in`))?.authorizationUrl),
+  signOut: async (client: GatewayClient, id: string) => parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/sign-out`)),
+  removeConnection: (client: GatewayClient, id: string) => client.post(`/v1/cc/connections/${encodeURIComponent(id)}/remove`),
+  calls: async (client: GatewayClient) => list((await client.get<{ calls?: unknown }>("/v1/cc/calls"))?.calls).map(parseCall),
+  artifacts: async (client: GatewayClient) => list((await client.get<{ artifacts?: unknown }>("/v1/cc/artifacts"))?.artifacts).map(parseArtifact),
   answer: (client: GatewayClient, id: string, body: { action: "approve" | "decline" | "reply" | "fill"; text?: string; values?: Record<string, string> }) =>
     client.post<{ handled?: boolean; detail?: string }>(`/v1/cc/approvals/${encodeURIComponent(id)}/answer`, body),
 };
@@ -267,7 +420,7 @@ export function looksSecret(text: string): boolean {
 
 export function taskStatusLabel(status: TaskStatus): string {
   return {
-    scheduled: "Scheduled", waiting_device: "Waiting for a phone", running: "Running", needs_you: "Needs you",
+    scheduled: "Scheduled", making: "Making the file", waiting_device: "Waiting for a phone", running: "Running", needs_you: "Needs you",
     succeeded: "Done", failed: "Failed", cancelled: "Cancelled",
   }[status];
 }
@@ -275,6 +428,7 @@ export function taskStatusLabel(status: TaskStatus): string {
 export function taskStatusTone(status: TaskStatus | RunStatus): "neutral" | "accent" | "success" | "warning" | "danger" {
   switch (status) {
     case "running":
+    case "making":
       return "accent";
     case "needs_you":
     case "waiting_device":
@@ -304,4 +458,37 @@ export function fillRecipe(goal: string, inputs: Record<string, string>): string
     const value = inputs[name.trim()];
     return value && value.trim() ? value.trim() : whole;
   });
+}
+
+export function ruleLabel(rule: ApprovalRule): string {
+  return { always: "Ask me before every call", over_cap: "Ask me only over the daily cap", cap: "Never ask; stop at the daily cap" }[rule];
+}
+
+export function sizeLabel(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/** Tool arguments from a form: typed by the tool's fields, blanks left out, numbers checked. Throws a sentence. */
+export function toolArguments(tool: CcTool, values: Record<string, string>): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const field of tool.fields) {
+    const raw = (values[field.name] ?? "").trim();
+    if (!raw) {
+      if (field.required) throw new Error(`${field.name} is required.`);
+      continue;
+    }
+    if (looksSecret(`${field.name}: ${raw}`) || looksSecret(raw)) throw new Error("Leave passwords, keys and codes out of a connection call.");
+    if (field.type === "integer" || field.type === "number") {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || (field.type === "integer" && !Number.isInteger(n))) throw new Error(`${field.name} must be a number.`);
+      out[field.name] = n;
+    } else if (field.type === "boolean") {
+      out[field.name] = raw === "true";
+    } else {
+      out[field.name] = raw;
+    }
+  }
+  return out;
 }

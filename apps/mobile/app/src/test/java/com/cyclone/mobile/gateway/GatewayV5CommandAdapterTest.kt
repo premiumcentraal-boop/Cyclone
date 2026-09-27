@@ -116,4 +116,14 @@ class GatewayV5CommandAdapterTest {
         assertEquals("INVALID_REQUEST", code { answer(JSONObject().put("action", "approve").put("requestId", "req-v")) })
         assertEquals("INVALID_REQUEST", code { answer(JSONObject().put("action", "run_shell").put("requestId", "req-v")) })
     }
+
+    @Test fun aPostingTaskTurnsOnThePublishGateForItsMissionOnly() {
+        com.cyclone.mobile.policy.PublishGate.liveMission = { "m1abcdefgh" }
+        GatewayV5CommandAdapter.start(JSONObject().put("goal", "Post the video").put("taskId", "tsk_video0001").put("publish", true))
+        assertTrue(com.cyclone.mobile.policy.PublishGate.active())
+        GatewayV5CommandAdapter.start(JSONObject().put("goal", "Check the inbox"))
+        assertFalse(com.cyclone.mobile.policy.PublishGate.active())
+        assertEquals("INVALID_REQUEST", code { GatewayV5CommandAdapter.start(JSONObject().put("goal", "x").put("publish", "yes")) })
+        com.cyclone.mobile.policy.PublishGate.liveMission = { null }
+    }
 }

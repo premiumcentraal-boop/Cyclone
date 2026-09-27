@@ -71,3 +71,14 @@
 .vault-fingerprint { font-family: var(--font-mono); font-size: var(--text-md); letter-spacing: 0.06em; }
 .vault-pending { padding: var(--space-2) 0; }
 .card-subtitle { font-size: var(--text-sm); margin: var(--space-2) 0 0; color: var(--text-muted); }
+
+/* Plan 33 (C3): connections and the "make first" editor. */
+.cc-connection-list, .cc-connection-activity { display: grid; gap: var(--space-3); margin-top: var(--space-3); }
+.cc-subtitle { font-size: var(--text-md); margin: var(--space-3) 0 var(--space-1); }
+.cc-tools { display: grid; gap: var(--space-2); margin: var(--space-2) 0 var(--space-3); }
+.cc-tool { align-items: baseline; flex-wrap: wrap; }
+.cc-tool .cc-sub { flex-basis: 100%; margin-left: 26px; }
+.cc-make { margin: var(--space-3) 0; display: grid; gap: var(--space-2); }
+.cc-make-panel:empty { display: none; }
+.cc-make-panel { border-left: 3px solid var(--accent); padding-left: var(--space-3); display: grid; gap: var(--space-2); }
+.cc-artifact { flex-wrap: wrap; }

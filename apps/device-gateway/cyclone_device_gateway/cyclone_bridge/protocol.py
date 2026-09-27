@@ -20,7 +20,7 @@ ALLOWED_OPS = {
     "atlas.versions", "scenarios.list", "knowledge.get", "atlas.here",
     # Cyclone Lab: measured Mind missions (start, watch, answer as the owner, read back).
     "lab.start", "lab.status", "lab.answer", "lab.record",
-    "cc.start", "cc.status", "cc.answer", "cc.key",
+    "cc.start", "cc.status", "cc.answer", "cc.key", "cc.media",
     # Cyclone Marketplace: the phone's store of recipes and connections.
     "market.catalog", "market.install", "market.remove", "market.run",
     # Learn: one press per run turns what it saw and did into app knowledge on the phone.

@@ -552,7 +552,8 @@ export function createVaultView(ctx: GlassContext, accounts: () => CcAccount[], 
     const rows: HTMLElement[] = [];
     for (const p of pending) {
       const row = el("div", "cc-row vault-pending");
-      row.append(el("strong", undefined, p.title), el("span", "muted", `${p.handle} · ${placeLabel(p.place)}`));
+      const when = p.ahead && p.dueAt ? ` · prepared for the run at ${new Date(p.dueAt).toLocaleString()}` : "";
+      row.append(el("strong", undefined, p.title), el("span", "muted", `${p.handle} · ${placeLabel(p.place)}${when}`));
       if (!p.deviceKey) row.append(chip("Trust the phone first", "warning"));
       else {
         const send = actionButton("Seal and send", { variant: "primary" });

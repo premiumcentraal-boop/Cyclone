@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+import html
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse
 
 from ..auth import verify_bearer
 from ..desktop_runtime.models import DesktopRuntimeError
@@ -188,8 +191,83 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def lease_revoke(lease_id: str):
         return call(lambda: cc().delivery.revoke(lease_id))
 
+    # Plan 33 (C3): connections (MCP servers), their calls and the files they make.
+    @router.get("/v1/cc/connections", dependencies=[Depends(auth)])
+    def connections():
+        return call(lambda: {"connections": cc().connections.list(), "higgsfield": "https://mcp.higgsfield.ai/mcp"})
+
+    @router.post("/v1/cc/connections", dependencies=[Depends(auth)])
+    def connection_add(body: dict[str, Any]):
+        return call(lambda: cc().connections.add(body_of(body)))
+
+    @router.post("/v1/cc/connections/{connection_id}/refresh", dependencies=[Depends(auth)])
+    def connection_refresh(connection_id: str):
+        return call(lambda: cc().connections.refresh(connection_id))
+
+    @router.post("/v1/cc/connections/{connection_id}/settings", dependencies=[Depends(auth)])
+    def connection_settings(connection_id: str, body: dict[str, Any]):
+        return call(lambda: cc().connections.settings(connection_id, body_of(body)))
+
+    @router.post("/v1/cc/connections/{connection_id}/sign-in", dependencies=[Depends(auth)])
+    def connection_sign_in(connection_id: str, request: Request):
+        redirect = str(request.base_url).rstrip("/") + "/v1/cc/connections/oauth/callback"
+        return call(lambda: cc().connections.begin_sign_in(connection_id, redirect))
+
+    @router.post("/v1/cc/connections/{connection_id}/sign-out", dependencies=[Depends(auth)])
+    def connection_sign_out(connection_id: str):
+        return call(lambda: cc().connections.sign_out(connection_id))
+
+    @router.post("/v1/cc/connections/{connection_id}/remove", dependencies=[Depends(auth)])
+    def connection_remove(connection_id: str):
+        return call(lambda: cc().connections.remove(connection_id))
+
+    @router.post("/v1/cc/connections/{connection_id}/call", dependencies=[Depends(auth)])
+    def connection_call(connection_id: str, body: dict[str, Any]):
+        raw = body_of(body)
+        if not set(raw) <= {"tool", "arguments", "pollTool"}:
+            raise HTTPException(status_code=422, detail={"code": "INVALID_REQUEST", "message": "Send {tool, arguments, pollTool?}."})
+        return call(lambda: cc().connections.call(connection_id, raw.get("tool"), raw.get("arguments", {}), poll_tool=raw.get("pollTool")))
+
+    @router.get("/v1/cc/calls", dependencies=[Depends(auth)])
+    def calls(limit: int = Query(default=100, ge=1, le=500)):
+        return call(lambda: {"calls": cc().connections.calls(limit)})
+
+    @router.get("/v1/cc/artifacts", dependencies=[Depends(auth)])
+    def artifacts(limit: int = Query(default=100, ge=1, le=500)):
+        return call(lambda: {"artifacts": cc().connections.artifacts(limit)})
+
+    @router.get("/v1/cc/artifacts/{artifact_id}/file", dependencies=[Depends(auth)])
+    def artifact_file(artifact_id: str):
+        meta, path = call(lambda: cc().connections.artifact(artifact_id))
+        return FileResponse(path, media_type=meta["mime"], filename=meta["name"],
+                            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
     @router.get("/v1/cc/audit", dependencies=[Depends(auth)])
     def audit(limit: int = Query(default=200, ge=1, le=1000)):
         return call(lambda: cc().audit(limit))
+
+    return router
+
+
+def create_oauth_callback_router(runtime: Any) -> APIRouter:
+    """The one Command Center route without the bearer: the sign-in page sends the owner's browser back here with a
+    code. It is only accepted with the single-use state (32 random bytes, 10 minutes) that Glass started, and the
+    code is useless without the PKCE verifier the gateway kept. Nothing is reflected back but the connection's name."""
+    router = APIRouter()
+
+    @router.get("/v1/cc/connections/oauth/callback", response_class=HTMLResponse)
+    def oauth_callback(state: str = Query(default="", max_length=200), code: str = Query(default="", max_length=2000),
+                       error: str = Query(default="", max_length=200)):
+        center = getattr(runtime, "command", None)
+        try:
+            if center is None:
+                raise CommandError("The Command Center is not running.")
+            name = center.connections.finish_sign_in(state, code, error or None)
+            title, text = "Signed in", f"Cyclone is signed in to {name}. You can close this tab and go back to Glass."
+        except CommandError as exc:
+            title, text = "Not signed in", str(exc)
+        page = (f"<!doctype html><meta charset=utf-8><title>{html.escape(title)}</title>"
+                f"<body style=\"font:16px system-ui;margin:3rem;max-width:36rem\"><h1>{html.escape(title)}</h1><p>{html.escape(text)}</p>")
+        return HTMLResponse(page, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
     return router

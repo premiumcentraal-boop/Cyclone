@@ -1049,7 +1049,11 @@ def _validate_skills_response(value: dict[str, Any]) -> None:
                 raise _bad_skills("waypoint screen")
 
 
-CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key"})
+CC_OPS = frozenset({"cc.start", "cc.status", "cc.answer", "cc.key", "cc.media"})
+CC_MEDIA_MIME = re.compile(r"^(video|image|audio)/[a-z0-9.+-]{1,60}$")
+CC_MEDIA_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+CC_MEDIA_MAX = 500 * 1024 * 1024
+CC_MEDIA_CHUNK = 512 * 1024
 CC_LEASE_ID = re.compile(r"^ls_[A-Za-z0-9_-]{12,40}$")
 CC_TASK_ID = re.compile(r"^tsk_[A-Za-z0-9_-]{6,40}$")
 CC_LEASE_STATES = frozenset({"delivered", "used", "failed", "expired", "unused", "unknown"})
@@ -1081,6 +1085,12 @@ def _validate_cc_response(op: str, value: dict[str, Any], args: dict[str, Any]) 
             raise _bad_cc("fingerprint")
         if value["suite"] != "DHKEM(P-256,HKDF-SHA256)/HKDF-SHA256/AES-256-GCM":
             raise _bad_cc("suite")
+        return
+    if op == "cc.media":
+        if set(value) != {"received", "done", "name", "folder"} or not _is_int(value["received"]) or not isinstance(value["done"], bool):
+            raise _bad_cc("media")
+        if value["received"] > args.get("size", 0) or not _short_text(value["name"], 100, nullable=True) or not _short_text(value["folder"], 60, nullable=True):
+            raise _bad_cc("media facts")
         return
     if op == "cc.answer":
         if set(value) != {"handled", "detail"} or not isinstance(value["handled"], bool) or not _short_text(value["detail"], 200):
@@ -1365,7 +1375,7 @@ class V5ContractService:
         return self._call(device_id, "skills.list", {})
 
     def cc_start(self, device_id: str, goal: str, *, task_id: str | None = None,
-                 sealed: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                 sealed: list[dict[str, Any]] | None = None, publish: bool = False) -> dict[str, Any]:
         """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret.
 
         C2: [sealed] envelopes (HPKE to the phone's device key, made in the owner's browser) ride along as opaque bytes.
@@ -1374,6 +1384,11 @@ class V5ContractService:
         if not isinstance(goal, str) or not goal.strip() or len(goal) > MAX_GOAL or INLINE_SECRET.search(goal):
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A task goal is 1..2000 characters without secrets.")
         args: dict[str, Any] = {"goal": goal.strip()}
+        if publish:
+            # C3: this task posts a file; the phone gates its final Share/Post as a send, for this mission.
+            if not isinstance(task_id, str) or not CC_TASK_ID.match(task_id):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A posting task needs its task id.")
+            args.update({"taskId": task_id, "publish": True})
         if sealed:
             if not isinstance(task_id, str) or not CC_TASK_ID.match(task_id) or len(sealed) > 2:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Sealed secrets need their task and are at most two.")
@@ -1386,6 +1401,19 @@ class V5ContractService:
             reject_secret_payload(args)
             return self._call(device_id, "cc.start", {**args, "taskId": task_id, "sealed": sealed}, checked=True)
         return self._call(device_id, "cc.start", args)
+
+    def cc_media(self, device_id: str, task_id: str, *, name: str, mime: str, size: int, sha256: str, offset: int,
+                 data: bytes) -> dict[str, Any]:
+        """Plan 33 (C3): one chunk of a made file (a video or image) for a task. The phone checks the whole file's
+        SHA-256 before it adds it to its gallery. Media bytes only; the fields are checked here, the bytes are opaque."""
+        if (not isinstance(task_id, str) or not CC_TASK_ID.match(task_id) or not isinstance(name, str) or not CC_MEDIA_NAME.match(name)
+                or not isinstance(mime, str) or not CC_MEDIA_MIME.match(mime) or type(size) is not int or not 0 < size <= CC_MEDIA_MAX
+                or not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256) or type(offset) is not int
+                or not 0 <= offset < size or not isinstance(data, bytes) or not 0 < len(data) <= CC_MEDIA_CHUNK or offset + len(data) > size):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A media chunk is {taskId, name, mime, size, sha256, offset, data}.")
+        args = {"taskId": task_id, "name": name, "mime": mime, "size": size, "sha256": sha256, "offset": offset,
+                "data": base64.b64encode(data).decode()}
+        return self._call(device_id, "cc.media", args, checked=True)
 
     def cc_key(self, device_id: str) -> dict[str, Any]:
         """Plan 33 (C2): the phone's device key (public half and fingerprint) for sealed delivery."""

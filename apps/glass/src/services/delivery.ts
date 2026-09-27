@@ -10,6 +10,8 @@ import { fingerprint, seal } from "./hpke.js";
 export const INFO = "cyclone-sealed-delivery/v1";
 export const LEASE_MS = 30 * 60_000;
 const MAX_LEASE_MS = 24 * 60 * 60_000;
+/** A routine's run may be prepared up to 8 days ahead; its lease still ends 30 minutes after that run. */
+export const MAX_AHEAD_MS = 8 * 24 * 60 * 60_000;
 
 export interface PhoneKey { publicKey: string; fingerprint: string; strongBox: boolean; fetchedAt: number; trusted: boolean; trustedAt: number | null }
 export interface Phone { deviceId: string; name: string; ready: boolean; key: PhoneKey | null }
@@ -23,6 +25,9 @@ export interface PendingLease {
   place: string;
   dueAt: number | null;
   deviceKey: { publicKey: string; fingerprint: string } | null;
+  /** A routine's future run, prepared ahead (a pre-authorised lease): it may be days away. */
+  ahead?: boolean;
+  routineId?: string | null;
 }
 export interface Lease { id: string; taskId: string; deviceId: string; slot: string; place: string; expiresAt: number; state: string; createdAt: number }
 export interface Envelope { leaseId: string; slot: "password" | "otp"; enc: string; ct: string; aad: string }
@@ -64,7 +69,13 @@ export async function sealForTask(pending: PendingLease, item: OpenItem, now = D
   if (item.moved || item.accountId !== pending.accountId) throw new Error("This vault item's account changed outside Glass. Save it again first.");
   const secrets = secretsOf(item);
   if (!secrets.length) throw new Error("This vault item has no password or authenticator seed.");
-  const expiresAt = Math.min(Math.max(now, pending.dueAt ?? now) + LEASE_MS, now + MAX_LEASE_MS);
+  let expiresAt: number;
+  if (pending.ahead) {
+    if (!pending.dueAt || pending.dueAt <= now || pending.dueAt > now + MAX_AHEAD_MS) throw new Error("That run is not within the next 8 days.");
+    expiresAt = pending.dueAt + LEASE_MS;
+  } else {
+    expiresAt = Math.min(Math.max(now, pending.dueAt ?? now) + LEASE_MS, now + MAX_LEASE_MS);
+  }
   const out: Envelope[] = [];
   for (const secret of secrets) {
     const id = leaseId(now);

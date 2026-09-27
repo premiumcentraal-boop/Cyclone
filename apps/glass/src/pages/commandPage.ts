@@ -31,6 +31,7 @@ import { relativeTime } from "../ui/format.js";
 import type { GlassPage } from "./page.js";
 import { createVaultView, type VaultView } from "./vaultView.js";
 import { vaultApi } from "../services/vault.js";
+import { createConnectionsView, createMakeEditor, type ConnectionsView } from "./connectionsView.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -40,6 +41,7 @@ const TABS: Array<{ id: CommandTab; label: string }> = [
   { id: "results", label: "Results" },
   { id: "accounts", label: "Accounts" },
   { id: "vault", label: "Vault" },
+  { id: "connections", label: "Connections" },
 ];
 
 interface Data {
@@ -146,12 +148,18 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
   }
 
   let vaultView: VaultView | null = null;
+  let connectionsView: ConnectionsView | null = null;
 
   function renderBody(): void {
     // The vault manages itself (its own loading, locking and forms); polling never re-renders it.
     if (tab === "vault") {
       vaultView ??= createVaultView(ctx, () => data.accounts, say);
       if (body.firstChild !== vaultView.element) setChildren(body, vaultView.element);
+      return;
+    }
+    if (tab === "connections") {
+      connectionsView ??= createConnectionsView(ctx, say);
+      if (body.firstChild !== connectionsView.element) setChildren(body, connectionsView.element);
       return;
     }
     if (!loaded) {
@@ -192,11 +200,26 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     const box = card("cc-approval");
     const head = el("div", "cc-row");
     head.append(
-      chip({ approval: "Approve?", question: "Question", values: "Details", secret: "Secure input", handover: "Your turn" }[a.kind], a.kind === "approval" ? "warning" : "accent"),
+      chip({ approval: "Approve?", question: "Question", values: "Details", secret: "Secure input", handover: "Your turn", spend: "Use credits?", login: "Unlock the vault" }[a.kind],
+        a.kind === "approval" || a.kind === "spend" ? "warning" : "accent"),
       el("strong", undefined, a.title),
-      el("span", "muted", `${deviceName(a.deviceId)} · ${relativeTime(a.createdAt)}`),
+      el("span", "muted", `${a.kind === "spend" ? "This PC" : deviceName(a.deviceId || null)} · ${relativeTime(a.createdAt)}`),
     );
     box.append(head, el("p", "cc-approval-text", a.text));
+    if (a.spend) {
+      const spend = el("dl", "cc-send");
+      spend.append(el("dt", undefined, "Connection"), el("dd", undefined, a.spend.connection), el("dt", undefined, "Tool"), el("dd", undefined, a.spend.tool));
+      for (const [key, value] of Object.entries(a.spend.arguments)) spend.append(el("dt", undefined, key), el("dd", "cc-send-text", String(value)));
+      box.append(spend);
+    }
+    if (a.kind === "login") {
+      const open = actionButton("Open the vault", { variant: "primary", icon: "lock" });
+      open.addEventListener("click", () => ctx.navigate({ name: "command", tab: "vault" }));
+      const row = el("div", "cc-actions");
+      row.append(open);
+      box.append(el("p", "cc-hint", "The run waits. When the vault is unlocked in Glass, it seals the password for this run only, and this clears itself."), row);
+      return box;
+    }
     if (a.send) {
       const send = el("dl", "cc-send");
       send.append(el("dt", undefined, "Message"), el("dd", "cc-send-text", a.send.text), el("dt", undefined, "To"), el("dd", undefined, a.send.recipient), el("dt", undefined, "In"), el("dd", undefined, a.send.app));
@@ -212,7 +235,13 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       box.append(el("p", "cc-hint", a.kind === "secret" ? "Type this on the phone. Secrets never go through the PC." : "Take the phone to continue."));
       return box;
     }
-    if (a.kind === "approval") {
+    if (a.kind === "spend") {
+      const approve = actionButton("Approve the call", { variant: "primary" });
+      approve.addEventListener("click", () => void answer("Approving", { action: "approve" }));
+      const decline = actionButton("Decline", { variant: "ghost" });
+      decline.addEventListener("click", () => void answer("Declining", { action: "decline" }));
+      actions.append(approve, decline);
+    } else if (a.kind === "approval") {
       if (a.approvableHere) {
         const approve = actionButton(a.gate === "send" ? "Approve and send" : "Approve", { variant: "primary" });
         approve.addEventListener("click", () => void answer("Approving", { action: "approve" }));
@@ -338,12 +367,23 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       goal.value = fillRecipe(listing.goal, inputs);
       if (!String(title.input.value ?? "").trim()) title.input.value = listing.name;
     });
+    const maker = createMakeEditor(ctx);
+    void maker.refresh();
     const create = actionButton("Create task", { variant: "primary", icon: "play" });
     create.addEventListener("click", () => {
+      let make;
+      try {
+        make = maker.read();
+      } catch (err) {
+        return say((err as Error).message, "error");
+      }
       const text = String(goal.value ?? "").trim();
-      if (!text) return say("Write what the phone should do.", "error");
+      if (!text && make?.then !== "keep") return say("Write what the phone should do.", "error");
       if (looksSecret(text)) return say("Leave passwords and codes out. The phone asks for them.", "error");
-      const body: Record<string, unknown> = { goal: text, requestId: requestId() };
+      const body: Record<string, unknown> = { requestId: requestId() };
+      if (text) body.goal = text;
+      if (make) body.make = make;
+      if (make?.then === "keep" && !String(title.input.value ?? "").trim()) body.title = `Make with ${make.tool}`;
       const name = String(title.input.value ?? "").trim();
       if (name) body.title = name;
       if (phone.value) body.deviceId = phone.value;
@@ -368,7 +408,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     grid.append(title.wrap, labelled("Phone", phone), labelled("Account", account), labelled("Sign in with", vaultPick), labelled("Start at (empty = now)", at), labelled("Recipe", recipes));
     const actions = el("div", "cc-actions");
     actions.append(create, loadRecipes);
-    box.append(grid, labelled("Goal", goal), actions);
+    box.append(grid, maker.element, labelled("Goal", goal), actions);
     return box;
   }
 
@@ -378,7 +418,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     table.append(headRow("Task", "Phone", "Account", "Status", "Detail", ""));
     for (const t of data.tasks) {
       const row = el("tr");
-      const open = ["scheduled", "waiting_device", "running", "needs_you"].includes(t.status);
+      const open = ["scheduled", "making", "waiting_device", "running", "needs_you"].includes(t.status);
       const due = t.dueAt && t.status === "scheduled" ? `Starts ${new Date(t.dueAt).toLocaleString()}` : "";
       const detail = open ? t.cause || due || t.run?.summary || "" : t.run?.summary || t.cause;
       const cancel = el("td");
@@ -388,7 +428,8 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
         cancel.append(button);
       }
       row.append(
-        cell(t.title, [t.routineId ? "From a routine" : t.recipe ? `Recipe ${t.recipe}` : "", t.vaultItemId ? `Signs in with the vault${t.leases[0] ? ` · password ${t.leases[0].state}` : ""}` : ""].filter(Boolean).join(" · ") || undefined),
+        cell(t.title, [t.routineId ? "From a routine" : t.recipe ? `Recipe ${t.recipe}` : "", t.vaultItemId ? `Signs in with the vault${t.leases[0] ? ` · password ${t.leases[0].state}` : ""}` : "",
+          t.make ? `Makes with ${t.make.tool}${t.artifact ? ` · ${t.artifact.name}` : t.call ? ` · ${t.call.state}` : ""}${t.make.then === "post" ? " · then posts" : ""}` : ""].filter(Boolean).join(" · ") || undefined),
         cell(deviceName(t.run?.deviceId ?? t.deviceId)),
         cell(accountName(t.accountId)),
         chipCell(taskStatusLabel(t.status), taskStatusTone(t.status)),
@@ -452,20 +493,53 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       drawWhen();
     });
     drawWhen();
+    // C3 milestone: sign in with a vault login, and prepare the next runs' passwords ahead so they run while Glass is closed.
+    const vaultPick = el("select", "cc-input");
+    vaultPick.setAttribute("aria-label", "Sign in with");
+    vaultPick.append(option("", "Nothing from the vault"));
+    account.addEventListener("change", async () => {
+      vaultPick.replaceChildren(option("", "Nothing from the vault"));
+      if (!account.value) return;
+      try {
+        const vault = await vaultApi.get(ctx.client);
+        for (const item of vault.items.filter((i) => i.accountId === account.value && (i.kind === "login" || i.kind === "totp"))) {
+          vaultPick.append(option(item.id, item.kind === "login" ? "Vault login" : "Vault authenticator"));
+        }
+      } catch {
+        /* no vault yet */
+      }
+    });
+    const ahead = el("select", "cc-input");
+    ahead.setAttribute("aria-label", "Prepare ahead");
+    for (const [n, label] of [[0, "Only while Glass is open"], [1, "The next run"], [3, "The next 3 runs"], [7, "The next 7 runs"]] as const) ahead.append(option(String(n), label));
+    const maker = createMakeEditor(ctx);
+    void maker.refresh();
     const create = actionButton("Create routine", { variant: "primary", icon: "clock" });
     create.addEventListener("click", () => {
       const text = String(goal.value ?? "").trim();
       const name = String(title.input.value ?? "").trim();
-      if (!text || !name) return say("A routine needs a title and a goal.", "error");
+      let make;
+      try {
+        make = maker.read();
+      } catch (err) {
+        return say((err as Error).message, "error");
+      }
+      if (!name || (!text && make?.then !== "keep")) return say("A routine needs a title and a goal.", "error");
       if (looksSecret(text)) return say("Leave passwords and codes out. The phone asks for them.", "error");
       const schedule: Schedule = kind === "daily"
         ? { kind: "daily", time: String(time.value || "09:00"), days: days.filter((d) => d.input.checked).map((d) => Number(d.input.value)) }
         : { kind: "every", minutes: Math.round(Number(minutes.value)) };
       if (schedule.kind === "daily" && !schedule.days.length) return say("Pick at least one day.", "error");
       const body: Record<string, unknown> = {
-        title: name, goal: text, schedule, deviceIds: boxes.filter((b) => b.checked).map((b) => String(b.value)),
+        title: name, goal: text || `Make with ${make?.tool}`, schedule, deviceIds: boxes.filter((b) => b.checked).map((b) => String(b.value)),
       };
       if (account.value) body.accountId = account.value;
+      if (make) body.make = make;
+      if (vaultPick.value) {
+        if ((body.deviceIds as string[]).length !== 1) return say("A routine that signs in with the vault runs on one chosen phone.", "error");
+        body.vaultItemId = vaultPick.value;
+        body.preauth = Number(ahead.value);
+      }
       void act("Creating the routine", () => command.saveRoutine(ctx.client, body)).then((ok) => {
         if (ok) {
           goal.value = "";
@@ -474,10 +548,11 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       });
     });
     const grid = el("div", "cc-grid");
-    grid.append(title.wrap, labelled("Account", account));
+    grid.append(title.wrap, labelled("Account", account), labelled("Sign in with", vaultPick), labelled("Seal the password ahead for", ahead));
     const actions = el("div", "cc-actions");
     actions.append(create);
-    box.append(grid, labelled("Goal", goal), labelled("Phones (one task each; none = any ready phone)", phones), labelled("When", group(kinds.element, when)), actions);
+    box.append(grid, el("p", "cc-hint", "Sealed ahead, each run's password opens only on its phone, for that run, until 30 minutes after it is due. The vault must be unlocked in Glass once to seal them."),
+      maker.element, labelled("Goal", goal), labelled("Phones (one task each; none = any ready phone)", phones), labelled("When", group(kinds.element, when)), actions);
     return box;
   }
 
@@ -504,7 +579,8 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       actions.append(run, pause, remove);
       const row = el("tr");
       row.append(
-        cell(r.title, r.goal.slice(0, 120)),
+        cell(r.title, [r.goal.slice(0, 120), r.make ? `Makes with ${r.make.tool}` : "",
+          r.vaultItemId ? (r.preauth ? `${r.prepared.filter((p) => p.ready).length} of ${r.prepared.length} runs sealed ahead` : "Signs in while Glass is open") : ""].filter(Boolean).join(" · ")),
         cell(r.scheduleLabel),
         cell(r.deviceIds.length ? r.deviceIds.map((d) => deviceName(d)).join(", ") : "Any ready phone"),
         cell(accountName(r.accountId)),
@@ -634,6 +710,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     element,
     destroy() {
       vaultView?.destroy();
+      connectionsView?.destroy();
       destroyed = true;
       clearInterval(timer);
     },

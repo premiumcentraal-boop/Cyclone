@@ -1,7 +1,7 @@
 # 33 — Cyclone Command Center: the final plan
 
-**Status:** final plan, 2026-09-27. **C0 built in alpha.51** (§12.1), **C1 in alpha.54** (§12.2), **C2 in alpha.55** (§12.3); C3–C6 not started. Physical acceptance
-of C0 is UNVERIFIED.
+**Status:** final plan, 2026-09-27. **C0 built in alpha.51** (§12.1), **C1 in alpha.54** (§12.2), **C2 in alpha.55** (§12.3), **C3 with pre-authorised leases in alpha.56**
+(§12.4); C4–C6 not started. Physical acceptance of C0–C3 is UNVERIFIED.
 
 **The owner's ask:**
 > "Credentials can be safely sent to the phone in tasks, and managed and saved in the dashboard. It should hold all
@@ -396,6 +396,61 @@ stated as owed until you test it.
   - Replay is refused on both sides (the phone keeps accepted lease ids only).
 - **Deferred:** pre-authorised leases for routines that run while Glass is closed; "remember on this phone"; SMS and
   email code relay.
+
+### 12.4 C3 as built, with pre-authorised leases (alpha.56)
+
+- **MCP client** (`command/mcp.py`):
+  - Streamable HTTP: JSON-RPC over POST, answered as JSON or an event stream, with `Mcp-Session-Id`.
+  - Only `initialize`, `notifications/initialized`, `tools/list` and `tools/call` are sent (CI-guarded).
+  - URLs are https, or http to this PC only. Redirects are not followed.
+- **OAuth 2.1:**
+  - Discovery: RFC 9728 protected-resource metadata, then RFC 8414 / OIDC authorization-server metadata.
+  - RFC 7591 dynamic registration of a public client, PKCE S256 and RFC 8707 `resource`.
+  - Glass opens the sign-in page in a new tab. The redirect lands on
+    `/v1/cc/connections/oauth/callback`, the one Command Center route without the bearer: it accepts only a
+    single-use 10-minute state and needs the verifier the gateway kept.
+  - Refresh happens one at a time.
+- **Grant storage (a change from §8):** the grant is **not** a vault item of kind `oauth`. The gateway must use the
+  token while Glass is closed, and a zero-knowledge vault item can only be opened in the browser. So:
+  - tokens live in `connections.dpapi`, sealed with Windows DPAPI for this Windows user, and only in memory on other
+    systems;
+  - they are kept apart from the database, and never go to Glass, the audit or any model (CI-guarded).
+- **Rules** (`command/connections.py`):
+  - A per-connection allowlist: no tool is allowed until ticked.
+  - A daily cap on calls.
+  - An approval rule: `always` (the default), `over_cap` or `cap`.
+  - At most one call per connection waits for an OK, and two run at once.
+  - Spend approvals go in the same Approvals inbox (`kind: spend`), approved or declined in Glass.
+  - Arguments are plain values, screened for secrets.
+- **Artifacts:**
+  - Files come from image/audio content, embedded resources, `resource_link`s and media URLs in text or
+    `structuredContent`.
+  - Downloads are https-only from public addresses, re-checked on every redirect, up to 500 MB.
+  - Files are stored under `artifacts/<sha256>`.
+  - Asynchronous jobs are polled every 10 s for up to 20 minutes, with a status tool the owner picks. The job id is
+    read from common keys.
+- **Make, then post:**
+  - A task or routine may carry `make {connectionId, tool, arguments, pollTool, then}`.
+  - With `then: keep`, the task ends with the file.
+  - With `then: post`, the file goes to the chosen phone in 256 KB `cc.media` chunks. The phone checks the whole
+    file's SHA-256 before adding it to its gallery (Movies/Pictures/Music `Cyclone`).
+  - The mission then starts with `publish: true`. For that mission only, the phone's `GateClassifier` treats
+    Share / Post / Publish / Upload as a SEND gate (`PublishGate`), so the post waits for the owner's OK.
+- **Pre-authorised leases (§4.2 step 2):**
+  - A routine with a vault login on one phone may set `preauth` (0–7).
+  - The gateway reserves the task ids of the next N runs (`routine_slot`) and lists them in `/v1/cc/leases/pending`
+    with `ahead: true`.
+  - Glass seals each one to that run's task id, expiring 30 minutes after the run is due, up to 8 days ahead
+    (checked on both sides).
+  - When the routine fires, the task takes the reserved id, so the phone accepts the lease for that run only.
+  - A changed, paused or deleted routine revokes its prepared leases.
+  - A vault run with no lease waits and raises a `login` request in the inbox, which clears itself when a lease
+    arrives.
+- **Not yet:**
+  - Higgsfield's real tool names and output format were not verified against the live server. The step uses
+    whichever tools the owner allows and picks.
+  - Credit-based caps (calls are counted, not credits).
+  - The coordinator's `connections.list` (C4).
 
 **Start with C0 → C2.** That is the core of the ask: one place for your accounts and tasks, and phones that log in
 for a task without the password ever being visible to anything but you and that phone.

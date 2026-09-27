@@ -8,6 +8,7 @@ import com.cyclone.mobile.mind.mission.Mission
 import com.cyclone.mobile.owner.MomentKind
 import com.cyclone.mobile.owner.OwnerMoment
 import com.cyclone.mobile.owner.OwnerMomentsRuntime
+import com.cyclone.mobile.policy.PublishGate
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.secrets.DeviceKey
 import com.cyclone.mobile.secrets.SealedDelivery
@@ -52,6 +53,8 @@ internal object GatewayV5CommandAdapter {
     fun install(context: Context) {
         this.context = context.applicationContext
         SealedDelivery.install(context)
+        CommandMedia.install(context)
+        PublishGate.liveMission = { MindMissions.live.value?.id }
     }
     private fun app(): Context = checkNotNull(context) { "command adapter not installed" }
 
@@ -60,6 +63,7 @@ internal object GatewayV5CommandAdapter {
         "cc.status" -> status(args)
         "cc.answer" -> answer(args)
         "cc.key" -> key(args)
+        "cc.media" -> CommandMedia.receive(args)
         else -> throw GatewayProtocolException("UNKNOWN_OPERATION", "Unsupported Command Center operation: $op")
     }
 
@@ -72,7 +76,9 @@ internal object GatewayV5CommandAdapter {
     }
 
     fun start(args: JSONObject): JSONObject {
-        requireOnly(args, setOf("goal", "taskId", "sealed"))
+        requireOnly(args, setOf("goal", "taskId", "sealed", "publish"))
+        val publish = args.opt("publish")
+        if (publish != null && publish != true) throw invalid("publish is true or left out.")
         val goal = (args.opt("goal") as? String)?.trim().orEmpty()
         if (goal.isBlank() || goal.length > MAX_GOAL) throw invalid("goal must be 1..$MAX_GOAL characters of text.")
         if (INLINE_SECRET.containsMatchIn(goal)) throw invalid("Do not put secrets in a task; Cyclone asks on the phone.")
@@ -94,6 +100,8 @@ internal object GatewayV5CommandAdapter {
             SealedDelivery.wipe(opened)
             throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
         }
+        // C3: a task that posts a file gates its final Share/Post as a send, for this mission only.
+        PublishGate.missionId = if (publish == true) id else null
         if (opened.isNotEmpty()) {
             SealedDelivery.hold(id, opened)
             synchronized(missionLeases) { missionLeases[id] = opened.values.map { it.first.leaseId } }
