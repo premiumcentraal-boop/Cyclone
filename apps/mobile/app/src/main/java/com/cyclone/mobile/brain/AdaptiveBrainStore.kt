@@ -86,6 +86,7 @@ object AdaptiveBrainRuntime {
         store.refreshAppInventory()
         store.writeMirror()
         initialized = true
+        UserMdRuntime.initialize(context.applicationContext)
     }
 
     fun recordToolOutcome(

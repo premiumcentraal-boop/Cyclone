@@ -8,6 +8,27 @@ After installing an update, close any still-open window and launch **Cyclone One
 
 The **AI connections** page provides one-click Codex setup. It configures the packaged Cyclone MCP server without copying a Gateway token, reports live Gateway/phone/tool readiness, and recovers a long-running Codex session after One rotates its protected local connection. Restart Codex once after the first connection.
 
+**Settings → Remote MCP (ChatGPT / Grok chat)** starts and stops the public HTTPS auth-gateway tunnel used by ChatGPT and grok.com connectors. Copy the MCP URL and bearer from that card. Local Grok Build / Cursor stdio MCP (`~/.grok/config.toml`) is not changed. See [`docs/A4_MCP_TUNNEL_SETTINGS.md`](../../docs/A4_MCP_TUNNEL_SETTINGS.md).
+
+The **ChatGPT Attach** tab syncs VMOS Cloud pads over ADB and exports a one-file Custom GPT handoff. **Share to ChatGPT** publishes Cloud Control (`/cloud`) over HTTPS so Plus Actions can reach this PC. SSH Connect Keys stay on this PC. See [`docs/VMOS_ARCHITECTURE.md`](../../docs/VMOS_ARCHITECTURE.md).
+
+## The `cyclone` terminal command
+
+Installing Cyclone One also installs a `cyclone` command for your Windows user (`%LOCALAPPDATA%\Cyclone One\bin` is
+added to your user PATH). Open a **new** terminal and type:
+
+| Command | What it does |
+|---|---|
+| `cyclone` | Checks for a newer Cyclone release (at most every 6 hours, never blocks offline), offers to update, then opens Glass in its own window. Close the terminal and Glass closes with it. |
+| `cyclone update` | Downloads the newest release installer, checks it against the release's `SHA256SUMS.txt`, installs it silently and opens Glass. |
+| `cyclone --no-update` | Open Glass straight away. |
+| `cyclone --browser` | Open Glass in your normal browser instead of its own window. |
+| `cyclone version` | Show the installed Cyclone version. |
+
+When Cyclone One is running, `cyclone` uses its runtime; otherwise it starts a runtime just for that terminal. Glass
+still opens through a one-time launch link. The Glass window uses its own Chrome/Edge profile
+(`%LOCALAPPDATA%\Cyclone One\glass-window`). Updating closes Cyclone One while the installer runs.
+
 ## Development
 
 ```bash

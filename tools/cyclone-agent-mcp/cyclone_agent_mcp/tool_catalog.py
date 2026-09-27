@@ -37,6 +37,11 @@ TOOL_CONTRACTS = (
     ToolContract("phone_routine_run", False, True),
     ToolContract("phone_routine_status", True, True),
     ToolContract("phone_routine_cancel", False, True),
+    # Cyclone Lab: measured Mind missions scored from the phone's real state, for A/B testing Cyclone itself.
+    ToolContract("phone_lab_missions", True, False),
+    ToolContract("phone_lab_start", False, True),
+    ToolContract("phone_lab_report", True, False),
+    ToolContract("phone_lab_stop", False, False),
 )
 
 TOOL_NAMES = tuple(contract.name for contract in TOOL_CONTRACTS)

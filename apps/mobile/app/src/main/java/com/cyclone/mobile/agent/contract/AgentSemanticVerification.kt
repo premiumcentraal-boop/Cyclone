@@ -57,6 +57,11 @@ object AgentSemanticVerifier {
         "phone.open_app",
         "phone.launch_intent",
         "phone.set_clipboard",
+        "phone.set_alarm",
+        "phone.set_timer",
+        "phone.open_settings",
+        "phone.submit_text",
+        "phone.tap_point",
     )
 
     // PhoneToolExecutor evaluates params.expect only for actionWithConfirmation tools.
@@ -80,6 +85,7 @@ object AgentSemanticVerifier {
         goalLabel: String,
         before: SemanticObservationState?,
         after: SemanticObservationState?,
+        expectedUri: String = "",
     ): AgentSemanticVerification {
         if (executorAssertionFailed) {
             return AgentSemanticVerification(
@@ -120,6 +126,43 @@ object AgentSemanticVerifier {
                     semanticSuccessClaimed = false,
                     basis = "EXPECTED_PACKAGE_MISMATCH",
                     detail = "The requested app package was not the authoritative after-state package.",
+                )
+            }
+        }
+
+        if (tool == "phone.open_settings") {
+            return if ("settings" in after.packageName.lowercase()) passed("SETTINGS_FOREGROUND") else AgentSemanticVerification(
+                status = AgentVerificationStatus.OBSERVED,
+                passed = false,
+                semanticSuccessClaimed = false,
+                basis = "SETTINGS_NOT_OBSERVED",
+                detail = "Android accepted the Settings intent, but Settings is not the authoritative after-state.",
+            )
+        }
+
+        if (tool == "phone.set_alarm" || tool == "phone.set_timer") {
+            // The tool's own check is only "a clock app took the request"; the goal proof (an enabled alarm row, a
+            // running countdown) is separate and never inferred from this.
+            return if (PhoneIntents.isClockApp(after.packageName)) passed("CLOCK_APP_FOREGROUND") else AgentSemanticVerification(
+                status = AgentVerificationStatus.OBSERVED,
+                passed = false,
+                semanticSuccessClaimed = false,
+                basis = "CLOCK_APP_NOT_OBSERVED",
+                detail = "Android accepted the clock intent, but no clock app is the authoritative after-state.",
+            )
+        }
+
+        val expectedHttpHost = expectedHttpHost(expectedUri)
+        if (tool == "phone.launch_intent" && expectedHttpHost != null) {
+            return if (httpHostVisible(after.haystack, expectedHttpHost)) {
+                passed("EXPECTED_URI_HOST")
+            } else {
+                AgentSemanticVerification(
+                    status = AgentVerificationStatus.OBSERVED,
+                    passed = false,
+                    semanticSuccessClaimed = false,
+                    basis = "EXPECTED_URI_HOST_NOT_OBSERVED",
+                    detail = "Android accepted the web intent, but the authoritative after-state does not yet show the requested host.",
                 )
             }
         }
@@ -208,6 +251,23 @@ object AgentSemanticVerifier {
         val needle = goalLabel.trim()
         if (needle.isBlank()) return false
         return !beforeHaystack.contains(needle, ignoreCase = true) && afterHaystack.contains(needle, ignoreCase = true)
+    }
+
+    private fun expectedHttpHost(raw: String): String? {
+        val value = raw.trim()
+        if (value.isBlank()) return null
+        val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return null
+        if (uri.scheme?.lowercase() !in setOf("http", "https")) return null
+        return uri.host?.lowercase()?.removePrefix("www.")?.takeIf { it.isNotBlank() }
+    }
+
+    private fun httpHostVisible(haystack: String, expectedHost: String): Boolean {
+        if (haystack.isBlank()) return false
+        val exactHost = Regex(
+            "(?i)(?<![a-z0-9_.@-])(?:https?://)?(?:[a-z0-9-]+\\.)*" +
+                Regex.escape(expectedHost) + "(?=[:/?#\\s\"']|$)",
+        )
+        return exactHost.containsMatchIn(haystack)
     }
 
     private fun passed(basis: String) = AgentSemanticVerification(

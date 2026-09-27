@@ -19,6 +19,14 @@ import android.net.Uri
 class GatewayInitProvider : ContentProvider() {
     override fun onCreate(): Boolean {
         val app = context?.applicationContext ?: return true
+        runCatching { com.cyclone.mobile.ai.OpenRouterCatalogStore.initialize(app) }
+        runCatching { com.cyclone.mobile.secrets.VaultGatewayV5Integration.install(app) }
+            .onFailure {
+                GatewayRuntime.reportSafeError(
+                    "VAULT_SOURCE_UNAVAILABLE",
+                    "Phone Vault metadata source could not initialize safely.",
+                )
+            }
         runCatching { GatewayRuntime.startPairingBootstrap(app) }
             .onFailure {
                 GatewayRuntime.reportSafeError(

@@ -3,15 +3,14 @@ package com.cyclone.mobile.runtime.background
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
-import com.cyclone.mobile.R
 import com.cyclone.mobile.ai.*
 import com.cyclone.mobile.runtime.session.ExecutionContext
-import com.cyclone.mobile.ui.overlay.PendingTaskAttachment
+import com.cyclone.mobile.ui.overlay.GlassStepKind
+import com.cyclone.mobile.ui.overlay.TaskGlassStep
 import kotlinx.coroutines.*
 
 /** One task, one existing agent, one owned display. UI dismissal never ends execution. */
@@ -29,20 +28,47 @@ class WorkspaceTaskService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) { stopSelf(); return START_NOT_STICKY }
         if (intent.action != null) {
+            val shared = WorkspaceTasks.state.value
+            if (shared?.foreground == true) {
+                if (WorkspaceTasks.matches(shared, intent.getStringExtra("task"), intent.getStringExtra("session")) &&
+                    intent.getIntExtra("display", -1) == shared.displayId && intent.getStringExtra("workspace") == null &&
+                    intent.getLongExtra("generation", -1) == -1L) {
+                    // Legacy notification intents for a foreground task: Task Kit routes them to the owning engine.
+                    com.cyclone.mobile.task.TaskCommand.parse(intent.action, intent.getStringExtra("confirmation"))?.let { command ->
+                        com.cyclone.mobile.task.TaskCommands.send(applicationContext, shared.taskId, command)
+                    }
+                }
+                if (taskId == null) stopSelf()
+                return START_NOT_STICKY
+            }
+            // Commands can create a fresh service after the original failed and stopped itself.
+            // Bind only the exact store identity carried by the command, never instance defaults.
+            if (taskId == null && intent.action == "cancel") {
+                val saved = WorkspaceTasks.state.value
+                if (WorkspaceTasks.matches(saved, intent.getStringExtra("task"), intent.getStringExtra("session"))) {
+                    taskId = saved!!.taskId
+                    sessionId = saved.sessionId
+                }
+            }
             if (!WorkspaceTasks.matches(current, intent.getStringExtra("task"), intent.getStringExtra("session"))) {
                 if (taskId == null) stopSelf()
                 return START_NOT_STICKY
             }
+            val target = current ?: return START_NOT_STICKY
+            if (intent.getIntExtra("display", -1) != (target.displayId ?: -1) ||
+                intent.getStringExtra("workspace") != target.workspaceId ||
+                intent.getLongExtra("generation", -1) != (target.workspaceGeneration ?: -1L)) return START_NOT_STICKY
             when (intent.action) {
                 "cancel" -> stopTask()
                 "handoff" -> transferToHuman()
                 "resume" -> continueTask()
+                "autofill" -> autofillLogin()
                 "confirm" -> {
                     val token = intent.getStringExtra("confirmation")
                     if (token != null && token == current?.confirmation?.token && current?.phase == TaskPhase.REVIEW) {
                         scope.launch {
                             runCatching { withContext(Dispatchers.IO) { sessionId?.let { WorkspaceRuntime.approveConfirmation(it, token) } } }
-                                .onSuccess { update { it.copy(confirmation = null) }; continueTask() }
+                                .onSuccess { update { it.copy(confirmation = null) }; continueTask(confirmed = true) }
                         }
                     }
                 }
@@ -88,23 +114,55 @@ class WorkspaceTaskService : Service() {
                 }
                 sessionId = session.sessionId
                 if (stopped) { withContext(Dispatchers.IO) { WorkspaceRuntime.close(session.sessionId) }; return@launch }
-                update { it.copy(sessionId = session.sessionId, phase = TaskPhase.WORKING,
-                    message = "Working in ${it.app}…", steps = listOf("Opened ${it.app}")) }
+                update { it.copy(
+                    sessionId = session.sessionId,
+                    displayId = session.displayId,
+                    phase = TaskPhase.WORKING,
+                    message = "Opening ${it.app}",
+                    outcome = null,
+                    glassStepKind = GlassStepKind.FAST_PATH,
+                    steps = emptyList(),
+                ) }
                 val settings = getSharedPreferences("cyclone_ai", MODE_PRIVATE)
                 val profile = CycloneAiAccessProfileStore.read(applicationContext)
                 val config = QuickAgentConfig(
-                    model = settings.getString("openrouter_model", null)?.let(OpenRouterModelPresets::byId) ?: OpenRouterModelPresets.DEFAULT,
+                    model = OpenRouterModelPresets.byId(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(applicationContext)).copy(
+                        reasoningEffort = settings.getString("openrouter_reasoning_effort", "medium")?.takeIf { it in setOf("low", "medium", "high", "max") } ?: "medium"),
                     safeMode = profile != CycloneAiAccessProfile.FULL, accessProfile = profile,
-                    attachment = PendingTaskAttachment.take())
+                    attachment = WorkspaceTasks.takeAttachment(task.taskId))
                 awaitWorkspace(session.sessionId, ExecutionContext.from(session))
-                agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session))
+                agent = OpenRouterAdaptiveAgent(applicationContext, ExecutionContext.from(session)).also { agent ->
+                    var revision = 0L
+                    agent.onTrajectory = { trajectory ->
+                        update { TaskHarnessState.applyTrajectory(it, trajectory) }
+                    }
+                    agent.onTraceSession = { traceId ->
+                        update { it.copy(traceSessionId = traceId) }
+                    }
+                    agent.onOperation = { tool, result ->
+                        if (result == null) { revision = current?.controlRevision ?: -1; update { TaskHarnessState.begin(it, tool) } }
+                        else update { TaskHarnessState.finish(it, TaskOperationEvidence(session.sessionId, session.displayId,
+                            revision, result.androidExecutionOk, result.verification.passed,
+                            result.afterObservationId != null && result.afterObservationId != result.beforeObservationId &&
+                                result.after?.sessionId == session.sessionId && result.after?.displayId == session.displayId,
+                            result.verification.basis)) }
+                    }
+                }
                 finishTask(agent!!.execute(task.goal, config) { text -> progress(text) })
             } catch (error: Exception) {
+                WorkspaceTasks.takeAttachment(task.taskId)
                 if (error is CancellationException && error !is TimeoutCancellationException) throw error
                 sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it, WorkspaceState.FAILED) } }
                 sessionId = null
-                update { it.copy(phase = TaskPhase.FAILED, resumable = false,
-                    message = BackgroundSetup.failure(applicationContext, task.packageName, error)) }
+                val diagnostic = BackgroundSetup.failure(applicationContext, task.packageName, error)
+                update {
+                    it.copy(
+                        phase = TaskPhase.FAILED,
+                        resumable = false,
+                        message = diagnostic,
+                        outcome = "I couldn't finish this task. Your place is saved.",
+                    )
+                }
                 stopForeground(STOP_FOREGROUND_DETACH); stopSelf()
             }
         }
@@ -120,16 +178,126 @@ class WorkspaceTaskService : Service() {
             return
         }
         val id = sessionId ?: return
+        val secretWall = if (result.classification == "HUMAN_OR_GATE") {
+            agent?.currentSecretWallRequest()
+        } else null
+
+        // A secret fill is an agent-authorized mutation on the exact existing workspace. Do not
+        // revoke the workspace lease here: the suspended agent is idle and the one-shot card fill
+        // is the only permitted mutation until verification succeeds.
+        if (secretWall != null) {
+            update {
+                it.copy(
+                    phase = TaskPhase.REVIEW,
+                    message = "Secure input is required to continue.",
+                    outcome = null,
+                    resumable = true,
+                    loginAutofill = false,
+                    interruption = TaskInterruption.needsSecret(),
+                )
+            }
+            val blocked = current ?: return
+            val expectedRevision = blocked.controlRevision
+            com.cyclone.mobile.secrets.SecretsPhoneFacade.requestForRun(
+                context = applicationContext,
+                request = secretWall.request,
+                target = secretWall.target,
+            ) { resolution ->
+                if (!resolution.taskMayResume) return@requestForRun
+                resumeAfterSecret(blocked.taskId, expectedRevision)
+            }
+            return
+        }
+
         // Even verified completion retains its exact app page until Open or Stop.
         withContext(Dispatchers.IO) { WorkspaceRuntime.pause(id, WorkspaceState.BACKGROUND_NEEDS_HANDOFF) }
         update {
             when {
-                result.ok -> it.copy(phase = TaskPhase.DONE, resumable = false,
-                    message = WorkspaceCopy.result(result.message), steps = it.steps + "Checked the result")
-                result.classification == "HUMAN_OR_GATE" -> it.copy(phase = TaskPhase.REVIEW,
-                    message = "Review the prepared page in ${it.app} before continuing.")
-                else -> it.copy(phase = TaskPhase.REVIEW, resumable = false,
-                    message = "I couldn't finish. Your place in ${it.app} is saved for you.")
+                result.ok -> {
+                    val safeOutcome = WorkspaceCopy.result(result.message)
+                    it.copy(
+                        phase = TaskPhase.DONE,
+                        resumable = false,
+                        message = safeOutcome,
+                        outcome = safeOutcome,
+                        steps = it.steps + "Checked the result",
+                    )
+                }
+                result.classification == "HUMAN_OR_GATE" -> it.copy(
+                    phase = TaskPhase.REVIEW,
+                    message = if (result.gateClass == "login")
+                        "This screen needs your sign-in. Take Over, Autofill, or tap I'm Done when finished."
+                    else "Review the prepared page in ${it.app} before continuing.",
+                    loginAutofill = result.gateClass == "login",
+                )
+                else -> {
+                    val safeFailure = OutcomeStageCopy.terminalFailure(it.plannedStages, result.message, resumable = false)
+                    it.copy(
+                        phase = TaskPhase.FAILED,
+                        resumable = false,
+                        message = safeFailure,
+                        outcome = safeFailure,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun resumeAfterSecret(expectedTaskId: String, expectedRevision: Long) {
+        if (switching || stopped) return
+        val blocked = current ?: return
+        if (blocked.taskId != expectedTaskId ||
+            blocked.controlRevision != expectedRevision ||
+            blocked.interruption?.kind != TaskInterruptionKind.NEEDS_SECRET
+        ) return
+
+        switching = true
+        val previousRun = running
+        running = scope.launch {
+            try {
+                previousRun?.join()
+                if (stopped) return@launch
+                val id = sessionId ?: error("Missing workspace session")
+                val currentTask = current ?: error("Task unavailable")
+                check(currentTask.taskId == expectedTaskId && currentTask.controlRevision == expectedRevision) {
+                    "STALE_SECRET_RESUME"
+                }
+                check(WorkspaceRuntime.ownsInput(id)) { "Workspace input authority changed" }
+                val exact = ExecutionContext(id, currentTask.displayId ?: error("Missing task display"))
+                val fresh = withContext(Dispatchers.IO) {
+                    com.cyclone.mobile.gateway.GatewayObservationAdapter.capture(
+                        applicationContext,
+                        currentTask.identityJson(),
+                    )
+                }
+                check(fresh.execution == exact && fresh.id.isNotBlank()) {
+                    "Fresh session evidence is required"
+                }
+                update {
+                    it.copy(
+                        phase = TaskPhase.WORKING,
+                        message = "Continuing from the current page",
+                        outcome = null,
+                        interruption = null,
+                        loginAutofill = false,
+                        glassStepKind = GlassStepKind.FAST_PATH,
+                    )
+                }
+                switching = false
+                finishTask(agent?.resume { text -> progress(text) } ?: error("Task unavailable"))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                val id = sessionId
+                if (id != null) withContext(Dispatchers.IO) { runCatching { WorkspaceRuntime.pause(id) } }
+                update {
+                    it.copy(
+                        phase = TaskPhase.PAUSED,
+                        message = "Couldn't continue after secure input. Your task is paused safely.",
+                    )
+                }
+            } finally {
+                switching = false
             }
         }
     }
@@ -138,6 +306,7 @@ class WorkspaceTaskService : Service() {
         val id = sessionId ?: return
         if (switching || current?.working != true) return
         switching = true
+        update { it.copy(phase = TaskPhase.PAUSED, message = "Pausing your task") }
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { WorkspaceRuntime.pause(id) }
@@ -149,8 +318,9 @@ class WorkspaceTaskService : Service() {
     }
     private fun transferToHuman() {
         val id = sessionId ?: return
-        if (switching || current?.phase == TaskPhase.HUMAN) return
+        if (switching || current?.interruption?.canTakeOver != true && current?.phase != TaskPhase.DONE && current?.working != true) return
         switching = true
+        update { it.copy(phase = TaskPhase.PAUSED, message = "Transferring control to you") }
         scope.launch {
             try {
                 // Revoke before moving; the agent suspends at its next normal execution boundary.
@@ -161,10 +331,16 @@ class WorkspaceTaskService : Service() {
             } finally { switching = false }
         }
     }
-    private fun continueTask() {
+    private fun autofillLogin() {
+        val task = current ?: return
+        if (switching || task.interruption?.canAutofill != true) return
+        agent?.authorizeAutofill()
+        continueTask(confirmed = true)
+    }
+    private fun continueTask(confirmed: Boolean = false) {
         val id = sessionId ?: return
         val task = current ?: return
-        if (switching || !task.resumable || task.phase !in setOf(TaskPhase.HUMAN, TaskPhase.PAUSED, TaskPhase.REVIEW)) return
+        if (switching || !task.resumable || (!confirmed && task.interruption?.canResumeAfterHuman != true)) return
         switching = true
         val previousRun = running
         running = scope.launch {
@@ -173,8 +349,20 @@ class WorkspaceTaskService : Service() {
                 previousRun?.join()
                 if (stopped) return@launch
                 withContext(Dispatchers.IO) { WorkspaceRuntime.resume(id) }
-                awaitWorkspace(id, ExecutionContext(id, com.cyclone.mobile.ai.vision.live.LiveVisionRuntime.sessions.lookup(id).displayId))
-                update { it.copy(phase = TaskPhase.WORKING, message = "Continuing in ${it.app}…") }
+                val exact = ExecutionContext(id, task.displayId ?: error("Missing task display"))
+                awaitWorkspace(id, exact)
+                val fresh = withContext(Dispatchers.IO) {
+                    com.cyclone.mobile.gateway.GatewayObservationAdapter.capture(applicationContext, task.identityJson())
+                }
+                check(fresh.execution == exact && fresh.id.isNotBlank()) { "Fresh session evidence is required" }
+                update {
+                    it.copy(
+                        phase = TaskPhase.WORKING,
+                        message = "Continuing from the current page",
+                        outcome = null,
+                        glassStepKind = GlassStepKind.FAST_PATH,
+                    )
+                }
                 switching = false
                 finishTask(agent?.resume { text -> progress(text) } ?: error("Task unavailable"))
             } catch (error: CancellationException) { throw error }
@@ -194,51 +382,49 @@ class WorkspaceTaskService : Service() {
     }
     private fun stopTask() {
         if (stopped) return
+        val closing = current ?: return
         stopped = true
         agent?.cancelActiveTask()
-        update { it.copy(phase = TaskPhase.STOPPED, message = "Stopped. You're in control.", resumable = false) }
+        observer?.cancel()
         scope.launch {
-            // Creation may still be running: its post-create check will close its own display.
-            sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it) } }
-            running?.cancelAndJoin()
-            sessionId = null
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            try {
+                // Join creation too: its NonCancellable block releases any display created late.
+                running?.cancelAndJoin()
+                if (closing.workspaceId != null) {
+                    val released = withContext(Dispatchers.IO) {
+                        com.cyclone.mobile.PhoneToolExecutor.execute(applicationContext, com.cyclone.mobile.PhoneToolRequest(
+                            java.util.UUID.randomUUID().toString(), "workspace.close_task", closing.identityJson()))
+                    }
+                    check(released.ok) { released.error?.message ?: "Couldn't release this workspace." }
+                } else {
+                sessionId?.let { withContext(Dispatchers.IO) { WorkspaceRuntime.close(it) } }
+                }
+                sessionId = null
+                WorkspaceTasks.clearClosedTask(closing.taskId, closing.sessionId)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                getSystemService(NotificationManager::class.java).cancel(NOTIFICATION)
+                com.cyclone.mobile.ui.overlay.OverlayChromeRuntime.clearBackgroundChrome()
+                WorkspaceTasks.scheduleQueuePromotion(applicationContext)
+                stopSelf()
+            } catch (error: Exception) {
+                stopped = false
+                update { it.copy(phase = TaskPhase.FAILED, confirmation = null, resumable = false,
+                    message = "Couldn't finish closing this task. Try Close task again.") }
+            }
         }
     }
+
     private fun progress(text: String) {
-        val message = when {
-            text.contains("verif", true) -> "Checking the result…"
-            text.contains("observ", true) -> "Checking the page…"
-            else -> return
-        }
-        update { if (it.working) it.copy(message = message) else it }
+        // Raw provider summaries can contain user-entered data. Harness operation callbacks own progress.
+        update { if (it.working && it.semanticSteps.isEmpty()) it.copy(message = "Checking the current page") else it }
     }
     private fun update(change: (WorkspaceTaskUi) -> WorkspaceTaskUi) { taskId?.let { WorkspaceTasks.update(it, change) } }
-    private fun notification(task: WorkspaceTaskUi): Notification {
-        fun action(command: String) = PendingIntent.getService(this, 0,
-            WorkspaceTasks.commandIntent(this, task, command), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val progress = PendingIntent.getActivity(this, 0, WorkspaceTasks.progressIntent(this, task),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val builder = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)
-            .setContentTitle(when (task.phase) {
-                TaskPhase.WORKING, TaskPhase.STARTING -> "Cyclone is working"
-                TaskPhase.REVIEW -> "Finish your task"
-                else -> task.title
-            }).setContentText(task.message).setOnlyAlertOnce(true).setShowWhen(false)
-            .setOngoing(task.phase !in setOf(TaskPhase.FAILED, TaskPhase.STOPPED))
-            .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(progress)
-            .setPublicVersion(Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_cyclone_status)
-                .setContentTitle("Cyclone task").setContentText("Unlock to view progress").build())
-        builder.addAction(Notification.Action.Builder(null, "View progress", progress).build())
-        if (task.phase in setOf(TaskPhase.REVIEW, TaskPhase.DONE))
-            builder.addAction(Notification.Action.Builder(null, "Open ${task.app}", action("handoff")).build())
-        else if (task.phase == TaskPhase.HUMAN && task.resumable)
-            builder.addAction(Notification.Action.Builder(null, "Continue with Cyclone", action("resume")).build())
-        if (task.working) builder.addAction(Notification.Action.Builder(null, "Stop task", action("cancel")).build())
-        return builder.build()
-    }
+    private fun notification(task: WorkspaceTaskUi): Notification =
+        TaskProgressNotification.build(this, CHANNEL, task)
     override fun onDestroy() {
+        // Only a task that was already truly terminal/closed may release the FIFO head.
+        val promoteAfterDestroy = current?.phase in setOf(TaskPhase.FAILED, TaskPhase.STOPPED)
+        taskId?.let { WorkspaceTasks.takeAttachment(it) }
         stopped = true
         agent?.cancelActiveTask()
         scope.cancel()
@@ -246,6 +432,7 @@ class WorkspaceTaskService : Service() {
         if (current?.phase !in setOf(TaskPhase.FAILED, TaskPhase.STOPPED))
             update { it.copy(phase = TaskPhase.STOPPED, message = "Task ended. Start a new task when you're ready.", resumable = false) }
         super.onDestroy()
+        if (promoteAfterDestroy) WorkspaceTasks.scheduleQueuePromotion(applicationContext)
     }
     override fun onBind(intent: Intent?): IBinder? = null
     companion object { private const val CHANNEL = "cyclone-workspace-task"; private const val NOTIFICATION = 902 }

@@ -22,12 +22,14 @@ Load more context only when the task needs it.
 - Never persist passwords, OTPs, API keys, payment data or raw typed secret values in Brain, learning stores or diagnostics.
 - Run diagnostics may contain model-visible context, decisions, tool calls/results, verification and recovery—not hidden provider chain-of-thought.
 - PC integrations route through the constrained gateway/MCP contracts; do not expose generic shell/root control to the model.
+- Task buttons (stop, take over, I'm done, approve, confirm…) on any surface go through Task Kit (`TaskCommands` in `apps/mobile/.../task/`) to the engine that owns the task; surfaces never call an engine directly (guarded by `scripts/ci/tests/test_mobile_task_kit.py`). See `Cyclone V5 plan/17-structure.md`.
 
 ## Ownership
 
 - Android runtime + UX: `apps/mobile/**`
 - Device gateway: `apps/device-gateway/**`
 - Windows companion: `apps/pc-companion/**`, `packaging/pc-companion/**`
+- Cyclone Glass (local browser dashboard, no intelligence): `apps/glass/**`, gateway hosting in `apps/device-gateway/cyclone_device_gateway/glass/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
 - CI/release: `.github/workflows/**`, `scripts/ci/**`, `release/version.toml`
 
@@ -36,6 +38,21 @@ Keep parallel agents on non-overlapping paths whenever possible.
 ## Versioning
 
 The authoritative product/component metadata is `release/version.toml`. Android `versionName` and `versionCode` live in `apps/mobile/app/build.gradle.kts` and must agree with release metadata. Increment `versionCode` for every distributed Android build.
+
+### Fast release lane (since 5.0.0-alpha.43)
+
+Releases ship **Android and Glass only**. The Windows companion, device gateway and MCP stay frozen at the installed
+`1.6.0-alpha.43` / `5.0.0-alpha.43.dev1` build: leave `pc_companion`, `device_gateway`, `mcp` and `python_version`
+in `release/version.toml` unchanged, and do not touch `apps/pc-companion/**` versions.
+
+To release: bump `product_version`, `components.mobile`, `android_version_code` (+ `build.gradle.kts`), and
+`components.glass` only when `apps/glass` changed; add `docs/RELEASE_<mobile>.md`; push to the dev branch.
+`.github/workflows/v5-publish.yml` waits for Mobile CI on that commit, signs the APK with the rotated key, builds the
+Glass zip and publishes the release. No RC branch and no per-release publisher. Do not push other commits to the dev
+branch until the publish finishes (Mobile CI cancels in-progress runs per branch).
+
+The PC gateway serves Glass from `CYCLONE_GLASS_DIST` first, so a new Glass zip is installed by unzipping it and
+pointing that variable at the folder — the companion itself is not rebuilt.
 
 ## Validation
 
@@ -52,6 +69,14 @@ For PC gateway/MCP changes:
 python -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp
 python -m pytest apps/device-gateway/tests -q
 python -m unittest discover -s tools/codex-phone-mcp/tests -v
+```
+
+For Cyclone Glass changes:
+
+```bash
+cd apps/glass && npm ci && npm test && npm run build
+python scripts/ci/glass_guard.py
+python -m pytest apps/device-gateway/tests/test_glass_hosting.py -q
 ```
 
 Run `python scripts/ci/release_versions.py --check` and `python scripts/ci/mobile_product_guard.py` when product identity or release surfaces change.

@@ -1,3 +1,18 @@
+import type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptShareStatus,
+  ChatgptSyncResult,
+} from "../core/chatgptAttach.js";
+import type {
+  McpTunnelMode,
+  McpTunnelSmokeCheck,
+  McpTunnelSmokeResult,
+  McpTunnelState,
+  McpTunnelStatus,
+  McpTunnelToken,
+} from "../core/mcpTunnel.js";
+
 export type DeviceLifecycleState =
   | "READY"
   | "UNPAIRED"
@@ -98,6 +113,18 @@ export interface ConnectionDiagnosticBundle {
   createdAtEpochMs: number;
 }
 
+export type {
+  ChatgptAttachConfig,
+  ChatgptAttachResources,
+  ChatgptSyncResult,
+  McpTunnelMode,
+  McpTunnelSmokeCheck,
+  McpTunnelSmokeResult,
+  McpTunnelState,
+  McpTunnelStatus,
+  McpTunnelToken,
+};
+
 export interface DeviceVideoDescriptor {
   mode: StreamBackendMode;
   width: number;
@@ -170,6 +197,8 @@ export interface DesktopDevice {
   provider?: string | null;
   providerInstanceId?: string | null;
   inputOwner?: "AI" | "HUMAN" | string;
+  /** Cyclone Mobile version when the fleet payload includes it. Absent ⇒ not 5.x (fail closed). */
+  mobileVersion?: string;
 }
 
 export interface FleetGroup {
@@ -328,10 +357,11 @@ export type ConnectorState =
   | "NEEDS_ATTENTION";
 
 export interface ConnectorCard {
-  id: "codex" | "deepseek-mcp" | "generic-mcp" | string;
+  id: "codex" | "grok" | "cursor" | "opencode" | "copilot" | "deepseek-mcp" | "generic-mcp" | string;
   name: string;
   description: string;
   state: ConnectorState;
+  aiState?: "UNKNOWN" | "DETECTED" | "CONFIGURED" | "CONNECTED" | "FAILED";
   actionLabel?: string;
   detected?: boolean;
   configured?: boolean;
@@ -343,6 +373,7 @@ export interface ConnectorCard {
   toolCount?: number;
   transport?: string;
   approvalMode?: string;
+  phoneState?: "UNKNOWN" | "CONNECTED" | "READY" | "DISCONNECTED";
 }
 
 export interface ConnectorActionResult {
@@ -417,6 +448,11 @@ export interface DesktopRuntimeStatus {
 
 export interface DesktopService {
   readonly mode: "real" | "mock";
+  /** Real HttpDesktopService only. Mock omits this. getBearer is for Authorization; never print it. */
+  readonly glassGateway?: {
+    httpBase: string;
+    getBearer: () => string;
+  };
   listDevices(): Promise<DesktopDevice[]>;
   scanDevices(): Promise<DesktopDevice[]>;
   watchFleet(onChange: (event?: FleetWsEvent) => void): () => void;
@@ -447,6 +483,26 @@ export interface DesktopService {
   listConnectors(): Promise<ConnectorCard[]>;
   runConnectorAction(connectorId: string, action: "connect" | "install" | "repair"): Promise<ConnectorActionResult>;
   getRuntimeStatus(): Promise<DesktopRuntimeStatus>;
+  getMcpTunnelStatus(): Promise<McpTunnelStatus>;
+  startMcpTunnel(mode?: McpTunnelMode): Promise<McpTunnelStatus>;
+  stopMcpTunnel(): Promise<McpTunnelStatus>;
+  restartMcpTunnel(): Promise<McpTunnelStatus>;
+  rotateMcpTunnelToken(): Promise<McpTunnelStatus>;
+  setMcpTunnelMode(mode: McpTunnelMode): Promise<McpTunnelStatus>;
+  copyMcpTunnelToken(): Promise<McpTunnelToken>;
+  smokeMcpTunnel(): Promise<McpTunnelSmokeResult>;
+  openMcpTunnelDocs(): Promise<string>;
+  loadChatgptAttachConfig(): Promise<ChatgptAttachConfig>;
+  saveChatgptAttachConfig(config: ChatgptAttachConfig): Promise<ChatgptAttachConfig>;
+  syncChatgptAttachFleet(): Promise<ChatgptSyncResult>;
+  copyChatgptHandoff(markdown: string): Promise<{ ok: boolean; markdown?: string }>;
+  saveChatgptHandoff(markdown: string): Promise<string>;
+  chatgptAttachResources(): Promise<ChatgptAttachResources>;
+  chatgptShareStatus(): Promise<ChatgptShareStatus>;
+  chatgptShareStart(): Promise<ChatgptShareStatus>;
+  chatgptShareStop(): Promise<ChatgptShareStatus>;
+  cloudControlLocalBase(): string;
+  probeCloudControl(base?: string): Promise<{ ok: boolean; localBase: string }>;
   getFleetWorkspace?(): Promise<FleetWorkspace>;
   saveFleetGroup?(groupId: string, name: string, deviceIds: string[]): Promise<FleetGroup>;
   deleteFleetGroup?(groupId: string): Promise<void>;

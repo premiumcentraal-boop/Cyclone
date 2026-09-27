@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
+import json
 import hashlib
 import hmac
 import queue
@@ -27,10 +29,14 @@ from .models import DESKTOP_PROTOCOL_VERSION, DesktopRuntimeError, RuntimeErrorC
 from .pairing import PairingCoordinator
 from .readiness import enrich_device_public
 from .layer2 import Layer2WorkspaceService
+from ..glass import LaunchCodes, create_glass_router, resolve_glass_dist
 from .sessions import ExecutionSessionService
+from .lan_share import LanShareDirectory
+from .v5_contract import V5ContractService
 from .trust_v33 import PCTrustCoordinator
 from .video import StreamMessage, VideoFleetLimiter, VideoStreamController
 from .workspace import FleetWorkspaceStore
+from ..cloud_control import create_cloud_control_router
 
 
 class PairCompleteBody(BaseModel):
@@ -185,9 +191,41 @@ class DesktopRuntime:
             self.fleet, self.agent, device_id, snapshot=self._snapshot_for_batch,
         ))
         self.video_limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
+        # Wi-Fi screen share: the phone's own stream when it shares (AnyDesk-style), ADB screenshots otherwise.
+        share_contract = V5ContractService(self.fleet)
+        # Cyclone Lab: measured Mind missions, scored from the phone's real state through the lab's fixed probes.
+        from ..lab.probes import PhoneProbe
+        from ..lab.runner import LabService
+        self.lab = LabService(settings.runtime_dir / "lab", share_contract, lambda device_id: PhoneProbe(self.fleet.get(device_id).adb))
+        self.lan_share = LanShareDirectory(
+            status=share_contract.share_status,
+            trust_record=self.trust.store.record,
+            sign=self.trust.identity.sign,
+        )
+        from .orchestration.controller import FleetController
+        from .orchestration.live import FleetLiveSync
+        from .orchestration.power import DevicePowerController
+        from .orchestration.runner import AskContractRunner
+        self.orchestration = FleetController(
+            registry_path=settings.runtime_dir / "fleet-registry.json",
+            journal_path=settings.runtime_dir / "fleet-missions.json",
+            runner=AskContractRunner(share_contract, poll_interval=0.5, max_polls=360),
+            max_workers=4,
+        )
+        self.live_fleet = FleetLiveSync(
+            self.fleet,
+            self.orchestration,
+            trust_state=self._fleet_trust_state,
+        )
+        self.orchestration.power = DevicePowerController(
+            self.live_fleet.probe_screen,
+            wake=self.live_fleet.wake_display,
+            record_lookup=self.orchestration._record_or_none,
+        )
         self.fleet.set_video_factory(lambda session: VideoStreamController(
             session,
             self.video_limiter,
+            lan_share=self.lan_share.for_device(session.device_id),
             diagnostic=lambda stage, details, device_id=session.device_id: self.live_diagnostics.mark(
                 device_id,
                 stage,
@@ -199,7 +237,7 @@ class DesktopRuntime:
         session = self.fleet.get(device_id)
         if session.video is None:
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture is unavailable.")
-        capture = session.video.snapshot()
+        capture = session.video.snapshot(fresh=True) if profile == "live-phone" else session.video.snapshot()
         data = capture.get("data")
         if not isinstance(data, bytes):
             raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Screenshot capture returned no image.")
@@ -207,7 +245,7 @@ class DesktopRuntime:
         suffix = ".png" if codec == "image/png" else ".jpg"
         root = self.settings.runtime_dir / "fleet-screenshots"
         root.mkdir(parents=True, exist_ok=True)
-        path = root / f"{device_id}-{int(time.time() * 1000)}{suffix}"
+        path = root / (f"{device_id}-live-phone{suffix}" if profile == "live-phone" else f"{device_id}-{int(time.time() * 1000)}{suffix}")
         path.write_bytes(data)
         return {
             "deviceId": device_id, "filePath": str(path.resolve()), "codec": codec,
@@ -215,7 +253,15 @@ class DesktopRuntime:
             "timestampMs": capture.get("timestamp_ms"),
         }
 
+    def _fleet_trust_state(self, device_id: str) -> str:
+        try:
+            return str(self.trust.status(device_id).get("state") or "UNPAIRED")
+        except Exception:
+            return "UNPAIRED"
+
     def start(self) -> None:
+        if getattr(self, "live_fleet", None) is not None:
+            self.live_fleet.start()
         self.fleet.start()
         # The diagnostic supervisor is deliberately independent of pairing. As soon as ADB reports
         # an authorized phone, it records a bounded baseline and follows only the Cyclone app PID.
@@ -224,8 +270,12 @@ class DesktopRuntime:
 
     def stop(self) -> None:
         # Stop trust refresh before retiring ADB sessions so no reconnect races shutdown cleanup.
+        if getattr(self, "orchestration", None) is not None:
+            self.orchestration.shutdown()
         self.trust.stop()
         self.live_diagnostics.stop()
+        if getattr(self, "live_fleet", None) is not None:
+            self.live_fleet.stop()
         self.fleet.stop()
 
 
@@ -689,32 +739,40 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             return
         try:
             session = runtime.fleet.get(device_id)
-            adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
-            if adb_state != "device":
-                raise DesktopRuntimeError(
-                    RuntimeErrorCode.DEVICE_UNAUTHORIZED if adb_state == "unauthorized" else RuntimeErrorCode.DEVICE_DISCONNECTED,
-                    "ADB authorization is required for live display.",
-                    retryable=True,
-                )
             controller = session.video
             if controller is None:
                 raise DesktopRuntimeError(RuntimeErrorCode.CAPABILITY_UNAVAILABLE, "Video runtime is unavailable.")
-        except DesktopRuntimeError as exc:
-            close_code = 4403 if exc.code == RuntimeErrorCode.DEVICE_UNAUTHORIZED.value else 4404
-            await websocket.close(code=close_code)
+        except DesktopRuntimeError:
+            await websocket.close(code=4404)
             return
         await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
-        if profile == "focus":
-            session.input_owner = "HUMAN"
+        # Self-healing live view: a phone that is known but not ready over USB right now (cable moved, debugging prompt
+        # pending, ADB restarting) gets a retryable reason instead of a closed door. The producer keeps capturing and
+        # frames flow again as soon as ADB is back, like a remote-desktop client that reconnects on its own.
+        adb_state = str(getattr(getattr(session, "adb_device", None), "state", "") or "")
+        if adb_state != "device":
+            reason = {"unauthorized": "USB_UNAUTHORIZED", "offline": "USB_OFFLINE"}.get(adb_state, "USB_ABSENT")
+            runtime.live_diagnostics.mark(device_id, "server.ws.usb_not_ready", details={"profile": profile, "code": reason})
+            await websocket.send_text(json.dumps({"type": "stream.error", "code": reason, "retryable": True}, separators=(",", ":")))
         q = controller.subscribe(profile)
         runtime.live_diagnostics.mark(device_id, "server.ws.accepted", details={"profile": profile, "transport": "websocket"})
         first_binary = True
+        async def watch_disconnect() -> None:
+            # Sending alone does not notice a closed browser while the encoder is quiet.
+            # Receive close frames so reloads cannot leave orphan subscriber queues.
+            while (await websocket.receive())["type"] != "websocket.disconnect":
+                pass
+
+        disconnect = asyncio.create_task(watch_disconnect())
         try:
-            while True:
+            while not disconnect.done():
                 try:
                     message: StreamMessage = await asyncio.to_thread(q.get, True, 1.0)
                 except queue.Empty:
                     continue
+                if message.kind == "close":
+                    await websocket.close(code=1012)
+                    break
                 if message.kind == "binary":
                     await websocket.send_bytes(message.data)  # type: ignore[arg-type]
                     if first_binary:
@@ -732,6 +790,9 @@ def create_desktop_router(runtime: DesktopRuntime, token: str) -> APIRouter:
             )
         finally:
             controller.unsubscribe(profile, q)
+            disconnect.cancel()
+            with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                await disconnect
 
     return router
 
@@ -755,7 +816,17 @@ def create_desktop_app(settings: Settings | None = None, runtime: DesktopRuntime
     desktop = runtime or DesktopRuntime(settings)
     app.state.desktop_runtime = desktop
     app.include_router(create_desktop_router(desktop, settings.token))
+    from .orchestration.fleet_api import create_fleet_orchestrator_router
+    app.include_router(create_fleet_orchestrator_router(desktop, settings.token))
     app.include_router(create_stream_router(desktop, settings.token))
+    app.include_router(create_cloud_control_router(desktop, settings.token))
+    from ..lab.api import create_lab_router
+    app.include_router(create_lab_router(desktop, settings.token))
+    from ..market.api import create_market_router
+    app.include_router(create_market_router(desktop, settings.token))
+    # Cyclone Glass: static web app + launch-code session. Same origin, so no new CORS origins.
+    app.state.glass_codes = LaunchCodes()
+    app.include_router(create_glass_router(settings.token, app.state.glass_codes, resolve_glass_dist()))
     app.add_event_handler("startup", desktop.start)
     app.add_event_handler("shutdown", desktop.stop)
     return app
@@ -861,6 +932,7 @@ def _call(fn):
             RuntimeErrorCode.TRUST_REVOKED.value: 403,
             RuntimeErrorCode.TRUST_EXPIRED.value: 401,
             RuntimeErrorCode.TRUST_AUTH_FAILED.value: 403,
+            RuntimeErrorCode.TRUST_REJECTED.value: 403,
             RuntimeErrorCode.PROTOCOL_MISMATCH.value: 426,
             RuntimeErrorCode.PHONE_LOCKED.value: 423,
             RuntimeErrorCode.HUMAN_HAS_CONTROL.value: 409,

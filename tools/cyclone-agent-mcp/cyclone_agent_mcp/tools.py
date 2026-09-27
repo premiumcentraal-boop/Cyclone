@@ -6,7 +6,12 @@ from typing import Any, Callable
 
 from .audit import SafeAuditLog
 from .gateway import GatewayClient, GatewayError
-from .safe import redact, strip_typed_plaintext, validate_typed_params
+from .safe import (
+    redact,
+    strip_typed_plaintext,
+    validate_human_gesture_params,
+    validate_typed_params,
+)
 from .tool_catalog import ALLOWED_ACTIONS, ALLOWED_GROUP_ACTIONS, TOOL_NAMES
 from .phone_mcp import (
     compact_observation,
@@ -39,6 +44,9 @@ IMAGE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.;+:-]{0,239}$")
 INSTANCE_ID = re.compile(r"^vdev_[a-f0-9]{16}$")
 ROUTINE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+LAB_EXPERIMENT_ID = re.compile(r"^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$")
+LAB_MISSION_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
+LAB_VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap"})
 TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
 
@@ -402,6 +410,7 @@ class PhoneTools:
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
         validate_typed_params(params)
+        validate_human_gesture_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
@@ -484,6 +493,7 @@ class PhoneTools:
         if not isinstance(params, dict):
             raise ValueError("params must be an object")
         validate_typed_params(params)
+        validate_human_gesture_params(tool, params)
         goal = str(args.get("goal") or "").strip()
         if not goal:
             raise ValueError("goal is required")
@@ -560,6 +570,57 @@ class PhoneTools:
         device_id = _required_id(args, "device_id", TARGET_ID)
         run_id = _required_id(args, "run_id", RUN_ID)
         return self.gateway.routine_cancel(device_id, run_id)
+
+
+    def phone_lab_missions(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, set())
+        return self.gateway.lab_missions()
+
+    def phone_lab_start(self, args: dict[str, Any]) -> Any:
+        """Start a lab experiment. Variants change only named knobs; boundaries are the phone's and cannot be relaxed."""
+        _only_keys(args, {"device_id", "name", "missions", "variants", "repetitions"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        name = args.get("name")
+        if not isinstance(name, str) or not 0 < len(name.strip()) <= 80:
+            raise ValueError("name is 1..80 characters")
+        missions = args.get("missions")
+        if not isinstance(missions, list) or not 1 <= len(missions) <= 100 or not all(isinstance(m, str) and LAB_MISSION_ID.match(m) for m in missions):
+            raise ValueError("missions is a list of lab mission ids (see phone_lab_missions)")
+        variants = args.get("variants") or [{"name": "A"}]
+        if not isinstance(variants, list) or not 1 <= len(variants) <= 4 or not all(
+            isinstance(v, dict) and set(v) <= LAB_VARIANT_KEYS and isinstance(v.get("name"), str) for v in variants
+        ):
+            raise ValueError("variants is 1..4 objects with a name and only known knobs")
+        repetitions = args.get("repetitions", 1)
+        if not isinstance(repetitions, int) or not 1 <= repetitions <= 20:
+            raise ValueError("repetitions is 1..20")
+        return self.gateway.lab_start(device_id, name.strip(), missions, variants, repetitions)
+
+    def phone_lab_report(self, args: dict[str, Any]) -> Any:
+        """Without an id: the experiment list. With one: rates, A/B, insights and the failed runs, compacted."""
+        _only_keys(args, {"experiment_id"})
+        if not args.get("experiment_id"):
+            return self.gateway.lab_experiments()
+        detail = self.gateway.lab_experiment(_required_id(args, "experiment_id", LAB_EXPERIMENT_ID))
+        if not isinstance(detail, dict) or "trials" not in detail:
+            return detail
+        failures = []
+        for trial in detail["trials"]:
+            if trial.get("verdict") == "pass":
+                continue
+            phone = trial.get("phone") or {}
+            metrics = phone.get("metrics") or {}
+            failures.append({
+                "mission": trial.get("missionId"), "variant": trial.get("variant"), "verdict": trial.get("verdict"),
+                "category": trial.get("category"), "cause": trial.get("cause"), "signals": trial.get("signals"),
+                "checks": trial.get("checks"), "summary": phone.get("summary"), "turns": phone.get("turns"),
+                "errorTail": metrics.get("errorTail"), "toolCalls": metrics.get("toolCalls"), "traceId": phone.get("traceId"),
+            })
+        return {**{k: v for k, v in detail.items() if k != "trials"}, "failures": failures[:60]}
+
+    def phone_lab_stop(self, args: dict[str, Any]) -> Any:
+        _only_keys(args, {"experiment_id"})
+        return self.gateway.lab_stop(_required_id(args, "experiment_id", LAB_EXPERIMENT_ID))
 
 
 def _with_sessions_inventory(result: Any) -> Any:

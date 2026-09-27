@@ -109,6 +109,8 @@ class FakePhone:
                 "transcript": transcript,
             }
         if op == "trust.complete":
+            if getattr(self, "rejected", False):
+                raise BridgeOperationError("TRUST_REJECTED")
             if not self.allowed:
                 raise BridgeOperationError("PHONE_CONFIRMATION_REQUIRED")
             transcript = trust_transcript(
@@ -271,6 +273,9 @@ def test_pc_trust_requires_phone_confirmation_and_never_persists_session_secret(
     assert begun["state"] == "CONFIRMATION_REQUIRED"
     assert begun["confirmationRequired"] is True
     assert begun["phoneConfirmation"] == "Allow this PC"
+    assert len(begun["matchCode"]) == 6 and begun["matchCode"].isdigit()
+    assert coordinator.status("dev_test")["matchCode"] == begun["matchCode"]
+    assert coordinator.status("dev_test")["pcLabel"] == coordinator.pc_label
     assert session.credential is None
 
     waiting = coordinator.complete("dev_test")
@@ -359,3 +364,32 @@ def test_revoke_forgets_local_record_while_phone_is_offline(tmp_path):
     assert result["phoneRevocationConfirmed"] is False
     assert result["phoneRevocationError"] == "DEVICE_DISCONNECTED"
     assert store.record("dev_test") is None
+
+
+def test_trust_match_code_is_shared_with_the_phone():
+    # Same transcript and code as GatewayTrustMatchCodeTest on the phone.
+    from cyclone_device_gateway.desktop_runtime.trust_v33 import trust_match_code, trust_transcript
+
+    transcript = trust_transcript(
+        challenge_id="challenge-1", phone_id="phone-1", pc_id="pc-1",
+        pc_nonce="pcnonce", phone_nonce="phonenonce", expires_at_ms=1700000000000,
+    )
+    assert trust_match_code(transcript) == "173715"
+
+
+def test_not_now_on_the_phone_is_a_plain_rejection_and_clears_the_request(tmp_path):
+    phone = FakePhone()
+    session = FakeSession(phone)
+    coordinator = PCTrustCoordinator(FakeFleet(session), PCTrustStore(tmp_path), pc_label="Cyclone Test PC")
+    coordinator.begin("dev_test")
+    phone.rejected = True
+    import pytest
+
+    from cyclone_device_gateway.desktop_runtime.models import DesktopRuntimeError
+
+    with pytest.raises(DesktopRuntimeError) as err:
+        coordinator.complete("dev_test")
+    assert err.value.code == "TRUST_REJECTED"
+    assert "Not now" in err.value.safe_message
+    status = coordinator.status("dev_test")
+    assert status["state"] == "UNPAIRED" and status["matchCode"] is None

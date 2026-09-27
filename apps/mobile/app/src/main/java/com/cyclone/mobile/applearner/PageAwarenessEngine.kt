@@ -40,9 +40,12 @@ data class PageContext(
     val lastSeenAt: Long,
     val previewPath: String? = null,
     val isNew: Boolean = false,
+    // Transient capture provenance; the learned page store does not persist this as current state.
+    val observation: com.cyclone.mobile.runtime.session.ObservationIdentity? = null,
 ) {
     fun toAgentJson(goal: String? = null, maxControls: Int = 36): JSONObject = JSONObject()
         .put("protocol", "cyclone-page-context-v28")
+        .put("observation", observation?.toJson() ?: JSONObject.NULL)
         .put("pageKey", pageKey)
         .put("package", packageName)
         .put("class", className ?: JSONObject.NULL)

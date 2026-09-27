@@ -23,6 +23,7 @@ import com.cyclone.mobile.agent.contract.AgentSearchResult
 import com.cyclone.mobile.agent.contract.AgentSemanticVerification
 import com.cyclone.mobile.agent.contract.AgentStateDelta
 import com.cyclone.mobile.agent.contract.AgentVerificationStatus
+import com.cyclone.mobile.agent.recovery.ActionOutcomePolicy
 import com.cyclone.mobile.ai.CycloneAiAccessPolicy
 import com.cyclone.mobile.ai.CycloneAiAccessProfileStore
 import com.cyclone.mobile.gateway.GatewayAppGraphAdapter
@@ -45,6 +46,7 @@ import java.util.UUID
 /** Native in-process eyes/hands/verification contract for the standalone mobile agent. */
 interface CycloneAgentEnvironmentApi {
     fun observe(goal: String = ""): AgentObservationResult
+    fun observeWithImage(goal: String): AgentObservationResult = observe(goal)
     fun locate(goal: String): AgentSearchResult
     fun search(query: String, goal: String = query): AgentSearchResult
     fun inspect(elementId: String): AgentInspectResult
@@ -52,17 +54,31 @@ interface CycloneAgentEnvironmentApi {
     fun act(tool: String, params: JSONObject = JSONObject(), goal: String = ""): AgentActionEnvelope
     /** Oldest to newest. takeLast(n) always returns the most recent outcomes. */
     fun history(): List<AgentActionEnvelope>
+    fun invalidateObservation() {}
     fun photoEffect(): PhotoEffectLedger.State = PhotoEffectLedger.State.NOT_ATTEMPTED
     fun brainRecall(goal: String): AgentKnowledgeResult
     fun knownRoutes(goal: String): AgentKnowledgeResult
+    /** Every control of the current observation (the page card holds a shortlist). Empty when none is current. */
+    fun allControls(): List<AgentElementCandidate> = emptyList()
+    /** The value of an ordinary editable field in the current observation; never secrets or the address bar. */
+    fun fieldValue(elementId: String): String? = null
 }
 
 class CycloneAgentEnvironment internal constructor(
     private val runtime: CycloneAgentRuntimePort,
     private val userTaskGoal: String? = null,
+    private val revalidateTargets: Boolean = false,
+    private val projectionMode: ObservationProjectionMode = ObservationProjectionMode.AUTHORITATIVE,
+    /** A Cyclone Mind mission: the owner's own request may type into ordinary fields ([OwnerMissionTyping]). */
+    private val ownerMission: Boolean = false,
 ) : CycloneAgentEnvironmentApi {
-    constructor(context: Context, execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT, userTaskGoal: String? = null) :
-        this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal)
+    constructor(
+        context: Context,
+        execution: com.cyclone.mobile.runtime.session.ExecutionContext = com.cyclone.mobile.runtime.session.ExecutionContext.DEFAULT,
+        userTaskGoal: String? = null,
+        ownerMission: Boolean = false,
+    ) : this(AndroidCycloneAgentRuntimePort(context.applicationContext, execution), userTaskGoal, revalidateTargets = true,
+        ownerMission = ownerMission)
 
     private val scope = AgentObservationScope()
     private val actionHistory = ArrayDeque<AgentActionEnvelope>()
@@ -75,15 +91,27 @@ class CycloneAgentEnvironment internal constructor(
     override fun observe(goal: String): AgentObservationResult = synchronized(this) {
         runCatching {
             val observation = runtime.capture()
-            val generation = scope.publish(observation.id)
+            val generation = scope.publish(observation.id, observation.generation.takeIf { it > 0 })
             AgentObservationResult(page = pageCard(observation, goal, generation, actionable = true))
         }.getOrElse { AgentObservationResult(failure = failureFromThrowable(it, AgentFailureLayer.OBSERVATION)) }
+    }
+
+    override fun observeWithImage(goal: String): AgentObservationResult = synchronized(this) {
+        runCatching {
+            val observation = runtime.captureWithImage()
+            val generation = scope.publish(observation.id, observation.generation.takeIf { it > 0 })
+            AgentObservationResult(page = pageCard(observation, goal, generation, actionable = true),
+                image = observation.payload.optJSONObject("screenshot")?.let { JSONObject(it.toString()) })
+        }.getOrElse {
+            invalidateObservation()
+            AgentObservationResult(failure = failureFromThrowable(it, AgentFailureLayer.OBSERVATION))
+        }
     }
 
     override fun locate(goal: String): AgentSearchResult = synchronized(this) {
         runCatching {
             val observation = runtime.capture()
-            val generation = scope.publish(observation.id)
+            val generation = scope.publish(observation.id, observation.generation.takeIf { it > 0 })
             AgentSearchResult(
                 page = pageCard(observation, goal, generation, actionable = true),
                 observationId = observation.id,
@@ -111,7 +139,7 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
         runCatching {
-            val observation = currentVisibleObservation() ?: runtime.capture().also { scope.publish(it.id) }
+            val observation = currentVisibleObservation() ?: runtime.capture().also { scope.publish(it.id, it.generation.takeIf { it > 0 }) }
             val generation = scope.generation
             AgentSearchResult(
                 page = pageCard(observation, goal, generation, actionable = true),
@@ -192,15 +220,17 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
 
-        val before = currentVisibleObservation()
+        var before = currentVisibleObservation()
             ?: return@synchronized failureEnvelope(
                 tool,
                 effectiveGoal,
                 staleFailure("Fresh observe/locate/search is required before every mutation."),
             )
-        val visibleGeneration = scope.generation
-        val rawElementId = elementId(params, before)
-        if (tool in ELEMENT_ID_REQUIRED_TOOLS && rawElementId == null) {
+        var visibleGeneration = scope.generation
+        var rawElementId = elementId(params, before)
+        // Plan 21 (Hands): a Mind mission may type into the text box that has focus, without a ref.
+        val focusedType = ownerMission && tool == "phone.type" && rawElementId == null && params.optBoolean("focused")
+        if (tool in ELEMENT_ID_REQUIRED_TOOLS && rawElementId == null && !focusedType) {
             return@synchronized failureEnvelope(
                 tool,
                 effectiveGoal,
@@ -240,13 +270,33 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
 
+        // Re-observe once at the execution boundary, then bind a new ID. Never repair coordinates.
+        if (revalidateTargets && rawElementId != null) {
+            val fresh = runCatching { runtime.capture() }.getOrElse {
+                scope.expire()
+                return@synchronized failureEnvelope(tool, effectiveGoal,
+                    failureFromThrowable(it, AgentFailureLayer.OBSERVATION), before, visibleGeneration)
+            }
+            val report = CurrentTargetRevalidation.resolve(before, fresh, rawElementId)
+            scope.expire()
+            if (report.elementId == null) return@synchronized failureEnvelope(tool, effectiveGoal,
+                AgentFailure(AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+                    "Target revalidation: ${report.status.name}. Inspect a fresh same-scope control.", report.status.name),
+                before, visibleGeneration)
+            before = fresh
+            visibleGeneration = scope.publish(fresh.id, fresh.generation.takeIf { it > 0 })
+            rawElementId = report.elementId
+        }
         val normalizedParams = JSONObject(params.toString())
-            .put("observationId", before.id)
             .put("fastPath", true)
+        if (com.cyclone.mobile.fastpath.MutationGrounding.requiredFor(tool)) {
+            normalizedParams.put("observationId", before.id)
+        }
         if (before.execution.sessionId != "default-foreground") {
             normalizedParams.put("executionGeneration", before.payload.optLong("executionGeneration"))
         }
         if (rawElementId != null) {
+            if (revalidateTargets) normalizedParams.remove("selector")
             val evidence = runCatching { runtime.element(before, rawElementId) }.getOrElse { error ->
                 return@synchronized failureEnvelope(
                     tool,
@@ -270,11 +320,28 @@ class CycloneAgentEnvironment internal constructor(
                 normalizedParams.remove("user_authorized")
                 normalizedParams.remove("selector")
                 normalizedParams.put("currentObservationId", before.id)
-                if (TaskTypingAuthorization.allows(userTaskGoal, before.page.packageName, evidence,
-                        normalizedParams.optString("value", normalizedParams.optString("text")))) {
+                val value = normalizedParams.optString("value", normalizedParams.optString("text"))
+                if (TaskTypingAuthorization.allows(userTaskGoal, before.page.packageName, evidence, value) ||
+                    ownerMission && OwnerMissionTyping.allows(evidence, value)) {
                     normalizedParams.put("user_authorized", true)
                 }
             }
+        }
+
+        if (focusedType) {
+            val value = normalizedParams.optString("value", normalizedParams.optString("text"))
+            val focusedField = before.elements.values.firstOrNull {
+                it.evidence.optBoolean("focused") && it.evidence.optBoolean("editable") && it.source != "raw_accessibility"
+            } ?: before.elements.values.firstOrNull { it.evidence.optBoolean("focused") && it.evidence.optBoolean("editable") }
+            normalizedParams.remove("user_authorized")
+            normalizedParams.remove("selector")
+            normalizedParams.remove("elementId")
+            normalizedParams.put("focused", true).put("currentObservationId", before.id)
+            if (focusedField == null) return@synchronized failureEnvelope(tool, effectiveGoal,
+                AgentFailure(AgentFailureClass.TARGET_NOT_FOUND, AgentFailureLayer.OBSERVATION, false,
+                    "No text box has focus. Tap the box first, then type with focused=true.", "NO_FOCUSED_FIELD"),
+                before, visibleGeneration)
+            if (OwnerMissionTyping.allows(focusedField.evidence, value)) normalizedParams.put("user_authorized", true)
         }
 
         runtime.readinessFailure()?.let { failure ->
@@ -313,7 +380,7 @@ class CycloneAgentEnvironment internal constructor(
 
         val executorAssertionFailed = result.error?.code == PhoneToolErrorCode.ASSERTION_FAILED
         val androidExecutionOk = result.ok || executorAssertionFailed
-        val after = if (androidExecutionOk) {
+        val after = if (ActionOutcomePolicy.shouldCaptureAfter(result.error?.code)) {
             runCatching { runtime.captureAfter(tool, normalizedParams, before) }.getOrNull()
         } else {
             null
@@ -326,7 +393,8 @@ class CycloneAgentEnvironment internal constructor(
             after = after,
             androidExecutionOk = androidExecutionOk,
             executorAssertionFailed = executorAssertionFailed,
-            explicitExpectation = normalizedParams.optJSONObject("expect") != null,
+            explicitExpectation = normalizedParams.optJSONObject("expect") != null &&
+                (result.payload as? JSONObject)?.optBoolean("expectationVerified") == true,
         )
 
         val executionFailure = if (!androidExecutionOk) failureFromPhoneResult(result) else null
@@ -395,10 +463,36 @@ class CycloneAgentEnvironment internal constructor(
             afterObservationId = after?.id,
             observationGeneration = visibleGeneration,
             learning = learning,
-            safeMessage = failure?.message,
+            // Plan 21 (Hands): typed text the executor could not read back is reported, never passed off as typed.
+            safeMessage = failure?.message ?: (result.payload as? JSONObject)?.takeIf { tool in setOf("phone.type", "phone.replace_text") }
+                ?.let { payload -> "TYPE_METHOD=${payload.optString("method", "set_text")}" +
+                    if (payload.has("textVerified") && !payload.optBoolean("textVerified")) " TEXT_UNVERIFIED" else "" },
+            executorInvoked = true,
         )
         remember(envelope)
         envelope
+    }
+
+    override fun allControls(): List<AgentElementCandidate> = synchronized(this) {
+        val observation = currentVisibleObservation() ?: return@synchronized emptyList()
+        val controls = runtime.allControls(observation)
+        (0 until controls.length()).mapNotNull { index ->
+            val evidence = controls.optJSONObject(index) ?: return@mapNotNull null
+            val id = evidence.optString("elementId").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            AgentElementCandidate(id, observation.id, evidence.optString("label"), evidence.optString("semanticName"),
+                evidence.optString("role"), evidence.optString("source"), 0.0, evidence,
+                evidence.optInt("elementIndex", -1).takeIf { it > 0 })
+        }
+    }
+
+    override fun fieldValue(elementId: String): String? = synchronized(this) {
+        val observation = currentVisibleObservation() ?: return@synchronized null
+        runtime.fieldValue(observation, elementId)
+    }
+
+    override fun invalidateObservation() = synchronized(this) {
+        scope.expire()
+        actionHistory.clear() // Previous after-states cannot satisfy post-handoff completion.
     }
 
     override fun history(): List<AgentActionEnvelope> = synchronized(this) { actionHistory.toList() }
@@ -449,7 +543,18 @@ class CycloneAgentEnvironment internal constructor(
         }
     }
 
-    private fun pageCard(
+    private fun pageCard(observation: GatewayObservation, goal: String, generation: Long, actionable: Boolean): AgentPageCard {
+        val shared = ObservationProjections.pageCard(observation, goal, generation, actionable)
+        if (projectionMode == ObservationProjectionMode.SHADOW) {
+            val legacy = legacyPageCard(observation, goal, generation, actionable)
+            legacy.pageEvidence.put("projectionShadow", ObservationProjections.shadow(legacy, shared))
+            return legacy
+        }
+        shared.pageEvidence.put("projectionMode", "authoritative")
+        return shared
+    }
+
+    private fun legacyPageCard(
         observation: GatewayObservation,
         goal: String,
         generation: Long,
@@ -465,8 +570,9 @@ class CycloneAgentEnvironment internal constructor(
 
         val semantic = observation.payload.optJSONArray("semanticControls") ?: JSONArray()
         for (index in 0 until semantic.length()) {
-            if (byId.size >= PAGE_CARD_CONTROL_LIMIT) break
             val evidence = semantic.optJSONObject(index) ?: continue
+            if (byId.size >= PAGE_CARD_CONTROL_LIMIT &&
+                !com.cyclone.mobile.ai.CookieInterruptionPolicy.isRejectLabel(evidence.optString("label"))) continue
             val id = evidence.optString("elementId")
             if (id.isBlank() || id in byId) continue
             byId[id] = AgentElementCandidate(
@@ -482,7 +588,7 @@ class CycloneAgentEnvironment internal constructor(
             )
         }
 
-        return AgentPageCard(
+        val legacy = AgentPageCard(
             observationId = observation.id,
             generation = generation,
             actionable = actionable,
@@ -498,11 +604,18 @@ class CycloneAgentEnvironment internal constructor(
             pageSummary = copyObject(observation.payload.optJSONObject("pageSummary")),
             pageText = copyObject(observation.payload.optJSONObject("pageText")),
             pageEvidence = copyObject(observation.payload.optJSONObject("pageEvidence")),
-            controls = byId.values.toList(),
+            controls = byId.values.sortedByDescending { com.cyclone.mobile.ai.CookieInterruptionPolicy.isRejectLabel(it.label) }
+                .take(PAGE_CARD_CONTROL_LIMIT),
             nextHopHints = copyArray(observation.payload.optJSONArray("nextHopHints")),
             perceptionMode = observation.payload.optString("perceptionMode", "a11y").ifBlank { "a11y" },
             treeUseful = observation.payload.optBoolean("treeUseful", true),
+            sessionId = observation.execution.sessionId,
+            displayId = observation.execution.displayId,
+            legacyPage = observation.page,
+            observation = com.cyclone.mobile.runtime.session.ObservationIdentity.fromPayload(observation.id, generation,
+                observation.execution, observation.capturedAt, observation.payload).copy(freshness = if (actionable) "current" else "stale"),
         )
+        return legacy
     }
 
     private fun candidateFrom(item: JSONObject, evidence: JSONObject) = AgentElementCandidate(
@@ -610,7 +723,7 @@ class CycloneAgentEnvironment internal constructor(
     private fun failureFromPhoneResult(result: PhoneToolResult): AgentFailure {
         val error = result.error
         val code = error?.code
-        val message = error?.message ?: "Canonical phone executor did not accept the action."
+        val message = com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(code?.name)
         return when (code) {
             PhoneToolErrorCode.FRESH_OBSERVATION_REQUIRED,
             PhoneToolErrorCode.STALE_ELEMENT,
@@ -636,12 +749,31 @@ class CycloneAgentEnvironment internal constructor(
                 message,
                 code.name,
             )
-            PhoneToolErrorCode.CAPABILITY_UNAVAILABLE,
-            PhoneToolErrorCode.APP_NOT_FOUND,
-            -> AgentFailure(
+            PhoneToolErrorCode.CAPABILITY_UNAVAILABLE -> AgentFailure(
                 AgentFailureClass.CAPABILITY_UNAVAILABLE,
                 AgentFailureLayer.CAPABILITY,
-                false,
+                true,
+                message,
+                code.name,
+            )
+            PhoneToolErrorCode.APP_NOT_FOUND -> AgentFailure(
+                AgentFailureClass.TARGET_NOT_FOUND,
+                AgentFailureLayer.EXECUTION,
+                true,
+                message,
+                code.name,
+            )
+            PhoneToolErrorCode.WORKSPACE_SCOPE_CONFLICT -> AgentFailure(
+                AgentFailureClass.EXECUTION_FAILED,
+                AgentFailureLayer.EXECUTION,
+                true,
+                message,
+                code.name,
+            )
+            PhoneToolErrorCode.TARGET_SCOPE_MISMATCH -> AgentFailure(
+                AgentFailureClass.STALE_OBSERVATION,
+                AgentFailureLayer.OBSERVATION,
+                true,
                 message,
                 code.name,
             )
@@ -685,58 +817,85 @@ class CycloneAgentEnvironment internal constructor(
         error: Throwable,
         defaultLayer: AgentFailureLayer,
     ): AgentFailure {
+        // WorkspaceRuntime still exposes these fixed codes as IllegalStateException messages.
+        // Preserve the code, never the arbitrary message suffix (which may contain screen data).
+        val workspaceCode = when (error) {
+            is GatewayProtocolException -> error.code
+            is IllegalStateException -> error.message?.substringBefore(':')?.trim()
+            else -> null
+        }
+        when (workspaceCode) {
+            "OBSERVATION_CHANGED_DURING_CAPTURE" -> return AgentFailure(AgentFailureClass.AFTER_OBSERVATION_FAILED,
+                AgentFailureLayer.OBSERVATION, true, "The screen or task scope changed during capture; retry a fresh same-scope observation.", workspaceCode)
+            "BACKEND_DISCONNECTED" -> return AgentFailure(AgentFailureClass.DEVICE_DISCONNECTED,
+                AgentFailureLayer.OBSERVATION, false, "The workspace backend is disconnected.", workspaceCode)
+            "STALE_SESSION" -> return AgentFailure(AgentFailureClass.STALE_OBSERVATION,
+                AgentFailureLayer.OBSERVATION, false, "The requested workspace session is no longer available.", workspaceCode)
+            "FOREGROUND_REQUIRED" -> return AgentFailure(AgentFailureClass.TARGET_NOT_FOUND,
+                AgentFailureLayer.OBSERVATION, false, "The target app is not observable on this task's display.", workspaceCode)
+            "ACCESSIBILITY_NOT_CONNECTED" -> return AgentFailure(AgentFailureClass.ACCESSIBILITY_UNAVAILABLE,
+                AgentFailureLayer.OBSERVATION, false, "The Accessibility service is disconnected.", workspaceCode)
+        }
+        if (error is com.cyclone.mobile.runtime.session.SessionIdentityException) return AgentFailure(
+            AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+            "The requested session/display identity is unavailable or changed.", error.errorClass)
+        if (error is SecurityException) return AgentFailure(AgentFailureClass.ACCESSIBILITY_UNAVAILABLE,
+            AgentFailureLayer.OBSERVATION, false, "Observation permission is unavailable.", "OBSERVATION_PERMISSION_REQUIRED")
         if (error is GatewayProtocolException) {
             return when (error.code) {
+                "SESSION_REQUIRED", "SESSION_NOT_FOUND", "SESSION_UNKNOWN", "SESSION_DISPLAY_MISMATCH", "OBSERVATION_SESSION_MISMATCH" ->
+                    AgentFailure(AgentFailureClass.STALE_OBSERVATION, AgentFailureLayer.OBSERVATION, false,
+                        "The requested session/display identity is unavailable or changed.", error.code)
                 "STALE_OBSERVATION", "STALE_ELEMENT" -> staleFailure(
-                    error.message ?: "Observation is stale.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                 )
                 "ELEMENT_NOT_FOUND" -> AgentFailure(
                     AgentFailureClass.TARGET_NOT_FOUND,
                     AgentFailureLayer.OBSERVATION,
                     true,
-                    error.message ?: "Target not found.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "POLICY_DENIED" -> AgentFailure(
                     AgentFailureClass.POLICY_DENIED,
                     AgentFailureLayer.POLICY,
                     false,
-                    error.message ?: "Policy denied action.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "ACCESSIBILITY_NOT_CONNECTED" -> AgentFailure(
                     AgentFailureClass.ACCESSIBILITY_UNAVAILABLE,
                     AgentFailureLayer.DEVICE,
                     true,
-                    error.message ?: "Accessibility is unavailable.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "CAPABILITY_UNAVAILABLE" -> AgentFailure(
                     AgentFailureClass.CAPABILITY_UNAVAILABLE,
                     AgentFailureLayer.CAPABILITY,
-                    false,
-                    error.message ?: "Capability unavailable.",
+                    true,
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "AUTH_REJECTED" -> AgentFailure(
                     AgentFailureClass.AUTH_REQUIRED,
                     AgentFailureLayer.POLICY,
                     true,
-                    error.message ?: "Authorization required.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 "TIMEOUT" -> AgentFailure(
                     AgentFailureClass.TIMEOUT,
                     defaultLayer,
                     true,
-                    error.message ?: "Operation timed out.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
                 else -> AgentFailure(
                     AgentFailureClass.EXECUTION_FAILED,
                     defaultLayer,
                     true,
-                    error.message ?: "Operation failed safely.",
+                    com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(error.code),
                     error.code,
                 )
             }
@@ -745,15 +904,15 @@ class CycloneAgentEnvironment internal constructor(
             AgentFailureClass.EXECUTION_FAILED,
             defaultLayer,
             true,
-            error.message ?: error.javaClass.simpleName,
+            com.cyclone.mobile.agent.contract.HarnessFailureCopy.describe(null),
         )
     }
 
     private fun remember(envelope: AgentActionEnvelope) {
         actionHistory.addLast(
             envelope.copy(
-                before = envelope.before?.copy(controls = emptyList()),
-                after = envelope.after?.copy(controls = emptyList()),
+                before = envelope.before?.copy(controls = emptyList(), legacyPage = null),
+                after = envelope.after?.copy(controls = emptyList(), legacyPage = null),
             ),
         )
         while (actionHistory.size > HISTORY_LIMIT) actionHistory.removeFirst()
@@ -816,12 +975,21 @@ class CycloneAgentEnvironment internal constructor(
             "phone.home",
             "phone.open_app",
             "phone.launch_intent",
+            "phone.wait_for",
+            "phone.set_alarm",
+            "phone.set_timer",
+            "phone.open_settings",
+            "phone.submit_text",
+            "phone.tap_point",
+            "phone.swipe",
+            "phone.open_notification",
         )
         private val ELEMENT_ID_REQUIRED_TOOLS = setOf(
             "phone.click",
             "phone.long_press",
             "phone.type",
             "phone.replace_text",
+            "phone.submit_text",
         )
         private val ELEMENT_SCOPED_TOOLS = ELEMENT_ID_REQUIRED_TOOLS + "phone.scroll"
         private val SELECTOR_KEYS = setOf(
@@ -851,9 +1019,9 @@ internal class AgentObservationScope {
     var generation: Long = 0
         private set
 
-    fun publish(id: String): Long {
+    fun publish(id: String, sourceGeneration: Long? = null): Long {
         require(id.isNotBlank())
-        generation += 1
+        generation = sourceGeneration ?: (generation + 1)
         observationId = id
         return generation
     }
@@ -866,6 +1034,7 @@ internal class AgentObservationScope {
 internal interface CycloneAgentRuntimePort {
     fun cameraImages(): Map<Long, Long>? = null
     fun capture(): GatewayObservation
+    fun captureWithImage(): GatewayObservation = capture()
     fun current(): GatewayObservation?
     fun search(observation: GatewayObservation, query: String, limit: Int): JSONArray
     fun element(observation: GatewayObservation, elementId: String): JSONObject
@@ -902,6 +1071,8 @@ internal interface CycloneAgentRuntimePort {
 
     fun brainRecall(goal: String): JSONObject
     fun knownRoutes(goal: String): JSONObject
+    fun allControls(observation: GatewayObservation): JSONArray = JSONArray()
+    fun fieldValue(observation: GatewayObservation, elementId: String): String? = null
 }
 
 private class AndroidCycloneAgentRuntimePort(
@@ -923,6 +1094,11 @@ private class AndroidCycloneAgentRuntimePort(
         JSONObject().put("sessionId", execution.sessionId).put("displayId", execution.displayId), params)
 
     override fun capture(): GatewayObservation = GatewayObservationAdapter.capture(context, scoped())
+    override fun allControls(observation: GatewayObservation): JSONArray = GatewayObservationAdapter.controls(observation)
+    override fun fieldValue(observation: GatewayObservation, elementId: String): String? =
+        GatewayObservationAdapter.fieldValue(observation, elementId)
+    override fun captureWithImage(): GatewayObservation = GatewayObservationAdapter.capture(context,
+        scoped(JSONObject().put("includeScreenshot", true).put("includeScreenshotBase64", true)))
     override fun current(): GatewayObservation? = GatewayObservationStore.current(execution.sessionId)
 
     override fun search(
@@ -955,8 +1131,7 @@ private class AndroidCycloneAgentRuntimePort(
             "Cyclone Accessibility is not connected.",
             "ACCESSIBILITY_UNAVAILABLE",
         )
-        (if (background) !com.cyclone.mobile.runtime.background.WorkspaceRuntime.ownsInput(execution.sessionId)
-            else DeviceState.controller != DeviceState.Controller.AGENT) -> AgentFailure(
+        (if (background) !backgroundInput() else DeviceState.controller != DeviceState.Controller.AGENT) -> AgentFailure(
             AgentFailureClass.HUMAN_HAS_CONTROL,
             AgentFailureLayer.DEVICE,
             true,
@@ -973,6 +1148,18 @@ private class AndroidCycloneAgentRuntimePort(
         else -> null
     }
 
+    /**
+     * Plan 28: a Mind mission's background screen whose input was paused while no switch runs has lost it by accident
+     * (nobody else holds it): take it back instead of waiting for an owner hand-back that will never come.
+     */
+    private fun backgroundInput(): Boolean {
+        val runtime = com.cyclone.mobile.runtime.background.WorkspaceRuntime
+        if (runtime.ownsInput(execution.sessionId)) return true
+        val plane = com.cyclone.mobile.runtime.plane.MissionPlanes.ui.value
+        if (plane?.backgroundSessionId != execution.sessionId || plane.switching || plane.waitingFor != null) return false
+        return runtime.reclaim(execution.sessionId) && runtime.ownsInput(execution.sessionId)
+    }
+
     override fun policyFailure(tool: String, params: JSONObject): AgentFailure? {
         val decision = CycloneAiAccessPolicy.evaluate(
             CycloneAiAccessProfileStore.read(context),
@@ -981,7 +1168,7 @@ private class AndroidCycloneAgentRuntimePort(
         )
         if (decision.allowed) return null
         val localConfirmation = decision.reasonCode == "LOCAL_CONFIRMATION_REQUIRED"
-        if (localConfirmation && tool in setOf("phone.click", "phone.long_press")) {
+        if (localConfirmation && tool in setOf("phone.click", "phone.long_press", "phone.submit_text")) {
             val selector = params.optJSONObject("selector") ?: params
             val labels = listOf(
                 selector.optString("text"),
@@ -993,9 +1180,12 @@ private class AndroidCycloneAgentRuntimePort(
                 selector.optString("resourceId"),
             ).map(String::trim).filter(String::isNotBlank)
             val gateClass = GateClassifier.classify(tool, labels)?.let(ClickGateIntercept::overlayClass)
+                ?: if (tool == "phone.submit_text") com.cyclone.mobile.ui.overlay.OverlayGateClass.SEND else null
             if (gateClass != null) {
                 // Policy may let an explicitly confirmed exact action proceed, but does not consume
                 // the grant. The final Accessibility click interceptor consumes the one-shot token.
+                // Enter has no click interceptor, so its one-shot grant is consumed here.
+                if (tool == "phone.submit_text" && OverlayChromeRuntime.consumeGateApproval(gateClass, tool, labels)) return null
                 if (OverlayChromeRuntime.hasGateApproval(gateClass, tool, labels)) return null
                 OverlayChromeRuntime.registerGateChallenge(gateClass, tool, labels)
                 OverlayChromeRuntime.enterGate(gateClass)

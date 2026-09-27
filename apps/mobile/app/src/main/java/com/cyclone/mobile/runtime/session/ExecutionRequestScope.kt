@@ -10,9 +10,12 @@ object ExecutionRequestScope {
         if (params.has("executionContext") && params.opt("executionContext") !is JSONObject) {
             throw SessionIdentityException("Invalid executionContext")
         }
-        val nested = params.optJSONObject("executionContext")
-        val session = string(params, "sessionId")
-        val display = integer(params, "displayId")
+        val scoped = JSONObject(params.toString())
+        copyWireAliases(scoped)
+        scoped.optJSONObject("executionContext")?.let(::copyWireAliases)
+        val nested = scoped.optJSONObject("executionContext")
+        val session = string(scoped, "sessionId")
+        val display = integer(scoped, "displayId")
         val nestedSession = nested?.let { string(it, "sessionId") }
         val nestedDisplay = nested?.let { integer(it, "displayId") }
         if (session != null && nestedSession != null && session != nestedSession) {
@@ -45,16 +48,22 @@ object ExecutionRequestScope {
         }
     }
 
+    fun requireUi(params: JSONObject): ExecutionContext = SessionContract.requireUi(params).let {
+        ExecutionContext(it.sessionId, it.displayId)
+    }
+
     /** Carry outer identity through adapters instead of dropping it while normalizing params. */
     fun merge(envelope: JSONObject, params: JSONObject): JSONObject {
         val out = JSONObject(params.toString())
-        for (key in listOf("sessionId", "displayId", "executionContext")) {
+        for (key in listOf("sessionId", "displayId", "executionContext", "session_id", "display_id")) {
             if (!envelope.has(key)) continue
             if (out.has(key) && out.get(key).toString() != envelope.get(key).toString()) {
                 throw SessionIdentityException("Conflicting $key in request envelope and params")
             }
             out.put(key, envelope.get(key))
         }
+        copyWireAliases(out)
+        out.optJSONObject("executionContext")?.let(::copyWireAliases)
         return out
     }
 
@@ -71,6 +80,22 @@ object ExecutionRequestScope {
             throw SessionIdentityException("Conflicting $key in params and execution context")
         }
         out.put(key, value)
+    }
+
+    internal fun copyWireAliases(json: JSONObject) {
+        copyAlias(json, "session_id", "sessionId")
+        copyAlias(json, "display_id", "displayId")
+    }
+
+    private fun copyAlias(json: JSONObject, snake: String, camel: String) {
+        if (!json.has(snake)) return
+        if (json.has(camel)) {
+            if (json.get(camel).toString() != json.get(snake).toString()) {
+                throw SessionIdentityException("Conflicting $camel aliases")
+            }
+            return
+        }
+        json.put(camel, json.get(snake))
     }
 
     private fun string(json: JSONObject, key: String): String? {

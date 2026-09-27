@@ -13,6 +13,7 @@ import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.cyclone.mobile.CycloneAccessibilityService
+import com.cyclone.mobile.DeviceState
 
 /**
  * One read-only source for the permission setup UI.
@@ -28,15 +29,28 @@ import com.cyclone.mobile.CycloneAccessibilityService
 object CyclonePermissionSetup {
     private const val AGENT_KEYBOARD = "com.mobilerun.portal.input.MobilerunKeyboardIME"
 
-    fun primaryControlEnabled(context: Context): Boolean = safePermissionCheck {
-        accessibilityServiceEnabled(context, CycloneAccessibilityService::class.java.name)
-    }
+    fun primaryControlEnabled(context: Context): Boolean = accessibilitySettingEnabled(context)
 
     /**
      * Compatibility mirror for older V3.2 UI code. Cyclone no longer exposes a second Android
      * Accessibility service, so "enhanced" readiness follows the canonical phone-control grant.
      */
     fun enhancedControlEnabled(context: Context): Boolean = primaryControlEnabled(context)
+
+    fun accessibilitySettingEnabled(context: Context): Boolean = safePermissionCheck {
+        accessibilityServiceEnabled(context, CycloneAccessibilityService::class.java.name)
+    }
+
+    fun accessibilityServiceBound(): Boolean = safePermissionCheck {
+        CycloneAccessibilityService.instance != null || DeviceState.accessibilityConnected
+    }
+
+    fun phoneControlSnapshot(context: Context): PhoneControlSnapshot = PhoneControlSnapshot(
+        settingEnabled = accessibilitySettingEnabled(context),
+        serviceBound = accessibilityServiceBound(),
+    )
+
+    fun phoneControlReady(context: Context): Boolean = phoneControlSnapshot(context).ready
 
     fun notificationAccessEnabled(context: Context): Boolean = safePermissionCheck {
         NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
@@ -54,6 +68,16 @@ object CyclonePermissionSetup {
             context,
             Manifest.permission.READ_CALENDAR,
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Plan 29: add the events the owner asks for, without opening a calendar app. */
+    fun calendarWriteEnabled(context: Context): Boolean = safePermissionCheck {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Plan 29: look up a person's number or address for a mission, without opening the contacts app. */
+    fun contactsEnabled(context: Context): Boolean = safePermissionCheck {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
     }
 
     fun overlayEnabled(context: Context): Boolean = safePermissionCheck {

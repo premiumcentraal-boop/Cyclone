@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,8 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -42,7 +41,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -75,6 +73,12 @@ private enum class BuilderStage(val title: String, val eyebrow: String) {
     ACTIONS("What should Cyclone do?", "3 of 4 · Then"),
     REVIEW("Name and review", "4 of 4 · Check"),
 }
+
+private val repeatOptions = listOf(
+    "Once" to null,
+    "Daily" to 86_400_000L,
+    "Weekly" to 604_800_000L,
+)
 
 @Composable
 fun V32RoutineBuilder(onBack: () -> Unit, onSave: (V32AutomationDraft) -> Unit) {
@@ -256,22 +260,33 @@ private fun V32TriggerDetailsStep(
             V32TriggerChoice.SCHEDULE -> item {
                 CycloneSimpleCard {
                     Text("Time", fontWeight = FontWeight.Bold)
-                    Button(onClick = {
-                        val initial = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, 1) }
-                        TimePickerDialog(context, { _, hour, minute ->
-                            val next = Calendar.getInstance().apply {
-                                set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, minute); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-                                if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
-                            }
-                            onScheduledAt(next.timeInMillis)
-                        }, initial.get(Calendar.HOUR_OF_DAY), initial.get(Calendar.MINUTE), true).show()
-                    }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Rounded.Schedule, null); Spacer(Modifier.size(6.dp)); Text(scheduledAt?.let { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(it)) } ?: "Choose time") }
-                    Text("Repeat", fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Once" to null, "Daily" to 86_400_000L, "Weekly" to 604_800_000L).forEach { (label, value) ->
-                            FilterChip(selected = repeatMillis == value, onClick = { onRepeatMillis(value) }, label = { Text(label) })
-                        }
+                    Button(
+                        onClick = {
+                            val initial = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, 1) }
+                            TimePickerDialog(context, { _, hour, minute ->
+                                val next = Calendar.getInstance().apply {
+                                    set(Calendar.HOUR_OF_DAY, hour)
+                                    set(Calendar.MINUTE, minute)
+                                    set(Calendar.SECOND, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                    if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
+                                }
+                                onScheduledAt(next.timeInMillis)
+                            }, initial.get(Calendar.HOUR_OF_DAY), initial.get(Calendar.MINUTE), true).show()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Rounded.Schedule, null)
+                        Spacer(Modifier.size(6.dp))
+                        Text(scheduledAt?.let { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(it)) } ?: "Choose time")
                     }
+                    Text("Repeat", fontWeight = FontWeight.Bold)
+                    CycloneLiquidChoiceBar(
+                        options = repeatOptions.map { it.first },
+                        selectedIndex = repeatOptions.indexOfFirst { it.second == repeatMillis }.coerceAtLeast(0),
+                        onSelect = { index -> onRepeatMillis(repeatOptions[index].second) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
             V32TriggerChoice.CALENDAR -> item {
@@ -310,10 +325,14 @@ private fun V32ActionsStep(
             items(actions, key = { it.id }) { action ->
                 CycloneSimpleCard(modifier = Modifier.clickable { onEdit(action) }) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) { Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) { Icon(actionIcon(action.choice), null, tint = MaterialTheme.colorScheme.primary) } }
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+                                Icon(actionIcon(action.choice), null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                         Column(Modifier.weight(1f)) {
                             Text(action.choice.label, fontWeight = FontWeight.Bold)
-                            if (action.value.isNotBlank()) Text(action.value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (action.value.isNotBlank()) Text(if (action.choice == V32ActionChoice.RUN_SKILL) skillName(action.value) else action.value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                         IconButton(onClick = { onRemove(action) }) { Icon(Icons.Rounded.Close, "Remove") }
                     }
@@ -323,7 +342,10 @@ private fun V32ActionsStep(
         item { CycloneSectionTitle("Add an action") }
         items(V32ActionChoice.entries, key = { it.name }) { choice ->
             OutlinedButton(onClick = { onAdd(choice) }, modifier = Modifier.fillMaxWidth()) {
-                Icon(actionIcon(choice), null); Spacer(Modifier.size(8.dp)); Text(choice.label, modifier = Modifier.weight(1f)); Icon(Icons.Rounded.Add, null)
+                Icon(actionIcon(choice), null)
+                Spacer(Modifier.size(8.dp))
+                Text(choice.label, modifier = Modifier.weight(1f))
+                Icon(Icons.Rounded.Add, null)
             }
         }
         item { Button(onClick = onContinue, enabled = actions.isNotEmpty() && actions.none { it.validationIssue() != null }, modifier = Modifier.fillMaxWidth()) { Text("Review routine") } }
@@ -342,7 +364,10 @@ private fun V32ReviewStep(modifier: Modifier, draft: V32AutomationDraft, name: S
         item {
             CycloneSimpleCard {
                 Text("Then", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                current.actions.forEachIndexed { index, action -> Text("${index + 1}. ${action.choice.label}${action.value.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}") }
+                current.actions.forEachIndexed { index, action ->
+                    val shown = if (action.choice == V32ActionChoice.RUN_SKILL) skillName(action.value) else action.value
+                    Text("${index + 1}. ${action.choice.label}${shown.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}")
+                }
             }
         }
         item {
@@ -392,6 +417,7 @@ private fun V32ActionEditorDialog(
                     V32ActionChoice.WAIT -> OutlinedTextField(value, { value = it.filter(Char::isDigit) }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Milliseconds") })
                     V32ActionChoice.HUMAN -> OutlinedTextField(value, { value = it }, Modifier.fillMaxWidth(), maxLines = 2, label = { Text("What should Cyclone ask?") })
                     V32ActionChoice.HOME, V32ActionChoice.BACK -> Text("No extra details needed.")
+                    V32ActionChoice.RUN_SKILL -> V32SkillPicker(context, value) { value = it }
                 }
             }
         },
@@ -399,6 +425,34 @@ private fun V32ActionEditorDialog(
         dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/** The owner's saved skills with how well each is grounded on its app's map; pick one to run. */
+@Composable
+private fun V32SkillPicker(context: Context, selected: String, onSelect: (String) -> Unit) {
+    val skills = remember(context) { runCatching { com.cyclone.mobile.market.Marketplace.skillsWithHealth(context) }.getOrDefault(emptyList()) }
+    if (skills.isEmpty()) {
+        Text("You have no saved skills yet. Finish a run and press Save skill on it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items(skills, key = { it.first.id }) { (listing, _, health) ->
+            Row(
+                Modifier.fillMaxWidth().clickable { onSelect(listing.id) }.padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(if (listing.id == selected) Icons.Rounded.Check else Icons.Rounded.Star, null, tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f)) {
+                    Text(listing.name, fontWeight = FontWeight.SemiBold)
+                    Text("${health.state.label} · ${health.detail}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+private fun skillName(id: String): String = com.cyclone.mobile.market.Marketplace.listing(id)?.name ?: id
 
 private data class V32InstalledApp(val label: String, val packageName: String)
 
@@ -412,12 +466,32 @@ private fun V32AppPickerDialog(context: Context, onDismiss: () -> Unit, onSelect
         title = { Text("Choose an app") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search apps") })
+                CycloneLiquidSearchField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = "Search apps",
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(visible, key = { it.packageName }) { app ->
-                        Row(Modifier.fillMaxWidth().clickable { onSelect(app.packageName) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) { Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Apps, null) } }
-                            Column(Modifier.weight(1f)) { Text(app.label, fontWeight = FontWeight.SemiBold); Text(app.packageName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onSelect(app.packageName) }.padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) {
+                                Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Apps, null) }
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(app.label, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    app.packageName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
@@ -456,6 +530,7 @@ private fun triggerIcon(choice: V32TriggerChoice): ImageVector = when (choice) {
 }
 
 private fun actionIcon(choice: V32ActionChoice): ImageVector = when (choice) {
+    V32ActionChoice.RUN_SKILL -> Icons.Rounded.Star
     V32ActionChoice.OPEN_APP -> Icons.Rounded.Apps
     V32ActionChoice.HOME -> Icons.Rounded.Home
     V32ActionChoice.BACK -> Icons.AutoMirrored.Rounded.ArrowBack

@@ -1,5 +1,6 @@
 package com.cyclone.mobile.gateway
 
+import com.cyclone.mobile.places.PlaceResolver
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -9,6 +10,8 @@ internal object GatewayPrivacy {
     private val sensitiveKey = Regex("(?i)(password|passcode|passwd|secret|token|api.?key|otp|one.?time|verification.?code|cvv|card.?number|pin)")
     private val providerKeyPattern = Regex("(?i)\\b(sk-[A-Za-z0-9_-]{12,}|(?:api[_ -]?key|bearer|token)\\s*[:=]\\s*[A-Za-z0-9._-]{8,})")
     private val inlineSecretPattern = Regex("(?i)\\b(password|passcode|passwd|pin|otp|verification\\s*code|api[_ -]?key|token|secret)\\s*(?:is|:|=)\\s*[^\\s,;]+")
+
+    fun isSensitiveHint(text: String): Boolean = sensitiveKey.containsMatchIn(text)
 
     fun sanitizeAccessibilitySnapshot(snapshot: JSONObject): JSONObject {
         val out = JSONObject(snapshot.toString())
@@ -23,6 +26,7 @@ internal object GatewayPrivacy {
 
     fun sanitizeNode(node: JSONObject): JSONObject {
         val out = JSONObject(node.toString())
+        val browserAddress = PlaceResolver.isChromeAddressBarResourceId(node.optString("resourceId"))
         val hints = listOf(
             node.optString("resourceId"),
             node.optString("contentDescription"),
@@ -31,9 +35,9 @@ internal object GatewayPrivacy {
         ).joinToString(" ").lowercase(Locale.US)
         val sensitive = node.optBoolean("password", false) || sensitiveKey.containsMatchIn(hints)
         // Editable text is user-entered state. Export field metadata, never the entered value.
-        if (node.optBoolean("editable", false) || sensitive) out.put("text", REDACTED)
+        if (node.optBoolean("editable", false) || sensitive || browserAddress) out.put("text", REDACTED)
         else out.put("text", cleanString(node.optString("text")).take(500))
-        if (sensitive) out.put("contentDescription", REDACTED)
+        if (sensitive || browserAddress) out.put("contentDescription", REDACTED)
         else out.put("contentDescription", cleanString(node.optString("contentDescription")).take(500))
         return out
     }
@@ -71,6 +75,7 @@ internal object GatewayPrivacy {
     private fun sanitizeObject(source: JSONObject): JSONObject {
         val out = JSONObject()
         val nodeLike = source.has("editable") || source.has("resourceId") || source.has("contentDescription")
+        val browserAddress = PlaceResolver.isChromeAddressBarResourceId(source.optString("resourceId"))
         val nodeSensitive = if (nodeLike) {
             val hints = listOf(
                 source.optString("resourceId"), source.optString("contentDescription"),
@@ -82,8 +87,9 @@ internal object GatewayPrivacy {
         while (keys.hasNext()) {
             val key = keys.next()
             val raw = source.opt(key)
-            val redactNodeValue = nodeLike && key in setOf("text", "value") && (source.optBoolean("editable", false) || nodeSensitive)
-            val redactNodeDescription = nodeLike && key == "contentDescription" && nodeSensitive
+            val redactNodeValue = nodeLike && key in setOf("text", "value") &&
+                (source.optBoolean("editable", false) || nodeSensitive || browserAddress)
+            val redactNodeDescription = nodeLike && key == "contentDescription" && (nodeSensitive || browserAddress)
             out.put(key, when {
                 sensitiveKey.containsMatchIn(key) -> REDACTED
                 redactNodeValue || redactNodeDescription -> REDACTED

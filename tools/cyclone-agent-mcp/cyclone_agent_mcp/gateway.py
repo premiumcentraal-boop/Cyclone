@@ -411,6 +411,23 @@ class GatewayClient:
             {},
         )
 
+    def lab_missions(self) -> Any:
+        return self._bounded_route("GET", "/v1/lab/missions")
+
+    def lab_start(self, device_id: str, name: str, missions: list[str], variants: list[dict[str, Any]], repetitions: int) -> Any:
+        return self._bounded_route("POST", "/v1/lab/experiments", {
+            "deviceId": device_id, "name": name, "missions": missions, "variants": variants, "repetitions": repetitions,
+        })
+
+    def lab_experiments(self) -> Any:
+        return self._bounded_route("GET", "/v1/lab/experiments")
+
+    def lab_experiment(self, experiment_id: str) -> Any:
+        return self._bounded_route("GET", f"/v1/lab/experiments/{urllib.parse.quote(experiment_id, safe='')}")
+
+    def lab_stop(self, experiment_id: str) -> Any:
+        return self._bounded_route("POST", f"/v1/lab/experiments/{urllib.parse.quote(experiment_id, safe='')}/stop", {})
+
     def _bounded_route(self, method: str, path: str, payload: Any | None = None) -> Any:
         """Call one frozen Gateway route and never improvise when it is unavailable."""
         try:

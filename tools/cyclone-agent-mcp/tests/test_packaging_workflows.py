@@ -18,7 +18,7 @@ def test_sidecar_lock_is_exact_and_specs_exist():
     assert lock["pyinstaller"] == "6.22.2"
     assert lock["mcp"] == "2.0.0"
     assert lock["websockets"] == "15.0.1"
-    assert {x["name"] for x in lock["sidecars"]} == {"CyclonePCRuntime.exe", "CycloneAgentMCP.exe"}
+    assert {x["name"] for x in lock["sidecars"]} == {"CyclonePCRuntime.exe", "CycloneAgentMCP.exe", "CycloneLivePhone.exe"}
     assert all((REPO / x["spec"]).is_file() for x in lock["sidecars"])
 
 def test_frozen_gateway_declares_websocket_runtime():
@@ -26,7 +26,7 @@ def test_frozen_gateway_declares_websocket_runtime():
     build = (REPO / "scripts/pc-companion/build-sidecars.ps1").read_text()
     lock = json.loads((REPO / "packaging/pc-companion/sidecar-build.lock.json").read_text())
     assert f'"websockets=={lock["websockets"]}"' in gateway
-    assert build.count("PyInstaller --clean --noconfirm") == 2
+    assert build.count("PyInstaller --clean --noconfirm") == 3
 
 def test_pinned_scrcpy_notice_is_deterministic_and_complete(tmp_path):
     script = load_script("generate-third-party-notices.py")

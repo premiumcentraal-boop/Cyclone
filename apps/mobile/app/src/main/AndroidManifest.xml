@@ -1,16 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Plan 29 (direct first): add events and look up contacts without opening any app. Asked for when first needed. -->
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- AlarmClock intents (phone.set_alarm / phone.set_timer): the clock app creates and shows it. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Cyclone Mind: a bounded partial wake lock so a model call finishes if the screen turns off mid-mission. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <queries>
@@ -19,13 +28,24 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- Plan 29: which clock app takes a direct timer, to confirm it by its running-timer notification. -->
+        <intent>
+            <action android:name="android.intent.action.SET_TIMER" />
+        </intent>
     </queries>
+
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
         android:label="Cyclone"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <activity
+            android:name=".direct.DirectAccessActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
@@ -49,11 +69,25 @@
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
+        <service android:name=".runtime.workspaces.ProfileBootstrapService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-requested secure profile configuration transfer" />
+        </service>
+
+        <activity android:name=".ui.ProfileRescueActivity" android:exported="false" />
         <activity android:name=".ui.overlay.OverlayAttachmentActivity" android:exported="false" />
         <activity android:name=".ui.overlay.CycloneAiSettingsActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
         <activity android:name=".runtime.background.BackgroundSetupActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceActivity" android:exported="false" />
+        <!-- Exported only so Cyclone One can open the dedicated viewer through an authorized ADB shell.
+             The stream URL is fixed to the local reverse tunnel; per-target ephemeral credentials travel
+             separately as intent extras and authenticated WebSocket headers, never in the URL. -->
+        <activity
+            android:name=".stream.CameraStreamViewerActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/AppTheme" />
         <service
             android:name=".runtime.background.WorkspaceTaskService"
             android:exported="false"
@@ -61,6 +95,24 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-requested isolated app task with visible pause, stop and human handoff controls" />
+        </service>
+        <!-- Task Kit: notification buttons for foreground tasks. Not exported. -->
+        <receiver android:name=".task.TaskCommandReceiver" android:exported="false" />
+        <service
+            android:name=".mind.mission.MindMissionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-requested Cyclone Mind mission with visible progress, stop and approval controls" />
+        </service>
+        <service
+            android:name=".mapping.run.MappingNotificationService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started app mapping with a visible stop control" />
         </service>
         <activity android:name=".capture.LiveCaptureConsentActivity" android:exported="false" />
         <service
@@ -71,7 +123,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -132,5 +185,30 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+    <receiver android:name=".gateway.LivePhoneControlReceiver" android:exported="false" />
+    <!-- Plan 26: background work that stays on (boot check) and its Quick Settings tile. -->
+    <!-- Plan 27: the task notification's Show brings the overlay island back. -->
+    <receiver android:name=".ui.overlay.OverlayShowReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="com.cyclone.mobile.action.SHOW_OVERLAY" />
+      </intent-filter>
+    </receiver>
+    <receiver android:name=".runtime.plane.BackgroundBootReceiver" android:exported="false">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+    </receiver>
+    <service
+        android:name=".runtime.plane.CycloneBackgroundTile"
+        android:exported="true"
+        android:icon="@drawable/ic_cyclone_status"
+        android:label="Cyclone background"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+        <intent-filter>
+            <action android:name="android.service.quicksettings.action.QS_TILE" />
+        </intent-filter>
+        <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />
+    </service>
     </application>
 </manifest>

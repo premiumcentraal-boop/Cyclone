@@ -318,6 +318,10 @@ def test_health_planes_keep_usb_gateway_accessibility_trust_semantic_and_media_i
         public=lambda: {"deviceId": "dev_health", "id": "dev_health", "state": "READY", "paired": True},
     )
 
+    trust = enrich_device_public(session, {"sessionReady": True, "pcLabel": "DESK\u0007-PC" * 20})["trust"]
+    assert trust["sessionReady"] is True and len(trust["pcLabel"]) == 80
+    assert enrich_device_public(session, {"pcLabel": 7})["trust"]["pcLabel"] is None
+
     health = enrich_device_public(session)["health"]
     planes = health["planes"]
     assert health["version"] == "cyclone.device-health.v1"

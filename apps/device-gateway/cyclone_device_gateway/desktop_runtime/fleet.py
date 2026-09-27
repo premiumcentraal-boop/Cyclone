@@ -26,6 +26,7 @@ from .models import (
 )
 
 _SIZE_RE = re.compile(r"(?:Physical|Override) size:\s*(\d+)x(\d+)", re.IGNORECASE)
+_MOBILE_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z][0-9A-Za-z.+-]*)?$")
 
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_BACKOFF_SECONDS = (1, 2, 4, 8, 15)
@@ -63,6 +64,7 @@ class DeviceSession:
     bridge_error_class: str | None = None
     bridge_gateway_enabled: bool | None = None
     bridge_socket_listening: bool | None = None
+    mobile_version: str | None = None
     accessibility_connected: bool | None = None
     source: str = "USB"
     provider: str | None = None
@@ -88,7 +90,7 @@ class DeviceSession:
             DeviceFleetState.ATTENTION: "Needs attention",
             DeviceFleetState.DISCONNECTED: reconnecting_label,
         }.get(self.state, state.replace("_", " ").title())
-        return {
+        public = {
             "deviceId": self.device_id,
             "id": self.device_id,
             "state": state,
@@ -146,6 +148,13 @@ class DeviceSession:
                 "video": ["thumbnail", "focus"],
             },
         }
+        # Only an authenticated phone status can supply this version. Glass uses it to
+        # enable the live Atlas, so never infer 5.x from PC release metadata.
+        if self.credential and self.mobile_version and self.state not in {
+            DeviceFleetState.UNAUTHORIZED, DeviceFleetState.DISCONNECTED,
+        }:
+            public["mobileVersion"] = self.mobile_version
+        return public
 
     def bridge(self, token: str | None = None, *, auto_forward: bool = False) -> CycloneBridgeClient:
         return CycloneBridgeClient(
@@ -377,6 +386,14 @@ class DeviceFleetManager:
             raise DesktopRuntimeError(RuntimeErrorCode.DEVICE_NOT_FOUND, "Device is not connected.", retryable=True)
         return session
 
+    def find_by_serial(self, serial: str) -> DeviceSession | None:
+        needle = (serial or "").strip()
+        if not needle:
+            return None
+        with self._lock:
+            device_id = self._serial_to_device.get(needle)
+            return self._sessions.get(device_id) if device_id else None
+
     def refresh_once(self, *, source: str = "manual") -> list[dict[str, Any]]:
         started = time.perf_counter()
         with self._refresh_lock:
@@ -543,6 +560,7 @@ class DeviceFleetManager:
         try:
             self._ensure_bridge_forward(session)
             if not self._package_present(session):
+                session.mobile_version = None
                 self._mark_bridge_unhealthy(session, None, "Cyclone mobile app is not installed on this phone.")
                 self._set_state(session, DeviceFleetState.ATTENTION, "Install the Cyclone mobile app on this phone.")
                 return
@@ -587,6 +605,10 @@ class DeviceFleetManager:
             session.bridge_gateway_enabled = _optional_bool(value.get("gatewayEnabled"))
             session.bridge_socket_listening = _optional_bool(value.get("socketListening"))
             session.accessibility_connected = _optional_bool(value.get("accessibilityConnected"))
+            version = value.get("appVersion")
+            session.mobile_version = (
+                version if isinstance(version, str) and len(version) <= 64 and _MOBILE_VERSION_RE.fullmatch(version) else None
+            )
 
     def _mark_bridge_healthy(self, session: DeviceSession) -> None:
         with self._lock:
@@ -604,6 +626,7 @@ class DeviceFleetManager:
     ) -> None:
         with self._lock:
             session.bridge_ok = False
+            session.mobile_version = None
             session.bridge_error_class = error_class
             session.bridge_last_error = error
 
@@ -714,6 +737,10 @@ class DeviceFleetManager:
 
     def remember_credential(self, session: DeviceSession, credential: str | None) -> None:
         with self._lock:
+            # Re-confirming the same credential (trust restore, refresh) must not forget the version the
+            # phone already reported over it; only a new or cleared credential starts from unknown.
+            if credential != session.credential:
+                session.mobile_version = None
             session.credential = credential
             if credential:
                 session.bridge_ok = None
@@ -729,6 +756,7 @@ class DeviceFleetManager:
         """Fail closed on rejected per-device credentials without touching trust material."""
         with self._lock:
             session.credential = None
+            session.mobile_version = None
             session.bridge_ok = False
             session.bridge_error_class = reason_code
             session.bridge_last_error = message[:240]

@@ -38,6 +38,28 @@ class GatewaySessionBindingTest {
     }
 
     @Test
+    fun mergeCarriesSnakeCaseIdentityAndBindRejectsNamedDisplayZero() {
+        val merged = ExecutionRequestScope.merge(
+            JSONObject().put("session_id", "workspace-a").put("display_id", 12),
+            JSONObject().put("elementId", "semantic:1"),
+        )
+        assertEquals("workspace-a", merged.getString("sessionId"))
+        assertEquals(12, merged.getInt("displayId"))
+        assertEquals("semantic:1", merged.getString("elementId"))
+        assertThrows(SessionIdentityException::class.java) {
+            ExecutionRequestScope.bind(
+                JSONObject().put("session_id", "workspace-a").put("display_id", 0),
+            )
+        }
+        assertThrows(SessionIdentityException::class.java) {
+            ExecutionRequestScope.merge(
+                JSONObject().put("session_id", "workspace-a").put("displayId", 0),
+                JSONObject(),
+            ).also { ExecutionRequestScope.bind(it) }
+        }
+    }
+
+    @Test
     fun mergeAndAttachCarryIdentityOntoParamsWithoutDroppingKeys() {
         val envelope = JSONObject().put("sessionId", "workspace-a").put("displayId", 12)
         val merged = ExecutionRequestScope.merge(envelope, JSONObject().put("elementId", "semantic:1"))

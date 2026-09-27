@@ -5,7 +5,7 @@ import com.cyclone.mobile.automation.RecoveryPolicy
 import com.cyclone.mobile.automation.Selector
 import com.cyclone.mobile.automation.StepDefinition
 import com.cyclone.mobile.automation.StepType
-import com.cyclone.mobile.ui.v291DescribeAutomationStep
+import com.cyclone.mobile.ui.v32.v32SafeSummary
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,7 +34,7 @@ class V291TeachUxTest {
             selector = Selector(resourceId = "com.shop:id/orders", text = "Orders", requireClickable = true),
             recovery = RecoveryPolicy(maxRetries = 1),
         )
-        val summary = v291DescribeAutomationStep(step)
+        val summary = step.v32SafeSummary()
         assertTrue(summary.contains("Click"))
         assertTrue(summary.contains("Orders"))
         assertTrue(summary.contains("timeout ms=1200"))

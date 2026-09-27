@@ -156,18 +156,43 @@ class OverlayChromeMachineTest {
     }
 
     @Test
-    fun minimizeRestoresTheSameStateAndExitNeverConfirmsGate() {
+    fun activeWorkCollapsesToComposerThenLauncherAndTripleTapRestoresComposerWithoutChangingRunState() {
         val events = mutableListOf<OverlayChromeEvent>()
         val effects = RecordingEffects()
         val machine = OverlayChromeMachine(emit = { events += it }, cycloneState = effects)
         machine.enterWorking("restore")
         machine.enterLive()
+
         machine.dispatch(OverlayUserAction.MINIMIZE)
         assertEquals(OverlayChromeState.LIVE, machine.state())
         assertTrue(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().launcherCollapsed)
+        assertFalse(machine.snapshot().idleChipVisible)
+        assertFalse(machine.snapshot().voiceListening)
+
+        machine.updateComposer("next request")
+        assertEquals("next request", machine.snapshot().composerText)
+
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertTrue(machine.snapshot().minimized)
+        assertTrue(machine.snapshot().launcherCollapsed)
+        // Plan 27: folded away while a task runs, only the live notification remains (its Show brings the island back).
+        assertFalse(machine.snapshot().idleChipVisible)
+        assertEquals("next request", machine.snapshot().composerText)
+
+        // This is the action emitted after the launcher receives its deliberate triple tap.
         machine.dispatch(OverlayUserAction.ASK_CYCLONE)
         assertEquals(OverlayChromeState.LIVE, machine.state())
+        assertTrue(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().launcherCollapsed)
+        assertFalse(machine.snapshot().idleChipVisible)
+        assertEquals("next request", machine.snapshot().composerText)
+
+        // Explicit expand from the minimized composer's handle restores the full drawer.
+        machine.dispatch(OverlayUserAction.ASK_CYCLONE)
         assertFalse(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().launcherCollapsed)
 
         machine.enterGate(OverlayGateClass.DELETE)
         events.clear()
@@ -193,6 +218,37 @@ class OverlayChromeMachineTest {
         assertFalse(request.clicksHost || request.dispatchAccessibilityAction)
     }
 
+
+    @Test fun aNewTaskOpensProgressAfterThePreviousTaskWasCollapsed() {
+        val machine = OverlayChromeMachine()
+        machine.enterWorking("first")
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        assertTrue(machine.snapshot().launcherCollapsed)
+        machine.finishStopped("stopped")
+        machine.enterWorking("second")
+        assertFalse(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().launcherCollapsed)
+        // Ordinary progress updates do not undo a deliberate collapse during this task.
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        machine.updateStatus("Opening Chrome")
+        assertTrue(machine.snapshot().minimized)
+    }
+
+    @Test fun backgroundTaskOverviewOpensWithoutResumingOrConfirmingTheAgent() {
+        val effects = RecordingEffects()
+        val machine = OverlayChromeMachine(cycloneState = effects)
+        machine.showTaskProgress()
+        assertEquals(OverlayChromeState.ANALYSIS, machine.state())
+        assertFalse(machine.snapshot().minimized)
+        assertFalse(machine.snapshot().idleChipVisible)
+        assertEquals(0, effects.resumes)
+        machine.enterGate(OverlayGateClass.PAY)
+        machine.showTaskProgress()
+        assertEquals(OverlayChromeState.GATE, machine.state())
+        assertEquals(0, effects.resumes)
+    }
+
     private fun assertEvent(event: OverlayChromeEvent, kind: OverlayChromeEventKind, clicksHost: Boolean) {
         assertEquals(kind, event.kind)
         assertEquals(clicksHost, event.clicksHost)
@@ -208,5 +264,17 @@ class OverlayChromeMachineTest {
         override fun resumeAgent() {
             resumes += 1
         }
+    }
+}
+
+class OverlayNotificationOnlyTest {
+    @Test fun foldingAFinishedTaskAwayLeavesTheLauncher() {
+        val machine = OverlayChromeMachine(emit = {})
+        machine.enterWorking("done-task")
+        machine.completeDone("done-task")
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        machine.dispatch(OverlayUserAction.MINIMIZE)
+        assertTrue(machine.snapshot().launcherCollapsed)
+        assertTrue(machine.snapshot().idleChipVisible)
     }
 }

@@ -104,6 +104,16 @@ class ADBClient:
         except ADBError:
             return False
 
+    def connect(self, serial: str, timeout: float = 15) -> str:
+        """Attach a TCP/USB serial already reachable to this ADB server.
+
+        Used for VMOS remote-ADB bootstrap. This is transport only; it never injects input.
+        """
+        target = (serial or "").strip()
+        if not target:
+            raise ADBError("ADB connect requires a serial")
+        return self.run(["connect", target], timeout=timeout, use_serial=False)
+
     def devices(self) -> list[ADBDevice]:
         text = self.run(["devices", "-l"], use_serial=False)
         out: list[ADBDevice] = []

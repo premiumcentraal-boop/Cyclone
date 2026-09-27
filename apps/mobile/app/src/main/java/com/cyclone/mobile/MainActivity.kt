@@ -22,6 +22,7 @@ import com.cyclone.mobile.automation.AutomationRuntime
 import com.cyclone.mobile.brain.AdaptiveBrainRuntime
 import com.cyclone.mobile.brain.BrainChatRuntime
 import com.cyclone.mobile.brain.CycloneBrainRuntime
+import com.cyclone.mobile.fastpath.InstalledAppInventory
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.gateway.GatewayDesktopPairingManager
 import com.cyclone.mobile.skills.SkillRuntime
@@ -32,8 +33,19 @@ import com.cyclone.mobile.ui.overlay.OverlayUserAction
 import com.cyclone.mobile.ui.v32.CycloneMobileV32App
 
 class MainActivity : ComponentActivity() {
+    private var rescueRedirect = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Compile the Teal Matrix shaders off the main thread before the first frame needs them.
+        com.cyclone.mobile.ui.v32.TealMatrixShaders.warmAsync()
+        val needsRescue = com.cyclone.mobile.runtime.workspaces.ProfileSetupRuntime.currentUserId() > 0 &&
+            !createDeviceProtectedStorageContext().getSharedPreferences("cyclone_profile_origin", MODE_PRIVATE).contains("source")
+        if (needsRescue && !intent.getBooleanExtra("skip_profile_rescue", false)) {
+            rescueRedirect = true
+            startActivity(Intent(this, com.cyclone.mobile.ui.ProfileRescueActivity::class.java))
+            finish()
+            return
+        }
         initializeCyclone()
         migrateModelDefault()
         migrateCanonicalLearning()
@@ -41,6 +53,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             // Android 15 enforces edge-to-edge for targetSdk 35. Keep Cyclone's interactive shell
             // inside the status-bar safe area so the top controls never compete with Wi-Fi/battery.
+            // Profile rescue lives inside the themed shell so it cannot sit unstyled above Scaffold.
             Box(Modifier.fillMaxSize().statusBarsPadding()) {
                 CycloneMobileV32App()
             }
@@ -60,6 +73,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (rescueRedirect) return
         initializeCyclone()
         CycloneV31Runtime.servicesOrNull()?.refreshHealth()
     }
@@ -79,6 +93,7 @@ class MainActivity : ComponentActivity() {
         AdaptiveBrainRuntime.initialize(this)
         BrainChatRuntime.initialize(this)
         RoutineTeachingRuntime.initialize(this)
+        InstalledAppInventory.refresh(this)
 
         val v31 = CycloneV31Runtime.initialize(this)
         CycloneV31ProductIntegration.install(this, v31)

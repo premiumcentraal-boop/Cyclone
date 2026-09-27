@@ -110,7 +110,7 @@ Rules:
         val body = com.cyclone.mobile.ai.model.PortableModelRequest.body(model.id,
             JSONArray().put(JSONObject().put("role", "system").put("content", system))
                 .put(JSONObject().put("role", "user").put("content", user.toString())),
-            com.cyclone.mobile.ai.model.ModelEndpointCatalog.verifiedTags(model.id, http))
+            emptyList())
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
             .header("Authorization", "Bearer $key")
