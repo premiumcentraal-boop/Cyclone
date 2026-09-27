@@ -55,9 +55,13 @@ Mobile CI on that commit, signs the APK with the rotated key, builds the Glass z
 SHA-256 in `release-manifest.json`. No RC branch and no per-release publisher. Do not push other commits to the dev
 branch until the publish finishes (Mobile CI cancels in-progress runs per branch).
 
-Owners install with `irm https://github.com/premiumcentraal-boop/Cyclone/releases/download/<tag>/install.ps1 | iex`
-(per user, no admin, into `%LOCALAPPDATA%\Cyclone One`) and update with `cyclone update`; both refuse a package whose
-SHA-256 is not in the release manifest. `CYCLONE_GLASS_DIST` remains a developer override for serving a local Glass.
+Owners install by double-clicking `Cyclone-Setup-<product_version>.exe` (since alpha.48: NSIS, per user, no admin,
+`packaging/pc/cyclone-setup.nsi`; it runs the same `install.ps1` on the package it carries, then adds Start menu and
+desktop shortcuts and an Apps & features entry whose uninstaller is `Uninstall Cyclone.exe`, never `uninstall.exe`),
+or with `irm https://github.com/premiumcentraal-boop/Cyclone/releases/download/<tag>/install.ps1 | iex` (per user,
+no admin, into `%LOCALAPPDATA%\Cyclone One`), and update with `cyclone update`; all refuse a package whose SHA-256
+is not in the release manifest. The package build installs and uninstalls the setup silently on Windows before a
+release. `CYCLONE_GLASS_DIST` remains a developer override for serving a local Glass.
 
 ## Validation
 

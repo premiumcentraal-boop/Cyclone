@@ -15,6 +15,7 @@ BUILD = ROOT / "scripts/pc/build-pc-package.ps1"
 PC_API = ROOT / "apps/device-gateway/cyclone_device_gateway/pc/api.py"
 SHIM = ROOT / "apps/device-gateway/cyclone_device_gateway/terminal/install.py"
 UPDATER = ROOT / "apps/device-gateway/cyclone_device_gateway/terminal/updater.py"
+SETUP = ROOT / "packaging/pc/cyclone-setup.nsi"
 
 
 class WebOnlyPcGuards(unittest.TestCase):
@@ -24,7 +25,7 @@ class WebOnlyPcGuards(unittest.TestCase):
         self.assertIn("scripts/pc/build-pc-package.ps1", text)
         self.assertIn("needs: pc-package", text)
         # The manifest lists the package and the installer, which `cyclone` and install.ps1 check against.
-        self.assertRegex(text, r"for p in \(apk, glass, pc, installer\)")
+        self.assertRegex(text, r"for p in \(apk, glass, pc, installer, setup\)")
         self.assertIn(r"gateway\.env$|fleet\.dpapi$", text)
 
     def test_the_package_build_proves_install_and_serving_on_windows(self):
@@ -46,6 +47,27 @@ class WebOnlyPcGuards(unittest.TestCase):
         # Only Cyclone's own adb/fastboot are stopped.
         self.assertIn('Where-Object { $_.Path -like "$Root\\android-platform-tools\\*" }', text)
         self.assertNotRegex(text, r"(?i)HKLM:|RunAs|Set-ExecutionPolicy")
+
+    def test_the_setup_wraps_install_ps1_per_user_and_is_proven_on_windows(self):
+        text = SETUP.read_text(encoding="utf-8")
+        self.assertTrue(text.isascii())
+        self.assertIn("RequestExecutionLevel user", text)
+        self.assertNotRegex(text, r"(?i)HKLM|RequestExecutionLevel admin")
+        # The same verified install as the one-line install; the setup adds shortcuts and Apps & features.
+        self.assertIn('install.ps1" -Zip "$PLUGINSDIR\\Cyclone-PC.zip" -NoStart', text)
+        self.assertIn('InstallDir "$LOCALAPPDATA\\Cyclone One"', text)
+        # install.ps1 runs any uninstall.exe as the retired window's uninstaller: ours must never take that name.
+        self.assertIn('!define UNINSTALLER "Uninstall Cyclone.exe"', text)
+        self.assertNotRegex(text, r'WriteUninstaller "\$INSTDIR\\uninstall\.exe"')
+        # Uninstalling keeps the owner's data folders.
+        for kept in ("runtime", "mcp-tunnel", "chatgpt-attach"):
+            self.assertNotIn(f'RMDir /r "$INSTDIR\\{kept}"', text)
+        build = BUILD.read_text(encoding="utf-8")
+        for needed in ("cyclone-setup.nsi", '"/S /D=$InstallDir"', "Uninstall Cyclone.exe", '"/S _?=$InstallDir"',
+                       "owner-data.txt", "Apps & features", "Cyclone-PC.zip.sha256') -Value $Hash"):
+            self.assertIn(needed, build)
+        publish = PUBLISH.read_text(encoding="utf-8")
+        self.assertIn('sha256sum --check "Cyclone-Setup-$PRODUCT.exe.sha256"', publish)
 
     def test_every_pc_route_needs_the_bearer(self):
         text = PC_API.read_text(encoding="utf-8")

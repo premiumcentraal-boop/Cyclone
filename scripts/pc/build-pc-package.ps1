@@ -63,6 +63,36 @@ $Hash = (Get-FileHash -Algorithm SHA256 $Zip).Hash.ToLowerInvariant()
 Set-Content -Path "$Zip.sha256" -Value "$Hash  Cyclone-PC-$Version.zip" -NoNewline
 Write-Host "Built $Zip ($Hash)"
 
+# ---- Cyclone-Setup-<version>.exe: one double-click install (alpha.48), wrapping the same install.ps1 ---------------
+$Payload = Join-Path $Work 'setup-payload'
+if (Test-Path $Payload) { Remove-Item -Recurse -Force $Payload }
+New-Item -ItemType Directory -Force -Path $Payload | Out-Null
+Copy-Item $Zip (Join-Path $Payload 'Cyclone-PC.zip')
+# install.ps1 -Zip checks a sidecar holding the hash alone.
+Set-Content -Path (Join-Path $Payload 'Cyclone-PC.zip.sha256') -Value $Hash -NoNewline
+Copy-Item (Join-Path $Repo 'packaging\pc\install.ps1') $Payload
+$Makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+if (-not $Makensis) {
+    foreach ($candidate in @("${env:ProgramFiles(x86)}\NSIS\makensis.exe", "$env:ProgramFiles\NSIS\makensis.exe")) {
+        if (Test-Path $candidate) { $Makensis = $candidate; break }
+    }
+}
+if (-not $Makensis) {
+    choco install nsis -y --no-progress
+    $Makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+}
+$VersionToml = Get-Content (Join-Path $Repo 'release\version.toml') -Raw
+if ($VersionToml -notmatch '(?m)^android_version_code\s*=\s*(\d+)') { throw 'release/version.toml has no android_version_code.' }
+$Code = [int]$Matches[1]
+if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)') { throw "Unexpected version $Version" }
+$FileVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$Code"
+$SetupName = "Cyclone-Setup-$Version.exe"
+$Setup = Join-Path (Resolve-Path $OutDir) $SetupName
+& $Makensis /V2 "/DVERSION=$Version" "/DFILEVERSION=$FileVersion" "/DPAYLOAD=$Payload" "/DOUTFILE=$Setup" (Join-Path $Repo 'packaging\pc\cyclone-setup.nsi')
+$SetupHash = (Get-FileHash -Algorithm SHA256 $Setup).Hash.ToLowerInvariant()
+Set-Content -Path "$Setup.sha256" -Value "$SetupHash  $SetupName" -NoNewline
+Write-Host "Built $Setup ($SetupHash)"
+
 # ---- Prove it: install into a scratch profile, run cyclone, start the runtime -------------------------------------
 $Scratch = Join-Path $Work 'scratch-profile'
 if (Test-Path $Scratch) { Remove-Item -Recurse -Force $Scratch }
@@ -108,4 +138,44 @@ try {
 } finally {
     $env:LOCALAPPDATA = $savedLocal
     Remove-Item Env:CYCLONE_DEVICE_GATEWAY_TOKEN, Env:CYCLONE_DEVICE_GATEWAY_PORT, Env:CYCLONE_DEVICE_GATEWAY_RUNTIME, Env:CYCLONE_DESKTOP_PAIRING_BOOTSTRAP -ErrorAction SilentlyContinue
+}
+
+# ---- Prove the setup: silent install into a scratch profile, then uninstall keeping the owner's data ---------------
+$SetupScratch = Join-Path $Work 'scratch-setup'
+if (Test-Path $SetupScratch) { Remove-Item -Recurse -Force $SetupScratch }
+New-Item -ItemType Directory -Force -Path $SetupScratch | Out-Null
+$InstallDir = Join-Path $SetupScratch 'Cyclone One'
+$UninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Cyclone'
+$savedLocal = $env:LOCALAPPDATA
+try {
+    # install.ps1 (inside the setup) installs into %LOCALAPPDATA%\Cyclone One; /D keeps the setup on the same folder.
+    $env:LOCALAPPDATA = $SetupScratch
+    # /D must be last and unquoted, so the arguments are one string.
+    $run = Start-Process -FilePath $Setup -ArgumentList "/S /D=$InstallDir" -Wait -PassThru
+    if ($run.ExitCode -ne 0) { throw "$SetupName /S failed ($($run.ExitCode))" }
+    $Shim = Join-Path $InstallDir 'bin\cyclone.cmd'
+    if (-not (Test-Path $Shim)) { throw "$SetupName did not create $Shim" }
+    $reported = (& $Shim version 2>&1) -join "`n"
+    if ($reported -notmatch [regex]::Escape("Cyclone $Version")) { throw "After $SetupName, cyclone version answered '$reported'" }
+    $Uninstaller = Join-Path $InstallDir 'Uninstall Cyclone.exe'
+    if (-not (Test-Path $Uninstaller)) { throw "$SetupName wrote no uninstaller" }
+    # install.ps1 runs any uninstall.exe in the folder as the retired window's: the setup must never leave one.
+    if (Test-Path (Join-Path $InstallDir 'uninstall.exe')) { throw 'The folder holds uninstall.exe; the next update would run it.' }
+    $entry = Get-ItemProperty -Path $UninstallKey
+    if ($entry.DisplayVersion -ne $Version) { throw "Apps & features shows '$($entry.DisplayVersion)', expected $Version" }
+    Write-Host "$SetupName installed Cyclone $Version with its Apps & features entry."
+
+    # The owner's data survives an uninstall.
+    New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'runtime') | Out-Null
+    Set-Content -Path (Join-Path $InstallDir 'runtime\owner-data.txt') -Value 'kept'
+    $gone = Start-Process -FilePath $Uninstaller -ArgumentList "/S _?=$InstallDir" -Wait -PassThru
+    if ($gone.ExitCode -ne 0) { throw "The uninstaller failed ($($gone.ExitCode))" }
+    if (Test-Path (Join-Path $InstallDir 'CyclonePCRuntime.exe')) { throw 'The uninstaller left CyclonePCRuntime.exe.' }
+    if (Test-Path $Shim) { throw 'The uninstaller left the cyclone command.' }
+    if (Test-Path $UninstallKey) { throw 'The uninstaller left the Apps & features entry.' }
+    if (-not (Test-Path (Join-Path $InstallDir 'runtime\owner-data.txt'))) { throw "The uninstaller deleted the owner's data." }
+    Write-Host 'The uninstaller removed Cyclone and kept the owner data.'
+} finally {
+    $env:LOCALAPPDATA = $savedLocal
+    Remove-Item -Force (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Cyclone.lnk') -ErrorAction SilentlyContinue
 }

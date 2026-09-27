@@ -155,6 +155,9 @@ jobs:
           unzip -l "pc/Cyclone-PC-$PRODUCT.zip" | grep -q ' CyclonePCRuntime.exe$'
           if unzip -l "pc/Cyclone-PC-$PRODUCT.zip" | grep -Eq 'gateway\.env$|fleet\.dpapi$'; then echo "The package carries owner secrets" >&2; exit 1; fi
           cp packaging/pc/install.ps1 pc/install.ps1
+          # alpha.48: the one-double-click setup, built and install/uninstall-tested on Windows by the pc-package job.
+          test -f "pc/Cyclone-Setup-$PRODUCT.exe"
+          (cd pc && sha256sum --check "Cyclone-Setup-$PRODUCT.exe.sha256")
 
       - name: Set up Android SDK
         if: steps.release.outputs.skip == 'false'
@@ -250,26 +253,30 @@ jobs:
           glass = Path('glass') / f"Cyclone-Glass-{os.environ['GLASS']}.zip"
           pc = Path('pc') / f"Cyclone-PC-{os.environ['PRODUCT']}.zip"
           installer = Path('pc') / 'install.ps1'
+          setup = Path('pc') / f"Cyclone-Setup-{os.environ['PRODUCT']}.exe"
           manifest = {
               'source_sha': os.environ['GITHUB_SHA'],
               'mobile_ci_run_id': int(os.environ['MOBILE_RUN']),
               'glass_version': os.environ['GLASS'],
               'pc_package': pc.name,
+              'pc_setup': setup.name,
               'pc_windows_signing': 'CI_UNSIGNED',
               'physical_acceptance': 'NOT_YET_VERIFIED_OWNER_TEST_BUILD',
               'signing': 'ROTATED_RELEASE_KEY_WITH_LINEAGE',
               # `cyclone` and install.ps1 refuse a package whose SHA-256 is not listed here.
-              'sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (apk, glass, pc, installer)},
+              'sha256': {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (apk, glass, pc, installer, setup)},
           }
           Path('release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
           notes = Path(f"docs/RELEASE_{os.environ['MOBILE']}.md").read_text()
           title = next(line[2:].strip() for line in notes.splitlines() if line.startswith('# '))
           Path('release-title.txt').write_text(f"{title} (developer alpha)")
           install = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['TAG']}/install.ps1"
-          downloads = (f"Download **{apk.name}** for Android.\n\n"
-                       f"**Windows** (web-only Cyclone: the runtime, Glass and the `cyclone` command). In PowerShell:\n\n"
-                       f"```\nirm {install} | iex\n```\n\n"
-                       f"Already installed? Type `cyclone update`. Glass alone: **{glass.name}**.\n\n")
+          downloads = (f"**Windows:** download **{setup.name}** and double-click it. It replaces any older Cyclone or "
+                       f"Cyclone One, keeps your pairing and keys, and adds Cyclone to the Start menu and the desktop. "
+                       f"Windows may say it protected your PC (the file is not code-signed yet): **More info** → **Run anyway**.\n\n"
+                       f"**Android:** download **{apk.name}** and install it as an update.\n\n"
+                       f"Also: already on alpha.47 or later, type `cyclone update`; or install from PowerShell with "
+                       f"`irm {install} | iex`. Glass alone: **{glass.name}**.\n\n")
           Path('RELEASE_NOTES.md').write_text(downloads + notes)
           PY
           gh release create "$TAG" signed/* glass/* pc/* release-manifest.json \
