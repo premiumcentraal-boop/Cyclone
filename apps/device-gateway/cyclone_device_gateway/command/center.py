@@ -140,6 +140,9 @@ class CommandCenter:
         self._tick_seconds = tick_seconds
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Plan 33 (C1): the zero-knowledge vault shares this file, lock and audit chain; it stores ciphertext only.
+        from .vault import VaultStore
+        self.vault = VaultStore(self)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -272,6 +275,8 @@ class CommandCenter:
             routines = self._db.execute("SELECT COUNT(*) FROM routine WHERE account_id = ?", (account_id,)).fetchone()[0]
             if busy or routines:
                 raise CommandError("Open tasks or routines still use this account. Cancel or change them first.")
+            if self._db.execute("SELECT COUNT(*) FROM vault_item WHERE account_id = ?", (account_id,)).fetchone()[0]:
+                raise CommandError("Vault items belong to this account. Move or delete them first.")
             self._db.execute("DELETE FROM account WHERE id = ?", (account_id,))
             self._audit("owner", "account.delete", account_id)
             return {"id": account_id, "deleted": True}
@@ -292,6 +297,7 @@ class CommandCenter:
             "notes": r["notes"], "createdAt": r["created_at"], "updatedAt": r["updated_at"],
             "lastOutcome": last["status"] if last else None,
             "locked": self._account_locked(r["id"]),
+            "vaultItems": self._db.execute("SELECT COUNT(*) FROM vault_item WHERE account_id = ?", (r["id"],)).fetchone()[0],
         }
 
     def _account_locked(self, account_id: str) -> bool:

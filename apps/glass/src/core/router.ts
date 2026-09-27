@@ -2,8 +2,8 @@
 export type AppTab = "map" | "coverage" | "skills" | "screens" | "scenarios" | "versions" | "runs" | "issues";
 const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios", "versions", "runs", "issues"];
 /** Plan 33 (C0): the Command Center's sections. */
-export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts";
-const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts"];
+export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "vault";
+const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "vault"];
 
 export type Route =
   | { name: "home" }

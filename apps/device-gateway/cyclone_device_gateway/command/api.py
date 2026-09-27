@@ -115,6 +115,46 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def answer(approval_id: str, body: dict[str, Any]):
         return call(lambda: cc().answer(approval_id, body_of(body)))
 
+    # Plan 33 (C1): the vault. Every body is ciphertext made in the browser; nothing here can decrypt it.
+    @router.get("/v1/cc/vault", dependencies=[Depends(auth)])
+    def vault():
+        return call(lambda: cc().vault.get())
+
+    @router.post("/v1/cc/vault/init", dependencies=[Depends(auth)])
+    def vault_init(body: dict[str, Any]):
+        return call(lambda: cc().vault.init(body))
+
+    @router.post("/v1/cc/vault/rewrap", dependencies=[Depends(auth)])
+    def vault_rewrap(body: dict[str, Any]):
+        return call(lambda: cc().vault.rewrap(body))
+
+    @router.post("/v1/cc/vault/items", dependencies=[Depends(auth)])
+    def vault_put(body: dict[str, Any]):
+        return call(lambda: cc().vault.put_item(body))
+
+    @router.post("/v1/cc/vault/import", dependencies=[Depends(auth)])
+    def vault_import(body: dict[str, Any]):
+        items = body_of(body).get("items")
+        if not isinstance(items, list) or not 1 <= len(items) <= 1000 or set(body) != {"items"}:
+            raise HTTPException(status_code=422, detail={"code": "INVALID_REQUEST", "message": "Send {\"items\": [...]} (1..1000)."})
+        return call(lambda: {"items": [cc().vault.put_item(item, created_by="import") for item in items]})
+
+    @router.post("/v1/cc/vault/items/{item_id}/delete", dependencies=[Depends(auth)])
+    def vault_delete(item_id: str):
+        return call(lambda: cc().vault.delete_item(item_id))
+
+    @router.post("/v1/cc/vault/restore", dependencies=[Depends(auth)])
+    def vault_restore(body: dict[str, Any]):
+        return call(lambda: cc().vault.restore(body))
+
+    @router.post("/v1/cc/vault/reset", dependencies=[Depends(auth)])
+    def vault_reset(body: dict[str, Any]):
+        return call(lambda: cc().vault.reset(body))
+
+    @router.post("/v1/cc/vault/audit", dependencies=[Depends(auth)])
+    def vault_audit(body: dict[str, Any]):
+        return call(lambda: cc().vault.client_audit(body))
+
     @router.get("/v1/cc/audit", dependencies=[Depends(auth)])
     def audit(limit: int = Query(default=200, ge=1, le=1000)):
         return call(lambda: cc().audit(limit))

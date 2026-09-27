@@ -23,6 +23,8 @@ export interface CcAccount {
   notes: string;
   lastOutcome: string | null;
   locked: boolean;
+  /** Encrypted vault items linked to this account (C1). */
+  vaultItems: number;
 }
 
 export interface CcRun {
@@ -129,6 +131,7 @@ export function parseAccount(raw: unknown): CcAccount {
     notes: str(r.notes),
     lastOutcome: optStr(r.lastOutcome),
     locked: r.locked === true,
+    vaultItems: num(r.vaultItems),
   };
 }
 

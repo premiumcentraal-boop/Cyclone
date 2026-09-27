@@ -1,6 +1,6 @@
 # 33 — Cyclone Command Center: the final plan
 
-**Status:** final plan, 2026-09-27. **C0 built in alpha.51** (see §12.1); C1–C6 not started. Physical acceptance
+**Status:** final plan, 2026-09-27. **C0 built in alpha.51** (§12.1), **C1 built in alpha.54** (§12.2); C2–C6 not started. Physical acceptance
 of C0 is UNVERIFIED.
 
 **The owner's ask:**
@@ -347,6 +347,27 @@ stated as owed until you test it.
 - **Deferred from the §12 row:** schedules are "daily at HH:MM on weekdays" or "every N minutes" (no RRULE or
   triggers yet); the inbox holds Command Center tasks only (not tasks started on the phone); no retries after a
   mission started (no double posts).
+
+### 12.2 C1 as built (alpha.54)
+
+- **Crypto (browser, WebCrypto only):**
+  - VK = 32 random bytes, wrapped with PBKDF2-SHA256 (≥ 600,000 iterations, 16-byte salt) → AES-256-GCM, and again
+    with a 32-byte recovery key.
+  - Per item version: a random item key wrapped with the VK; fields sealed with AES-256-GCM, AAD
+    `cyclone-vault/v1/item/<id>/<kind>/<version>`.
+  - The account id is inside the ciphertext too; a changed plain link is flagged, not trusted.
+  - Argon2id and XChaCha20 were replaced by WebCrypto-native primitives: Glass has no runtime dependencies.
+- **Gateway:** `command/vault.py` holds `vault_meta` and `vault_item`: ciphertext, salt, KDF parameters, kind, account
+  link and version only. Routes are `/v1/cc/vault/{init,rewrap,items,import,items/<id>/delete,restore,reset,audit}`.
+  Versions are strictly increasing; restore goes into an empty vault only; client-side events (unlock, show, copy,
+  export) go into the audit chain.
+- **Glass:** Command Center → **Vault**: create with a recovery key, unlock (passphrase or recovery key), items
+  (login, authenticator, recovery codes, note), a generator, health, show/copy/code behind a 2-minute step-up, a
+  5-minute idle lock, Bitwarden JSON / CSV import, encrypted backup and restore, change passphrase, new recovery key.
+- **Exit test run:** a canary absent from the DB, WAL, logs, backup and runtime process memory; restore on a second
+  runtime unlocked with the recovery key.
+- **Deferred:** passkey (WebAuthn PRF) unlock, because Glass runs at 127.0.0.1 and WebAuthn needs a domain name;
+  planned for C6 or a local hostname.
 
 **Start with C0 → C2.** That is the core of the ask: one place for your accounts and tasks, and phones that log in
 for a task without the password ever being visible to anything but you and that phone.

@@ -29,6 +29,7 @@ import { el, setChildren } from "../ui/dom.js";
 import { actionButton, card, chip, emptyState, errorState, loadingState, pageHeader, segmented, statTile } from "../ui/components.js";
 import { relativeTime } from "../ui/format.js";
 import type { GlassPage } from "./page.js";
+import { createVaultView, type VaultView } from "./vaultView.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -37,6 +38,7 @@ const TABS: Array<{ id: CommandTab; label: string }> = [
   { id: "routines", label: "Routines" },
   { id: "results", label: "Results" },
   { id: "accounts", label: "Accounts" },
+  { id: "vault", label: "Vault" },
 ];
 
 interface Data {
@@ -142,7 +144,15 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     );
   }
 
+  let vaultView: VaultView | null = null;
+
   function renderBody(): void {
+    // The vault manages itself (its own loading, locking and forms); polling never re-renders it.
+    if (tab === "vault") {
+      vaultView ??= createVaultView(ctx, () => data.accounts, say);
+      if (body.firstChild !== vaultView.element) setChildren(body, vaultView.element);
+      return;
+    }
     if (!loaded) {
       setChildren(body, loadingState("Loading the Command Center…"));
       return;
@@ -515,7 +525,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     const box = card("cc-card");
     box.append(
       el("h2", "card-title", "Add an account you own"),
-      el("p", "cc-hint", "Only details, never a password. Until the vault arrives, Cyclone asks for passwords and codes on the phone."),
+      el("p", "cc-hint", "Only details here, never a password. Keep the password in the Vault tab, encrypted, linked to this account."),
     );
     const service = field("App package or website", el("input", "cc-input"));
     service.input.placeholder = "com.instagram.android or example.com";
@@ -568,7 +578,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
   function accountsView(): HTMLElement {
     if (!data.accounts.length) return emptyState({ icon: "user", title: "No accounts yet", body: "Add the accounts you own so tasks can say which one to use. One phone uses an account at a time." });
     const table = el("table", "cc-table");
-    table.append(headRow("Account", "Service", "Whose", "Two-step", "Phones", "State", ""));
+    table.append(headRow("Account", "Service", "Whose", "Two-step", "Phones", "Vault", "State", ""));
     for (const a of data.accounts) {
       const actions = el("td", "cc-row");
       const pause = actionButton(a.status === "paused" ? "Resume" : "Pause", { variant: "ghost" });
@@ -583,6 +593,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
         cell(basisLabel(a.ownerBasis)),
         cell(twofaLabel(a.twofa)),
         cell(a.allowedDevices.length ? a.allowedDevices.map((d) => deviceName(d)).join(", ") : "Any"),
+        cell(a.vaultItems ? `${a.vaultItems} encrypted` : "—"),
         a.locked ? chipCell("In use", "accent") : a.status === "paused" ? chipCell("Paused", "neutral") : chipCell(a.lastOutcome === "failed" ? "Last task failed" : "Ready", a.lastOutcome === "failed" ? "warning" : "success"),
         actions,
       );
@@ -600,6 +611,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
   return {
     element,
     destroy() {
+      vaultView?.destroy();
       destroyed = true;
       clearInterval(timer);
     },

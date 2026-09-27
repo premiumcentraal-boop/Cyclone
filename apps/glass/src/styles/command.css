@@ -51,3 +51,16 @@
 @media (max-width: 720px) {
   .cc-table { display: block; overflow-x: auto; }
 }
+
+/* Plan 33 (C1): the vault. */
+.vault, .vault-open { display: grid; gap: var(--space-3); }
+.vault-card { max-width: 760px; }
+.vault-recovery {
+  display: block; font-family: var(--font-mono); font-size: var(--text-lg); letter-spacing: 0.04em; word-break: break-all;
+  padding: var(--space-3) var(--space-4); background: var(--surface-muted); border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+}
+.vault-stepup { border-left: 3px solid var(--accent); max-width: 520px; }
+.vault-secret .vault-mask { font-family: var(--font-mono); font-size: var(--text-sm); word-break: break-all; }
+.vault-health .chip { font-size: var(--text-xs); }
+.vault-editor { border-left: 3px solid var(--accent); }
