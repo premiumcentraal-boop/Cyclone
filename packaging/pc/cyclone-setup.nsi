@@ -28,6 +28,8 @@ Unicode true
 !endif
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Cyclone"
 !define UNINSTALLER "Uninstall Cyclone.exe"
+; What the setup did, step by step, with install.ps1's own output: %TEMP%\Cyclone-Setup.log.
+!define SETUP_LOG "$TEMP\Cyclone-Setup.log"
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
@@ -64,36 +66,55 @@ VIAddVersionKey "LegalCopyright" "Cyclone"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+!macro SetupLog TEXT
+  FileOpen $9 "${SETUP_LOG}" a
+  FileSeek $9 0 END
+  FileWrite $9 "${TEXT}$\r$\n"
+  FileClose $9
+!macroend
+
 Function OpenCyclone
   ExecShell "open" "$INSTDIR\bin\cyclone.cmd"
 FunctionEnd
 
 Section "Cyclone" SecMain
+  Delete "${SETUP_LOG}"
+  !insertmacro SetupLog "Cyclone ${VERSION} setup into $INSTDIR"
   ; $PLUGINSDIR exists only once a page or plugin has run; a silent install (/S) shows no page, so create it here.
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
+  ClearErrors
   File "${PAYLOAD}\Cyclone-PC.zip"
   File "${PAYLOAD}\Cyclone-PC.zip.sha256"
   File "${PAYLOAD}\install.ps1"
+  ${If} ${Errors}
+    !insertmacro SetupLog "Could not unpack the package into $PLUGINSDIR"
+    MessageBox MB_ICONSTOP "Cyclone was not installed: the setup could not unpack its package into $PLUGINSDIR." /SD IDOK
+    SetErrorLevel 3
+    Abort
+  ${EndIf}
+  !insertmacro SetupLog "Unpacked into $PLUGINSDIR"
 
   DetailPrint "Installing Cyclone ${VERSION}..."
   ; The setup is 32-bit: run the 64-bit PowerShell on a 64-bit PC, so install.ps1 sees every process's path.
   ${If} ${RunningX64}
     ${DisableX64FSRedirection}
   ${EndIf}
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\install.ps1" -Zip "$PLUGINSDIR\Cyclone-PC.zip" -NoStart'
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\install.ps1" -Zip "$PLUGINSDIR\Cyclone-PC.zip" -NoStart -Log "${SETUP_LOG}"'
   Pop $0
   ${If} ${RunningX64}
     ${EnableX64FSRedirection}
   ${EndIf}
+  !insertmacro SetupLog "install.ps1 returned $0"
   ${If} $0 != "0"
-    MessageBox MB_ICONSTOP "Cyclone was not installed (install.ps1 reported $0). The details above say why." /SD IDOK
-    SetErrorLevel 2
+    MessageBox MB_ICONSTOP "Cyclone was not installed (install.ps1 reported $0). The details above and ${SETUP_LOG} say why." /SD IDOK
+    SetErrorLevel 4
     Abort
   ${EndIf}
   ${IfNot} ${FileExists} "$INSTDIR\CyclonePCRuntime.exe"
+    !insertmacro SetupLog "CyclonePCRuntime.exe is missing from $INSTDIR"
     MessageBox MB_ICONSTOP "Cyclone was not installed: CyclonePCRuntime.exe is missing from $INSTDIR." /SD IDOK
-    SetErrorLevel 2
+    SetErrorLevel 5
     Abort
   ${EndIf}
 
@@ -112,6 +133,7 @@ Section "Cyclone" SecMain
   WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\${UNINSTALLER}" /S'
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
+  !insertmacro SetupLog "Installed"
 SectionEnd
 
 ; Removes the program, the command and the shortcuts. The owner's data (pairing in runtime\, the Remote MCP token in

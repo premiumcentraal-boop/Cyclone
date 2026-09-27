@@ -151,8 +151,13 @@ try {
     # install.ps1 (inside the setup) installs into %LOCALAPPDATA%\Cyclone One; /D keeps the setup on the same folder.
     $env:LOCALAPPDATA = $SetupScratch
     # /D must be last and unquoted, so the arguments are one string.
+    $SetupLog = Join-Path $env:TEMP 'Cyclone-Setup.log'
+    Remove-Item -Force $SetupLog -ErrorAction SilentlyContinue
     $run = Start-Process -FilePath $Setup -ArgumentList "/S /D=$InstallDir" -Wait -PassThru
-    if ($run.ExitCode -ne 0) { throw "$SetupName /S failed ($($run.ExitCode))" }
+    if ($run.ExitCode -ne 0) {
+        if (Test-Path $SetupLog) { Write-Host "---- $SetupLog"; Get-Content $SetupLog | Write-Host } else { Write-Host "The setup wrote no $SetupLog." }
+        throw "$SetupName /S failed ($($run.ExitCode))"
+    }
     $Shim = Join-Path $InstallDir 'bin\cyclone.cmd'
     if (-not (Test-Path $Shim)) { throw "$SetupName did not create $Shim" }
     $reported = (& $Shim version 2>&1) -join "`n"

@@ -16,7 +16,9 @@ What it does, in order:
 param(
     [string]$Zip = "",
     [switch]$Relaunch,
-    [switch]$NoStart
+    [switch]$NoStart,
+    # The setup passes its log file; everything shown here is added to it.
+    [string]$Log = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -174,7 +176,9 @@ function Install-Cyclone {
     }
 }
 
+if ($Log) { try { Start-Transcript -Path $Log -Append | Out-Null } catch { } }
 $ok = Install-Cyclone
+if ($Log) { try { Stop-Transcript | Out-Null } catch { } }
 if ($ok -and ($Relaunch -or -not $NoStart)) {
     Say "Starting Cyclone..."
     & (Join-Path $Root 'CyclonePCRuntime.exe') terminal --no-update
