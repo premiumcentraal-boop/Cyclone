@@ -34,9 +34,19 @@ class GatewayMappingObservationPort(
     private val trail: com.cyclone.mobile.mapping.run.MappingTrailTap? = null,
 ) : MappingObservationPort {
     private val appContext = context.applicationContext
+    @Volatile private var failure: String? = null
 
-    override fun freshObservation(session: MappingSessionSnapshot): MappingObservation? =
-        runCatching {
+    override fun lastFailure(): String? = failure
+
+    override fun freshObservation(session: MappingSessionSnapshot): MappingObservation? {
+        // A screen that keeps changing is retried with longer quiet waits; a real failure keeps its cause (plan 20).
+        val (observation, cause) = ObservationRetry.run({ attempt -> captureOnce(session, attempt) })
+        failure = cause
+        return observation
+    }
+
+    private fun captureOnce(session: MappingSessionSnapshot, attempt: ObservationRetry.Attempt): MappingObservation =
+        run {
             val args = JSONObject()
                 .put("sessionId", session.sessionId)
                 .put("displayId", session.displayId)
@@ -44,6 +54,8 @@ class GatewayMappingObservationPort(
                     session.workspaceId?.let { put("workspaceId", it) }
                     session.workspaceGeneration?.let { put("workspaceGeneration", it) }
                     session.executionGeneration?.let { put("executionGeneration", it) }
+                    if (attempt.settleMaxMs > 0) put("settleQuietMs", attempt.settleQuietMs).put("settleMaxMs", attempt.settleMaxMs)
+                    if (attempt.tolerateContentChange) put("tolerateContentChange", true)
                 }
             val captured = GatewayObservationAdapter.capture(appContext, args, AtlasPersona.MAPPING)
             val page = ObservationProjections.pageCard(captured, "", captured.generation, actionable = true)
@@ -52,7 +64,7 @@ class GatewayMappingObservationPort(
             }
             MappingStructuralProjection.fromGateway(captured)
                 .copy(inPlace = PlaceResolver.matchesCurrent(page, session.placeId))
-        }.getOrNull()
+        }
 }
 
 /**

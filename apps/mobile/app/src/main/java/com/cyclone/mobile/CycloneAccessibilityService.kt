@@ -1052,6 +1052,22 @@ class CycloneAccessibilityService : AccessibilityService() {
         return null
     }
 
+    /** Waits until no accessibility event has touched [displayId] for [quietMs] (at most [maxWaitMs]). */
+    fun waitForRevisionQuiet(displayId: Int, quietMs: Long, maxWaitMs: Long) {
+        val counter = observationRevisions.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicLong() }
+        val started = android.os.SystemClock.uptimeMillis()
+        var seen = counter.get()
+        var quietSince = started
+        while (android.os.SystemClock.uptimeMillis() - started < maxWaitMs) {
+            Thread.sleep(20)
+            val now = counter.get()
+            if (now != seen) {
+                seen = now
+                quietSince = android.os.SystemClock.uptimeMillis()
+            } else if (android.os.SystemClock.uptimeMillis() - quietSince >= quietMs) return
+        }
+    }
+
     fun waitForUiQuiet(quietMs: Long = 90L, maxWaitMs: Long = 300L) {
         val started = System.currentTimeMillis()
         while (System.currentTimeMillis() - started < maxWaitMs) {

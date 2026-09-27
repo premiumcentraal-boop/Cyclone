@@ -1,18 +1,18 @@
-# Cyclone V5 alpha.58 dev1: API maker and cards (plan 34 M3+M4) - OpenAPI/Swagger descriptions become connections, results chain into the next step and reach a phone as quoted data, and connectors export and import as cards without keys.
+# Cyclone V5 alpha.58 dev2: mapping no longer stops with OBSERVATION_MISSING on screens that keep moving; the report names the cause.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.58.dev1"
+product_version = "5.0.0-alpha.58.dev2"
 channel = "development"
-android_version_code = 202
+android_version_code = 203
 python_version = "5.0.0-alpha.58.dev1"
 
 [components]
-mobile = "5.0.0-alpha.58.dev1"
+mobile = "5.0.0-alpha.58.dev2"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.33"
+glass = "1.0.0-alpha.34"
 device_gateway = "5.0.0-alpha.58.dev1"
 mcp = "5.0.0-alpha.58.dev1"
 
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha58-dev1-api-maker-and-cards"
+candidate_generation = "cyclone-v5-alpha58-dev2-mapping-observation-fix"

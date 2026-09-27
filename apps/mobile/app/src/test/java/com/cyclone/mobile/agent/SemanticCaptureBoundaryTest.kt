@@ -113,4 +113,15 @@ class SemanticCaptureBoundaryTest {
         assertEquals(1, captures); assertNull(captured.image)
         assertNull(captured.imageStartMs); assertNull(captured.imageEndMs)
     }
+
+    @Test fun onlyTheMappersLastAttemptToleratesAContentOnlyChange() {
+        var surface = initial
+        val animating = { surface = surface.copy(revision = surface.revision + 1); "tree" }
+        try { SemanticCaptureBoundary.capture({ surface }, animating, clock = { 10L }); fail("A moving screen was accepted") } catch (_: CaptureChanged) { }
+        val captured = SemanticCaptureBoundary.capture({ surface }, animating, clock = { 10L }, tolerateContentChange = true)
+        assertEquals("tree", captured.semantic)
+        // A window, size or scope change is never tolerated.
+        val resized = { surface = surface.copy(revision = surface.revision + 1, width = 101); "tree" }
+        try { SemanticCaptureBoundary.capture({ surface }, resized, clock = { 10L }, tolerateContentChange = true); fail("A resized screen was accepted") } catch (_: CaptureChanged) { }
+    }
 }

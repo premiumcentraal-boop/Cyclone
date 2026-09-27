@@ -36,15 +36,21 @@ object SemanticCaptureBoundary {
         return left >= 0 && top >= 0 && right <= surface.width && bottom <= surface.height &&
             right > left && bottom > top && image.optInt("width") == right - left && image.optInt("height") == bottom - top
     }
+    /**
+     * [tolerateContentChange]: accept a capture during which only the content revision moved (an app that animates
+     * all the time) while the window set, size, rotation and scope stayed the same. Only the mapper's last attempt
+     * asks for this; its taps still go through PhoneToolExecutor's own freshness checks.
+     */
     fun <T> capture(surface: () -> ObservationSurface, semantic: () -> T,
         image: (() -> JSONObject)? = null, clock: () -> Long = { android.os.SystemClock.uptimeMillis() },
-        settle: () -> Unit = {}): CapturedSemantic<T> {
+        settle: () -> Unit = {}, tolerateContentChange: Boolean = false): CapturedSemantic<T> {
         settle()
         val start = clock()
         val before = surface()
         val tree = semantic()
         val end = clock()
-        if (before != surface()) throw CaptureChanged()
+        val after = surface()
+        if (before != after && !(tolerateContentChange && before.copy(revision = 0) == after.copy(revision = 0))) throw CaptureChanged()
         val imageStart = image?.let { clock() }
         val pixels = image?.let { capture -> runCatching { capture() }.getOrElse {
             if (it is java.util.concurrent.CancellationException || it is InterruptedException) throw it

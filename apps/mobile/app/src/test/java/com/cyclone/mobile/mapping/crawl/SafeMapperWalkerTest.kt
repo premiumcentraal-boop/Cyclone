@@ -417,6 +417,18 @@ class SafeMapperWalkerTest {
         kind = kind,
     )
 
+    @Test
+    fun anUnreadableScreenReportsWhy() {
+        val h = Harness(observations = emptyList())
+        h.observer.cause = "SCREEN_KEPT_CHANGING"
+        val result = h.walker.step(nowMs = 1_100)
+        assertTrue(result is MappingStepResult.Failed)
+        assertEquals("observation_missing_SCREEN_KEPT_CHANGING", (result as MappingStepResult.Failed).reason)
+        assertEquals("observation_missing_SCREEN_KEPT_CHANGING", h.session.failure)
+        val plain = Harness(observations = emptyList())
+        assertEquals("observation_missing", (plain.walker.step(nowMs = 1_100) as MappingStepResult.Failed).reason)
+    }
+
     private inner class Harness(
         observations: List<MappingObservation>,
         dangers: Map<String, MappingDanger> = emptyMap(),
@@ -478,6 +490,8 @@ class SafeMapperWalkerTest {
     ) : MappingObservationPort {
         private val queue = ArrayDeque(values)
         val returned = mutableListOf<MappingObservation>()
+        var cause: String? = null
+        override fun lastFailure(): String? = cause
 
         override fun freshObservation(session: MappingSessionSnapshot): MappingObservation? {
             if (queue.isEmpty()) return null

@@ -307,3 +307,16 @@ test("Teach on the phone starts Follow Me, Done stops it and shows Your teaching
   assert.equal(page.element.querySelector(".segment.active").textContent, "Your teaching");
   page.destroy();
 });
+
+test("a mapping pass that could not read the screen says why in plain words", async () => {
+  const { failureHint, reportReason } = await import("../.test-dist/ui/missionPanel.js");
+  const job = { state: "failed", failureCode: "OBSERVATION_MISSING_SCREEN_KEPT_CHANGING" };
+  const reason = reportReason(job);
+  assert.match(reason.text, /\(OBSERVATION_MISSING_SCREEN_KEPT_CHANGING\)/);
+  assert.match(reason.text, /screen kept moving/);
+  assert.match(reason.text, /Nothing was changed on the phone\.$/);
+  assert.match(failureHint("AFTER_OBSERVATION_MISSING_ACCESSIBILITY_OFF"), /accessibility service is off/);
+  assert.match(failureHint("OBSERVATION_MISSING"), /could not read the phone's screen/);
+  assert.equal(failureHint("DOOR_UNSAFE"), "");
+  assert.equal(failureHint(null), "");
+});

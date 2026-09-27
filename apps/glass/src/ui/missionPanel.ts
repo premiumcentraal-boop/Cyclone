@@ -203,9 +203,19 @@ export interface ReportInfo {
   onMapDeeper(): void;
 }
 
+/** Plain words for the phone's "could not read the screen" codes (OBSERVATION_MISSING_<cause>). */
+export function failureHint(code: string | null): string {
+  if (!code || !/^(AFTER_)?OBSERVATION_MISSING/.test(code)) return "";
+  if (code.endsWith("SCREEN_KEPT_CHANGING")) return " The app's screen kept moving while Cyclone read it, even after waiting. Let the app finish loading, close any playing video or animation, then Map again.";
+  if (code.endsWith("ACCESSIBILITY_OFF")) return " Cyclone's accessibility service is off on the phone. Turn it back on in Settings, then Map again.";
+  if (code.endsWith("DISPLAY_GONE")) return " The screen Cyclone was mapping on closed. Map again.";
+  if (code.endsWith("TIMEOUT")) return " The phone took too long to answer. Check it is awake and connected, then Map again.";
+  return " Cyclone could not read the phone's screen.";
+}
+
 export function reportReason(job: MappingJobView): { text: string; tone: Tone } {
   if (job.state === "stopped") return { text: "You stopped the pass.", tone: "neutral" };
-  if (job.state === "failed") return { text: `The pass stopped with an error (${job.failureCode ?? "unknown"}). Nothing was changed on the phone.`, tone: "danger" };
+  if (job.state === "failed") return { text: `The pass stopped with an error (${job.failureCode ?? "unknown"}).${failureHint(job.failureCode)} Nothing was changed on the phone.`, tone: "danger" };
   if (job.boundary === "authentication") return { text: "Ended at a sign-in screen: a look-only pass never signs in. Map with a test account to cover sign-in screens.", tone: "warning" };
   if (job.atlasStatus === "mapped") return { text: "Finished: every reachable safe door was walked.", tone: "success" };
   return { text: "Finished for now: the time or the budget was used, or nothing new was left within reach. Map again or go deeper.", tone: "accent" };

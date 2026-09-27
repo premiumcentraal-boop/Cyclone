@@ -24,7 +24,7 @@ class SafeMapperWalker(
         budgetResult(beforeSession, nowMs)?.let { return it }
 
         val before = observations.freshObservation(beforeSession)
-            ?: return fail("observation_missing")
+            ?: return fail(missing("observation_missing"))
         validateObservation(beforeSession, before)?.let { return it }
         // Never classify or tap a foreign app/site as part of this place. The driver recovers.
         if (!before.inPlace) return MappingStepResult.LeftPlace("before_observation_outside_place")
@@ -94,7 +94,7 @@ class SafeMapperWalker(
         // Eyes beat the map: every screen-changing attempt is followed by a new observation before
         // another decision can ever be made.
         val after = observations.freshObservation(afterMutationSession)
-            ?: return fail("after_observation_missing")
+            ?: return fail(missing("after_observation_missing"))
         validateObservation(afterMutationSession, after)?.let { return it }
         if (after.observationId == before.observationId) {
             return fail("after_observation_not_fresh")
@@ -230,6 +230,9 @@ class SafeMapperWalker(
         session.completePartial(reason)
         return MappingStepResult.CompletedPartial(reason)
     }
+
+    /** The report says why the screen could not be read, e.g. OBSERVATION_MISSING_SCREEN_KEPT_CHANGING. */
+    private fun missing(base: String): String = observations.lastFailure()?.let { "${base}_$it" } ?: base
 
     private fun fail(reason: String): MappingStepResult.Failed {
         session.fail(reason)

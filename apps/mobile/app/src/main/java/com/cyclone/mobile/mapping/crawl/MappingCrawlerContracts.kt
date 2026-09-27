@@ -150,6 +150,9 @@ data class VerifiedStructure(
 interface MappingObservationPort {
     /** Must return a newly captured observation for exactly the bound session/display. */
     fun freshObservation(session: MappingSessionSnapshot): MappingObservation?
+
+    /** Why the last [freshObservation] returned null (a short code for the report), or null. */
+    fun lastFailure(): String? = null
 }
 
 interface MappingAtlasPort {

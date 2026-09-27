@@ -132,9 +132,17 @@ internal object GatewayObservationAdapter {
                 plane.toJson().put("executionGeneration", executionGeneration ?: JSONObject.NULL).toString(), profile)
         }
         val includeScreenshot = args.optBoolean("includeScreenshot", false)
+        // The mapper retries with longer quiet waits, and its last attempt may tolerate animated content (plan 20).
+        val settleQuietMs = args.optLong("settleQuietMs", 0L).coerceIn(0L, 1_000L)
+        val settleMaxMs = args.optLong("settleMaxMs", 0L).coerceIn(0L, 6_000L)
+        val tolerateContentChange = catalogPersona == AtlasPersona.MAPPING && args.optBoolean("tolerateContentChange", false)
         val captured = try {
             com.cyclone.mobile.agent.SemanticCaptureBoundary.capture(::surface,
-                settle = { service.waitForUiQuiet() },
+                tolerateContentChange = tolerateContentChange,
+                settle = {
+                    service.waitForUiQuiet()
+                    if (settleMaxMs > 0) service.waitForRevisionQuiet(execution.displayId, settleQuietMs.coerceAtLeast(90L), settleMaxMs)
+                },
                 semantic = { if (background) com.cyclone.mobile.runtime.background.WorkspaceRuntime.observe(execution) else service.observe(markFresh = false) },
                 image = if (!includeScreenshot) null else ({
                     val result = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
