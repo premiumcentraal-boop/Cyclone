@@ -1,5 +1,6 @@
 # Cyclone V5 alpha.55 dev1: Command Center C2 (plan 33) - sealed delivery: a vault password sealed to one trusted phone, for one task, on one app or site, used once.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
+# Published from the commit that also tracks the phone's sealed-delivery sources (the first alpha.55 push lacked them).
 schema = 1
 product_version = "5.0.0-alpha.55.dev1"
 channel = "development"
