@@ -181,6 +181,7 @@ class CommandCenter:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=5)
+        self.connections.close()
         with self._lock:
             self._db.close()
 
@@ -818,6 +819,7 @@ class CommandCenter:
     # ---------------------------------------------------------------- the job loop
 
     def tick(self) -> None:
+        self.connections.local.sweep()
         with self._lock:
             self._fire_routines()
             ready = self._ready_devices()

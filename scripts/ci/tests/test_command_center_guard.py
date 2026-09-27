@@ -146,6 +146,38 @@ class CommandCenterGuard(unittest.TestCase):
         center = (COMMAND / "center.py").read_text(encoding="utf-8")
         assert "task_id=reserved" in center and "_clear_slots(routine_id" in center and "_login_approval(task)" in center
 
+    # Plan 34 (alpha.57): local MCP servers run only after the owner approved an exact, pinned command.
+    def test_local_servers_run_only_approved_pinned_commands_without_a_shell(self):
+        local = (COMMAND / "local.py").read_text(encoding="utf-8")
+        assert 'LAUNCHERS = ("npx", "uvx", "docker", "node", "python", "python3", "py")' in local
+        assert "shell=False" in local and "shell=True" not in local and "os.system" not in local
+        assert "subprocess.Popen([executable, *launch[\"args\"]]" in local, "an argument list, never a shell line"
+        assert "SHELL_CHARS" in local and "NPM_PINNED" in local and "PY_PINNED" in local and "_file_hash" in local
+        passed = local[local.index("PASS_ENV = ("):local.index(")", local.index("PASS_ENV = ("))]
+        assert "CYCLONE" not in passed and "TOKEN" not in passed, "the gateway's token never reaches a local server"
+        store = (COMMAND / "connections.py").read_text(encoding="utf-8")
+        assert 'if launch.get("approvedHash") != launch["hash"]:' in store, "nothing runs before the owner approves this exact hash"
+        assert 'if body["hash"] != launch["hash"]:' in store
+        assert 'launch.pop("env")' in store and 'self.grants.put(f"env:{connection_id}", env)' in store, "env values stay out of the database"
+
+    def test_sensitive_tools_always_ask_and_changed_tools_switch_off(self):
+        store = (COMMAND / "connections.py").read_text(encoding="utf-8")
+        assert 'rule = "always" if cls == "sensitive"' in store
+        assert "always asks you first" in store
+        assert "allowed = 0, previous = ?" in store, "a changed tool is off until the owner approves it again"
+        assert "def tool_hash" in store and '"inputSchema": tool.get("inputSchema")' in store
+
+    def test_the_setup_card_says_what_a_local_program_can_do(self):
+        text = (GLASS / "services/command.ts").read_text(encoding="utf-8")
+        card = text[text.index("export const LOCAL_CARD"):]
+        for words in ("Run this program on your PC?", "read and change files", "use the internet", "Only add programs you trust."):
+            assert words in card, f"the setup card must say: {words}"
+        view = (GLASS / "pages/connectionsView.ts").read_text(encoding="utf-8")
+        assert "LOCAL_CARD.title" in view and "LOCAL_CARD.body" in view and "LOCAL_CARD.trust" in view
+        for name in (GLASS / "pages").glob("*.ts"):
+            if name.name != "connectionsView.ts":
+                assert "approveLocal" not in name.read_text(encoding="utf-8"), f"{name.name}: only the setup card approves a local server"
+
 
 if __name__ == "__main__":
     unittest.main()

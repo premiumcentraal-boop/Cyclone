@@ -81,12 +81,23 @@ export interface ToolField {
   default: string | number | boolean | null;
 }
 
+export type ToolClass = "read" | "change" | "sensitive";
+
 export interface CcTool {
   name: string;
   title: string;
   description: string;
   fields: ToolField[];
   readOnly: boolean;
+  /** Plan 34: reads only look; changes change something outside; sensitive ones send, delete, pay or grant. */
+  class: ToolClass;
+  allowed: boolean;
+  rule: ApprovalRule;
+  /** The server changed this tool since it was allowed; it is off until the owner looks. */
+  changed: boolean;
+  previous: { description: string } | null;
+  /** The reading tool that checks this one's background job, found by the gateway. */
+  pollTool: string | null;
 }
 
 export type ApprovalRule = "always" | "over_cap" | "cap";
@@ -95,8 +106,17 @@ export interface CcConnection {
   id: string;
   name: string;
   url: string;
-  auth: "none" | "oauth";
-  status: "new" | "ready" | "needs_sign_in" | "error";
+  auth: "none" | "oauth" | "header";
+  status: "new" | "ready" | "needs_sign_in" | "needs_key" | "needs_client" | "needs_approval" | "error";
+  kind: "remote" | "local";
+  transport: "http" | "sse" | "stdio";
+  keyHeader: string | null;
+  manualClient: boolean;
+  probe: Array<{ step: string; ok: boolean; detail: string }>;
+  /** A local server: the exact command, what is pinned, env names (never values) and the hash the owner approves. */
+  launch: { name: string; launcher: string; args: string[]; envKeys: string[]; pinned: string; display: string; hash: string; approvedHash: string | null; previous: string | null } | null;
+  envSet: string[];
+  running: boolean;
   detail: string;
   signedIn: boolean;
   grantKept: boolean;
@@ -118,6 +138,8 @@ export interface CcCall {
   arguments: Record<string, unknown>;
   createdAt: number;
   finishedAt: number | null;
+  /** What the call brought back (structured data or text), bounded and screened by the gateway. */
+  result: unknown;
 }
 
 export interface CcArtifact {
@@ -222,18 +244,32 @@ export function parseCall(raw: unknown): CcCall {
   return { id: str(r.id), connectionId: str(r.connectionId), tool: str(r.tool), taskId: optStr(r.taskId),
     state: oneOf(r.state, ["waiting", "running", "done", "failed", "declined", "refused"] as const, "failed"), summary: str(r.summary),
     artifacts: list(r.artifacts).filter((a): a is string => typeof a === "string"), arguments: obj(r.arguments),
-    createdAt: num(r.createdAt), finishedAt: optNum(r.finishedAt) };
+    createdAt: num(r.createdAt), finishedAt: optNum(r.finishedAt), result: r.result ?? null };
 }
 
 export function parseConnection(raw: unknown): CcConnection {
   const r = obj(raw);
   return {
-    id: str(r.id), name: str(r.name), url: str(r.url), auth: r.auth === "oauth" ? "oauth" : "none",
-    status: oneOf(r.status, ["new", "ready", "needs_sign_in", "error"] as const, "error"), detail: str(r.detail),
+    id: str(r.id), name: str(r.name), url: str(r.url), auth: oneOf(r.auth, ["none", "oauth", "header"] as const, "none"),
+    status: oneOf(r.status, ["new", "ready", "needs_sign_in", "needs_key", "needs_client", "needs_approval", "error"] as const, "error"), detail: str(r.detail),
+    kind: r.kind === "local" ? "local" : "remote", transport: oneOf(r.transport, ["http", "sse", "stdio"] as const, "http"),
+    keyHeader: optStr(r.keyHeader), manualClient: r.manualClient === true,
+    probe: list(r.probe).map((x) => { const y = obj(x); return { step: str(y.step), ok: y.ok === true, detail: str(y.detail) }; }),
+    launch: r.launch ? (() => {
+      const l = obj(r.launch);
+      return { name: str(l.name), launcher: str(l.launcher), args: list(l.args).filter((a): a is string => typeof a === "string"),
+        envKeys: list(l.envKeys).filter((a): a is string => typeof a === "string"), pinned: str(l.pinned), display: str(l.display),
+        hash: str(l.hash), approvedHash: optStr(l.approvedHash), previous: optStr(l.previous) };
+    })() : null,
+    envSet: list(r.envSet).filter((a): a is string => typeof a === "string"), running: r.running === true,
     signedIn: r.signedIn === true, grantKept: r.grantKept === true,
     tools: list(r.tools).map((t) => {
       const x = obj(t);
+      const prev = x.previous ? obj(x.previous) : null;
       return { name: str(x.name), title: str(x.title), description: str(x.description), readOnly: x.readOnly === true,
+        class: oneOf(x.class, ["read", "change", "sensitive"] as const, "change"), allowed: x.allowed === true,
+        rule: oneOf(x.rule, ["always", "over_cap", "cap"] as const, "always"), changed: x.changed === true,
+        previous: prev ? { description: str(prev.description) } : null, pollTool: optStr(x.pollTool),
         fields: list(x.fields).map((f) => {
           const y = obj(f);
           const d = y.default;
@@ -397,9 +433,22 @@ export const command = {
     const r = await client.get<{ connections?: unknown; higgsfield?: unknown }>("/v1/cc/connections");
     return { connections: list(r?.connections).map(parseConnection), higgsfield: str(r?.higgsfield, "https://mcp.higgsfield.ai/mcp") };
   },
-  addConnection: async (client: GatewayClient, body: { name: string; url: string }) => parseConnection(await client.post("/v1/cc/connections", body)),
+  addConnection: async (client: GatewayClient, body: { name: string; url: string } | { config: unknown; name?: string }) => parseConnection(await client.post("/v1/cc/connections", body)),
+  setKey: async (client: GatewayClient, id: string, header: string, value: string) =>
+    parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/key`, { header, value })),
+  setClient: async (client: GatewayClient, id: string, clientId: string, clientSecret?: string) =>
+    parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/client`, clientSecret ? { clientId, clientSecret } : { clientId })),
+  approveLocal: async (client: GatewayClient, id: string, hash: string) =>
+    parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/approve`, { hash })),
+  setEnv: async (client: GatewayClient, id: string, values: Record<string, string>) =>
+    parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/env`, { values })),
+  logs: async (client: GatewayClient, id: string) =>
+    list((await client.get<{ lines?: unknown }>(`/v1/cc/connections/${encodeURIComponent(id)}/logs`))?.lines).filter((l): l is string => typeof l === "string"),
+  tryTool: async (client: GatewayClient, id: string, tool: string, args: Record<string, unknown>) =>
+    parseCall(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/call`, { tool, arguments: args })),
+  getCall: async (client: GatewayClient, id: string) => parseCall(await client.get(`/v1/cc/calls/${encodeURIComponent(id)}`)),
   refreshConnection: async (client: GatewayClient, id: string) => parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/refresh`)),
-  connectionSettings: async (client: GatewayClient, id: string, body: { allowed?: string[]; dailyCap?: number; approval?: ApprovalRule }) =>
+  connectionSettings: async (client: GatewayClient, id: string, body: { allowed?: string[]; allowReads?: true; rules?: Record<string, ApprovalRule>; dailyCap?: number; approval?: ApprovalRule }) =>
     parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/settings`, body)),
   signIn: async (client: GatewayClient, id: string) =>
     str((await client.post<{ authorizationUrl?: unknown }>(`/v1/cc/connections/${encodeURIComponent(id)}/sign-in`))?.authorizationUrl),
@@ -492,3 +541,14 @@ export function toolArguments(tool: CcTool, values: Record<string, string>): Rec
   }
   return out;
 }
+
+export function classLabel(cls: ToolClass): string {
+  return { read: "Reads", change: "Changes things", sensitive: "Sends, deletes, pays or grants — always asks you" }[cls];
+}
+
+/** The setup card's words for a local server, kept short and human (plan 34 §3.1). */
+export const LOCAL_CARD = {
+  title: "Run this program on your PC?",
+  body: "It works like any app you install: it can read and change files on this PC and use the internet. Cyclone runs only this exact version and stops it when Cyclone stops.",
+  trust: "Only add programs you trust.",
+};

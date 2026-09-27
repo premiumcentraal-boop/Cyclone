@@ -38,7 +38,8 @@ a = Analysis(
                    # Plan 33: the Command Center (some modules are imported inside CommandCenter.__init__).
                    "cyclone_device_gateway.command.api", "cyclone_device_gateway.command.center", "cyclone_device_gateway.command.schedule",
                    "cyclone_device_gateway.command.vault", "cyclone_device_gateway.command.delivery",
-                   "cyclone_device_gateway.command.connections", "cyclone_device_gateway.command.mcp"],
+                   "cyclone_device_gateway.command.connections", "cyclone_device_gateway.command.mcp",
+                   "cyclone_device_gateway.command.local"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

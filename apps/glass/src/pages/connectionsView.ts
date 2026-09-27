@@ -8,6 +8,8 @@
  */
 import type { GlassContext } from "../app.js";
 import {
+  LOCAL_CARD,
+  classLabel,
   command,
   ruleLabel,
   sizeLabel,
@@ -20,7 +22,7 @@ import {
   type MakeStep,
 } from "../services/command.js";
 import { el, setChildren } from "../ui/dom.js";
-import { actionButton, card, chip, emptyState } from "../ui/components.js";
+import { actionButton, card, chip, emptyState, segmented } from "../ui/components.js";
 import { relativeTime } from "../ui/format.js";
 
 const POLL_MS = 5_000;
@@ -40,7 +42,7 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
   let higgsfield = "https://mcp.higgsfield.ai/mcp";
   let destroyed = false;
   // Settings the owner is editing are kept across polls, per connection.
-  const drafts = new Map<string, { allowed: Set<string>; dailyCap: string; approval: ApprovalRule }>();
+  const drafts = new Map<string, { allowed: Set<string>; dailyCap: string; approval: ApprovalRule; rules: Record<string, ApprovalRule> }>();
 
   const act = async (label: string, action: () => Promise<unknown>): Promise<boolean> => {
     say(`${label}…`);
@@ -55,14 +57,18 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
     }
   };
 
-  // ------------------------------------------------------------------ add
+  // ------------------------------------------------------------------ add: an address, or a config for a program on this PC
 
+  let mode: "address" | "config" = "address";
   const name = el("input", "cc-input");
   name.setAttribute("aria-label", "Name");
   name.placeholder = "Higgsfield";
   const url = el("input", "cc-input");
   url.setAttribute("aria-label", "Server address");
   url.placeholder = "https://mcp.example.com/mcp";
+  const config = el("textarea", "cc-input cc-goal");
+  config.setAttribute("aria-label", "Server config");
+  config.placeholder = '{ "mcpServers": { "files": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.8.21", "C:\\\\Notes"] } } }';
   const preset = actionButton("Use Higgsfield", { variant: "ghost" });
   preset.addEventListener("click", () => {
     name.value = "Higgsfield";
@@ -70,51 +76,88 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
   });
   const add = actionButton("Add connection", { variant: "primary", icon: "plug" });
   add.addEventListener("click", () => {
+    if (mode === "config") {
+      const text = String(config.value ?? "").trim();
+      if (!text) return say("Paste the server's config from its README.", "error");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return say("That is not JSON. Paste the config block from the server's README.", "error");
+      }
+      void act("Reading the config", () => command.addConnection(ctx.client, { config: parsed })).then((ok) => {
+        if (ok) config.value = "";
+      });
+      return;
+    }
     const address = String(url.value ?? "").trim();
     if (!address) return say("Paste the server's address.", "error");
-    if (/[?&](key|token|api[_-]?key)=/i.test(address)) return say("Leave keys out of the address. Cyclone signs in with OAuth instead.", "error");
-    void act("Adding the connection", () => command.addConnection(ctx.client, { name: String(name.value ?? "").trim() || "Connection", url: address })).then((ok) => {
+    if (/[?&](key|token|api[_-]?key)=/i.test(address)) return say("Leave keys out of the address. Cyclone asks for the key next, and keeps it sealed.", "error");
+    void act("Connecting", () => command.addConnection(ctx.client, { name: String(name.value ?? "").trim() || "Connection", url: address })).then((ok) => {
       if (ok) {
         name.value = "";
         url.value = "";
       }
     });
   });
-  const addGrid = el("div", "cc-grid");
-  addGrid.append(labelled("Name", name), labelled("Server address (MCP, https)", url));
-  const addActions = el("div", "cc-actions");
-  addActions.append(add, preset);
-  addBox.append(
-    el("h2", "card-title", "Add a connection"),
-    el("p", "cc-hint", "An MCP server Cyclone may use for your tasks, like Higgsfield for videos. You sign in on its own page; the sign-in stays on this PC, sealed for your Windows user, and Glass never sees it."),
-    addGrid,
-    addActions,
-  );
+  const addBody = el("div", "cc-add-body");
+  const modes = segmented<"address" | "config">([{ id: "address", label: "Server address" }, { id: "config", label: "Program on this PC" }], mode, (id) => {
+    mode = id;
+    modes.set(id);
+    drawAdd();
+  });
+  function drawAdd(): void {
+    const actions = el("div", "cc-actions");
+    if (mode === "address") {
+      const grid = el("div", "cc-grid");
+      grid.append(labelled("Name", name), labelled("Server address (MCP)", url));
+      actions.append(add, preset);
+      setChildren(addBody, el("p", "cc-hint", "Paste its address. Cyclone works out how to reach it and how to sign in: on the server's own page, or with a key you paste. Keys and sign-ins stay on this PC, sealed for your Windows user."), grid, actions);
+    } else {
+      actions.append(add);
+      setChildren(addBody, el("p", "cc-hint", "Paste the server's config (the mcpServers JSON from its README). Nothing runs until you say so."), labelled("Server config", config), actions);
+    }
+  }
+  drawAdd();
+  addBox.append(el("h2", "card-title", "Add a connection"), modes.element, addBody);
 
   // ------------------------------------------------------------------ connections
 
   function draftOf(c: CcConnection) {
     let draft = drafts.get(c.id);
     if (!draft) {
-      draft = { allowed: new Set(c.allowed), dailyCap: String(c.dailyCap), approval: c.approval };
+      draft = { allowed: new Set(c.tools.filter((t) => t.allowed).map((t) => t.name)), dailyCap: String(c.dailyCap), approval: c.approval,
+        rules: Object.fromEntries(c.tools.filter((t) => t.class === "change").map((t) => [t.name, t.rule])) as Record<string, ApprovalRule> };
       drafts.set(c.id, draft);
     }
     return draft;
   }
 
+  const STATUS: Record<CcConnection["status"], [string, "success" | "warning" | "danger" | "neutral"]> = {
+    ready: ["Ready", "success"], needs_sign_in: ["Sign in needed", "warning"], needs_key: ["Key needed", "warning"],
+    needs_client: ["Client ID needed", "warning"], needs_approval: ["Waiting for your OK", "warning"], error: ["Not working", "danger"], new: ["New", "neutral"],
+  };
+
   function connectionCard(c: CcConnection): HTMLElement {
     const box = card("cc-card cc-connection");
     const head = el("div", "cc-row");
-    const tone = c.status === "ready" ? "success" : c.status === "needs_sign_in" ? "warning" : c.status === "error" ? "danger" : "neutral";
-    head.append(
-      el("strong", undefined, c.name),
-      chip({ ready: "Ready", needs_sign_in: "Sign in needed", error: "Not reachable", new: "New" }[c.status], tone),
-      el("span", "muted", c.url),
-    );
+    const [label, tone] = STATUS[c.status];
+    head.append(el("strong", undefined, c.name), chip(label, tone));
+    if (c.kind === "local") head.append(chip(c.running ? "On this PC · running" : "On this PC", "accent"), el("span", "muted", c.launch?.pinned ?? ""));
+    else head.append(el("span", "muted", c.url), ...(c.transport === "sse" ? [chip("older transport", "neutral")] : []));
     box.append(head);
-    if (c.detail) box.append(el("p", "cc-hint", c.detail));
+    if (c.probe.length) {
+      const steps = el("ul", "cc-probe");
+      for (const step of c.probe) steps.append(el("li", step.ok ? "cc-probe-ok" : "cc-probe-no", `${step.ok ? "✓" : "•"} ${step.step}${step.detail ? `: ${step.detail}` : ""}`));
+      box.append(steps);
+    } else if (c.detail) box.append(el("p", "cc-hint", c.detail));
+
+    if (c.status === "needs_approval" && c.launch) box.append(setupCard(c));
+    if (c.status === "needs_key") box.append(keyForm(c));
+    if (c.status === "needs_client") box.append(clientForm(c));
+
     const actions = el("div", "cc-actions");
-    if (c.auth === "oauth" && !c.signedIn) {
+    if (c.auth === "oauth" && !c.signedIn && c.status !== "needs_client") {
       const signIn = actionButton("Sign in", { variant: "primary", icon: "user" });
       signIn.addEventListener("click", () => void act("Opening the sign-in page", async () => {
         const target = await command.signIn(ctx.client, c.id);
@@ -128,30 +171,143 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
     refresh.addEventListener("click", () => void act("Checking", () => command.refreshConnection(ctx.client, c.id)));
     actions.append(refresh);
     if (c.signedIn) {
-      const out = actionButton("Sign out", { variant: "ghost" });
+      const out = actionButton(c.auth === "header" ? "Forget the key" : "Sign out", { variant: "ghost" });
       out.addEventListener("click", () => void act("Signing out", () => command.signOut(ctx.client, c.id)));
       actions.append(out);
+    }
+    if (c.kind === "local") {
+      const log = el("pre", "cc-log");
+      const show = actionButton("Show its log", { variant: "ghost" });
+      show.addEventListener("click", () => void command.logs(ctx.client, c.id).then((lines) => {
+        log.textContent = lines.length ? lines.slice(-40).join("\n") : "Nothing written yet.";
+      }).catch((err: Error) => say(err.message, "error")));
+      actions.append(show);
+      box.append(log);
     }
     const remove = actionButton("Remove", { variant: "ghost" });
     remove.addEventListener("click", () => void act("Removing", () => command.removeConnection(ctx.client, c.id)));
     actions.append(remove);
     box.append(actions);
-    if (!c.tools.length) return box;
+    if (c.tools.length) box.append(toolsSection(c));
+    return box;
+  }
 
+  /** Plan 34 §3.1: one short card before a program first runs on this PC. */
+  function setupCard(c: CcConnection): HTMLElement {
+    const launch = c.launch!;
+    const box = el("div", "cc-setup");
+    box.append(el("h3", "cc-subtitle", LOCAL_CARD.title), el("code", "cc-command", launch.display));
+    if (launch.previous) box.append(el("p", "cc-hint", `Changed. Before it was: ${launch.previous}`));
+    box.append(el("p", undefined, LOCAL_CARD.body), el("p", "cc-strong", LOCAL_CARD.trust));
+    const envInputs = launch.envKeys.map((key) => {
+      const input = el("input", "cc-input");
+      input.type = "password";
+      input.autocomplete = "off";
+      input.setAttribute("aria-label", key);
+      input.placeholder = c.envSet.includes(key) ? "Saved (type to change)" : "Value";
+      return [key, input] as const;
+    });
+    if (envInputs.length) {
+      const grid = el("div", "cc-grid");
+      grid.append(...envInputs.map(([key, input]) => labelled(`${key} (kept sealed on this PC)`, input)));
+      box.append(grid);
+    }
+    const run = actionButton("Run it", { variant: "primary", icon: "play" });
+    run.addEventListener("click", () => void act("Starting it", async () => {
+      const values: Record<string, string> = {};
+      for (const [key, input] of envInputs) {
+        const value = String(input.value ?? "");
+        if (value) values[key] = value;
+        input.value = "";
+      }
+      if (Object.keys(values).length) await command.setEnv(ctx.client, c.id, values);
+      await command.approveLocal(ctx.client, c.id, launch.hash);
+    }));
+    const cancel = actionButton("Cancel", { variant: "ghost" });
+    cancel.addEventListener("click", () => void act("Removing", () => command.removeConnection(ctx.client, c.id)));
+    const row = el("div", "cc-actions");
+    row.append(run, cancel);
+    box.append(row);
+    return box;
+  }
+
+  function keyForm(c: CcConnection): HTMLElement {
+    const box = el("div", "cc-setup");
+    const header = el("input", "cc-input");
+    header.setAttribute("aria-label", "Header name");
+    header.value = c.keyHeader ?? "Authorization";
+    const value = el("input", "cc-input");
+    value.type = "password";
+    value.autocomplete = "off";
+    value.setAttribute("aria-label", "Key");
+    const bearer = el("input");
+    bearer.type = "checkbox";
+    bearer.checked = (c.keyHeader ?? "Authorization") === "Authorization";
+    bearer.setAttribute("aria-label", "Send it as Bearer");
+    const bearerLabel = el("label", "cc-check");
+    bearerLabel.append(bearer, el("span", undefined, "Send it as “Bearer <key>”"));
+    const save = actionButton("Save the key", { variant: "primary", icon: "lock" });
+    save.addEventListener("click", () => {
+      const key = String(value.value ?? "").trim();
+      if (!key) return say("Paste the key first.", "error");
+      const full = bearer.checked && !/^bearer\s/i.test(key) ? `Bearer ${key}` : key;
+      value.value = "";
+      void act("Saving the key", () => command.setKey(ctx.client, c.id, String(header.value || "Authorization").trim(), full));
+    });
+    const grid = el("div", "cc-grid");
+    grid.append(labelled("Header name (from the service's docs)", header), labelled("Key", value));
+    const row = el("div", "cc-actions");
+    row.append(save);
+    box.append(el("p", "cc-hint", "The key is kept sealed on this PC and only sent to this server. Glass does not keep it."), grid, bearerLabel, row);
+    return box;
+  }
+
+  function clientForm(c: CcConnection): HTMLElement {
+    const box = el("div", "cc-setup");
+    const redirect = `${globalThis.location?.origin ?? "http://127.0.0.1"}/v1/cc/connections/oauth/callback`;
+    const id = el("input", "cc-input");
+    id.setAttribute("aria-label", "Client ID");
+    const secret = el("input", "cc-input");
+    secret.type = "password";
+    secret.autocomplete = "off";
+    secret.setAttribute("aria-label", "Client secret");
+    const save = actionButton("Save and sign in", { variant: "primary" });
+    save.addEventListener("click", () => {
+      const clientId = String(id.value ?? "").trim();
+      if (!clientId) return say("Paste the client ID.", "error");
+      const clientSecret = String(secret.value ?? "").trim() || undefined;
+      secret.value = "";
+      void act("Saving the client", () => command.setClient(ctx.client, c.id, clientId, clientSecret));
+    });
+    const grid = el("div", "cc-grid");
+    grid.append(labelled("Client ID", id), labelled("Client secret (if it gave one)", secret));
+    const row = el("div", "cc-actions");
+    row.append(save);
+    box.append(el("p", "cc-hint", "This service wants you to register Cyclone as an app yourself. In its developer settings, create an app with this redirect address, then paste its client ID here:"),
+      el("code", "cc-command", redirect), grid, row);
+    return box;
+  }
+
+  function toolsSection(c: CcConnection): HTMLElement {
     const draft = draftOf(c);
-    const tools = el("div", "cc-tools");
-    for (const tool of c.tools) {
-      const input = el("input");
-      input.type = "checkbox";
-      input.value = tool.name;
-      input.checked = draft.allowed.has(tool.name);
-      input.addEventListener("change", () => {
-        if (input.checked) draft.allowed.add(tool.name);
-        else draft.allowed.delete(tool.name);
+    const wrap = el("div", "cc-tools-wrap");
+    wrap.append(el("h3", "cc-subtitle", "Tools Cyclone may use"), el("p", "cc-hint", "Nothing is on until you tick it. Tasks and routines can use only these."));
+    const reads = c.tools.filter((t) => t.class === "read");
+    if (reads.some((t) => !draft.allowed.has(t.name))) {
+      const allowReads = actionButton(`Allow all reads (${reads.length})`, { variant: "secondary" });
+      allowReads.addEventListener("click", () => {
+        for (const t of reads) draft.allowed.add(t.name);
+        void act("Allowing the reads", () => command.connectionSettings(ctx.client, c.id, { allowReads: true })).then(() => drafts.delete(c.id));
       });
-      const label = el("label", "cc-check cc-tool");
-      label.append(input, el("span", undefined, tool.title || tool.name), el("span", "cc-sub", tool.description.slice(0, 160)));
-      tools.append(label);
+      wrap.append(allowReads);
+    }
+    for (const cls of ["read", "change", "sensitive"] as const) {
+      const group = c.tools.filter((t) => t.class === cls);
+      if (!group.length) continue;
+      const box = el("div", `cc-tools cc-tools-${cls}`);
+      box.append(el("h4", "cc-group-title", classLabel(cls)));
+      for (const tool of group) box.append(toolRow(c, tool, draft));
+      wrap.append(box);
     }
     const cap = el("input", "cc-input");
     cap.type = "number";
@@ -173,27 +329,82 @@ export function createConnectionsView(ctx: GlassContext, say: (text: string, ton
     save.addEventListener("click", () => {
       const dailyCap = Math.round(Number(draft.dailyCap));
       if (!Number.isFinite(dailyCap) || dailyCap < 0 || dailyCap > 1000) return say("Calls a day is 0 to 1000.", "error");
-      void act("Saving the rules", () => command.connectionSettings(ctx.client, c.id, { allowed: [...draft.allowed], dailyCap, approval: draft.approval })).then((ok) => {
+      void act("Saving the rules", () => command.connectionSettings(ctx.client, c.id, { allowed: [...draft.allowed], rules: draft.rules, dailyCap, approval: draft.approval })).then((ok) => {
         if (ok) drafts.delete(c.id);
       });
     });
     const rules = el("div", "cc-grid");
-    rules.append(labelled(`Calls a day (${c.usedToday} used today)`, cap), labelled("When to ask", rule));
+    rules.append(labelled(`Calls a day (${c.usedToday} used today)`, cap), labelled("New changing tools: when to ask", rule));
     const saveRow = el("div", "cc-actions");
     saveRow.append(save);
-    box.append(
-      el("h3", "cc-subtitle", "Tools Cyclone may call"),
-      el("p", "cc-hint", "Nothing is allowed until you tick it. Tasks and routines can use only these."),
-      tools,
-      rules,
-      saveRow,
-    );
-    return box;
+    wrap.append(rules, saveRow);
+    return wrap;
+  }
+
+  function toolRow(c: CcConnection, tool: CcTool, draft: ReturnType<typeof draftOf>): HTMLElement {
+    const row = el("div", "cc-tool-row");
+    const input = el("input");
+    input.type = "checkbox";
+    input.value = tool.name;
+    input.checked = draft.allowed.has(tool.name);
+    input.addEventListener("change", () => {
+      if (input.checked) draft.allowed.add(tool.name);
+      else draft.allowed.delete(tool.name);
+    });
+    const label = el("label", "cc-check cc-tool");
+    label.append(input, el("span", undefined, tool.title || tool.name), el("span", "cc-sub", tool.description.slice(0, 160)));
+    row.append(label);
+    if (tool.changed) {
+      row.append(chip("Changed — look before you allow it again", "warning"));
+      if (tool.previous) row.append(el("p", "cc-hint", `Before: ${tool.previous.description.slice(0, 200)}`), el("p", "cc-hint", `Now: ${tool.description.slice(0, 200)}`));
+    }
+    if (tool.class === "change") {
+      const rule = el("select", "cc-input cc-rule");
+      rule.setAttribute("aria-label", `When to ask for ${tool.name}`);
+      for (const r of ["always", "over_cap", "cap"] as const) rule.append(option(r, ruleLabel(r)));
+      rule.value = draft.rules[tool.name] ?? tool.rule;
+      rule.addEventListener("change", () => {
+        draft.rules[tool.name] = rule.value as ApprovalRule;
+      });
+      row.append(rule);
+    }
+    if (tool.class === "read" && tool.allowed) row.append(tryIt(c, tool));
+    return row;
+  }
+
+  /** Run one reading tool now and show what came back. */
+  function tryIt(c: CcConnection, tool: CcTool): HTMLElement {
+    const wrap = el("div", "cc-try");
+    const inputs = tool.fields.map((field) => {
+      const input = el("input", "cc-input");
+      input.setAttribute("aria-label", `${tool.name} ${field.name}`);
+      input.placeholder = field.name + (field.required ? "" : " (optional)");
+      return [field.name, input] as const;
+    });
+    const out = el("pre", "cc-result");
+    const run = actionButton("Try it", { variant: "ghost", icon: "play" });
+    run.addEventListener("click", async () => {
+      try {
+        const values: Record<string, string> = {};
+        for (const [key, input] of inputs) values[key] = String(input.value ?? "");
+        let call = await command.tryTool(ctx.client, c.id, tool.name, toolArguments(tool, values));
+        for (let i = 0; i < 60 && (call.state === "running" || call.state === "waiting"); i += 1) {
+          if (call.state === "waiting") break;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          call = await command.getCall(ctx.client, call.id);
+        }
+        out.textContent = call.state === "waiting" ? "Waiting for your OK in Approvals." : call.result !== null ? JSON.stringify(call.result, null, 2).slice(0, 4_000) : call.summary;
+      } catch (err) {
+        out.textContent = (err as Error).message;
+      }
+    });
+    wrap.append(...inputs.map(([, input]) => input), run, out);
+    return wrap;
   }
 
   function renderList(): void {
     if (!connections.length) {
-      setChildren(list, emptyState({ icon: "plug", title: "No connections yet", body: "Add Higgsfield (or any MCP server you use) to make videos and images for your tasks." }));
+      setChildren(list, emptyState({ icon: "plug", title: "No connections yet", body: "Add Higgsfield, any MCP server you use, or a server program on this PC." }));
       return;
     }
     // Do not redraw under a field the owner is typing in (a button that was just pressed does not count).
@@ -313,17 +524,18 @@ export function createMakeEditor(ctx: GlassContext): MakeEditor {
 
   function drawTools(): void {
     const c = current();
-    const allowed = c ? c.tools.filter((t) => c.allowed.includes(t.name)) : [];
+    const allowed = c ? c.tools.filter((t) => t.allowed) : [];
     tool.replaceChildren(...allowed.map((t) => option(t.name, t.title || t.name)));
     tool.value = allowed[0]?.name ?? "";
     poll.replaceChildren(option("", "The first answer has the file"), ...allowed.map((t) => option(t.name, `Then check with ${t.title || t.name}`)));
-    const checker = allowed.find((t) => t.readOnly && /result|status|get|check/i.test(t.name));
-    if (checker) poll.value = checker.name;
     drawFields();
   }
 
   function drawFields(): void {
     const t = currentTool();
+    // The gateway pairs a background job with the reading tool that checks it.
+    const paired = t?.pollTool && current()?.tools.some((x) => x.name === t.pollTool && x.allowed) ? t.pollTool : "";
+    poll.value = paired;
     inputs = (t?.fields ?? []).map((field) => {
       let control: HTMLInputElement | HTMLSelectElement;
       if (field.enum.length) {

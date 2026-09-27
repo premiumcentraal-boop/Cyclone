@@ -221,6 +221,35 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def connection_remove(connection_id: str):
         return call(lambda: cc().connections.remove(connection_id))
 
+    # Plan 34: keys, a pasted OAuth client, and local servers (approve the exact command, env keys, logs).
+    @router.post("/v1/cc/connections/{connection_id}/key", dependencies=[Depends(auth)])
+    def connection_key(connection_id: str, body: dict[str, Any]):
+        return call(lambda: cc().connections.set_key(connection_id, body_of(body)))
+
+    @router.post("/v1/cc/connections/{connection_id}/client", dependencies=[Depends(auth)])
+    def connection_client(connection_id: str, body: dict[str, Any]):
+        return call(lambda: cc().connections.set_client(connection_id, body_of(body)))
+
+    @router.post("/v1/cc/connections/{connection_id}/approve", dependencies=[Depends(auth)])
+    def connection_approve(connection_id: str, body: dict[str, Any]):
+        return call(lambda: cc().connections.approve_local(connection_id, body_of(body)))
+
+    @router.post("/v1/cc/connections/{connection_id}/config", dependencies=[Depends(auth)])
+    def connection_config(connection_id: str, body: dict[str, Any]):
+        return call(lambda: cc().connections.update_local(connection_id, body_of(body)))
+
+    @router.post("/v1/cc/connections/{connection_id}/env", dependencies=[Depends(auth)])
+    def connection_env(connection_id: str, body: dict[str, Any]):
+        return call(lambda: cc().connections.set_env(connection_id, body_of(body)))
+
+    @router.get("/v1/cc/connections/{connection_id}/logs", dependencies=[Depends(auth)])
+    def connection_logs(connection_id: str):
+        return call(lambda: {"lines": cc().connections.logs(connection_id)})
+
+    @router.get("/v1/cc/calls/{call_id}", dependencies=[Depends(auth)])
+    def call_get(call_id: str):
+        return call(lambda: cc().connections.get_call(call_id))
+
     @router.post("/v1/cc/connections/{connection_id}/call", dependencies=[Depends(auth)])
     def connection_call(connection_id: str, body: dict[str, Any]):
         raw = body_of(body)

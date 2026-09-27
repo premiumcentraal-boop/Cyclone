@@ -16,12 +16,12 @@ function ctx(fetch, navigate = () => {}) {
 const buttons = (page, label) => page.element.querySelectorAll("button").filter((b) => b.textContent === label);
 const OVERVIEW = { accounts: 0, openTasks: 0, running: 0, routines: 0, routinesPaused: 0, approvals: 0, succeeded24h: 0, failed24h: 0 };
 const TOOLS = [
-  { name: "generate_video", title: "Generate video", description: "Make a short video.", readOnly: false, fields: [
+  { name: "generate_video", title: "Generate video", description: "Make a short video.", readOnly: false, class: "change", allowed: true, rule: "always", changed: false, previous: null, pollTool: "get_result", fields: [
     { name: "prompt", type: "string", enum: [], required: true, description: "", default: null },
     { name: "duration", type: "integer", enum: [], required: false, description: "", default: 5 },
     { name: "aspect", type: "string", enum: ["9:16", "16:9"], required: false, description: "", default: "9:16" }] },
-  { name: "get_result", title: "", description: "Check a generation.", readOnly: true, fields: [{ name: "job_id", type: "string", enum: [], required: true, description: "", default: null }] },
-  { name: "delete_account", title: "", description: "Deletes the account.", readOnly: false, fields: [] },
+  { name: "get_result", title: "", description: "Check a generation.", readOnly: true, class: "read", allowed: true, rule: "cap", changed: false, previous: null, pollTool: null, fields: [{ name: "job_id", type: "string", enum: [], required: true, description: "", default: null }] },
+  { name: "delete_account", title: "", description: "Deletes the account.", readOnly: false, class: "sensitive", allowed: false, rule: "always", changed: false, previous: null, pollTool: null, fields: [] },
 ];
 const HIGGS = { id: "con_higgs0001", name: "Higgsfield", url: "https://mcp.higgsfield.ai/mcp", auth: "oauth", status: "ready", detail: "3 tool(s)", signedIn: true,
   grantKept: true, tools: TOOLS, allowed: ["generate_video", "get_result"], dailyCap: 5, approval: "always", usedToday: 1 };
@@ -88,7 +88,7 @@ test("connections: sign in opens the server's page, and rules are saved as ticke
     rule.dispatchEvent({ type: "change" });
     buttons(page, "Save rules")[0].click();
     await flush();
-    assert.deepEqual(saved[0], { allowed: ["generate_video"], dailyCap: 5, approval: "cap" });
+    assert.deepEqual(saved[0], { allowed: ["generate_video"], rules: { generate_video: "always" }, dailyCap: 5, approval: "cap" });
   } finally {
     page.destroy();
     delete globalThis.open;

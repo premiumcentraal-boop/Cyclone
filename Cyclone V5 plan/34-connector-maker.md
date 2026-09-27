@@ -1,6 +1,6 @@
 # 34 — Connector maker: connect any MCP, yourself
 
-**Status:** plan, 2026-09-27. Builds on plan 33 C3 (alpha.56). Nothing here is built yet.
+**Status:** M1 + M2 built in **alpha.57** (§9); M3 + M4 next (alpha.58). Builds on plan 33 C3 (alpha.56).
 
 **The owner's ask:**
 > "A self serve MCP connector maker to automatically connect custom MCPs." Local MCP servers on the PC are allowed,
@@ -160,3 +160,34 @@ Before the first run, one card, no scrolling:
 
 M1 and M2 can ship together as one milestone. Physical acceptance (Windows, real servers) is stated as owed until the
 owner tests it.
+
+## 9. M1 + M2 as built (alpha.57)
+
+- **Transports** (`command/mcp.py`): a shared `Session` (the same four messages) over Streamable HTTP
+  (`McpClient`), the older HTTP + SSE (`LegacySseClient`: a GET stream, a same-host POST address) and stdio
+  (`command/local.py`, `StdioClient`).
+  - A 400/404/405/406/415 from Streamable HTTP falls back to SSE.
+- **Sign-in:**
+  - **Detection:** a 401 plus protected-resource or authorization-server metadata means OAuth (`offers_oauth`);
+    otherwise it wants a key.
+  - **Keys:** `set_key` stores `{header, value}` in the grant store.
+  - **Pasted client:** `set_client` stores a manual client; `needs_client` is raised when there is no
+    registration endpoint, and Glass shows the redirect address.
+  - **Not done:** Client ID Metadata Documents, because a loopback PC can't host a document the service can fetch.
+- **Tools:** the `connection_tool` table (class, allowed, rule, hash, approved hash, previous).
+  - **Class:** `classify()` uses `destructiveHint`, then sensitive name words, then `readOnlyHint` or a read verb.
+    A description can only raise the risk.
+  - **Rules:** sensitive tools are forced to `always`; reads default to `cap`; changes default to the
+    connection's rule.
+  - **Pinning:** `tool_hash()` covers the name, description, input schema and annotations. A change sets
+    `allowed = 0` and keeps `previous`.
+  - **Pairing:** a change tool is paired with a read that has a required `*_id` field.
+  - **Results:** calls keep `result`, bounded to 32 KB and screened, so the next step can use it in M3.
+- **Local servers** (`command/local.py`):
+  - config parsing and the launcher allowlist, pinning rules, refused env names and Docker flags;
+  - the argument list with shell-special characters refused;
+  - a minimal env without the gateway token;
+  - its own folder, a Windows Job Object, a 3-in-10-minutes restart limit, a 15-minute idle stop, and a redacted
+    stderr log.
+  - **Approval:** the connection holds the launch (without env values) and runs only when `approvedHash == hash`.
+    The setup card is `LOCAL_CARD` in Glass.

@@ -18,6 +18,7 @@ import json
 import re
 import secrets
 import socket
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,7 +32,11 @@ LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
 
 class McpError(RuntimeError):
-    """A connection problem, worded for the owner."""
+    """A connection problem, worded for the owner. [status] is the HTTP status when there was one."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class NeedsSignIn(McpError):
@@ -125,68 +130,30 @@ def _sse_messages(raw: bytes) -> list[dict[str, Any]]:
     return out
 
 
-@dataclass
-class McpClient:
-    url: str
-    token: str | None = None
-    send: Callable[..., Response] = http
-    session_id: str | None = None
+def _pick(messages: list[Any], wanted: Any) -> dict[str, Any] | None:
+    """The result for request [wanted] among [messages], or None; a JSON-RPC error is raised in the owner's words."""
+    for m in messages:
+        if isinstance(m, dict) and m.get("id") == wanted and ("result" in m or "error" in m):
+            if "error" in m:
+                error = m["error"] if isinstance(m["error"], dict) else {}
+                raise McpError(f"The server refused: {str(error.get('message', 'error'))[:200]}")
+            result = m.get("result")
+            if not isinstance(result, dict):
+                raise McpError("The server's answer is malformed.")
+            return result
+    return None
+
+
+class Session:
+    """The four MCP messages Cyclone sends, over any transport. A transport implements [_post]: send one JSON-RPC
+    message and return the result for its id (or None for a notification)."""
+
     _next: int = 0
     _ready: bool = False
-    server: dict[str, Any] = field(default_factory=dict)
+    server: dict[str, Any]
 
-    def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
-                   "MCP-Protocol-Version": PROTOCOL_VERSION}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        if self.session_id:
-            headers["Mcp-Session-Id"] = self.session_id
-        return headers
-
-    def _post(self, message: dict[str, Any], *, timeout: float) -> dict[str, Any] | None:
-        wanted = message.get("id")
-
-        def done(raw: bytes) -> bool:
-            return any(m.get("id") == wanted and ("result" in m or "error" in m) for m in _sse_messages(raw))
-
-        response = self.send("POST", self.url, headers=self._headers(), body=json.dumps(message).encode(), timeout=timeout,
-                             stop=done if wanted is not None else None)
-        if response.status == 401:
-            header = response.headers.get("www-authenticate", "")
-            match = re.search(r'resource_metadata="([^"]+)"', header)
-            raise NeedsSignIn(match.group(1) if match else None)
-        if response.status == 404 and self.session_id:
-            self.session_id, self._ready = None, False
-            raise McpError("The server ended the session.")
-        if response.status == 403:
-            raise McpError("The server refused this (403). Check the account's plan or sign in again.")
-        if response.status >= 400:
-            raise McpError(f"The server answered {response.status}.")
-        if wanted is None:
-            return None
-        session = response.headers.get("mcp-session-id")
-        if session and re.match(r"^[\x21-\x7e]{1,200}$", session):
-            self.session_id = session
-        kind = response.headers.get("content-type", "")
-        if "text/event-stream" in kind:
-            messages = _sse_messages(response.body)
-        else:
-            try:
-                parsed = json.loads(response.body or b"null")
-            except ValueError as exc:
-                raise McpError("The server's answer is not JSON.") from exc
-            messages = parsed if isinstance(parsed, list) else [parsed]
-        for m in messages:
-            if isinstance(m, dict) and m.get("id") == wanted:
-                if "error" in m:
-                    error = m["error"] if isinstance(m["error"], dict) else {}
-                    raise McpError(f"The server refused: {str(error.get('message', 'error'))[:200]}")
-                result = m.get("result")
-                if not isinstance(result, dict):
-                    raise McpError("The server's answer is malformed.")
-                return result
-        raise McpError("The server did not answer the request.")
+    def _post(self, message: dict[str, Any], *, timeout: float) -> dict[str, Any] | None:  # pragma: no cover - abstract
+        raise NotImplementedError
 
     def request(self, method: str, params: dict[str, Any] | None = None, *, timeout: float = 60.0) -> dict[str, Any]:
         if not self._ready and method != "initialize":
@@ -199,8 +166,11 @@ class McpClient:
         assert result is not None
         return result
 
+    def _reset(self) -> None:
+        """Forget transport state before a new initialize."""
+
     def initialize(self) -> dict[str, Any]:
-        self.session_id = None
+        self._reset()
         result = self.request("initialize", {"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": CLIENT_INFO}, timeout=30)
         self.server = result.get("serverInfo") if isinstance(result.get("serverInfo"), dict) else {}
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"}, timeout=15)
@@ -223,6 +193,73 @@ class McpClient:
     def call_tool(self, name: str, arguments: dict[str, Any], *, timeout: float = 300.0) -> dict[str, Any]:
         return self.request("tools/call", {"name": name, "arguments": arguments}, timeout=timeout)
 
+
+    def close(self) -> None:
+        """Release the transport (a stream, a process). Safe to call twice."""
+
+
+@dataclass
+class McpClient(Session):
+    url: str
+    token: str | None = None
+    send: Callable[..., Response] = http
+    #: API key or custom header sign-ins (plan 34), e.g. {"X-Api-Key": "..."}; never logged.
+    extra_headers: dict[str, str] = field(default_factory=dict)
+    session_id: str | None = None
+    _next: int = 0
+    _ready: bool = False
+    server: dict[str, Any] = field(default_factory=dict)
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                   "MCP-Protocol-Version": PROTOCOL_VERSION}
+        headers.update(self.extra_headers)
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+        return headers
+
+    def _post(self, message: dict[str, Any], *, timeout: float) -> dict[str, Any] | None:
+        wanted = message.get("id")
+
+        def done(raw: bytes) -> bool:
+            return any(m.get("id") == wanted and ("result" in m or "error" in m) for m in _sse_messages(raw))
+
+        response = self.send("POST", self.url, headers=self._headers(), body=json.dumps(message).encode(), timeout=timeout,
+                             stop=done if wanted is not None else None)
+        if response.status == 401:
+            header = response.headers.get("www-authenticate", "")
+            match = re.search(r'resource_metadata="([^"]+)"', header)
+            raise NeedsSignIn(match.group(1) if match else None)
+        if response.status == 404 and self.session_id:
+            self.session_id, self._ready = None, False
+            raise McpError("The server ended the session.", 404)
+        if response.status == 403:
+            raise McpError("The server refused this (403). Check the account's plan or sign in again.", 403)
+        if response.status >= 400:
+            raise McpError(f"The server answered {response.status}.", response.status)
+        if wanted is None:
+            return None
+        session = response.headers.get("mcp-session-id")
+        if session and re.match(r"^[\x21-\x7e]{1,200}$", session):
+            self.session_id = session
+        kind = response.headers.get("content-type", "")
+        if "text/event-stream" in kind:
+            messages = _sse_messages(response.body)
+        else:
+            try:
+                parsed = json.loads(response.body or b"null")
+            except ValueError as exc:
+                raise McpError("The server's answer is not JSON.") from exc
+            messages = parsed if isinstance(parsed, list) else [parsed]
+        result = _pick(messages, wanted)
+        if result is None:
+            raise McpError("The server did not answer the request.")
+        return result
+
+    def _reset(self) -> None:
+        self.session_id = None
 
 # ---------------------------------------------------------------------------------------------------- OAuth 2.1
 
@@ -401,3 +438,139 @@ def fetch_file(url: str, dest: "Any", *, limit: int, allow_loopback: bool, timeo
                     out.write(chunk)
             return kind, size, digest.hexdigest()
     raise McpError("The file address redirected too often.")
+
+
+def offers_oauth(server_url: str, resource_metadata: str | None, send: Callable[..., Response] = http) -> bool:
+    """True when the server publishes OAuth metadata (so "Sign in" can work); False means it wants a key or header."""
+    if resource_metadata and _get_json(send, resource_metadata):
+        return True
+    for url in _well_known(server_url, "oauth-protected-resource") + _well_known(server_url, "oauth-authorization-server"):
+        if _get_json(send, url):
+            return True
+    return False
+
+
+class LegacySseClient(Session):
+    """The older MCP transport (2024-11-05): a GET event stream announces where to POST, and the answers come back on
+    that stream. Used only when a server refuses Streamable HTTP. The POST address must stay on the same host."""
+
+    def __init__(self, url: str, *, token: str | None = None, extra_headers: dict[str, str] | None = None) -> None:
+        self.url = check_url(url, what="server address")
+        self.token = token
+        self.extra_headers = dict(extra_headers or {})
+        self._next, self._ready, self.server = 0, False, {}
+        self._endpoint: str | None = None
+        self._answers: dict[Any, dict[str, Any]] = {}
+        self._cond = threading.Condition()
+        self._stream: Any = None
+        self._closed = False
+
+    def _headers(self, accept: str) -> dict[str, str]:
+        headers = {"Accept": accept, **self.extra_headers}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
+
+    def _open(self) -> None:
+        request = urllib.request.Request(self.url, method="GET", headers=self._headers("text/event-stream"))
+        try:
+            stream = _OPENER.open(request, timeout=300)  # noqa: S310 - check_url limits schemes and hosts
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                match = re.search(r'resource_metadata="([^"]+)"', exc.headers.get("WWW-Authenticate", "") or "")
+                raise NeedsSignIn(match.group(1) if match else None) from exc
+            raise McpError(f"The server answered {exc.code}.", exc.code) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise McpError("The server could not be reached.") from exc
+        if "text/event-stream" not in (stream.headers.get("Content-Type") or ""):
+            stream.close()
+            raise McpError("The server does not speak MCP here.")
+        self._stream, self._closed = stream, False
+        threading.Thread(target=self._read, args=(stream,), name="cyclone-mcp-sse", daemon=True).start()
+        with self._cond:
+            if not self._cond.wait_for(lambda: self._endpoint is not None or self._closed, timeout=15) or self._endpoint is None:
+                self.close()
+                raise McpError("The server did not say where to send requests.")
+
+    def _read(self, stream: Any) -> None:
+        event, data = "message", []
+        try:
+            while True:
+                raw = stream.readline(MAX_RESPONSE)
+                if not raw:
+                    break
+                line = raw.rstrip(b"\r\n")
+                if not line:
+                    self._dispatch(event, b"\n".join(data))
+                    event, data = "message", []
+                    continue
+                if line.startswith(b":"):
+                    continue
+                name, _, value = line.partition(b":")
+                value = value[1:] if value.startswith(b" ") else value
+                if name == b"event":
+                    event = value.decode("utf-8", "replace")
+                elif name == b"data":
+                    data.append(value)
+        except (OSError, ValueError):
+            pass
+        finally:
+            with self._cond:
+                self._closed = True
+                self._cond.notify_all()
+
+    def _dispatch(self, event: str, data: bytes) -> None:
+        if event == "endpoint":
+            target = urllib.parse.urljoin(self.url, data.decode("utf-8", "replace").strip())
+            here, there = urllib.parse.urlsplit(self.url), urllib.parse.urlsplit(target)
+            if (here.scheme, here.netloc) != (there.scheme, there.netloc):
+                return  # a POST address on another host is ignored; the open then fails
+            with self._cond:
+                self._endpoint = target
+                self._cond.notify_all()
+            return
+        try:
+            message = json.loads(data or b"null")
+        except ValueError:
+            return
+        if isinstance(message, dict) and "id" in message and ("result" in message or "error" in message):
+            with self._cond:
+                self._answers[message["id"]] = message
+                self._cond.notify_all()
+
+    def _post(self, message: dict[str, Any], *, timeout: float) -> dict[str, Any] | None:
+        if self._stream is None or self._closed:
+            self._open()
+        assert self._endpoint is not None
+        headers = {"Content-Type": "application/json", **self._headers("application/json, text/event-stream")}
+        response = http("POST", self._endpoint, headers=headers, body=json.dumps(message).encode(), timeout=timeout)
+        if response.status == 401:
+            raise NeedsSignIn(None)
+        if response.status >= 400:
+            raise McpError(f"The server answered {response.status}.", response.status)
+        wanted = message.get("id")
+        if wanted is None:
+            return None
+        with self._cond:
+            self._cond.wait_for(lambda: wanted in self._answers or self._closed, timeout=timeout)
+            answer = self._answers.pop(wanted, None)
+        if answer is None:
+            raise McpError("The server did not answer the request.")
+        return _pick([answer], wanted)
+
+    def _reset(self) -> None:
+        self.close()
+        self._endpoint, self._stream = None, None
+
+    def close(self) -> None:
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()
+        if self._stream is not None:
+            # The reader thread is blocked in readline; shutting the socket down wakes it (close alone would wait).
+            sock = getattr(getattr(getattr(self._stream, "fp", None), "raw", None), "_sock", None)
+            try:
+                if sock is not None:
+                    sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass

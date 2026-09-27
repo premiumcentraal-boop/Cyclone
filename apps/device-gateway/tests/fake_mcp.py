@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import queue
 import secrets
 import threading
 import urllib.parse
@@ -28,8 +29,15 @@ TOOLS = [
 
 
 class FakeMcp:
-    def __init__(self, *, oauth: bool = True, polls_until_done: int = 1) -> None:
-        self.oauth = oauth
+    def __init__(self, *, oauth: bool = True, polls_until_done: int = 1, api_key: str | None = None, legacy_sse: bool = False,
+                 registration: bool = True) -> None:
+        # Plan 34 modes: a server that wants a key in X-Api-Key (no OAuth metadata), one that only speaks the older
+        # HTTP+SSE transport, and an authorization server without self-registration.
+        self.oauth = oauth and api_key is None
+        self.api_key = api_key
+        self.legacy_sse = legacy_sse
+        self.registration = registration
+        self.streams: dict[str, "queue.Queue[bytes | None]"] = {}
         self.polls_until_done = polls_until_done
         self.clients: dict[str, str] = {}
         self.codes: dict[str, dict[str, str]] = {}
@@ -44,8 +52,25 @@ class FakeMcp:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def close(self) -> None:
+        for q in self.streams.values():
+            q.put(None)
         self.server.shutdown()
         self.server.server_close()
+
+    def answer(self, message: dict[str, Any]) -> dict[str, Any]:
+        """A plain JSON-RPC answer (key and older-SSE modes share it)."""
+        method = message.get("method")
+        if method == "initialize":
+            result: dict[str, Any] = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake"}}
+        elif method == "tools/list":
+            result = {"tools": TOOLS}
+        elif method == "tools/call":
+            params = message["params"]
+            self.calls.append(params)
+            result = {"content": [{"type": "text", "text": json.dumps({"ok": True, "tool": params["name"], "echo": params.get("arguments")})}]}
+        else:
+            return {"jsonrpc": "2.0", "id": message.get("id"), "error": {"code": -32601, "message": "no such method"}}
+        return {"jsonrpc": "2.0", "id": message.get("id"), "result": result}
 
     def issue(self) -> str:
         token = "tok-" + secrets.token_hex(8)
@@ -71,12 +96,39 @@ class FakeMcp:
 
             def do_GET(self) -> None:  # noqa: N802
                 path = urllib.parse.urlsplit(self.path)
+                if fake.legacy_sse and path.path == "/mcp":
+                    if fake.api_key and self.headers.get("X-Api-Key") != fake.api_key:
+                        return self._json(401, {})
+                    session = secrets.token_hex(6)
+                    q: "queue.Queue[bytes | None]" = queue.Queue()
+                    fake.streams[session] = q
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.end_headers()
+                    self.wfile.write(f"event: endpoint\ndata: /messages?session={session}\n\n".encode())
+                    self.wfile.flush()
+                    while True:
+                        try:
+                            item = q.get(timeout=30)
+                        except queue.Empty:
+                            continue
+                        if item is None:
+                            return None
+                        try:
+                            self.wfile.write(item)
+                            self.wfile.flush()
+                        except OSError:
+                            return None
+                if fake.api_key and path.path.startswith("/.well-known/"):
+                    return self._json(404, {})
                 if path.path == "/.well-known/oauth-protected-resource/mcp":
                     return self._json(200, {"resource": fake.url, "authorization_servers": [fake.base], "scopes_supported": ["generate"]})
                 if path.path == "/.well-known/oauth-authorization-server":
-                    return self._json(200, {"issuer": fake.base, "authorization_endpoint": fake.base + "/authorize",
-                                            "token_endpoint": fake.base + "/token", "registration_endpoint": fake.base + "/register",
-                                            "code_challenge_methods_supported": ["S256"]})
+                    meta = {"issuer": fake.base, "authorization_endpoint": fake.base + "/authorize",
+                            "token_endpoint": fake.base + "/token", "code_challenge_methods_supported": ["S256"]}
+                    if fake.registration:
+                        meta["registration_endpoint"] = fake.base + "/register"
+                    return self._json(200, meta)
                 if path.path == "/authorize":
                     q = dict(urllib.parse.parse_qsl(path.query))
                     assert q["code_challenge_method"] == "S256" and q["resource"] == fake.url and q["client_id"] in fake.clients
@@ -118,8 +170,32 @@ class FakeMcp:
                     refresh = "ref-" + secrets.token_hex(8)
                     fake.refresh.add(refresh)
                     return self._json(200, {"access_token": fake.issue(), "token_type": "Bearer", "expires_in": 3600, "refresh_token": refresh})
-                if path != "/mcp":
-                    return self._json(404, {})
+                if fake.legacy_sse and path == "/messages":
+                    session = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query)).get("session", "")
+                    message = json.loads(raw)
+                    if "id" in message and session in fake.streams:
+                        answer = fake.answer(message)
+                        fake.streams[session].put(f"event: message\ndata: {json.dumps(answer)}\n\n".encode())
+                    self.send_response(202)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
+                if path != "/mcp" or fake.legacy_sse:
+                    return self._json(405 if path == "/mcp" else 404, {})
+                if fake.api_key is not None:
+                    if self.headers.get("X-Api-Key") != fake.api_key:
+                        self.send_response(401)
+                        self.send_header("WWW-Authenticate", 'Bearer realm="api"')
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return None
+                    message = json.loads(raw)
+                    if "id" not in message:
+                        self.send_response(202)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return None
+                    return self._json(200, fake.answer(message))
                 auth = self.headers.get("Authorization", "")
                 if fake.oauth and auth.removeprefix("Bearer ") not in fake.tokens:
                     self.send_response(401)

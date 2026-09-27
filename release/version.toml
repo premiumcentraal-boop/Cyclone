@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.56 dev1: Command Center C3 (plan 33) - MCP connections with OAuth, allowlists, caps and approvals, artifacts, make-then-post (Higgsfield first), plus pre-authorised leases for routines.
+# Cyclone V5 alpha.57 dev1: connect any MCP (plan 34 M1+M2) - keys, older SSE, pasted OAuth clients, tool classes and pinning, results back, and local MCP servers on the PC behind a plain-words setup card.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.56.dev1"
+product_version = "5.0.0-alpha.57.dev1"
 channel = "development"
-android_version_code = 200
-python_version = "5.0.0-alpha.56.dev1"
+android_version_code = 201
+python_version = "5.0.0-alpha.57.dev1"
 
 [components]
-mobile = "5.0.0-alpha.56.dev1"
+mobile = "5.0.0-alpha.57.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.31"
-device_gateway = "5.0.0-alpha.56.dev1"
-mcp = "5.0.0-alpha.56.dev1"
+glass = "1.0.0-alpha.32"
+device_gateway = "5.0.0-alpha.57.dev1"
+mcp = "5.0.0-alpha.57.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha56-dev1-command-center-c3-connections-preauth"
+candidate_generation = "cyclone-v5-alpha57-dev1-connect-any-mcp"

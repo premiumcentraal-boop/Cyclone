@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS tool_call (
 CREATE TABLE IF NOT EXISTS artifact (
   id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
   connection_id TEXT, tool TEXT, call_id TEXT, task_id TEXT, prompt TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS connection_tool (
+  connection_id TEXT NOT NULL, tool TEXT NOT NULL, class TEXT NOT NULL, allowed INTEGER NOT NULL, rule TEXT,
+  hash TEXT NOT NULL, approved_hash TEXT, previous TEXT, PRIMARY KEY(connection_id, tool));
 CREATE INDEX IF NOT EXISTS tool_call_connection ON tool_call(connection_id, day);
 CREATE INDEX IF NOT EXISTS artifact_task ON artifact(task_id);
 """
@@ -70,6 +73,76 @@ URL = re.compile(r"https?://[^\s\"'<>)\]]+")
 JOB_KEYS = ("job_id", "jobId", "request_id", "requestId", "generation_id", "generationId", "task_id", "taskId", "id")
 FAILED = {"failed", "error", "cancelled", "canceled", "rejected", "nsfw"}
 HIGGSFIELD = "https://mcp.higgsfield.ai/mcp"
+#: Plan 34: tool classes. A *read* only looks; a *change* changes something outside; a *sensitive* change sends,
+#: publishes, deletes, pays or grants, and always waits for the owner's OK whatever its rule.
+CLASSES = ("read", "change", "sensitive")
+READ_VERBS = {"get", "list", "search", "read", "fetch", "find", "query", "describe", "lookup", "check", "status", "show",
+              "view", "count", "download", "browse", "inspect", "resolve", "info", "whoami", "poll", "retrieve"}
+SENSITIVE_WORDS = {"send", "post", "publish", "delete", "remove", "erase", "destroy", "drop", "purge", "pay", "purchase", "buy",
+                   "transfer", "charge", "refund", "grant", "revoke", "share", "invite", "email", "message", "tweet", "reply",
+                   "comment", "permission", "permissions", "withdraw", "deploy", "merge", "archive", "ban", "kick"}
+HEADER_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,63}$")
+MAX_RESULT = 32_000
+
+
+def _words(text: str) -> list[str]:
+    return [w.lower() for w in re.findall(r"[A-Za-z][a-z]*|[A-Z]+(?![a-z])", re.sub(r"[_\-./]", " ", text))]
+
+
+def classify(tool: dict[str, Any]) -> str:
+    """read, change or sensitive: from the tool's own hints, then its name; a description can only raise the risk."""
+    annotations = tool.get("annotations") if isinstance(tool.get("annotations"), dict) else {}
+    name = _words(str(tool.get("name", "")))
+    described = set(_words(str(tool.get("description", ""))[:400]))
+    if annotations.get("destructiveHint") is True or SENSITIVE_WORDS & set(name):
+        return "sensitive"
+    looks_read = annotations.get("readOnlyHint") is True or (name and name[0] in READ_VERBS)
+    if looks_read:
+        risky = ("delet", "send", "sent", "pay", "purchas", "transfer", "publish", "post")
+        return "change" if any(w.startswith(risky) for w in described) else "read"
+    return "change"
+
+
+def tool_hash(tool: dict[str, Any]) -> str:
+    """What the owner approved: the tool's name, description and input schema."""
+    body = {"name": tool.get("name"), "description": tool.get("description"), "inputSchema": tool.get("inputSchema"),
+            "annotations": tool.get("annotations")}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _redact(value: Any, depth: int = 0) -> Any:
+    if depth > 8:
+        return None
+    if isinstance(value, str):
+        return INLINE_SECRET.sub("[hidden]:", value[:4000])
+    if isinstance(value, list):
+        return [_redact(v, depth + 1) for v in value[:200]]
+    if isinstance(value, dict):
+        return {str(k)[:100]: ("[hidden]" if _secretish(str(k)) else _redact(v, depth + 1)) for k, v in list(value.items())[:200]}
+    return value if isinstance(value, (int, float, bool)) or value is None else str(value)[:200]
+
+
+def _secretish(key: str) -> bool:
+    from ..desktop_runtime.v5_contract import _secret_name
+    return _secret_name(key)
+
+
+def result_public(result: dict[str, Any]) -> Any:
+    """What a call brought back, for Glass and the next step: structured content, or the text; bounded and screened."""
+    if isinstance(result.get("structuredContent"), (dict, list)):
+        value = _redact(result["structuredContent"])
+    else:
+        texts = [str(i.get("text")) for i in result.get("content") or [] if isinstance(i, dict) and i.get("type") == "text"]
+        joined = "\n".join(texts)
+        try:
+            parsed = json.loads(joined) if joined.strip().startswith(("{", "[")) else None
+        except ValueError:
+            parsed = None
+        value = _redact(parsed) if parsed is not None else _redact(joined)
+    text = json.dumps(value)
+    if len(text) > MAX_RESULT:
+        return {"truncated": True, "text": text[:MAX_RESULT]}
+    return value
 
 
 def _today(clock_ms: int) -> str:
@@ -157,8 +230,17 @@ class ConnectionStore:
         self._signing: dict[str, dict[str, Any]] = {}
         # One refresh at a time: a server that rotates refresh tokens would otherwise sign Cyclone out.
         self._refreshing = threading.Lock()
+        from .local import LocalServers
+        self.local = LocalServers(root / "connectors", secrets=lambda cid: (self.grants.get(f"env:{cid}") or {}))
         with center._lock:
             center._db.executescript(CONNECTIONS_SCHEMA)
+            columns = {r["name"] for r in center._db.execute("PRAGMA table_info(connection)")}
+            for column, kind in (("kind", "TEXT NOT NULL DEFAULT 'remote'"), ("transport", "TEXT NOT NULL DEFAULT 'http'"),
+                                 ("launch", "TEXT"), ("probe", "TEXT")):
+                if column not in columns:
+                    center._db.execute(f"ALTER TABLE connection ADD COLUMN {column} {kind}")
+            if "result" not in {r["name"] for r in center._db.execute("PRAGMA table_info(tool_call)")}:
+                center._db.execute("ALTER TABLE tool_call ADD COLUMN result TEXT")
             # A call that was running when the runtime stopped did not finish; say so instead of leaving it running.
             center._db.execute("UPDATE tool_call SET state = 'failed', summary = 'Cyclone restarted while this ran.', finished_at = ?"
                                " WHERE state = 'running'", (center._clock(),))
@@ -184,18 +266,43 @@ class ConnectionStore:
         used = self._c._db.execute(
             "SELECT COUNT(*) FROM tool_call WHERE connection_id = ? AND day = ? AND state IN ('waiting','running','done','failed')",
             (r["id"], today)).fetchone()[0]
-        grant = self.grants.get(r["id"]) if r["auth"] == "oauth" else None
+        grant = self.grants.get(r["id"]) if r["auth"] in ("oauth", "header") else None
         sign_in = json.loads(r["sign_in"]) if r["sign_in"] else {}
+        launch = json.loads(r["launch"]) if r["launch"] else None
         return {
-            "id": r["id"], "name": r["name"], "url": r["url"], "auth": r["auth"], "status": r["status"], "detail": r["detail"],
-            "signedIn": bool(grant), "signInServer": sign_in.get("issuer"), "grantKept": self.grants.persistent,
-            "tools": json.loads(r["tools"]), "allowed": json.loads(r["allowed"]), "dailyCap": r["daily_cap"],
+            "id": r["id"], "name": r["name"], "url": r["url"] if r["kind"] == "remote" else "", "kind": r["kind"], "transport": r["transport"],
+            "auth": r["auth"], "status": r["status"], "detail": r["detail"],
+            "signedIn": bool(grant), "signInServer": sign_in.get("issuer"), "keyHeader": sign_in.get("header"),
+            "manualClient": bool((sign_in.get("client") or {}).get("manual")), "grantKept": self.grants.persistent,
+            "tools": self._tools_public(r), "allowed": json.loads(r["allowed"]), "dailyCap": r["daily_cap"],
             "approval": r["approval"], "usedToday": used, "createdAt": r["created_at"], "updatedAt": r["updated_at"],
+            "probe": json.loads(r["probe"]) if r["probe"] else [],
+            "launch": None if launch is None else {k: launch.get(k) for k in ("name", "launcher", "args", "envKeys", "pinned", "display", "hash", "approvedHash", "previous")},
+            "envSet": sorted((self.grants.get(f"env:{r['id']}") or {}).keys()) if r["kind"] == "local" else [],
+            "running": self.local.running(r["id"]) if r["kind"] == "local" else False,
         }
 
+    def _tools_public(self, r: Any) -> list[dict[str, Any]]:
+        tools = json.loads(r["tools"])
+        states = {t["tool"]: t for t in self._c._db.execute("SELECT * FROM connection_tool WHERE connection_id = ?", (r["id"],))}
+        pollers = [t for t in tools if states.get(t["name"], {"class": "change"})["class"] == "read"
+                   and any(f["required"] and re.search(r"(^|_)(job|request|task|generation|prediction|run)?_?id$", f["name"], re.I) for f in t["fields"])]
+        out = []
+        for t in tools:
+            st = states.get(t["name"])
+            cls = st["class"] if st else "change"
+            out.append({**t, "class": cls, "allowed": bool(st and st["allowed"]),
+                        "rule": "always" if cls == "sensitive" else (st["rule"] if st and st["rule"] else ("cap" if cls == "read" else r["approval"])),
+                        "changed": bool(st and st["approved_hash"] and st["approved_hash"] != st["hash"]),
+                        "previous": json.loads(st["previous"]) if st and st["previous"] else None,
+                        "pollTool": next((p["name"] for p in pollers if p["name"] != t["name"]), None) if cls != "read" else None})
+        return out
+
     def add(self, body: Any) -> dict[str, Any]:
+        if isinstance(body, dict) and "config" in body:
+            return self.add_local(body)
         if not isinstance(body, dict) or not set(body) <= {"name", "url"}:
-            raise CommandError("Send {name, url}.")
+            raise CommandError("Send {name, url} or {config}.")
         try:
             url = mcp.check_url(body.get("url"), what="server address")
         except mcp.McpError as exc:
@@ -204,7 +311,7 @@ class ConnectionStore:
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or INLINE_SECRET.search(name):
             raise CommandError("name is 1..60 characters.")
         if urllib.parse.urlsplit(url).query:
-            raise CommandError("Leave keys out of the address; Cyclone signs in with OAuth instead.")
+            raise CommandError("Leave keys out of the address; Cyclone asks for a key or a sign-in next.")
         with self._c._lock:
             now = self._c._clock()
             connection_id = f"con_{secrets.token_urlsafe(9)}"
@@ -219,29 +326,273 @@ class ConnectionStore:
         return self.refresh(connection_id)
 
     def refresh(self, connection_id: str) -> dict[str, Any]:
-        """Look at the server again: its tools, or that it needs a sign-in. Network outside the lock."""
+        """Look at the server again: how to reach it, how to sign in, its tools. Network outside the lock. Each step
+        is kept as a plain sentence for Glass."""
         with self._c._lock:
             row = self._row(connection_id)
+        steps: list[dict[str, Any]] = []
+        tools: list[dict[str, Any]] | None = None
+        transport = row["transport"]
+        status, detail = "error", ""
+        if row["kind"] == "local":
+            launch = json.loads(row["launch"])
+            if launch.get("approvedHash") != launch["hash"]:
+                return self._set_status(connection_id, "needs_approval", "Approve it to run it on this PC.", [{"step": "Waiting for your OK to run it", "ok": False}])
+            steps.append({"step": f"Starting {launch['pinned'] if launch['launcher'] != 'python' and launch['launcher'] != 'node' else launch['launcher'] + ' script'}", "ok": True})
+        client: Any = None
         try:
-            client = mcp.McpClient(row["url"], token=self._token(row), send=self._send)
+            client = self._session(row)
             tools = client.list_tools()
+            steps.append({"step": "Reached it" if row["kind"] == "remote" else "It started and answered", "ok": True})
             status, detail = "ready", f"{len(tools)} tool(s)"
         except mcp.NeedsSignIn as exc:
-            tools, status, detail = None, "needs_sign_in", "Sign in to use it."
-            with self._c._lock:
-                hint = json.loads(row["sign_in"]) if row["sign_in"] else {}
-                hint["resourceMetadata"] = exc.resource_metadata
-                self._c._db.execute("UPDATE connection SET auth = 'oauth', sign_in = ? WHERE id = ?", (json.dumps(hint), connection_id))
+            steps.append({"step": "Reached it", "ok": True})
+            if row["auth"] == "header":
+                status, detail = "needs_key", "The server did not accept the key. Paste it again."
+                steps.append({"step": "The key was refused", "ok": False})
+            elif mcp.offers_oauth(row["url"], exc.resource_metadata, self._send):
+                status, detail = "needs_sign_in", "Sign in to use it."
+                steps.append({"step": "It wants you to sign in", "ok": False})
+                with self._c._lock:
+                    hint = json.loads(row["sign_in"]) if row["sign_in"] else {}
+                    hint["resourceMetadata"] = exc.resource_metadata
+                    self._c._db.execute("UPDATE connection SET auth = 'oauth', sign_in = ? WHERE id = ?", (json.dumps(hint), connection_id))
+            else:
+                status, detail = "needs_key", "It wants a key. Paste it with the header name from the service's docs."
+                steps.append({"step": "It wants a key (API key or token)", "ok": False})
+                with self._c._lock:
+                    self._c._db.execute("UPDATE connection SET auth = 'header' WHERE id = ? AND auth = 'none'", (connection_id,))
         except mcp.McpError as exc:
-            tools, status, detail = None, "error", str(exc)[:200]
+            fallback = row["kind"] == "remote" and transport == "http" and exc.status in (400, 404, 405, 406, 415)
+            if fallback:
+                if client is not None:
+                    client.close()
+                client = None
+                try:
+                    client = mcp.LegacySseClient(row["url"], token=self._token(row), extra_headers=self._headers(row))
+                    tools = client.list_tools()
+                    transport = "sse"
+                    steps.append({"step": "Reached it (older event-stream transport)", "ok": True})
+                    status, detail = "ready", f"{len(tools)} tool(s)"
+                except mcp.McpError as second:
+                    status, detail = "error", str(second)[:200]
+                    steps.append({"step": "Could not reach it", "ok": False, "detail": detail})
+            else:
+                status, detail = "error", str(exc)[:200]
+                steps.append({"step": "Could not reach it" if row["kind"] == "remote" else "It did not start or answer", "ok": False, "detail": detail})
+        finally:
+            if client is not None and row["kind"] == "remote":
+                client.close()
         with self._c._lock:
             if tools is not None:
-                public = [self._tool_public(t) for t in tools[:200]]
-                names = {t["name"] for t in public}
-                allowed = [n for n in json.loads(self._row(connection_id)["allowed"]) if n in names]
-                self._c._db.execute("UPDATE connection SET tools = ?, allowed = ? WHERE id = ?", (json.dumps(public), json.dumps(allowed), connection_id))
-            self._c._db.execute("UPDATE connection SET status = ?, detail = ?, updated_at = ? WHERE id = ?", (status, detail, self._c._clock(), connection_id))
+                changed = self._sync_tools(connection_id, tools[:200])
+                reads = sum(1 for t in self._tools_public(self._row(connection_id)) if t["class"] == "read")
+                steps.append({"step": f"{len(tools)} tools: {reads} read, {len(tools) - reads} change things", "ok": True})
+                if changed:
+                    steps.append({"step": f"{len(changed)} tool(s) changed since you allowed them; they are off until you look", "ok": False})
+            self._c._db.execute("UPDATE connection SET transport = ? WHERE id = ?", (transport, connection_id))
+            return self._set_status(connection_id, status, detail, steps)
+
+    def _set_status(self, connection_id: str, status: str, detail: str, steps: list[dict[str, Any]]) -> dict[str, Any]:
+        with self._c._lock:
+            self._c._db.execute("UPDATE connection SET status = ?, detail = ?, probe = ?, updated_at = ? WHERE id = ?",
+                                (status, detail, json.dumps(steps), self._c._clock(), connection_id))
             return self._public(self._row(connection_id))
+
+    def _sync_tools(self, connection_id: str, tools: list[dict[str, Any]]) -> list[str]:
+        """Record the listed tools with their class and hash. A tool that changed since it was allowed is switched off
+        until the owner approves it again; a new tool starts off. Returns the names that changed."""
+        db = self._c._db
+        row = self._row(connection_id)
+        known = {t["tool"]: t for t in db.execute("SELECT * FROM connection_tool WHERE connection_id = ?", (connection_id,))}
+        legacy = set(json.loads(row["allowed"])) if not known else set()  # C3 connections: keep what the owner allowed
+        old_public = {t["name"]: t for t in json.loads(row["tools"])}
+        public = [self._tool_public(t) for t in tools]
+        changed = []
+        for tool, pub in zip(tools, public):
+            name, digest, cls = pub["name"], tool_hash(tool), classify(tool)
+            state = known.pop(name, None)
+            if state is None:
+                allowed = 1 if name in legacy else 0
+                db.execute("INSERT INTO connection_tool(connection_id, tool, class, allowed, rule, hash, approved_hash, previous) VALUES (?,?,?,?,?,?,?,?)",
+                           (connection_id, name, cls, allowed, None, digest, digest if allowed else None, None))
+            elif state["hash"] != digest:
+                was_allowed = bool(state["allowed"])
+                db.execute("UPDATE connection_tool SET class = ?, hash = ?, allowed = 0, previous = ? WHERE connection_id = ? AND tool = ?",
+                           (cls, digest, json.dumps(old_public.get(name)) if state["approved_hash"] else None, connection_id, name))
+                if was_allowed:
+                    changed.append(name)
+            elif state["class"] != cls:
+                db.execute("UPDATE connection_tool SET class = ? WHERE connection_id = ? AND tool = ?", (cls, connection_id, name))
+        for gone in known:
+            db.execute("DELETE FROM connection_tool WHERE connection_id = ? AND tool = ?", (connection_id, gone))
+        db.execute("UPDATE connection SET tools = ? WHERE id = ?", (json.dumps(public), connection_id))
+        self._derive_allowed(connection_id)
+        if changed:
+            self._c._audit("engine", "connection.tools_changed", connection_id, {"tools": changed})
+        return changed
+
+    def _derive_allowed(self, connection_id: str) -> None:
+        names = [r["tool"] for r in self._c._db.execute(
+            "SELECT tool FROM connection_tool WHERE connection_id = ? AND allowed = 1 ORDER BY tool", (connection_id,))]
+        self._c._db.execute("UPDATE connection SET allowed = ? WHERE id = ?", (json.dumps(names), connection_id))
+
+    def _headers(self, row: Any) -> dict[str, str]:
+        if row["auth"] != "header":
+            return {}
+        grant = self.grants.get(row["id"])
+        if not grant or not grant.get("header"):
+            raise mcp.NeedsSignIn(None)
+        return {grant["header"]: grant["value"]}
+
+    def _session(self, row: Any) -> Any:
+        """A client for this connection: its local program, the older event stream, or Streamable HTTP."""
+        if row["kind"] == "local":
+            launch = json.loads(row["launch"])
+            if launch.get("approvedHash") != launch["hash"]:
+                raise mcp.McpError("Approve this local server before it runs.")
+            return self.local.session(row["id"], launch)
+        if row["transport"] == "sse":
+            return mcp.LegacySseClient(row["url"], token=self._token(row), extra_headers=self._headers(row))
+        return mcp.McpClient(row["url"], token=self._token(row), send=self._send, extra_headers=self._headers(row))
+
+    # ------------------------------------------------------------------ keys, clients, local servers (plan 34)
+
+    def set_key(self, connection_id: str, body: Any) -> dict[str, Any]:
+        """An API key or token sent in a header. Kept sealed on this PC, never shown again."""
+        if not isinstance(body, dict) or set(body) != {"header", "value"}:
+            raise CommandError("Send {header, value}.")
+        header, value = body["header"], body["value"]
+        if not isinstance(header, str) or not HEADER_NAME.match(header) or header.lower() in ("host", "content-type", "content-length", "cookie", "mcp-session-id"):
+            raise CommandError("header is a header name like X-Api-Key or Authorization.")
+        if not isinstance(value, str) or not 1 <= len(value) <= 4000 or any(c in value for c in "\r\n"):
+            raise CommandError("The key is one line of text.")
+        with self._c._lock:
+            row = self._row(connection_id)
+            if row["kind"] != "remote":
+                raise CommandError("Local servers take their keys as env values.")
+            self.grants.put(connection_id, {"header": header, "value": value})
+            self._c._db.execute("UPDATE connection SET auth = 'header', sign_in = ? WHERE id = ?", (json.dumps({"header": header}), connection_id))
+            self._c._audit("owner", "connection.key", connection_id, {"header": header})
+        return self.refresh(connection_id)
+
+    def set_client(self, connection_id: str, body: Any) -> dict[str, Any]:
+        """An OAuth client the owner registered with the service themselves (for servers without self-registration)."""
+        if not isinstance(body, dict) or not {"clientId"} <= set(body) <= {"clientId", "clientSecret"}:
+            raise CommandError("Send {clientId, clientSecret?}.")
+        client_id, secret = body["clientId"], body.get("clientSecret")
+        if not isinstance(client_id, str) or not re.match(r"^[\x21-\x7e]{1,300}$", client_id):
+            raise CommandError("clientId is the ID the service gave you.")
+        if secret is not None and (not isinstance(secret, str) or not re.match(r"^[\x21-\x7e]{1,500}$", secret)):
+            raise CommandError("clientSecret is one line of text.")
+        with self._c._lock:
+            row = self._row(connection_id)
+            hint = json.loads(row["sign_in"]) if row["sign_in"] else {}
+            hint["client"] = {"client_id": client_id, "confidential": bool(secret), "manual": True}
+            if secret:
+                self.grants.put(f"client:{connection_id}", {"client_secret": secret})
+            else:
+                self.grants.drop(f"client:{connection_id}")
+            self._c._db.execute("UPDATE connection SET auth = 'oauth', sign_in = ?, status = 'needs_sign_in', detail = 'Sign in to use it.' WHERE id = ?",
+                                (json.dumps(hint), connection_id))
+            self._c._audit("owner", "connection.client", connection_id, {"confidential": bool(secret)})
+            return self._public(self._row(connection_id))
+
+    def add_local(self, body: Any) -> dict[str, Any]:
+        """A server config pasted from a README. Nothing runs until the owner approves the exact command."""
+        from .local import LaunchError, parse_config
+        if not isinstance(body, dict) or not set(body) <= {"config", "name"}:
+            raise CommandError("Send {config}.")
+        try:
+            launches = parse_config(body["config"])
+        except LaunchError as exc:
+            raise CommandError(str(exc)) from exc
+        if len(launches) != 1:
+            raise CommandError("Add one local server at a time.")
+        launch = launches[0]
+        env = {k: v for k, v in launch.pop("env").items() if v}  # a README's empty placeholder is not a saved key
+        name = body.get("name") or launch["name"]
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or INLINE_SECRET.search(name):
+            raise CommandError("name is 1..60 characters.")
+        with self._c._lock:
+            now = self._c._clock()
+            connection_id = f"con_{secrets.token_urlsafe(9)}"
+            launch["approvedHash"] = None
+            self._c._db.execute(
+                "INSERT INTO connection(id, name, url, auth, sign_in, tools, allowed, daily_cap, approval, status, detail, created_at, updated_at, kind, transport, launch)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (connection_id, name.strip(), f"local:{connection_id}", "none", None, "[]", "[]", 50, "always", "needs_approval",
+                 "Approve it to run it on this PC.", now, now, "local", "stdio", json.dumps(launch)))
+            if env:
+                self.grants.put(f"env:{connection_id}", env)
+            self._c._audit("owner", "connection.add_local", connection_id, {"launcher": launch["launcher"], "pinned": launch["pinned"], "hash": launch["hash"]})
+        return self._set_status(connection_id, "needs_approval", "Approve it to run it on this PC.", [{"step": "Waiting for your OK to run it", "ok": False}])
+
+    def update_local(self, connection_id: str, body: Any) -> dict[str, Any]:
+        """A changed config: the new command must be approved again; the card shows what changed."""
+        from .local import LaunchError, parse_config
+        if not isinstance(body, dict) or set(body) != {"config"}:
+            raise CommandError("Send {config}.")
+        try:
+            launches = parse_config(body["config"])
+        except LaunchError as exc:
+            raise CommandError(str(exc)) from exc
+        if len(launches) != 1:
+            raise CommandError("One server at a time.")
+        launch = launches[0]
+        env = {k: v for k, v in launch.pop("env").items() if v}
+        with self._c._lock:
+            row = self._row(connection_id)
+            if row["kind"] != "local":
+                raise CommandError("That is not a local server.")
+            old = json.loads(row["launch"])
+            launch["approvedHash"] = old["approvedHash"] if old["hash"] == launch["hash"] else None
+            launch["previous"] = old["display"] if old["hash"] != launch["hash"] else old.get("previous")
+            self._c._db.execute("UPDATE connection SET launch = ? WHERE id = ?", (json.dumps(launch), connection_id))
+            if env:
+                self.grants.put(f"env:{connection_id}", {**(self.grants.get(f"env:{connection_id}") or {}), **env})
+            self._c._audit("owner", "connection.update_local", connection_id, {"hash": launch["hash"], "changed": launch["approvedHash"] is None})
+        self.local.stop(connection_id)
+        return self.refresh(connection_id)
+
+    def approve_local(self, connection_id: str, body: Any) -> dict[str, Any]:
+        """The owner pressed Run it on the card for this exact command (its hash)."""
+        if not isinstance(body, dict) or set(body) != {"hash"} or not isinstance(body["hash"], str):
+            raise CommandError("Send the hash of the command you approved.")
+        with self._c._lock:
+            row = self._row(connection_id)
+            if row["kind"] != "local":
+                raise CommandError("That is not a local server.")
+            launch = json.loads(row["launch"])
+            if body["hash"] != launch["hash"]:
+                raise CommandError("The command changed since you looked at it. Look again.")
+            launch["approvedHash"] = launch["hash"]
+            launch["previous"] = None
+            self._c._db.execute("UPDATE connection SET launch = ? WHERE id = ?", (json.dumps(launch), connection_id))
+            self._c._audit("owner", "connection.approve_local", connection_id, {"hash": launch["hash"], "display": launch["display"][:300]})
+        return self.refresh(connection_id)
+
+    def set_env(self, connection_id: str, body: Any) -> dict[str, Any]:
+        """Keys a local server reads from its env, kept sealed on this PC. Only names the config declared."""
+        if not isinstance(body, dict) or set(body) != {"values"} or not isinstance(body["values"], dict):
+            raise CommandError("Send {values: {NAME: value}}.")
+        with self._c._lock:
+            row = self._row(connection_id)
+            if row["kind"] != "local":
+                raise CommandError("That is not a local server.")
+            names = set(json.loads(row["launch"])["envKeys"])
+            values = body["values"]
+            if not set(values) <= names or not all(isinstance(v, str) and len(v) <= 4000 and "\n" not in v for v in values.values()):
+                raise CommandError("Only the env names in the config, one line each.")
+            self.grants.put(f"env:{connection_id}", {**(self.grants.get(f"env:{connection_id}") or {}), **{k: v for k, v in values.items() if v}})
+            self._c._audit("owner", "connection.env", connection_id, {"names": sorted(values)})
+        self.local.stop(connection_id)
+        return self.refresh(connection_id)
+
+    def logs(self, connection_id: str) -> list[str]:
+        with self._c._lock:
+            self._row(connection_id)
+        return self.local.logs(connection_id)
 
     @staticmethod
     def _tool_public(tool: dict[str, Any]) -> dict[str, Any]:
@@ -262,17 +613,39 @@ class ConnectionStore:
                 "readOnly": annotations.get("readOnlyHint") is True}
 
     def settings(self, connection_id: str, body: Any) -> dict[str, Any]:
-        if not isinstance(body, dict) or not body or not set(body) <= {"allowed", "dailyCap", "approval", "name"}:
-            raise CommandError("Send any of allowed, dailyCap, approval, name.")
+        """The owner's choices. `allowed` is the full list of allowed tools (it also re-approves changed ones);
+        `allowReads` allows every reading tool; `rules` sets a tool's rule (a sensitive tool always asks)."""
+        keys = {"allowed", "allowReads", "rules", "dailyCap", "approval", "name"}
+        if not isinstance(body, dict) or not body or not set(body) <= keys:
+            raise CommandError("Send any of allowed, allowReads, rules, dailyCap, approval, name.")
         with self._c._lock:
             row = self._row(connection_id)
-            names = {t["name"] for t in json.loads(row["tools"])}
+            db = self._c._db
+            states = {t["tool"]: t for t in db.execute("SELECT * FROM connection_tool WHERE connection_id = ?", (connection_id,))}
             fields: dict[str, Any] = {}
             if "allowed" in body:
                 allowed = body["allowed"]
-                if not isinstance(allowed, list) or not all(isinstance(n, str) and n in names for n in allowed):
+                if not isinstance(allowed, list) or not all(isinstance(n, str) and n in states for n in allowed):
                     raise CommandError("allowed lists tools this server offers.")
-                fields["allowed"] = json.dumps(sorted(set(allowed)))
+                for name, st in states.items():
+                    on = name in allowed
+                    db.execute("UPDATE connection_tool SET allowed = ?, approved_hash = ?, previous = ? WHERE connection_id = ? AND tool = ?",
+                               (1 if on else 0, st["hash"] if on else st["approved_hash"], None if on else st["previous"], connection_id, name))
+            if body.get("allowReads") is True:
+                for name, st in states.items():
+                    if st["class"] == "read":
+                        db.execute("UPDATE connection_tool SET allowed = 1, approved_hash = ?, previous = NULL WHERE connection_id = ? AND tool = ?",
+                                   (st["hash"], connection_id, name))
+            elif "allowReads" in body and body["allowReads"] is not True:
+                raise CommandError("allowReads is true.")
+            if "rules" in body:
+                rules = body["rules"]
+                if not isinstance(rules, dict) or not all(n in states and r in RULES for n, r in rules.items()):
+                    raise CommandError("rules are {tool: always | over_cap | cap}.")
+                for name, rule in rules.items():
+                    if states[name]["class"] == "sensitive" and rule != "always":
+                        raise CommandError(f"{name} sends, deletes, pays or grants something, so it always asks you first.")
+                    db.execute("UPDATE connection_tool SET rule = ? WHERE connection_id = ? AND tool = ?", (rule, connection_id, name))
             if "dailyCap" in body:
                 cap = body["dailyCap"]
                 if type(cap) is not int or not 0 <= cap <= 1000:
@@ -287,12 +660,15 @@ class ConnectionStore:
                 if not isinstance(name, str) or not 1 <= len(name.strip()) <= 60 or INLINE_SECRET.search(name):
                     raise CommandError("name is 1..60 characters.")
                 fields["name"] = name.strip()
-            sets = ", ".join(f"{k} = ?" for k in fields)
-            self._c._db.execute(f"UPDATE connection SET {sets}, updated_at = ? WHERE id = ?", (*fields.values(), self._c._clock(), connection_id))
+            if fields:
+                sets = ", ".join(f"{k} = ?" for k in fields)
+                db.execute(f"UPDATE connection SET {sets}, updated_at = ? WHERE id = ?", (*fields.values(), self._c._clock(), connection_id))
+            self._derive_allowed(connection_id)
+            row = self._row(connection_id)
             self._c._audit("owner", "connection.settings", connection_id,
-                           {"allowed": json.loads(fields.get("allowed", row["allowed"])), "dailyCap": fields.get("daily_cap", row["daily_cap"]),
-                            "approval": fields.get("approval", row["approval"])})
-            return self._public(self._row(connection_id))
+                           {"allowed": json.loads(row["allowed"]), "dailyCap": row["daily_cap"], "approval": row["approval"],
+                            "rules": body.get("rules") or {}})
+            return self._public(row)
 
     def remove(self, connection_id: str) -> dict[str, Any]:
         with self._c._lock:
@@ -300,15 +676,19 @@ class ConnectionStore:
             if self._c._db.execute("SELECT 1 FROM tool_call WHERE connection_id = ? AND state IN ('waiting','running')", (connection_id,)).fetchone():
                 raise CommandError("A call is still running or waiting for you. Let it finish or decline it first.")
             self._c._db.execute("DELETE FROM connection WHERE id = ?", (connection_id,))
-            self.grants.drop(connection_id)
+            self._c._db.execute("DELETE FROM connection_tool WHERE connection_id = ?", (connection_id,))
+            for key in (connection_id, f"client:{connection_id}", f"env:{connection_id}"):
+                self.grants.drop(key)
             self._c._audit("owner", "connection.remove", connection_id)
-            return {"id": connection_id, "removed": True}
+        self.local.stop(connection_id)
+        return {"id": connection_id, "removed": True}
 
     def sign_out(self, connection_id: str) -> dict[str, Any]:
         with self._c._lock:
             self._row(connection_id)
             self.grants.drop(connection_id)
-            self._c._db.execute("UPDATE connection SET status = 'needs_sign_in', detail = 'Signed out.' WHERE id = ? AND auth = 'oauth'", (connection_id,))
+            self._c._db.execute("UPDATE connection SET status = CASE auth WHEN 'header' THEN 'needs_key' ELSE 'needs_sign_in' END,"
+                                " detail = 'Signed out.' WHERE id = ? AND auth IN ('oauth','header')", (connection_id,))
             self._c._audit("owner", "connection.sign_out", connection_id)
             return self._public(self._row(connection_id))
 
@@ -321,8 +701,16 @@ class ConnectionStore:
         try:
             server = mcp.discover(row["url"], hint.get("resourceMetadata"), self._send)
             client = hint.get("client") if hint.get("redirectUri") == redirect_uri and hint.get("issuer") == server.issuer else None
+            if (hint.get("client") or {}).get("manual"):
+                client = hint["client"]  # the owner registered Cyclone with the service themselves
             secret_client = self.grants.get(f"client:{connection_id}")
             if client is None or (client.get("confidential") and not secret_client):
+                if not server.registration_endpoint:
+                    with self._c._lock:
+                        self._c._db.execute("UPDATE connection SET status = 'needs_client', detail = ? WHERE id = ?",
+                                            ("This service does not let apps register themselves. Paste a client ID from its developer settings.", connection_id))
+                    raise CommandError("This service does not let apps register themselves. Create an app in its developer settings "
+                                       f"with the redirect address {redirect_uri}, then paste its client ID here.")
                 registered = mcp.register(server, redirect_uri, self._send)
                 client = {"client_id": registered["client_id"], "confidential": "client_secret" in registered}
                 if "client_secret" in registered:
@@ -336,7 +724,8 @@ class ConnectionStore:
             self._signing = {k: v for k, v in self._signing.items() if now - v["at"] < SIGN_IN_TTL_MS}
             self._signing[state] = {"connection": connection_id, "verifier": verifier, "redirect": redirect_uri, "at": now}
             self._c._db.execute("UPDATE connection SET auth = 'oauth', sign_in = ? WHERE id = ?",
-                                (json.dumps({**server.public(), "resourceMetadata": hint.get("resourceMetadata"), "client": client, "redirectUri": redirect_uri}), connection_id))
+                                (json.dumps({**server.public(), "resourceMetadata": hint.get("resourceMetadata"), "client": client,
+                                             "redirectUri": redirect_uri if not client.get("manual") else hint.get("redirectUri", redirect_uri)}), connection_id))
             self._c._audit("owner", "connection.sign_in_start", connection_id, {"issuer": server.issuer})
         return {"authorizationUrl": mcp.authorize_url(server, client["client_id"], redirect_uri, state, challenge)}
 
@@ -415,6 +804,9 @@ class ConnectionStore:
             for name in (tool, poll_tool):
                 if name and name not in allowed:
                     raise CommandError(f"{row['name']}: the tool {name} is not allowed. Allow it in Connections first.")
+            state = self._c._db.execute("SELECT * FROM connection_tool WHERE connection_id = ? AND tool = ?", (connection_id, tool)).fetchone()
+            cls = state["class"] if state else "change"
+            rule = "always" if cls == "sensitive" else ((state["rule"] if state and state["rule"] else None) or ("cap" if cls == "read" else row["approval"]))
             if row["status"] != "ready":
                 raise CommandError(f"{row['name']} is not ready ({row['detail'] or row['status']}).")
             now = self._c._clock()
@@ -423,10 +815,10 @@ class ConnectionStore:
                 "SELECT COUNT(*) FROM tool_call WHERE connection_id = ? AND day = ? AND state IN ('waiting','running','done','failed')",
                 (connection_id, today)).fetchone()[0]
             over = used >= row["daily_cap"]
-            if over and row["approval"] == "cap":
+            if over and rule == "cap":
                 self._refused(connection_id, tool, task_id, actor, arguments, today, f"The daily cap of {row['daily_cap']} call(s) is reached.")
                 raise CommandError(f"{row['name']}: the daily cap of {row['daily_cap']} call(s) is reached. It resets tomorrow, or raise it.")
-            ask = row["approval"] == "always" or (over and row["approval"] == "over_cap")
+            ask = rule == "always" or (over and rule == "over_cap")
             if ask and self._c._db.execute("SELECT 1 FROM tool_call WHERE connection_id = ? AND state = 'waiting'", (connection_id,)).fetchone():
                 raise CommandError(f"{row['name']}: another call is already waiting for your OK.")
             if not ask and self._c._db.execute("SELECT COUNT(*) FROM tool_call WHERE connection_id = ? AND state = 'running'", (connection_id,)).fetchone()[0] >= MAX_PARALLEL:
@@ -436,9 +828,9 @@ class ConnectionStore:
                 "INSERT INTO tool_call(id, connection_id, tool, task_id, actor, arguments, poll_tool, state, day, approval_id, summary, artifacts, created_at, started_at, finished_at)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (call_id, connection_id, tool, task_id, actor, json.dumps(arguments), poll_tool, "waiting" if ask else "running", today, None, "", "[]", now, None if ask else now, None))
-            self._c._audit(actor, "connection.call", call_id, {"connection": connection_id, "tool": tool, "task": task_id, "ask": ask, "over": over})
+            self._c._audit(actor, "connection.call", call_id, {"connection": connection_id, "tool": tool, "task": task_id, "ask": ask, "over": over, "class": cls})
             if ask:
-                self._ask(row, call_id, tool, arguments, task_id, over)
+                self._ask(row, call_id, tool, arguments, task_id, over, cls)
             else:
                 self._spawn(lambda: self._run(call_id))
             return self._call_public(self._c._db.execute("SELECT * FROM tool_call WHERE id = ?", (call_id,)).fetchone())
@@ -452,9 +844,10 @@ class ConnectionStore:
             (call_id, connection_id, tool, task_id, actor, json.dumps(arguments), None, "refused", today, None, why, "[]", now, None, now))
         self._c._audit("engine", "connection.refused", call_id, {"connection": connection_id, "tool": tool, "why": why})
 
-    def _ask(self, row: Any, call_id: str, tool: str, arguments: dict[str, Any], task_id: str | None, over: bool) -> None:
+    def _ask(self, row: Any, call_id: str, tool: str, arguments: dict[str, Any], task_id: str | None, over: bool, cls: str = "change") -> None:
         approval_id = f"apv_{secrets.token_urlsafe(12)}"
-        text = f"Use {row['name']}: {tool}?" + (f" This is over today's cap of {row['daily_cap']}." if over else "") + " It may use your plan's credits."
+        why = {"sensitive": " It sends, deletes, pays or grants something outside Cyclone.", "read": " It only reads."}.get(cls, " It changes something outside Cyclone and may use your plan's credits.")
+        text = f"Use {row['name']}: {tool}?" + (f" This is over today's cap of {row['daily_cap']}." if over else "") + why
         preview = {k: (v if not isinstance(v, str) else v[:300]) for k, v in list(arguments.items())[:12]}
         self._c._db.execute(
             "INSERT INTO approval(id, run_id, task_id, device_id, mission_id, request_id, kind, text, gate, send, choices, fields,"
@@ -488,14 +881,16 @@ class ConnectionStore:
         if call is None or row is None:
             return
         arguments = json.loads(call["arguments"])
-        state, summary, made = "failed", "", []
+        state, summary, made, kept = "failed", "", [], None
+        client: Any = None
         try:
-            client = mcp.McpClient(row["url"], token=self._token(row), send=self._send)
+            client = self._session(row)
             result = client.call_tool(call["tool"], arguments)
             made = self._keep(result, row, call, arguments)
             if not made and call["poll_tool"] and not result.get("isError"):
                 result, made = self._poll(client, row, call, arguments, result)
             summary = _summary(result)
+            kept = result_public(result)
             state = "failed" if result.get("isError") else "done"
             if state == "done" and not made and call["task_id"]:
                 state, summary = "failed", ("No file came back. " + summary)[:500]
@@ -507,14 +902,17 @@ class ConnectionStore:
             summary = str(exc)[:300]
         except Exception as exc:  # noqa: BLE001 - a bad answer fails the call, never the runtime
             summary = f"The call failed ({exc.__class__.__name__})."
+        finally:
+            if client is not None and row["kind"] == "remote":
+                client.close()
         with self._c._lock:
-            self._c._db.execute("UPDATE tool_call SET state = ?, summary = ?, artifacts = ?, finished_at = ? WHERE id = ?",
-                                (state, summary, json.dumps(made), self._c._clock(), call_id))
+            self._c._db.execute("UPDATE tool_call SET state = ?, summary = ?, artifacts = ?, result = ?, finished_at = ? WHERE id = ?",
+                                (state, summary, json.dumps(made), json.dumps(kept) if kept is not None else None, self._c._clock(), call_id))
             self._c._audit("engine", f"connection.{state}", call_id, {"artifacts": made})
             if call["task_id"]:
                 self._c._make_finished(call["task_id"])
 
-    def _poll(self, client: mcp.McpClient, row: Any, call: Any, arguments: dict[str, Any], first: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    def _poll(self, client: Any, row: Any, call: Any, arguments: dict[str, Any], first: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         job = _job_id(first)
         if job is None:
             return first, []
@@ -648,6 +1046,17 @@ class ConnectionStore:
         return {"id": r["id"], "sha256": r["sha256"], "name": r["name"], "mime": r["mime"], "size": r["size"], "connectionId": r["connection_id"],
                 "tool": r["tool"], "callId": r["call_id"], "taskId": r["task_id"], "prompt": r["prompt"], "createdAt": r["created_at"]}
 
+    def get_call(self, call_id: str) -> dict[str, Any]:
+        with self._c._lock:
+            row = self._c._db.execute("SELECT * FROM tool_call WHERE id = ?", (call_id,)).fetchone()
+            if row is None:
+                raise CommandError("No such call.")
+            return self._call_public(row)
+
+    def close(self) -> None:
+        """The runtime stops: local servers stop with it."""
+        self.local.stop_all()
+
     def calls(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._c._lock:
             return [self._call_public(r) for r in self._c._db.execute("SELECT * FROM tool_call ORDER BY created_at DESC, rowid DESC LIMIT ?", (max(1, min(limit, 500)),))]
@@ -661,6 +1070,7 @@ class ConnectionStore:
         return {"id": r["id"], "connectionId": r["connection_id"], "tool": r["tool"], "taskId": r["task_id"], "actor": r["actor"],
                 "arguments": json.loads(r["arguments"]), "pollTool": r["poll_tool"], "state": r["state"], "summary": r["summary"],
                 "artifacts": json.loads(r["artifacts"]), "approvalId": r["approval_id"], "createdAt": r["created_at"],
+                "result": json.loads(r["result"]) if r["result"] else None,
                 "startedAt": r["started_at"], "finishedAt": r["finished_at"]}
 
 
