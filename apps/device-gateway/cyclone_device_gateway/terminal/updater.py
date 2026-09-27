@@ -1,4 +1,4 @@
-"""Check GitHub for a newer Cyclone and download its installer, verified against the release's SHA256SUMS.txt."""
+"""Check GitHub for a newer Cyclone and download its package, verified against the release's manifest (plan 31)."""
 
 from __future__ import annotations
 
@@ -47,21 +47,26 @@ class UpdateError(Exception):
     pass
 
 
-def download_installer(release: rel.Release, target: Path, *, fetch: Callable[[str, float], bytes] = _get,
-                       progress: Callable[[str], None] = lambda _line: None) -> Path:
-    """Download the release installer and refuse it unless its SHA-256 matches the release's SHA256SUMS.txt."""
-    sums = fetch(release.sums_url, 30.0).decode("utf-8", "replace")
-    expected = rel.expected_sha256(sums, release.setup_name)
+def download_package(release: rel.Release, target: Path, *, fetch: Callable[[str, float], bytes] = _get,
+                     progress: Callable[[str], None] = lambda _line: None) -> Path:
+    """Download the release's Cyclone-PC zip and refuse it unless its SHA-256 matches the release manifest."""
+    try:
+        manifest = json.loads(fetch(release.manifest_url, 30.0).decode("utf-8", "replace"))
+    except ValueError as exc:
+        raise UpdateError("The release manifest could not be read; not installing.") from exc
+    expected = rel.expected_sha256(manifest, release.package_name)
     if expected is None:
-        raise UpdateError(f"{release.setup_name} is not listed in SHA256SUMS.txt; not installing it.")
-    progress(f"Downloading {release.setup_name}…")
+        raise UpdateError(f"{release.package_name} is not listed in the release manifest; not installing it.")
+    progress(f"Downloading {release.package_name}…")
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(".part")
-    partial.write_bytes(fetch(release.setup_url, 600.0))
+    partial.write_bytes(fetch(release.package_url, 600.0))
     actual = rel.sha256_file(partial)
     if actual != expected:
         partial.unlink(missing_ok=True)
         raise UpdateError("The download does not match the release checksum; it was deleted and nothing was installed.")
     partial.replace(target)
+    # install.ps1 checks the package once more against this before unpacking it.
+    target.with_name(target.name + ".sha256").write_text(expected, encoding="ascii")
     progress(f"Verified SHA-256 {actual[:12]}…")
     return target

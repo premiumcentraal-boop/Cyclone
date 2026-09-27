@@ -62,6 +62,10 @@ export class GatewayClient {
     return this.request<T>("POST", path, body ?? {}, signal);
   }
 
+  put<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    return this.request<T>("PUT", path, body, signal);
+  }
+
   /** Offer the gateway's selected protocol as well as the bearer used to authenticate the handshake. */
   socket(path: string, origin: string): { url: string; protocols: string[] } {
     const base = this.baseUrl || origin;

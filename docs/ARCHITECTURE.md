@@ -89,6 +89,31 @@ Owner Moments render as `OverlayOwnerCard`. Approvals are split by `OverlayGlass
 
 An owner's tap waits up to `OWNER_PAUSE_MS` for the step boundary. Plan: `Cyclone V5 plan/27-overlay-redesign.md`.
 
+### Direct first (since 5.0.0-alpha.45)
+
+Tasks that need no screen run first. The Mind's `calendar_find`, `calendar_add` and `contact_find`, plus `set_timer`
+and `set_alarm`, call `MindDevicePort.direct`, which reaches the executor's `phone.direct_*` tools. Those tools use
+`direct/DirectActions` (Android's calendar and contacts providers, and the clock's `EXTRA_SKIP_UI` contract). The pure
+rules live in `DirectPlan`: time parsing, event checks, windows, alarm proof. Every result is proven or said as
+unconfirmed: an event is read back, an alarm is matched against `AlarmManager.nextAlarmClock`, a timer against the
+clock's notification. A missing permission is asked for by `DirectAccessActivity` (Android's dialog only) and the
+action runs once more. These tools never observe a screen, start a plane or wait for an unlock. Guard:
+`scripts/ci/tests/test_mobile_direct_first.py`. Plan: `Cyclone V5 plan/29-one-tap-engine.md`.
+
+### Background that stays working (since 5.0.0-alpha.44)
+
+Only a real loss ends a background screen: `onDestroy` of the Accessibility service, not `onInterrupt`. A locked phone
+refuses an action (`SCREEN_LOCKED`) without pausing the screen, and the mission waits for the unlock. Task ownership is
+`WorkspaceCommands.ownedTask`: the app visible on the main screen means the owner has it; Recents leftovers do not
+count, and several tasks on Cyclone's display are all Cyclone's. Background observation shows whatever application
+window is on top of Cyclone's display. Approvals for a Mind mission's background screen go through
+`PhoneToolExecutor.workspaceGate`, with the overlay card and one-shot grant and no pause. Background failures carry their
+reason code; `BackgroundFailure.classify` lets only `UNSUPPORTED` move the task to the screen. A paused screen that
+Cyclone still holds is taken back (`WorkspaceRuntime.reclaim`). A gesture Android never queued goes once through the
+helper's `input -d`. `BackgroundCheck` runs the whole path on a hidden screen (Settings → AI → Background work, and
+once per build by itself); an engine failure keeps Automatic on the screen with the reason. Guard:
+`scripts/ci/tests/test_mobile_background_stable.py`. Plan: `Cyclone V5 plan/28-background-stable.md`.
+
 ### Background always (since 5.0.0-alpha.42)
 
 `BackgroundCapabilities` turns the setup facts into one level (ready, needs start, needs setup, off, unsupported) with

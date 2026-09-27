@@ -74,6 +74,16 @@ internal class AndroidMindDevice(private val context: Context) : MindDevicePort 
         return if (result.ok) null else result.error?.message ?: "The reply could not be sent."
     }
 
+    override fun direct(tool: String, params: org.json.JSONObject): com.cyclone.mobile.mind.MindDirect {
+        val result = com.cyclone.mobile.PhoneToolExecutor.execute(context, com.cyclone.mobile.PhoneToolRequest(
+            "mind-direct-${java.util.UUID.randomUUID()}", "phone.direct_$tool", params))
+        return if (result.ok) com.cyclone.mobile.mind.MindDirect(result.payload as? org.json.JSONObject ?: org.json.JSONObject())
+        else com.cyclone.mobile.mind.MindDirect(error = result.error?.message ?: "The phone could not do it.")
+    }
+
+    override fun requestAccess(permissions: List<String>): Boolean =
+        com.cyclone.mobile.direct.DirectActions.requestAccess(context, permissions)
+
     override fun copy(text: String): Boolean = runCatching {
         val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return false
         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Cyclone draft", text))

@@ -13,6 +13,8 @@ export type Route =
   | { name: "knowledge" }
   | { name: "lab"; experimentId?: string }
   | { name: "market" }
+  | { name: "remote" }
+  | { name: "attach" }
   | { name: "settings" };
 
 export const DEFAULT_ROUTE: Route = { name: "home" };
@@ -51,6 +53,8 @@ export function parseRoute(hash: string): Route {
     return /^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$/.test(id) ? { name: "lab", experimentId: id } : { name: "lab" };
   }
   if (parts[0] === "market") return { name: "market" };
+  if (parts[0] === "remote") return { name: "remote" };
+  if (parts[0] === "attach") return { name: "attach" };
   if (parts[0] === "apps") return { name: "apps" };
   if (parts[0] === "runs") return { name: "runs" };
   if (parts[0] === "phone") return { name: "phone" };
@@ -89,13 +93,17 @@ export function routeHref(route: Route): string {
       return route.experimentId ? `#/lab/${encodeURIComponent(route.experimentId)}` : "#/lab";
     case "market":
       return "#/market";
+    case "remote":
+      return "#/remote";
+    case "attach":
+      return "#/attach";
     case "settings":
       return "#/settings";
   }
 }
 
 /** Sidebar section that owns a route. */
-export function sectionOf(route: Route): "home" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market" | "settings" {
+export function sectionOf(route: Route): "home" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market" | "remote" | "attach" | "settings" {
   if (route.name === "app") return "apps";
   if (route.name === "run") return "runs";
   return route.name;

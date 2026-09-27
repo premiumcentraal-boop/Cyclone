@@ -70,6 +70,16 @@ object CyclonePermissionSetup {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    /** Plan 29: add the events the owner asks for, without opening a calendar app. */
+    fun calendarWriteEnabled(context: Context): Boolean = safePermissionCheck {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Plan 29: look up a person's number or address for a mission, without opening the contacts app. */
+    fun contactsEnabled(context: Context): Boolean = safePermissionCheck {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun overlayEnabled(context: Context): Boolean = safePermissionCheck {
         Settings.canDrawOverlays(context)
     }

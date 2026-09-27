@@ -183,9 +183,9 @@ object WorkspaceRuntime {
     fun observe(scope: ExecutionContext): UiSnapshot = synchronized(lock) {
         val session = requireScope(scope)
         val service = CycloneAccessibilityService.instance ?: error("ACCESSIBILITY_NOT_CONNECTED")
-        val snapshot = service.observeDisplay(session.displayId, session.targetPackage.orEmpty())
-        check(snapshot.packageName == session.targetPackage) { "FOREGROUND_REQUIRED: target is not observable on its display" }
-        snapshot
+        // The display holds only what this task opened; another app on top (a permission dialog, a sign-in page) is
+        // shown as it is. Approvals still apply to every tap there.
+        service.observeDisplay(session.displayId, session.targetPackage.orEmpty())
     }
 
     fun requestConfirmation(sessionId: String, action: String, nodeId: String, fingerprint: String, kind: String) = synchronized(lock) {
@@ -231,10 +231,10 @@ object WorkspaceRuntime {
         requireScope(scope)
         entry.lifecycle.requireMutation(WorkspaceLease(scope.sessionId, scope.displayId, generation), true, backend != null)
         val keyguard = appContext?.getSystemService(android.app.KeyguardManager::class.java)
-        if (keyguard?.isDeviceLocked != false) {
-            pause(scope.sessionId)
-            error("SCREEN_LOCKED: unlock and resume the task")
-        }
+        // Plan 28: a locked phone refuses the action but keeps the background screen as it is. Pausing here left the
+        // session paused after unlock with nothing to resume it, so every later action failed. The mission waits for
+        // the unlock before its next step (MindDevice.blocker).
+        check(keyguard?.isDeviceLocked == false) { "SCREEN_LOCKED: unlock and resume the task" }
         // Plan 26 (A42-3): a still page sends no new frames. The accessibility fingerprint check before every action
         // already proves the page is current, so a frame that exists is enough; none at all is still a stall.
         check(LiveVisionRuntime.healthy(scope.sessionId) || LiveVisionRuntime.hasFrame(scope.sessionId)) {
@@ -263,6 +263,16 @@ object WorkspaceRuntime {
         entry.lifecycle.transition(WorkspaceState.BACKGROUND_OK)
         LiveVisionRuntime.sessions.setOwner(sessionId, InputOwner.CYCLONE)
         com.cyclone.mobile.gateway.GatewayObservationStore.clear(sessionId)
+    }
+
+    /**
+     * Plan 28: a background screen Cyclone still holds but whose input was paused (not handed to the owner) gets its
+     * input back. False when there is nothing to take back or the screen is the owner's.
+     */
+    fun reclaim(sessionId: String): Boolean = synchronized(lock) {
+        val entry = entries[sessionId] ?: return@synchronized false
+        if (entry.lifecycle.state !in setOf(WorkspaceState.PAUSED, WorkspaceState.BACKGROUND_NEEDS_HANDOFF)) return@synchronized false
+        runCatching { resume(sessionId) }.isSuccess
     }
 
     fun handoff(sessionId: String) = synchronized(lock) {

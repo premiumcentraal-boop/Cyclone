@@ -48,10 +48,14 @@ Each orch issues **three** agent handoffs (drafted under `orchestrators/<team>/a
 | 21 | [Mind hands and desk](21-mind-hands-and-desk.md) | **Hands built (alpha.41)**: reliable text delivery; mission desk scratchpad (after Drive) |
 | 22 | [Glass Atlas and mapping missions](22-glass-atlas-and-mapping-missions.md) | **Built in alpha.38**: semantic-zoom map, coverage, mission control, safe mapping identities |
 | 23 | [One map, grounded skills and routines](23-one-map-grounded-skills.md) | **Built in alpha.39**: mapping passes teach runs, skills and routines anchored on the map, skills on Glass's map |
-| 24 | [Cyclone Drive: voice assistant](24-cyclone-drive-voice.md) | **Plan**: driver mode AI button, Siri-like AI mode, voice pipeline on OpenRouter (alpha.45–46, after Planes, Hands, Background always and the Glass overlay) |
+| 24 | [Cyclone Drive: voice assistant](24-cyclone-drive-voice.md) | **Plan**: driver mode AI button, Siri-like AI mode, voice pipeline on OpenRouter (alpha.49–50, after Planes, Hands, Background always, the Glass overlay, stable background, the web-only PC and parallel sessions) |
 | 25 | [Planes: background and foreground](25-planes-background-foreground.md) | **First step built (alpha.40)**: the Mind in the background, one-tap switch pill, transactional plane switches, automatic plane choice, self-healing background |
-| 26 | [Background that always works](26-background-always.md) | **Built (alpha.42)**: switch it on once, start from Recents, background parity, start preference, app leases for the same-app case, tier 0, see-to-approve, Lab planes suite; parallel sessions alpha.44 |
+| 26 | [Background that always works](26-background-always.md) | **Built (alpha.42)**: switch it on once, start from Recents, background parity, start preference, app leases for the same-app case, tier 0, see-to-approve, Lab planes suite; stabilised in plan 28, parallel sessions alpha.48 |
 | 27 | [The overlay, redesigned](27-overlay-redesign.md) | **Built (alpha.43)**: tilt-lit glass, the one-word plane pill above card and island, four heights (card, island, notification only, idle), app logos, a background switch that goes home and is never silent, notification Show and Android 16 step segments |
+| 28 | [Background that stays working](28-background-stable.md) | **Built (alpha.44)**: an audit of the whole background path and its fixes (interrupts no longer close background screens, a lock no longer pauses them for good, approvals work in the background, only steps that need the screen move the task, apps with several tasks, dialogs from other apps, a second route for gestures) and the one-tap Background Check |
+| 29 | [Direct first, then the background screen](29-one-tap-engine.md) | **Layer 1 built (alpha.45)**: calendar, contacts, timers and alarms with no screen on every phone, access asked by Android's own dialog. **Layer 2**: stays on Shizuku, no Cyclone engine (decided) |
+| 30 | [Setup cards](30-setup-cards.md) | **Built (alpha.46)**: a short guided setup in plain words, one Tilt Glass card per important setting (Shizuku included), with ⓘ in Settings to see a card again |
+| 31 | [Web-only PC](31-web-only-pc.md) | **Built (alpha.47)**: one-line install, type `cyclone`, Glass in the browser with Remote MCP and ChatGPT Attach; the Cyclone One desktop window is retired |
 
 ## Identity
 

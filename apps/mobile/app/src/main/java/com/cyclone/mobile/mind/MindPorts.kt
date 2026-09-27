@@ -91,4 +91,21 @@ interface MindDevicePort {
      * owner's approval for this exact text. Null when it worked, otherwise why not.
      */
     fun replyNotification(key: String, text: String): String? = "Replying from a notification is not available here."
+
+    /**
+     * Plan 29 (direct first): an action that needs no screen at all ([tool] is calendar_find, calendar_add,
+     * contacts_find, alarm or timer). It runs through the harness like everything else.
+     */
+    fun direct(tool: String, params: org.json.JSONObject): MindDirect = MindDirect(error = "UNAVAILABLE: not on this phone")
+
+    /** Ask Android for these permissions with its own dialog; true when the owner allowed all of them. */
+    fun requestAccess(permissions: List<String>): Boolean = false
+}
+
+/** What a direct action returned: its payload, or why not ("PERMISSION_REQUIRED: …: android.permission.X"). */
+data class MindDirect(val payload: org.json.JSONObject? = null, val error: String? = null) {
+    val ok: Boolean get() = error == null
+    /** The Android permissions a refusal asks for; empty when it is not about permissions. */
+    val permissions: List<String> get() = error?.takeIf { "PERMISSION_REQUIRED" in it }?.substringAfterLast(": ")
+        ?.split(',')?.map { it.trim() }?.filter { it.startsWith("android.permission.") }.orEmpty()
 }

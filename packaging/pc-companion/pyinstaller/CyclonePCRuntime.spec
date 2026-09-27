@@ -31,7 +31,10 @@ a = Analysis(
                    "cyclone_device_gateway.terminal.console", "cyclone_device_gateway.terminal.release",
                    "cyclone_device_gateway.lab.api", "cyclone_device_gateway.lab.runner", "cyclone_device_gateway.lab.probes",
                    "cyclone_device_gateway.lab.missions", "cyclone_device_gateway.lab.verdict", "cyclone_device_gateway.lab.stats",
-                   "cyclone_device_gateway.market.api", "cyclone_device_gateway.market.pc_connections"],
+                   "cyclone_device_gateway.market.api", "cyclone_device_gateway.market.pc_connections",
+                   # Plan 31: Remote MCP, ChatGPT Attach and share, served to Glass (imported inside build_serve_app).
+                   "cyclone_device_gateway.pc.api", "cyclone_device_gateway.pc.common", "cyclone_device_gateway.pc.tunnel",
+                   "cyclone_device_gateway.pc.attach", "cyclone_device_gateway.pc.share"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

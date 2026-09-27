@@ -28,7 +28,7 @@ Load more context only when the task needs it.
 
 - Android runtime + UX: `apps/mobile/**`
 - Device gateway: `apps/device-gateway/**`
-- Windows companion: `apps/pc-companion/**`, `packaging/pc-companion/**`
+- Cyclone for Windows (web-only): `packaging/pc/**`, `scripts/pc/**`, gateway PC features in `apps/device-gateway/cyclone_device_gateway/pc/**` and `terminal/**`; the retired desktop window in `apps/pc-companion/**` (reference only), PyInstaller specs in `packaging/pc-companion/**`
 - Cyclone Glass (local browser dashboard, no intelligence): `apps/glass/**`, gateway hosting in `apps/device-gateway/cyclone_device_gateway/glass/**`
 - PC agent adapters: `tools/codex-phone-mcp/**`, `tools/cyclone-agent-mcp/**`
 - CI/release: `.github/workflows/**`, `scripts/ci/**`, `release/version.toml`
@@ -39,20 +39,25 @@ Keep parallel agents on non-overlapping paths whenever possible.
 
 The authoritative product/component metadata is `release/version.toml`. Android `versionName` and `versionCode` live in `apps/mobile/app/build.gradle.kts` and must agree with release metadata. Increment `versionCode` for every distributed Android build.
 
-### Fast release lane (since 5.0.0-alpha.43)
+### Fast release lane (since 5.0.0-alpha.43; web-only PC since 5.0.0-alpha.47)
 
-Releases ship **Android and Glass only**. The Windows companion, device gateway and MCP stay frozen at the installed
-`1.6.0-alpha.43` / `5.0.0-alpha.43.dev1` build: leave `pc_companion`, `device_gateway`, `mcp` and `python_version`
-in `release/version.toml` unchanged, and do not touch `apps/pc-companion/**` versions.
+Releases ship **Android, Glass and Cyclone for Windows** from one push. Cyclone for Windows is web-only (plan 31): the
+runtime (`CyclonePCRuntime.exe`), the agent MCP, Glass inside the runtime and the `cyclone` command, as one
+`Cyclone-PC-<product_version>.zip`. The Cyclone One desktop window (`apps/pc-companion`, Tauri) is retired: its source
+stays for reference, it is not built, and `pc_companion` in `release/version.toml` stays `1.6.0-alpha.43`.
 
-To release: bump `product_version`, `components.mobile`, `android_version_code` (+ `build.gradle.kts`), and
-`components.glass` only when `apps/glass` changed; add `docs/RELEASE_<mobile>.md`; push to the dev branch.
-`.github/workflows/v5-publish.yml` waits for Mobile CI on that commit, signs the APK with the rotated key, builds the
-Glass zip and publishes the release. No RC branch and no per-release publisher. Do not push other commits to the dev
+To release: bump `product_version`, `components.mobile`, `android_version_code` (+ `build.gradle.kts`),
+`python_version`, `components.device_gateway` and `components.mcp` (+ the three `pyproject.toml` files) when PC code
+changed, and `components.glass` only when `apps/glass` changed; add `docs/RELEASE_<mobile>.md`; push to the dev branch.
+`.github/workflows/v5-publish.yml` builds and smoke-tests the Windows package on a Windows runner (install into a
+scratch profile, `cyclone version`, the runtime serving Glass and the authenticated `/v1/pc/*` routes), waits for
+Mobile CI on that commit, signs the APK with the rotated key, builds the Glass zip and publishes, with every file's
+SHA-256 in `release-manifest.json`. No RC branch and no per-release publisher. Do not push other commits to the dev
 branch until the publish finishes (Mobile CI cancels in-progress runs per branch).
 
-The PC gateway serves Glass from `CYCLONE_GLASS_DIST` first, so a new Glass zip is installed by unzipping it and
-pointing that variable at the folder — the companion itself is not rebuilt.
+Owners install with `irm https://github.com/premiumcentraal-boop/Cyclone/releases/download/<tag>/install.ps1 | iex`
+(per user, no admin, into `%LOCALAPPDATA%\Cyclone One`) and update with `cyclone update`; both refuse a package whose
+SHA-256 is not in the release manifest. `CYCLONE_GLASS_DIST` remains a developer override for serving a local Glass.
 
 ## Validation
 
@@ -69,6 +74,7 @@ For PC gateway/MCP changes:
 python -m pip install -e 'apps/device-gateway[test]' -e tools/codex-phone-mcp
 python -m pytest apps/device-gateway/tests -q
 python -m unittest discover -s tools/codex-phone-mcp/tests -v
+python -m pytest scripts/ci/tests/test_pc_web_only.py -q
 ```
 
 For Cyclone Glass changes:

@@ -205,7 +205,9 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onInterrupt() { com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll() }
+    // Android sends onInterrupt when an app asks accessibility feedback (speech) to stop. It is not a loss of the
+    // service, so background screens stay; only onDestroy (the service really going away) ends them.
+    override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         com.cyclone.mobile.runtime.background.WorkspaceRuntime.invalidateAll()
@@ -298,10 +300,14 @@ class CycloneAccessibilityService : AccessibilityService() {
         val display = getSystemService(android.hardware.display.DisplayManager::class.java).getDisplay(displayId)
             ?: error("DISPLAY_GONE")
         val listed = windowsOnAllDisplays.get(displayId).orEmpty()
-        val root = listed.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        // Plan 28: the display is Cyclone's alone, so whatever is on top there is part of the task: the app itself, or a
+        // permission dialog, share sheet or sign-in page it opened. The top application window leads the snapshot.
+        val roots = listed.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
             .sortedByDescending { it.layer }.mapNotNull { it.root }
-            .firstOrNull { it.packageName?.toString() == targetPackage }
+            .filter { it.packageName?.toString() != packageName }
+        val root = roots.firstOrNull()
             ?: error("BACKGROUND_MODE_UNAVAILABLE: no target Accessibility window on this display")
+        val shownPackage = root.packageName?.toString() ?: targetPackage
         val nodes = mutableListOf<UiNodeSnapshot>()
         val ownedWindows = listed.filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
         ownedWindows.forEach { window ->
@@ -311,8 +317,8 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
         val metrics = createDisplayContext(display).resources.displayMetrics
         val folded = AccessibilityRoles.foldTalkBackHosts(nodes)
-        return UiSnapshot(targetPackage, root.className?.toString(), metrics.widthPixels, metrics.heightPixels,
-            System.currentTimeMillis(), screenFingerprint(targetPackage, folded), "agent",
+        return UiSnapshot(shownPackage, root.className?.toString(), metrics.widthPixels, metrics.heightPixels,
+            System.currentTimeMillis(), screenFingerprint(shownPackage, folded), "agent",
             ownedWindows.map { window ->
                 val rect = Rect().also { window.getBoundsInScreen(it) }
                 UiWindowSnapshot(window.id, window.title?.toString().orEmpty(), window.type, window.layer,

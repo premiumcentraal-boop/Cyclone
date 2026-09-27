@@ -35,16 +35,22 @@ SETUP_ROW_PERMISSIONS = {
     "android.permission.REQUEST_INSTALL_PACKAGES",  # User-requested, pinned helper installer in Background setup
 
     "android.permission.POST_NOTIFICATIONS",  # Result notifications
-    "android.permission.READ_CALENDAR",  # Calendar context
+    "android.permission.READ_CALENDAR",  # Calendar (read)
+    # Plan 29 (direct first): the Calendar row also adds the events the owner asks for, and the Contacts row looks up a
+    # number or address for a mission. Both are asked for by Android's own dialog, and both rows show and revoke them.
+    "android.permission.WRITE_CALENDAR",
+    "android.permission.READ_CONTACTS",
     "android.permission.RECORD_AUDIO",  # Voice requests
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",  # Unrestricted battery
     "android.permission.SYSTEM_ALERT_WINDOW",  # Display over apps
     "android.permission.SCHEDULE_EXACT_ALARM",  # Precise timing
 }
 
+# READ_CONTACTS left this list in alpha.45 by the owner's decision (plan 29): it now has a setup row and is asked for
+# only when a mission needs it. Writing contacts stays out.
 FORBIDDEN_PERMISSIONS = {
     "android.permission.MANAGE_EXTERNAL_STORAGE",
-    "android.permission.READ_CONTACTS",
+    "android.permission.WRITE_CONTACTS",
     "android.permission.RECEIVE_SMS",
 }
 

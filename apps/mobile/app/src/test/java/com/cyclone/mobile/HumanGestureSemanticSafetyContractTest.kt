@@ -73,7 +73,9 @@ class HumanGestureSemanticSafetyContractTest {
         assertOrdered(workspace, "GatewayObservationStore.current(scope.sessionId)", "runtime.input(")
         assertOrdered(workspace, "STALE_SESSION", "runtime.input(")
         assertOrdered(workspace, "CycloneAiAccessPolicy.evaluate", "runtime.input(")
-        assertOrdered(workspace, "GateClassifier.classify", "runtime.input(")
+        // Plan 28: every background approval check is one function, called before any input.
+        assertOrdered(workspace, "workspaceGate(scope", "runtime.input(")
+        assertTrue("GateClassifier.classify(tool, labels)" in slice(executor, "private fun workspaceGate(", "private fun workspaceTouchFailure"))
         assertOrdered(workspace, "authorizeTouch", "HumanGestureDispatch.tap")
         assertOrdered(workspace, "HumanGestureDispatch.tap", "runtime.input(")
         assertTrue("setDisplayId" in dispatch)

@@ -1,8 +1,9 @@
 """`cyclone`: update Cyclone when a newer release exists, then open Glass in its own window until the terminal closes.
 
-Flow: quick release check (cached, never blocks when offline) -> optional verified update (the cyclone.cmd shim runs
-the installer after this process exits, exit code 10) -> Glass launch link from Cyclone One's running gateway, or a
-gateway started here for this terminal only -> app window tied to this process.
+Flow (plan 31, web-only): quick release check (cached, never blocks when offline) -> optional verified update (the
+cyclone.cmd shim runs install.ps1 with the downloaded zip after this process exits, exit code 10) -> Glass launch link
+from a gateway another `cyclone` window already runs, or one started here for this terminal -> app window tied to this
+process, and the run/stop card.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import release as rel
-from .install import SETUP_NAME, UPDATE_EXIT_CODE
+from .install import PACKAGE_NAME, UPDATE_EXIT_CODE
 
 
 
@@ -46,11 +47,11 @@ def parse(argv: list[str]) -> argparse.Namespace:
 def check_for_update(io: TerminalIO, *, force: bool, installed: str, runtime_dir: Path, updates_dir: Path,
                      latest: Callable[..., rel.Release | None] | None = None,
                      download: Callable[..., Path] | None = None) -> int | None:
-    """Returns UPDATE_EXIT_CODE when a verified installer is ready for the shim, else None to continue to Glass."""
-    from .updater import UpdateError, download_installer, latest_release
+    """Returns UPDATE_EXIT_CODE when a verified package is ready for the shim, else None to continue to Glass."""
+    from .updater import UpdateError, download_package, latest_release
 
     latest = latest or latest_release
-    download = download or download_installer
+    download = download or download_package
     found = latest(runtime_dir / "update-check.json", force=force)
     if found is None or not rel.is_newer(found.version, installed):
         if force:
@@ -58,7 +59,7 @@ def check_for_update(io: TerminalIO, *, force: bool, installed: str, runtime_dir
         return None
     io.out(f"Cyclone {found.version} is available (you have {installed}).")
     if not force:
-        answer = io.ask("Update now? Cyclone One closes while it installs. [Y/n] ").strip().lower()
+        answer = io.ask("Update now? Cyclone restarts by itself after it installs. [Y/n] ").strip().lower()
         if answer not in ("", "y", "yes", "j", "ja"):
             io.out("Skipped. Type `cyclone update` any time.")
             return None
@@ -66,7 +67,7 @@ def check_for_update(io: TerminalIO, *, force: bool, installed: str, runtime_dir
         io.out(f"Download it from {found.page_url}")
         return None
     try:
-        download(found, updates_dir / SETUP_NAME, progress=io.out)
+        download(found, updates_dir / PACKAGE_NAME, progress=io.out)
     except UpdateError as exc:
         io.out(str(exc))
         return None
@@ -86,7 +87,7 @@ class Launch:
 
 
 def launch_target(io: TerminalIO) -> Launch:
-    """Glass launch link: Cyclone One's gateway when it runs, else a gateway owned by this terminal."""
+    """Glass launch link: the gateway another `cyclone` window runs, else a gateway owned by this terminal."""
     from ..glass.launcher import request_launch_code
     from ..tooling_seam import load_connection
 
@@ -94,7 +95,7 @@ def launch_target(io: TerminalIO) -> Launch:
     if connection and connection.get("token") and connection.get("url"):
         target = request_launch_code(connection["url"], connection["token"])
         if target is not None:
-            return Launch(target.url, lambda: None, connection["url"], connection["token"], "Cyclone One (already running)")
+            return Launch(target.url, lambda: None, connection["url"], connection["token"], "shared with another cyclone window")
     return _gateway_for_this_terminal(io)
 
 
@@ -134,6 +135,14 @@ def _gateway_for_this_terminal(io: TerminalIO):
 
     code = app.state.glass_codes.issue()
     base = f"http://{settings.host}:{settings.port}"
+    # The retired window used to save where the gateway is, so Codex/Cursor's Cyclone MCP can find it. Now this does.
+    try:
+        from ..tooling_seam import persist_runtime_bearer, resolve_one_mcp_executable
+
+        persist_runtime_bearer(settings.token, base, port=settings.port, write_cursor=False,
+                               mcp_executable=resolve_one_mcp_executable())
+    except Exception:
+        pass
     return Launch(f"{base}/glass/#code={code}", stop, base, settings.token, "started for this terminal")
 
 
@@ -164,7 +173,7 @@ def run_terminal(argv: list[str], io: TerminalIO | None = None) -> int:
     try:
         launch = launch_target(io)
     except Exception as exc:
-        io.out(f"Could not start Glass: {exc}. Open Cyclone One once, then try again.")
+        io.out(f"Could not start Glass: {exc}. Close other Cyclone windows, then type cyclone again.")
         return 2
     view.runtime, view.address = launch.runtime, launch.base_url
     view.phones = fetch_phones(launch.base_url, launch.token)

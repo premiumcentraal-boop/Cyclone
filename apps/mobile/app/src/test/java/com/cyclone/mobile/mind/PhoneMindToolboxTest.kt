@@ -259,6 +259,80 @@ class PhoneMindToolboxTest {
         assertTrue("no screen was touched", env.acts.isEmpty())
     }
 
+    @Test fun directToolsNeverTouchTheScreenAndAskForAccessOnce() {
+        val env = FakeEnv(login)
+        val calls = mutableListOf<String>()
+        var allowed = false
+        val asked = mutableListOf<List<String>>()
+        val phone = object : MindDevicePort by device {
+            override fun direct(tool: String, params: JSONObject): MindDirect {
+                calls += tool
+                if (!allowed) return MindDirect(error = "PERMISSION_REQUIRED: Cyclone needs access to your calendar: " +
+                    "android.permission.READ_CALENDAR,android.permission.WRITE_CALENDAR")
+                return when (tool) {
+                    "calendar_add" -> MindDirect(JSONObject().put("added", true).put("verified", true).put("title", params.getString("title"))
+                        .put("when", "Sat 3 Oct 19:00–20:00").put("calendar", "Sam's calendar").put("reminderMinutes", 30))
+                    "calendar_find" -> MindDirect(JSONObject().put("from", "2026-10-03T00:00").put("to", "2026-10-04T00:00")
+                        .put("events", JSONArray().put(JSONObject().put("title", "Dinner with Sam").put("when", "Sat 3 Oct 19:00–20:00")
+                            .put("location", "Luigi's").put("calendar", "Sam's calendar"))))
+                    "contacts_find" -> MindDirect(JSONObject().put("contacts", JSONArray().put(JSONObject().put("name", "Sam Jones")
+                        .put("phones", JSONArray().put("+31 6 1234 5678")).put("emails", JSONArray()))))
+                    else -> MindDirect(error = "UNAVAILABLE")
+                }
+            }
+            override fun requestAccess(permissions: List<String>): Boolean { asked += permissions; allowed = true; return true }
+        }
+        val box = PhoneMindToolbox(env, FakeOwner(), phone, "add dinner with Sam")
+        val added = box.run("calendar_add", """{"title":"Dinner with Sam","start":"2026-10-03T19:00","reminder_minutes":30}""")
+        assertTrue(added.text, added.ok)
+        assertTrue(added.text.contains("Checked: it is in the calendar"))
+        assertTrue(added.text.contains("a reminder 30 minutes before"))
+        assertNotNull(added.evidence)
+        // Android's own dialog was shown once, then the add ran again.
+        assertEquals(listOf(listOf("android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR")), asked)
+        assertEquals(listOf("calendar_add", "calendar_add"), calls)
+        assertTrue(box.run("calendar_find", """{"from":"2026-10-03","to":"2026-10-03"}""").text.contains("Dinner with Sam · at Luigi's"))
+        assertTrue(box.run("contact_find", """{"query":"Sam"}""").text.contains("Sam Jones · phone +31 6 1234 5678"))
+        assertFalse("secrets never go into the calendar",
+            box.run("calendar_add", """{"title":"Bank","start":"2026-10-03T19:00","notes":"password: hunter2"}""").ok)
+        assertTrue("no screen was touched", env.acts.isEmpty())
+        assertEquals(0, env.observations)
+    }
+
+    @Test fun declinedAccessIsSaidAndNothingElseHappens() {
+        val env = FakeEnv(login)
+        val phone = object : MindDevicePort by device {
+            override fun direct(tool: String, params: JSONObject) =
+                MindDirect(error = "PERMISSION_REQUIRED: Cyclone needs access to your contacts: android.permission.READ_CONTACTS")
+            override fun requestAccess(permissions: List<String>) = false
+        }
+        val result = PhoneMindToolbox(env, FakeOwner(), phone, "call Sam").run("contact_find", """{"query":"Sam"}""")
+        assertFalse(result.ok)
+        assertTrue(result.text.contains("did not allow access to your contacts"))
+        assertTrue(env.acts.isEmpty())
+    }
+
+    @Test fun timersAndAlarmsGoDirectAndFallBackToTheClockApp() {
+        val env = FakeEnv(login)
+        val direct = mutableListOf<String>()
+        val phone = object : MindDevicePort by device {
+            override fun direct(tool: String, params: JSONObject): MindDirect {
+                direct += tool
+                return MindDirect(JSONObject().put("requested", true).put("verified", tool == "alarm"))
+            }
+        }
+        val box = PhoneMindToolbox(env, FakeOwner(), phone, "wake me at 6:30")
+        val alarm = box.run("set_alarm", """{"hour":6,"minute":30}""")
+        assertTrue(alarm.ok)
+        assertTrue(alarm.text.contains("Android now lists it as the next alarm"))
+        val timer = box.run("set_timer", """{"minutes":5}""")
+        assertTrue(timer.ok)
+        assertTrue("an unconfirmed timer is not claimed", timer.text.contains("not confirmed"))
+        assertEquals(listOf("alarm", "timer"), direct)
+        assertTrue("the clock app's screen was not used", env.acts.isEmpty())
+        // A phone whose clock has no such contract uses the clock app, as before (actionsWithoutAPriorReadObserveFirst).
+    }
+
     @Test fun refsStayStableAcrossReobservation() {
         val env = FakeEnv(login)
         val box = PhoneMindToolbox(env, FakeOwner(), device, "goal")

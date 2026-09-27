@@ -128,6 +128,8 @@ object MindMissions {
         refresh(context)
         // Plan 26: is background work still ready? Told once, quietly, not in the middle of a task.
         runCatching { com.cyclone.mobile.runtime.plane.BackgroundWatch.check(context) }
+        // Plan 28: after an install or update, check the background path once, on a hidden screen, before a task needs it.
+        runCatching { com.cyclone.mobile.runtime.plane.BackgroundCheck.maybeAuto(context) }
         val id = resumeCandidate ?: return
         resumeCandidate = null
         if (!enabled(context) || isLive()) return
