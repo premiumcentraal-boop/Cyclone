@@ -84,6 +84,8 @@ try {
     $env:CYCLONE_DEVICE_GATEWAY_TOKEN = $token
     $env:CYCLONE_DEVICE_GATEWAY_PORT = '8799'
     $env:CYCLONE_DEVICE_GATEWAY_RUNTIME = Join-Path $Scratch 'Cyclone One\runtime'
+    # The same start-up the cyclone command uses: first-use pairing instead of a fixed Android bridge token.
+    $env:CYCLONE_DESKTOP_PAIRING_BOOTSTRAP = '1'
     $runtime = Start-Process -FilePath (Join-Path $Scratch 'Cyclone One\CyclonePCRuntime.exe') -ArgumentList 'serve' -PassThru -WindowStyle Hidden
     try {
         $ready = $false
@@ -91,7 +93,10 @@ try {
             Start-Sleep -Seconds 1
             try { $ready = (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8799/glass/').StatusCode -eq 200 } catch { }
         }
-        if (-not $ready) { throw 'The installed runtime did not serve Glass at /glass/.' }
+        if (-not $ready) {
+            $state = if ($runtime.HasExited) { "exited with code $($runtime.ExitCode)" } else { 'still running' }
+            throw "The installed runtime did not serve Glass at /glass/ (runtime $state)."
+        }
         $welcome = Invoke-RestMethod -Headers @{ Authorization = "Bearer $token" } 'http://127.0.0.1:8799/v1/pc/welcome'
         if ($welcome.seen -ne $false) { throw "The /v1/pc routes did not answer as expected: $($welcome | ConvertTo-Json -Compress)" }
         try { Invoke-RestMethod 'http://127.0.0.1:8799/v1/pc/tunnel'; throw 'The /v1/pc routes answered without the bearer.' } catch { if ($_.Exception.Message -like '*answered without*') { throw } }
@@ -102,5 +107,5 @@ try {
     }
 } finally {
     $env:LOCALAPPDATA = $savedLocal
-    Remove-Item Env:CYCLONE_DEVICE_GATEWAY_TOKEN, Env:CYCLONE_DEVICE_GATEWAY_PORT, Env:CYCLONE_DEVICE_GATEWAY_RUNTIME -ErrorAction SilentlyContinue
+    Remove-Item Env:CYCLONE_DEVICE_GATEWAY_TOKEN, Env:CYCLONE_DEVICE_GATEWAY_PORT, Env:CYCLONE_DEVICE_GATEWAY_RUNTIME, Env:CYCLONE_DESKTOP_PAIRING_BOOTSTRAP -ErrorAction SilentlyContinue
 }

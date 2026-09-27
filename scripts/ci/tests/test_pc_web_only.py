@@ -29,13 +29,16 @@ class WebOnlyPcGuards(unittest.TestCase):
 
     def test_the_package_build_proves_install_and_serving_on_windows(self):
         text = BUILD.read_text(encoding="utf-8")
-        for needed in ("install.ps1') -Zip", "version 2>&1", "/glass/", "/v1/pc/welcome", "answered without the bearer"):
+        for needed in ("CYCLONE_DESKTOP_PAIRING_BOOTSTRAP = '1'", "install.ps1') -Zip", "version 2>&1", "/glass/", "/v1/pc/welcome", "answered without the bearer"):
             self.assertIn(needed, text)
         self.assertIn("'gateway.env', 'fleet.dpapi'", text)
         self.assertNotIn("CycloneLivePhone.spec", text)
 
     def test_the_installer_verifies_and_never_exits_the_owners_shell(self):
         text = INSTALL.read_text(encoding="utf-8")
+        # Windows PowerShell 5.1 reads a BOM-less script as ANSI: any non-ASCII character corrupts it.
+        self.assertTrue(text.isascii())
+        self.assertTrue(BUILD.read_text(encoding="utf-8").isascii())
         self.assertIn("Get-FileHash -Algorithm SHA256", text)
         self.assertIn("release-manifest.json", text)
         exits = [line.strip() for line in text.splitlines() if re.search(r"(^\s*|[{;]\s*)exit\b", line) and not line.strip().startswith("#")]

@@ -40,7 +40,7 @@ function Get-VersionKey([string]$Tag) {
 function Get-Package {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $headers = @{ 'User-Agent' = 'cyclone-install'; 'Accept' = 'application/vnd.github+json' }
-    Say "Looking for the newest Cyclone…"
+    Say "Looking for the newest Cyclone..."
     $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=30" -Headers $headers
     $best = $null; $bestKey = $null
     foreach ($release in $releases) {
@@ -60,7 +60,7 @@ function Get-Package {
     if (-not $expected -or $expected -notmatch '^[0-9a-fA-F]{64}$') { Fail "$($best.Package.name) is not listed in the release manifest." }
     New-Item -ItemType Directory -Force -Path $Temp | Out-Null
     $path = Join-Path $Temp $best.Package.name
-    Say "Downloading $($best.Package.name)…"
+    Say "Downloading $($best.Package.name)..."
     Invoke-WebRequest -Uri $best.Package.browser_download_url -OutFile $path -UseBasicParsing -Headers @{ 'User-Agent' = 'cyclone-install' }
     Test-Checksum $path $expected
     return $path
@@ -72,7 +72,7 @@ function Test-Checksum([string]$Path, [string]$Expected) {
         Remove-Item -Force $Path -ErrorAction SilentlyContinue
         Fail "the download does not match the release checksum; it was deleted."
     }
-    Say "Verified SHA-256 $($actual.Substring(0, 12))…"
+    Say "Verified SHA-256 $($actual.Substring(0, 12))..."
 }
 
 function Stop-Cyclone {
@@ -105,7 +105,7 @@ function Copy-Missing([string]$From, [string]$To) {
 function Remove-DesktopWindow {
     $uninstaller = Join-Path $Root 'uninstall.exe'
     if (-not (Test-Path $uninstaller)) { return }
-    Say "Removing the old Cyclone One window (your data stays)…"
+    Say "Removing the old Cyclone One window (your data stays)..."
     # Keep the owner's secrets safe across the uninstaller, whatever it removes.
     $backup = Join-Path $Temp 'keep'
     foreach ($relative in @('mcp-tunnel\config', 'chatgpt-attach', 'runtime')) {
@@ -141,7 +141,7 @@ function Install-Cyclone {
         if ($kept) { Say "Kept your pairing from Cyclone One." }
         Remove-DesktopWindow
 
-        Say "Installing into $Root…"
+        Say "Installing into $Root..."
         $unpacked = Join-Path $Temp 'package'
         New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
         Expand-Archive -LiteralPath $package -DestinationPath $unpacked -Force
@@ -176,7 +176,7 @@ function Install-Cyclone {
 
 $ok = Install-Cyclone
 if ($ok -and ($Relaunch -or -not $NoStart)) {
-    Say "Starting Cyclone…"
+    Say "Starting Cyclone..."
     & (Join-Path $Root 'CyclonePCRuntime.exe') terminal --no-update
 }
 # Run as a file (cyclone's update), report the result; under `irm | iex`, just return to the owner's prompt.
