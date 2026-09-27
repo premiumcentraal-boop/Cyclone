@@ -60,6 +60,10 @@ object DriverMode {
         endSilenceMs = p.getInt("end_silence_ms", 700).takeIf { it in DriverSettings.END_SILENCE } ?: 700,
         bestVoice = p.getBoolean("best_voice", false),
         jevWatch = p.getBoolean("jev_watch", true),
+        announce = p.getBoolean("announce", false),
+        announceApps = p.getStringSet("announce_apps", null)?.toSet().orEmpty(),
+        announceContacts = p.getStringSet("announce_contacts", null)?.toSet().orEmpty(),
+        bluetoothMic = p.getBoolean("bluetooth_mic", true),
     )
 
     private fun write(p: SharedPreferences, s: DriverSettings) {
@@ -75,6 +79,10 @@ object DriverMode {
             .putInt("end_silence_ms", s.endSilenceMs)
             .putBoolean("best_voice", s.bestVoice)
             .putBoolean("jev_watch", s.jevWatch)
+            .putBoolean("announce", s.announce)
+            .putStringSet("announce_apps", s.announceApps.toSet())
+            .putStringSet("announce_contacts", s.announceContacts.toSet())
+            .putBoolean("bluetooth_mic", s.bluetoothMic)
             .apply()
     }
 }

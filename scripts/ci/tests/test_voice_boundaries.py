@@ -62,6 +62,8 @@ class VoiceBoundaries(unittest.TestCase):
         approvals = [line.strip() for line in turn.splitlines() if "VoiceAnswer.Approve" in line and "data object" not in line]
         self.assertEqual(len(approvals), 1, approvals)
         self.assertTrue(approvals[0].startswith("VoiceMoment.Kind.SEND ->"), approvals[0])
+        # A yes counts only after the readback was heard to the end (a tap can cut it short).
+        self.assertIn("if (readbackHeard == open.id) sendAnswer(VoiceAnswer.Approve(open.id)", approvals[0])
         # Everything else that is consequential waits for the owner on screen.
         moments = code((VOICE / "VoiceMoments.kt").read_text(encoding="utf-8"))
         self.assertNotRegex(moments, r"Kind\.(APPROVAL|SECRET|HANDOVER)\s*->\s*(?!VoiceCopy\.NEEDS_SCREEN)")
@@ -120,6 +122,24 @@ class VoiceBoundaries(unittest.TestCase):
     def test_no_voice_cloning(self):
         for name, text in voice_sources():
             self.assertNotRegex(code(text).lower(), r"\b(voice_?)?clon(e|es|ed|ing)\b", name)
+
+    def test_announcements_never_open_the_microphone_or_keep_messages(self):
+        turn = code((VOICE / "VoiceTurn.kt").read_text(encoding="utf-8"))
+        announce = turn[turn.index("private fun announceMessage("):]
+        announce = announce[: announce.index("\n    }")]
+        # Said and closed: only a tap opens the microphone to answer.
+        self.assertIn("AfterSpeech.CLOSE", announce)
+        self.assertNotIn("VoiceEffect.Listen", announce)
+        self.assertNotIn("AfterSpeech.LISTEN", announce)
+        # The understanding model hears who wrote, never what they wrote.
+        source = code((VOICE / "VoiceAnnounce.kt").read_text(encoding="utf-8"))
+        ask = source[source.index("fun openAsk("):]
+        ask = ask[: ask.index("\n\n")]
+        self.assertNotRegex(ask.split("=", 1)[1], r"\.(text|line)\b")
+        # Codes and anything redacted are never announced.
+        self.assertIn("if (looksLikeCode(text) || VoiceRedaction.spoken(text) != text) return null", source)
+        bridge = code((VOICE / "DriveAnnouncements.kt").read_text(encoding="utf-8"))
+        self.assertNotRegex(bridge, r"addLog|Log\.|SharedPreferences|putString", "messages are never logged or stored")
 
     def test_values_said_by_voice_are_never_remembered(self):
         session = code((VOICE / "VoiceSession.kt").read_text(encoding="utf-8"))

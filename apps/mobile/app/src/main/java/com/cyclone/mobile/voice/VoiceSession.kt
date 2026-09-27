@@ -71,6 +71,15 @@ class VoiceSession(context: Context) {
             val voice = VoiceMomentSource.of(moment)
             if (voice != null) dispatch(VoiceEvent.MomentOpened(voice)) else if (_turn.value.moment != null) dispatch(VoiceEvent.MomentClosed)
         } }
+        // Messages the owner asked to hear (plan 32 D3): said when the turn is free; a tap within a minute answers.
+        scope.launch { DriveAnnouncements.incoming.collect { message ->
+            val offer = VoiceAnnounce.offer(message) ?: return@collect
+            dispatch(VoiceEvent.Announce(offer))
+            if (_turn.value.offer?.id == offer.id) scope.launch {
+                delay(VoiceAnnounce.OFFER_MS)
+                dispatch(VoiceEvent.OfferExpired(offer.id))
+            }
+        } }
         // The live model lists: fetched once per session in the background, so the first request does not wait.
         // Then the stock lines ("On it.", "Okay.", "Done.") are made once for this voice, so they play at once.
         scope.launch(Dispatchers.IO) {
@@ -146,6 +155,8 @@ class VoiceSession(context: Context) {
         heardText = null
         val settings = DriverMode.settings.value
         listenJob = scope.launch {
+            // A car kit's microphone link comes up while the earcon plays (plan 32 D3).
+            val car = if (settings.bluetoothMic && !settings.onDeviceStt) async { capture.routeToCar() } else null
             // The earcon first: the detector learns the room's noise, not our own sound.
             earconJob?.join()
             VoiceService.start(app)
@@ -163,13 +174,15 @@ class VoiceSession(context: Context) {
                     val warm = { scope.launch(Dispatchers.IO) {
                         OpenRouterSecretStore.read(app).takeIf { it.isNotBlank() }?.let { runCatching { OpenRouterVoice(it).warm() } }
                     }; Unit }
-                    when (val result = capture.record(tuning, onSpeech = warm) { micLevel.value = it }) {
+                    when (val result = capture.record(tuning, car = car?.await(), onSpeech = warm) { micLevel.value = it }) {
                         is VoiceCapture.Outcome.Clip -> { clip = result.samples; heard(); dispatch(VoiceEvent.Heard) }
                         VoiceCapture.Outcome.NothingHeard -> dispatch(VoiceEvent.NothingHeard)
                         is VoiceCapture.Outcome.Failed -> dispatch(VoiceEvent.Failed(result.failure))
                     }
                 }
             } finally {
+                car?.cancel()
+                capture.releaseCar()
                 micLevel.value = 0f
                 VoiceService.stop(app)
             }

@@ -198,6 +198,19 @@ yes.
    - reports latency percentiles, transcript accuracy, kind accuracy and false accepts on silence and noise;
    - the Mind outcomes reuse existing Lab missions.
 
+**Built in alpha.53** (after "Drive: faster", alpha.52):
+- Announcements, opt-in per app and per sender. They are said only when Drive is idle; the mic still opens only on a
+  tap (the orb glows for a minute). "yes"/"reply" starts the reply, "tell her …" gives the answer, "no" lets it go.
+  Groups are named only, with no reply offer; codes and anything redacted are never announced; the understanding
+  model hears who wrote, never the message.
+- Car microphone: `CarMic` routes to a Bluetooth car kit or headset while listening (`setCommunicationDevice`), brought
+  up while the listen earcon plays, and falls back to the phone mic after 1.5 s. Speech stays on car media audio.
+- Barge-in by tap (built in D1) now keeps the readback rule: a readback cut short is read again in full before a yes
+  counts (`readbackHeard`, CI-guarded).
+- Cached lines were built in alpha.52.
+- **Not built yet:** barge-in by talking over Cyclone (echo on car audio must be measured first), the Lab voice suite,
+  and JEV promotion (it needs the owner's car-test numbers).
+
 **Exit:**
 - The Lab voice suite meets the plan 24 §7 targets on the Pixel 8.
 - An announced message is answered end to end over car Bluetooth; the car audio result is stated honestly.

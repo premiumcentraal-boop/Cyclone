@@ -42,6 +42,7 @@ import com.cyclone.mobile.voice.DriverSettings
 import com.cyclone.mobile.voice.JevWatch
 import com.cyclone.mobile.voice.OpenRouterVoice
 import com.cyclone.mobile.voice.SpeechOut
+import com.cyclone.mobile.voice.VoiceAnnounce
 import com.cyclone.mobile.voice.VoiceCatalog
 import com.cyclone.mobile.voice.VoiceModel
 import com.cyclone.mobile.voice.VoiceModels
@@ -83,9 +84,63 @@ internal fun DriverModeSettings(context: Context, refresh: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
         DriveNote("Tap the orb to talk. Hold it for a second, then drag it to either edge; it stays there.")
+        if (settings.enabled) InTheCar(context, settings)
         DriveNote("Stop is always one tap. Paying, deleting, permissions, passwords and handing the phone to you always wait until you're stopped.")
         DriveNote("Use it hands-free with the phone mounted, and keep your eyes on the road. Cyclone is not a replacement for Android Auto.")
         DriveNote("The microphone opens only when you tap. Recordings stay in memory and are never saved.")
+    }
+}
+
+/** Driver mode → In the car (plan 32 D3): the Bluetooth microphone and message announcements. */
+@Composable
+private fun InTheCar(context: Context, settings: DriverSettings) {
+    val installed = remember {
+        VoiceAnnounce.CHAT_APPS.filter { (pkg, _) -> runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.isSuccess }
+    }
+    var contacts by remember { mutableStateOf(settings.announceContacts.sorted().joinToString(", ")) }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("In the car", style = MaterialTheme.typography.titleMedium)
+        ToggleRow("Car microphone", "When a car kit or headset is connected over Bluetooth, Cyclone listens through it. " +
+            "Its microphone is closer to you than the phone's.", settings.bluetoothMic) { on ->
+            DriverMode.update(context) { it.copy(bluetoothMic = on) }
+        }
+        ToggleRow("Announce messages", "Cyclone reads new messages from the apps you pick: \"Louella wrote: '…'. Reply?\" " +
+            "Tap the orb within a minute to answer. Codes and long messages are never read out; groups by name only.", settings.announce) { on ->
+            DriverMode.update(context) { it.copy(announce = on) }
+        }
+        if (settings.announce) {
+            if (installed.isEmpty()) DriveNote("No supported chat app is installed.")
+            installed.forEach { (pkg, label) ->
+                PickRow(label, selected = pkg in settings.announceApps) {
+                    DriverMode.update(context) { s -> s.copy(announceApps = if (pkg in s.announceApps) s.announceApps - pkg else s.announceApps + pkg) }
+                }
+            }
+            Text("Only from", style = MaterialTheme.typography.labelLarge)
+            CycloneLiquidSearchField(
+                value = contacts,
+                onValueChange = { text ->
+                    contacts = text
+                    val names = text.split(',').map { it.trim() }.filter { it.isNotBlank() }.take(30).toSet()
+                    DriverMode.update(context) { it.copy(announceContacts = names) }
+                },
+                placeholder = "Everyone (or names, separated by commas)",
+                modifier = Modifier.fillMaxWidth(),
+            )
+            DriveNote("Cyclone needs notification access for this (Set up Cyclone). Messages are never saved; a reply is read back " +
+                "word for word and sent only when you say yes.")
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        CycloneLiquidToggle(checked = checked, onCheckedChange = onChange)
     }
 }
 

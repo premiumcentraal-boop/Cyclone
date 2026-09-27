@@ -20,6 +20,14 @@ data class DriverSettings(
     val bestVoice: Boolean = false,
     /** JEV watches each request next to the understanding model (it never decides); its agreement shows in Settings. */
     val jevWatch: Boolean = true,
+    /** Read incoming messages aloud while Driver mode is on (plan 32 D3). Off until the owner turns it on. */
+    val announce: Boolean = false,
+    /** The chat apps whose messages are announced (package names). */
+    val announceApps: Set<String> = emptySet(),
+    /** Only these senders, by name; empty means everyone in the allowed apps. */
+    val announceContacts: Set<String> = emptySet(),
+    /** Listen through a connected car kit or headset when there is one; the phone's own microphone otherwise. */
+    val bluetoothMic: Boolean = true,
 ) {
     companion object {
         const val DEFAULT_BUTTON_DP = 84

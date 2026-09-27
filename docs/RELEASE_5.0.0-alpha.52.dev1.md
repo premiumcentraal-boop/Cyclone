@@ -3,7 +3,7 @@
 Developer alpha for owner testing, built on Alpha 51 (Command Center C0) and Alpha 50 (Drive: conversations), which it includes.
 - **Mobile:** `5.0.0-alpha.52.dev1` (version code 196).
 - **Cyclone for Windows:** `Cyclone-Setup-5.0.0-alpha.52.dev1.exe`. It has no Drive changes; it carries alpha.51's Command Center.
-- **Glass:** `1.0.0-alpha.27` (unchanged).
+- **Glass:** `1.0.0-alpha.28` (unchanged since alpha.51).
 
 This release makes Drive quicker and more accurate with the newest models (research of 27 September 2026), and adds
 the measurements the first car test needs. Nothing about what Drive may do by voice has changed.

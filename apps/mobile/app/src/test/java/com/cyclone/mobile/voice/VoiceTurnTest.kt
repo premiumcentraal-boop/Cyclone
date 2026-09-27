@@ -383,6 +383,95 @@ class VoiceTurnTest {
         assertFalse(r.said.last(), r.said.last().contains("hunter22"))
     }
 
+    // ---- D3: a readback cut short, and announced messages ------------------------------------------------------------
+
+    @Test fun `a readback cut short by a tap is read again before a yes counts`() {
+        val r = working()
+        r.on(VoiceEvent.MomentOpened(louella))
+        // The owner taps while the readback is still playing, and says yes.
+        r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("yes"))
+        assertFalse(r.effects.any { it is VoiceEffect.Send && it.answer is VoiceAnswer.Approve })
+        assertEquals(VoiceMoments.readback(louella), r.said.last())
+        assertEquals(VoicePhase.READBACK, r.turn.phase)
+        // Heard to the end this time: now the yes approves it.
+        r.on(VoiceEvent.SpeechEnded); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("yes"))
+        assertTrue(r.effects.contains(VoiceEffect.Send(VoiceAnswer.Approve("a1"))))
+    }
+
+    private val offer = VoiceOffer("n1", "Louella wrote: \"I will be home late.\" Reply?", "Louella", "WhatsApp",
+        "Reply to the latest WhatsApp message from \"Louella\".")
+
+    @Test fun `an announcement is said and closes without opening the microphone`() {
+        val r = Run()
+        val fx = r.on(VoiceEvent.Announce(offer))
+        assertEquals(listOf(VoiceEffect.Play(Earcon.NEEDS_YOU), VoiceEffect.Say(offer.line, AfterSpeech.CLOSE)), fx)
+        r.on(VoiceEvent.SpeechEnded)
+        assertEquals(VoicePhase.CLOSED, r.turn.phase)
+        assertFalse(r.effects.contains(VoiceEffect.Listen))
+        assertEquals(offer, r.turn.offer)
+        assertTrue(VoiceFace.of(r.turn).warm)
+    }
+
+    @Test fun `yes after an announcement starts the reply with no model call`() {
+        val r = Run()
+        r.on(VoiceEvent.Announce(offer)); r.on(VoiceEvent.SpeechEnded)
+        r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("Yes."))
+        assertEquals(0, r.effects.count { it is VoiceEffect.Understand })
+        assertTrue(r.effects.contains(VoiceEffect.Submit(offer.replyGoal!!)))
+        assertEquals("Replying to Louella.", r.said.last())
+        assertEquals(null, r.turn.offer)
+    }
+
+    @Test fun `saying what to answer goes into the reply goal`() {
+        val r = Run()
+        r.on(VoiceEvent.Announce(offer)); r.on(VoiceEvent.SpeechEnded)
+        r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("tell her I'm on my way"))
+        val ask = r.effects.filterIsInstance<VoiceEffect.Understand>().single()
+        // The model hears who wrote, never the message itself.
+        assertEquals("reply offer", ask.context.open?.kind)
+        assertFalse(ask.context.open!!.spoken.contains("home late"))
+        r.on(understood(VoiceKind.ANSWER, "I'm on my way"))
+        val submit = r.effects.filterIsInstance<VoiceEffect.Submit>().single()
+        assertEquals(VoiceAnnounce.replyWith(offer, "I'm on my way"), submit.goal)
+    }
+
+    @Test fun `no lets the message go and a new request is its own task`() {
+        val no = Run()
+        no.on(VoiceEvent.Announce(offer)); no.on(VoiceEvent.SpeechEnded)
+        no.on(VoiceEvent.Tap); no.on(VoiceEvent.Heard); no.on(VoiceEvent.Transcript("no"))
+        assertEquals(VoiceCopy.OKAY, no.said.last())
+        assertFalse(no.effects.any { it is VoiceEffect.Submit })
+        assertEquals(null, no.turn.offer)
+
+        val other = Run()
+        other.on(VoiceEvent.Announce(offer)); other.on(VoiceEvent.SpeechEnded)
+        other.on(VoiceEvent.Tap); other.on(VoiceEvent.Heard); other.on(VoiceEvent.Transcript("navigate home"))
+        other.on(understood(VoiceKind.TASK, "Navigate home.", "Navigating home."))
+        assertEquals(listOf(VoiceEffect.Submit("Navigate home.")), other.effects.filterIsInstance<VoiceEffect.Submit>())
+    }
+
+    @Test fun `an announcement is dropped while busy, and expires`() {
+        val busy = working()
+        assertTrue(busy.on(VoiceEvent.Announce(offer)).isEmpty())
+        val listening = Run()
+        listening.on(VoiceEvent.Tap)
+        assertTrue(listening.on(VoiceEvent.Announce(offer)).isEmpty())
+
+        val r = Run()
+        r.on(VoiceEvent.Announce(offer)); r.on(VoiceEvent.SpeechEnded)
+        r.on(VoiceEvent.OfferExpired("n1"))
+        assertEquals(null, r.turn.offer)
+        assertFalse(VoiceFace.of(r.turn).warm)
+    }
+
+    @Test fun `a group or a message with no reply field is said without an offer`() {
+        val r = Run()
+        r.on(VoiceEvent.Announce(offer.copy(line = "New message in Family on WhatsApp.", replyGoal = null)))
+        r.on(VoiceEvent.SpeechEnded)
+        assertEquals(null, r.turn.offer)
+        assertEquals(VoicePhase.CLOSED, r.turn.phase)
+    }
+
     private fun working(): Run {
         val r = Run()
         r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard); r.on(VoiceEvent.Transcript("set a timer for ten minutes"))

@@ -38,6 +38,8 @@ data class VoiceFace(
     companion object {
         fun of(turn: VoiceTurn): VoiceFace {
             val needsYou = turn.moment != null
+            // An announced message waits for a tap: the orb glows until it is answered or a minute passes.
+            val message = turn.offer != null && !needsYou
             val motion = when {
                 turn.speaking -> OrbMotion.SPEAK
                 turn.phase == VoicePhase.LISTENING -> OrbMotion.LISTEN
@@ -51,6 +53,7 @@ data class VoiceFace(
                 turn.phase == VoicePhase.READBACK -> "Check this"
                 needsYou -> "Needs you"
                 turn.speaking -> "Cyclone"
+                message -> "Message"
                 turn.taskLive -> "Working"
                 else -> "Cyclone"
             }
@@ -66,7 +69,7 @@ data class VoiceFace(
                 OrbMotion.SWIRL -> "Thinking"
                 OrbMotion.SPEAK -> "Speaking"
                 OrbMotion.WORK -> if (needsYou) "Needs you" else "Working"
-                OrbMotion.CALM -> if (needsYou) "Needs you" else "Ready"
+                OrbMotion.CALM -> if (needsYou) "Needs you" else if (message) "Message: tap to reply" else "Ready"
             }
             return VoiceFace(
                 motion = motion,
@@ -75,7 +78,7 @@ data class VoiceFace(
                 cyclone = cyclone.takeIf { turn.panelOpen }.orEmpty(),
                 panel = turn.panelOpen,
                 dim = turn.dimmed,
-                warm = needsYou,
+                warm = needsYou || message,
                 stop = turn.panelOpen || turn.taskLive,
                 notNow = asking && turn.moment != null,
                 description = "Cyclone voice. Tap to talk. Hold one second to move.",

@@ -65,6 +65,10 @@ sealed interface VoiceEvent {
     data object StillWorking : VoiceEvent
     data class MomentOpened(val moment: VoiceMoment) : VoiceEvent
     data object MomentClosed : VoiceEvent
+    /** A message arrived and the owner asked to hear it (plan 32 D3). Said only when the turn is free. */
+    data class Announce(val offer: VoiceOffer) : VoiceEvent
+    /** The minute to answer an announcement is over. */
+    data class OfferExpired(val id: String) : VoiceEvent
     /** The big Stop button: ends the voice turn and the task. */
     data object Stop : VoiceEvent
     /** "Not now" while Cyclone asks: declines the open question and closes. */
@@ -108,6 +112,10 @@ data class VoiceTurn(
     val language: String = "auto",
     /** VALUES by voice: the answers so far, one field at a time. */
     val filled: Map<String, String> = emptyMap(),
+    /** An announced message a tap can still answer ("yes", "tell her …", "no"). */
+    val offer: VoiceOffer? = null,
+    /** The SEND moment whose readback was heard to the end: only then does a yes approve it. */
+    val readbackHeard: String? = null,
 ) {
     data class Step(val turn: VoiceTurn, val effects: List<VoiceEffect>)
 
@@ -120,7 +128,7 @@ data class VoiceTurn(
         VoicePhase.READBACK)
 
     /** Cyclone waits for an answer: the open moment, or its own follow-up question. */
-    val answering: Boolean get() = followUp != null || moment?.kind in VOICE_KINDS
+    val answering: Boolean get() = followUp != null || moment?.kind in VOICE_KINDS || offer != null
 
     fun on(event: VoiceEvent): Step = when (event) {
         VoiceEvent.Tap -> tap()
@@ -138,6 +146,8 @@ data class VoiceTurn(
         VoiceEvent.MomentClosed -> step(copy(moment = null, filled = emptyMap(), phase = if (phase in setOf(VoicePhase.ASKING, VoicePhase.READBACK) && !speaking) restPhase() else phase))
         VoiceEvent.Stop -> stop()
         VoiceEvent.NotNow -> notNow()
+        is VoiceEvent.Announce -> announceMessage(event.offer)
+        is VoiceEvent.OfferExpired -> if (offer?.id == event.id) step(copy(offer = null)) else same()
     }
 
     // ---- events -----------------------------------------------------------------------------------------------------
@@ -161,12 +171,20 @@ data class VoiceTurn(
                 null -> Unit
             }
         }
+        // An announcement is answered by yes, "reply" or no without a model.
+        val waiting = offer
+        if (waiting != null && open == null && followUp == null) {
+            val yes = VoiceRules.yesNo(text)
+            if (yes == true || VoiceAnnounce.replyWord(text)) return copy(heard = text.trim()).takeOffer(waiting, null)
+            if (yes == false) return copy(offer = null).sayClosing(VoiceCopy.OKAY, text.trim())
+        }
         return screenTranscript(text)
     }
 
     private fun screenTranscript(text: String): Step = when (val screen = VoiceRules.screen(text, answering)) {
         VoiceRules.Screen.Empty, VoiceRules.Screen.Filler -> rest(listOf(VoiceEffect.Play(Earcon.CLOSE_SOFT)))
-        is VoiceRules.Screen.Cancel -> if (screen.stop && taskLive) {
+        is VoiceRules.Screen.Cancel -> if (offer != null && moment == null) copy(offer = null).sayClosing(VoiceCopy.OKAY, text.trim())
+        else if (screen.stop && taskLive) {
             val s = say(VoiceCopy.STOPPING, AfterSpeech.CLOSE, VoicePhase.DONE)
             Step(s.turn.copy(stopping = true, heard = text.trim()), listOf(VoiceEffect.Send(VoiceAnswer.Stop)) + s.effects)
         } else {
@@ -184,6 +202,8 @@ data class VoiceTurn(
 
     private fun understood(u: Understanding): Step {
         val open = moment?.takeIf { it.kind in VOICE_KINDS }
+        val waiting = offer
+        if (open == null && waiting != null) return copy(offer = null).offerAnswered(waiting, u)
         return when (u.kind) {
             VoiceKind.NONE -> rest(listOf(VoiceEffect.Play(Earcon.CLOSE_SOFT)))
             VoiceKind.CANCEL -> if (open != null) declineMoment(heard) else sayClosing(VoiceCopy.OKAY)
@@ -205,6 +225,31 @@ data class VoiceTurn(
         }
     }
 
+    /** What the owner said after an announcement: the reply's content, a yes or no, or a new request of their own. */
+    private fun offerAnswered(waiting: VoiceOffer, u: Understanding): Step = when (u.kind) {
+        VoiceKind.ANSWER -> takeOffer(waiting, u.goal)
+        VoiceKind.CONFIRM -> takeOffer(waiting, null)
+        VoiceKind.DECLINE, VoiceKind.CANCEL -> sayClosing(VoiceCopy.OKAY)
+        else -> understood(u)
+    }
+
+    /** Starts the reply to an announced message; the Mind asks what to say unless [answer] already says it. */
+    private fun takeOffer(waiting: VoiceOffer, answer: String?): Step {
+        val goal = waiting.replyGoal ?: return copy(offer = null).sayClosing(VoiceCopy.OKAY)
+        if (taskLive) return copy(offer = null).sayClosing(VoiceCopy.BUSY)
+        val full = if (answer.isNullOrBlank()) goal else VoiceAnnounce.replyWith(waiting, answer)
+        val s = say(VoiceCopy.ack("Replying to ${waiting.sender}."), AfterSpeech.WORK, VoicePhase.ACKING)
+        return Step(s.turn.copy(offer = null, taskLive = true, stillSaid = false, stopping = false, unclearCount = 0, followUp = null,
+            recentGoals = (recentGoals + goal).takeLast(3)), listOf(VoiceEffect.Submit(full)) + s.effects)
+    }
+
+    /** Says an announced message when nothing else is going on; otherwise it stays on screen as a notification. */
+    private fun announceMessage(o: VoiceOffer): Step {
+        if (taskLive || moment != null || speaking || followUp != null || phase !in setOf(VoicePhase.IDLE, VoicePhase.CLOSED)) return same()
+        val s = say(o.line, AfterSpeech.CLOSE, VoicePhase.DONE)
+        return Step(s.turn.copy(offer = o.takeIf { it.replyGoal != null }, heard = "", unclearCount = 0), listOf(VoiceEffect.Play(Earcon.NEEDS_YOU)) + s.effects)
+    }
+
     private fun unclear(u: Understanding): Step {
         if (unclearCount >= 1) return sayClosing(VoiceCopy.UNCLEAR_AGAIN)
         val question = VoiceCopy.question(u.missing)
@@ -216,7 +261,8 @@ data class VoiceTurn(
 
     private fun speechEnded(): Step {
         if (!speaking) return same()
-        val quiet = copy(speaking = false)
+        val readback = moment?.takeIf { phase == VoicePhase.READBACK && it.kind == VoiceMoment.Kind.SEND }?.id
+        val quiet = copy(speaking = false, readbackHeard = readback ?: readbackHeard)
         return when (after) {
             AfterSpeech.LISTEN -> Step(quiet.copy(phase = VoicePhase.LISTENING), listOf(VoiceEffect.Play(Earcon.LISTEN), VoiceEffect.Listen))
             AfterSpeech.WORK -> quiet.freeOrPending(VoicePhase.WORKING)
@@ -234,7 +280,7 @@ data class VoiceTurn(
 
     private fun momentOpened(m: VoiceMoment): Step {
         if (moment?.id == m.id) return same()
-        val next = copy(moment = m, filled = emptyMap())
+        val next = copy(moment = m, filled = emptyMap(), offer = null)
         // The owner is talking or Cyclone is speaking: the moment is said as soon as the turn is free.
         if (phase in BUSY_PHASES || speaking) return Step(next, emptyList())
         return next.speakMoment(m)
@@ -246,7 +292,7 @@ data class VoiceTurn(
             if (speaking) add(VoiceEffect.StopSpeaking)
             if (taskLive) add(VoiceEffect.Send(VoiceAnswer.Stop))
         }
-        return Step(copy(phase = VoicePhase.CLOSED, speaking = false, stopping = taskLive, followUp = null, unclearCount = 0,
+        return Step(copy(phase = VoicePhase.CLOSED, speaking = false, stopping = taskLive, followUp = null, unclearCount = 0, offer = null,
             pendingEnd = null, said = if (taskLive) VoiceCopy.STOPPED else said), effects)
     }
 
@@ -297,7 +343,9 @@ data class VoiceTurn(
 
     private fun confirm(open: VoiceMoment): Step = when (open.kind) {
         // Only send is approved by voice, and only after its verbatim readback was heard (plan 32).
-        VoiceMoment.Kind.SEND -> sendAnswer(VoiceAnswer.Approve(open.id), VoiceMoments.SENDING)
+        // A readback cut short by a tap is read again in full before a yes counts.
+        VoiceMoment.Kind.SEND -> if (readbackHeard == open.id) sendAnswer(VoiceAnswer.Approve(open.id), VoiceMoments.SENDING)
+            else say(VoiceMoments.readback(open), AfterSpeech.LISTEN, VoicePhase.READBACK)
         VoiceMoment.Kind.QUESTION -> sendAnswer(VoiceAnswer.Reply(heard.ifBlank { "Yes" }), VoiceCopy.OKAY)
         VoiceMoment.Kind.VALUES -> fillNext(open, heard)
         else -> sayClosing(VoiceCopy.NEEDS_SCREEN)
@@ -314,11 +362,12 @@ data class VoiceTurn(
         return Step(s.turn.copy(moment = null, followUp = null, unclearCount = 0, filled = emptyMap()), listOf(VoiceEffect.Send(answer)) + s.effects)
     }
 
-    private fun openAsk(): VoiceContext.OpenAsk? = moment?.takeIf { it.kind in VOICE_KINDS }?.let {
-        when (it.kind) {
-            VoiceMoment.Kind.VALUES -> it.fields.getOrNull(filled.size)?.let { f -> VoiceContext.OpenAsk("details", VoiceMoments.fieldQuestion(f), f.choices) }
-            VoiceMoment.Kind.SEND -> VoiceContext.OpenAsk("readback", VoiceMoments.prompt(it))
-            else -> VoiceContext.OpenAsk(it.kind.name.lowercase(), VoiceMoments.prompt(it), it.choices)
+    private fun openAsk(): VoiceContext.OpenAsk? {
+        val open = moment?.takeIf { it.kind in VOICE_KINDS } ?: return offer?.let(VoiceAnnounce::openAsk)
+        return when (open.kind) {
+            VoiceMoment.Kind.VALUES -> open.fields.getOrNull(filled.size)?.let { f -> VoiceContext.OpenAsk("details", VoiceMoments.fieldQuestion(f), f.choices) }
+            VoiceMoment.Kind.SEND -> VoiceContext.OpenAsk("readback", VoiceMoments.prompt(open))
+            else -> VoiceContext.OpenAsk(open.kind.name.lowercase(), VoiceMoments.prompt(open), open.choices)
         }
     }
 

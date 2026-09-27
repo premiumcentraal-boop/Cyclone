@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -22,6 +23,7 @@ import kotlin.coroutines.coroutineContext
  * written anywhere.
  */
 class VoiceCapture(private val context: Context) {
+    private val carMic = CarMic(context)
 
     sealed interface Outcome {
         /** Speech, trimmed to the part worth sending. */
@@ -35,19 +37,43 @@ class VoiceCapture(private val context: Context) {
     /** The owner tapped while talking: end now and keep what was said. */
     fun finish() { finishEarly = true }
 
-    /** Records until the detector decides; [onLevel] gets the voice level (0..1) about 50 times a second. */
+    /**
+     * Brings up a connected car kit or headset as the microphone; started together with the listen sound so the link
+     * is ready when the owner speaks. Null: the phone's microphone.
+     */
+    suspend fun routeToCar(): AudioDeviceInfo? = withContext(Dispatchers.IO) { carMic.acquire() }
+
+    /** Hands the audio route back (music and navigation return). Safe to call more than once. */
+    fun releaseCar() = carMic.release()
+
+    /**
+     * Records until the detector decides; [onLevel] gets the voice level (0..1) about 50 times a second. [car] is the
+     * route from [routeToCar], released when the recording ends.
+     */
     @SuppressLint("MissingPermission")
-    suspend fun record(tuning: VoiceActivity.Tuning, onSpeech: () -> Unit = {}, onLevel: (Float) -> Unit): Outcome = withContext<Outcome>(Dispatchers.IO) {
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return@withContext Outcome.Failed(VoiceFailure.NO_MIC)
+    suspend fun record(tuning: VoiceActivity.Tuning, car: AudioDeviceInfo? = null, onSpeech: () -> Unit = {}, onLevel: (Float) -> Unit): Outcome =
+        withContext<Outcome>(Dispatchers.IO) {
+            try {
+                if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return@withContext Outcome.Failed(VoiceFailure.NO_MIC)
+                recordFrom(car, tuning, onSpeech, onLevel)
+            } finally {
+                carMic.release()
+            }
+        }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun recordFrom(car: AudioDeviceInfo?, tuning: VoiceActivity.Tuning, onSpeech: () -> Unit, onLevel: (Float) -> Unit): Outcome {
         finishEarly = false
         val rate = VoiceActivity.SAMPLE_RATE
         val minBuffer = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        if (minBuffer <= 0) return@withContext Outcome.Failed(VoiceFailure.MIC_BUSY)
+        if (minBuffer <= 0) return Outcome.Failed(VoiceFailure.MIC_BUSY)
+        // A car kit is heard through the communication path, which also brings the platform's echo cancelling.
+        val source = if (car != null) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION
         val record = runCatching {
-            AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                maxOf(minBuffer, rate / 5 * 2))
-        }.getOrNull() ?: return@withContext Outcome.Failed(VoiceFailure.MIC_BUSY)
-        if (record.state != AudioRecord.STATE_INITIALIZED) { record.release(); return@withContext Outcome.Failed(VoiceFailure.MIC_BUSY) }
+            AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, rate / 5 * 2))
+                .also { r -> car?.let { r.setPreferredDevice(it) } }
+        }.getOrNull() ?: return Outcome.Failed(VoiceFailure.MIC_BUSY)
+        if (record.state != AudioRecord.STATE_INITIALIZED) { record.release(); return Outcome.Failed(VoiceFailure.MIC_BUSY) }
         val echo = if (AcousticEchoCanceler.isAvailable()) runCatching { AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
         val noise = if (NoiseSuppressor.isAvailable()) runCatching { NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
         val detector = VoiceActivity(tuning)
@@ -55,13 +81,13 @@ class VoiceCapture(private val context: Context) {
         var count = 0
         val chunk = ShortArray(rate / 50)
         var spoke = false
-        try {
+        return try {
             record.startRecording()
-            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) return@withContext Outcome.Failed(VoiceFailure.MIC_BUSY)
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) return Outcome.Failed(VoiceFailure.MIC_BUSY)
             while (true) {
                 coroutineContext.ensureActive()
                 val n = record.read(chunk, 0, chunk.size)
-                if (n < 0) return@withContext Outcome.Failed(VoiceFailure.MIC_BUSY)
+                if (n < 0) return Outcome.Failed(VoiceFailure.MIC_BUSY)
                 if (n == 0) continue
                 val room = minOf(n, all.size - count)
                 System.arraycopy(chunk, 0, all, count, room)
@@ -71,11 +97,11 @@ class VoiceCapture(private val context: Context) {
                         onLevel(result.level)
                         // Speech longer than a blip: never on a silent or blip-only open, which stays free.
                         if (!spoke && result.speechMs >= tuning.minSpeechMs) { spoke = true; onSpeech() }
-                        if (finishEarly) return@withContext early(all, count, detector)
+                        if (finishEarly) return early(all, count, detector)
                     }
                     is VoiceActivity.Result.Heard ->
-                        return@withContext Outcome.Clip(Wav.trim(all, count, result.startMs, result.endMs), result.voicedMs)
-                    VoiceActivity.Result.NoSpeech, is VoiceActivity.Result.Blip -> return@withContext Outcome.NothingHeard
+                        return Outcome.Clip(Wav.trim(all, count, result.startMs, result.endMs), result.voicedMs)
+                    VoiceActivity.Result.NoSpeech, is VoiceActivity.Result.Blip -> return Outcome.NothingHeard
                 }
             }
             @Suppress("UNREACHABLE_CODE") Outcome.NothingHeard

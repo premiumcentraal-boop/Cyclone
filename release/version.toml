@@ -1,13 +1,13 @@
 # Cyclone V5 alpha.52 dev1: Drive faster - newest speech-to-text first, instant timers and alarms on the phone, stock lines made ahead, JEV watching.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.52.dev1"
+product_version = "5.0.0-alpha.53.dev1"
 channel = "development"
-android_version_code = 196
+android_version_code = 197
 python_version = "5.0.0-alpha.51.dev1"
 
 [components]
-mobile = "5.0.0-alpha.52.dev1"
+mobile = "5.0.0-alpha.53.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha52-dev1-drive-faster"
+candidate_generation = "cyclone-v5-alpha53-dev1-drive-in-the-car"
