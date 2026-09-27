@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cyclone-device-gateway"
-version = "5.0.0-alpha.57.dev1"
+version = "5.0.0-alpha.58.dev1"
 description = "Deterministic PC-side Android device gateway for Cyclone"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,6 +13,8 @@ dependencies = [
   "websockets==15.0.1",
   "pydantic>=2.8,<3",
   "cryptography>=44,<47",
+  # Plan 34 M3: API descriptions in YAML, read with the safe loader and no aliases (command/openapi.py).
+  "pyyaml>=6.0.2,<7",
 ]
 
 [project.optional-dependencies]

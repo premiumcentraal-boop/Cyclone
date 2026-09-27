@@ -380,7 +380,9 @@ def register(server: OAuthServer, redirect_uri: str, send: Callable[..., Respons
 
 def authorize_url(server: OAuthServer, client_id: str, redirect_uri: str, state: str, challenge: str) -> str:
     query = {"response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri, "state": state,
-             "code_challenge": challenge, "code_challenge_method": "S256", "resource": server.resource}
+             "code_challenge": challenge, "code_challenge_method": "S256"}
+    if server.resource:  # MCP servers name their resource (RFC 8707); a plain API's sign-in may not accept one
+        query["resource"] = server.resource
     if server.scopes:
         query["scope"] = " ".join(server.scopes)
     joiner = "&" if "?" in server.authorization_endpoint else "?"
@@ -388,7 +390,9 @@ def authorize_url(server: OAuthServer, client_id: str, redirect_uri: str, state:
 
 
 def token_request(server: OAuthServer, form: dict[str, str], client: dict[str, Any], send: Callable[..., Response] = http) -> dict[str, Any]:
-    body = {**form, "client_id": client["client_id"], "resource": server.resource}
+    body = {**form, "client_id": client["client_id"]}
+    if server.resource:
+        body["resource"] = server.resource
     if client.get("client_secret"):
         body["client_secret"] = client["client_secret"]
     response = send("POST", server.token_endpoint, headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},

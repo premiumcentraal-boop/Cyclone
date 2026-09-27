@@ -133,7 +133,7 @@ test("a task can make a video first, then post it from the phone, with typed arg
   const page = createCommandPage(ctx(gateway.fetch), "tasks");
   try {
     await flush();
-    const make = page.element.querySelectorAll("input").find((i) => i.getAttribute("aria-label") === "Make a file first");
+    const make = page.element.querySelectorAll("input").find((i) => i.getAttribute("aria-label") === "Use connections first");
     make.checked = true;
     make.dispatchEvent({ type: "change" });
     await flush();

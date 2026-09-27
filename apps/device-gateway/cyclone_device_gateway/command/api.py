@@ -246,6 +246,15 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     def connection_logs(connection_id: str):
         return call(lambda: {"lines": cc().connections.logs(connection_id)})
 
+    # Plan 34 M4: connector cards. Export holds no keys or tokens; import is checked like a new connection.
+    @router.get("/v1/cc/connections/{connection_id}/card", dependencies=[Depends(auth)])
+    def connection_card(connection_id: str):
+        return call(lambda: cc().connections.card(connection_id))
+
+    @router.post("/v1/cc/connections/import", dependencies=[Depends(auth)])
+    def connection_import(body: dict[str, Any]):
+        return call(lambda: cc().connections.import_card(body_of(body)))
+
     @router.get("/v1/cc/calls/{call_id}", dependencies=[Depends(auth)])
     def call_get(call_id: str):
         return call(lambda: cc().connections.get_call(call_id))

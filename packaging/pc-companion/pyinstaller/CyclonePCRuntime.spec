@@ -39,7 +39,9 @@ a = Analysis(
                    "cyclone_device_gateway.command.api", "cyclone_device_gateway.command.center", "cyclone_device_gateway.command.schedule",
                    "cyclone_device_gateway.command.vault", "cyclone_device_gateway.command.delivery",
                    "cyclone_device_gateway.command.connections", "cyclone_device_gateway.command.mcp",
-                   "cyclone_device_gateway.command.local"],
+                   "cyclone_device_gateway.command.local",
+                   # Plan 34 M3/M4: API connectors (imported inside ConnectionStore) and the YAML reader they use.
+                   "cyclone_device_gateway.command.openapi", "yaml"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

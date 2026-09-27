@@ -57,20 +57,35 @@ export interface CcTask {
   /** C2: the vault login this task signs in with (an id; the value stays sealed). */
   vaultItemId: string | null;
   leases: Array<{ id: string; slot: string; state: string; expiresAt: number }>;
-  /** C3: made first with a connection's tool, then posted from a phone or kept. */
+  /** C3: made first with a connection's tool, then posted from a phone or kept. Plan 34 M3: up to five steps. */
   make: MakeStep | null;
+  /** The next step to run (equal to the number of steps once they are all done). */
+  stepAt: number;
   artifact: CcArtifact | null;
   call: CcCall | null;
+  /** The latest call of each step, in order. */
+  calls: CcCall[];
   media: { deviceId: string; state: string; name: string } | null;
 }
 
-export interface MakeStep {
+export type Then = "post" | "keep" | "phone";
+
+/** One connection call in a chain. Its arguments may use {step1.field} from an earlier step's result. */
+export interface StepSpec {
   connectionId: string;
   tool: string;
   arguments: Record<string, string | number | boolean>;
   pollTool: string | null;
-  then: "post" | "keep";
 }
+
+/** The first step's fields (as C3 had them), then, and every step. */
+export interface MakeStep extends StepSpec {
+  then: Then;
+  steps: StepSpec[];
+}
+
+/** What the steps editor sends: C3's one-step make, or steps + then. */
+export type Plan = { make: StepSpec & { then: "post" | "keep" } } | { steps: StepSpec[]; then: Then };
 
 export interface ToolField {
   name: string;
@@ -98,6 +113,9 @@ export interface CcTool {
   previous: { description: string } | null;
   /** The reading tool that checks this one's background job, found by the gateway. */
   pollTool: string | null;
+  /** Plan 34 M3: Cyclone's own reading of the tool, and whether the owner moved it (read <-> change, or up to sensitive). */
+  baseClass: ToolClass;
+  overridden: boolean;
 }
 
 export type ApprovalRule = "always" | "over_cap" | "cap";
@@ -106,11 +124,17 @@ export interface CcConnection {
   id: string;
   name: string;
   url: string;
-  auth: "none" | "oauth" | "header";
+  auth: "none" | "oauth" | "header" | "query";
   status: "new" | "ready" | "needs_sign_in" | "needs_key" | "needs_client" | "needs_approval" | "error";
-  kind: "remote" | "local";
+  kind: "remote" | "local" | "api";
   transport: "http" | "sse" | "stdio";
   keyHeader: string | null;
+  /** An API key sent in the address (plan 34 M3): the parameter's name, never the value. */
+  keyQuery: string | null;
+  /** An API connection (plan 34 M3): what its description says. */
+  api: CcApi | null;
+  /** Added from a card whose tool choices wait for the tools to be listed (after sign-in or approval). */
+  fromCard: boolean;
   manualClient: boolean;
   probe: Array<{ step: string; ok: boolean; detail: string }>;
   /** A local server: the exact command, what is pinned, env names (never values) and the hash the owner approves. */
@@ -127,6 +151,17 @@ export interface CcConnection {
   usedToday: number;
 }
 
+export interface CcApi {
+  title: string;
+  version: string;
+  base: string;
+  sourceUrl: string | null;
+  operations: number;
+  skipped: string[];
+  unsupportedSignIn: string | null;
+  scheme: { type: "header" | "query" | "bearer" | "basic" | "oauth2"; name: string | null; scopes: string[]; authorizationUrl: string | null } | null;
+}
+
 export interface CcCall {
   id: string;
   connectionId: string;
@@ -140,6 +175,8 @@ export interface CcCall {
   finishedAt: number | null;
   /** What the call brought back (structured data or text), bounded and screened by the gateway. */
   result: unknown;
+  /** Which step of its task's chain (0-based). */
+  step: number;
 }
 
 export interface CcArtifact {
@@ -225,12 +262,20 @@ const KINDS = ["question", "values", "approval", "secret", "handover", "spend", 
 
 const obj = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {});
 
-export function parseMake(raw: unknown): MakeStep | null {
+function parseStep(raw: unknown): StepSpec | null {
   const r = obj(raw);
   if (!r.connectionId || !r.tool) return null;
   const args: Record<string, string | number | boolean> = {};
   for (const [k, v] of Object.entries(obj(r.arguments))) if (["string", "number", "boolean"].includes(typeof v)) args[k] = v as string | number | boolean;
-  return { connectionId: str(r.connectionId), tool: str(r.tool), arguments: args, pollTool: optStr(r.pollTool), then: r.then === "keep" ? "keep" : "post" };
+  return { connectionId: str(r.connectionId), tool: str(r.tool), arguments: args, pollTool: optStr(r.pollTool) };
+}
+
+export function parseMake(raw: unknown): MakeStep | null {
+  const r = obj(raw);
+  const first = parseStep(r);
+  if (!first) return null;
+  const steps = list(r.steps).map(parseStep).filter((s): s is StepSpec => s !== null);
+  return { ...first, then: oneOf(r.then, ["post", "keep", "phone"] as const, "post"), steps: steps.length ? steps : [first] };
 }
 
 export function parseArtifact(raw: unknown): CcArtifact {
@@ -244,16 +289,17 @@ export function parseCall(raw: unknown): CcCall {
   return { id: str(r.id), connectionId: str(r.connectionId), tool: str(r.tool), taskId: optStr(r.taskId),
     state: oneOf(r.state, ["waiting", "running", "done", "failed", "declined", "refused"] as const, "failed"), summary: str(r.summary),
     artifacts: list(r.artifacts).filter((a): a is string => typeof a === "string"), arguments: obj(r.arguments),
-    createdAt: num(r.createdAt), finishedAt: optNum(r.finishedAt), result: r.result ?? null };
+    createdAt: num(r.createdAt), finishedAt: optNum(r.finishedAt), result: r.result ?? null, step: num(r.step) };
 }
 
 export function parseConnection(raw: unknown): CcConnection {
   const r = obj(raw);
   return {
-    id: str(r.id), name: str(r.name), url: str(r.url), auth: oneOf(r.auth, ["none", "oauth", "header"] as const, "none"),
+    id: str(r.id), name: str(r.name), url: str(r.url), auth: oneOf(r.auth, ["none", "oauth", "header", "query"] as const, "none"),
     status: oneOf(r.status, ["new", "ready", "needs_sign_in", "needs_key", "needs_client", "needs_approval", "error"] as const, "error"), detail: str(r.detail),
-    kind: r.kind === "local" ? "local" : "remote", transport: oneOf(r.transport, ["http", "sse", "stdio"] as const, "http"),
-    keyHeader: optStr(r.keyHeader), manualClient: r.manualClient === true,
+    kind: oneOf(r.kind, ["remote", "local", "api"] as const, "remote"), transport: oneOf(r.transport, ["http", "sse", "stdio"] as const, "http"),
+    keyHeader: optStr(r.keyHeader), keyQuery: optStr(r.keyQuery), manualClient: r.manualClient === true, fromCard: r.fromCard === true,
+    api: r.api ? parseApi(r.api) : null,
     probe: list(r.probe).map((x) => { const y = obj(x); return { step: str(y.step), ok: y.ok === true, detail: str(y.detail) }; }),
     launch: r.launch ? (() => {
       const l = obj(r.launch);
@@ -268,6 +314,8 @@ export function parseConnection(raw: unknown): CcConnection {
       const prev = x.previous ? obj(x.previous) : null;
       return { name: str(x.name), title: str(x.title), description: str(x.description), readOnly: x.readOnly === true,
         class: oneOf(x.class, ["read", "change", "sensitive"] as const, "change"), allowed: x.allowed === true,
+        baseClass: oneOf(x.baseClass, ["read", "change", "sensitive"] as const, oneOf(x.class, ["read", "change", "sensitive"] as const, "change")),
+        overridden: x.overridden === true,
         rule: oneOf(x.rule, ["always", "over_cap", "cap"] as const, "always"), changed: x.changed === true,
         previous: prev ? { description: str(prev.description) } : null, pollTool: optStr(x.pollTool),
         fields: list(x.fields).map((f) => {
@@ -281,6 +329,17 @@ export function parseConnection(raw: unknown): CcConnection {
     }),
     allowed: list(r.allowed).filter((a): a is string => typeof a === "string"),
     dailyCap: num(r.dailyCap, 10), approval: oneOf(r.approval, ["always", "over_cap", "cap"] as const, "always"), usedToday: num(r.usedToday),
+  };
+}
+
+export function parseApi(raw: unknown): CcApi {
+  const r = obj(raw);
+  const scheme = r.scheme ? obj(r.scheme) : null;
+  return {
+    title: str(r.title), version: str(r.version), base: str(r.base), sourceUrl: optStr(r.sourceUrl), operations: num(r.operations),
+    skipped: list(r.skipped).filter((s): s is string => typeof s === "string"), unsupportedSignIn: optStr(r.unsupportedSignIn),
+    scheme: scheme ? { type: oneOf(scheme.type, ["header", "query", "bearer", "basic", "oauth2"] as const, "header"), name: optStr(scheme.name),
+      scopes: list(scheme.scopes).filter((s): s is string => typeof s === "string"), authorizationUrl: optStr(scheme.authorizationUrl) } : null,
   };
 }
 
@@ -339,8 +398,10 @@ export function parseTask(raw: unknown): CcTask {
       return { id: str(x.id), slot: str(x.slot), state: str(x.state), expiresAt: num(x.expiresAt) };
     }),
     make: parseMake(r.make),
+    stepAt: num(r.stepAt),
     artifact: r.artifact ? parseArtifact(r.artifact) : null,
     call: r.call ? parseCall(r.call) : null,
+    calls: list(r.calls).map(parseCall),
     media: r.media ? { deviceId: str(obj(r.media).deviceId), state: str(obj(r.media).state), name: str(obj(r.media).name) } : null,
   };
 }
@@ -433,9 +494,17 @@ export const command = {
     const r = await client.get<{ connections?: unknown; higgsfield?: unknown }>("/v1/cc/connections");
     return { connections: list(r?.connections).map(parseConnection), higgsfield: str(r?.higgsfield, "https://mcp.higgsfield.ai/mcp") };
   },
-  addConnection: async (client: GatewayClient, body: { name: string; url: string } | { config: unknown; name?: string }) => parseConnection(await client.post("/v1/cc/connections", body)),
+  addConnection: async (client: GatewayClient, body: { name: string; url: string } | { config: unknown; name?: string }
+    | { specUrl: string; baseUrl?: string; name?: string } | { specText: string; baseUrl?: string; name?: string }) =>
+    parseConnection(await client.post("/v1/cc/connections", body)),
   setKey: async (client: GatewayClient, id: string, header: string, value: string) =>
     parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/key`, { header, value })),
+  /** An API key sent in the address, as the API's description says (the value is kept sealed on the PC). */
+  setQueryKey: async (client: GatewayClient, id: string, query: string, value: string) =>
+    parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/key`, { query, value })),
+  /** Plan 34 M4: a connector card (no keys or tokens), as the gateway made it. */
+  exportCard: async (client: GatewayClient, id: string) => obj(await client.get(`/v1/cc/connections/${encodeURIComponent(id)}/card`)),
+  importCard: async (client: GatewayClient, card: Record<string, unknown>) => parseConnection(await client.post("/v1/cc/connections/import", { card })),
   setClient: async (client: GatewayClient, id: string, clientId: string, clientSecret?: string) =>
     parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/client`, clientSecret ? { clientId, clientSecret } : { clientId })),
   approveLocal: async (client: GatewayClient, id: string, hash: string) =>
@@ -448,7 +517,8 @@ export const command = {
     parseCall(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/call`, { tool, arguments: args })),
   getCall: async (client: GatewayClient, id: string) => parseCall(await client.get(`/v1/cc/calls/${encodeURIComponent(id)}`)),
   refreshConnection: async (client: GatewayClient, id: string) => parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/refresh`)),
-  connectionSettings: async (client: GatewayClient, id: string, body: { allowed?: string[]; allowReads?: true; rules?: Record<string, ApprovalRule>; dailyCap?: number; approval?: ApprovalRule }) =>
+  connectionSettings: async (client: GatewayClient, id: string, body: { allowed?: string[]; allowReads?: true; rules?: Record<string, ApprovalRule>; dailyCap?: number; approval?: ApprovalRule;
+    classes?: Record<string, ToolClass> }) =>
     parseConnection(await client.post(`/v1/cc/connections/${encodeURIComponent(id)}/settings`, body)),
   signIn: async (client: GatewayClient, id: string) =>
     str((await client.post<{ authorizationUrl?: unknown }>(`/v1/cc/connections/${encodeURIComponent(id)}/sign-in`))?.authorizationUrl),
@@ -469,7 +539,7 @@ export function looksSecret(text: string): boolean {
 
 export function taskStatusLabel(status: TaskStatus): string {
   return {
-    scheduled: "Scheduled", making: "Making the file", waiting_device: "Waiting for a phone", running: "Running", needs_you: "Needs you",
+    scheduled: "Scheduled", making: "Calling a connection", waiting_device: "Waiting for a phone", running: "Running", needs_you: "Needs you",
     succeeded: "Done", failed: "Failed", cancelled: "Cancelled",
   }[status];
 }
@@ -519,8 +589,20 @@ export function sizeLabel(bytes: number): string {
   return `${bytes} B`;
 }
 
-/** Tool arguments from a form: typed by the tool's fields, blanks left out, numbers checked. Throws a sentence. */
-export function toolArguments(tool: CcTool, values: Record<string, string>): Record<string, string | number | boolean> {
+/** A result reference like {step1.orders.0.id}; the gateway fills it from that step's result. */
+export const STEP_REF = /\{step([1-9])((?:\.[A-Za-z0-9_-]{1,64}){0,8})\}/g;
+
+/** The step numbers [text] refers to; throws for something that looks like a reference but is not one. */
+export function stepRefs(text: string): number[] {
+  for (const loose of text.match(/\{\s*step[^{}]{0,120}\}/gi) ?? []) {
+    if (!/^\{step[1-9](?:\.[A-Za-z0-9_-]{1,64}){0,8}\}$/.test(loose)) throw new Error(`${loose.slice(0, 60)} is not a step reference like {step1.name}.`);
+  }
+  return [...text.matchAll(STEP_REF)].map((m) => Number(m[1]));
+}
+
+/** Tool arguments from a form: typed by the tool's fields, blanks left out, numbers checked. Throws a sentence.
+ *  With [step] (1-based), a field may hold a reference to an earlier step's result instead of a value. */
+export function toolArguments(tool: CcTool, values: Record<string, string>, step = 0): Record<string, string | number | boolean> {
   const out: Record<string, string | number | boolean> = {};
   for (const field of tool.fields) {
     const raw = (values[field.name] ?? "").trim();
@@ -529,6 +611,12 @@ export function toolArguments(tool: CcTool, values: Record<string, string>): Rec
       continue;
     }
     if (looksSecret(`${field.name}: ${raw}`) || looksSecret(raw)) throw new Error("Leave passwords, keys and codes out of a connection call.");
+    const refs = stepRefs(raw);
+    if (refs.length) {
+      if (!step || refs.some((n) => n >= step)) throw new Error(`${field.name}: a step can only use results of earlier steps.`);
+      out[field.name] = raw;
+      continue;
+    }
     if (field.type === "integer" || field.type === "number") {
       const n = Number(raw);
       if (!Number.isFinite(n) || (field.type === "integer" && !Number.isInteger(n))) throw new Error(`${field.name} must be a number.`);
@@ -540,6 +628,20 @@ export function toolArguments(tool: CcTool, values: Record<string, string>): Rec
     }
   }
   return out;
+}
+
+/** "Then" in the steps editor. */
+export function thenLabel(then: Then): string {
+  return { post: "Then a phone posts the file (you approve the final Share)", keep: "Only keep what comes back",
+    phone: "Then a phone does the goal with the results" }[then];
+}
+
+/** Basic sign-in (user name and password) as the one header value the PC keeps sealed. */
+export function basicAuth(user: string, password: string): string {
+  const bytes = new TextEncoder().encode(`${user}:${password}`);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return `Basic ${btoa(binary)}`;
 }
 
 export function classLabel(cls: ToolClass): string {

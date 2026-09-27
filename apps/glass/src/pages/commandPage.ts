@@ -22,6 +22,7 @@ import {
   type CcResult,
   type CcRoutine,
   type CcTask,
+  type Plan,
   type Schedule,
 } from "../services/command.js";
 import { getMarket, type MarketListing } from "../services/market.js";
@@ -31,7 +32,7 @@ import { relativeTime } from "../ui/format.js";
 import type { GlassPage } from "./page.js";
 import { createVaultView, type VaultView } from "./vaultView.js";
 import { vaultApi } from "../services/vault.js";
-import { createConnectionsView, createMakeEditor, type ConnectionsView } from "./connectionsView.js";
+import { checkGoalRefs, createConnectionsView, createMakeEditor, type ConnectionsView } from "./connectionsView.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -200,7 +201,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     const box = card("cc-approval");
     const head = el("div", "cc-row");
     head.append(
-      chip({ approval: "Approve?", question: "Question", values: "Details", secret: "Secure input", handover: "Your turn", spend: "Use credits?", login: "Unlock the vault" }[a.kind],
+      chip({ approval: "Approve?", question: "Question", values: "Details", secret: "Secure input", handover: "Your turn", spend: "Use a connection?", login: "Unlock the vault" }[a.kind],
         a.kind === "approval" || a.kind === "spend" ? "warning" : "accent"),
       el("strong", undefined, a.title),
       el("span", "muted", `${a.kind === "spend" ? "This PC" : deviceName(a.deviceId || null)} · ${relativeTime(a.createdAt)}`),
@@ -371,19 +372,21 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     void maker.refresh();
     const create = actionButton("Create task", { variant: "primary", icon: "play" });
     create.addEventListener("click", () => {
-      let make;
+      const text = String(goal.value ?? "").trim();
+      let plan;
       try {
-        make = maker.read();
+        plan = maker.read();
+        checkGoalRefs(text, plan);
       } catch (err) {
         return say((err as Error).message, "error");
       }
-      const text = String(goal.value ?? "").trim();
-      if (!text && make?.then !== "keep") return say("Write what the phone should do.", "error");
+      const then = maker.then();
+      if (!text && then !== "keep") return say("Write what the phone should do.", "error");
       if (looksSecret(text)) return say("Leave passwords and codes out. The phone asks for them.", "error");
       const body: Record<string, unknown> = { requestId: requestId() };
       if (text) body.goal = text;
-      if (make) body.make = make;
-      if (make?.then === "keep" && !String(title.input.value ?? "").trim()) body.title = `Make with ${make.tool}`;
+      if (plan) Object.assign(body, plan);
+      if (plan && then === "keep" && !String(title.input.value ?? "").trim()) body.title = planTitle(plan);
       const name = String(title.input.value ?? "").trim();
       if (name) body.title = name;
       if (phone.value) body.deviceId = phone.value;
@@ -429,7 +432,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       }
       row.append(
         cell(t.title, [t.routineId ? "From a routine" : t.recipe ? `Recipe ${t.recipe}` : "", t.vaultItemId ? `Signs in with the vault${t.leases[0] ? ` · password ${t.leases[0].state}` : ""}` : "",
-          t.make ? `Makes with ${t.make.tool}${t.artifact ? ` · ${t.artifact.name}` : t.call ? ` · ${t.call.state}` : ""}${t.make.then === "post" ? " · then posts" : ""}` : ""].filter(Boolean).join(" · ") || undefined),
+          t.make ? planDetail(t) : ""].filter(Boolean).join(" · ") || undefined),
         cell(deviceName(t.run?.deviceId ?? t.deviceId)),
         cell(accountName(t.accountId)),
         chipCell(taskStatusLabel(t.status), taskStatusTone(t.status)),
@@ -518,23 +521,24 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
     create.addEventListener("click", () => {
       const text = String(goal.value ?? "").trim();
       const name = String(title.input.value ?? "").trim();
-      let make;
+      let plan;
       try {
-        make = maker.read();
+        plan = maker.read();
+        checkGoalRefs(text, plan);
       } catch (err) {
         return say((err as Error).message, "error");
       }
-      if (!name || (!text && make?.then !== "keep")) return say("A routine needs a title and a goal.", "error");
+      if (!name || (!text && maker.then() !== "keep")) return say("A routine needs a title and a goal.", "error");
       if (looksSecret(text)) return say("Leave passwords and codes out. The phone asks for them.", "error");
       const schedule: Schedule = kind === "daily"
         ? { kind: "daily", time: String(time.value || "09:00"), days: days.filter((d) => d.input.checked).map((d) => Number(d.input.value)) }
         : { kind: "every", minutes: Math.round(Number(minutes.value)) };
       if (schedule.kind === "daily" && !schedule.days.length) return say("Pick at least one day.", "error");
       const body: Record<string, unknown> = {
-        title: name, goal: text || `Make with ${make?.tool}`, schedule, deviceIds: boxes.filter((b) => b.checked).map((b) => String(b.value)),
+        title: name, goal: text || (plan ? planTitle(plan) : ""), schedule, deviceIds: boxes.filter((b) => b.checked).map((b) => String(b.value)),
       };
       if (account.value) body.accountId = account.value;
-      if (make) body.make = make;
+      if (plan) Object.assign(body, plan);
       if (vaultPick.value) {
         if ((body.deviceIds as string[]).length !== 1) return say("A routine that signs in with the vault runs on one chosen phone.", "error");
         body.vaultItemId = vaultPick.value;
@@ -579,7 +583,7 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
       actions.append(run, pause, remove);
       const row = el("tr");
       row.append(
-        cell(r.title, [r.goal.slice(0, 120), r.make ? `Makes with ${r.make.tool}` : "",
+        cell(r.title, [r.goal.slice(0, 120), r.make ? (r.make.steps.length > 1 ? `${r.make.steps.length} steps: ${r.make.steps.map((s) => s.tool).join(" → ")}` : `Makes with ${r.make.tool}`) : "",
           r.vaultItemId ? (r.preauth ? `${r.prepared.filter((p) => p.ready).length} of ${r.prepared.length} runs sealed ahead` : "Signs in while Glass is open") : ""].filter(Boolean).join(" · ")),
         cell(r.scheduleLabel),
         cell(r.deviceIds.length ? r.deviceIds.map((d) => deviceName(d)).join(", ") : "Any ready phone"),
@@ -766,4 +770,19 @@ function requestId(): string {
   const bytes = new Uint8Array(12);
   globalThis.crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** A default title for steps that only keep what comes back. */
+function planTitle(plan: Plan): string {
+  return "make" in plan ? `Make with ${plan.make.tool}` : `Run ${plan.steps.length} connection steps`;
+}
+
+/** What a task's connection steps did so far, in one line. */
+function planDetail(t: CcTask): string {
+  const make = t.make!;
+  const then = { post: " · then posts", keep: "", phone: " · then a phone uses the results" }[make.then];
+  if (make.steps.length <= 1) return `Makes with ${make.tool}${t.artifact ? ` · ${t.artifact.name}` : t.call ? ` · ${t.call.state}` : ""}${then}`;
+  const done = Math.min(t.stepAt, make.steps.length);
+  const last = t.calls[t.calls.length - 1];
+  return `${make.steps.map((s) => s.tool).join(" → ")} · ${done} of ${make.steps.length} done${last && done < make.steps.length ? ` · step ${last.step + 1} ${last.state}` : ""}${then}`;
 }

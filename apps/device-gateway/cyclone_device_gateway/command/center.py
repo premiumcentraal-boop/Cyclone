@@ -29,6 +29,7 @@ from typing import Any, Callable, Protocol
 from ..desktop_runtime.models import DesktopRuntimeError
 from ..desktop_runtime.v5_contract import INLINE_SECRET, _secret_name
 from . import schedule as schedules
+from . import steps as chain
 
 SERVICE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+|[a-z0-9-]+(?:\.[a-z0-9-]+)+)$")
 HANDLE = re.compile(r"^[^\s].{0,79}$")
@@ -159,6 +160,10 @@ class CommandCenter:
         for column in ("make", "artifact_id", "media"):
             if column not in columns:
                 self._db.execute(f"ALTER TABLE task ADD COLUMN {column} TEXT")
+        if "step_at" not in columns:
+            # Plan 34 M3: the next step of a task's chain. A C3 task that already made its file is past its one step.
+            self._db.execute("ALTER TABLE task ADD COLUMN step_at INTEGER NOT NULL DEFAULT 0")
+            self._db.execute("UPDATE task SET step_at = 1 WHERE make IS NOT NULL AND artifact_id IS NOT NULL")
         columns = {r["name"] for r in self._db.execute("PRAGMA table_info(routine)")}
         for column, kind in (("make", "TEXT"), ("vault_item_id", "TEXT"), ("preauth", "INTEGER NOT NULL DEFAULT 0")):
             if column not in columns:
@@ -345,12 +350,14 @@ class CommandCenter:
         return device, account
 
     def create_task(self, body: dict[str, Any], *, actor: str = "owner") -> dict[str, Any]:
-        _only(body, {"title", "goal", "deviceId", "accountId", "recipe", "dueAt", "requestId", "vaultItemId", "make"})
-        make = self._make_spec(body.get("make"))
+        _only(body, {"title", "goal", "deviceId", "accountId", "recipe", "dueAt", "requestId", "vaultItemId", "make", "steps", "then"})
+        make = self._plan_spec(body)
         if make and not body.get("goal") and json.loads(make)["then"] == "keep":
-            body = {**body, "goal": f"Make with {json.loads(make)['tool']}"}
+            plan = json.loads(make)
+            body = {**body, "goal": f"Make with {plan['steps'][0]['tool']}" if len(plan["steps"]) == 1 else f"Run {len(plan['steps'])} connection steps"}
         title = _clean_text(body.get("title") or str(body.get("goal", ""))[:80], "title", 80)
         goal = _clean_text(body.get("goal"), "goal", MAX_GOAL)
+        self._check_goal(goal, make)
         recipe = _clean_text(body.get("recipe"), "recipe", 64, required=False) or None
         due = body.get("dueAt")
         if due is not None and (type(due) is not int or due < 0):
@@ -369,15 +376,38 @@ class CommandCenter:
                                         vault_item=item, make=make)
             return created
 
-    def _make_spec(self, raw: Any) -> str | None:
-        """Plan 33 (C3): a task may first make a file with a connection's tool, then post it from a phone or keep it."""
-        if raw is None:
+    def _plan_spec(self, body: dict[str, Any]) -> str | None:
+        """Plan 33 (C3) and plan 34 (M3): up to five connection steps before the phone (or instead of it). ``make`` is
+        the one-step C3 form; ``steps`` + ``then`` the chain. Stored as {steps, then}."""
+        make, raw_steps, then = body.get("make"), body.get("steps"), body.get("then")
+        if make is None and raw_steps is None:
+            if then is not None:
+                raise CommandError("then needs steps.")
             return None
-        if not isinstance(raw, dict) or not set(raw) <= {"connectionId", "tool", "arguments", "pollTool", "then"}:
-            raise CommandError("make is {connectionId, tool, arguments, pollTool?, then}.")
+        if make is not None and raw_steps is not None:
+            raise CommandError("Send make or steps, not both.")
+        if make is not None:
+            if not isinstance(make, dict) or not set(make) <= {"connectionId", "tool", "arguments", "pollTool", "then"}:
+                raise CommandError("make is {connectionId, tool, arguments, pollTool?, then}.")
+            if then is not None:
+                raise CommandError("make carries its own then.")
+            raw_steps, then = [{k: v for k, v in make.items() if k != "then"}], make.get("then", "post")
+        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= chain.MAX_STEPS:
+            raise CommandError(f"steps is a list of 1..{chain.MAX_STEPS} connection calls.")
+        if then is None:
+            then = "post"
+        if then not in chain.THEN:
+            raise CommandError("then is post (a phone posts the file), keep (only keep what came back) or phone (a phone uses the results).")
+        steps = [self._step_spec(raw, i + 1, len(raw_steps) == 1 and make is not None) for i, raw in enumerate(raw_steps)]
+        return json.dumps({"steps": steps, "then": then}, sort_keys=True)
+
+    def _step_spec(self, raw: Any, number: int, legacy: bool) -> dict[str, Any]:
+        label = "make" if legacy else f"Step {number}"
+        if not isinstance(raw, dict) or not set(raw) <= {"connectionId", "tool", "arguments", "pollTool"}:
+            raise CommandError(f"{label} is {{connectionId, tool, arguments, pollTool?}}.")
         connection = raw.get("connectionId")
         if not isinstance(connection, str) or not re.match(r"^con_[A-Za-z0-9_-]{6,40}$", connection):
-            raise CommandError("make.connectionId is malformed.")
+            raise CommandError(f"{label}: connectionId is malformed.")
         row = self.connections._row(connection)
         allowed = set(json.loads(row["allowed"]))
         tool, poll = raw.get("tool"), raw.get("pollTool")
@@ -385,19 +415,33 @@ class CommandCenter:
             if name is not None and (not isinstance(name, str) or name not in allowed):
                 raise CommandError(f"{row['name']}: allow the tool {name} in Connections first.")
         if tool is None:
-            raise CommandError("make.tool is required.")
+            raise CommandError(f"{label}: tool is required.")
         arguments = raw.get("arguments", {})
         if not isinstance(arguments, dict) or len(json.dumps(arguments)) > 8_000:
-            raise CommandError("make.arguments are an object of at most 8 KB.")
+            raise CommandError(f"{label}: arguments are an object of at most 8 KB.")
         for key, value in arguments.items():
             if _secret_name(str(key)) or (isinstance(value, str) and INLINE_SECRET.search(value)):
-                raise CommandError("make.arguments look like they hold a secret.")
+                raise CommandError(f"{label}: the arguments look like they hold a secret.")
             if not isinstance(value, (str, int, float, bool)) or (isinstance(value, str) and len(value) > 4_000):
-                raise CommandError("make.arguments are plain values (text up to 4000 characters, numbers, true/false).")
-        then = raw.get("then", "post")
-        if then not in ("post", "keep"):
-            raise CommandError("make.then is post (a phone posts the file) or keep (only keep the file).")
-        return json.dumps({"connectionId": connection, "tool": tool, "arguments": arguments, "pollTool": poll, "then": then}, sort_keys=True)
+                raise CommandError(f"{label}: arguments are plain values (text up to 4000 characters, numbers, true/false).")
+        try:
+            chain.check_arguments(arguments, number)
+        except chain.StepError as exc:
+            raise CommandError(str(exc)) from exc
+        return {"connectionId": connection, "tool": tool, "arguments": arguments, "pollTool": poll}
+
+    @staticmethod
+    def _check_goal(goal: str, make: str | None) -> None:
+        """``{stepN…}`` in a goal needs that step, and a phone that gets the results."""
+        try:
+            refs = chain.references(goal)
+            if refs:
+                plan = json.loads(make) if make else None
+                if not plan or plan["then"] == "keep":
+                    raise CommandError("{step…} in the goal needs steps whose results go to a phone (then: phone or post).")
+                chain.check_goal(goal, len(plan["steps"]))
+        except chain.StepError as exc:
+            raise CommandError(str(exc)) from exc
 
     def _vault_item_for(self, item_id: Any, device: str | None, account: str | None) -> str | None:
         """A task may use one vault item's secret (C2): its own account's login or authenticator, on one trusted phone."""
@@ -424,7 +468,7 @@ class CommandCenter:
             " next_try_at, waiting_since, created_at, updated_at, vault_item_id, make) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (task_id, title, goal, device, account, recipe, routine, due, "scheduled", "", key, due or now, None, now, now, vault_item, make))
         self._audit(actor, "task.create", task_id, {"device": device, "account": account, "routine": routine,
-                                                    "vault": bool(vault_item), "make": json.loads(make)["tool"] if make else None})
+                                                    "vault": bool(vault_item), "make": [st["tool"] for st in chain.plan_of(make)["steps"]] if make else None})
         return self.get_task(task_id)
 
     def cancel_task(self, task_id: str) -> dict[str, Any]:
@@ -475,9 +519,11 @@ class CommandCenter:
             "cause": r["cause"], "createdAt": r["created_at"], "updatedAt": r["updated_at"],
             "run": self._run_public(run) if run else None,
             "vaultItemId": r["vault_item_id"],
-            "make": json.loads(r["make"]) if r["make"] else None,
+            "make": chain.public(chain.plan_of(r["make"])),
+            "stepAt": r["step_at"],
             "artifact": self._artifact_of(r["artifact_id"]),
             "call": self.connections.call_of_task(r["id"]) if r["make"] else None,
+            "calls": self.connections.calls_of_task(r["id"]) if r["make"] else [],
             "media": json.loads(r["media"]) if r["media"] else None,
             "leases": [{"id": l["id"], "slot": l["slot"], "state": l["state"], "expiresAt": l["expires_at"]}
                        for l in self._db.execute("SELECT id, slot, state, expires_at FROM lease WHERE task_id = ? ORDER BY created_at DESC LIMIT 4", (r["id"],))],
@@ -524,7 +570,7 @@ class CommandCenter:
     # ---------------------------------------------------------------- routines
 
     def _routine_fields(self, body: dict[str, Any], *, partial: bool) -> dict[str, Any]:
-        _only(body, {"title", "goal", "deviceIds", "accountId", "schedule", "paused", "make", "vaultItemId", "preauth"})
+        _only(body, {"title", "goal", "deviceIds", "accountId", "schedule", "paused", "make", "steps", "then", "vaultItemId", "preauth"})
         out: dict[str, Any] = {}
         if not partial or "title" in body:
             out["title"] = _clean_text(body.get("title"), "title", 80)
@@ -556,8 +602,8 @@ class CommandCenter:
             if not isinstance(body["paused"], bool):
                 raise CommandError("paused is true or false.")
             out["paused"] = 1 if body["paused"] else 0
-        if not partial or "make" in body:
-            out["make"] = self._make_spec(body.get("make"))
+        if not partial or {"make", "steps", "then"} & set(body):
+            out["make"] = self._plan_spec(body)
         if not partial or "vaultItemId" in body:
             item = body.get("vaultItemId")
             if item is not None:
@@ -578,6 +624,7 @@ class CommandCenter:
 
     def create_routine(self, body: dict[str, Any], *, actor: str = "owner") -> dict[str, Any]:
         fields = self._routine_fields(body, partial=False)
+        self._check_goal(fields["goal"], fields["make"])
         with self._lock:
             now = self._clock()
             routine_id = _id("rtn")
@@ -590,7 +637,7 @@ class CommandCenter:
                 (routine_id, fields["title"], fields["goal"], fields["devices"], fields["account_id"], fields["schedule"],
                  paused, self._next_run(fields["schedule"]), None, now, now, fields["make"], fields["vault_item_id"], fields["preauth"]))
             self._audit(actor, "routine.create", routine_id, {"schedule": json.loads(fields["schedule"]), "vault": bool(fields["vault_item_id"]),
-                                                              "preauth": fields["preauth"], "make": json.loads(fields["make"])["tool"] if fields["make"] else None})
+                                                              "preauth": fields["preauth"], "make": [st["tool"] for st in chain.plan_of(fields["make"])["steps"]] if fields["make"] else None})
             self._plan_slots(self._db.execute("SELECT * FROM routine WHERE id = ?", (routine_id,)).fetchone())
             return self.get_routine(routine_id)
 
@@ -601,6 +648,9 @@ class CommandCenter:
             if "vaultItemId" in merged and "accountId" not in merged:
                 merged = {**merged, "accountId": current["accountId"]}
             fields = self._routine_fields(merged, partial=True)
+            if "goal" in fields or "make" in fields:
+                current_plan = chain.plan_of(self._db.execute("SELECT make FROM routine WHERE id = ?", (routine_id,)).fetchone()["make"])
+                self._check_goal(fields.get("goal", current["goal"]), fields["make"] if "make" in fields else (json.dumps(current_plan) if current_plan else None))
             if "schedule" in fields or fields.get("paused") == 0:
                 fields["next_run_at"] = self._next_run(fields.get("schedule") or json.dumps(current["schedule"]))
             if fields:
@@ -659,7 +709,7 @@ class CommandCenter:
             "accountId": r["account_id"], "schedule": schedule, "scheduleLabel": schedules.describe(schedule),
             "paused": bool(r["paused"]), "nextRunAt": None if r["paused"] else r["next_run_at"], "lastRunAt": r["last_run_at"],
             "succeeded": counts["ok"] or 0, "failed": counts["bad"] or 0,
-            "make": json.loads(r["make"]) if r["make"] else None, "vaultItemId": r["vault_item_id"], "preauth": r["preauth"],
+            "make": chain.public(chain.plan_of(r["make"])), "vaultItemId": r["vault_item_id"], "preauth": r["preauth"],
             "prepared": [{"dueAt": slot["due_at"], "taskId": slot["task_id"], "deviceId": slot["device_id"],
                           "ready": bool(self.delivery.ready_leases(slot["task_id"]))}
                          for slot in self._db.execute("SELECT * FROM routine_slot WHERE routine_id = ? ORDER BY due_at", (r["id"],))],
@@ -860,8 +910,8 @@ class CommandCenter:
                 self._withdraw_gateway_approvals(task["id"])
                 self._audit("engine", "task.expired", task["id"])
                 continue
-            make = json.loads(task["make"]) if task["make"] else None
-            if make and not task["artifact_id"]:
+            make = chain.plan_of(task["make"])
+            if make and task["step_at"] < len(make["steps"]):
                 self._start_make(task, make)
                 continue
             if make and make["then"] == "post":
@@ -895,6 +945,13 @@ class CommandCenter:
                     self._push_media(task, device)
                     continue
             goal = task["goal"]
+            if make and make["then"] in ("phone", "post"):
+                try:
+                    goal = self._goal_with_results(task, make, goal)
+                except chain.StepError as exc:
+                    self._set_task(task["id"], "failed", str(exc))
+                    self._audit("engine", "task.refused", task["id"], {"why": "step result"})
+                    continue
             if account:
                 goal = f"{goal}\n\nUse the account {account['handle']} ({account['service']})."
             sealed: list[dict[str, Any]] = []
@@ -914,6 +971,11 @@ class CommandCenter:
                 media = json.loads(task["media"])
                 goal += (f"\n\nThe file to post is already on this phone: {media['name']} (the newest item in the gallery, folder {media['folder']})."
                          " Post that file. The final Share or Post needs the owner's OK; ask for it and wait.")
+            if len(goal) > chain.PHONE_GOAL:
+                self._set_task(task["id"], "failed", f"With the step results the task is {len(goal)} characters; a phone takes {chain.PHONE_GOAL}."
+                               " Name just the fields it needs, like {step1.name}.")
+                self._audit("engine", "task.refused", task["id"], {"why": "goal too long"})
+                continue
             extra: dict[str, Any] = {}
             if sealed or publish:
                 extra["task_id"] = task["id"]
@@ -950,45 +1012,87 @@ class CommandCenter:
     # ---------------------------------------------------------------- C3: make with a connection, then post from a phone
 
     def _start_make(self, task: sqlite3.Row, make: dict[str, Any]) -> None:
-        call = self.connections.call_of_task(task["id"])
-        if call and call["state"] in ("waiting", "running"):
+        """Start the task's next connection step, its arguments filled from the earlier steps' results."""
+        index = task["step_at"]
+        total = len(make["steps"])
+        calls = self.connections.calls_of_task(task["id"])
+        current = next((c for c in calls if c["step"] == index), None)
+        if current and current["state"] in ("waiting", "running"):
+            return
+        step = make["steps"][index]
+        label = f"Step {index + 1} of {total}: " if total > 1 else ""
+        try:
+            arguments = chain.fill(step["arguments"], {c["step"] + 1: c["result"] for c in calls if c["state"] == "done" and c["step"] < index})
+        except chain.StepError as exc:
+            self._set_task(task["id"], "failed", f"{label}{exc}")
+            self._audit("engine", "task.refused", task["id"], {"why": "step reference", "step": index})
             return
         try:
-            call = self.connections.call(make["connectionId"], make["tool"], make["arguments"], task_id=task["id"],
-                                         actor="routine" if task["routine_id"] else "engine", poll_tool=make.get("pollTool"))
+            call = self.connections.call(step["connectionId"], step["tool"], arguments, task_id=task["id"],
+                                         actor="routine" if task["routine_id"] else "engine", poll_tool=step.get("pollTool"), step=index)
         except CommandError as exc:
             message = str(exc)
             if "already waiting" in message or "already running" in message:
                 self._wait(task, message)
                 return
-            self._set_task(task["id"], "failed", message)
-            self._audit("engine", "task.refused", task["id"], {"why": "connection"})
+            self._set_task(task["id"], "failed", f"{label}{message}")
+            self._audit("engine", "task.refused", task["id"], {"why": "connection", "step": index})
             return
-        current = self._db.execute("SELECT status FROM task WHERE id = ?", (task["id"],)).fetchone()
-        if current and current["status"] in ("scheduled", "waiting_device"):  # an inline call may already have finished it
-            self._set_task(task["id"], "making", "Waiting for your OK to use the connection." if call["state"] == "waiting" else "Making the file.",
+        current = self._db.execute("SELECT status, step_at FROM task WHERE id = ?", (task["id"],)).fetchone()
+        still = self.connections.get_call(call["id"])["state"] in ("waiting", "running")
+        # The call may already have finished (and moved the task on) before this line runs.
+        if still and current and current["step_at"] == index and current["status"] in ("scheduled", "waiting_device"):
+            doing = "Making the file." if total == 1 and make["then"] == "post" else f"Calling {step['tool']}."
+            self._set_task(task["id"], "making", label + ("Waiting for your OK to use the connection." if call["state"] == "waiting" else doing),
                            waiting_since=None)
 
     def _make_finished(self, task_id: str) -> None:
-        """A task's connection call ended (called by the connection store, under this lock)."""
+        """A task's connection call ended (called by the connection store, under this lock): go on to the next step,
+        or post, keep, or hand the results to a phone."""
         task = self._db.execute("SELECT * FROM task WHERE id = ?", (task_id,)).fetchone()
         if task is None or task["status"] not in OPEN_TASK_STATES:
             return
         call = self.connections.call_of_task(task_id)
-        make = json.loads(task["make"])
+        make = chain.plan_of(task["make"])
+        total = len(make["steps"])
         self._withdraw_gateway_approvals(task_id)
-        if call is None or call["state"] != "done" or not call["artifacts"]:
+        label = f"Step {call['step'] + 1} of {total}: " if call and total > 1 else ""
+        if call is None or call["state"] != "done":
             why = {"declined": "You declined the connection call.", "refused": "The connection refused the call."}.get(call["state"] if call else "", "")
-            self._set_task(task_id, "failed", why or f"Making the file failed: {(call or {}).get('summary', '')}"[:300])
+            doing = "Making the file failed" if total == 1 and make["then"] == "post" else "The call failed"
+            self._set_task(task_id, "failed", label + (why or f"{doing}: {(call or {}).get('summary', '')}")[:300])
             return
-        artifact = call["artifacts"][0]
-        self._db.execute("UPDATE task SET artifact_id = ? WHERE id = ?", (artifact, task_id))
+        if call["step"] + 1 < total:
+            self._set_task(task_id, "scheduled", f"Step {call['step'] + 1} of {total} done.", step_at=call["step"] + 1, next_try_at=self._clock())
+            self._audit("engine", "task.step", task_id, {"step": call["step"], "call": call["id"]})
+            return
+        made = [a for c in reversed(self.connections.calls_of_task(task_id)) for a in c["artifacts"]]
+        if make["then"] == "post":
+            media = [a for a in made if (self._db.execute("SELECT mime FROM artifact WHERE id = ?", (a,)).fetchone() or {"mime": ""})["mime"].startswith(("video/", "image/", "audio/"))]
+            if not media:
+                self._set_task(task_id, "failed", label + "No video, image or audio came back to post. " + call["summary"][:200], step_at=total)
+                return
+            self._set_task(task_id, "scheduled", "Made the file; sending it to a phone.", step_at=total, artifact_id=media[0], next_try_at=self._clock())
+            self._audit("engine", "task.made", task_id, {"artifact": media[0]})
+            return
         if make["then"] == "keep":
-            self._set_task(task_id, "succeeded", "Made and kept the file.")
-            self._audit("engine", "task.made", task_id, {"artifact": artifact})
+            if made:
+                self._set_task(task_id, "succeeded", "Made and kept the file." if total == 1 else f"Ran {total} steps and kept the file.", step_at=total, artifact_id=made[0])
+            else:
+                self._set_task(task_id, "succeeded", "Done; what came back is kept with the call." if total == 1 else f"Ran {total} steps; the results are kept.",
+                               step_at=total)
+            self._audit("engine", "task.made", task_id, {"artifacts": made[:4]})
             return
-        self._set_task(task_id, "scheduled", "Made the file; sending it to a phone.", next_try_at=self._clock())
-        self._audit("engine", "task.made", task_id, {"artifact": artifact})
+        self._set_task(task_id, "scheduled", "The steps are done; a phone gets their results next.", step_at=total,
+                       artifact_id=made[0] if made else None, next_try_at=self._clock())
+        self._audit("engine", "task.steps_done", task_id, {"steps": total})
+
+    def _goal_with_results(self, task: sqlite3.Row, make: dict[str, Any], goal: str) -> str:
+        """The phone's goal with the steps' results as quoted data (plan 34 §5: outside content, never instructions)."""
+        results = {c["step"] + 1: c["result"] for c in self.connections.calls_of_task(task["id"]) if c["state"] == "done"}
+        if make["then"] == "post" and not chain.references(goal):
+            return goal
+        return chain.quote_for_phone(goal, results, last=len(make["steps"]))
 
     def _push_media(self, task: sqlite3.Row, device: str) -> None:
         """Send the made file to [device]'s gallery in chunks, off the job loop. The task goes on once it is there."""

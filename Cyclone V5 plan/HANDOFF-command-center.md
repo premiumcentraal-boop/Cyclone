@@ -4,6 +4,11 @@
 **State at handoff (2026-09-27):**
 - `5.0.0-alpha.57.dev1` is published and verified, from commit `86b9fb03` on `claude/cyclone-v5-handoff-review-9qrs40`.
 - Versions: Glass `1.0.0-alpha.32`, Android version code 201.
+- **Update:** run 2 (`5.0.0-alpha.58.dev1`, API maker and cards; Glass `1.0.0-alpha.33`, code 202) is built. See plan 34
+  §10 and `docs/RELEASE_5.0.0-alpha.58.dev1.md`. Next is run 3 (alpha.59, parallel sessions).
+  - `GrantStore` also holds `{query, value}`.
+  - `task.make` is now `{steps, then}` (read it with `steps.plan_of`).
+  - PyYAML is a gateway dependency.
 
 Read this whole file once. Then work the plan in plan 35, one release per run, the way it is described here.
 

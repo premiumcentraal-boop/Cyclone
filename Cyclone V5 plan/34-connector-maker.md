@@ -191,3 +191,82 @@ owner tests it.
     stderr log.
   - **Approval:** the connection holds the launch (without env values) and runs only when `approvedHash == hash`.
     The setup card is `LOCAL_CARD` in Glass.
+
+## 10. M3 + M4 as built (alpha.58)
+
+- **API connectors** (`command/openapi.py`), a connection kind `api`:
+  - **Reading:** `load_text` (JSON, or YAML via a `SafeLoader` subclass that refuses aliases; 5 MB), then
+    `normalize` (OpenAPI 3.x / Swagger 2) keeps a small normalised copy in `connection.api`:
+    - servers (variables filled, relative resolved against the spec URL, or the owner's `baseUrl`), checked with
+      `mcp.check_url`;
+    - one sign-in scheme (`header`/`query`/`bearer`/`basic`/`oauth2` authorization code), the first supported one the
+      requirements name;
+    - operations, each with `inputs` (`arg`, wire `name`, `in` path/query/header/body, required, schema);
+    - an object body is flattened into fields (`body_x` on a clash), any other body is one `body` input;
+    - form bodies, cookie/multipart/file operations skipped with a reason; `$ref` local only, 20 hops; descriptions
+      screened with `hide_secrets`.
+  - **Tools:** `tools(api)` gives MCP-shaped tools, so pinning (`tool_hash`), rules, results and artifacts are
+    unchanged.
+  - **Classes:** `openapi.classify(op)`: DELETE sensitive; GET/HEAD read unless the first name word is a sensitive
+    verb; others change, sensitive on any sensitive word.
+  - **Calls:** `ApiSession` has the Session shape (`list_tools` from the kept copy, `call_tool`).
+    - `build()` types and checks arguments: unknown/missing inputs, enums, numbers, JSON; path values
+      `quote(safe="")` with `.`/`..` refused; header values one line; the final URL must stay under `base`.
+    - `_sign()` reads the grant at call time: `{header, value}`, `{query, value}` or an OAuth token via
+      `ConnectionStore._token`.
+    - `request()` resolves the host, requires every address public (or loopback when the base is), and connects
+      `_PinnedHTTPS`/`_PinnedHTTP` to that address with SNI and certificate checks for the name. No redirects; 25 MB
+      answers.
+    - `_result()`: JSON becomes `structuredContent` (a list is kept under `items`); PDF/CSV/media become a resource
+      blob, so `_keep` makes an artifact (`FILE_TYPES`); 4xx is `isError` with a plain sentence; 401 raises
+      `NeedsSignIn`, so the status turns `needs_key` or `needs_sign_in` by auth.
+  - **Store:** `ConnectionStore.add_api` / `_insert_api` / `_refresh_api` (no network: steps say what it needs).
+    - `set_key` also takes `{query, value}` (API only).
+    - `_api_oauth` builds the OAuth server from the description: no discovery, no DCR (so `needs_client`), and no
+      resource indicator (`mcp.authorize_url` / `token_request` omit an empty `resource`).
+    - Links in API results are not downloaded unless it is a final `post` step (`_wants_file`).
+    - API tools are never auto-paired, and `_poll` stops on a `FINISHED` status.
+  - **Owner override:** `connection_tool.override` via `settings({classes})`. `_cls()` is the effective class; a
+    sensitive base class is never lowered. A changed tool clears its override.
+- **Chaining** (`command/steps.py`, `center.py`):
+  - `task.make` / `routine.make` store `{steps, then}`. `plan_of()` reads C3 one-step rows, and `public()` keeps the
+    first step's fields at the top for C3 readers.
+  - `task.step_at` is the next step; the migration sets it to 1 for C3 tasks that already made their file.
+    `tool_call.step` records the step.
+  - `_plan_spec` accepts `make` (C3) or `steps` + `then` (`post`/`keep`/`phone`), 1–5 steps.
+    `check_arguments` allows only earlier-step refs, and `_check_goal` allows goal refs only when results go to a
+    phone.
+  - `_start_make` fills arguments with `chain.fill` from the done calls' kept results (a whole-value placeholder keeps
+    its type) and calls with `step=`.
+  - `_make_finished` advances `step_at`, or finishes:
+    - `post` needs a media artifact;
+    - `keep` succeeds with or without a file;
+    - `phone` schedules the phone.
+  - `_goal_with_results` → `chain.quote_for_phone`: `‹data N›` in the goal, then `DATA_HEADER` and a
+    `<<<DATA … DATA>>>` block of one-line JSON values; the last result is included when the goal names none. A goal
+    over `PHONE_GOAL` (2,000) fails the task.
+- **Cards** (`ConnectionStore.card` / `import_card` / `_apply_card`; routes `GET /v1/cc/connections/{id}/card`,
+  `POST /v1/cc/connections/import`):
+  - **Export:** `{cyclone: "connector-card", version: 1, name, kind, remote|local|api, signIn{method, header, query},
+    tools[{name, hash (approved), class, allowed, rule}], dailyCap, approval, pairings, hash}`.
+    - `card_hash` is SHA-256 of the canonical JSON.
+    - The API part is `to_openapi(api)`, re-read by `normalize` on import; the round trip keeps tool hashes.
+    - Local env values are exported empty.
+  - **Import:**
+    - checks keys, version and the hash (optional, for curated cards);
+    - refuses env values;
+    - creates the connection with `card` pending (cap and rule from the card).
+  - **`_apply_card`** runs from `_sync_tools` once tools are listed:
+    - same hash → allowed (and the class override);
+    - changes get `always`;
+    - a read without a hash (curated) is allowed by name;
+    - then `card` is cleared.
+- **Glass:**
+  - the API description mode and the Connector cards box (paste, file, curated from `services/cards.ts`);
+  - `queryKeyForm` / `basicForm` (`basicAuth`), Export card, and the "counts as" select per tool;
+  - `createMakeEditor` is now the steps editor: a `Plan` is `{make}` for one step, else `{steps, then}`. Field
+    references are checked with `stepRefs`, and goals with `checkGoalRefs`;
+  - Try it state is kept in `tries` across redraws;
+  - the Command Center tab strip scrolls at phone width.
+- **Tests and checks:** `tests/test_command_api_maker.py` (20, `tests/fake_api.py`), `tests/apimaker.test.mjs` (8),
+  3 guards in `test_command_center_guard.py`. PyYAML is a gateway dependency and a PyInstaller hidden import.

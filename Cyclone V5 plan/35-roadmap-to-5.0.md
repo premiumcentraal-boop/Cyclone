@@ -9,8 +9,9 @@ own tests, guards, release notes and an end-to-end check. The order is a recomme
   - the phone Mind, planes and background (alpha.40–46);
   - web-only PC and one-click setup (47–48);
   - Drive (49–53);
-  - Command Center C0 shell (51), C1 vault (54), C2 sealed delivery (55), C3 connections with pre-authorised leases (56).
-- **Planned, not built:** the connector maker (plan 34), parallel sessions (plan 26 §6, deferred since alpha.47),
+  - Command Center C0 shell (51), C1 vault (54), C2 sealed delivery (55), C3 connections with pre-authorised leases (56);
+  - the connector maker: any MCP and local servers (57), the API maker, result chaining and cards (58).
+- **Planned, not built:** parallel sessions (plan 26 §6, deferred since alpha.47),
   the mission desk (plan 21), C4 coordinator, C5 Pages, C6 hosted (plan 33), and the road to 5.0 (plan 9).
 
 ## The owner's tests (not build runs, but they gate "done")
@@ -30,7 +31,7 @@ These are all stated as UNVERIFIED in their release notes:
 | # | Release | What it delivers | Plan |
 |---|---|---|---|
 | 1 | **alpha.57: Connect any MCP** (built) | Any remote server: SSE fallback, API key/header, a pasted OAuth client, Client ID Metadata Documents. Tools sorted into reads and changes, **Allow all reads**, per-tool rules, auto-paired job checkers, pinning, **Try it**. **Local MCP servers on the PC:** config import, the plain-words setup card, pinned launchers, Job Object lifecycle, keys in DPAPI | 34 M1+M2 |
-| 2 | **alpha.58: API maker and cards** | OpenAPI → connector with no code; GET reads, writes ask; results chained into the next step (`{step.field}`); connector cards (export, import, curated set incl. Higgsfield once verified) | 34 M3+M4 |
+| 2 | **alpha.58: API maker and cards** (built) | OpenAPI → connector with no code; GET reads, writes ask; results chained into the next step (`{step.field}`); connector cards (export, import, curated set incl. Higgsfield once verified) | 34 M3+M4 |
 | 3 | **alpha.59: Parallel sessions** | The phone runs up to 2 background missions plus your screen. Each has its own task card, inbox, plane and leases. Per-session notifications and pill; the Lab concurrency suite. The Command Center then sends a phone more than one task at a time | 26 §6 |
 | 4 | **alpha.60: Fleet health and alerts** | Phone heartbeat (battery, heat, storage, network, versions), quarantine after 3 infrastructure failures, "phones behind on updates". Alerts to your phone or email: phone offline over 10 minutes, success rate under 80%, a login failing twice, a cap reached. Metrics per recipe, account and phone | 33 §10–11 |
 | 5 | **alpha.61: Coordinator (C4)** | The AI coordinator in the runtime. Fixed tools: accounts, phones, recipes, tasks, routines, runs, artifacts, connections — no vault values, no approving, no adding connections. Also: budgets (tasks and credits a day), a daily or weekly report page, the Lab coordinator suite, and Cyclone as an MCP server so Claude or Codex can create tasks behind the same approvals | 33 §7, §8 |
