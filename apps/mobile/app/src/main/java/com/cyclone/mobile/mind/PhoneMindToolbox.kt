@@ -389,8 +389,8 @@ class PhoneMindToolbox(
      * here sends. Null with no box, several, or text Cyclone did not write (then the owner checks it on screen).
      */
     private fun composerDraft(): String? {
-        val filled = refs.all().filter { it.editable && !it.password }
-            .mapNotNull { ref -> env.fieldValue(ref.elementId)?.trim()?.takeIf { it.isNotEmpty() } }
+        val filled = controlsById.values.filter { it.evidence.optBoolean("editable") && !it.evidence.optBoolean("password") }
+            .mapNotNull { control -> env.fieldValue(control.elementId)?.trim()?.takeIf { it.isNotEmpty() } }
         return filled.singleOrNull()?.takeIf { it in typedDrafts }
     }
 
@@ -653,6 +653,8 @@ class PhoneMindToolbox(
         }
         owner.status(done)
         fresh = false
+        // Read before the tap: what is in the message box now is what a send tap sends.
+        val boxBefore = composerDraft()
         var envelope = env.act(tool, params, goal)
         var waited = 0L
         // The policy check raises GATE_REQUIRED; Accessibility's own click interceptor reports a refused click as a
@@ -660,7 +662,7 @@ class PhoneMindToolbox(
         val gated = envelope.errorClass == AgentFailureClass.GATE_REQUIRED || envelope.errorClass == AgentFailureClass.POLICY_DENIED
         // A send from a chat's message box: the approval carries the box's exact text, read live, so the owner (or Drive,
         // after reading it back word for word) approves exactly what the tap sends.
-        val draft = if (gated) composerDraft() else null
+        val draft = if (gated) boxBefore else null
         val approval = if (!gated) null else if (draft != null)
             owner.awaitApproval(done.replaceFirstChar { it.lowercase() }, ownerTimeoutMs, MindSend(draft, "", appLabel(screen?.packageName.orEmpty()) ?: ""))
             else owner.awaitApproval(done.replaceFirstChar { it.lowercase() }, ownerTimeoutMs)
