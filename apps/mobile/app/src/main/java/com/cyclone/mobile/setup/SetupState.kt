@@ -16,9 +16,9 @@ import com.cyclone.mobile.runtime.background.BackgroundSetupActivity
  * screen or permission dialog for it. It never changes a setting itself.
  */
 object SetupState {
-    fun cards(): List<SetupCard> = SetupFlow.cards(Build.VERSION.SDK_INT)
+    fun cards(context: Context): List<SetupCard> = SetupFlow.cards(Build.VERSION.SDK_INT, com.cyclone.mobile.voice.DriverMode.enabled(context))
 
-    fun done(context: Context): Set<SetupCard> = cards().filterTo(mutableSetOf()) { isOn(context, it) }
+    fun done(context: Context): Set<SetupCard> = cards(context).filterTo(mutableSetOf()) { isOn(context, it) }
 
     fun isOn(context: Context, card: SetupCard): Boolean = when (card) {
         SetupCard.PHONE_CONTROL -> CyclonePermissionSetup.phoneControlReady(context)
@@ -34,7 +34,7 @@ object SetupState {
             context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 
-    fun shouldOpen(context: Context): Boolean = SetupFlow.shouldOpen(cards(), done(context), SetupStore.seen(context))
+    fun shouldOpen(context: Context): Boolean = SetupFlow.shouldOpen(cards(context), done(context), SetupStore.seen(context))
 
     /**
      * Opens the place where the owner turns [card] on. Runtime permissions use Android's own dialog the first time;

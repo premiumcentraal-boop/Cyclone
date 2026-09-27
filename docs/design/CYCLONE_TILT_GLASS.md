@@ -183,6 +183,31 @@ When a task needs you, the owner card takes the card's place and rises, whatever
 - Approvals: when the request quotes text, the quote is the message and the rest is the line above it.
 - Copy lives in pure objects (`OverlayGlassCopy`) so it is unit-tested apart from the composables.
 
+## 7b. Drive (plan 32): the AI button and AI mode
+
+- **The AI button** (`ui/overlay/DriverButton.kt`) replaces the idle bubble in Driver mode:
+  - the drive orb on idle-bubble glass (`tiltGlass(size / 2, dots = false, thin = true, seeThrough = 0.78f)`), 84 dp
+    by default (72 / 96);
+  - a 16 dp margin around it holds the glow;
+  - a thin teal ring turns around the glass while a task works;
+  - the glow turns `GlassWarm` when Cyclone needs the owner.
+- **The orb** (`DriveOrb`) is the voice orb's lit sphere, with the same gradient, swirl and highlight towards
+  `GlassLight`. Its motion follows real state only:
+  - calm breath (2.8 s) at rest;
+  - swells with the owner's voice while listening, with one ring riding out on loud speech;
+  - fast swirl (1.3 s) while thinking;
+  - pulses with Cyclone's voice while speaking;
+  - still when Android animations are off.
+- **AI mode** (`ui/overlay/AiModeOverlay.kt`) is a `tiltGlass(30.dp)` panel rising from the bottom (slide + fade,
+  260 ms). Top to bottom:
+  - the status word (12 sp, spaced capitals; warm when Cyclone needs you);
+  - the owner's words on a veil pill (`GlassMuted`, 20 sp) and Cyclone's line on a veil pill (`GlassInk`, 23 sp),
+    each two lines at most;
+  - the 136 dp orb;
+  - one 56 dp **Stop** (`GlassCapsuleButton` primary), with **Not now** beside it when Cyclone asks.
+- **The dim:** a non-touchable window darkens the screen (46 %, deeper at the bottom), only while a request is live.
+- **Copy and state** live in `voice/VoiceCopy` and `voice/VoiceFace` (pure, tested); the composables only draw them.
+
 ## 8. Tried and dropped
 
 These came up in the design rounds and were rejected. Don't bring them back without a reason:

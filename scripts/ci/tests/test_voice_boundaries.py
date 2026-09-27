@@ -44,7 +44,7 @@ class VoiceBoundaries(unittest.TestCase):
             overlay_uses |= set(re.findall(r"OverlayChromeRuntime\.(\w+)", body))
             for imported in re.findall(r"^import (com\.cyclone\.mobile\.[\w.]+)", text, re.M):
                 self.assertRegex(imported, r"^com\.cyclone\.mobile\.(voice|task\.TaskCommands?|owner\.|ai\.OpenRouterSecretStore|"
-                                 r"ui\.overlay\.OverlayChromeRuntime|runtime\.background\.(TaskPhase|WorkspaceTaskUi)|"
+                                 r"ui\.overlay\.(OverlayChromeRuntime|glass\.VoicePress)|runtime\.background\.(TaskPhase|WorkspaceTaskUi)|"
                                  r"mind\.mission\.MindRedaction|R$)", f"voice/{name} imports {imported}")
         self.assertEqual(overlay_uses, {"submitRequest"})
         session = code((VOICE / "VoiceSession.kt").read_text(encoding="utf-8"))

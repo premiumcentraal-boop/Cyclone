@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.48 dev1: Cyclone-Setup.exe - one double-click installs Cyclone for Windows (replaces any older Cyclone, keeps pairing and keys).
+# Cyclone V5 alpha.49 dev1: Drive D1 (plan 32) - Driver mode: tap the voice orb, talk, hear a one-line confirmation, Cyclone works and tells you when it is done.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.48.dev1"
+product_version = "5.0.0-alpha.49.dev1"
 channel = "development"
-android_version_code = 192
+android_version_code = 193
 python_version = "5.0.0-alpha.47.dev1"
 
 [components]
-mobile = "5.0.0-alpha.48.dev1"
+mobile = "5.0.0-alpha.49.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha48-dev1-windows-setup"
+candidate_generation = "cyclone-v5-alpha49-dev1-drive-talk"

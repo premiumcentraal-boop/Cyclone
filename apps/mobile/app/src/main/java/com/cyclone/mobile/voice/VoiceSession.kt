@@ -8,6 +8,7 @@ import com.cyclone.mobile.runtime.background.TaskPhase
 import com.cyclone.mobile.task.TaskCommand
 import com.cyclone.mobile.task.TaskCommands
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
+import com.cyclone.mobile.ui.overlay.glass.VoicePress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -71,9 +72,21 @@ class VoiceSession(context: Context) {
         scope.launch(Dispatchers.IO) { runCatching { VoiceCatalog.refresh(OpenRouterSecretStore.read(app)) } }
     }
 
+    private var lastPressAt = 0L
+    private var listeningSince = 0L
+
+    /**
+     * The orb was tapped. [VoicePress] keeps the same guards as the voice button: a bounce or quick second touch is
+     * one press, and a tap in the first moments of listening does not cut the owner off.
+     */
     fun tap() {
-        if (_turn.value.phase == VoicePhase.LISTENING) { capture.finish(); return }
-        dispatch(VoiceEvent.Tap)
+        val now = SystemClock.uptimeMillis()
+        val listening = _turn.value.phase == VoicePhase.LISTENING
+        when (VoicePress.down(now, listening, listeningSince, lastPressAt)) {
+            VoicePress.Action.NONE -> return
+            VoicePress.Action.STOP -> { lastPressAt = now; capture.finish() }
+            VoicePress.Action.START -> { lastPressAt = now; dispatch(VoiceEvent.Tap) }
+        }
     }
 
     fun stop() {
@@ -115,6 +128,7 @@ class VoiceSession(context: Context) {
 
     private fun listen() {
         listenJob?.cancel()
+        listeningSince = SystemClock.uptimeMillis()
         clip = null
         heardText = null
         val settings = DriverMode.settings.value

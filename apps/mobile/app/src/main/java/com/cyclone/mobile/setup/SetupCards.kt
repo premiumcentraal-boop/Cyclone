@@ -53,7 +53,7 @@ enum class SetupCard(
     ),
     DRIVER(
         "driver", "Drive with Cyclone",
-        "A big voice button for the car. Tap, talk, and Cyclone tells you when it's done. Paying or deleting waits until you stop.",
+        "Cyclone hears you only after you tap the orb, and keeps nothing it hears. Paying or deleting waits until you stop.",
     ),
     ;
 
@@ -95,7 +95,9 @@ object SetupCopy {
 
 /** Which card to show. [done] = settings already on; [passed] = cards skipped in this run of the flow. */
 object SetupFlow {
-    fun cards(sdk: Int): List<SetupCard> = SetupCard.entries.filter { sdk >= it.minSdk }
+    /** [driving]: Driver mode is on. Its card (plan 32) is part of setup only then, to explain the microphone. */
+    fun cards(sdk: Int, driving: Boolean = false): List<SetupCard> =
+        SetupCard.entries.filter { sdk >= it.minSdk && (it != SetupCard.DRIVER || driving) }
 
     /** The next card: the first one that is not on yet and not skipped in this run; null when the flow is finished. */
     fun next(cards: List<SetupCard>, done: Set<SetupCard>, passed: Set<SetupCard>): SetupCard? =

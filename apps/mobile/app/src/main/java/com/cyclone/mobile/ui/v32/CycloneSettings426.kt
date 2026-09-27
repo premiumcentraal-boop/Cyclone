@@ -122,7 +122,7 @@ internal fun CycloneSettingsPage426(
     val batteryUnrestricted = CyclonePermissionSetup.batteryUnrestricted(context)
     val background = remember(refreshTick) { BackgroundSetup.read(context) }
     val essentialsReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
-    val setupCards = remember { com.cyclone.mobile.setup.SetupState.cards() }
+    val setupCards = remember { com.cyclone.mobile.setup.SetupState.cards(context) }
     val setupDone = remember(refreshTick) { com.cyclone.mobile.setup.SetupState.done(context).size }
 
     fun modelValue(): String = V39AiChatContract.modelForStored(selectedModel).label

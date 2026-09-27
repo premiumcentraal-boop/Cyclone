@@ -77,7 +77,7 @@ import com.cyclone.mobile.ui.overlay.glass.veilPill
  */
 @Composable
 internal fun SetupCardSheet(context: Context, refreshTick: Int, only: SetupCard?, onClose: () -> Unit) {
-    val cards = remember { SetupState.cards() }
+    val cards = remember { SetupState.cards(context) }
     val done = remember(refreshTick) { SetupState.done(context) }
     var passed by remember { mutableStateOf(emptySet<SetupCard>()) }
 

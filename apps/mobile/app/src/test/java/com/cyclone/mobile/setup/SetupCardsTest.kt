@@ -12,7 +12,15 @@ class SetupCardsTest {
     @Test fun backgroundCardOnlyOnAndroid15() {
         assertTrue(SetupCard.BACKGROUND in SetupFlow.cards(35))
         assertFalse(SetupCard.BACKGROUND in SetupFlow.cards(34))
-        assertEquals(SetupCard.entries.size - 1, SetupFlow.cards(34).size)
+        assertEquals(SetupCard.entries.size - 2, SetupFlow.cards(34).size)
+    }
+
+    @Test fun theDriverCardIsPartOfSetupOnlyInDriverMode() {
+        assertFalse(SetupCard.DRIVER in SetupFlow.cards(35))
+        assertTrue(SetupCard.DRIVER in SetupFlow.cards(35, driving = true))
+        // Turning Driver mode on after setup shows its card once, as a new card would.
+        val seenBefore = SetupFlow.cards(35).map { it.id }.toSet()
+        assertTrue(SetupFlow.shouldOpen(SetupFlow.cards(35, driving = true), SetupFlow.cards(35).toSet(), seenBefore))
     }
 
     @Test fun startsWithPhoneControl() {
