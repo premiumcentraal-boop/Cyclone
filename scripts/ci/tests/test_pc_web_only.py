@@ -70,6 +70,15 @@ class WebOnlyPcGuards(unittest.TestCase):
             self.assertIn(needed, build)
         publish = PUBLISH.read_text(encoding="utf-8")
         self.assertIn('sha256sum --check "Cyclone-Setup-$PRODUCT.exe.sha256"', publish)
+        # Started from a PowerShell 7 terminal, Windows PowerShell inherits PowerShell 7's module path and cannot load
+        # Get-FileHash (alpha.48 release run #10): the setup clears it for install.ps1, and install.ps1 repairs it.
+        self.assertLess(text.index('SetEnvironmentVariable(t "PSModulePath", p 0)'), text.index("nsExec::ExecToLog"))
+        install = INSTALL.read_text(encoding="utf-8")
+        self.assertLess(install.index("$env:PSModulePath = "), install.index("Get-FileHash -Algorithm"))
+        # A failed setup says why: its log, with install.ps1's transcript, is printed by the package build.
+        self.assertIn('-Log "${SETUP_LOG}"', text)
+        self.assertIn("Start-Transcript -Path $Log", install)
+        self.assertIn("Get-Content $SetupLog", build)
 
     def test_every_pc_route_needs_the_bearer(self):
         text = PC_API.read_text(encoding="utf-8")
