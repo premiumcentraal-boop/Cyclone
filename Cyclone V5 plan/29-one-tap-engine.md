@@ -2,7 +2,7 @@
 
 **Status:**
 - **Layer 1 (direct first):** built in **alpha.45**.
-- **Layer 2 (the one-tap engine):** planned for alpha.46.
+- **Layer 2 (background screen):** stays on Shizuku; no Cyclone engine (see §4). Alpha.46 is the setup cards (plan 30).
 - **Next after that:** parallel sessions in alpha.47, Drive in alpha.48–49.
 
 The first version of this plan was only the one-tap engine (Cyclone's own replacement for Shizuku). The owner asked
@@ -43,7 +43,7 @@ upgrade, never a foundation.
 | Layer | What | Works on | Status |
 |---|---|---|---|
 | **1. Direct** | Android's own providers and contracts: the calendar (read and add), contacts (look up), the clock (timers and alarms without the clock's screen), notification replies, links and intents | **Every phone, no setup** | alpha.45 (notification replies since alpha.42) |
-| **2. Background screen** | A private display, only on phone models and Android versions whose Background Check passes. The one-tap engine replaces Shizuku's setup. | Android 15+, proven per model | alpha.44 check; engine alpha.46 |
+| **2. Background screen** | A private display through Shizuku, only where the Background Check passes. | Android 15+, proven per model | alpha.44 check; Shizuku stays the helper |
 | **3. The owner's screen** | Cyclone works where the owner can watch. The overlay shows what it does; the owner takes the phone back in one tap. | Every phone | since alpha.25 |
 | 4. Cloud screen (later, opt-in) | Web tasks in a cloud browser | Every phone | later; costs money and uses accounts in the cloud, so the owner must opt in |
 
@@ -93,27 +93,20 @@ happens. The permissions are also in Settings → Permissions:
 **What this changes for the owner:** "add dinner with Sam Friday at 7", "what's on my calendar tomorrow", "what's
 Sam's number" and "set an alarm for 6:30" no longer open any app or take the screen, on any phone.
 
-## 4. Layer 2 in alpha.46 (plan)
+## 4. Layer 2: decided, no Cyclone engine
 
-Unchanged from the first version of this plan, now as polish on a proven layer.
+**Decision (2026-09-27):** Cyclone does **not** build its own privileged engine. It will not start a `shell` process
+itself, pair with wireless debugging, or grant itself powers the owner did not give through an audited tool. That work
+was started and then removed in full; do not bring it back in any form.
 
-**Cyclone Engine:**
-- Cyclone's own `shell` process, started through wireless debugging with a built-in client.
-- Setup is a Cyclone mission. The owner only types their PIN and taps Allow; Android reserves both for them.
-- Silent restart after reboots on Wi-Fi.
-- Wireless debugging is turned off again after the start.
-- Self-healing: it restarts itself, turns phone control back on and keeps battery restrictions off.
-- Shizuku stays as a fallback until the engine has proven itself.
+Layer 2 stays exactly as it is:
+- **Shizuku** (separate, installed by the owner, open source and audited) is the only privileged helper.
+- The background screen is used only where the Background Check (plan 28) passes.
+- What gets better is **setup**, not privilege: the guided setup cards in plan 30 walk the owner through Shizuku and
+  every other important setting in plain words, one card at a time.
 
-**Per-model enabling:**
-- The background screen is used only where the Background Check passed on that model and Android version.
-- The first entry is Pixel. Other models join as their checks pass (locally; an anonymous shared list only if the owner
-  opts in later).
-
-**Phase 0 on the owner's Pixel first.** These questions decide only how many taps remain:
-- Does the engine survive wireless debugging (or Developer options) being turned off?
-- Can Accessibility read the pairing code?
-- Does a silent reconnect at boot work?
+The long-term answer for "installed from the get-go" is distribution (a phone maker or system-app build), not an engine
+inside Cyclone.
 
 ## 5. Invariants kept
 
