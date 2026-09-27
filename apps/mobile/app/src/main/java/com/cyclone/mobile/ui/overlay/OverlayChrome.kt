@@ -4,7 +4,6 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,63 +13,36 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowUpward
-import androidx.compose.material.icons.rounded.AttachFile
-import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import com.cyclone.mobile.runtime.background.WorkspaceTasks
-import com.cyclone.mobile.runtime.background.TaskPhase
-import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import com.cyclone.mobile.capture.LiveCaptureSessionManager
-import com.cyclone.mobile.capture.LiveCaptureService
-import com.cyclone.mobile.capture.LiveCaptureConsentActivity
-import com.cyclone.mobile.capture.ScreenSharePhase
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,31 +50,41 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.ai.OpenRouterModelPresets
+import com.cyclone.mobile.capture.LiveCaptureConsentActivity
+import com.cyclone.mobile.ui.overlay.glass.tiltGlass
+import com.cyclone.mobile.capture.LiveCaptureService
+import com.cyclone.mobile.capture.LiveCaptureSessionManager
+import com.cyclone.mobile.capture.ScreenSharePhase
+import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.ui.v32.CycloneAskTaskPanel
+import com.cyclone.mobile.ui.v32.CycloneForegroundWorkCard
+import com.cyclone.mobile.ui.v32.CyclonePendingRequests
+import com.cyclone.mobile.ui.v32.CycloneTrayIconAction
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
-import kotlinx.coroutines.launch
 
 private val AuroraBlue = Color(0xFF4A8DFF)
 private val AuroraCyan = Color(0xFF80E9FF)
-private val AuroraViolet = Color(0xFF8568FF)
-private val AuroraMagenta = Color(0xFFE56CFF)
-private val ComposerInk = Color(0xFF191A20)
+private val AuroraWhite = Color(0xFFE8F4FF)
 
 data class OverlayAiSettings(
-    val modelId: String = OpenRouterModelPresets.DEFAULT.id,
+    val modelId: String = "",
     val reasoningEffort: String = "medium",
 )
 
@@ -179,46 +161,77 @@ fun OverlayChrome(
     onComposerChanged: (String) -> Unit = {},
     onRequestSubmitted: (String) -> Unit = {},
     onVoiceInput: () -> Unit = {},
+    onVoiceStop: () -> Unit = {},
     aiSettings: OverlayAiSettings = OverlayAiSettings(),
     onAiSettingsChanged: (OverlayAiSettings) -> Unit = {},
     idleVisualState: OverlayIdleVisualState = OverlayIdleVisualState(),
+    secretCardState: com.cyclone.mobile.secrets.SecretsCardUiState? = null,
+    ownerMoment: com.cyclone.mobile.owner.OwnerMoment? = null,
     onIdleTap: () -> Unit = {},
     onIdleSemanticActivate: () -> Unit = { onAction(OverlayUserAction.ASK_CYCLONE) },
     modifier: Modifier = Modifier,
 ) {
-    CycloneV32Theme {
-        val showOrb = snapshot.state == OverlayChromeState.IDLE || snapshot.minimized
+    com.cyclone.mobile.ui.v32.CycloneSignatureTheme {
+        val presentation = when {
+            secretCardState?.visible == true -> "secret"
+            com.cyclone.mobile.owner.OwnerMoments.overlayCard(ownerMoment) -> "owner"
+            snapshot.state == OverlayChromeState.IDLE -> "idle"
+            snapshot.launcherCollapsed -> "launcher"
+            snapshot.state == OverlayChromeState.GATE -> "gate"
+            else -> "composer"
+        }
         AnimatedContent(
-            targetState = showOrb,
+            targetState = presentation,
             transitionSpec = {
-                if (targetState) {
-                    (fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 2 })
-                        .togetherWith(fadeOut(tween(130)))
-                } else {
-                    (fadeIn(tween(220)) + slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 2 })
-                        .togetherWith(fadeOut(tween(120)) + slideOutVertically(tween(160)) { it / 3 })
-                }
+                (fadeIn(tween(180)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { it / 3 })
+                    .togetherWith(fadeOut(tween(130)) + slideOutVertically(tween(160)) { it / 4 })
             },
-            label = "Cyclone composer",
-        ) { orb ->
-            when {
-                orb && snapshot.idleChipVisible -> IdleActivationHotspot(
-                    state = idleVisualState,
-                    onTap = onIdleTap,
-                    onSemanticActivate = onIdleSemanticActivate,
-                    modifier = modifier,
-                )
-                !orb && snapshot.state == OverlayChromeState.GATE -> GatePanel(snapshot, onAction, modifier)
-                !orb -> ComposerPanel(
+            label = "Cyclone chat drawer",
+        ) { mode ->
+            when (mode) {
+                "secret" -> com.cyclone.mobile.secrets.SecretsCardOverlay(secretCardState!!)
+                "owner" -> ownerMoment?.let { moment ->
+                    com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        if (moment.taskId.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX)) {
+                            PlaneRow(moment.taskId)
+                            androidx.compose.foundation.layout.Spacer(Modifier.height(OverlayStackGeometry.PILL_GAP_DP.dp))
+                        }
+                        OverlayOwnerCard(moment)
+                    }
+                }
+                "idle" -> if (snapshot.idleChipVisible) {
+                    IdleActivationHotspot(
+                        state = idleVisualState,
+                        onTap = onIdleTap,
+                        onSemanticActivate = onIdleSemanticActivate,
+                        modifier = modifier,
+                    )
+                } else {
+                    Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
+                }
+                "launcher" -> if (snapshot.idleChipVisible) {
+                    IdleActivationHotspot(
+                        state = idleVisualState,
+                        onTap = onIdleTap,
+                        onSemanticActivate = onIdleSemanticActivate,
+                        modifier = modifier,
+                    )
+                } else {
+                    Box(Modifier.size(OverlayChromeContract.IDLE_TOUCH_SIZE_DP.dp))
+                }
+                "gate" -> GatePanel(snapshot, onAction)
+                else -> { com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight(); ComposerPanel(
                     snapshot = snapshot,
+                    minimized = snapshot.minimized,
                     onAction = onAction,
                     onComposerChanged = onComposerChanged,
                     onRequestSubmitted = onRequestSubmitted,
                     onVoiceInput = onVoiceInput,
+                    onVoiceStop = onVoiceStop,
                     aiSettings = aiSettings,
                     onAiSettingsChanged = onAiSettingsChanged,
-                    modifier = modifier,
-                )
+                ) }
             }
         }
     }
@@ -271,116 +284,83 @@ internal fun OverlayIdleHalo(
         pulseAlpha.animateTo(0f, tween(170))
     }
 
-    Canvas(
-        modifier
-            .size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp)
-            .graphicsLayer {
-                scaleX = pulseScale.value
-                scaleY = pulseScale.value
-            },
+    // Plan 27: a small, slightly oval, see-through glass bubble with a thin shine and Cyclone's mark; taps light it up.
+    Box(
+        modifier.size(OverlayChromeContract.IDLE_VISUAL_WIDTH_DP.dp, OverlayChromeContract.IDLE_VISUAL_HEIGHT_DP.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        val center = Offset(size.width / 2f, size.height / 2f)
         val response = pulseAlpha.value
-        drawLine(
-            brush = Brush.horizontalGradient(
-                listOf(
-                    Color.Transparent,
-                    AuroraBlue.copy(alpha = 0.07f + response * 0.07f),
-                    AuroraCyan.copy(alpha = 0.15f + response * 0.11f),
-                    AuroraMagenta.copy(alpha = 0.10f + response * 0.09f),
-                    Color.Transparent,
-                ),
-            ),
-            start = Offset(size.width * 0.08f, center.y),
-            end = Offset(size.width * 0.92f, center.y),
-            strokeWidth = 1.2.dp.toPx(),
-            cap = StrokeCap.Round,
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                listOf(
-                    AuroraCyan.copy(alpha = 0.06f + response * 0.13f),
-                    AuroraViolet.copy(alpha = 0.025f + response * 0.06f),
-                    Color.Transparent,
-                ),
-                center = center,
-                radius = 31.dp.toPx(),
-            ),
-            radius = 31.dp.toPx(),
-            center = center,
-        )
-        drawCircle(
-            color = Color.White.copy(alpha = 0.34f + response * 0.34f),
-            radius = if (state.activating) 3.2.dp.toPx() else 2.3.dp.toPx(),
-            center = center,
-        )
-        drawCircle(
-            color = AuroraCyan.copy(alpha = 0.13f + response * 0.20f),
-            radius = 20.dp.toPx(),
-            center = center,
-            style = Stroke(width = 1.dp.toPx()),
-        )
+        Box(
+            Modifier.size(58.dp, 50.dp)
+                .graphicsLayer {
+                    scaleX = pulseScale.value
+                    scaleY = pulseScale.value
+                }
+                .tiltGlass(25.dp, dots = false, thin = true, seeThrough = 0.42f + 0.3f * response),
+            contentAlignment = Alignment.Center,
+        ) {
+            androidx.compose.material3.Icon(
+                androidx.compose.ui.res.painterResource(com.cyclone.mobile.R.drawable.ic_cyclone_status), null,
+                Modifier.size(if (state.activating) 22.dp else 20.dp),
+                tint = Color(0xFFE0F5F3).copy(alpha = 0.82f + 0.18f * response),
+            )
+        }
     }
 }
 
 @Composable
 private fun ComposerPanel(
     snapshot: OverlayChromeSnapshot,
+    minimized: Boolean,
     onAction: (OverlayUserAction) -> Unit,
     onComposerChanged: (String) -> Unit,
     onRequestSubmitted: (String) -> Unit,
     onVoiceInput: () -> Unit,
+    onVoiceStop: () -> Unit,
     aiSettings: OverlayAiSettings,
     onAiSettingsChanged: (OverlayAiSettings) -> Unit,
-    modifier: Modifier,
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
-    val scope = rememberCoroutineScope()
-    var accessory by remember { mutableStateOf<ComposerAccessory>(ComposerAccessory.NONE) }
-    var modelsExpanded by remember { mutableStateOf(false) }
+    // The + tools drawer lives in its own window (OverlayToolsSheet); this panel only reads it.
+    val accessory by OverlayToolsSheetState.page.collectAsState()
     val sharing by LiveCaptureSessionManager.state.collectAsState()
     val attached by PendingTaskAttachment.present.collectAsState()
-    val focusRequester = remember { FocusRequester() }
+    val queued by WorkspaceTasks.requests.state.collectAsState()
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
-    var editorFocused by remember { mutableStateOf(false) }
-    var restoreEditor by remember { mutableStateOf(false) }
     val workspace by WorkspaceTasks.state.collectAsState()
-    val task = workspace?.takeIf { it.phase != TaskPhase.STOPPED }
-    val compactRunning = task?.working == true && !editorFocused
-    LaunchedEffect(task?.taskId, task?.working) {
-        if (task?.working == true) { focusManager.clearFocus(); accessory = ComposerAccessory.NONE }
+    val clearedCards = com.cyclone.mobile.ui.v32.TaskCardDismissals.cleared(context)
+    val task = workspace?.takeIf { com.cyclone.mobile.ui.v32.taskCardVisible(it, clearedCards) }
+    val foregroundWorking = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
+    val activeWork = task?.working == true || foregroundWorking
+    val imePx = LocalOverlayImeBottomPx.current
+    val keyboardHeightDp = with(LocalDensity.current) {
+        maxOf(imePx, WindowInsets.ime.getBottom(this)).toDp().value.toInt()
     }
-    DisposableEffect(view) {
-        val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { focused ->
-            if (focused && restoreEditor) {
-                view.post {
-                    if (view.isAttachedToWindow && restoreEditor) {
-                        restoreEditor = false
-                        focusRequester.requestFocus()
-                        keyboard?.show()
-                    }
-                }
-            }
+    val panelHeight = SignatureDrawerGeometry.availableHeight(
+        LocalConfiguration.current.screenHeightDp, keyboardHeightDp,
+    ).coerceAtMost(650)
+    // The work panel is only a little taller than the live work card; the conversation above it
+    // (the first prompt) stays one scroll away instead of filling half the screen.
+    var workCardPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val upperMaxHeight = if (workCardPx > 0) {
+        with(density) { workCardPx.toDp() } + OverlayChromeContract.WORK_PANEL_PEEK_DP.dp
+    } else androidx.compose.ui.unit.Dp.Unspecified
+    // Cyclone's own glass keeps the Trace Field underneath it: report where it is on screen.
+    val hostView = LocalView.current
+    DisposableEffect(Unit) {
+        onDispose { com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.chromeBounds(null) }
+    }
+
+    LaunchedEffect(task?.taskId, task?.working, foregroundWorking) {
+        if (activeWork) {
+            focusManager.clearFocus()
+            OverlayToolsSheetState.close()
         }
-        view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-        onDispose { view.viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
     }
-    fun launchExternal(intent: Intent) {
-        OverlayExternalInteraction.active.value = true
-        restoreEditor = editorFocused
-        accessory = ComposerAccessory.NONE
-        runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            .onFailure {
-                restoreEditor = false
-                OverlayExternalInteraction.active.value = false
-                android.widget.Toast.makeText(context, "This action is unavailable.", android.widget.Toast.LENGTH_SHORT).show()
-            }
-    }
-    var dragOffset by remember { mutableStateOf(0f) }
-    var sheetHeight by remember { mutableStateOf(220f) }
-    var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val submit = {
         if (snapshot.composerText.isNotBlank()) {
@@ -389,186 +369,138 @@ private fun ComposerPanel(
         }
     }
 
-    fun settle(dismiss: Boolean) {
-        settleJob?.cancel()
-        settleJob = scope.launch {
-            animate(dragOffset, if (dismiss) sheetHeight else 0f, animationSpec = tween(180)) { value, _ ->
-                dragOffset = value
+    val upperVisible = !minimized && (task != null || foregroundWorking || queued.isNotEmpty() ||
+        sharing.phase != ScreenSharePhase.OFF || attached)
+    // Plan 27: folded while working, the Ask bar becomes the island with the live status.
+    val island = minimized && activeWork
+    val mindTaskId = task?.taskId?.takeIf { it.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX) }
+    val islandSnapshot = task?.let { remember(it) { com.cyclone.mobile.runtime.background.TaskPresentationProjector.project(it) } }
+    // After the owner moves the task behind the screen, the stack settles into the island (their home screen shows).
+    val planeState by com.cyclone.mobile.runtime.plane.MissionPlanes.ui.collectAsState()
+    val moveSeq = planeState?.moveSeq ?: 0L
+    var seenMove by remember { mutableStateOf(moveSeq) }
+    LaunchedEffect(moveSeq) {
+        if (moveSeq != seenMove) {
+            seenMove = moveSeq
+            when (planeState?.movedTo) {
+                com.cyclone.mobile.runtime.plane.PlaneKind.BACKGROUND -> if (!minimized) onAction(OverlayUserAction.MINIMIZE)
+                com.cyclone.mobile.runtime.plane.PlaneKind.SCREEN -> if (minimized) onAction(OverlayUserAction.ASK_CYCLONE)
+                null -> Unit
             }
-            if (dismiss) onAction(OverlayUserAction.MINIMIZE)
-            dragOffset = 0f
         }
     }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .imePadding()
-            .padding(
-                start = 12.dp,
-                end = 12.dp,
-                bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp,
-            )
-            .graphicsLayer { translationY = dragOffset }
-            .onSizeChanged { sheetHeight = it.height.toFloat().coerceAtLeast(1f) },
-        verticalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(18.dp)
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragStart = { settleJob?.cancel() },
-                        onVerticalDrag = { change, amount ->
-                            change.consume()
-                            dragOffset = (dragOffset + amount).coerceAtLeast(0f)
-                        },
-                        onDragCancel = { settle(false) },
-                        onDragEnd = { settle(SheetDismissal.shouldDismiss(dragOffset, sheetHeight)) },
-                    )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(34.dp, 4.dp).clip(CircleShape).background(Color.White.copy(alpha = .36f)))
-        }
-
-        if (task != null) {
-            Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 8.dp) {
-                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(task.title, color = Color.White, style = MaterialTheme.typography.titleMedium)
-                    Text(task.message, color = Color.White.copy(alpha = .72f), style = MaterialTheme.typography.bodyMedium, maxLines = 3)
-                    if (task.queued != null) Text("Follow-up saved", color = AuroraCyan, style = MaterialTheme.typography.labelMedium)
-                    Button(onClick = { onAction(OverlayUserAction.MINIMIZE); context.startActivity(WorkspaceTasks.progressIntent(context, task)) },
-                        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = AuroraBlue)) { Text("View progress") }
-                }
-            }
-        }
-        if (sharing.phase != ScreenSharePhase.OFF) {
-            ScreenSharePill(sharing) { LiveCaptureService.stop(context) }
-        }
-        if (accessory != ComposerAccessory.NONE) {
-            Surface(shape = RoundedCornerShape(26.dp), color = ComposerInk, shadowElevation = 6.dp) {
-                when (accessory) {
-                    ComposerAccessory.ATTACHMENTS -> Row(Modifier.heightIn(min = 52.dp).padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java)) }) { Text("File") }
-                        TextButton(onClick = { launchExternal(Intent(context, OverlayAttachmentActivity::class.java).putExtra("camera", true)) }) { Text("Photo") }
-                        TextButton(enabled = !sharing.active, onClick = {
-                            launchExternal(Intent(context, LiveCaptureConsentActivity::class.java))
-                        }) { Text("Share screen") }
-                    }
-                    ComposerAccessory.MODEL -> Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
-                        TextButton(onClick = { modelsExpanded = !modelsExpanded }) {
-                            Text(OpenRouterModelPresets.byId(aiSettings.modelId).label + if (modelsExpanded) " ▴" else " ▾")
-                        }
-                        if (modelsExpanded) {
-                        OpenRouterModelPresets.all.forEach { model ->
-                            TextButton(onClick = {
-                                onAiSettingsChanged(aiSettings.copy(modelId = model.id))
-                                modelsExpanded = false
-                            }) { Text((if (model.id == aiSettings.modelId) "✓ " else "") + model.label) }
-                        }
-                        TextButton(onClick = { launchExternal(Intent(context, CycloneAiSettingsActivity::class.java)) }) { Text("More AI settings") }
-                        TextButton(enabled = !sharing.active, onClick = {
-                            launchExternal(Intent(context, LiveCaptureConsentActivity::class.java).putExtra("wholeDisplay", true))
-                        }) { Text("Share for cross-app control") }
-                        }
-                    }
-                    ComposerAccessory.NONE -> Unit
-                }
-            }
-        }
-        if (attached) {
-            Surface(shape = RoundedCornerShape(24.dp), color = ComposerInk) {
-                TextButton(onClick = { PendingTaskAttachment.take() }) { Text("Reference attached · Remove") }
-            }
-        }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(34.dp),
-            color = ComposerInk,
-            shadowElevation = 8.dp,
-        ) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = OverlayChromeContract.COMPOSER_HEIGHT_DP.dp)
-                    .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(
-                    onClick = { accessory = accessory.toggle(ComposerAccessory.ATTACHMENTS) },
-                    modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                ) {
-                    Icon(Icons.Rounded.Add, "Add attachment", tint = Color.White, modifier = Modifier.size(27.dp))
-                }
-                if (!compactRunning) IconButton(
-                    onClick = { accessory = accessory.toggle(ComposerAccessory.MODEL) },
-                    modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                ) {
-                    Icon(Icons.Rounded.Tune, "Choose model", tint = Color.White, modifier = Modifier.size(24.dp))
-                }
-
-                BasicTextField(
-                    value = snapshot.composerText,
-                    onValueChange = onComposerChanged,
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.White),
-                    cursorBrush = SolidColor(AuroraCyan),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .onFocusChanged { editorFocused = it.isFocused }
-                        .heightIn(min = 48.dp)
-                        .padding(horizontal = 8.dp, vertical = 13.dp)
-                        .semantics { contentDescription = OverlayCopy.COMPOSER },
-                    decorationBox = { field ->
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (snapshot.composerText.isEmpty()) {
-                                Text(
-                                    if (snapshot.voiceListening) OverlayCopy.LISTENING else OverlayCopy.COMPOSER,
-                                    color = Color.White.copy(alpha = .68f),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                            }
-                            field()
-                        }
-                    },
-                )
-
-                if (!compactRunning) IconButton(
-                    onClick = onVoiceInput,
-                    modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                ) {
-                    Icon(
-                        Icons.Rounded.Mic,
-                        contentDescription = "Dictate request",
-                        tint = if (snapshot.voiceListening) AuroraCyan else Color.White,
-                        modifier = Modifier.size(25.dp),
-                    )
-                }
-
-                FilledIconButton(
-                    onClick = { if (task?.working == true && snapshot.composerText.isBlank()) WorkspaceTasks.command(context, task, "cancel") else submit() },
-                    enabled = task?.working == true || snapshot.composerText.isNotBlank(),
-                    modifier = Modifier.size(OverlayChromeContract.COMPOSER_TOUCH_TARGET_DP.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = AuroraBlue,
-                        disabledContainerColor = Color.White.copy(alpha = .10f),
-                        contentColor = Color.White,
-                        disabledContentColor = Color.White.copy(alpha = .30f),
+    SignatureOverlayDrawer(
+        expanded = upperVisible,
+        minimized = minimized,
+        onCollapse = {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+            OverlayToolsSheetState.close()
+            onAction(OverlayUserAction.MINIMIZE)
+        },
+        onExpand = { onAction(OverlayUserAction.ASK_CYCLONE) },
+        modifier = Modifier.fillMaxWidth().heightIn(max = panelHeight.dp).padding(horizontal = 16.dp)
+            .onGloballyPositioned { coordinates ->
+                val origin = IntArray(2).also { hostView.getLocationOnScreen(it) }
+                val bounds = coordinates.boundsInWindow()
+                com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime.chromeBounds(
+                    android.graphics.RectF(
+                        bounds.left + origin[0], bounds.top + origin[1],
+                        bounds.right + origin[0], bounds.bottom + origin[1],
                     ),
-                ) {
-                    Icon(if (task?.working == true && snapshot.composerText.isBlank()) Icons.Rounded.Stop else Icons.Rounded.ArrowUpward,
-                        if (task?.working == true && snapshot.composerText.isBlank()) "Stop task" else "Send request", modifier = Modifier.size(23.dp))
+                )
+            },
+        upperMaxHeight = upperMaxHeight,
+        top = mindTaskId?.let { id -> { PlaneRow(id) } },
+        composer = {
+            AnimatedContent(
+                targetState = island,
+                transitionSpec = {
+                    (fadeIn(tween(220)) + slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it / 5 })
+                        .togetherWith(fadeOut(tween(140)))
+                },
+                label = "Ask bar or island",
+            ) { showIsland ->
+                if (showIsland) {
+                    val lines = islandSnapshot?.let {
+                        OverlayGlassCopy.island(it.currentMilestone, it.title, it.completedCount, it.totalCount)
+                    } ?: OverlayGlassCopy.island(snapshot.statusMessage ?: snapshot.bullets.firstOrNull(), "Cyclone is working", 0, null)
+                    WorkIsland(
+                        appPackage = task?.let { TaskAppTrail.record(it.taskId, it.packageName).lastOrNull() },
+                        lines = lines,
+                        fraction = islandSnapshot?.progressFraction,
+                        working = foregroundWorking || task?.working == true || snapshot.userPaused,
+                        paused = snapshot.userPaused,
+                        taskKey = snapshot.sessionId,
+                        onOpen = { onAction(OverlayUserAction.ASK_CYCLONE) },
+                        onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
+                        onStop = { onAction(OverlayUserAction.STOP_TASK) },
+                    )
+                } else {
+                    OverlayAppleComposerBar(
+                        text = snapshot.composerText,
+                        onTextChanged = onComposerChanged,
+                        focusRequester = focusRequester,
+                        onFocusChanged = {},
+                        placeholder = when {
+                            snapshot.voiceListening -> OverlayCopy.LISTENING
+                            else -> OverlayCopy.COMPOSER
+                        },
+                        menuOpen = accessory != ComposerAccessory.NONE,
+                        voiceListening = snapshot.voiceListening,
+                        working = foregroundWorking || snapshot.userPaused,
+                        paused = snapshot.userPaused,
+                        taskKey = snapshot.sessionId,
+                        onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
+                        onStop = { onAction(OverlayUserAction.STOP_TASK) },
+                        onMenu = {
+                            focusManager.clearFocus()
+                            keyboard?.hide()
+                            OverlayToolsSheetState.toggle(ComposerAccessory.ATTACHMENTS)
+                        },
+                        onDictate = onVoiceInput,
+                        onStopDictation = onVoiceStop,
+                        onPrimary = {
+                            if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
+                        },
+                    )
                 }
             }
+        },
+    ) {
+        val minimize = { onAction(OverlayUserAction.MINIMIZE) }
+        if (task != null || foregroundWorking) {
+            Box(Modifier.fillMaxWidth().onSizeChanged { workCardPx = it.height }) {
+                when {
+                    task != null -> OverlayWorkCard(task, minimize)
+                    else -> OverlayForegroundCard(snapshot, minimize) { onAction(OverlayUserAction.STOP_TASK) }
+                }
+            }
+        }
+        if (queued.isNotEmpty()) CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }
+
+        if (sharing.phase != ScreenSharePhase.OFF) {
+            OverlayAppleStatusPill(
+                text = when (sharing.phase) {
+                    ScreenSharePhase.LIVE -> "Sharing screen"
+                    ScreenSharePhase.REQUESTING_PERMISSION -> "Waiting for permission"
+                    ScreenSharePhase.STARTING -> sharing.message ?: "Starting screen share"
+                    ScreenSharePhase.STOPPING -> "Stopping screen share"
+                    ScreenSharePhase.ERROR -> sharing.message ?: "Screen sharing failed"
+                    ScreenSharePhase.REVOKED -> "Screen sharing ended"
+                    ScreenSharePhase.OFF -> "Screen sharing off"
+                },
+                actionLabel = if (sharing.active) "Stop" else null,
+                onAction = if (sharing.active) ({ LiveCaptureService.stop(context) }) else null,
+            )
+        }
+
+        if (attached) {
+            OverlayAppleStatusPill(
+                text = "Reference attached",
+                actionLabel = "Remove",
+                onAction = { PendingTaskAttachment.take() },
+            )
         }
     }
 }
@@ -577,38 +509,38 @@ private fun ComposerPanel(
 private fun GatePanel(
     snapshot: OverlayChromeSnapshot,
     onAction: (OverlayUserAction) -> Unit,
-    modifier: Modifier,
 ) {
-    Column(
-        modifier
+    Box(
+        Modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .imePadding()
-            .padding(
-                start = 12.dp,
-                end = 12.dp,
-                bottom = OverlayChromeContract.COMPOSER_BOTTOM_GAP_DP.dp,
-            ),
+            .wrapContentHeight()
+            .padding(horizontal = 12.dp),
     ) {
-        Surface(shape = RoundedCornerShape(28.dp), color = ComposerInk, shadowElevation = 10.dp) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OverlayAppleGlass(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 28.dp,
+        ) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Confirmation needed", style = MaterialTheme.typography.titleMedium, color = Color.White, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { onAction(OverlayUserAction.EXIT) }) {
-                        Icon(Icons.Rounded.Close, "Cancel", tint = Color.White.copy(alpha = .8f))
+                    Text(
+                        "Confirmation needed",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    CycloneTrayIconAction(onClick = { onAction(OverlayUserAction.EXIT) }, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Rounded.Close, "Cancel", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Text(OverlayCopy.GATE, color = Color.White.copy(alpha = .82f))
-                TextButton(
+                Text(OverlayCopy.GATE, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(
                     onClick = { onAction(OverlayUserAction.GATE_CONFIRM) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(OverlayCopy.CONFIRM)
-                }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) { Text(OverlayCopy.CONFIRM) }
                 if (snapshot.gateClass != null) {
                     Text(
                         "Cyclone will authorize only this exact ${snapshot.gateClass.wire} action.",
-                        color = Color.White.copy(alpha = .58f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -622,11 +554,22 @@ internal enum class ComposerAccessory {
     fun toggle(next: ComposerAccessory): ComposerAccessory = if (this == next) NONE else next
 }
 
+/** Quiet inline status kept for callers/tests outside the Apple-style composer path. */
 @Composable
 internal fun ScreenSharePill(state: com.cyclone.mobile.capture.ScreenShareState, onStop: () -> Unit) {
-    Surface(shape = RoundedCornerShape(26.dp), color = ComposerInk, shadowElevation = 6.dp) {
-        Row(Modifier.heightIn(min = 52.dp).padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(when (state.phase) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(if (state.active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant),
+        )
+        Text(
+            when (state.phase) {
                 ScreenSharePhase.LIVE -> "Sharing screen"
                 ScreenSharePhase.REQUESTING_PERMISSION -> "Waiting for permission"
                 ScreenSharePhase.STARTING -> state.message ?: "Starting screen share"
@@ -634,8 +577,17 @@ internal fun ScreenSharePill(state: com.cyclone.mobile.capture.ScreenShareState,
                 ScreenSharePhase.ERROR -> state.message ?: "Screen sharing failed"
                 ScreenSharePhase.REVOKED -> "Screen sharing ended"
                 ScreenSharePhase.OFF -> "Screen sharing off"
-            }, color = Color.White, modifier = Modifier.weight(1f, fill = false))
-            if (state.active) TextButton(onClick = onStop, enabled = state.phase != ScreenSharePhase.STOPPING) { Text("Stop") }
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (state.active) {
+            TextButton(
+                onClick = onStop,
+                enabled = state.phase != ScreenSharePhase.STOPPING,
+                modifier = Modifier.heightIn(min = 40.dp),
+            ) { Text("Stop") }
         }
     }
 }

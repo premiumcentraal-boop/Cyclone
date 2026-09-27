@@ -47,7 +47,7 @@ class MediaProfile:
         if name == "thumbnail":
             return cls(name, 540, 8, 1_000_000)
         if name == "focus":
-            return cls(name, 1080, 30, 8_000_000)
+            return cls(name, 1920, 30, 12_000_000)
         raise ValueError(f"Unknown media profile {name!r}")
 
 
@@ -109,6 +109,7 @@ class ScrcpyMediaSession:
         self._width: int | None = None
         self._height: int | None = None
         self._last_pts_us: int | None = None
+        self._last_config_event: MediaEvent | None = None
         self._started_at_ms: int | None = None
         self._first_frame_at_ms: int | None = None
         self._active_port: int | None = None
@@ -178,6 +179,8 @@ class ScrcpyMediaSession:
                 "height": self._height,
                 "clientResized": False,
             }))
+            if self._last_config_event is not None:
+                q.put_nowait(self._last_config_event)
 
     def _set_state(self, state: MediaState, **details: Any) -> None:
         with self._lock:
@@ -416,6 +419,7 @@ class ScrcpyMediaSession:
                 if isinstance(event, SessionEvent):
                     with self._lock:
                         self._width, self._height = event.width, event.height
+                        self._last_config_event = None
                     self._set_state(MediaState.WAITING_KEYFRAME)
                     self._broadcast(MediaEvent("session", {
                         "sessionId": self.session_id,
@@ -432,13 +436,24 @@ class ScrcpyMediaSession:
                             self._config_packets += 1
                         else:
                             self._frames += 1
-                    self._broadcast(MediaEvent("packet", {
+                    packet_event = MediaEvent("packet", {
                         "sessionId": self.session_id,
                         "ptsUs": event.pts_us,
                         "config": event.config,
                         "keyframe": event.keyframe,
                         "payload": event.payload,
-                    }))
+                    })
+                    if event.config:
+                        with self._lock:
+                            self._last_config_event = packet_event
+                    elif event.keyframe:
+                        # A viewer can join after the first SPS/PPS or drop a packet during a
+                        # brief stall. Re-send codec configuration before each random-access frame.
+                        with self._lock:
+                            config_event = self._last_config_event
+                        if config_event is not None:
+                            self._broadcast(config_event)
+                    self._broadcast(packet_event)
                     if event.keyframe:
                         with self._lock:
                             if self._first_frame_at_ms is None:

@@ -1,19 +1,32 @@
 import {
   canPreserveFocusedPage,
   initialCompanionState,
+  phoneSupportsGlassAtlas,
   reduceCompanionState,
   type AppRoute,
   type CompanionState,
 } from "./core/fleet.js";
 import { TopologyRefreshGate } from "./core/topologyRefresh.js";
 import type { DesktopDevice, DesktopService, FleetWsEvent } from "./services/types.js";
-import { isSessionFabricEvent } from "./core/sessionTiles.js";
+import {
+  createGlassRuntime,
+  GLASS_OPERATOR_REQUEST_REASON,
+  readDeviceMobileVersion,
+  resolveGlassSessionId,
+  type GlassRuntime,
+  type GlassSessionPlane,
+} from "./services/glassRuntime.js";
+import { DEFAULT_FOREGROUND_SESSION_ID, isSessionFabricEvent } from "./core/sessionTiles.js";
+import { createChatgptAttachPage } from "./pages/chatgptAttachPage.js";
 import { createConnectionsPage } from "./pages/connectionsPage.js";
 import { createAutomationsPage } from "./pages/automationsPage.js";
+import { createAskPage } from "./pages/askPage.js";
 import { createFleetPage } from "./pages/fleetPage.js";
 import { createFocusedPhonePage } from "./pages/focusedPhonePage.js";
 import { createHomePage } from "./pages/homePage.js";
+import { createMapsPage } from "./pages/mapsPage.js";
 import { createSettingsPage } from "./pages/settingsPage.js";
+import { createVaultPage } from "./pages/vaultPage.js";
 import { PairingModal } from "./ui/pairingModal.js";
 import { button, el } from "./ui/dom.js";
 
@@ -84,15 +97,19 @@ export class CyclonePcCompanionApp {
     const shell = el("div", "app-shell");
     const topbar = el("header", "app-topbar");
     const brand = el("div", "brand");
-    brand.append(el("div", "cyclone-mark"), el("div", "brand-name", "Cyclone One"));
+    brand.append(el("div", "cyclone-mark"), el("div", "brand-name", "Cyclone Glass"));
     const nav = el("nav", "primary-nav");
-    nav.setAttribute("aria-label", "Cyclone PC Companion");
+    nav.setAttribute("aria-label", "Cyclone Glass");
 
     const entries: Array<[Exclude<AppRoute, "focused">, string, string]> = [
       ["home", "⌂", "Home"],
       ["fleet", "▣", "Control"],
+      ["ask", "?", "Ask"],
+      ["maps", "▦", "Maps"],
+      ["vault", "◉", "Vault"],
       ["automations", "↻", "Tasks"],
       ["connections", "◇", "Connections"],
+      ["chatgpt", "✦", "ChatGPT"],
     ];
     for (const [route, symbol, label] of entries) {
       const item = button("", "nav-button");
@@ -133,7 +150,7 @@ export class CyclonePcCompanionApp {
       el("div", "profile-panel-heading", "Workspace"),
       connectionItem,
       settingsItem,
-      el("div", "profile-version", `Cyclone PC Companion · v${__CYCLONE_PC_VERSION__}`),
+      el("div", "profile-version", `Cyclone Glass · v${__CYCLONE_PC_VERSION__}`),
     );
     profile.append(profileButton, profilePanel);
     actions.append(this.topbarStatus, notifications, profile);
@@ -236,6 +253,9 @@ export class CyclonePcCompanionApp {
           () => this.backToFleet(),
           () => this.navigate("settings"),
           (target) => this.openPairing(target),
+          (sessionId) => {
+            this.state = reduceCompanionState(this.state, { type: "focus_session", sessionId });
+          },
         );
       } else {
         this.state = reduceCompanionState(this.state, { type: "back_to_fleet" });
@@ -247,7 +267,44 @@ export class CyclonePcCompanionApp {
         () => this.navigate("fleet"),
         () => this.navigate("automations"),
         () => this.navigate("connections"),
+        () => this.navigate("chatgpt"),
       );
+    }
+    if (!this.currentPage && this.state.route === "ask") {
+      const { version, sessionId, sessionPlane, demo, mapping, runtime } = this.glassContext();
+      this.currentPage = createAskPage({
+        devices: this.state.devices,
+        mobileVersion: version ?? undefined,
+        onOpenControl: () => this.navigate("fleet"),
+        sessionId,
+        sessionPlane,
+        previewSnapshots: demo,
+        // The same local, paired gateway client that commands mapping also sends Ask goals.
+        ask: mapping && runtime ? runtime.atlas : undefined,
+        fleetGateway: this.service.glassGateway,
+      });
+    }
+    if (!this.currentPage && this.state.route === "maps") {
+      const { version, sessionId, sessionPlane, demo, loadSource, mapping } = this.glassContext();
+      this.currentPage = createMapsPage({
+        phoneVersion: version,
+        loadSource,
+        demo,
+        sessionId,
+        sessionPlane,
+        mapping,
+        onOpenControl: () => this.navigate("fleet"),
+      });
+    }
+    if (!this.currentPage && this.state.route === "vault") {
+      const { version, demo, loadSlots, onRequestSlot } = this.glassContext();
+      this.currentPage = createVaultPage({
+        devices: this.state.devices,
+        mobileVersion: version,
+        loadSlots,
+        onRequestSlot,
+        previewSlots: demo,
+      });
     }
     if (!this.currentPage && this.state.route === "automations") {
       this.currentPage = createAutomationsPage(this.state.devices, (device) => {
@@ -256,6 +313,9 @@ export class CyclonePcCompanionApp {
     }
     if (!this.currentPage && this.state.route === "connections") {
       this.currentPage = createConnectionsPage(this.service);
+    }
+    if (!this.currentPage && this.state.route === "chatgpt") {
+      this.currentPage = createChatgptAttachPage(this.service);
     }
     if (!this.currentPage && this.state.route === "settings") {
       this.currentPage = createSettingsPage(this.service, this.state.devices);
@@ -278,9 +338,56 @@ export class CyclonePcCompanionApp {
         () => this.navigate("fleet"),
         () => this.navigate("automations"),
         () => this.navigate("connections"),
+        () => this.navigate("chatgpt"),
       );
     }
     this.content.replaceChildren(this.currentPage.element);
+  }
+
+  private glassContext(): {
+    device: DesktopDevice | undefined;
+    version: string | null;
+    sessionId: string;
+    sessionPlane: GlassSessionPlane;
+    demo: boolean;
+    runtime: GlassRuntime | null;
+    loadSource: (() => Promise<import("./maps/mockAtlas.js").MapsDataSource>) | undefined;
+    loadSlots: (() => Promise<import("./core/fleet.js").GlassVaultSlot[]>) | undefined;
+    onRequestSlot: ((slotId: string) => void) | undefined;
+    mapping: import("./maps/mappingWatcher.js").MappingOps | undefined;
+  } {
+    const device = selectGlassDevice(this.state.devices, this.state.focusedDeviceId);
+    const version = device ? (readDeviceMobileVersion(device) ?? null) : null;
+    const sessionId = resolveGlassSessionId(this.state.focusedSessionId);
+    const sessionPlane: GlassSessionPlane = sessionId !== DEFAULT_FOREGROUND_SESSION_ID ? "session_kernel_vd" : "foreground";
+    const demo = this.service.mode === "mock";
+    const gateway = this.service.glassGateway;
+    const httpBase = String(gateway?.httpBase ?? "").trim();
+    const bearer = gateway && typeof gateway.getBearer === "function" ? String(gateway.getBearer() ?? "").trim() : "";
+    const atlasReady = version != null && phoneSupportsGlassAtlas(version);
+    const runtime = device && gateway && httpBase && bearer
+      ? createGlassRuntime({
+          httpBase,
+          getBearer: gateway.getBearer,
+          getDeviceId: () => device.id,
+          getSessionId: () => sessionId,
+          getPhoneVersion: () => version,
+        })
+      : null;
+    const live = Boolean(runtime && atlasReady && sessionId);
+    return {
+      device,
+      version,
+      sessionId,
+      sessionPlane,
+      demo,
+      runtime,
+      loadSource: live && runtime ? () => loadMapsSourceBoth(runtime) : undefined,
+      // Mapping is a local operator act on this PC's paired phone; the phone walks the app.
+      mapping: live && runtime ? runtime.atlas : undefined,
+      loadSlots: live && runtime ? () => loadVaultSlotsLive(runtime) : undefined,
+      onRequestSlot: live && runtime ? (slotId) => requestVaultSlot(runtime, slotId) : undefined,
+    };
   }
 
   private updateNavState(): void {
@@ -348,6 +455,7 @@ function deviceSignature(device: DesktopDevice): string {
     JSON.stringify(device.planes ?? {}),
     JSON.stringify(device.readiness ?? {}),
     JSON.stringify(device.operatorHealth ?? {}),
+    device.mobileVersion ?? "",
   ].join(":");
 }
 
@@ -356,4 +464,54 @@ function friendlyGatewayError(error: unknown): string {
   if (/401|403|token|session/i.test(message)) return "Local session verification failed. Reopen PC Companion to start a fresh protected session.";
   if (/fetch|network|offline|gateway|connect/i.test(message)) return "The local Gateway sidecar is not responding. Retry discovery, then reopen PC Companion if needed.";
   return message ? message.slice(0, 180) : "Cyclone could not refresh local phone inventory.";
+}
+
+function selectGlassDevice(devices: DesktopDevice[], focusedDeviceId: string | null): DesktopDevice | undefined {
+  if (focusedDeviceId) {
+    const focused = devices.find((candidate) => candidate.id === focusedDeviceId);
+    if (focused) return focused;
+  }
+  return devices.find((candidate) => candidate.state === "READY" && candidate.paired)
+    ?? devices.find((candidate) => candidate.paired)
+    ?? devices[0];
+}
+
+async function loadMapsSourceBoth(runtime: GlassRuntime): Promise<import("./maps/mockAtlas.js").MapsDataSource> {
+  const [live, mapping] = await Promise.all([
+    runtime.loadMapsSource("live"),
+    runtime.loadMapsSource("mapping"),
+  ]);
+  return {
+    listSummaries: (persona) => (persona === "mapping" ? mapping : live).listSummaries(persona),
+    getDocument: (placeId, persona) => (persona === "mapping" ? mapping : live).getDocument(placeId, persona),
+  };
+}
+
+async function loadVaultSlotsLive(runtime: GlassRuntime): Promise<import("./core/fleet.js").GlassVaultSlot[]> {
+  const catalog = await runtime.atlas.places();
+  const slots: import("./core/fleet.js").GlassVaultSlot[] = [];
+  const seen = new Set<string>();
+  for (const summary of catalog.places ?? []) {
+    const placeId = summary?.place?.placeId;
+    if (!placeId || seen.has(placeId)) continue;
+    seen.add(placeId);
+    const placeLabel = summary.place.label || placeId;
+    slots.push(...await runtime.loadVaultSlots(placeId, "live", placeLabel));
+  }
+  return slots;
+}
+
+function requestVaultSlot(runtime: GlassRuntime, slotId: string): void {
+  const parsed = parseVaultSlotId(slotId);
+  if (!parsed) return;
+  void runtime.requestSecret(parsed.placeId, "live", parsed.slot, GLASS_OPERATOR_REQUEST_REASON).catch(() => {
+    /* swallow — never log payloads, bearers, or slot values */
+  });
+}
+
+function parseVaultSlotId(slotId: string): { placeId: string; slot: string } | null {
+  const raw = String(slotId ?? "").trim();
+  const separator = raw.lastIndexOf(":");
+  if (separator <= 0 || separator === raw.length - 1) return null;
+  return { placeId: raw.slice(0, separator), slot: raw.slice(separator + 1) };
 }

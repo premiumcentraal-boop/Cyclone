@@ -11,6 +11,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PageAgentProtocolTest {
+    @Test fun rotatedCaptureIdsAndPageNoiseDoNotHideRepeatedIntent() {
+        fun decision(id: String) = PageAgentDecision("act", "", "", listOf(
+            PageAgentAction("phone.click", id, JSONObject(), true, "Reject optional cookies")), null, null)
+        assertEquals(PageAgentProtocol.actionSignature(decision("semantic:capture-a:target"), "page-one"),
+            PageAgentProtocol.actionSignature(decision("semantic:capture-b:target"), "page-two"))
+        assertFalse(PageAgentProtocol.actionSignature(decision("semantic:capture-a:target"), "page-one") ==
+            PageAgentProtocol.actionSignature(decision("semantic:capture-b:other-target"), "page-two"))
+    }
+
     private val control = PageControl(
         key = "battery-control",
         label = "Battery",

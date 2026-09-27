@@ -11,6 +11,7 @@ import com.cyclone.mobile.capture.PhoneScreenCapture
 import com.cyclone.mobile.capture.PhoneScreenCapture.ScreenCaptureException
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
 import com.cyclone.mobile.runtime.session.ExecutionSession
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -22,10 +23,20 @@ import java.io.ByteArrayOutputStream
  */
 internal object GatewayCaptureAdapter {
     fun capture(context: Context, args: JSONObject): JSONObject {
-        val execution = try {
-            ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject()))
+        val merged = ExecutionRequestScope.merge(args, args.optJSONObject("params") ?: JSONObject())
+        if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+        if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+            merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+        }
+        val plane = try {
+            SessionContract.classify(merged)
         } catch (error: SessionIdentityException) {
-            throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch")
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch")
+        }
+        val execution = try {
+            ExecutionRequestScope.bind(merged)
+        } catch (error: SessionIdentityException) {
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch")
         }
         val maxDimension = args.optInt("maxDimension", 0).takeIf { it > 0 }
         val includeBase64 = args.optBoolean("includeBase64", false)
@@ -51,7 +62,8 @@ internal object GatewayCaptureAdapter {
         if (pageKey != null && filePath != null) {
             runCatching { PageAwarenessRuntime.store.attachPreview(pageKey, filePath) }
         }
-        return frame.put("sessionId", execution.sessionId).put("displayId", execution.displayId)
+        val payload = frame.put("sessionId", execution.sessionId).put("displayId", execution.displayId)
+        return SessionContract.attach(payload, plane)
     }
 
     private fun encodeArtifact(

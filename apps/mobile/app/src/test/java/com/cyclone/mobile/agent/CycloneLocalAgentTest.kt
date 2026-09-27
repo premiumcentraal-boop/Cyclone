@@ -1,6 +1,7 @@
 package com.cyclone.mobile.agent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -98,6 +99,22 @@ class CycloneLocalAgentTest {
         val result = CycloneLocalAgent("goal", model, tools).runUntilBoundary()
         assertTrue(result is CycloneAgentRunResult.Completed)
         assertEquals(1, tools.executeCalls)
+    }
+
+    @Test fun providerRetryLaterStopsWithoutGroundingRecovery() {
+        val model = ScriptModel(mutableListOf(
+            CyclonePlanResult.Valid(CycloneModelTurn(CycloneModelDirective.BLOCKED, reason = "RATE_LIMITED")),
+            act("must-not-run"),
+        ))
+        val tools = FakeTools().apply { boundary = CycloneTaskClassification.PROVIDER_RETRY_LATER }
+
+        val result = CycloneLocalAgent("goal", model, tools).runUntilBoundary()
+
+        assertTrue(result is CycloneAgentRunResult.Stopped)
+        assertEquals(CycloneTaskClassification.PROVIDER_RETRY_LATER, result.state.finalClassification)
+        assertTrue(result.state.recoveryAttempts.isEmpty())
+        assertEquals(1, model.calls)
+        assertEquals(0, tools.executeCalls)
     }
 
     @Test fun malformedModelResponseGetsBoundedRecovery() {
@@ -279,6 +296,9 @@ class CycloneLocalAgentTest {
         assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Suspended)
         assertTrue(agent.resume())
         assertTrue(agent.snapshot().requireFreshObservation)
+        assertNull(agent.snapshot().latestObservationIdentity)
+        assertNull(agent.snapshot().latestPageIdentity)
+        assertNull(agent.snapshot().lastActionSignature)
         assertTrue(agent.runUntilBoundary() is CycloneAgentRunResult.Completed)
         assertEquals(listOf(true, true), observedRequireFresh)
     }

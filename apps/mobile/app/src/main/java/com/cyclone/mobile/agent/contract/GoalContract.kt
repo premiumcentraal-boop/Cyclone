@@ -5,12 +5,20 @@ import org.json.JSONObject
 
 enum class GoalRequirementKind {
     WEB_HOST,
+    BROWSER_PACKAGE,
+    AUTHENTICATED_SESSION,
+    REGISTERED_ACCOUNT,
     NAMED_WEB_SITE,
     VERIFIED_SCROLL,
     DISMISS_COOKIE_CONSENT,
     SITE_NOTIFICATION_PERMISSION,
     VERIFIED_TARGET_INTERACTION,
     GENERIC_SEMANTIC_EVIDENCE,
+    NAMED_APP,
+    /** An enabled alarm at `value` (HH:MM) is visible in a clock app. */
+    ALARM_SET,
+    /** A timer of `value` seconds is counting down. */
+    TIMER_RUNNING,
 }
 
 data class GoalRequirement(
@@ -71,6 +79,12 @@ data class GoalContractEvaluation(
  * defines what independently verifiable success means.
  */
 object GoalContractCompiler {
+    const val ACTION_OUTCOME = "ACTION"
+    private val NAVIGATION_ONLY_TOOLS = setOf(
+        "phone.open_app", "phone.launch_intent", "phone.back", "phone.home", "phone.scroll", "phone.swipe",
+        "phone.wait_for", "phone.assert", "phone.observe", "phone.screenshot",
+    )
+
     /** Only complete simple navigation locally; compound/content goals still need model decisions. */
     fun isSimpleWebNavigation(goal: String): Boolean = NavigationIntent.parse(goal) != null
 
@@ -78,6 +92,13 @@ object GoalContractCompiler {
         "(?i)(?:https?://)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63})(?=[:/?#\\s]|$)",
     )
     private val wordPattern = Regex("[\\p{L}\\p{N}]+")
+    private val SIGNUP_INTENT = Regex(
+        """(?i)\b(sign\s*up|signup|register|registration|create\s+(?:a\s+|an\s+|new\s+)?account|make\s+(?:a\s+|an\s+)?account)\b""",
+    )
+    private val REGISTRATION_SUCCESS = Regex(
+        """(?i)\b(account\s+(?:has\s+been\s+)?created|registration\s+complete|verify\s+your\s+email|confirm\s+your\s+email|check\s+your\s+email|complete\s+your\s+profile)\b""",
+    )
+
     private val stopWords = setOf(
         "open", "go", "navigate", "take", "to", "the", "a", "an", "and", "then", "finally",
         "find", "show", "me", "on", "in", "for", "please", "page", "screen", "website", "site",
@@ -98,6 +119,26 @@ object GoalContractCompiler {
         }
         if (!host.isNullOrBlank()) {
             requirements += GoalRequirement(GoalRequirementKind.WEB_HOST, host)
+        }
+
+        if (navigation?.chrome == true || (host != null && Regex("(?i)\\bchrome\\b").containsMatchIn(clean))) {
+            requirements += GoalRequirement(GoalRequirementKind.BROWSER_PACKAGE, "com.android.chrome")
+        }
+        val loginIntent = Regex("(?i)\\b(log\\s*in|sign\\s*in)\\b").containsMatchIn(clean)
+        val loginNavigationOnly = Regex("(?i)\\b(click|tap|press|open)\\s+(?:the\\s+)?(?:log\\s*in|sign\\s*in)(?:\\s+(?:button|page|form))?\\s*$")
+            .containsMatchIn(clean)
+        if (loginIntent && !loginNavigationOnly) {
+            requirements += GoalRequirement(GoalRequirementKind.AUTHENTICATED_SESSION, host)
+        }
+
+        if (SIGNUP_INTENT.containsMatchIn(clean)) {
+            requirements += GoalRequirement(GoalRequirementKind.REGISTERED_ACCOUNT, host)
+        }
+
+        if (com.cyclone.mobile.agent.plan.TaskDifficulty.isNamedAppOpenOnly(clean)) {
+            com.cyclone.mobile.fastpath.FastPathLanding.namedApp(clean)?.second?.let { packageName ->
+                requirements += GoalRequirement(GoalRequirementKind.NAMED_APP, packageName)
+            }
         }
 
         if (Regex("(?i)\\b(scroll|swipe)\\b").containsMatchIn(clean)) {
@@ -139,9 +180,20 @@ object GoalContractCompiler {
             )
         }
 
+        PhoneIntents.alarm(clean)?.let { alarm ->
+            requirements.removeAll { it.kind == GoalRequirementKind.NAMED_APP }
+            requirements += GoalRequirement(GoalRequirementKind.ALARM_SET, alarm.hhmm)
+        } ?: PhoneIntents.timer(clean)?.let { timer ->
+            requirements.removeAll { it.kind == GoalRequirementKind.NAMED_APP }
+            requirements += GoalRequirement(GoalRequirementKind.TIMER_RUNNING, timer.seconds.toString())
+        }
+
         if (requirements.isEmpty()) {
+            // An action goal ("set", "turn on", "add"…) cannot complete on page words alone: it also needs a verified
+            // non-navigation action. Opening the right app is never the outcome of an action goal.
             requirements += GoalRequirement(
                 GoalRequirementKind.GENERIC_SEMANTIC_EVIDENCE,
+                value = if (CompletionClaimAudit.isActionGoal(clean)) ACTION_OUTCOME else null,
                 terms = significantTerms(finalGoalSegment(clean)),
             )
         }
@@ -168,15 +220,57 @@ object GoalContractCompiler {
     ): GoalRequirementResult {
         val successful = history.filter { it.androidExecutionOk && it.verification.passed }
         return when (requirement.kind) {
+            GoalRequirementKind.BROWSER_PACKAGE -> {
+                val matched = currentPage?.packageName == requirement.value
+                GoalRequirementResult(requirement, matched,
+                    if (matched) "requested browser is the current task surface" else "requested browser has not been verified")
+            }
+            GoalRequirementKind.AUTHENTICATED_SESSION -> {
+                val labels = currentPage?.controls.orEmpty().filter {
+                    it.role.lowercase() in setOf("button", "link", "menuitem") &&
+                        it.evidence.optBoolean("enabled", true) && it.evidence.optBoolean("visible", true) &&
+                        it.evidence.optBoolean("visibleToUser", true) &&
+                        !it.evidence.optString("resourceId").startsWith("com.android.chrome:")
+                }.map { it.label.trim().lowercase() }
+                val hostMatches = requirement.value?.let { host -> currentPage?.let { pageShowsHost(it, host) } } ?: true
+                val signedOut = labels.any { it in setOf("log in", "login", "sign in", "signin") }
+                val signedIn = labels.any { it in setOf("log out", "logout", "sign out", "signout") }
+                val matched = currentPage?.actionable == true && hostMatches && signedIn && !signedOut
+                GoalRequirementResult(requirement, matched,
+                    if (matched) "current task surface exposes an authenticated-session sign-out control"
+                    else "login is not verified; reaching the host or login form is insufficient, and authentication boundaries still apply")
+            }
+            GoalRequirementKind.REGISTERED_ACCOUNT -> {
+                val controls = currentPage?.controls.orEmpty().filter {
+                    it.evidence.optBoolean("enabled", true) && it.evidence.optBoolean("visibleToUser", true)
+                }
+                val actionLabels = controls
+                    .filter { it.role.lowercase() in setOf("button", "link", "menuitem") || it.evidence.optBoolean("clickable") }
+                    .map { it.label.trim().lowercase() }
+                val registrationActionVisible = actionLabels.any { label ->
+                    label == "sign up" || label == "signup" || label == "register" ||
+                        label.startsWith("create account") || label.startsWith("create new account")
+                }
+                val signedIn = actionLabels.any { it in setOf("log out", "logout", "sign out", "signout") }
+                val surface = currentPage?.let(::pageHaystack).orEmpty()
+                val confirmation = REGISTRATION_SUCCESS.containsMatchIn(surface)
+                val hostMatches = requirement.value?.let { host -> currentPage?.let { pageShowsHost(it, host) } } ?: true
+                val matched = currentPage?.actionable == true && hostMatches && !registrationActionVisible && (signedIn || confirmation)
+                GoalRequirementResult(
+                    requirement,
+                    matched,
+                    if (matched) "current task surface contains post-registration evidence"
+                    else "account creation is not verified; the signup form or landing page alone is insufficient",
+                )
+            }
             GoalRequirementKind.NAMED_WEB_SITE -> {
                 val intent = NavigationIntent.parse(contract.sourceGoal)
                 val loadedHost = currentPage?.controls?.firstOrNull {
                     !it.evidence.optBoolean("focused") && listOf("url_bar", "urlbar", "location_bar", "address_bar")
                         .any(it.evidence.optString("resourceId").lowercase()::contains)
                 }?.label
-                val matched = intent != null && loadedHost != null && intent.accepts(loadedHost) &&
-                    (!intent.chrome || currentPage.packageName == "com.android.chrome") &&
-                    pageShowsHost(currentPage, loadedHost.removePrefix("https://").removePrefix("www.").trimEnd('/'))
+                val matched = intent != null && loadedHost != null && intent.acceptsLoaded(loadedHost) &&
+                    (!intent.chrome || currentPage.packageName == "com.android.chrome")
                 GoalRequirementResult(requirement, matched, if (matched) "requested site loaded in the requested browser" else "site host and browser have not been verified")
             }
             GoalRequirementKind.WEB_HOST -> {
@@ -246,9 +340,29 @@ object GoalContractCompiler {
                 )
             }
 
+            GoalRequirementKind.NAMED_APP -> {
+                val expected = requirement.value.orEmpty()
+                val matched = currentPage != null && expected.isNotBlank() &&
+                    com.cyclone.mobile.fastpath.FastPathLanding.launchCandidates(expected)
+                        .any { it == currentPage.packageName }
+                GoalRequirementResult(
+                    requirement,
+                    matched,
+                    if (matched) "requested app is the current task surface" else "requested app has not been verified in the foreground",
+                )
+            }
             GoalRequirementKind.GENERIC_SEMANTIC_EVIDENCE -> {
                 val pageMatch = currentPage?.let { pageMatchesTerms(it, requirement.terms) } == true
                 val verifiedMutation = successful.isNotEmpty()
+                if (requirement.value == ACTION_OUTCOME) {
+                    val acted = successful.any { it.tool !in NAVIGATION_ONLY_TOOLS }
+                    val matched = acted && (pageMatch || requirement.terms.isEmpty())
+                    return GoalRequirementResult(requirement, matched, when {
+                        matched -> "a verified action changed the task surface and the scene shows the goal's evidence"
+                        !acted -> "an action goal needs a verified action; opening or showing the app is not the outcome"
+                        else -> "goal evidence is not yet present in the current scene"
+                    })
+                }
                 GoalRequirementResult(
                     requirement,
                     pageMatch || (requirement.terms.isEmpty() && verifiedMutation),
@@ -258,6 +372,27 @@ object GoalContractCompiler {
                         else -> "goal evidence is not yet present in the current scene"
                     },
                 )
+            }
+            GoalRequirementKind.ALARM_SET -> {
+                val parts = requirement.value.orEmpty().split(':')
+                val alarm = PhoneIntents.Alarm(parts.getOrNull(0)?.toIntOrNull() ?: -1, parts.getOrNull(1)?.toIntOrNull() ?: -1, null)
+                val rows = currentPage?.controls.orEmpty().map { control ->
+                    PhoneIntents.Row(control.label, if (control.evidence.has("checked") &&
+                        (control.evidence.optBoolean("checkable") || control.role in setOf("switch", "checkbox")))
+                        control.evidence.optBoolean("checked") else null)
+                }
+                val matched = currentPage != null && alarm.hour in 0..23 && alarm.minute in 0..59 &&
+                    PhoneIntents.alarmVisible(currentPage.packageName, rows, alarm)
+                GoalRequirementResult(requirement, matched,
+                    if (matched) "an enabled alarm at ${alarm.hhmm} is visible in the clock app"
+                    else "no enabled alarm at ${requirement.value} is visible; opening Clock is not setting an alarm")
+            }
+            GoalRequirementKind.TIMER_RUNNING -> {
+                val seconds = requirement.value?.toLongOrNull() ?: 0L
+                val matched = currentPage != null && seconds > 0 && PhoneIntents.isClockApp(currentPage.packageName) &&
+                    PhoneIntents.timerRunning(currentPage.controls.map { it.label }, seconds)
+                GoalRequirementResult(requirement, matched,
+                    if (matched) "a timer of the requested length is counting down" else "no running timer of the requested length is visible")
             }
         }
     }

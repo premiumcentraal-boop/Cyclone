@@ -39,6 +39,8 @@ object AccessibilityRoles {
         val labeled = text.isNotBlank() || contentDescription.isNotBlank()
         val canClick = clickable || "ACTION_CLICK" in actions
         if ("button" in cls || (canClick && labeled)) return "button"
+        // Busy indicators are evidence for the settle controller ("still loading"), never an action target.
+        if ("progressbar" in cls || "progressindicator" in cls) return "progress"
         if ("image" in cls) return "image"
         if (scrollable) return "scroll_container"
         if ("textview" in cls) return "text"

@@ -10,6 +10,13 @@ import org.junit.Test
 
 class GatewaySemanticV33Test {
     @Test
+    fun launchIntentUsesMutationFreshnessAndPageTransitionSettle() {
+        assertTrue(GatewayV33ActionAdapter.requiresMutationObservation("phone.launch_intent"))
+        assertEquals(1_800L, GatewayV33ActionAdapter.pageTransitionSettleMs("phone.launch_intent"))
+        assertEquals(0L, GatewayV33ActionAdapter.pageTransitionSettleMs("phone.wait_for"))
+    }
+
+    @Test
     fun composeAndWebViewAccessibleContentRemainReadableWithoutValuesLeaking() {
         val raw = snapshot(
             node("compose-title", "Welcome", "", "text", 20, 30),

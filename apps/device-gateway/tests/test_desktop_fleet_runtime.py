@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 import time
 import zipfile
@@ -79,11 +81,13 @@ class FakeDeviceADB:
 
 
 class FakeBridge:
-    def __init__(self, credentials=None):
+    def __init__(self, credentials=None, app_version=None):
         self.credentials = list(credentials or ["A" * 43, "B" * 43, "C" * 43])
+        self.app_version = app_version
         self.challenge = 0
         self.calls = []
         self.qr_approved = False
+        self.manual_result = {"ok": True, "status": "DONE"}
 
     def request_unauthenticated(self, op, args=None, request_id=None):
         self.calls.append((op, args or {}))
@@ -101,11 +105,14 @@ class FakeBridge:
     def request(self, op, args=None, request_id=None):
         self.calls.append((op, args or {}))
         if op == "bridge.status":
-            return {"gatewayEnabled": True, "socketListening": True, "accessibilityConnected": True}
+            status = {"gatewayEnabled": True, "socketListening": True, "accessibilityConnected": True}
+            if self.app_version is not None:
+                status["appVersion"] = self.app_version
+            return status
         if op == "pair.revoke":
             return {"revoked": True}
         if op == "manual.execute":
-            return {"ok": True, "status": "DONE"}
+            return self.manual_result
         if op == "clipboard.get":
             return {"mode": "PC_TO_PHONE", "reverseSync": "UNAVAILABLE"}
         if op == "clipboard.set":
@@ -259,8 +266,68 @@ def test_paired_health_refresh_sends_authenticated_phone_heartbeat():
     assert [op for op, _ in bridges[session.device_id].calls].count("bridge.status") == 1
 
 
+def test_real_fleet_exposes_only_authenticated_mobile_version_and_rechecks_it(tmp_path):
+    fleet, _, _ = make_fleet([ADBDevice("VERSION-PIXEL", "device", "Pixel_8")])
+    fleet.refresh_once()
+    session = fleet.get(deterministic_device_id("VERSION-PIXEL"))
+    bridge = FakeBridge(app_version="5.0.0-alpha.2.dev2")
+    session.bridge = lambda token=None, auto_forward=False: bridge
+    settings = Settings("pc-secret", None, "adb", tmp_path)
+    runtime = DesktopRuntime(settings, fleet=fleet)
+    with TestClient(create_desktop_app(settings, runtime)) as client:
+        headers = {"Authorization": "Bearer pc-secret"}
+
+        def public_device():
+            response = client.get("/v1/fleet", headers=headers)
+            assert response.status_code == 200
+            return response.json()["devices"][0]
+
+        # A connected phone without authenticated bridge status cannot be assumed V5.
+        assert "mobileVersion" not in public_device()
+        fleet.remember_credential(session, "H" * 43)
+        fleet.refresh_once()
+        assert public_device()["mobileVersion"] == "5.0.0-alpha.2.dev2"
+
+        bridge.app_version = "4.8.0"
+        fleet.refresh_once()
+        assert public_device()["mobileVersion"] == "4.8.0"
+
+        # Unexpected or missing phone status must not retain a stale V5 claim.
+        bridge.app_version = "5-not-a-version"
+        fleet.refresh_once()
+        assert "mobileVersion" not in public_device()
+        bridge.app_version = None
+        fleet.refresh_once()
+        assert "mobileVersion" not in public_device()
+
+        bridge.app_version = "5.0.0-alpha.2.dev2"
+        fleet.refresh_once()
+        assert public_device()["mobileVersion"] == "5.0.0-alpha.2.dev2"
+        original_request = bridge.request
+
+        def offline(*args, **kwargs):
+            raise BridgeDisconnectedError("simulated offline phone")
+
+        bridge.request = offline
+        fleet.refresh_once()
+        assert "mobileVersion" not in public_device()
+        bridge.request = original_request
+        fleet.refresh_once()
+        assert public_device()["mobileVersion"] == "5.0.0-alpha.2.dev2"
+        # Trust restore re-confirms the same session token; that must not hide the version (Glass "Waiting for Cyclone").
+        fleet.remember_credential(session, "H" * 43)
+        assert public_device()["mobileVersion"] == "5.0.0-alpha.2.dev2"
+        fleet.remember_credential(session, "N" * 43)
+        assert "mobileVersion" not in public_device()
+        fleet.refresh_once()
+        assert public_device()["mobileVersion"] == "5.0.0-alpha.2.dev2"
+        fleet.remember_credential(session, None)
+        assert "mobileVersion" not in public_device()
+
+
 def test_pairing_timeout_replay_attempt_limit_and_token_rotation():
     fleet, session, bridge = paired_session_for_services()
+    bridge.app_version = "5.0.0-alpha.2.dev2"
     session.credential = None
     pairing = PairingCoordinator(fleet)
     pairing.POST_PAIR_HEALTH_DELAY_SECONDS = 0
@@ -284,6 +351,7 @@ def test_pairing_timeout_replay_attempt_limit_and_token_rotation():
     first = pairing.complete(session.device_id, begin["pairingId"], "NOVA")
     first_token = session.credential
     assert first["paired"] is True and first["gatewayHealthy"] is True and "credential" not in first
+    assert first["device"]["mobileVersion"] == "5.0.0-alpha.2.dev2"
     assert [op for op, _ in bridge.calls].count("bridge.status") >= 2
     with pytest.raises(DesktopRuntimeError) as err:
         pairing.complete(session.device_id, begin["pairingId"], "NOVA")
@@ -431,6 +499,22 @@ def test_manual_control_routes_explicit_device_and_never_echoes_keyboard_text():
         service.execute(session.device_id, {"kind": "shell"})
 
 
+def test_manual_control_reports_android_execution_instead_of_transport_success():
+    fleet, session, bridge = paired_session_for_services()
+    service = ManualControlService(fleet)
+    bridge.manual_result = {
+        "transport": {"ok": True},
+        "androidExecution": {"ok": False, "errorCode": "HUMAN_HAS_CONTROL"},
+    }
+    refused = service.execute(session.device_id, {"kind": "tap", "x": .5, "y": .5})
+    assert refused["ok"] is False
+    assert refused["status"] == "HUMAN_HAS_CONTROL"
+
+    bridge.manual_result = {"androidExecution": {"ok": True}, "verification": {"status": "OBSERVED"}}
+    accepted = service.execute(session.device_id, {"kind": "tap", "x": .5, "y": .5})
+    assert accepted["ok"] is True
+
+
 def test_opening_paired_phone_uses_only_fixed_wake_event_and_marks_ready():
     fleet, session, bridge = paired_session_for_services()
     session.screen_awake = False
@@ -461,10 +545,10 @@ def test_clipboard_is_pc_to_phone_and_sensitive_values_are_rejected_without_echo
 
 def test_video_profiles_are_bounded_thumbnail_cheaper_and_sleeping_stream_pauses():
     assert VIDEO_PROFILES["thumbnail"].max_long_edge <= 540
-    assert VIDEO_PROFILES["thumbnail"].target_fps <= 4
+    assert VIDEO_PROFILES["thumbnail"].target_fps == 8
     assert VIDEO_PROFILES["thumbnail"].cpu_weight < VIDEO_PROFILES["focus"].cpu_weight
-    assert VIDEO_PROFILES["focus"].max_long_edge <= 1080
-    assert VIDEO_PROFILES["focus"].target_fps == 15
+    assert VIDEO_PROFILES["focus"].max_long_edge == 1920
+    assert VIDEO_PROFILES["focus"].target_fps == 30
     fleet, session, _ = paired_session_for_services()
     session.screen_awake = False
     limiter = VideoFleetLimiter(max_sources=12, max_focus=2)
@@ -697,6 +781,55 @@ def test_frozen_http_and_websocket_routes_are_authenticated(tmp_path):
         ).status_code == 422
         with client.websocket_connect("/v1/fleet/events", headers=headers) as websocket:
             assert websocket.receive_json()["event"] == "FLEET_SNAPSHOT"
+
+
+def test_live_view_heals_itself_when_usb_is_not_ready_yet(tmp_path):
+    fleet, _, _ = make_fleet([ADBDevice("SERIAL-USB-9876", "device")])
+    fleet.refresh_once()
+    install_fake_bridges(fleet)
+    settings = Settings("pc-secret", None, "adb", tmp_path)
+    runtime = DesktopRuntime(settings, fleet=fleet)
+    device_id = fleet.list_public()[0]["deviceId"]
+    session = fleet.get(device_id)
+    session.video = VideoStreamController(session, runtime.video_limiter, media_backend=unavailable_media_backend())
+    app = create_desktop_app(settings, runtime)
+    headers = {"Authorization": "Bearer pc-secret"}
+    with TestClient(app) as client:
+        fleet.stop() if hasattr(fleet, "stop") else None
+        session.adb_device = ADBDevice("SERIAL-USB-9876", "unauthorized")
+        with client.websocket_connect(f"/v1/devices/{device_id}/video?profile=thumbnail", headers=headers) as video:
+            first = json.loads(video.receive_text())
+            assert first == {"type": "stream.error", "code": "USB_UNAUTHORIZED", "retryable": True}
+            assert "stream.init" in video.receive_text(), "the producer keeps trying instead of closing the door"
+
+
+def test_closed_browser_releases_subscription_while_video_producer_is_silent(tmp_path):
+    from cyclone_device_gateway.desktop_runtime.video import StreamMessage
+    fleet, _, _ = make_fleet([ADBDevice("SERIAL-IDLE-1234", "device")])
+    fleet.refresh_once()
+    install_fake_bridges(fleet)
+    settings = Settings("pc-secret", None, "adb", tmp_path)
+    runtime = DesktopRuntime(settings, fleet=fleet)
+    device_id = fleet.list_public()[0]["deviceId"]
+    session = fleet.get(device_id)
+    controller = VideoStreamController(session, runtime.video_limiter, jpeg_first=True)
+    def silent_producer(profile, stop):
+        controller._broadcast(profile, StreamMessage("text", '{"type":"stream.init"}'))
+        stop.wait(5)
+    controller._produce_jpeg = silent_producer
+    session.video = controller
+    with TestClient(create_desktop_app(settings, runtime)) as client:
+        session.input_owner = "AI"
+        with client.websocket_connect(f"/v1/devices/{device_id}/video?profile=focus",
+                headers={"Authorization": "Bearer pc-secret"}) as video:
+            assert video.receive_json()["type"] == "stream.init"
+            assert controller.subscriber_count() == 1
+            assert session.input_owner == "AI", "watching a focus stream must not take input"
+            video.close()
+            deadline = time.monotonic() + 2.5
+            while controller.subscriber_count() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert controller.subscriber_count() == 0
 
 
 def test_connection_debug_flow_records_client_server_timeline_and_creates_sendable_zip(tmp_path):

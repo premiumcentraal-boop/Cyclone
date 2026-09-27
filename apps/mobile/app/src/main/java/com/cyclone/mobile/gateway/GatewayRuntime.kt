@@ -12,12 +12,14 @@ import com.cyclone.mobile.automation.skill.SkillCompiler
 import com.cyclone.mobile.automation.skill.SkillDraftSink
 import com.cyclone.mobile.debug.PageDebugSandboxV293
 import com.cyclone.mobile.infrastructure.v31.CycloneV31Runtime
+import com.cyclone.mobile.permissions.CyclonePermissionSetup
 import com.cyclone.mobile.policy.GatePolicy
 import com.cyclone.mobile.policy.PolicyPrincipal
 import com.cyclone.mobile.policy.PrincipalKind
 import com.cyclone.mobile.policy.PrincipalRef
 import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
 import com.mobilerun.portal.diagnostics.CycloneProcessDiagnostics
 import org.json.JSONArray
@@ -143,25 +145,41 @@ object GatewayRuntime {
         val pcSessionKnown = trustedSessionCount > 0 || recentlyAuthenticated
         val bootstrapListening = socket?.isRunning() == true
         val listening = enabled && bootstrapListening
+        val phoneControlSnapshot = CyclonePermissionSetup.phoneControlSnapshot(context)
+        val phoneControlReady = phoneControlSnapshot.ready
+        val phoneControlNeedsRepair = phoneControlSnapshot.needsRepair
         val semanticState = when {
-            !DeviceState.accessibilityConnected -> "UNAVAILABLE"
+            !phoneControlReady -> "UNAVAILABLE"
             current == null -> "DEGRADED"
             else -> "READY"
         }
         val authorityState = when {
             !enabled -> "DENIED"
             !GatewayActionAuthorityRegistry.isProductionAuthorityBound() -> "DEGRADED"
-            !DeviceState.accessibilityConnected -> "DEGRADED"
+            !phoneControlReady -> "DEGRADED"
             else -> "READY"
         }
         val state = when {
             !enabled -> "OFF"
             !listening || listenerError != null -> "ATTENTION_NEEDED"
             trust.optString("trustState") == "CONFIRMATION_REQUIRED" -> "WAITING_FOR_PC"
-            !DeviceState.accessibilityConnected -> "ATTENTION_NEEDED"
+            !phoneControlReady -> "ATTENTION_NEEDED"
             pcSessionKnown -> "CONNECTED"
             else -> "WAITING_FOR_PC"
         }
+        val pendingTrust = trust.optString("trustState") == "CONFIRMATION_REQUIRED" ||
+            trust.optBoolean("confirmationRequired")
+        val trustedPcCount = trust.optInt("trustedPcCount", 0)
+        val nextAction = GatewayReadyDoctor.nextAction(
+            gatewayEnabled = enabled,
+            socketListening = listening,
+            hasListenerError = listenerError != null,
+            phoneControlReady = phoneControlReady,
+            phoneControlNeedsRepair = phoneControlNeedsRepair,
+            pendingTrust = pendingTrust,
+            trustedPcCount = trustedPcCount,
+            pcSessionKnown = pcSessionKnown,
+        )
         return JSONObject()
             .put("protocolVersion", GatewayProtocol.VERSION)
             .put("trustProtocolVersion", GatewayTrustProtocolV33.VERSION)
@@ -182,6 +200,15 @@ object GatewayRuntime {
             .put("socketName", GatewayProtocol.SOCKET_NAME)
             .put("networkListener", false)
             .put("accessibilityConnected", DeviceState.accessibilityConnected)
+            .put("phoneControlReady", phoneControlReady)
+            .put("phoneControlNeedsRepair", phoneControlNeedsRepair)
+            .put("nextAction", nextAction?.let { action ->
+                JSONObject()
+                    .put("code", action.code)
+                    .put("title", action.title)
+                    .put("body", action.body)
+                    .put("actionLabel", action.actionLabel)
+            } ?: JSONObject.NULL)
             .put("semanticObservationState", semanticState)
             .put("actionAuthorityState", authorityState)
             .put("controllerOwner", DeviceState.controller.name)
@@ -312,6 +339,7 @@ internal object GatewayDispatcher {
     private fun dispatch(context: Context, request: GatewayRequest): Any {
         // Trust-session IDs belong to authentication. Only execution operations use this scope.
         val bound = bindDispatchIdentity(request)
+        LivePhoneMode.check(context, request)
         return when (request.op) {
         "trust.negotiate" -> GatewayV33TrustManager.negotiate(context, request.args)
         "trust.begin" -> GatewayV33TrustManager.beginTrust(context, request.args)
@@ -377,6 +405,54 @@ internal object GatewayDispatcher {
         "teach.stop" -> GatewayTeachingAdapter.stop(context)
         "debug.snapshot" -> debugSnapshot(context)
         "skill.compile", "skill.run", "skill.match" -> dispatchSkill(context, request)
+        "atlas.places", "atlas.get", "secrets.slots", "secrets.request" ->
+            GatewayV5ContractAdapter.dispatch(request.op, request.args)
+        "atlas.diff", "mapping.start", "mapping.pause", "mapping.stop", "mapping.status" ->
+            GatewayV5MappingAdapter.dispatch(context, request.op, request.args)
+        "ask.start", "ask.status" -> GatewayV5AskAdapter.dispatch(request.op, request.args)
+        "market.catalog", "market.install", "market.remove", "market.run" -> {
+            GatewayV5MarketAdapter.install(context)
+            GatewayV5MarketAdapter.dispatch(request.op, request.args)
+        }
+        "skills.list" -> {
+            GatewayV5SkillsAdapter.install(context)
+            GatewayV5SkillsAdapter.dispatch(request.op, request.args)
+        }
+        "learn.run" -> {
+            GatewayV5LearnAdapter.install(context)
+            GatewayV5LearnAdapter.dispatch(request.op, request.args)
+        }
+        "lab.start", "lab.status", "lab.answer", "lab.record" -> {
+            GatewayV5LabAdapter.install(context)
+            GatewayV5LabAdapter.dispatch(request.op, request.args)
+        }
+        "apps.list" -> GatewayV5AppsAdapter.dispatch(request.op, request.args)
+        "share.status" -> {
+            if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "share.status takes no arguments.", request.id)
+            com.cyclone.mobile.share.LanShareRuntime.status(context)
+        }
+        "share.request" -> {
+            val extra = request.args.keys().asSequence().filter { it != "pcLabel" }.toList()
+            if (extra.isNotEmpty()) throw GatewayProtocolException("INVALID_REQUEST", "share.request takes only pcLabel.", request.id)
+            com.cyclone.mobile.share.LanShareRuntime.request(context, request.args.optString("pcLabel").takeIf { it.isNotBlank() })
+        }
+        "atlas.here" -> {
+            if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "atlas.here takes no arguments.", request.id)
+            com.cyclone.mobile.mapping.crawl.StepLocation.here(context)
+        }
+        "knowledge.get" -> {
+            GatewayV5KnowledgeSummaryAdapter.install(context)
+            GatewayV5KnowledgeSummaryAdapter.dispatch(request.op, request.args)
+        }
+        "atlas.versions", "scenarios.list" -> {
+            com.cyclone.mobile.applearner.graphv2.AtlasRuntime.initialize(context)
+            GatewayV5KnowledgeAdapter.dispatch(request.op, request.args)
+        }
+        "runs.list", "runs.get", "runs.mark" -> {
+            com.cyclone.mobile.ai.AgentTraceRuntime.initialize(context)
+            GatewayV5RunsAdapter.install(context)
+            GatewayV5RunsAdapter.dispatch(request.op, request.args)
+        }
         else -> throw GatewayProtocolException(
             "PROTOCOL_MISMATCH",
             "Unsupported gateway operation: ${request.op}",
@@ -389,23 +465,40 @@ internal object GatewayDispatcher {
     private fun bindDispatchIdentity(request: GatewayRequest): ExecutionContext {
         if (request.op !in humanDisplayOps && request.op !in sessionBindOps) return ExecutionContext.DEFAULT
         val merged = ExecutionRequestScope.merge(request.args, request.args.optJSONObject("params") ?: JSONObject())
-        return try {
-            if (request.op in humanDisplayOps) ExecutionRequestScope.requireForeground(merged)
-            else ExecutionRequestScope.bind(merged)
+        if (request.args.has("workspaceId") && !merged.has("workspaceId")) {
+            merged.put("workspaceId", request.args.get("workspaceId"))
+        }
+        if (request.args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+            merged.put("workspaceGeneration", request.args.get("workspaceGeneration"))
+        }
+        val plane = try {
+            if (request.op in humanDisplayOps) {
+                ExecutionRequestScope.requireForeground(merged)
+                SessionContract.classify(merged)
+            } else SessionContract.classify(merged)
         } catch (error: SessionIdentityException) {
+            val code = if (
+                request.op == "session.snapshot" &&
+                error.errorClass == SessionContract.SESSION_DISPLAY_MISMATCH
+            ) {
+                "PROTOCOL_MISMATCH"
+            } else {
+                error.errorClass
+            }
             throw GatewayProtocolException(
-                "SESSION_DISPLAY_MISMATCH",
+                code,
                 error.message ?: "session/display mismatch",
                 request.id,
             )
         }
+        return ExecutionContext(plane.sessionId, plane.displayId)
     }
 
     private fun currentObservation(bound: ExecutionContext, requestId: String): GatewayObservation? = try {
         GatewayObservationStore.current(bound)
     } catch (error: SessionIdentityException) {
         throw GatewayProtocolException(
-            "SESSION_DISPLAY_MISMATCH",
+            error.errorClass,
             error.message ?: "session/display mismatch",
             requestId,
         )

@@ -257,6 +257,31 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         """Cancel one explicitly targeted Cyclone routine run."""
         return tools.call("phone_routine_cancel", {"device_id": device_id, "run_id": run_id})
 
+    @mcp.tool(annotations=READ)
+    def phone_lab_missions() -> dict[str, Any]:
+        """List Cyclone Lab missions (goal, suite, how success is read from the phone) for measuring Cyclone."""
+        return tools.call("phone_lab_missions", {})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_lab_start(device_id: str, name: str, missions: list[str], variants: list[dict[str, Any]] | None = None,
+                        repetitions: int = 1) -> dict[str, Any]:
+        """Run a Cyclone Lab experiment: missions x variants x repetitions on one paired phone, scored from the phone.
+        A variant is {name, modelId?, effort?, workingMinutes?, marks?, freshMemory?, promptAddendum?, useMap?}. The lab never
+        approves consequential actions and never supplies secrets."""
+        return tools.call("phone_lab_start", {"device_id": device_id, "name": name, "missions": missions,
+                                              "variants": variants or [{"name": "A"}], "repetitions": repetitions})
+
+    @mcp.tool(annotations=READ)
+    def phone_lab_report(experiment_id: str | None = None) -> dict[str, Any]:
+        """Cyclone Lab results: without an id the experiment list; with one, success rates with confidence intervals,
+        A/B comparisons, insights and every failed run with its cause, checks and tool errors."""
+        return tools.call("phone_lab_report", {"experiment_id": experiment_id} if experiment_id else {})
+
+    @mcp.tool(annotations=WRITE)
+    def phone_lab_stop(experiment_id: str) -> dict[str, Any]:
+        """Stop a running Cyclone Lab experiment after the current mission is stopped."""
+        return tools.call("phone_lab_stop", {"experiment_id": experiment_id})
+
     return mcp
 
 

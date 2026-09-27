@@ -138,6 +138,10 @@ class GatewayDesktopRuntimeV1Test {
             GatewayProtocol.unauthenticatedOperations,
         )
         assertTrue("bridge.status" in GatewayProtocol.legacyReadOnlyOperations)
+        assertTrue("atlas.places" in GatewayProtocol.legacyReadOnlyOperations)
+        assertTrue("atlas.get" in GatewayProtocol.legacyReadOnlyOperations)
+        assertTrue("secrets.slots" in GatewayProtocol.legacyReadOnlyOperations)
+        assertFalse("secrets.request" in GatewayProtocol.legacyReadOnlyOperations)
         assertFalse("action.execute" in GatewayProtocol.legacyReadOnlyOperations)
         assertFalse("manual.execute" in GatewayProtocol.legacyReadOnlyOperations)
         assertFalse("clipboard.set" in GatewayProtocol.legacyReadOnlyOperations)

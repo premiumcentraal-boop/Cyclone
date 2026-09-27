@@ -62,6 +62,16 @@ def trust_transcript(*, challenge_id: str, phone_id: str, pc_id: str, pc_nonce: 
     ])
 
 
+def trust_match_code(transcript: str) -> str:
+    """Six digits both screens show while a phone is being connected (not a secret, only a visual match).
+
+    Phone twin: `GatewayTrustProtocolV33.matchCode`. Both derive it from the same signed transcript, so the
+    user can see that the phone asking is the phone on this PC's screen.
+    """
+    digest = hashlib.sha256(transcript.encode("utf-8")).digest()
+    return f"{int.from_bytes(digest[:4], 'big') % 1_000_000:06d}"
+
+
 def trust_receipt_transcript(*, challenge_id: str, trust_id: str, phone_id: str, pc_id: str, generation: int) -> str:
     return _canonical([
         ("purpose", "trust-receipt"),
@@ -349,11 +359,13 @@ class PCTrustCoordinator:
             "deviceId": device_id,
             "protocolVersion": TRUST_PROTOCOL_VERSION,
             "state": state,
+            "matchCode": trust_match_code(pending.transcript) if state == "CONFIRMATION_REQUIRED" and pending else None,
             "confirmationRequired": state == "CONFIRMATION_REQUIRED",
             "trusted": record is not None and not revoked,
             "sessionReady": active_ready,
             "sessionExpiresAtEpochMs": active.expires_at_ms if active_ready and active else None,
             "pcId": self.identity.pc_id,
+            "pcLabel": self.pc_label,
             "pcIdentityStorage": self.store.security_mode,
             "sessionSecretPersisted": False,
             "lastSafeError": last_error,
@@ -452,6 +464,8 @@ class PCTrustCoordinator:
             except BridgeOperationError as exc:
                 if exc.code == "PHONE_CONFIRMATION_REQUIRED":
                     return {**self.status(device_id), "completed": False, "confirmationRequired": True}
+                if exc.code in {"TRUST_REJECTED", "TRUST_EXPIRED"}:
+                    self._pending.pop(device_id, None)
                 self._raise_bridge(exc)
             trust_id = _required(response, "trustId")
             phone_id = _required(response, "phoneId")
@@ -742,6 +756,7 @@ class PCTrustCoordinator:
             "AUTH_REJECTED": RuntimeErrorCode.TRUST_AUTH_FAILED,
             "AUTH_SIGNATURE_INVALID": RuntimeErrorCode.TRUST_AUTH_FAILED,
             "PHONE_LOCKED_OR_UNAVAILABLE": RuntimeErrorCode.PHONE_LOCKED,
+            "TRUST_REJECTED": RuntimeErrorCode.TRUST_REJECTED,
         }
         code = mapping.get(exc.code, RuntimeErrorCode.TRUST_AUTH_FAILED)
         raise DesktopRuntimeError(code, _plain_error(exc.code), retryable=exc.code in {"TRUST_EXPIRED", "PHONE_LOCKED_OR_UNAVAILABLE"}) from exc
@@ -786,6 +801,7 @@ def _plain_error(code: str) -> str:
         "AUTH_REJECTED": "The trusted phone session was rejected; allow this PC again if needed.",
         "AUTH_SIGNATURE_INVALID": "Cyclone could not authenticate the trust exchange.",
         "PHONE_LOCKED_OR_UNAVAILABLE": "Unlock the phone to restore AI/Codex access.",
+        "TRUST_REJECTED": "The phone answered Not now; this PC was not connected.",
     }.get(code, "Cyclone AI trust could not be restored.")
 
 

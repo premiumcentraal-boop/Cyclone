@@ -35,7 +35,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,11 +49,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.cyclone.mobile.ai.OpenRouterModelPresets
+import com.cyclone.mobile.ai.OpenRouterCatalogStore
 import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.ai.model.ModelQualificationOutcome
 import com.cyclone.mobile.ai.model.ModelQualificationRunner
+import com.cyclone.mobile.ui.v32.CycloneOpenRouterCatalog
+import com.cyclone.mobile.ui.v32.CycloneReasoningSelector
 import com.cyclone.mobile.ui.v32.CycloneV32Theme
+import com.cyclone.mobile.ui.overlay.tracefield.TraceFieldMode
+import com.cyclone.mobile.ui.overlay.tracefield.TraceFieldPrefs
+import com.cyclone.mobile.ui.overlay.tracefield.TraceFieldRuntime
+import com.cyclone.mobile.ui.overlay.tracefield.TraceFieldStyle
 import kotlinx.coroutines.launch
 
 /** Full AI configuration intentionally lives in the Cyclone app, never in the floating composer. */
@@ -71,26 +80,15 @@ class CycloneAiSettingsActivity : ComponentActivity() {
 
 @Composable
 private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
-    val prefs = remember { context.getSharedPreferences("cyclone_ai", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
-    var selectedModelId by rememberSaveable {
-        mutableStateOf(
-            prefs.getString("openrouter_model", OpenRouterModelPresets.DEFAULT.id)
-                .orEmpty()
-                .ifBlank { OpenRouterModelPresets.DEFAULT.id },
-        )
-    }
-    var reasoning by rememberSaveable {
-        mutableStateOf(
-            prefs.getString("openrouter_reasoning_effort", "medium")
-                .orEmpty()
-                .takeIf { it in REASONING_LEVELS } ?: "medium",
-        )
-    }
+    val catalogRevision by OpenRouterCatalogStore.revision.collectAsState()
+    val pickerModels = remember(catalogRevision) { OpenRouterCatalogStore.picker(context) }
+    var selectedModelId by rememberSaveable(catalogRevision) { mutableStateOf(OpenRouterCatalogStore.activeId(context)) }
+    var backupModelId by rememberSaveable(catalogRevision) { mutableStateOf(OpenRouterCatalogStore.backupId(context)) }
     var checking by remember { mutableStateOf(false) }
     var accessResult by remember { mutableStateOf<String?>(null) }
     var roleRefresh by remember { mutableStateOf(0) }
-    val selectedModel = OpenRouterModelPresets.byId(selectedModelId)
+    val selectedModel = remember(catalogRevision, selectedModelId) { OpenRouterCatalogStore.preset(context, selectedModelId) }
     val roleManager = remember(roleRefresh) { context.getSystemService(RoleManager::class.java) }
     val roleAvailable = roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)
     val assistantHeld = roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)
@@ -132,14 +130,19 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
             }
         }
 
+        item { SettingsCard { CycloneOpenRouterCatalog(context) } }
         item { Text("Choose model", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-        items(OpenRouterModelPresets.all, key = { it.id }) { model ->
+        items(pickerModels, key = { it.id }) { model ->
             FilterChip(
                 selected = selectedModelId == model.id,
                 onClick = {
-                    selectedModelId = model.id
-                    prefs.edit().putString("openrouter_model", model.id).apply()
-                    accessResult = null
+                    try {
+                        OpenRouterCatalogStore.setActive(context, model.id)
+                        selectedModelId = OpenRouterCatalogStore.activeId(context)
+                        accessResult = null
+                    } catch (failure: Exception) {
+                        accessResult = failure.message
+                    }
                 },
                 label = { Text(model.label) },
             )
@@ -147,21 +150,215 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
-                Text("Reasoning", fontWeight = FontWeight.Bold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    REASONING_LEVELS.forEach { level ->
+                Text("When the main model is busy", fontWeight = FontWeight.Bold)
+                Text(
+                    "If the main model is rate-limited or down during a task, Cyclone can continue with a backup you choose. It never switches on its own.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.size(8.dp))
+                FilterChip(
+                    selected = backupModelId.isBlank(),
+                    onClick = {
+                        runCatching { OpenRouterCatalogStore.setBackup(context, "") }
+                        backupModelId = OpenRouterCatalogStore.backupId(context)
+                    },
+                    label = { Text("Stop and tell me") },
+                )
+                pickerModels.filter { it.id != selectedModelId }.forEach { model ->
+                    FilterChip(
+                        selected = backupModelId == model.id,
+                        onClick = {
+                            try {
+                                OpenRouterCatalogStore.setBackup(context, model.id)
+                                backupModelId = OpenRouterCatalogStore.backupId(context)
+                            } catch (failure: Exception) {
+                                accessResult = failure.message
+                            }
+                        },
+                        label = { Text("Backup: ${model.label}") },
+                    )
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
+                var mindOn by remember { mutableStateOf(com.cyclone.mobile.mind.mission.MindMissions.enabled(context)) }
+                var minutes by remember { mutableStateOf(com.cyclone.mobile.mind.mission.MindMissions.workingMinutes(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Cyclone Mind", fontWeight = FontWeight.Bold)
+                        Text(
+                            "One model works each request as a mission: it keeps the whole conversation, uses the phone's tools itself and asks you only when it needs you. Off uses the classic step agent.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = mindOn, onCheckedChange = {
+                        mindOn = it
+                        com.cyclone.mobile.mind.mission.MindMissions.setEnabled(context, it)
+                    })
+                }
+                if (mindOn) {
+                    Spacer(Modifier.size(8.dp))
+                    Text("Working time per mission: $minutes min", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(10, 30, 60).forEach { value ->
+                            FilterChip(
+                                selected = minutes == value,
+                                onClick = {
+                                    minutes = value
+                                    com.cyclone.mobile.mind.mission.MindMissions.setWorkingMinutes(context, value)
+                                },
+                                label = { Text("$value min") },
+                            )
+                        }
+                    }
+                    Text(
+                        "Time you spend answering Cyclone does not count. A paused mission can be resumed from Ask.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
+                // Planes (plan 25): where missions work. The pill on a running task switches either way.
+                var planeMode by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.mode(context)) }
+                val blocker = remember { com.cyclone.mobile.runtime.plane.MissionPlanes.blocker(context) }
+                Text("Where Cyclone works", fontWeight = FontWeight.Bold)
+                Text(
+                    when (planeMode) {
+                        com.cyclone.mobile.runtime.plane.PlaneMode.AUTOMATIC -> "Automatic: when you are using your phone, Cyclone works on a background screen behind it; otherwise on your screen, where you can watch. Protected screens and apps that need you always come to your screen."
+                        com.cyclone.mobile.runtime.plane.PlaneMode.SCREEN -> "Always on your screen, where you can watch every step."
+                        com.cyclone.mobile.runtime.plane.PlaneMode.BACKGROUND -> "In the background whenever the app allows it. Steps that need you or your screen still come to it."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.cyclone.mobile.runtime.plane.PlaneMode.entries.forEach { mode ->
                         FilterChip(
-                            selected = reasoning == level,
+                            selected = planeMode == mode,
                             onClick = {
-                                reasoning = level
-                                prefs.edit().putString("openrouter_reasoning_effort", level).apply()
+                                planeMode = mode
+                                com.cyclone.mobile.runtime.plane.MissionPlanes.setMode(context, mode)
                             },
-                            label = { Text(level.replaceFirstChar { it.uppercase() }) },
+                            label = { Text(mode.label) },
                         )
                     }
                 }
+                blocker?.let {
+                    Text("Background work is not available yet: $it", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                // Plan 26 (A42-4): what happens when background is wanted but not possible right now.
+                if (planeMode != com.cyclone.mobile.runtime.plane.PlaneMode.SCREEN) {
+                    var fallback by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.fallback(context)) }
+                    Text("When background isn't possible", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.runtime.plane.PlaneFallback.entries.forEach { choice ->
+                            FilterChip(selected = fallback == choice, onClick = {
+                                fallback = choice
+                                com.cyclone.mobile.runtime.plane.MissionPlanes.setFallback(context, choice)
+                            }, label = { Text(choice.label) })
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
+                // Plan 26 (A42-1): one switch, one answer, one next step.
+                var capability by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.capability(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Background work", fontWeight = FontWeight.Bold)
+                        Text(capability.headline, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = capability.level != com.cyclone.mobile.runtime.plane.CapabilityLevel.OFF &&
+                            capability.level != com.cyclone.mobile.runtime.plane.CapabilityLevel.UNSUPPORTED,
+                        enabled = capability.level != com.cyclone.mobile.runtime.plane.CapabilityLevel.UNSUPPORTED,
+                        onCheckedChange = { on ->
+                            com.cyclone.mobile.runtime.plane.MissionPlanes.setBackgroundOn(context, on)
+                            capability = com.cyclone.mobile.runtime.plane.MissionPlanes.capability(context)
+                        },
+                    )
+                }
+                capability.action?.takeIf { it != com.cyclone.mobile.runtime.plane.CapabilityAction.TURN_ON }?.let { action ->
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(com.cyclone.mobile.runtime.plane.BackgroundWatch.fixIntent(context, action)) }
+                    }) { Text(action.label) }
+                }
+                Text("Also in Quick Settings: add the Cyclone background tile. Glass on your PC can keep it on after restarts.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                BackgroundCheckSection(onDone = { capability = com.cyclone.mobile.runtime.plane.MissionPlanes.capability(context) })
+                // Per app: seeded (banking, camera, games on your screen) and learned; the owner's choice wins.
+                val compat = remember { com.cyclone.mobile.runtime.plane.MissionPlanes.compat(context) }
+                var choices by remember { mutableStateOf(compat.choices()) }
+                if (choices.isNotEmpty()) {
+                    Text("Per app", style = MaterialTheme.typography.bodyMedium)
+                    choices.entries.sortedBy { it.key }.take(30).forEach { (pkg, choice) ->
+                        val label = remember(pkg) { runCatching { context.packageManager.getApplicationLabel(
+                            context.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                val next = com.cyclone.mobile.runtime.plane.PlaneOverride.entries.let { it[(it.indexOf(choice) + 1) % it.size] }
+                                compat.setOverride(pkg, next)
+                                choices = compat.choices()
+                            }) { Text(choice.label) }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
+                val memory = remember { com.cyclone.mobile.mind.mission.MindMissions.memory(context) }
+                var facts by remember { mutableStateOf(memory.all()) }
+                Text("What Cyclone Mind remembers", fontWeight = FontWeight.Bold)
+                Text(
+                    "Facts the Mind kept for future missions. It never keeps passwords, codes, keys or card numbers. Remove anything you don't want it to know.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (facts.isEmpty()) {
+                    Text("Nothing yet.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    facts.take(50).forEach { fact ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(fact.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { memory.forget(fact.id); facts = memory.all() }) { Text("Forget") }
+                        }
+                    }
+                    TextButton(onClick = { memory.forgetAll(); facts = memory.all() }) { Text("Forget everything") }
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
+                Text("Intelligence", fontWeight = FontWeight.Bold)
+                if (selectedModelId.isBlank()) {
+                    Text("Choose an available model first.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    CycloneReasoningSelector(selectedModelId)
+                }
+                Text(
+                    "Cyclone uses only the exact reasoning efforts advertised by this model in OpenRouter. Changing intelligence never changes the model or provider route.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Button(
-                    enabled = !checking && OpenRouterSecretStore.hasKey(context),
+                    enabled = !checking && selectedModelId.isNotBlank() && OpenRouterSecretStore.hasKey(context),
                     onClick = {
                         checking = true
                         accessResult = null
@@ -174,12 +371,8 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                                         append(selectedModel.label)
                                         append(": ")
                                         append(result.failure.userMessage)
-                                        if (result.failure.httpStatus > 0) {
-                                            append(" (HTTP ").append(result.failure.httpStatus).append(')')
-                                        }
-                                        result.failure.providerMessage
-                                            ?.takeIf { it.isNotBlank() }
-                                            ?.let { append(" · ").append(it) }
+                                        if (result.failure.httpStatus > 0) append(" (HTTP ").append(result.failure.httpStatus).append(')')
+                                        result.failure.providerMessage?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
                                     }
                                 }
                             } catch (_: Exception) {
@@ -205,6 +398,8 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
             }
         }
 
+        item { SettingsCard { WorkingIndicatorSettings(context) } }
+
         item {
             SettingsCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -223,16 +418,12 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 }
                 if (roleAvailable && !assistantHeld) {
                     Button(
-                        onClick = {
-                            requestAssistant.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
-                        },
+                        onClick = { requestAssistant.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)) },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Make Cyclone my assistant") }
                 }
                 OutlinedButton(
-                    onClick = {
-                        context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    },
+                    onClick = { context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Open Android settings") }
                 Text(
@@ -242,6 +433,110 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+/** Shared by the AI settings screen and the main Settings → Appearance → Working indicator page. */
+@Composable
+internal fun ColumnScope.WorkingIndicatorSettings(context: Context) {
+    var mode by remember { mutableStateOf(TraceFieldPrefs.mode(context)) }
+    var style by remember { mutableStateOf(TraceFieldPrefs.style(context)) }
+    var previewMessage by remember { mutableStateOf<String?>(null) }
+    Text("Working indicator", fontWeight = FontWeight.Bold)
+    Text(
+        "Trace Field shows tiny digits under a soft lens that follows what Cyclone is looking at and tapping. It never covers your screen and is hidden from Cyclone's own screenshots.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            TraceFieldMode.FIELD to "Trace Field",
+            TraceFieldMode.EDGE to "Edge only",
+            TraceFieldMode.OFF to "Off",
+        ).forEach { (option, label) ->
+            FilterChip(
+                selected = mode == option,
+                onClick = {
+                    TraceFieldPrefs.setMode(context, option)
+                    mode = option
+                    previewMessage = null
+                },
+                label = { Text(label) },
+            )
+        }
+    }
+    if (mode == TraceFieldMode.FIELD) {
+        Text("Style", fontWeight = FontWeight.Bold)
+        TraceFieldStyle.entries.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { option ->
+                    FilterChip(
+                        selected = style == option,
+                        onClick = {
+                            TraceFieldPrefs.setStyle(context, option)
+                            style = option
+                            previewMessage = null
+                        },
+                        label = { Text(option.label) },
+                    )
+                }
+            }
+        }
+        Text(style.blurb, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    OutlinedButton(
+        enabled = mode != TraceFieldMode.OFF,
+        onClick = {
+            previewMessage = if (TraceFieldRuntime.preview()) {
+                "Playing preview over this screen."
+            } else {
+                "Turn on Cyclone's accessibility service to preview."
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text("Preview") }
+    previewMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    Text(
+        "Battery Saver switches Trace Field to Edge only. Remove animations shows a still field.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * Plan 28: the Background Check. One tap runs the real background path on a hidden screen and shows each step; a
+ * failed step names what to do. The same result decides whether Automatic uses the background.
+ */
+@Composable
+private fun ColumnScope.BackgroundCheckSection(onDone: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val check = com.cyclone.mobile.runtime.plane.BackgroundCheck
+    remember { check.last(context) }
+    val report by check.report.collectAsState()
+    var running by remember { mutableStateOf(check.running) }
+    androidx.compose.runtime.LaunchedEffect(report, running) {
+        if (running && !check.running) { running = false; onDone() }
+        if (running) { kotlinx.coroutines.delay(400); running = check.running; if (!running) onDone() }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Background check", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(report?.headline ?: "Opens a harmless app on a hidden screen, reads it and scrolls it once. About 10 seconds.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        OutlinedButton(enabled = !running, onClick = { if (check.start(context)) running = true }) {
+            Text(if (running) "Checking…" else "Check")
+        }
+    }
+    report?.steps?.forEach { step ->
+        val mark = when (step.result) {
+            com.cyclone.mobile.runtime.plane.CheckResult.PASSED -> "✓"
+            com.cyclone.mobile.runtime.plane.CheckResult.FAILED -> "✗"
+            com.cyclone.mobile.runtime.plane.CheckResult.SKIPPED -> "–"
+        }
+        Text("$mark ${step.step.label}: ${step.detail}", style = MaterialTheme.typography.bodySmall,
+            color = if (step.result == com.cyclone.mobile.runtime.plane.CheckResult.FAILED) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -258,5 +553,3 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
         )
     }
 }
-
-private val REASONING_LEVELS = listOf("low", "medium", "high", "max")

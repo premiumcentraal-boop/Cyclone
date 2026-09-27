@@ -95,6 +95,16 @@ class OpenRouterQuickAgentTest {
             "phone.type",
             JSONObject().put("selector", JSONObject().put("text", "Password")),
         ).allowed)
+        assertFalse(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.FULL,
+            "phone.click",
+            JSONObject().put("selector", JSONObject().put("text", "Log in")),
+        ).allowed)
+        assertTrue(CycloneAiAccessPolicy.evaluate(
+            CycloneAiAccessProfile.FULL,
+            "phone.click",
+            JSONObject().put("selector", JSONObject().put("text", "Log in")).put("autofill_authorized", true),
+        ).allowed)
     }
 
     @Test

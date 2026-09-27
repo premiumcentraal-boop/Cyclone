@@ -14,7 +14,9 @@ import com.cyclone.mobile.debug.PageDebugSandboxV293
 import com.cyclone.mobile.guided.RoutineTeachingRuntime
 import com.cyclone.mobile.guided.RoutineTeachingSession
 import com.cyclone.mobile.guided.TeachingGestureEvidenceV292
+import com.cyclone.mobile.runtime.session.ExecutionContext
 import com.cyclone.mobile.runtime.session.ExecutionRequestScope
+import com.cyclone.mobile.runtime.session.SessionContract
 import com.cyclone.mobile.runtime.session.SessionIdentityException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -163,11 +165,17 @@ internal object GatewayActionAdapter {
         val source = args.optString("source", "PC_CODEX")
         if (source != "PC_CODEX") throw GatewayProtocolException("PROTOCOL_MISMATCH", "Gateway action source must be PC_CODEX", requestId)
         val params = args.optJSONObject("params") ?: JSONObject()
-        val bound = try {
-            ExecutionRequestScope.bind(ExecutionRequestScope.merge(args, params))
+        val plane = try {
+            val merged = ExecutionRequestScope.merge(args, params)
+            if (args.has("workspaceId") && !merged.has("workspaceId")) merged.put("workspaceId", args.get("workspaceId"))
+            if (args.has("workspaceGeneration") && !merged.has("workspaceGeneration")) {
+                merged.put("workspaceGeneration", args.get("workspaceGeneration"))
+            }
+            SessionContract.classify(merged)
         } catch (error: SessionIdentityException) {
-            throw GatewayProtocolException("SESSION_DISPLAY_MISMATCH", error.message ?: "session/display mismatch", requestId)
+            throw GatewayProtocolException(error.errorClass, error.message ?: "session/display mismatch", requestId)
         }
+        val bound = ExecutionContext(plane.sessionId, plane.displayId)
         val goal = args.optString("goal").ifBlank { tool.removePrefix("phone.").replace('_', ' ') }
         val currentObservationId = args.optString("currentObservationId")
             .takeIf(String::isNotBlank)
@@ -193,7 +201,7 @@ internal object GatewayActionAdapter {
         // V3.3 owns post-action observation. Learning here would confuse executor/transport
         // success with a verified page result, so GatewayV33ActionAdapter records only a passed
         // semantic after-state.
-        return JSONObject()
+        val envelope = JSONObject()
             .put("source", "PC_CODEX")
             .put("tool", tool)
             .put("authority", JSONObject()
@@ -202,6 +210,7 @@ internal object GatewayActionAdapter {
                 .put("reasonCode", authorityDecision.reasonCode))
             .put("sanitizedParams", GatewayPrivacy.redactActionParams(tool, executableParams))
             .put("execution", GatewayPrivacy.sanitizeDeep(result.toJson()))
+        return SessionContract.attach(envelope, plane)
     }
 
 }

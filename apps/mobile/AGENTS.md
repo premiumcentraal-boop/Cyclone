@@ -17,7 +17,7 @@ This module is the Android product. Keep changes focused on the current runtime 
 
 ## Main product surfaces
 
-`Home`, `Teach`, `Ask Cyclone`, `Routines`, `Brain`, `Settings`, plus the persistent Aurora activation overlay.
+`Home`, `Profiles`, `AI / Ask Cyclone`, `Routines`, `Brain`, `Settings`, plus the persistent Aurora activation overlay.
 
 ## Before committing
 

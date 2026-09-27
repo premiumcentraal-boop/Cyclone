@@ -31,6 +31,8 @@ JPEG_INIT_TIMEOUT_S = 20.0
 JPEG_STALE_TIMEOUT_S = 15.0
 JPEG_SCREENCAP_TIMEOUT_S = JPEG_INIT_TIMEOUT_S
 JPEG_PRIMARY_BACKEND = "adb-screenshot"
+LAN_SHARE_BACKEND = "lan-share"
+LAN_RECHECK_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -74,11 +76,7 @@ class VideoFleetLimiter:
 
 
 class VideoStreamController:
-    """Compatibility adapter from the gateway WebSocket surface to the live-view producer.
-
-    Physical focus prefers JPEG/adb-screenshot (~2 fps). scrcpy H.264 is opt-in for tests and is
-    never a provisional ``video/avc`` handshake that can time out before a frame exists.
-    """
+    """USB H.264 live view with a bounded screenshot fallback when media is unavailable."""
 
     def __init__(
         self,
@@ -87,8 +85,12 @@ class VideoStreamController:
         diagnostic=None,
         media_backend: ScrcpyMediaBackend | None = None,
         *,
-        jpeg_first: bool = True,
+        jpeg_first: bool = False,
+        lan_share: Any | None = None,
     ):
+        # Wi-Fi screen share (AnyDesk-style): an object with available() -> bool and open() -> client|None for this
+        # phone. USB H.264 is primary; an explicitly started share can rescue a failed USB encoder.
+        self.lan_share = lan_share
         self.session = session
         self.limiter = limiter
         self.jpeg_first = jpeg_first
@@ -113,22 +115,35 @@ class VideoStreamController:
     def subscribe(self, profile: str) -> queue.Queue:
         if profile not in VIDEO_PROFILES:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unknown video profile.")
-        q: queue.Queue = queue.Queue(maxsize=3)
+        # Keep configuration and the next keyframe available while a local viewer briefly stalls.
+        # Old frames are still discarded by _broadcast, so this is never an unbounded latency buffer.
+        q: queue.Queue = queue.Queue(maxsize=16)
         with self._lock:
             self._subscribers[profile].add(q)
-            if len(self._subscribers[profile]) == 1:
-                stop = threading.Event()
-                self._stops[profile] = stop
-                thread = threading.Thread(
-                    target=self._producer,
-                    args=(profile, stop),
-                    name=f"cyclone-video-{self.session.device_id}-{profile}",
-                    daemon=True,
-                )
-                self._threads[profile] = thread
-                thread.start()
+            thread = self._threads.get(profile)
+            if thread is None or not thread.is_alive():
+                self._start_producer_locked(profile)
+            else:
+                # A late viewer has no decoder configuration or keyframe. Restart once
+                # for all current viewers rather than feed it mid-GOP delta packets.
+                # This also covers a reload whose new socket beats the old close frame.
+                self._stops[profile].set()
+            # If the last viewer just left, its producer is still shutting down. Its
+            # finally block starts the replacement, after releasing the old media session.
         self._mark("server.stream.subscribed", {"profile": profile, "transport": "websocket"})
         return q
+
+    def _start_producer_locked(self, profile: str) -> None:
+        stop = threading.Event()
+        self._stops[profile] = stop
+        thread = threading.Thread(
+            target=self._producer,
+            args=(profile, stop),
+            name=f"cyclone-video-{self.session.device_id}-{profile}",
+            daemon=True,
+        )
+        self._threads[profile] = thread
+        thread.start()
 
     def unsubscribe(self, profile: str, q: queue.Queue) -> None:
         with self._lock:
@@ -143,8 +158,11 @@ class VideoStreamController:
         with self._lock:
             stops = tuple(self._stops.values())
             threads = tuple(self._threads.values())
-        for stop in stops:
-            stop.set()
+            for profile, subscribers in self._subscribers.items():
+                self._broadcast(profile, StreamMessage("close", ""))
+                subscribers.clear()
+            for stop in stops:
+                stop.set()
         try:
             self.media_backend.stop(self.session.device_id)
         except Exception:
@@ -187,10 +205,10 @@ class VideoStreamController:
                 "media": media,
             }
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, *, fresh: bool = False) -> dict[str, Any]:
         """Return one bounded image for evidence/degraded preview, never the primary live path."""
         with self._lock:
-            meta = self._last_frame_meta
+            meta = None if fresh else self._last_frame_meta
             sequence = self._sequence
         if meta is None:
             try:
@@ -246,6 +264,13 @@ class VideoStreamController:
             )
             return
         try:
+            if self.lan_share is not None and self.jpeg_first:
+                # Prefer the phone's own Wi-Fi share; fall back to ADB screenshots and switch back as soon as it shares.
+                while not stop.is_set():
+                    if self._produce_lan(profile, stop):
+                        continue
+                    self._produce_jpeg(profile, stop, until=self._lan_ready)
+                return
             if self.jpeg_first:
                 self._produce_jpeg(profile, stop)
             else:
@@ -263,43 +288,39 @@ class VideoStreamController:
                         },
                     )
                 if not stop.is_set():
-                    self._produce_jpeg(profile, stop)
+                    # Do not strand a disconnected viewer. An owner-requested LAN share can
+                    # still replace the emergency screenshot preview after USB media fails.
+                    while not stop.is_set():
+                        if self._produce_lan(profile, stop):
+                            continue
+                        self._produce_jpeg(profile, stop, until=self._lan_ready, fallback=True)
         finally:
-            try:
-                self.media_backend.stop(self.session.device_id)
-            except Exception:
-                pass
+            # _produce_scrcpy unsubscribes its own media session. Stopping by device here used
+            # to kill a newly started focus stream when Glass closed the thumbnail stream.
             self._mark("server.producer.stop", {"profile": profile})
             self.limiter.release(profile, focus_allowed)
             with self._lock:
-                self._threads.pop(profile, None)
-                self._stops.pop(profile, None)
+                if self._stops.get(profile) is stop:
+                    self._threads.pop(profile, None)
+                    self._stops.pop(profile, None)
+                    if stop.is_set() and self._subscribers.get(profile):
+                        self._start_producer_locked(profile)
 
     def _produce_scrcpy(self, profile: str, stop: threading.Event) -> None:
         media = self.media_backend.start(self.session, profile)
         events = media.subscribe()
-        status = media.status()
-        self._broadcast(
-            profile,
-            StreamMessage(
-                "text",
-                self._init_json(
-                    profile,
-                    "video/avc",
-                    "scrcpy-v4.0",
-                    width=status.get("width") or getattr(self.session, "display_width", None),
-                    height=status.get("height") or getattr(self.session, "display_height", None),
-                    session_id=media.session_id,
-                ),
-            ),
-        )
-        init_sent = True
-        self._mark("server.stream.init", {"profile": profile, "source": "scrcpy-v4.0", "provisional": True})
+        # Wait for scrcpy's real session metadata. A provisional init could reset the browser's
+        # decoder when the first configuration packet was already in flight.
+        init_sent = False
+        seen_frame = False
+        last_keepalive = time.monotonic()
         try:
             while not stop.is_set():
                 try:
                     event: MediaEvent = events.get(timeout=0.5)
                 except queue.Empty:
+                    if seen_frame:
+                        last_keepalive = self._maybe_keepalive(profile, last_keepalive)
                     continue
                 if event.kind == "session":
                     width = _safe_int(event.data.get("width"))
@@ -319,6 +340,8 @@ class VideoStreamController:
                         ),
                     )
                     init_sent = True
+                    seen_frame = False
+                    last_keepalive = time.monotonic()
                     self._mark(
                         "server.stream.init",
                         {"profile": profile, "source": "scrcpy-v4.0", "width": width, "height": height},
@@ -339,6 +362,8 @@ class VideoStreamController:
                         ),
                     )
                     if not config:
+                        seen_frame = True
+                        last_keepalive = time.monotonic()
                         with self._lock:
                             self._frames_by_profile[profile] += 1
                             first = self._frames_by_profile[profile] == 1
@@ -360,6 +385,7 @@ class VideoStreamController:
                         ),
                     )
                 elif state == MediaState.RECONNECTING.value:
+                    seen_frame = False
                     self._broadcast(
                         profile,
                         StreamMessage(
@@ -410,7 +436,52 @@ class VideoStreamController:
         finally:
             media.unsubscribe(events)
 
-    def _produce_jpeg(self, profile: str, stop: threading.Event) -> None:
+    def _lan_ready(self) -> bool:
+        try:
+            return bool(self.lan_share is not None and self.lan_share.available())
+        except Exception:
+            return False
+
+    def _produce_lan(self, profile: str, stop: threading.Event) -> bool:
+        """Stream the phone's Wi-Fi share. False when it is not sharing or unreachable (caller falls back)."""
+        try:
+            client = self.lan_share.open() if self.lan_share is not None else None
+        except Exception:
+            client = None
+        if client is None:
+            return False
+        codec = "image/jpeg"
+        width, height = self._target_dimensions(VIDEO_PROFILES[profile].max_long_edge)
+        self._broadcast(profile, StreamMessage("text", self._init_json(profile, codec, LAN_SHARE_BACKEND, fallback=False, width=width, height=height)))
+        self._mark("server.stream.init", {"profile": profile, "source": LAN_SHARE_BACKEND})
+        last_keepalive = time.monotonic()
+        frames = 0
+        try:
+            for kind, payload in client.records():
+                if stop.is_set():
+                    break
+                if kind == 1 and payload[:2] == b"\xff\xd8":
+                    self._last_safe_frame = payload
+                    self._last_frame_meta = (payload, codec, None, None)
+                    self._broadcast(profile, StreamMessage("binary", self._packet(payload, pts_us=now_ms() * 1000)))
+                    last_keepalive = time.monotonic()
+                    frames += 1
+                    if frames == 1:
+                        self._mark("server.frame.first", {"profile": profile, "source": LAN_SHARE_BACKEND})
+                    with self._lock:
+                        self._frames_by_profile[profile] += 1
+                else:
+                    last_keepalive = self._maybe_keepalive(profile, last_keepalive)
+        except Exception as exc:
+            self._mark("server.lan.ended", {"profile": profile, "errorClass": exc.__class__.__name__, "retryable": True})
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+        return True
+
+    def _produce_jpeg(self, profile: str, stop: threading.Event, until: Any | None = None, *, fallback: bool = False) -> None:
         codec = _image_codec()
         width, height = self._target_dimensions(VIDEO_PROFILES[profile].max_long_edge)
         self._broadcast(
@@ -421,7 +492,7 @@ class VideoStreamController:
                     profile,
                     codec,
                     JPEG_PRIMARY_BACKEND,
-                    fallback=False,
+                    fallback=fallback,
                     width=width,
                     height=height,
                 ),
@@ -432,20 +503,25 @@ class VideoStreamController:
             {"profile": profile, "source": JPEG_PRIMARY_BACKEND, "jpegFirst": True},
         )
         target_fps = DEGRADED_FOCUS_FPS if profile == "focus" else DEGRADED_THUMBNAIL_FPS
-        self._produce_images(profile, stop, target_fps=target_fps)
+        self._produce_images(profile, stop, target_fps=target_fps, until=until)
 
     def _produce_degraded(self, profile: str, stop: threading.Event) -> None:
         # Retained name for older tests/callers; JPEG is the primary physical preview path.
         self._produce_jpeg(profile, stop)
 
-    def _produce_images(self, profile: str, stop: threading.Event, target_fps: int) -> None:
+    def _produce_images(self, profile: str, stop: threading.Event, target_fps: int, until: Any | None = None) -> None:
         interval = 1.0 / max(1, target_fps)
+        next_until_check = time.monotonic() + LAN_RECHECK_S
         sleeping_sent = False
         consecutive_failures = 0
         outage_active = False
         last_keepalive = time.monotonic()
         while not stop.is_set():
             started = time.monotonic()
+            if until is not None and started >= next_until_check:
+                next_until_check = started + LAN_RECHECK_S
+                if until():
+                    return
             if not self.session.screen_awake:
                 if not sleeping_sent:
                     self._broadcast(

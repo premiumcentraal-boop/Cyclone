@@ -9,6 +9,7 @@ import com.cyclone.mobile.DeviceState
 import com.cyclone.mobile.PhoneToolExecutor
 import com.cyclone.mobile.PhoneToolRequest
 import com.cyclone.mobile.automation.AutomationDefinition
+import com.cyclone.mobile.applearner.graphv2.AtlasRuntime
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -32,6 +33,7 @@ object AppLearnerRuntime {
         if (initialized) return
         appContext = context.applicationContext
         store = AppKnowledgeStore(appContext)
+        AtlasRuntime.initialize(appContext, store)
         explorer = AppExplorer(appContext, store)
         graphExecutor = AppGraphExecutor(appContext, store)
         initialized = true

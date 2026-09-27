@@ -69,7 +69,10 @@ object CycloneTaskJournal {
     }
 
     private fun toJson(state: CycloneTaskState): JSONObject = JSONObject()
-        .put("schema", 1)
+        .put("schema", 2)
+        .put("incident", state.incident?.toJson() ?: JSONObject.NULL)
+        .put("executionSessionId", state.executionSessionId).put("executionDisplayId", state.executionDisplayId)
+        .put("observationGeneration", state.observationGeneration).put("executionPackageName", state.executionPackageName)
         .put("taskId", state.taskId)
         .put("goal", state.goal.take(2_000))
         .put("currentStage", state.currentStage.name)
@@ -94,8 +97,13 @@ object CycloneTaskJournal {
     private fun read(file: File): CycloneTaskState? = runCatching {
         if (!file.isFile || file.length() > 256_000L) return@runCatching null
         val json = JSONObject(file.readText())
-        if (json.optInt("schema") != 1) return@runCatching null
+        if (json.optInt("schema") !in 1..2) return@runCatching null
         CycloneTaskState(
+            incident = json.optJSONObject("incident")?.let(com.cyclone.mobile.agent.recovery.RecoveryIncident::fromJson),
+            executionSessionId = json.optString("executionSessionId", "default-foreground"),
+            executionDisplayId = json.optInt("executionDisplayId"),
+            observationGeneration = json.optLong("observationGeneration"),
+            executionPackageName = json.optString("executionPackageName"),
             taskId = json.getString("taskId"),
             goal = json.getString("goal"),
             currentStage = enumValueOf<CycloneAgentStage>(json.getString("currentStage")),

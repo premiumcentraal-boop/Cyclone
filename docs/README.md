@@ -2,9 +2,12 @@
 
 This directory contains only documentation that describes the current Cyclone product and how to extend it.
 
-**Next generation (not current product):** [Cyclone V5 plan](../Cyclone%20V5%20plan/README.md) — Mobile 5.0 + Glass 1.0 (App Maps, secrets card, Minitap-class operator canvas). Do not treat that folder as current 4.x behavior.
-
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — current system shape and runtime boundaries
+- [`MULTI_DEVICE_FLEET_README.md`](MULTI_DEVICE_FLEET_README.md) — multi-device fleet: what it does and how to open it
+- [`FLEET_ORCHESTRATION.md`](FLEET_ORCHESTRATION.md) — fleet call chain, isolation, and lock rules
+- [`REAL_DEVICE_FLEET_CHECK.md`](REAL_DEVICE_FLEET_CHECK.md) — how to run the two-phone checker
+
+
 - [`ONE_1.1_BUILD_PLAN.md`](ONE_1.1_BUILD_PLAN.md) — Cyclone One 1.1 Session Contract Glass (A1 tooling seam done; A2+ not started)
 - [`ONE_1.1_STAGE1_TOOLING.md`](ONE_1.1_STAGE1_TOOLING.md) — One 1.1 Stage A1 persisted PC bearer / Cursor MCP / doctor attach
 - [`V4_STAGE1_FASTPATH.md`](V4_STAGE1_FASTPATH.md) — V4 Stage 1 Fast Path harness (a11y-first loop, nav isolation, planner/UI split)
@@ -18,4 +21,4 @@ This directory contains only documentation that describes the current Cyclone pr
 - [`DUO_RELIABILITY_REVIEW.md`](DUO_RELIABILITY_REVIEW.md) — versionCode 58 findings, fixes and ordered acceptance plan
 - [`OPEN_SOURCE_COMPONENTS.md`](OPEN_SOURCE_COMPONENTS.md) — third-party component notices
 
-Historical plans, sprint handoffs and release-specific notes live in Git history and GitHub Releases rather than the active documentation tree. The V5 generation plan is the exception: it lives at repo root in `Cyclone V5 plan/` until a 5.0 cut ships and the matching slice is promoted here.
+Historical plans, sprint handoffs and release-specific notes live in Git history and GitHub Releases rather than the active documentation tree.

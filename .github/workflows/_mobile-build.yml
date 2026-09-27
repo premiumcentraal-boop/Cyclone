@@ -48,10 +48,15 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # The legacy aggregate package named `tools` was removed from Google's SDK repository.
+          # setup-android defaults to `tools platform-tools`, so opt into the still-supported package
+          # explicitly; the exact platform/build-tools versions are installed in the next step.
+          packages: platform-tools
 
       - name: Install Android SDK packages
         shell: bash
-        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0' 'build-tools;34.0.0'
+        run: sdkmanager --install 'platforms;android-36' 'platforms;android-35' 'build-tools;35.0.0' 'build-tools;34.0.0'
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
