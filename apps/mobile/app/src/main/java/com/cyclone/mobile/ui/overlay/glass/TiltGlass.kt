@@ -95,6 +95,25 @@ fun FollowPhoneLight() {
 private val Teal = Color(0xFF83DBD7)
 
 /**
+ * The glass's palette. [TEAL] is Tilt Glass as the overlay has it. [SMOKE] is the AI screen's neutral glass (R3): the
+ * same optics in graphite and white, with silver dots, so the cards sitting on the rain carry no teal.
+ */
+enum class GlassPalette(
+    internal val body: Triple<Color, Color, Color>,
+    internal val sheen: Color,
+    internal val dotRgb: Int,
+    internal val hairline: Color,
+    internal val glow: Color,
+    internal val rim: Color,
+) {
+    TEAL(Triple(Color(0xFF10383E), Color(0xFF062228), Color(0xFF08282E)), Teal, 0x83DBD7, Color(0xFFA0E2DE), Color(0xFF83E6DE), Color(0xFFF0FFFD)),
+    SMOKE(Triple(Color(0xFF1C1E23), Color(0xFF0F1013), Color(0xFF14161A)), Color(0xFFFFFFFF), 0xD6DCE4, Color(0xFFFFFFFF), Color(0xFFE8ECF2), Color(0xFFFFFFFF)),
+}
+
+/** The palette glass under this point uses; surfaces that call [tiltGlass] pass it on. The overlay never sets it. */
+val LocalGlassPalette = androidx.compose.runtime.staticCompositionLocalOf { GlassPalette.TEAL }
+
+/**
  * The glass itself (plan 27): dark teal body with a sheen leaning towards the light, a crisp hairline, a sharp shine
  * on the rim sections facing the light (and a weaker one opposite), and optional halftone fingerprint dots along the
  * edge. [thin] is the fine line for small pills; [seeThrough] below 1 lets the app show through (the idle bubble).
@@ -104,15 +123,16 @@ fun Modifier.tiltGlass(
     dots: Boolean = true,
     thin: Boolean = false,
     seeThrough: Float = 1f,
+    palette: GlassPalette = GlassPalette.TEAL,
 ): Modifier = drawWithCache {
     val w = size.width
     val h = size.height
     val r = min(cornerRadius.toPx(), min(w, h) / 2f)
     val outline = Path().apply { addRoundRect(RoundRect(0f, 0f, w, h, CornerRadius(r))) }
     val body = Brush.verticalGradient(
-        0f to Color(0xFF10383E).copy(alpha = 0.94f * seeThrough),
-        0.55f to Color(0xFF062228).copy(alpha = 0.95f * seeThrough),
-        1f to Color(0xFF08282E).copy(alpha = 0.95f * seeThrough),
+        0f to palette.body.first.copy(alpha = 0.94f * seeThrough),
+        0.55f to palette.body.second.copy(alpha = 0.95f * seeThrough),
+        1f to palette.body.third.copy(alpha = 0.95f * seeThrough),
     )
     // Halftone band: dot centres and their place relative to the rim, computed once per size.
     val step = 4.3.dp.toPx()
@@ -156,8 +176,8 @@ fun Modifier.tiltGlass(
             drawRect(body)
             val span = max(w, h) * 0.6f
             drawRect(Brush.linearGradient(
-                0f to Teal.copy(alpha = 0.16f * power * seeThrough), 0.45f to Color.Transparent,
-                0.8f to Color.Transparent, 1f to Teal.copy(alpha = 0.06f * power * seeThrough),
+                0f to palette.sheen.copy(alpha = 0.16f * power * seeThrough), 0.45f to Color.Transparent,
+                0.8f to Color.Transparent, 1f to palette.sheen.copy(alpha = 0.06f * power * seeThrough),
                 start = Offset(w / 2f + lx * span, h / 2f + ly * span), end = Offset(w / 2f - lx * span, h / 2f - ly * span),
             ))
             if (dotCount > 0) {
@@ -179,14 +199,14 @@ fun Modifier.tiltGlass(
                         if (counts[b] == 0) continue
                         val alpha = (b / RADIUS_LEVELS) * 0.85f / (ALPHA_LEVELS - 1)
                         val radius = 0.2f + (b % RADIUS_LEVELS) * 2.4f / (RADIUS_LEVELS - 1)
-                        paint.color = android.graphics.Color.argb((alpha * 255).roundToInt(), 131, 219, 215)
+                        paint.color = android.graphics.Color.argb((alpha * 255).roundToInt(), (palette.dotRgb shr 16) and 0xFF, (palette.dotRgb shr 8) and 0xFF, palette.dotRgb and 0xFF)
                         paint.strokeWidth = radius * 2f * dpPx
                         canvas.nativeCanvas.drawPoints(buckets[b], 0, counts[b] * 2, paint)
                     }
                 }
             }
         }
-        drawPath(outline, Color(0xFFA0E2DE).copy(alpha = 0.16f), style = hairline)
+        drawPath(outline, palette.hairline.copy(alpha = 0.16f), style = hairline)
         for (pass in 0..1) {
             if (pass == 0 && thin) continue
             var i = 0
@@ -195,9 +215,9 @@ fun Modifier.tiltGlass(
                 if (intensity >= 0.02f) {
                     val start = Offset(rim[i] + 0.6f, rim[i + 1] + 0.6f)
                     val end = Offset(rim[i + 2] + 0.6f, rim[i + 3] + 0.6f)
-                    if (pass == 0) drawLine(Color(0xFF83E6DE).copy(alpha = (0.3f * intensity * power).coerceIn(0f, 1f)),
+                    if (pass == 0) drawLine(palette.glow.copy(alpha = (0.3f * intensity * power).coerceIn(0f, 1f)),
                         start, end, glowWidth, StrokeCap.Round)
-                    else drawLine(Color(0xFFF0FFFD).copy(alpha = min(if (thin) 0.8f else 1f, (if (thin) 0.8f else 1.15f) * intensity * power)),
+                    else drawLine(palette.rim.copy(alpha = min(if (thin) 0.8f else 1f, (if (thin) 0.8f else 1.15f) * intensity * power)),
                         start, end, lineWidth, StrokeCap.Round)
                 }
                 i += 5

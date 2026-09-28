@@ -1,0 +1,133 @@
+package com.cyclone.mobile.ui.v32.ask
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+
+/** R3 (docs/design/redesign/rounds/R3-ai-screen.md): the AI screen is the Cyclone rain behind smoked glass. */
+class AskScreenR3ContractTest {
+    private fun source(relative: String): String {
+        val candidates = listOf(
+            File("src/main/java/$relative"),
+            File("app/src/main/java/$relative"),
+            File("apps/mobile/app/src/main/java/$relative"),
+        )
+        return candidates.firstOrNull(File::isFile)?.readText()
+            ?: error("Could not locate source file $relative from ${File(".").absolutePath}")
+    }
+
+    private val page get() = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
+    private fun ask(name: String) = source("com/cyclone/mobile/ui/v32/ask/$name")
+
+    @Test fun rainIsTheBackdropEveryGlassSurfaceBlurs() {
+        val page = page
+        assertTrue(page.contains("val backdrop = rememberLayerBackdrop()"))
+        assertTrue(page.contains("AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))"))
+        assertTrue(page.contains("AskScrim(Modifier.matchParentSize(), greeting = homeCanvas)"))
+        assertTrue(page.contains("LocalAskBackdrop provides backdrop"))
+        assertTrue(page.contains("LocalAskShine provides shine"))
+        assertTrue(page.contains("LocalGlassPalette provides GlassPalette.SMOKE"))
+        assertTrue(page.indexOf("AskRainField(") < page.indexOf("AskHeader("))
+    }
+
+    @Test fun rainUsesTheTraceFieldGlyphsCalmlyAndRespectsStillMode() {
+        val rain = ask("AskRain.kt")
+        assertTrue(rain.contains("TraceFieldShader.GLYPHS"))
+        assertTrue(rain.contains("RuntimeShader(SOURCE)"))
+        assertTrue(rain.contains("const val FRAME_NS = 32_000_000L"))
+        assertTrue(rain.contains("if (rain != null && !still)"))
+        assertTrue(rain.contains("ANIMATOR_DURATION_SCALE"))
+        // A shader that cannot run leaves a dark gradient, never a crash.
+        assertTrue(rain.contains("if (!drawn) drawRect(AskRain.FALLBACK)"))
+        assertTrue(rain.contains("}.getOrNull()"))
+    }
+
+    @Test fun smokedGlassBlursLensesAndDarkens() {
+        val glass = ask("SmokedGlass.kt")
+        assertTrue(glass.contains("blur(AskGlass.BLUR_DP.dp.toPx())"))
+        assertTrue(glass.contains("lens(AskGlass.LENS_HEIGHT_DP.dp.toPx(), AskGlass.LENS_AMOUNT_DP.dp.toPx())"))
+        assertTrue(glass.contains("drawRect(Color.Black.copy(alpha = smoke))"))
+        assertTrue(glass.contains("const val SMOKE = 0.52f"))
+        assertTrue(glass.contains("const val SHINE_MS = 6_000"))
+        // Without a recorded backdrop the glass is painted graphite, not transparent.
+        assertTrue(glass.contains("if (backdrop == null)"))
+        assertTrue(glass.contains(".background(AskGlass.Painted, shape)"))
+    }
+
+    @Test fun noTealOnTheAiScreen() {
+        listOf("AskCopy.kt", "AskRain.kt", "SmokedGlass.kt", "AskScreen.kt", "AskSheets.kt").forEach { name ->
+            val text = ask(name)
+            listOf("0xFF83DBD7", "SignatureTeal", "TealMatrix", "0xFF41D7CB", "0xFF061A20").forEach { teal ->
+                assertFalse("$name uses $teal", text.contains(teal))
+            }
+        }
+        val tilt = source("com/cyclone/mobile/ui/overlay/glass/TiltGlass.kt")
+        assertTrue(tilt.contains("SMOKE(Triple(Color(0xFF1C1E23)"))
+        assertTrue(tilt.contains("val LocalGlassPalette = androidx.compose.runtime.staticCompositionLocalOf { GlassPalette.TEAL }"))
+        // The shared task cards take the page's palette; the floating overlay never sets it, so it stays teal.
+        val stack = source("com/cyclone/mobile/ui/overlay/OverlayGlassStack.kt")
+        assertEquals(4, Regex("palette = LocalGlassPalette.current").findAll(stack).count())
+        assertFalse(source("com/cyclone/mobile/ui/overlay/OverlayChrome.kt").contains("LocalGlassPalette provides"))
+    }
+
+    @Test fun askBarKeepsItsDotsAndShineOnSmokedGlass() {
+        val bar = source("com/cyclone/mobile/ui/v32/InAppGlass.kt")
+        assertTrue(bar.contains("val askBackdrop = com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop.current"))
+        assertTrue(bar.contains(".askWhorls()"))
+        assertTrue(bar.contains("Modifier.tiltGlass(33.dp)"))
+        val glass = ask("SmokedGlass.kt")
+        assertTrue(glass.contains("fun Modifier.askWhorls("))
+        assertTrue(glass.contains("for (ridge in 1..25)"))
+    }
+
+    @Test fun headerIsBurgerModelSelectorAndMark() {
+        val header = ask("AskScreen.kt")
+        val menu = header.indexOf("AskRoundChip(\"Menu\", onMenu")
+        val model = header.indexOf("contentDescription = \"Model: \$modelLabel. Choose a model\"")
+        val mark = header.indexOf("AskRoundChip(\"Cyclone\", onLogo")
+        assertTrue(menu in 0 until model)
+        assertTrue(model in 0 until mark)
+        assertTrue(header.contains("CycloneOrbitMark(Modifier.size(22.dp))"))
+        assertFalse(page.contains("AskCycloneOrb"))
+    }
+
+    @Test fun homeIsGreetingSuggestionsAndRecentRuns() {
+        val home = ask("AskScreen.kt")
+        val greeting = home.indexOf("AskCopy.greeting(")
+        val suggestions = home.indexOf("AskCopy.SUGGESTIONS.chunked(2)")
+        val runs = home.indexOf("AskCopy.RUNS_LABEL")
+        assertTrue(greeting in 0 until suggestions)
+        assertTrue(suggestions in 0 until runs)
+        assertTrue(home.contains(".take(3)"))
+        // Suggestions only write into the Ask bar.
+        assertTrue(home.contains("onSuggestion(suggestion.seed)"))
+        assertTrue(page.contains("onSuggestion = { composer = it }"))
+        // Runs left the chat thread; they live on home and in the menu.
+        assertFalse(page.contains("item(key = \"missions\")"))
+    }
+
+    @Test fun sheetsKeepTheExistingRulesAndStoreNothingNew() {
+        val sheets = ask("AskSheets.kt")
+        assertTrue(sheets.contains("if (mission.status.resumable) AskPillButton(\"Resume\", enabled = canResume"))
+        assertTrue(sheets.contains("canResume = live == null"))
+        assertTrue(sheets.contains("MindMissions.resume(context, mission.id)"))
+        assertTrue(sheets.contains("MindMissions.delete(context, mission.id)"))
+        // Driver mode switches exactly as in Settings, asking for the microphone first.
+        assertTrue(sheets.contains("Manifest.permission.RECORD_AUDIO"))
+        assertTrue(sheets.contains("DriverMode.setEnabled(context, on)"))
+        assertTrue(sheets.contains("com.cyclone.mobile.brain.UserMdRuntime.setEnabled(context, on)"))
+        listOf("getSharedPreferences", "OpenRouterSecretStore", "writeText(", "Log.").forEach {
+            assertFalse("sheets must not use $it", sheets.contains(it))
+        }
+        assertTrue(page.contains("androidx.activity.compose.BackHandler(menuOpen || logoOpen || modelMenuOpen)"))
+    }
+
+    @Test fun navigationStillOwnsTheAiDestination() {
+        val app = source("com/cyclone/mobile/ui/v32/CycloneV32App.kt")
+        assertTrue(app.contains("if (!settingsOpen) CycloneV32BottomBar(destination)"))
+        assertTrue(app.contains("onRoutines = { destination = V32Destination.ROUTINES }"))
+        assertTrue(app.contains("onBrain = { destination = V32Destination.BRAIN }"))
+    }
+}

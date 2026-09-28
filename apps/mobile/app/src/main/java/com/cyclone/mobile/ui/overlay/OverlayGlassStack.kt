@@ -82,6 +82,7 @@ import com.cyclone.mobile.ui.overlay.glass.AppLogoStack
 import com.cyclone.mobile.ui.overlay.glass.GlassRoundButton
 import com.cyclone.mobile.ui.overlay.glass.litRim
 import com.cyclone.mobile.ui.overlay.glass.pressGlow
+import com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette
 import com.cyclone.mobile.ui.overlay.glass.tiltGlass
 import com.cyclone.mobile.ui.v32.CycloneTaskVisualState
 import com.cyclone.mobile.ui.v32.appLabel
@@ -138,7 +139,7 @@ internal fun PlaneRow(taskId: String, modifier: Modifier = Modifier) {
         AnimatedVisibility(line != null, Modifier.weight(1f, fill = false), enter = fadeIn(tween(200)), exit = fadeOut(tween(200))) {
             Row(
                 Modifier.height(OverlayStackGeometry.PILL_HEIGHT_DP.dp)
-                    .tiltGlass(17.dp, dots = false, thin = true)
+                    .tiltGlass(17.dp, dots = false, thin = true, palette = LocalGlassPalette.current)
                     .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -148,7 +149,7 @@ internal fun PlaneRow(taskId: String, modifier: Modifier = Modifier) {
         Row(
             Modifier.height(OverlayStackGeometry.PILL_HEIGHT_DP.dp).widthIn(min = 92.dp)
                 .pressGlow(interaction, 17.dp)
-                .tiltGlass(17.dp, dots = false, thin = true)
+                .tiltGlass(17.dp, dots = false, thin = true, palette = LocalGlassPalette.current)
                 .clip(RoundedCornerShape(17.dp))
                 .combinedClickable(
                     interactionSource = interaction, indication = null, role = Role.Switch,
@@ -267,7 +268,7 @@ private fun CollapseButton(onMinimize: () -> Unit) {
 /** The card's frame: the glass, the grabber inside its top edge, and one soft pill the words sit on. */
 @Composable
 private fun GlassCard(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().tiltGlass(OverlayStackGeometry.CARD_RADIUS_DP.dp)) {
+    Box(Modifier.fillMaxWidth().tiltGlass(OverlayStackGeometry.CARD_RADIUS_DP.dp, palette = LocalGlassPalette.current)) {
         Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 14.dp)) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 10.dp)
                 .size(32.dp, 3.dp).background(GlassMuted.copy(alpha = 0.38f), CircleShape))
@@ -397,7 +398,7 @@ internal fun WorkIsland(
     onPause: () -> Unit,
     onStop: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth().height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).tiltGlass(OverlayStackGeometry.BAR_RADIUS_DP.dp)) {
+    Box(Modifier.fillMaxWidth().height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).tiltGlass(OverlayStackGeometry.BAR_RADIUS_DP.dp, palette = LocalGlassPalette.current)) {
         Row(
             Modifier.fillMaxWidth().height(OverlayStackGeometry.BAR_HEIGHT_DP.dp).padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

@@ -57,7 +57,10 @@ import com.cyclone.mobile.ui.overlay.WorkIsland
 import com.cyclone.mobile.ui.overlay.glass.GlassRoundButton
 import com.cyclone.mobile.ui.overlay.glass.TiltGlassTheme
 import com.cyclone.mobile.ui.overlay.glass.VoiceOrbButton
+import com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette
 import com.cyclone.mobile.ui.overlay.glass.tiltGlass
+import com.cyclone.mobile.ui.v32.ask.askWhorls
+import com.cyclone.mobile.ui.v32.ask.smokedGlass
 
 /**
  * Plan 27 inside the app: the same glass stack as the overlay. The plane pill sits above the task, the card folds into
@@ -119,7 +122,7 @@ internal fun InAppGlassSheet(
     content: @Composable () -> Unit,
 ) {
     val radius = OverlayStackGeometry.CARD_RADIUS_DP.dp
-    Box(modifier.fillMaxWidth().tiltGlass(radius).clip(RoundedCornerShape(radius))) {
+    Box(modifier.fillMaxWidth().tiltGlass(radius, palette = LocalGlassPalette.current).clip(RoundedCornerShape(radius))) {
         TiltGlassTheme {
             Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
                 handle()
@@ -161,7 +164,16 @@ internal fun GlassComposerBar(
     maxLines: Int = 4,
     onExpand: (() -> Unit)? = null,
 ) {
-    Box(modifier.fillMaxWidth().heightIn(min = 66.dp).tiltGlass(33.dp)) {
+    // R3: on the AI screen the bar is smoked glass over the rain, with the fingerprint dots in silver at both ends.
+    val askBackdrop = com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop.current
+    val material = if (askBackdrop != null) {
+        Modifier.smokedGlass(askBackdrop, 33.dp, shine = com.cyclone.mobile.ui.v32.ask.LocalAskShine.current, shineOffset = 0.7f,
+            shape = com.kyant.capsule.ContinuousCapsule).askWhorls()
+    } else {
+        Modifier.tiltGlass(33.dp)
+    }
+    val veil = if (askBackdrop != null) com.cyclone.mobile.ui.v32.ask.AskGlass.Veil else Color(0x4D04181D)
+    Box(modifier.fillMaxWidth().heightIn(min = 66.dp).then(material)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 66.dp).clip(RoundedCornerShape(33.dp)).padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -172,12 +184,12 @@ internal fun GlassComposerBar(
                 value = text,
                 onValueChange = onTextChanged,
                 modifier = Modifier.weight(1f).heightIn(min = 46.dp, max = 104.dp)
-                    .clip(RoundedCornerShape(23.dp)).background(Color(0x4D04181D))
+                    .clip(RoundedCornerShape(23.dp)).background(veil)
                     .padding(horizontal = 18.dp, vertical = 12.dp)
                     .semantics { contentDescription = fieldDescription },
                 maxLines = maxLines,
-                textStyle = TextStyle(color = SignatureInk, fontSize = 17.sp, lineHeight = 22.sp),
-                cursorBrush = SolidColor(Color(0xFF83DBD7)),
+                textStyle = TextStyle(color = if (askBackdrop != null) Color.White else SignatureInk, fontSize = 17.sp, lineHeight = 22.sp),
+                cursorBrush = SolidColor(if (askBackdrop != null) Color.White else Color(0xFF83DBD7)),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { if (sendEnabled) onSend() }),
                 decorationBox = { field ->

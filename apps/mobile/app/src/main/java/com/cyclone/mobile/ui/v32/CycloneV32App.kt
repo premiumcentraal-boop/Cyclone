@@ -144,7 +144,16 @@ fun CycloneMobileV32App() {
                                             onSettings = { settingsOpen = true },
                                         )
                                         V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick) { destination = V32Destination.AI }
-                                        V32Destination.AI -> V39AiChatPage(context, refreshTick) { settingsOpen = true }
+                                        V32Destination.AI -> V39AiChatPage(
+                                            context,
+                                            refreshTick,
+                                            onSettingsSection = { section ->
+                                                settingsSection = section
+                                                settingsOpen = true
+                                            },
+                                            onRoutines = { destination = V32Destination.ROUTINES },
+                                            onBrain = { destination = V32Destination.BRAIN },
+                                        ) { settingsOpen = true }
                                         V32Destination.ROUTINES -> CycloneRoutinesPage(
                                             context,
                                             refreshTick,

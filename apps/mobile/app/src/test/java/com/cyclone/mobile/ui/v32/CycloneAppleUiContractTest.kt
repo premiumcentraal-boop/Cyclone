@@ -105,12 +105,15 @@ class CycloneAppleUiContractTest {
 
     @Test fun askEmptyStateIsAProductGreetingNotAQuoteCard() {
         val ask = source("CycloneV39AiChatPage.kt")
-        assertTrue(ask.contains("\"Ask Cyclone\""))
-        assertTrue(ask.contains("\"Good morning\""))
-        assertTrue(ask.contains("\"Good afternoon\""))
-        assertTrue(ask.contains("\"Good evening\""))
-        assertTrue(ask.contains("\"What can I do for you?\""))
-        assertTrue(ask.contains("AskCycloneDotField(Modifier.matchParentSize())"))
+        // R3: the greeting and its words live in AskCopy; the page draws the rain and the home.
+        val copy = source("ask/AskCopy.kt")
+        assertTrue(copy.contains("const val TITLE = \"Ask Cyclone\""))
+        assertTrue(copy.contains("\"Good morning\""))
+        assertTrue(copy.contains("\"Good afternoon\""))
+        assertTrue(copy.contains("\"Good evening\""))
+        assertTrue(copy.contains("\"What can I do for you?\""))
+        assertTrue(ask.contains("AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))"))
+        assertTrue(ask.contains("AskHome("))
         assertFalse(ask.contains("CycloneAlpineBackdrop"))
         assertFalse(ask.contains("progress today"))
         assertFalse(ask.contains("Ideas become real"))

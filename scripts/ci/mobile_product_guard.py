@@ -60,10 +60,11 @@ REQUIRED_AI_CHAT = (
     "WorkspaceTasks.queueRequest(normalized)",
     "OpenRouterCatalogStore.activeId(context)",
     '"Ask Cyclone…"',
-    "CycloneModelIntelligencePanel(",
+    # R3: the model selector is the header pill; its sheet drops from the header.
+    "AskHeader(",
     "CycloneConversationBubble(",
-    "showModelSelector = true",
-    'contentDescription = "Model and intelligence"',
+    "AskModelSheet(",
+    "onChanged = ::persistAiControls",
     "onPhotos = { openPhotos() }",
     'filesLabel = "Files"',
 )

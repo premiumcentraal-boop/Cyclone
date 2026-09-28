@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -64,6 +65,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -103,6 +105,22 @@ import com.cyclone.mobile.ai.RequestIntent
 import com.cyclone.mobile.ai.RequestIntentRouter
 import com.cyclone.mobile.ai.model.ModelRegistry
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
+import com.cyclone.mobile.ui.overlay.glass.GlassPalette
+import com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette
+import com.cyclone.mobile.ui.v32.ask.AskCopy
+import com.cyclone.mobile.ui.v32.ask.AskDim
+import com.cyclone.mobile.ui.v32.ask.AskGlass
+import com.cyclone.mobile.ui.v32.ask.AskHeader
+import com.cyclone.mobile.ui.v32.ask.AskHome
+import com.cyclone.mobile.ui.v32.ask.AskLogoPanel
+import com.cyclone.mobile.ui.v32.ask.AskMenuDrawer
+import com.cyclone.mobile.ui.v32.ask.AskModelSheet
+import com.cyclone.mobile.ui.v32.ask.AskRainField
+import com.cyclone.mobile.ui.v32.ask.AskScrim
+import com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop
+import com.cyclone.mobile.ui.v32.ask.LocalAskShine
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.cyclone.mobile.ui.overlay.OverlayChromeRuntime
 import com.cyclone.mobile.ui.overlay.OverlayChromeState
 import com.cyclone.mobile.ui.overlay.PendingTaskAttachment
@@ -168,7 +186,14 @@ internal class V39AiSubmitGate {
 }
 
 @Composable
-internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () -> Unit) {
+internal fun V39AiChatPage(
+    context: Context,
+    refreshTick: Int,
+    onSettingsSection: (String) -> Unit = {},
+    onRoutines: () -> Unit = {},
+    onBrain: () -> Unit = {},
+    onSettings: () -> Unit,
+) {
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -190,6 +215,10 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
     var toolsOpen by remember { mutableStateOf(false) }
     var voiceOpen by remember { mutableStateOf(false) }
     var modelMenuOpen by remember { mutableStateOf(false) }
+    // R3: the burger opens the menu drawer, the mark opens the logo panel; a run tapped on home opens in the drawer.
+    var menuOpen by remember { mutableStateOf(false) }
+    var logoOpen by remember { mutableStateOf(false) }
+    var openRun by remember { mutableStateOf<String?>(null) }
     var drawerCollapsed by rememberSaveable { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val catalogRevision by com.cyclone.mobile.ai.OpenRouterCatalogStore.revision.collectAsState()
@@ -371,12 +400,38 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
         }
     }
 
+    // R3 (docs/design/redesign/rounds/R3-ai-screen.md): the Cyclone rain behind smoked glass. The rain is recorded
+    // once as the backdrop every glass surface on the page blurs; the shine crosses them every six seconds.
+    val backdrop = rememberLayerBackdrop()
+    val shine = rememberInfiniteTransition(label = "Ask shine").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(AskGlass.SHINE_MS, easing = LinearEasing), RepeatMode.Restart),
+        label = "Ask shine phase",
+    )
+    val modelLabel = remember(catalogRevision, selectedModelId) {
+        AskCopy.modelLabel(com.cyclone.mobile.ai.OpenRouterCatalogStore.activeId(context).takeIf(String::isNotBlank)
+            ?.let { com.cyclone.mobile.ai.OpenRouterCatalogStore.preset(context, it).label })
+    }
+    androidx.activity.compose.BackHandler(menuOpen || logoOpen || modelMenuOpen) {
+        menuOpen = false
+        logoOpen = false
+        modelMenuOpen = false
+    }
+    val homeCanvas = emptyCanvas && composer.isBlank()
+
+    CompositionLocalProvider(
+        LocalAskBackdrop provides backdrop,
+        LocalAskShine provides shine,
+        LocalGlassPalette provides GlassPalette.SMOKE,
+    ) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(askCycloneCanvasBrush()),
+            .background(Color(0xFF050608)),
     ) {
-        AskCycloneDotField(Modifier.matchParentSize())
+        AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))
+        AskScrim(Modifier.matchParentSize(), greeting = homeCanvas)
         com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
 
         Column(
@@ -386,21 +441,40 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             ),
             verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
         ) {
-            AskCycloneHeader(
-                onMenu = onSettings,
-                onProfile = onSettings,
+            AskHeader(
+                modelLabel = modelLabel,
+                modelOpen = modelMenuOpen,
+                onMenu = {
+                    modelMenuOpen = false
+                    logoOpen = false
+                    openRun = null
+                    menuOpen = true
+                },
+                onModel = {
+                    toolsOpen = false
+                    logoOpen = false
+                    modelMenuOpen = !modelMenuOpen
+                },
+                onLogo = {
+                    modelMenuOpen = false
+                    menuOpen = false
+                    logoOpen = !logoOpen
+                },
             )
 
-            if (emptyCanvas && composer.isBlank()) {
-                Box(
-                    Modifier.weight(1f).fillMaxWidth().padding(bottom = 48.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space16)) {
-                        AskCycloneEmptyState()
-                        CycloneRecentMissions(limit = 2)
-                    }
-                }
+            if (homeCanvas) {
+                AskHome(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onSuggestion = { composer = it },
+                    onSeeAll = {
+                        openRun = null
+                        menuOpen = true
+                    },
+                    onRun = {
+                        openRun = it
+                        menuOpen = true
+                    },
+                )
             } else {
                 CycloneConversationPanel(Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
@@ -431,7 +505,6 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         if (queuedRequests.isNotEmpty()) {
                             item(key = "queued") { CyclonePendingRequests() }
                         }
-                        if (liveMission == null) item(key = "missions") { CycloneRecentMissions() }
 
                         if (session.busy || session.status.isNotBlank()) {
                             item {
@@ -634,34 +707,69 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             }
         }
 
+        // R3 state 2: the model selector drops from the header pill.
         if (modelMenuOpen && !keyboardOpen) {
             Box(Modifier.matchParentSize().zIndex(4f)) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = .22f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { modelMenuOpen = false },
-                        ),
+                AskDim { modelMenuOpen = false }
+                AskModelSheet(
+                    modifier = Modifier.align(Alignment.TopCenter).padding(
+                        start = CycloneConversationTokens.space16,
+                        end = CycloneConversationTokens.space16,
+                        top = 66.dp,
+                    ),
+                    onChanged = ::persistAiControls,
+                    onDismiss = { modelMenuOpen = false },
                 )
-                InAppGlassSheet(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .heightIn(max = 430.dp)
-                        .padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
-                    handle = { CycloneSheetDismissHandle(onDismiss = { modelMenuOpen = false }, handleColor = GlassMutedHandle) },
-                ) {
-                    Column(Modifier.fillMaxWidth().semantics { contentDescription = "Model and intelligence" }) {
-                        CycloneModelIntelligencePanel(
-                            modelId = selectedModelId,
-                            effort = reasoningEffort,
-                            showModelSelector = true,
-                            onChange = ::persistAiControls,
-                        )
-                    }
-                }
+            }
+        }
+
+        // R3 state 3: the menu drawer from the left.
+        AnimatedVisibility(
+            visible = menuOpen,
+            modifier = Modifier.matchParentSize().zIndex(5f),
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(160)),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                AskDim { menuOpen = false }
+                AskMenuDrawer(
+                    openRun = openRun,
+                    newChatEnabled = !session.busy && (session.messages.isNotEmpty() || session.status.isNotBlank()),
+                    onNewChat = {
+                        session.messages.clear()
+                        session.status = ""
+                        composer = ""
+                        message = ""
+                        menuOpen = false
+                    },
+                    onRoutines = {
+                        menuOpen = false
+                        onRoutines()
+                    },
+                    onBrain = {
+                        menuOpen = false
+                        onBrain()
+                    },
+                    onSettings = {
+                        menuOpen = false
+                        onSettings()
+                    },
+                    onDismiss = { menuOpen = false },
+                )
+            }
+        }
+
+        // R3 state 4: the logo panel from the top right.
+        if (logoOpen) {
+            Box(Modifier.matchParentSize().zIndex(5f)) {
+                AskDim { logoOpen = false }
+                AskLogoPanel(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = CycloneConversationTokens.space16, top = 66.dp),
+                    onSettings = { section ->
+                        logoOpen = false
+                        if (section.isBlank()) onSettings() else onSettingsSection(section)
+                    },
+                )
             }
         }
 
@@ -669,225 +777,6 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             AskCycloneVoiceMode(onClose = { voiceOpen = false })
         }
     }
-}
-
-@Composable
-private fun AskCycloneHeader(
-    onMenu: () -> Unit,
-    onProfile: () -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .semantics { contentDescription = "Ask Cyclone" },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Box(
-            Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(role = Role.Button, onClick = onMenu)
-                .semantics { contentDescription = "Settings" },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Rounded.Menu, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
-        }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            Text(
-                "Cyclone",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        Box(
-            Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(role = Role.Button, onClick = onProfile)
-                .semantics { contentDescription = "Profile" },
-            contentAlignment = Alignment.Center,
-        ) {
-            CycloneOrbitMark(Modifier.size(22.dp))
-        }
-    }
-}
-
-@Composable
-private fun AskCycloneEmptyState() {
-    val greeting = when (java.time.LocalTime.now().hour) {
-        in 5..11 -> "Good morning"
-        in 12..17 -> "Good afternoon"
-        else -> "Good evening"
-    }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .semantics { contentDescription = "Ready when you are. Tell Cyclone what to do on your phone." },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        AskCycloneOrb()
-        Text(
-            greeting,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            "What can I do for you?",
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun askCycloneCanvasBrush(): Brush {
-    return Brush.verticalGradient(listOf(Color(0xFF061A20), Color(0xFF0B3037), Color(0xFF061A20)))
-}
-
-/**
- * One animated dot field owns the entire Ask Cyclone canvas. The dots stay fixed in position and only
- * breathe in size/opacity, which keeps the motion calm while the smooth spatial envelope gives the
- * lower page a soft bowl of blue/cyan/lilac without drawing a visible U-shaped edge. Because this is
- * the first child of the full-screen page Box, it continues behind the floating composer.
- */
-@Composable
-private fun AskCycloneDotField(modifier: Modifier = Modifier) {
-    val dark = true
-    val motion = rememberInfiniteTransition(label = "askDotField")
-    val phase by motion.animateFloat(
-        initialValue = 0f,
-        targetValue = (Math.PI * 2.0).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = 20_000,
-                easing = androidx.compose.animation.core.LinearEasing,
-            ),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "askDotPhase",
-    )
-
-    val lilac = Color(0xFF327A80)
-    val blue = Color(0xFF58B4B2)
-    val cyan = SignatureTeal
-
-    Canvas(modifier) {
-        if (size.width <= 0f || size.height <= 0f) return@Canvas
-
-        val spacing = 17.dp.toPx()
-        val tinyRadius = 0.45.dp.toPx()
-        val radiusRange = 2.65.dp.toPx()
-        val columns = (size.width / spacing).toInt() + 2
-        val rows = (size.height / spacing).toInt() + 2
-        val startX = (size.width - (columns - 1) * spacing) / 2f
-
-        fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
-            val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
-            return t * t * (3f - 2f * t)
-        }
-
-        fun blend(a: Color, b: Color, amount: Float): Color {
-            val t = amount.coerceIn(0f, 1f)
-            return Color(
-                red = a.red + (b.red - a.red) * t,
-                green = a.green + (b.green - a.green) * t,
-                blue = a.blue + (b.blue - a.blue) * t,
-                alpha = 1f,
-            )
-        }
-
-        for (row in 0 until rows) {
-            val y = row * spacing
-            val ny = (y / size.height).coerceIn(0f, 1f)
-            for (column in 0 until columns) {
-                val x = startX + column * spacing
-                val nx = (x / size.width).coerceIn(0f, 1f)
-                val edge = (kotlin.math.abs(nx - 0.5f) * 2f).coerceIn(0f, 1f)
-                val edge2 = edge * edge
-
-                // The sides begin slightly higher than the middle, but the smooth fade prevents a hard U.
-                val rise = 0.44f - 0.12f * edge2
-                val vertical = smoothStep(rise, 1f, ny)
-                val bottom = smoothStep(0.66f, 1f, ny)
-                val bowl = 0.18f + 0.82f * edge2
-
-                val broadDrift = 0.92f + 0.08f * kotlin.math.sin(
-                    (phase * 0.55f + nx * 4.6f - ny * 3.3f).toDouble(),
-                ).toFloat()
-                val envelope = ((vertical * bowl) + (bottom * bottom * 0.16f))
-                    .times(broadDrift)
-                    .coerceIn(0f, 1f)
-                if (envelope < 0.012f) continue
-
-                val localWave = 0.5f + 0.5f * kotlin.math.sin(
-                    (phase + column * 0.43f + row * 0.31f).toDouble(),
-                ).toFloat()
-                val pulseScale = 0.78f + localWave * 0.42f
-                val radius = (tinyRadius + radiusRange * envelope) * pulseScale
-                val opacity = envelope * (if (dark) 0.18f else 0.18f) * (0.90f + localWave * 0.10f)
-
-                val tint = if (nx < 0.5f) {
-                    blend(lilac, blue, nx * 2f)
-                } else {
-                    blend(blue, cyan, (nx - 0.5f) * 2f)
-                }
-                drawCircle(
-                    color = tint.copy(alpha = opacity.coerceIn(0f, 0.72f)),
-                    radius = radius,
-                    center = Offset(x, y),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AskCycloneOrb() {
-    val pulse = rememberInfiniteTransition(label = "orb")
-    val glow by pulse.animateFloat(
-        initialValue = 0.42f,
-        targetValue = 0.78f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "glow",
-    )
-    Canvas(Modifier.size(58.dp)) {
-        val c = center
-        val r = size.minDimension / 2f
-        drawCircle(
-            brush = Brush.radialGradient(
-                0.28f to Color(0xFF5B8CFF).copy(alpha = glow * 0.48f),
-                0.62f to Color(0xFF7A5CFF).copy(alpha = glow * 0.18f),
-                1f to Color.Transparent,
-            ),
-            radius = r,
-            center = c,
-        )
-        val orb = r * 0.52f
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0xFFCCF6EF), SignatureTeal, Color(0xFF217C83), Color(0xFF0B3037)),
-                center = Offset(c.x - orb * 0.28f, c.y - orb * 0.34f),
-                radius = orb * 1.55f,
-            ),
-            radius = orb,
-            center = c,
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                0f to Color.White.copy(alpha = 0.90f),
-                1f to Color.Transparent,
-            ),
-            radius = orb * 0.34f,
-            center = Offset(c.x - orb * 0.24f, c.y - orb * 0.30f),
-        )
     }
 }
 

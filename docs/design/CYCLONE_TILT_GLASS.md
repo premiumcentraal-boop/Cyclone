@@ -86,6 +86,14 @@ Variants:
 | Small pill (plane pill, outcome line) | `tiltGlass(17.dp, dots = false, thin = true)` at 34 dp high |
 | Idle bubble | 58 × 50 dp oval, `tiltGlass(25.dp, dots = false, thin = true, seeThrough = 0.42–0.72)` |
 
+### 2b. Smoke palette (R3, the AI screen)
+
+`tiltGlass(…, palette = GlassPalette.SMOKE)` keeps every optic above and swaps the teal for graphite and white:
+body `#1C1E23` → `#0F1013` → `#14161A`, white sheen, hairline and rim, rim glow `#E8ECF2`, dots `#D6DCE4`. The AI
+screen provides it through `LocalGlassPalette`, so its task card, island, owner card and sheets carry no teal. The
+floating overlay never sets it and stays teal. The AI screen's own surfaces are smoked glass (a live blur of the
+rain, see `docs/design/redesign/rounds/R3-ai-screen.md`), not Tilt Glass.
+
 ## 3. Palette and type
 
 | Token | Hex | Use |

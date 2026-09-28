@@ -56,7 +56,8 @@ class CycloneV39AiChatPageTest {
 
     @Test fun productionAiDestinationRoutesToV39Page() {
         val app = source("CycloneV32App.kt")
-        assertTrue(app.contains("V32Destination.AI -> V39AiChatPage(context, refreshTick)"))
+        assertTrue(app.contains("V32Destination.AI -> V39AiChatPage("))
+        assertTrue(app.contains("onSettingsSection = { section ->"))
         assertFalse(app.contains("V32Destination.AI -> V32AiPage("))
     }
 
@@ -88,14 +89,16 @@ class CycloneV39AiChatPageTest {
 
     @Test fun modelIntelligenceControlLivesInPlusSheetWithoutDuplicateHeaderPill() {
         val page = source("CycloneV39AiChatPage.kt")
-        // Plan 27: the Ask bar is the glass composer; model and intelligence stay in the + sheet below it.
+        // R3: the model selector is the header pill (it replaced the word "Cyclone"); its sheet drops from there.
+        // The + drawer's "Model & intelligence" opens the same sheet, so there is still one model control.
+        val sheets = source("ask/AskSheets.kt")
         val askGlass = page.indexOf("GlassComposerBar(")
-        val quickControl = page.indexOf("contentDescription = \"Model and intelligence\"", askGlass)
+        val quickControl = page.indexOf("AskModelSheet(", askGlass)
         assertTrue(askGlass >= 0)
         assertTrue(quickControl > askGlass)
         assertTrue(source("InAppGlass.kt").contains("BasicTextField("))
-        assertTrue(page.contains("CycloneModelIntelligencePanel("))
-        assertTrue(page.contains("showModelSelector = true"))
+        assertTrue(sheets.contains("contentDescription = \"Model and thinking\""))
+        assertTrue(page.contains("\"Model & intelligence\" -> modelMenuOpen = true"))
         assertTrue(page.contains("if (modelMenuOpen && !keyboardOpen)"))
         assertFalse(page.contains(".imePadding()"))
         assertFalse(page.contains("CycloneModelPill("))
@@ -118,11 +121,15 @@ class CycloneV39AiChatPageTest {
         val reasoning = source("CycloneReasoningSelector.kt")
         assertTrue(page.contains("const val PREFS = \"cyclone_ai\""))
         assertTrue(page.contains("const val MODEL_KEY = \"openrouter_model\""))
+        val sheets = source("ask/AskSheets.kt")
         assertTrue(controls.contains("OpenRouterCatalogStore.setActive(context"))
         assertTrue(reasoning.contains("OpenRouterCatalogStore.setReasoningEffort(context, canonical, value)"))
         assertTrue(reasoning.contains("reasoningSelectorMode(options)"))
-        assertTrue(page.contains("CycloneModelIntelligencePanel("))
-        assertTrue(page.contains("showModelSelector = true"))
+        // R3's model sheet stores through the same canonical store calls, with exact provider tokens.
+        assertTrue(sheets.contains("OpenRouterCatalogStore.setActive(context, option.id)"))
+        assertTrue(sheets.contains("OpenRouterCatalogStore.setReasoningEffort(context, canonical, option)"))
+        assertTrue(sheets.contains("V39AiChatContract.storageId(option)"))
+        assertTrue(page.contains("onChanged = ::persistAiControls"))
     }
 
     @Test fun missingKeyBlocksChatButNotPhoneRoutingContract() {
@@ -181,29 +188,29 @@ class CycloneV39AiChatPageTest {
 
     @Test fun dotFieldEmptyStateUsesPreferredAskComposition() {
         val page = source("CycloneV39AiChatPage.kt")
+        val copy = source("ask/AskCopy.kt")
+        val home = source("ask/AskScreen.kt")
         assertFalse(page.contains("CycloneAlpineBackdrop"))
-        assertTrue(page.contains("\"Ask Cyclone\""))
-        assertTrue(page.contains("\"Good morning\""))
-        assertTrue(page.contains("\"Good afternoon\""))
-        assertTrue(page.contains("\"Good evening\""))
-        assertTrue(page.contains("\"What can I do for you?\""))
+        assertTrue(copy.contains("\"Ask Cyclone\""))
+        assertTrue(copy.contains("\"Good morning\""))
+        assertTrue(copy.contains("\"Good afternoon\""))
+        assertTrue(copy.contains("\"Good evening\""))
+        assertTrue(copy.contains("\"What can I do for you?\""))
         assertFalse(page.contains("progress today"))
         assertFalse(page.contains("Ideas become real"))
         assertFalse(page.contains("Contributor · prompts and responses may be used for training."))
-        assertFalse(page.contains("AskSuggestionChip"))
         assertFalse(page.contains("Take a screenshot\", onSuggestion"))
         assertFalse(page.contains("compactHeader = true"))
         assertFalse(page.contains("expandInLayout = false"))
-        assertTrue(page.contains("CycloneModelIntelligencePanel("))
-        assertTrue(page.contains("showModelSelector = true"))
-        assertTrue(page.contains("AskCycloneOrb()"))
-        assertTrue(page.contains("AskCycloneDotField(Modifier.matchParentSize())"))
-        assertTrue(page.contains("askCycloneCanvasBrush()"))
-        assertTrue(page.contains("Color(0xFF061A20)"))
-        assertTrue(page.contains("padding(bottom = 48.dp)"))
+        // R3: no orb, no dot field, no teal canvas. Suggestions fill the bar; they never send.
+        assertFalse(page.contains("AskCycloneOrb"))
+        assertFalse(page.contains("AskCycloneDotField"))
+        assertFalse(page.contains("askCycloneCanvasBrush"))
+        assertTrue(page.contains("onSuggestion = { composer = it }"))
+        assertTrue(home.contains("AskCopy.SUGGESTIONS"))
         val tools = page.indexOf("CycloneAttachmentTools(")
-        val intelligence = page.indexOf("CycloneModelIntelligencePanel(")
-        assertTrue(tools in 0 until intelligence)
+        val modelSheet = page.indexOf("AskModelSheet(")
+        assertTrue(tools in 0 until modelSheet)
     }
 
     @Test fun inAppChatUsesTypeableFirstStageRetractionAndDraggablePlusSheet() {
@@ -249,9 +256,10 @@ class CycloneV39AiChatPageTest {
     @Test fun askPlusContainsModelAndIntelligenceSelector() {
         val page = source("CycloneV39AiChatPage.kt")
         val controls = source("CycloneIntelligenceControls.kt")
-        assertTrue(page.contains("contentDescription = \"Model and intelligence\""))
-        assertFalse(page.contains("modelLabel ="))
-        assertTrue(page.contains("onChange = ::persistAiControls"))
+        // R3: the header shows the model's name; the words come from AskCopy.modelLabel.
+        assertTrue(page.contains("AskCopy.modelLabel("))
+        assertTrue(page.contains("modelLabel = modelLabel"))
+        assertTrue(page.contains("onChanged = ::persistAiControls"))
         assertTrue(controls.contains("private enum class OverlaySettingsStep { MODEL, INTELLIGENCE }"))
         assertFalse(controls.contains("OverlaySettingsStep.AUTONOMY"))
     }

@@ -37,28 +37,32 @@ class CycloneV39AiPageContractTest {
 
     @Test fun taskConversationAndQuickModelControlStayAboveOneLiquidComposer() {
         val text = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
+        val header = text.indexOf("AskHeader(")
         val current = text.indexOf("InAppTaskStack(current)")
         val queued = text.indexOf("CyclonePendingRequests()")
         val drawer = text.indexOf("CycloneChatDrawerSurface(")
-        val quickModel = text.indexOf("contentDescription = \"Model and intelligence\"", drawer)
         val composer = text.lastIndexOf("GlassComposerBar(")
+        // R3: the model selector is the header pill; its sheet drops from the header, drawn above the composer.
+        val modelSheet = text.indexOf("AskModelSheet(", composer)
+        assertTrue(header in 0 until current)
         assertTrue(current in 0 until drawer)
         assertTrue(queued in 0 until drawer)
-        assertTrue(drawer in 0 until quickModel)
-        assertTrue(composer in drawer until quickModel)
-        assertTrue(text.contains("CycloneModelIntelligencePanel("))
-        assertTrue(text.contains("showModelSelector = true"))
+        assertTrue(composer in drawer until modelSheet)
+        assertTrue(text.contains("onModel = {"))
         assertFalse(text.contains("CycloneModelPill("))
     }
 
     @Test fun emptyStateMatchesDotFieldAskConcept() {
         val page = source("com/cyclone/mobile/ui/v32/CycloneV39AiChatPage.kt")
-        assertTrue(page.contains("\"Ask Cyclone\""))
-        assertTrue(page.contains("\"Good morning\""))
-        assertTrue(page.contains("\"Good afternoon\""))
-        assertTrue(page.contains("\"Good evening\""))
-        assertTrue(page.contains("\"What can I do for you?\""))
-        assertTrue(page.contains("AskCycloneDotField(Modifier.matchParentSize())"))
+        val copy = source("com/cyclone/mobile/ui/v32/ask/AskCopy.kt")
+        assertTrue(copy.contains("\"Ask Cyclone\""))
+        assertTrue(copy.contains("\"Good morning\""))
+        assertTrue(copy.contains("\"Good afternoon\""))
+        assertTrue(copy.contains("\"Good evening\""))
+        assertTrue(copy.contains("\"What can I do for you?\""))
+        // R3: the rain replaced the breathing dot field.
+        assertTrue(page.contains("AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))"))
+        assertFalse(page.contains("AskCycloneDotField"))
         assertFalse(page.contains("CycloneAlpineBackdrop"))
         assertFalse(page.contains("cyclone_alpine"))
         assertFalse(page.contains("progress today"))
