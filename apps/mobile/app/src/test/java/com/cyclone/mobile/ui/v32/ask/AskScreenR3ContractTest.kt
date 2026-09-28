@@ -124,6 +124,25 @@ class AskScreenR3ContractTest {
         assertTrue(page.contains("androidx.activity.compose.BackHandler(menuOpen || logoOpen || modelMenuOpen)"))
     }
 
+    @Test fun ownersVideoIsReadInPlaceMutedAndFallsBackToTheRain() {
+        val background = ask("AskBackground.kt")
+        assertTrue(page.contains("if (video != null) AskVideoField(video, Modifier.matchParentSize().layerBackdrop(backdrop))"))
+        // Only Android's read grant is kept; the file is never copied, uploaded or opened as a stream by Cyclone.
+        assertTrue(background.contains("takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)"))
+        listOf("openInputStream", "FileOutputStream", "copyTo(", "OpenRouter", "http").forEach {
+            assertFalse("background must not use $it", background.contains(it))
+        }
+        assertTrue(background.contains("player.setVolume(0f, 0f)"))
+        assertTrue(background.contains("player.isLooping = true"))
+        assertTrue(background.contains("runCatching { player.release() }"))
+        assertTrue(background.contains("AskBackground.failed(uri)"))
+        assertTrue(background.contains("Lifecycle.Event.ON_PAUSE -> if (player.isPlaying) player.pause()"))
+        // Picked from the logo panel, with a way back to the rain.
+        val sheets = ask("AskSheets.kt")
+        assertTrue(sheets.contains("pickVideo.launch(arrayOf(\"video/*\"))"))
+        assertTrue(sheets.contains("AskBackground.useRain(context)"))
+    }
+
     @Test fun navigationStillOwnsTheAiDestination() {
         val app = source("com/cyclone/mobile/ui/v32/CycloneV32App.kt")
         assertTrue(app.contains("if (!settingsOpen) CycloneV32BottomBar(destination)"))

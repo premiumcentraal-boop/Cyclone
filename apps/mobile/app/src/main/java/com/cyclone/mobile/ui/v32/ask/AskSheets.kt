@@ -5,6 +5,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
@@ -39,7 +41,9 @@ import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Grain
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Search
@@ -382,6 +386,10 @@ internal fun AskLogoPanel(modifier: Modifier = Modifier, onSettings: (section: S
     val drive by DriverMode.settings.collectAsState()
     LaunchedEffect(Unit) { DriverMode.load(context) }
     var notes by remember { mutableStateOf(com.cyclone.mobile.brain.UserMdRuntime.enabled) }
+    val video by AskBackground.video.collectAsState()
+    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) AskBackground.choose(context, uri)
+    }
     Column(
         modifier.widthIn(max = 320.dp).fillMaxWidth(0.86f)
             .smokedGlass(LocalAskBackdrop.current, 28.dp, AskGlass.SHEET_SMOKE, LocalAskShine.current, 0.3f)
@@ -414,6 +422,15 @@ internal fun AskLogoPanel(modifier: Modifier = Modifier, onSettings: (section: S
             AskSwitch(notes, "User notes") { on ->
                 com.cyclone.mobile.brain.UserMdRuntime.setEnabled(context, on)
                 notes = on
+            }
+        }
+        // The AI screen's background: the rain, or a video the owner picks from their phone (never copied).
+        AskPanelRow(Icons.Rounded.Movie, "Background video", onClick = { pickVideo.launch(arrayOf("video/*")) }) {
+            Text(if (video != null) "On" else "Off", color = AskGlass.Muted, fontSize = 14.sp)
+        }
+        if (video != null) {
+            AskPanelRow(Icons.Rounded.Grain, "Use the rain", onClick = { AskBackground.useRain(context) }) {
+                Icon(Icons.Rounded.ChevronRight, null, Modifier.size(20.dp), tint = AskGlass.Faint)
             }
         }
         AskDivider(Modifier.padding(horizontal = 16.dp, vertical = 6.dp))

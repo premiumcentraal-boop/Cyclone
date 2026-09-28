@@ -107,6 +107,7 @@ import com.cyclone.mobile.ai.model.ModelRegistry
 import com.cyclone.mobile.runtime.background.WorkspaceTasks
 import com.cyclone.mobile.ui.overlay.glass.GlassPalette
 import com.cyclone.mobile.ui.overlay.glass.LocalGlassPalette
+import com.cyclone.mobile.ui.v32.ask.AskBackground
 import com.cyclone.mobile.ui.v32.ask.AskCopy
 import com.cyclone.mobile.ui.v32.ask.AskDim
 import com.cyclone.mobile.ui.v32.ask.AskGlass
@@ -117,6 +118,7 @@ import com.cyclone.mobile.ui.v32.ask.AskMenuDrawer
 import com.cyclone.mobile.ui.v32.ask.AskModelSheet
 import com.cyclone.mobile.ui.v32.ask.AskRainField
 import com.cyclone.mobile.ui.v32.ask.AskScrim
+import com.cyclone.mobile.ui.v32.ask.AskVideoField
 import com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop
 import com.cyclone.mobile.ui.v32.ask.LocalAskShine
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -418,6 +420,8 @@ internal fun V39AiChatPage(
         modelMenuOpen = false
     }
     val homeCanvas = emptyCanvas && composer.isBlank()
+    val backgroundVideo by AskBackground.video.collectAsState()
+    LaunchedEffect(Unit) { AskBackground.load(context) }
 
     CompositionLocalProvider(
         LocalAskBackdrop provides backdrop,
@@ -429,7 +433,10 @@ internal fun V39AiChatPage(
             .fillMaxSize()
             .background(Color(0xFF050608)),
     ) {
-        AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))
+        // The owner may pick a video from their phone instead (logo panel › Background video); the rain is the default.
+        val video = backgroundVideo
+        if (video != null) AskVideoField(video, Modifier.matchParentSize().layerBackdrop(backdrop))
+        else AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop))
         AskScrim(Modifier.matchParentSize(), greeting = homeCanvas)
         com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
 
