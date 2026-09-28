@@ -36,7 +36,7 @@ class CycloneVisual42ContractTest {
     @Test fun taskCardIsOnePhysicalObjectWithExactTaskProjection() {
         val panel = source("CycloneAskTaskPanel.kt")
         assertTrue(panel.contains("TaskPresentationProjector.project(projectedTask)"))
-        assertTrue(panel.contains("CycloneAppIcon(snapshot.packageName"))
+        assertTrue(panel.contains("CycloneAppIcon(com.cyclone.mobile.ui.overlay.WorkingApp.forTask(snapshot.taskId, snapshot.packageName)"))
         assertTrue(panel.contains("UiTask(task).open(context)"))
         assertTrue(panel.contains("CycloneTaskStatusPill(state)"))
         assertTrue(panel.contains("TaskFollowUpAction.TAKE_OVER"))
