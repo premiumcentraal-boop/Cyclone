@@ -172,6 +172,9 @@ class CommandCenter:
                          " task_id TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, PRIMARY KEY(routine_id, due_at, device_id))")
         from .connections import ConnectionStore
         self.connections = ConnectionStore(self, path.parent, **(connections or {}))
+        # Plan 33 (C5): pages, the workspace's Notion-like documents with live references.
+        from .pages import PageStore
+        self.pages = PageStore(self)
 
     # ---------------------------------------------------------------- lifecycle
 

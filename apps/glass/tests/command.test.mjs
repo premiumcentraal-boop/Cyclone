@@ -28,9 +28,9 @@ function routes(extra = {}) {
 }
 
 test("the Command Center has its own routes and section", () => {
-  assert.deepEqual(parseRoute("#/command"), { name: "command", tab: "approvals" });
+  assert.deepEqual(parseRoute("#/command"), { name: "command", tab: "home" });
   assert.deepEqual(parseRoute("#/command/routines"), { name: "command", tab: "routines" });
-  assert.deepEqual(parseRoute("#/command/nonsense"), { name: "command", tab: "approvals" });
+  assert.deepEqual(parseRoute("#/command/nonsense"), { name: "command", tab: "home" });
   assert.equal(routeHref({ name: "command", tab: "accounts" }), "#/command/accounts");
   assert.equal(sectionOf({ name: "command", tab: "tasks" }), "command");
 });

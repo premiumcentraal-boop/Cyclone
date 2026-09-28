@@ -4,10 +4,13 @@ const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios",
 /** Plan 33 (C0): the Command Center's sections. */
 export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "vault" | "connections";
 const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "vault", "connections"];
+/** Plan 33 (C5): the workspace's own screens: its home, one page, and the trash. */
+export type WorkspaceTab = "home" | "page" | "trash";
+const PAGE_ID = /^pg_[A-Za-z0-9_-]{8,40}$/;
 
 export type Route =
   | { name: "home" }
-  | { name: "command"; tab: CommandTab }
+  | { name: "command"; tab: CommandTab | WorkspaceTab; pageId?: string }
   | { name: "apps" }
   | { name: "app"; placeId: string; tab: AppTab; route?: string[]; runId?: string; skill?: string }
   | { name: "runs" }
@@ -57,7 +60,12 @@ export function parseRoute(hash: string): Route {
     return /^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$/.test(id) ? { name: "lab", experimentId: id } : { name: "lab" };
   }
   if (parts[0] === "command") {
-    const tab = COMMAND_TABS.includes(parts[1] as CommandTab) ? (parts[1] as CommandTab) : "approvals";
+    if (parts[1] === "page") {
+      const pageId = safeDecode(parts[2] ?? "");
+      return PAGE_ID.test(pageId) ? { name: "command", tab: "page", pageId } : { name: "command", tab: "home" };
+    }
+    if (parts[1] === "trash") return { name: "command", tab: "trash" };
+    const tab = COMMAND_TABS.includes(parts[1] as CommandTab) ? (parts[1] as CommandTab) : "home";
     return { name: "command", tab };
   }
   if (parts[0] === "market") return { name: "market" };
@@ -77,7 +85,7 @@ export function routeHref(route: Route): string {
     case "home":
       return "#/home";
     case "command":
-      return `#/command/${route.tab}`;
+      return route.tab === "page" && route.pageId ? `#/command/page/${encodeURIComponent(route.pageId)}` : `#/command/${route.tab}`;
     case "apps":
       return "#/apps";
     case "app": {
@@ -110,6 +118,17 @@ export function routeHref(route: Route): string {
     case "settings":
       return "#/settings";
   }
+}
+
+/** Glass has two faces: the Command Center workspace, and the Glass screens (phones, apps, runs, settings…). */
+export type Mode = "command" | "glass";
+
+export function modeOf(route: Route): Mode {
+  return route.name === "command" ? "command" : "glass";
+}
+
+export function isCommandTab(tab: string): tab is CommandTab {
+  return COMMAND_TABS.includes(tab as CommandTab);
 }
 
 /** Sidebar section that owns a route. */
