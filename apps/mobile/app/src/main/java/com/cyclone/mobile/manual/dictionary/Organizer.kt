@@ -120,6 +120,7 @@ object Organizer {
                     lastSeenAt = pass.at,
                     versions = (existing.versions + listOfNotNull(pass.versionName)).distinct().takeLast(8),
                     missedPasses = 0,
+                    proven = existing.proven || proposal.proven,
                 )
                 dict = dict.copy(entries = dict.entries + (merged.id to merged))
                 continue
@@ -140,6 +141,7 @@ object Organizer {
                 firstSeenAt = pass.at,
                 lastSeenAt = pass.at,
                 versions = listOfNotNull(pass.versionName),
+                proven = proposal.proven,
             )
             dict = dict.copy(entries = dict.entries + (id to entry))
                 .withAudit(AuditEvent(pass.at, "proposed", id, "“$name” (${proposal.anchor.kind.wire})", "reader"))
@@ -169,7 +171,9 @@ object Organizer {
         val failed = LinkedHashSet<Gate>()
         if (DictionaryPrivacy.text(entry.name) == null) failed += Gate.NAMED_BY_APP
         if (entry.anchors.isEmpty()) failed += Gate.ANCHORED
-        val seen = if (entry.nameProof == ChromeProof.LEXICON) entry.observations >= 2 else entry.days.distinct().size >= 2
+        // A probe that saw the category switch views proves it in one pass; otherwise two sightings (two days for a
+        // downloaded name).
+        val seen = entry.proven || if (entry.nameProof == ChromeProof.LEXICON) entry.observations >= 2 else entry.days.distinct().size >= 2
         if (!seen) failed += Gate.SEEN_TWICE
         val parent = entry.parentId?.let(dict::resolve)
         if (dict.depth(parent?.id) + 1 > MAX_DEPTH) failed += Gate.DEPTH
@@ -428,6 +432,32 @@ object Organizer {
         }
     }
 
+    // ---- the owner's "app word or yours?" answers (plan 36 §5.1, alpha.60) ----
+
+    /**
+     * The owner said a downloaded name is the app's own word: it joins as a confirmed set (or folds into the set it
+     * already is). Only the owner can admit a name that is not one of the app's shipped strings.
+     */
+    fun ownerAdmit(dictionary: AppDictionary, proposal: SetProposal, at: Long): AppDictionary {
+        val name = DictionaryPrivacy.text(proposal.name.text) ?: throw EditRefused("That name can't be kept.")
+        val pass = PassInfo(at, null)
+        var dict = record(dictionary, listOf(proposal.copy(proven = true)), pass)
+        val entry = dict.entries.values.firstOrNull { e -> e.status != EntryStatus.MERGED && e.names().any { AppLexicon.normalize(it) == AppLexicon.normalize(name) } }
+            ?: throw EditRefused("That name can't be kept.")
+        dict = resolveParents(dict)
+        val current = dict.entries.getValue(entry.id)
+        if (current.status.active) return dict.withAudit(AuditEvent(at, "app_word", current.id, "“$name” is the app's word", "owner"))
+        val parent = current.parentId?.let(dict::resolve)?.takeIf { it.status.active }
+        val kind = parent?.kind ?: current.kind
+        return dict.copy(entries = dict.entries + (current.id to current.copy(status = EntryStatus.CONFIRMED, kind = kind, parentId = parent?.id, note = "owner: the app's word")), updatedAt = at)
+            .withAudit(AuditEvent(at, "app_word", current.id, "“$name” is the app's word", "owner"))
+    }
+
+    /** The owner said a name is their own ("Mine"): only its hash is kept, so it is never asked about again. */
+    fun decline(dictionary: AppDictionary, nameHash: String, at: Long): AppDictionary =
+        dictionary.copy(declined = (dictionary.declined + nameHash).toList().takeLast(AppDictionary.MAX_DECLINED).toSet(), updatedAt = at)
+            .withAudit(AuditEvent(at, "declined", "-", "a name you said is yours (not kept)", "owner"))
+
     // ---- health and glossary ----
 
     fun health(dict: AppDictionary, now: Long, currentVersion: String?): Health {
@@ -452,7 +482,8 @@ object Organizer {
      */
     fun glossary(dict: AppDictionary, appLabel: String, maxLines: Int = 20): String {
         val active = dict.active()
-        if (active.isEmpty()) return ""
+        val places = placeLines(dict, maxLines / 2)
+        if (active.isEmpty()) return if (places.isEmpty()) "" else (listOf("Places in $appLabel (the app's own words):") + places).joinToString("\n")
         val lines = ArrayList<String>()
         lines += "Dictionary of $appLabel (the app's own groups; ids are stable):"
         for (entry in active.sortedWith(compareBy({ it.kind.ordinal }, { dict.path(it) }))) {
@@ -467,6 +498,19 @@ object Organizer {
             val marker = entry.markers.takeIf { it.isNotEmpty() }?.let { m -> "rows show " + m.joinToString(", ") { "“$it”" } }
             lines += "  ${entry.id} = ${dict.path(entry)}" + listOfNotNull(where, search, marker).joinToString("; ").let { if (it.isBlank()) "" else " ($it)" }
         }
+        if (places.isNotEmpty() && lines.size < maxLines + 4) lines += listOf("Places (the app's own words):") + places
         return lines.joinToString("\n")
+    }
+
+    /** Panels first (what "+" or ⋯ opens and what it offers), then named screens; at most [max] lines. */
+    private fun placeLines(dict: AppDictionary, max: Int): List<String> {
+        val named = dict.screens.values.filter { it.name != null }.sortedWith(compareBy({ !it.isPanel }, { -it.seen }))
+        return named.take(max.coerceAtLeast(0)).map { card ->
+            val over = card.panelOf?.let { dict.screens[it]?.name }
+            if (card.isPanel) "  “${card.name}” opens a panel" + (over?.let { " over “$it”" } ?: "") +
+                (if (card.items.isNotEmpty()) " offering " + card.items.take(8).joinToString(", ") { "“$it”" } else "")
+            else "  “${card.name}”" + (card.category?.let { " (category “$it” selected)" } ?: "") +
+                (if (card.items.isNotEmpty()) " with buttons " + card.items.take(6).joinToString(", ") { "“$it”" } else "")
+        }
     }
 }

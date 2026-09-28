@@ -5,9 +5,28 @@
  * Structure only: set names in the app's own words, where they live, ids and counts. Never members or content.
  */
 import type { GatewayClient } from "./gateway.js";
+import type { AtlasViewModel } from "../maps/atlasViewModel.js";
 
 export type SetStatus = "candidate" | "confirmed" | "locked" | "rejected" | "merged" | "retired";
-export type DictAction = "confirm" | "reject" | "lock" | "unlock" | "rename" | "merge" | "unmerge" | "move" | "kind";
+export type DictAction = "confirm" | "reject" | "lock" | "unlock" | "rename" | "merge" | "unmerge" | "move" | "kind" | "app_word" | "mine";
+
+/** A place of the map named in the app's own words (alpha.60). */
+export interface ManualScreen {
+  roomKey: string;
+  name: string | null;
+  title: string | null;
+  category: string | null;
+  via: string | null;
+  panelOf: string | null;
+  items: string[];
+  sets: string[];
+  seen: number;
+}
+
+export interface ManualDoor { edgeId: string; from: string; to: string; label: string | null; kind: string }
+
+/** A downloaded name waiting for the owner's "app word or yours?" (held in memory on the phone). */
+export interface ReviewItem { id: string; name: string; screenTitle: string | null; siblings: string[]; seenAt: number }
 
 export interface DictAnchor {
   kind: "list" | "view";
@@ -66,6 +85,9 @@ export interface AppDictionaryView {
   health: DictHealth;
   jev: { summary: string; answered: number; agreed: number };
   glossary: string;
+  screens: ManualScreen[];
+  doors: ManualDoor[];
+  review: ReviewItem[];
 }
 
 export interface PhoneModel { id: string; label: string; vision: boolean }
@@ -211,6 +233,75 @@ export function parseDictionary(body: unknown): AppDictionaryView {
     },
     jev: { summary: str(jev.summary, 160) || "No decisions yet.", answered: int(jev.answered), agreed: int(jev.agreed) },
     glossary: str(r.glossary, 6000),
+    screens: Array.isArray(r.screens) ? r.screens.map(parseScreen).filter((x): x is ManualScreen => x !== null).slice(0, 300) : [],
+    doors: Array.isArray(r.doors) ? r.doors.map(parseDoor).filter((x): x is ManualDoor => x !== null).slice(0, 600) : [],
+    review: Array.isArray(r.review) ? r.review.map(parseReview).filter((x): x is ReviewItem => x !== null).slice(0, 20) : [],
+  };
+}
+
+const ROOM = /^screen:[a-z_]{1,20}:[0-9a-f]{16}$/;
+const EDGE = /^edge:[0-9a-f]{16,64}$/;
+const REVIEW_ID = /^rv:[0-9a-f]{16}$/;
+const room = (v: unknown): string | null => (typeof v === "string" && ROOM.test(v) ? v : null);
+
+function parseScreen(raw: unknown): ManualScreen | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const roomKey = room(r.roomKey);
+  if (!roomKey) return null;
+  return {
+    roomKey,
+    name: strOrNull(r.name, 60),
+    title: strOrNull(r.title, 60),
+    category: strOrNull(r.category, 60),
+    via: strOrNull(r.via, 60),
+    panelOf: room(r.panelOf),
+    items: strs(r.items, 12),
+    sets: Array.isArray(r.sets) ? r.sets.map(setId).filter((x): x is string => x !== null).slice(0, 12) : [],
+    seen: int(r.seen),
+  };
+}
+
+function parseDoor(raw: unknown): ManualDoor | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const from = room(r.from);
+  const to = room(r.to);
+  if (typeof r.edgeId !== "string" || !EDGE.test(r.edgeId) || !from || !to) return null;
+  return { edgeId: r.edgeId, from, to, label: strOrNull(r.label, 60), kind: str(r.kind, 24) || "navigate" };
+}
+
+function parseReview(raw: unknown): ReviewItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || !REVIEW_ID.test(r.id)) return null;
+  const name = str(r.name, 60);
+  if (!name) return null;
+  return { id: r.id, name, screenTitle: strOrNull(r.screenTitle, 60), siblings: strs(r.siblings, 11), seenAt: int(r.seenAt) };
+}
+
+/**
+ * Puts the App Manual's names on the map (alpha.60): a place with a name in the app's words shows it instead of
+ * "Screen", a panel says what opens it, and a walked door shows the words on it. Places without a name are unchanged.
+ */
+export function applyManualNames(model: AtlasViewModel, manual: AppDictionaryView | null): AtlasViewModel {
+  if (!manual || (!manual.screens.length && !manual.doors.length)) return model;
+  const cards = new Map(manual.screens.map((c) => [c.roomKey, c]));
+  const doors = new Map(manual.doors.map((d) => [d.edgeId, d]));
+  const nameOf = (id: string): string | null => cards.get(id)?.name ?? null;
+  return {
+    ...model,
+    screens: model.screens.map((screen) => {
+      const card = cards.get(screen.screenId);
+      if (!card?.name) return screen;
+      const over = card.panelOf ? nameOf(card.panelOf) : null;
+      const purpose = card.panelOf ? (over ? `Panel over ${over}` : "Panel") : card.category ? `${card.category} selected` : screen.purpose;
+      return { ...screen, label: card.name, purpose, landmarks: card.items.length ? card.items.slice(0, 3) : screen.landmarks };
+    }),
+    edges: model.edges.map((edge) => {
+      const label = doors.get(edge.edgeId)?.label;
+      return label ? { ...edge, actionHint: label } : edge;
+    }),
   };
 }
 

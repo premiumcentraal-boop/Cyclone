@@ -114,6 +114,12 @@ enum class MappingDoorKind {
     ACCOUNT,
     BACK,
     HOME,
+    /**
+     * Opens a panel over the current screen ("+", ⋯, attach, create, a floating button): plan 36 §5.1's reveal. The
+     * pass opens it, reads what it offers in the app's own words and goes back; items inside are tapped only when they
+     * are doors of their own (a tab, a menu, settings), never a choice.
+     */
+    REVEAL,
     STRUCTURAL_SAMPLE,
     CONTENT_ROW,
     UNKNOWN,

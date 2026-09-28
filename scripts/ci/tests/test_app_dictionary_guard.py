@@ -85,10 +85,37 @@ def test_the_pc_sends_a_model_name_never_a_key():
     assert 'filter { it != "model" }' in adapter
 
 
-def test_user_made_labels_are_never_proposed_in_production():
-    """A name proven only word by word could be a user's own folder or chat title: production never proposes one."""
+def test_user_made_labels_never_reach_the_stored_dictionary():
+    """A name proven only word by word could be a user's own folder or chat title (alpha.60).
+
+    The reader may see it so a probe can prove it, but only the app's exact strings are recorded; a proven downloaded
+    name waits in memory for the owner's "app word or yours?", and "Mine" keeps only a hash.
+    """
     reader = read(MANUAL / "StructureReader.kt")
     assert "private val allowVocabulary: Boolean = false" in reader
     assert "word.proof == ChromeProof.LEXICON" in reader, "a screen title must be exactly one of the app's strings"
+    assert "named.filter { it.proof == ChromeProof.LEXICON }" in reader, "neighbour names must be app strings only"
+    memory = read(MANUAL / "PassMemory.kt")
+    assert "marked.filter { it.name.proof == ChromeProof.LEXICON }" in memory
+    runtime = read(MANUAL / "ManualRuntime.kt")
+    assert "Organizer.record(dict, split.appStrings" in runtime and "Organizer.record(dict, split.downloaded" not in runtime
+    assert "allowVocabulary = true" in runtime  # read, then split: see above
     for path in MOBILE.rglob("*.kt"):
-        assert "allowVocabulary = true" not in read(path), f"{path.name} turns on word-by-word names"
+        if path.name not in {"ManualRuntime.kt"}:
+            assert "allowVocabulary = true" not in read(path), f"{path.name} turns on word-by-word names"
+    model = read(DICT / "DictionaryModel.kt")
+    write = model[model.index("fun write(dictionary: AppDictionary)"):model.index("fun entry(e: DictEntry)")]
+    assert "review" not in write, "the review queue is never written to disk"
+    assert "HASH.matches" in write, "declined names are stored as hashes only"
+
+
+def test_reveal_doors_stay_behind_the_same_safety_check():
+    ports = read(MOBILE / "mapping/crawl/AndroidMapperPorts.kt")
+    reveal = ports[ports.index("private fun revealer("):ports.index("private fun inferPurpose(")]
+    assert "if (!element.iconOnly && !floating && role != \"imagebutton\") return false" in reveal, "text rows are never revealers"
+    walker = read(MOBILE / "mapping/crawl/SafeMapperWalker.kt")
+    # Every candidate door, reveal included, is judged by the safety port before the one tap of a step.
+    assert "val danger = safety.classify(observation, door)" in walker
+    assert "MappingDoorKind.REVEAL to 2" in walker
+    risk = read(MOBILE / "mapping/crawl/MapperDoorRisk.kt")
+    assert "add to|buy|purchase" in risk

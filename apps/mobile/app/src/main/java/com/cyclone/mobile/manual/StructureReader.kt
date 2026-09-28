@@ -67,13 +67,22 @@ data class SetProposal(
     val parentName: ChromeWord? = null,
     val markers: List<ChromeWord> = emptyList(),
     val secondAnchor: Anchor? = null,
+    /** Proven by a probe in this pass: its category row was seen switching views (plan 36 §5.1). */
+    val proven: Boolean = false,
 )
+
+/** A category row as seen on one screen: its structural key and which of its (named) items was selected. */
+data class StripSeen(val key: String, val selected: String?, val labels: List<String>)
 
 data class ScreenFindings(
     val title: ChromeWord?,
-    val strips: Int,
+    val strips: List<StripSeen>,
     val lists: Int,
     val proposals: List<SetProposal>,
+    /** The selected category on this screen, in the app's words. */
+    val selectedCategory: String? = null,
+    /** The app's words on this screen's own buttons (outside list rows and category rows), at most 12. */
+    val controls: List<String> = emptyList(),
 )
 
 /**
@@ -96,7 +105,7 @@ class StructureReader(
 
     fun read(roomKey: String, nodes: List<UiNode>): ScreenFindings {
         val visible = nodes.filter { it.visible && it.width > 0 && it.height > 0 }
-        if (visible.isEmpty()) return ScreenFindings(null, 0, 0, emptyList())
+        if (visible.isEmpty()) return ScreenFindings(null, emptyList(), 0, emptyList())
         val screenH = visible.maxOf { it.bottom }.coerceAtLeast(1)
         val byId = visible.associateBy { it.id }
         val children = visible.groupBy { it.parentId }
@@ -146,7 +155,8 @@ class StructureReader(
                     containerKey = category.key,
                     screenTitle = title?.text,
                     position = index,
-                    siblings = named.map { it.text }.filter { it != word.text }.take(11),
+                    // Only the app's exact strings: a downloaded neighbour's name must not ride along.
+                    siblings = named.filter { it.proof == ChromeProof.LEXICON }.map { it.text }.filter { it != word.text }.take(11),
                 )
                 val isShown = item == selected && mainList != null
                 val evidence = listOfNotNull(word.text, parent?.text) + (if (isShown) mainList!!.rowEvidence else emptyList())
@@ -160,7 +170,15 @@ class StructureReader(
                 )
             }
         }
-        return ScreenFindings(title, strips.size, lists.size, proposals)
+        val controls = visible.asSequence()
+            .filter { it.clickable && it.id !in rowIds && it.id !in stripIds && !it.editable }
+            .sortedWith(compareBy({ it.top }, { it.left }))
+            .mapNotNull { node -> label(node, children)?.let(lexicon::chrome)?.takeIf { it.proof == ChromeProof.LEXICON }?.text }
+            .distinct().take(12).toList()
+        val seen = strips.filter { it.region == Region.CATEGORY }.map { strip ->
+            StripSeen(strip.key, strip.items.firstOrNull { it.selected && it.word != null }?.word?.text, strip.items.mapNotNull { it.word?.text })
+        }
+        return ScreenFindings(title, seen, lists.size, proposals, selected?.word?.takeIf { it.proof == ChromeProof.LEXICON }?.text, controls)
     }
 
     // ---- lists ----

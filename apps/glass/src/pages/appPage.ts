@@ -34,7 +34,7 @@ import { appTabs } from "./appKnowledgePage.js";
 import { deriveZones, layeredLayout, layoutCollapsed, runsThroughDoor, zoneSubModel, type LaneId, type ZoneMap } from "../maps/zones.js";
 import { createZoneOverview } from "../ui/zoneOverview.js";
 import { getScenarios } from "../services/knowledge.js";
-import { loadModels } from "../services/dictionary.js";
+import { applyManualNames, loadDictionary, loadModels } from "../services/dictionary.js";
 import { listRuns, statusLabel as runStatusLabel, statusTone as runStatusTone, type RunSummary } from "../services/runs.js";
 
 /** Semantic zoom (plan 22): the app's story, one zone, one scenario lane, or every place at once. */
@@ -516,10 +516,15 @@ export function createAppPage(ctx: GlassContext, route: Extract<Route, { name: "
     const seq = ++loadSeq;
     if (!model || fit) setChildren(boardArea, loadingState("Asking the phone for this map…"));
     try {
+      // The App Manual's names (alpha.60) ride along for the mapping map of an app; an older phone just has none.
+      const manual = placeId.startsWith("package:") && persona === "mapping"
+        ? loadDictionary(ctx.client, deviceId, placeId).catch(() => null)
+        : Promise.resolve(null);
       const document = await phone.get(placeId, persona);
+      const names = await manual;
       if (destroyed || seq !== loadSeq) return;
       const previous = model;
-      model = toViewModel(toMapsDocument(document));
+      model = applyManualNames(toViewModel(toMapsDocument(document)), names);
       noteDiscoveries(previous, model);
       if (selection?.kind === "screen" && !model.screens.some((s) => s.screenId === selection?.id)) selection = null;
       renderBoard(fit);

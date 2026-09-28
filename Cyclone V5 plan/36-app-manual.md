@@ -1,6 +1,6 @@
 # 36 — The App Manual: a map builder that understands apps by itself
 
-**Status:** plan, 2026-09-28, with the owner's decisions (§0). **The app dictionary (§7) is built in alpha.59 (§7.8).** Three build runs (M1–M3, §14). Builds on the mapper
+**Status:** plan, 2026-09-28, with the owner's decisions (§0). **The app dictionary (§7) is built in alpha.59 (§7.8), the App Manual foundation in alpha.60 (§7.9).** Three build runs (M1–M3, §14). Builds on the mapper
 (plans 06, 20, 22), one map and grounded skills (23), the Mind's `go_to` (A37) and JEV watching (32).
 
 **The owner's ask:**
@@ -523,6 +523,28 @@ It sees the proposal's evidence (anchors, markers, app words) and the nearby dic
   - the Mind gets the glossary with the map.
 - **Not yet:** revealers and probes (§5.1), the describer and abilities (M2), the screenshots switch, JEV ability picks
   and the Lab dictionary-stability suite.
+
+### 7.9 As built (alpha.60): the App Manual foundation
+
+- **Reveal doors:** `MappingDoorKind.REVEAL` covers icon or floating buttons whose description or id says add, more,
+  attach, create, new or options.
+  - Their priority comes after tabs and menus.
+  - They pass the same safety check as every door; `MapperDoorRisk` now also refuses add-to, buy, checkout, call and
+    similar.
+  - Text rows are never revealers.
+- **Screen and door cards:** `ScreenCard` and `DoorCard` in the dictionary store (schema 2), keyed by room key and
+  Atlas edge id.
+  - `ManualScreens.observed` sets the title, selected category and button words.
+  - `ManualScreens.verified` sets the door words, the name from the door and `panelOf` for a reveal.
+  - The Atlas stays structure-only, and Glass lays the names over the map (`applyManualNames`).
+- **One-pass proof:** `PassMemory` marks categories proven when the same strip is seen with different selections;
+  `Gate.SEEN_TWICE` accepts `proven`.
+- **App word or yours?:** the reader sees downloaded names, but `PassMemory.split` records only app strings.
+  - A proven downloaded name waits in `ReviewQueue`, held in memory only.
+  - The owner's `app_word` calls `Organizer.ownerAdmit`; `mine` keeps a hash only (`declined`).
+- **Agents:** the glossary lists panels (what opens them, what they offer) and named screens.
+- **JEV is parked by the owner** (2026-09-28). The organizer watcher from alpha.59 stays watch-only, and nothing new
+  uses JEV.
 
 ## 8. How agents use the manual: rapid navigation in three tiers
 

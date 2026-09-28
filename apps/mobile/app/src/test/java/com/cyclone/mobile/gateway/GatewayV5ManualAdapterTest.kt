@@ -73,4 +73,34 @@ class GatewayV5ManualAdapterTest {
         assertEquals(2, out.getJSONArray("models").length())
         assertFalse(out.toString().contains("sk-or"))
     }
+
+    @Test
+    fun screensDoorsAndTheReviewQueueAreServedAndAnsweredByTheOwner() {
+        val room = "screen:list:0123456789abcdef"
+        val panel = "screen:unknown:fedcba98765abcde"
+        dict = dict.copy(
+            screens = mapOf(room to com.cyclone.mobile.manual.dictionary.ScreenCard(room, title = "Messages", category = "Primary", seen = 3),
+                panel to com.cyclone.mobile.manual.dictionary.ScreenCard(panel, via = "Add photos and files", panelOf = room, items = listOf("Camera", "Files"), seen = 1)),
+            doors = mapOf("edge:" + "a".repeat(64) to com.cyclone.mobile.manual.dictionary.DoorCard("edge:" + "a".repeat(64), room, panel, "Add photos and files", "reveal")),
+        )
+        val proposal = com.cyclone.mobile.manual.SetProposal(com.cyclone.mobile.manual.ChromeWord("Close friends", ChromeProof.VOCABULARY), CoreKind.PERSON,
+            Anchor(AnchorKind.VIEW, room, "abcdef12", screenTitle = "Messages", position = 3, siblings = listOf("Primary")), proven = true)
+        val item = com.cyclone.mobile.manual.ReviewQueue.Item("rv:0123456789abcdef", "0123456789abcdef01234567", proposal, 5)
+        var answered: Pair<String, Boolean>? = null
+        GatewayV5ManualAdapter.review = { _ -> if (answered == null) listOf(item) else emptyList() }
+        GatewayV5ManualAdapter.answer = { _, id, appWord -> answered = id to appWord; dict }
+        val out = call("dictionary.get", """{"placeId":"package:com.example"}""")
+        val screens = out.getJSONArray("screens")
+        val messages = (0 until screens.length()).map { screens.getJSONObject(it) }.single { it.getString("roomKey") == room }
+        assertEquals("Messages", messages.getString("name"))
+        assertTrue(messages.getJSONArray("sets").toString().contains("set:messages"))
+        val panelJson = (0 until screens.length()).map { screens.getJSONObject(it) }.single { it.getString("roomKey") == panel }
+        assertEquals(room, panelJson.getString("panelOf"))
+        assertEquals("reveal", out.getJSONArray("doors").getJSONObject(0).getString("kind"))
+        assertEquals("Close friends", out.getJSONArray("review").getJSONObject(0).getString("name"))
+        call("dictionary.edit", """{"placeId":"package:com.example","action":"app_word","id":"rv:0123456789abcdef"}""")
+        assertEquals("rv:0123456789abcdef" to true, answered)
+        val bad = runCatching { call("dictionary.edit", """{"placeId":"package:com.example","action":"mine","id":"set:messages"}""") }
+        assertTrue(bad.exceptionOrNull() is GatewayProtocolException)
+    }
 }

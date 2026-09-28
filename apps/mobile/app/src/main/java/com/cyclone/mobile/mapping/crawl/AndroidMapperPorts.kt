@@ -67,7 +67,7 @@ class GatewayMappingObservationPort(
             // The app dictionary (plan 36 §7): only the app's own words survive the reader; it never fails the pass.
             if (observation.inPlace) {
                 com.cyclone.mobile.manual.ManualRuntime.observe(appContext, session.jobId, session.placeId,
-                    StructuralRoomClassifier.nodeKey(observation), captured)
+                    StructuralRoomClassifier.nodeKey(observation), captured, observation)
             }
             observation
         }
@@ -98,6 +98,8 @@ internal fun MappingStructuralProjection.fromGateway(
             path = element.evidence.optString("path"),
             clickable = element.evidence.optBoolean("clickable"),
             editable = element.evidence.optBoolean("editable"),
+            iconOnly = element.evidence.optString("text").let { it.isBlank() || it == "<redacted>" } &&
+                element.evidence.optString("contentDescription").let { it.isNotBlank() && it != "<redacted>" },
             enabled = element.evidence.optBoolean("enabled", true),
             visible = element.evidence.optBoolean("visibleToUser", true),
         )
@@ -339,6 +341,8 @@ internal data class RawMappingElement(
     val editable: Boolean = false,
     val enabled: Boolean = true,
     val visible: Boolean = true,
+    /** An icon button: no visible text, only its description ("Add photos and files", "More options"). */
+    val iconOnly: Boolean = false,
 )
 
 /**
@@ -417,8 +421,22 @@ internal object MappingStructuralProjection {
             ACCOUNT.containsMatchIn(signal) -> MappingDoorKind.ACCOUNT
             BACK.containsMatchIn(signal) -> MappingDoorKind.BACK
             HOME.containsMatchIn(signal) -> MappingDoorKind.HOME
+            revealer(element, role, id) -> MappingDoorKind.REVEAL
             else -> MappingDoorKind.CONTENT_ROW
         }
+    }
+
+    /**
+     * A control that opens a panel: an icon button or a floating button whose description or id says add, more,
+     * attach, create, new or options. A row of text ("Add to cart", a person) is never a revealer: text rows stay
+     * content, and what a revealer offers is judged again by [MapperDoorRisk] before any tap.
+     */
+    private fun revealer(element: RawMappingElement, role: String, id: String): Boolean {
+        val floating = FLOATING.containsMatchIn(normalize(element.className)) || FLOATING.containsMatchIn(id)
+        if (!element.iconOnly && !floating && role != "imagebutton") return false
+        val words = normalize(element.label.ifBlank { element.semanticName })
+        if (words.split(' ').size > 5) return false
+        return REVEAL.containsMatchIn("$id $words") || floating
     }
 
     private fun inferPurpose(
@@ -488,6 +506,8 @@ internal object MappingStructuralProjection {
     private val ACCOUNT = Regex("""\b(account|profile)\b""")
     private val BACK = Regex("""\b(back|close|dismiss)\b""")
     private val HOME = Regex("""\bhome\b""")
+    private val REVEAL = Regex("""\b(add|plus|more|overflow|options|attach|attachment|attachments|create|new|compose|actions|expand|share sheet)\b""")
+    private val FLOATING = Regex("""floatingactionbutton|\bfab\b|extended fab""")
 }
 
 /**

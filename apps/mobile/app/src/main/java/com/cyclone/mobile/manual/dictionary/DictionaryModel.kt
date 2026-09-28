@@ -58,10 +58,40 @@ data class DictEntry(
     val missedPasses: Int = 0,
     val redirectTo: String? = null,
     val note: String? = null,
+    /** Proven by a probe in a pass (plan 36 §5.1): the same category row was seen switching views. */
+    val proven: Boolean = false,
 ) {
     val shownName: String get() = ownerLabel ?: name
     fun names(): List<String> = (listOf(name) + aliases + listOfNotNull(ownerLabel)).distinct()
 }
+
+/**
+ * One screen or panel of the app, named in the app's own words (plan 36 §3, alpha.60). Keyed by the mapper's room key,
+ * which is also the Atlas screen id, so Glass can put the name on the map. Structure only: exact app strings, never a
+ * row, a name or typed text.
+ */
+data class ScreenCard(
+    val roomKey: String,
+    /** The screen's title, when it is exactly one of the app's strings. */
+    val title: String? = null,
+    /** The category selected when the screen was read ("Primary"). */
+    val category: String? = null,
+    /** The app's words on the door that first led here ("Settings", "Add photos and files"). */
+    val via: String? = null,
+    /** For a panel (opened by a reveal door): the room it opens over. */
+    val panelOf: String? = null,
+    /** The app's words on this screen's own buttons (a panel's offers), at most 12. */
+    val items: List<String> = emptyList(),
+    val seen: Int = 0,
+    val lastSeenAt: Long = 0,
+) {
+    val isPanel: Boolean get() = panelOf != null
+    /** The name shown on the map: the title, else the door that led here, else the selected category. */
+    val name: String? get() = title ?: via ?: category
+}
+
+/** A walked door between two rooms, with the app's words on it. [edgeId] is the Atlas edge id. */
+data class DoorCard(val edgeId: String, val from: String, val to: String, val label: String?, val kind: String, val lastSeenAt: Long = 0)
 
 data class AuditEvent(val at: Long, val action: String, val entryId: String, val detail: String, val by: String)
 
@@ -98,6 +128,10 @@ data class AppDictionary(
     val jev: JevOrganizerTally = JevOrganizerTally(),
     val passes: Int = 0,
     val updatedAt: Long = 0,
+    val screens: Map<String, ScreenCard> = emptyMap(),
+    val doors: Map<String, DoorCard> = emptyMap(),
+    /** Hashes of names the owner said are their own ("Mine"): never asked again, never stored as text. */
+    val declined: Set<String> = emptySet(),
 ) {
     /** Follows merges to the entry that stands for [id] now. */
     fun resolve(id: String?): DictEntry? {
@@ -150,6 +184,9 @@ data class AppDictionary(
         const val MAX_AUDIT = 200
         const val MAX_REDIRECTS = 8
         const val MAX_ENTRIES = 400
+        const val MAX_SCREENS = 300
+        const val MAX_DOORS = 600
+        const val MAX_DECLINED = 500
     }
 }
 
@@ -197,6 +234,25 @@ object DictionaryPrivacy {
         )
     }
 
+    fun screen(card: ScreenCard): ScreenCard? {
+        if (!ROOM.matches(card.roomKey) || card.roomKey == "screen:unknown") return null
+        return card.copy(
+            title = text(card.title),
+            category = text(card.category),
+            via = text(card.via),
+            panelOf = card.panelOf?.takeIf { ROOM.matches(it) && it != card.roomKey },
+            items = texts(card.items, 12),
+        )
+    }
+
+    fun door(card: DoorCard): DoorCard? {
+        if (!EDGE.matches(card.edgeId) || !ROOM.matches(card.from) || !ROOM.matches(card.to)) return null
+        return card.copy(label = text(card.label), kind = card.kind.lowercase().takeIf { KIND.matches(it) } ?: "navigate")
+    }
+
+    private val EDGE = Regex("^edge:[0-9a-f]{16,64}$")
+    private val KIND = Regex("^[a-z_]{2,24}$")
+
     private fun noteText(value: String): String? = value.takeIf { AtlasPrivacy.structuralLabel(it.take(60), "").isNotBlank() }
 
     private val SHAPE = Regex("^[0-9]{1,2} texts?( · image)?( · button)?$")
@@ -209,12 +265,28 @@ object DictionaryPrivacy {
 object DictionaryJson {
     val ENTRY_KEYS = setOf("id", "kind", "name", "nameProof", "resKey", "aliases", "ownerLabel", "parentId", "parentHint",
         "status", "anchors", "markers", "observations", "days", "firstSeenAt", "lastSeenAt", "versions", "missedPasses",
-        "redirectTo", "note")
+        "redirectTo", "note", "proven")
+    val SCREEN_KEYS = setOf("roomKey", "title", "category", "via", "panelOf", "items", "seen", "lastSeenAt")
+    val DOOR_KEYS = setOf("edgeId", "from", "to", "label", "kind", "lastSeenAt")
     val ANCHOR_KEYS = setOf("kind", "roomKey", "containerKey", "screenTitle", "position", "siblings", "groups", "rowShape",
         "searchable", "searchLabel")
 
     fun write(dictionary: AppDictionary): JSONObject = JSONObject()
-        .put("schema", 1)
+        .put("schema", 2)
+        .put("screens", JSONArray().also { out ->
+            dictionary.screens.values.mapNotNull(DictionaryPrivacy::screen).forEach { c ->
+                out.put(JSONObject().put("roomKey", c.roomKey).put("title", c.title ?: JSONObject.NULL).put("category", c.category ?: JSONObject.NULL)
+                    .put("via", c.via ?: JSONObject.NULL).put("panelOf", c.panelOf ?: JSONObject.NULL).put("items", JSONArray(c.items))
+                    .put("seen", c.seen).put("lastSeenAt", c.lastSeenAt))
+            }
+        })
+        .put("doors", JSONArray().also { out ->
+            dictionary.doors.values.mapNotNull(DictionaryPrivacy::door).forEach { d ->
+                out.put(JSONObject().put("edgeId", d.edgeId).put("from", d.from).put("to", d.to).put("label", d.label ?: JSONObject.NULL)
+                    .put("kind", d.kind).put("lastSeenAt", d.lastSeenAt))
+            }
+        })
+        .put("declined", JSONArray(dictionary.declined.filter { HASH.matches(it) }.take(AppDictionary.MAX_DECLINED)))
         .put("packageName", dictionary.packageName)
         .put("passes", dictionary.passes)
         .put("updatedAt", dictionary.updatedAt)
@@ -249,6 +321,7 @@ object DictionaryJson {
         .put("missedPasses", e.missedPasses)
         .put("redirectTo", e.redirectTo ?: JSONObject.NULL)
         .put("note", e.note ?: JSONObject.NULL)
+        .put("proven", e.proven)
 
     fun anchor(a: Anchor): JSONObject = JSONObject()
         .put("kind", a.kind.wire)
@@ -283,8 +356,27 @@ object DictionaryJson {
                 j.optJSONArray("timesMs")?.let { t -> (0 until t.length()).map { t.optLong(it) } }.orEmpty(),
                 j.optString("lastError").takeIf { it.isNotBlank() && it != "null" })
         } ?: JevOrganizerTally()
+        val screens = LinkedHashMap<String, ScreenCard>()
+        json.optJSONArray("screens")?.let { array ->
+            for (i in 0 until array.length()) {
+                val c = array.optJSONObject(i) ?: continue
+                val card = DictionaryPrivacy.screen(ScreenCard(c.optString("roomKey"), nullable(c, "title"), nullable(c, "category"), nullable(c, "via"),
+                    nullable(c, "panelOf"), strings(c.optJSONArray("items")), c.optInt("seen"), c.optLong("lastSeenAt"))) ?: continue
+                screens[card.roomKey] = card
+            }
+        }
+        val doors = LinkedHashMap<String, DoorCard>()
+        json.optJSONArray("doors")?.let { array ->
+            for (i in 0 until array.length()) {
+                val d = array.optJSONObject(i) ?: continue
+                val card = DictionaryPrivacy.door(DoorCard(d.optString("edgeId"), d.optString("from"), d.optString("to"), nullable(d, "label"),
+                    d.optString("kind"), d.optLong("lastSeenAt"))) ?: continue
+                doors[card.edgeId] = card
+            }
+        }
+        val declined = strings(json.optJSONArray("declined")).filter { HASH.matches(it) }.toSet()
         return AppDictionary(json.optString("packageName"), entries, audit.takeLast(AppDictionary.MAX_AUDIT), jev,
-            json.optInt("passes"), json.optLong("updatedAt"))
+            json.optInt("passes"), json.optLong("updatedAt"), screens, doors, declined)
     }
 
     private fun strings(array: JSONArray?): List<String> = array?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotBlank) } }.orEmpty()
@@ -313,6 +405,7 @@ object DictionaryJson {
             missedPasses = json.optInt("missedPasses"),
             redirectTo = nullable(json, "redirectTo")?.takeIf { ID.matches(it) },
             note = nullable(json, "note"),
+            proven = json.optBoolean("proven"),
         )
     }
 
@@ -333,4 +426,5 @@ object DictionaryJson {
     }
 
     val ID = Regex("^set:[\\p{L}\\p{N}_]{1,40}$")
+    val HASH = Regex("^[0-9a-f]{24}$")
 }

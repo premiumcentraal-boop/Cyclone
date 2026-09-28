@@ -38,6 +38,10 @@ internal object GatewayV5ManualAdapter {
         active to OpenRouterCatalogStore.picker(c).map { Triple(it.id, it.label, it.vision) }
     }
     internal var now: () -> Long = { System.currentTimeMillis() }
+    /** Downloaded names waiting for the owner (in memory on the phone), and the owner's answer. */
+    internal var review: (String) -> List<com.cyclone.mobile.manual.ReviewQueue.Item> = { pkg -> ManualRuntime.reviewItems(pkg) }
+    internal var answer: (String, String, Boolean) -> AppDictionary = { pkg, id, appWord -> ManualRuntime.answerReview(app(), pkg, id, appWord) }
+    private val REVIEW_ID = Regex("^rv:[0-9a-f]{16}$")
 
     fun dispatch(op: String, args: JSONObject): JSONObject = try {
         when (op) {
@@ -49,7 +53,14 @@ internal object GatewayV5ManualAdapter {
             "dictionary.edit" -> {
                 only(args, setOf("placeId", "action", "id", "into", "label", "parentId", "kind"))
                 val pkg = packageOf(args)
-                render(pkg, editor(pkg, edit(args)))
+                when (val action = args.optString("action")) {
+                    "app_word", "mine" -> {
+                        val id = args.optString("id")
+                        if (!REVIEW_ID.matches(id)) throw GatewayProtocolException("INVALID_REQUEST", "id must be a review id.")
+                        render(pkg, answer(pkg, id, action == "app_word"))
+                    }
+                    else -> render(pkg, editor(pkg, edit(args)))
+                }
             }
             "models.list" -> {
                 only(args, emptySet())
@@ -130,6 +141,36 @@ internal object GatewayV5ManualAdapter {
             .put("jev", JSONObject().put("summary", dict.jev.summary().take(160)).put("answered", dict.jev.answered).put("agreed", dict.jev.agreed)
                 .put("sureAnswered", dict.jev.sureAnswered).put("sureAgreed", dict.jev.sureAgreed))
             .put("glossary", Organizer.glossary(dict, appLabel, maxLines = 40).take(6000))
+            .put("screens", JSONArray().also { out ->
+                dict.screens.values.sortedByDescending { it.seen }.take(com.cyclone.mobile.manual.dictionary.AppDictionary.MAX_SCREENS).forEach { c ->
+                    out.put(JSONObject()
+                        .put("roomKey", c.roomKey)
+                        .put("name", c.name ?: JSONObject.NULL)
+                        .put("title", c.title ?: JSONObject.NULL)
+                        .put("category", c.category ?: JSONObject.NULL)
+                        .put("via", c.via ?: JSONObject.NULL)
+                        .put("panelOf", c.panelOf ?: JSONObject.NULL)
+                        .put("items", JSONArray(c.items))
+                        .put("sets", JSONArray(com.cyclone.mobile.manual.dictionary.ManualScreens.setsOn(dict, c.roomKey).map { it.id }.take(12)))
+                        .put("seen", c.seen))
+                }
+            })
+            .put("doors", JSONArray().also { out ->
+                dict.doors.values.sortedByDescending { it.lastSeenAt }.take(com.cyclone.mobile.manual.dictionary.AppDictionary.MAX_DOORS).forEach { d ->
+                    out.put(JSONObject().put("edgeId", d.edgeId).put("from", d.from).put("to", d.to).put("label", d.label ?: JSONObject.NULL).put("kind", d.kind))
+                }
+            })
+            .put("review", JSONArray().also { out ->
+                review(pkg).take(com.cyclone.mobile.manual.ReviewQueue.MAX).forEach { item ->
+                    val a = item.proposal.anchor
+                    out.put(JSONObject()
+                        .put("id", item.id)
+                        .put("name", item.proposal.name.text.take(60))
+                        .put("screenTitle", a.screenTitle ?: JSONObject.NULL)
+                        .put("siblings", JSONArray(a.siblings.take(11)))
+                        .put("seenAt", item.seenAt))
+                }
+            })
     }
 
     private fun entry(dict: AppDictionary, e: DictEntry): JSONObject {

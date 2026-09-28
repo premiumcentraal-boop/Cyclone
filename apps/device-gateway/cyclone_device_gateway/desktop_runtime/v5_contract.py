@@ -1025,10 +1025,16 @@ SKILL_KEYS = frozenset({"skillId", "name", "placeId", "ground", "detail", "route
 
 
 DICT_SET_ID = re.compile(r"^set:[\w]{1,40}$")
-DICT_ACTIONS = frozenset({"confirm", "reject", "lock", "unlock", "rename", "merge", "unmerge", "move", "kind"})
+DICT_ACTIONS = frozenset({"confirm", "reject", "lock", "unlock", "rename", "merge", "unmerge", "move", "kind", "app_word", "mine"})
+DICT_REVIEW_ID = re.compile(r"^rv:[0-9a-f]{16}$")
+DICT_ROOM = re.compile(r"^screen:[a-z_]{1,20}:[0-9a-f]{16}$")
+DICT_EDGE = re.compile(r"^edge:[0-9a-f]{16,64}$")
 DICT_STATUSES = frozenset({"candidate", "confirmed", "locked", "rejected", "merged", "retired"})
 DICT_TOP_KEYS = frozenset({"placeId", "appLabel", "currentVersion", "passes", "updatedAt", "coreKinds", "entries", "truncated",
-                           "audit", "health", "jev", "glossary"})
+                           "audit", "health", "jev", "glossary", "screens", "doors", "review"})
+DICT_SCREEN_KEYS = frozenset({"roomKey", "name", "title", "category", "via", "panelOf", "items", "sets", "seen"})
+DICT_DOOR_KEYS = frozenset({"edgeId", "from", "to", "label", "kind"})
+DICT_REVIEW_KEYS = frozenset({"id", "name", "screenTitle", "siblings", "seenAt"})
 DICT_ENTRY_KEYS = frozenset({"id", "kind", "name", "shownName", "nameProof", "aliases", "parentId", "path", "status", "redirectTo",
                              "anchors", "markers", "observations", "days", "versions", "missedPasses", "note", "failedGates", "waiting"})
 DICT_ANCHOR_KEYS = frozenset({"kind", "roomKey", "screenTitle", "position", "siblings", "groups", "rowShape", "searchable", "searchLabel"})
@@ -1077,6 +1083,31 @@ def _validate_dictionary_response(value: dict[str, Any], args: dict[str, Any]) -
         raise _bad_dictionary("glossary")
     if not isinstance(value["health"], dict) or not isinstance(value["jev"], dict):
         raise _bad_dictionary("health")
+    screens, doors, review = value["screens"], value["doors"], value["review"]
+    if not isinstance(screens, list) or len(screens) > 300 or not isinstance(doors, list) or len(doors) > 600 \
+            or not isinstance(review, list) or len(review) > 20:
+        raise _bad_dictionary("screens")
+    for screen in screens:
+        if not isinstance(screen, dict) or set(screen) != DICT_SCREEN_KEYS or not DICT_ROOM.match(str(screen["roomKey"])):
+            raise _bad_dictionary("screen keys")
+        for key in ("name", "title", "category", "via"):
+            if not _short_text(screen[key], 60, nullable=True):
+                raise _bad_dictionary("screen name")
+        if screen["panelOf"] is not None and not DICT_ROOM.match(str(screen["panelOf"])):
+            raise _bad_dictionary("screen panel")
+        if not _short_list(screen["items"], 12, 60) or not _short_list(screen["sets"], 12, 48) or not _is_int(screen["seen"]):
+            raise _bad_dictionary("screen lists")
+    for door in doors:
+        if not isinstance(door, dict) or set(door) != DICT_DOOR_KEYS or not DICT_EDGE.match(str(door["edgeId"])):
+            raise _bad_dictionary("door keys")
+        if not DICT_ROOM.match(str(door["from"])) or not DICT_ROOM.match(str(door["to"])) or not _short_text(door["label"], 60, nullable=True) \
+                or not _short_text(door["kind"], 24):
+            raise _bad_dictionary("door")
+    for item in review:
+        if not isinstance(item, dict) or set(item) != DICT_REVIEW_KEYS or not DICT_REVIEW_ID.match(str(item["id"])):
+            raise _bad_dictionary("review keys")
+        if not _short_text(item["name"], 60) or not _short_text(item["screenTitle"], 60, nullable=True) or not _short_list(item["siblings"], 11, 60):
+            raise _bad_dictionary("review")
 
 
 def _validate_models_response(value: dict[str, Any]) -> None:
@@ -1467,6 +1498,11 @@ class V5ContractService:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "placeId must be package:<app>.")
         if body.get("action") not in DICT_ACTIONS:
             raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unknown dictionary action.")
+        if body["action"] in {"app_word", "mine"}:
+            # The owner's "app word or yours?" answer names a review item, never a set.
+            if set(body) != {"placeId", "action", "id"} or not isinstance(body.get("id"), str) or not DICT_REVIEW_ID.match(body["id"]):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "id must be a review id.")
+            return self._call(device_id, "dictionary.edit", dict(body))
         for key in ("id", "into"):
             if key in body and (not isinstance(body[key], str) or not DICT_SET_ID.match(body[key])):
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, f"{key} must be a set id.")

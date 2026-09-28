@@ -6,6 +6,7 @@ import com.cyclone.mobile.ai.OpenRouterSecretStore
 import com.cyclone.mobile.ai.ProviderCancellation
 import com.cyclone.mobile.manual.dictionary.AppDictionary
 import com.cyclone.mobile.manual.dictionary.DictionaryJson
+import com.cyclone.mobile.manual.dictionary.ManualScreens
 import com.cyclone.mobile.manual.dictionary.Organizer
 import com.cyclone.mobile.manual.dictionary.OrganizerDecision
 import com.cyclone.mobile.manual.dictionary.OrganizerJudge
@@ -30,12 +31,16 @@ object ManualRuntime {
     /** The model the owner picked for a pass: the phone's current model, or one from its list. */
     const val PHONE_MODEL = "phone"
 
-    private class Pass(val packageName: String, val versionName: String?, val modelChoice: String, val rooms: MutableSet<String> = ConcurrentHashMap.newKeySet())
+    private class Pass(val packageName: String, val versionName: String?, val modelChoice: String, val rooms: MutableSet<String> = ConcurrentHashMap.newKeySet()) {
+        val memory = PassMemory()
+    }
 
     private val passes = ConcurrentHashMap<String, Pass>()
     private val choices = ConcurrentHashMap<String, String>()
     private val cache = ConcurrentHashMap<String, AppDictionary>()
     private val lexicons = ConcurrentHashMap<String, Pair<Long, AppLexicon>>()
+    /** Per app, in memory only: downloaded names waiting for the owner's "app word or yours?". */
+    private val reviews = ConcurrentHashMap<String, ReviewQueue>()
     private val lock = Any()
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "cyclone-manual").apply { isDaemon = true } }
 
@@ -54,7 +59,14 @@ object ManualRuntime {
         if (choice == PHONE_MODEL) OpenRouterCatalogStore.activeId(context) else OpenRouterCatalogStore.canonicalId(choice)
 
     /** One screen of a mapping pass. Never throws into the mapper. */
-    internal fun observe(context: Context, jobId: String, placeId: String, roomKey: String, captured: com.cyclone.mobile.gateway.GatewayObservation) {
+    internal fun observe(
+        context: Context,
+        jobId: String,
+        placeId: String,
+        roomKey: String,
+        captured: com.cyclone.mobile.gateway.GatewayObservation,
+        observation: com.cyclone.mobile.mapping.crawl.MappingObservation? = null,
+    ) {
         runCatching {
             val packageName = placeId.removePrefix("package:").takeIf { placeId.startsWith("package:") && PACKAGE.matches(it) } ?: return
             if (captured.page.packageName != packageName) return
@@ -66,13 +78,55 @@ object ManualRuntime {
             pass.rooms += roomKey
             val lexicon = lexicon(app, packageName)
             val label = runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(packageName, 0)).toString() }.getOrNull()
-            val found = StructureReader(lexicon, label).read(roomKey, nodes(captured))
-            if (found.proposals.isEmpty()) return
+            // Downloaded names are read so a probe can prove them, but only app strings reach the dictionary.
+            val found = StructureReader(lexicon, label, allowVocabulary = true).read(roomKey, nodes(captured))
+            val split = pass.memory.split(found)
+            observation?.doors?.forEach { door ->
+                val element = captured.elements[door.elementId]
+                val word = listOfNotNull(element?.label, element?.evidence?.optString("contentDescription"))
+                    .firstNotNullOfOrNull { lexicon.chrome(it)?.takeIf { w -> w.proof == ChromeProof.LEXICON } }
+                pass.memory.rememberDoor(door.key, word?.text, door.kind.name.lowercase())
+            }
+            val now = System.currentTimeMillis()
             synchronized(lock) {
-                val dict = load(app, packageName)
-                save(app, Organizer.record(dict, found.proposals, PassInfo(System.currentTimeMillis(), pass.versionName)))
+                var dict = load(app, packageName)
+                if (split.appStrings.isNotEmpty()) dict = Organizer.record(dict, split.appStrings, PassInfo(now, pass.versionName))
+                dict = ManualScreens.observed(dict, roomKey, found, now)
+                save(app, dict)
+                if (split.downloaded.isNotEmpty()) reviews.getOrPut(packageName) { ReviewQueue() }.offer(dict, split.downloaded, now)
             }
         }
+    }
+
+    /** The walker verified a door: the destination is named from the door's words, and a reveal makes it a panel. */
+    internal fun verified(context: Context, jobId: String, structure: com.cyclone.mobile.mapping.crawl.VerifiedStructure) {
+        runCatching {
+            val pass = passes[jobId] ?: return
+            if (structure.fromNodeKey == structure.toNodeKey) return
+            val (label, kind) = pass.memory.door(structure.doorKey) ?: (null to structure.doorKind.name.lowercase())
+            val edgeId = com.cyclone.mobile.brain.graphv2.AtlasGraphIds.wireEdgeId(com.cyclone.mobile.brain.graphv2.GraphEdgeKey(
+                com.cyclone.mobile.brain.graphv2.GraphNodeId(structure.fromNodeKey),
+                com.cyclone.mobile.brain.graphv2.GraphEdgeType.NAVIGATES_TO,
+                com.cyclone.mobile.brain.graphv2.GraphNodeId(structure.toNodeKey),
+            ))
+            val app = context.applicationContext
+            synchronized(lock) {
+                save(app, ManualScreens.verified(load(app, pass.packageName), structure.fromNodeKey, structure.toNodeKey, edgeId, label, kind, System.currentTimeMillis()))
+            }
+        }
+    }
+
+    /** Downloaded names waiting for the owner, in memory only. */
+    fun reviewItems(packageName: String): List<ReviewQueue.Item> = reviews[packageName]?.list().orEmpty()
+
+    /** The owner's answer: "app word" admits the name as a confirmed set; "mine" keeps only its hash. */
+    fun answerReview(context: Context, packageName: String, id: String, appWord: Boolean): AppDictionary = synchronized(lock) {
+        val app = context.applicationContext
+        val item = reviews[packageName]?.take(id) ?: throw Organizer.EditRefused("That question is gone (the phone restarted or it was answered).")
+        val now = System.currentTimeMillis()
+        val next = if (appWord) Organizer.ownerAdmit(load(app, packageName), item.proposal, now) else Organizer.decline(load(app, packageName), item.hash, now)
+        save(app, next)
+        next
     }
 
     /** The pass ended: the organizer runs in the background (gates, then at most one model question). */

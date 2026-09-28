@@ -29,6 +29,13 @@ DICT = {
     "health": {"orphans": [], "nearDuplicates": [], "tooDeep": [], "tooWide": [], "staleCandidates": [], "notSeenInVersion": []},
     "jev": {"summary": "No decisions yet.", "answered": 0, "agreed": 0, "sureAnswered": 0, "sureAgreed": 0},
     "glossary": "Dictionary of Instagram:\n  set:primary = Conversation › Messages › Primary",
+    "screens": [{"roomKey": "screen:list:0123456789abcdef", "name": "Messages", "title": "Messages", "category": "Primary", "via": None,
+                 "panelOf": None, "items": ["Add photos and files"], "sets": ["set:primary"], "seen": 3},
+                {"roomKey": "screen:unknown:fedcba98765abcde", "name": "Add photos and files", "title": None, "category": None,
+                 "via": "Add photos and files", "panelOf": "screen:list:0123456789abcdef", "items": ["Camera", "Files"], "sets": [], "seen": 1}],
+    "doors": [{"edgeId": "edge:" + "a" * 64, "from": "screen:list:0123456789abcdef", "to": "screen:unknown:fedcba98765abcde",
+               "label": "Add photos and files", "kind": "reveal"}],
+    "review": [{"id": "rv:0123456789abcdef", "name": "Close friends", "screenTitle": "Messages", "siblings": ["Primary"], "seenAt": 5}],
 }
 MODELS = {"active": {"id": "anthropic/claude-fable-5.1", "label": "Claude Fable 5.1", "vision": True},
           "models": [{"id": "anthropic/claude-fable-5.1", "label": "Claude Fable 5.1", "vision": True}]}
@@ -98,3 +105,21 @@ def test_the_dictionary_routes():
     edit = client.post("/v1/devices/phone-1/dictionary/edit", headers=auth, json={"placeId": PLACE, "action": "confirm", "id": "set:primary"})
     assert edit.status_code == 200
     assert client.get("/v1/devices/phone-1/models", headers=auth).json()["models"][0]["vision"] is True
+
+
+def test_screens_doors_and_the_review_queue_are_validated_and_answered():
+    svc, bridge = service({"dictionary.get": DICT, "dictionary.edit": DICT})
+    assert svc.dictionary_get("phone-1", PLACE)["screens"][1]["panelOf"] == "screen:list:0123456789abcdef"
+    svc.dictionary_edit("phone-1", {"placeId": PLACE, "action": "app_word", "id": "rv:0123456789abcdef"})
+    assert bridge.calls[-1] == ("dictionary.edit", {"placeId": PLACE, "action": "app_word", "id": "rv:0123456789abcdef"})
+    for body in ({"placeId": PLACE, "action": "mine", "id": "set:primary"},
+                 {"placeId": PLACE, "action": "app_word", "id": "rv:0123456789abcdef", "label": "x"}):
+        with pytest.raises(DesktopRuntimeError):
+            svc.dictionary_edit("phone-1", body)
+    for broken in ({**DICT, "screens": [{**DICT["screens"][0], "rowText": "See you"}]},
+                   {**DICT, "screens": [{**DICT["screens"][0], "roomKey": "../etc"}]},
+                   {**DICT, "doors": [{**DICT["doors"][0], "label": "x" * 90}]},
+                   {**DICT, "review": [{**DICT["review"][0], "members": ["Sam"]}]}):
+        bad, _ = service({"dictionary.get": broken})
+        with pytest.raises(DesktopRuntimeError):
+            bad.dictionary_get("phone-1", PLACE)

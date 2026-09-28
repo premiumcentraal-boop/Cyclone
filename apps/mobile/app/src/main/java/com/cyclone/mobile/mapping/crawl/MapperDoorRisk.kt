@@ -25,7 +25,8 @@ object MapperDoorRisk {
     private val STATE_CHANGE = Regex(
         """\b(follow|unfollow|like|unlike|subscribe|unsubscribe|join|leave|add friend|accept|decline|reject|block|unblock|report|mute|unmute|""" +
             """save|unsave|bookmark|vote|upvote|downvote|rate|install|uninstall|update|enable|disable|turn on|turn off|allow|deny|""" +
-            """archive|pin|unpin|favourite|favorite|hide|restrict|remove|clear|reset|apply|confirm|agree)\b""",
+            """archive|pin|unpin|favourite|favorite|hide|restrict|remove|clear|reset|apply|confirm|agree|""" +
+            """add to|buy|purchase|order now|checkout|donate|tip|send gift|go live|start call|call|video call|record)\b""",
     )
     private val SECURITY = Regex(
         """\b(password|passcode|two[- ]?factor|2fa|two[- ]?step|passkeys?|security|recovery|authenticator|login activity|""" +

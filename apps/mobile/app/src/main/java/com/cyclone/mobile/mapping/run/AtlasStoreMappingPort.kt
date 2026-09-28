@@ -48,6 +48,8 @@ class AtlasStoreMappingPort(
     private val clock: () -> Long = System::currentTimeMillis,
     /** Installed app version during this pass; every door learned is stamped with it (Glass Versions, needs-remap). */
     private val appVersion: AppVersionEvidence? = null,
+    /** Told about each verified door (the App Manual names places and panels from it). Never fails the pass. */
+    private val onVerified: (VerifiedStructure) -> Unit = {},
 ) : MappingAtlasPort {
     private val packageName = placeId.removePrefix("package:")
     private val key = AtlasPlaceKey(placeId, AtlasPersona.MAPPING)
@@ -110,6 +112,7 @@ class AtlasStoreMappingPort(
         ensureScreen(structure.fromNodeKey)
         ensureScreen(structure.toNodeKey)
         knownDoors.getOrPut(structure.fromNodeKey) { linkedSetOf() } += doorDigest(structure.doorKey)
+        runCatching { onVerified(structure) }
         if (structure.fromNodeKey == structure.toNodeKey) return
 
         val routeKey = GraphEdgeKey(
@@ -261,6 +264,7 @@ class AtlasStoreMappingPort(
             MappingDoorKind.ACCOUNT -> "Open account"
             MappingDoorKind.BACK -> "Go back"
             MappingDoorKind.HOME -> "Go home"
+            MappingDoorKind.REVEAL -> "Open panel"
             MappingDoorKind.STRUCTURAL_SAMPLE -> "Open item"
             MappingDoorKind.CONTENT_ROW, MappingDoorKind.UNKNOWN -> "Navigate"
         }

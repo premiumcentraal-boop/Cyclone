@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { installMiniDom } from "./helpers/mini-dom.mjs";
-import { parseDictionary, parseModels, waitingLine, whereLine } from "../.test-dist/services/dictionary.js";
+import { applyManualNames, parseDictionary, parseModels, waitingLine, whereLine } from "../.test-dist/services/dictionary.js";
 import { dictionaryView } from "../.test-dist/ui/dictionaryView.js";
 import { startSheet } from "../.test-dist/ui/missionPanel.js";
 
@@ -101,4 +101,57 @@ test("the start sheet offers the phone's models, the phone's own first", async (
   select.dispatchEvent({ type: "change" });
   sheet.querySelectorAll("button").find((b) => b.textContent === "Start mapping").click();
   assert.equal(started.model, "z-ai/glm-5.3-flash");
+});
+
+const ROOM = "screen:list:0123456789abcdef";
+const PANEL = "screen:unknown:fedcba98765abcde";
+const EDGE = "edge:" + "a".repeat(64);
+const MANUAL = {
+  ...DICT,
+  screens: [
+    { roomKey: ROOM, name: "Messages", title: "Messages", category: "Primary", via: null, panelOf: null, items: ["Add photos and files"], sets: ["set:primary"], seen: 3 },
+    { roomKey: PANEL, name: "Add photos and files", title: null, category: null, via: "Add photos and files", panelOf: ROOM, items: ["Camera", "Files", "Connectors"], sets: [], seen: 1 },
+    { roomKey: "../etc", name: "x", items: [], sets: [], seen: 1 },
+  ],
+  doors: [{ edgeId: EDGE, from: ROOM, to: PANEL, label: "Add photos and files", kind: "reveal" }],
+  review: [{ id: "rv:0123456789abcdef", name: "Close friends", screenTitle: "Messages", siblings: ["Primary"], seenAt: 5 }, { id: "bad", name: "x" }],
+};
+
+test("the map shows places in the app's own words, panels over their screen and door words", () => {
+  const view = parseDictionary(MANUAL);
+  assert.equal(view.screens.length, 2, "a bad room key is dropped");
+  assert.equal(view.review.length, 1);
+  const model = {
+    screens: [
+      { screenId: ROOM, label: "Screen", purpose: "List", landmarks: [] },
+      { screenId: PANEL, label: "Screen", purpose: "Screen", landmarks: [] },
+      { screenId: "screen:unknown:1111111111111111", label: "Screen", purpose: "Screen", landmarks: [] },
+    ],
+    edges: [{ edgeId: EDGE, fromScreenId: ROOM, toScreenId: PANEL, actionHint: "Open panel" }],
+  };
+  const named = applyManualNames(model, view);
+  assert.deepEqual(named.screens.map((s) => s.label), ["Messages", "Add photos and files", "Screen"]);
+  assert.equal(named.screens[0].purpose, "Primary selected");
+  assert.equal(named.screens[1].purpose, "Panel over Messages");
+  assert.deepEqual(named.screens[1].landmarks, ["Camera", "Files", "Connectors"]);
+  assert.equal(named.edges[0].actionHint, "Add photos and files");
+  assert.equal(applyManualNames(model, null), model, "an older phone leaves the map as it was");
+});
+
+test("App word or yours? asks in plain words and sends only the review id", () => {
+  installMiniDom();
+  const edits = [];
+  const root = dictionaryView(parseDictionary(MANUAL), { showHidden: false, renaming: null }, { edit: (...a) => edits.push(a) }, () => undefined);
+  const card = root.querySelector(".dictionary-review");
+  assert.match(card.textContent, /“Close friends” is a tab on “Messages” next to “Primary”. Is it a word from Instagram, or a name you made\?/);
+  assert.match(card.textContent, /Kept only on the phone until you answer/);
+  card.querySelectorAll("button").find((b) => b.textContent === "App word").click();
+  assert.deepEqual(edits.at(-1), ["app_word", "rv:0123456789abcdef"]);
+  card.querySelectorAll("button").find((b) => b.textContent === "Mine").click();
+  assert.deepEqual(edits.at(-1), ["mine", "rv:0123456789abcdef"]);
+  const places = root.querySelector(".dictionary-places");
+  assert.match(places.textContent, /Add photos and files/);
+  assert.match(places.textContent, /panel over Messages/);
+  assert.match(places.textContent, /Offers: Camera · Files · Connectors/);
+  assert.match(places.textContent, /Groups here: Primary/);
 });

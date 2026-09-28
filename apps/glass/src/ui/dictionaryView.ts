@@ -32,7 +32,7 @@ export function dictionaryView(view: AppDictionaryView, state: DictionaryViewSta
   const byId = new Map(view.sets.map((s) => [s.id, s]));
   const active = view.sets.filter((s) => s.status === "confirmed" || s.status === "locked");
   const waiting = view.sets.filter((s) => s.status === "candidate");
-  if (!view.sets.length) {
+  if (!view.sets.length && !view.screens.length && !view.review.length) {
     root.append(emptyState({
       icon: "map",
       title: "No groups yet",
@@ -40,6 +40,8 @@ export function dictionaryView(view: AppDictionaryView, state: DictionaryViewSta
     }));
     return root;
   }
+
+  if (view.review.length) root.append(reviewCard(view, handlers));
 
   const stats = el("div", "stats stats-4");
   stats.append(
@@ -76,6 +78,30 @@ export function dictionaryView(view: AppDictionaryView, state: DictionaryViewSta
     root.append(section);
   }
 
+  const named = view.screens.filter((c) => c.name);
+  if (named.length) {
+    const places = el("section", "dictionary-places");
+    places.append(el("h3", "sheet-section", "Places"));
+    const nameOf = new Map(view.screens.map((c) => [c.roomKey, c.name]));
+    const setName = new Map(view.sets.map((s) => [s.id, s.shownName]));
+    const ul = el("ul", "dictionary-place-list");
+    for (const card of named.slice(0, 60)) {
+      const li = el("li", "dictionary-place");
+      li.dataset.room = card.roomKey;
+      const head = el("div", "dictionary-head");
+      head.append(el("strong", undefined, card.name ?? ""));
+      if (card.panelOf) head.append(chip(`panel over ${nameOf.get(card.panelOf) ?? "a screen"}`, "accent"));
+      if (card.category) head.append(chip(`${card.category} selected`, "neutral"));
+      li.append(head);
+      if (card.items.length) li.append(el("p", "dictionary-where", `${card.panelOf ? "Offers" : "Buttons"}: ${card.items.join(" · ")}`));
+      const tags = card.sets.map((id) => setName.get(id)).filter((n): n is string => Boolean(n));
+      if (tags.length) li.append(el("p", "muted dictionary-meta", `Groups here: ${tags.join(", ")}`));
+      ul.append(li);
+    }
+    places.append(ul, el("p", "muted table-note", "Names are the app's own words. A panel is what opens over a screen, like the menu behind “+”; Cyclone reads what it offers and closes it again."));
+    root.append(places);
+  }
+
   const health = view.health;
   const issues: string[] = [];
   const name = (id: string): string => byId.get(id)?.shownName ?? id;
@@ -106,6 +132,28 @@ export function dictionaryView(view: AppDictionaryView, state: DictionaryViewSta
     root.append(glossary);
   }
   return root;
+}
+
+/** "App word or yours?": downloaded names a probe proved to be a category, kept only on the phone until answered. */
+function reviewCard(view: AppDictionaryView, handlers: DictionaryHandlers): HTMLElement {
+  const box = el("section", "dictionary-review");
+  box.append(el("h3", "sheet-section", `Part of ${view.appLabel || "the app"}?`));
+  for (const item of view.review) {
+    const row = el("div", "dictionary-review-item");
+    row.dataset.reviewId = item.id;
+    const where = `a tab${item.screenTitle ? ` on “${item.screenTitle}”` : ""}${item.siblings.length ? ` next to ${item.siblings.map((s) => `“${s}”`).join(", ")}` : ""}`;
+    row.append(el("p", undefined, `“${item.name}” is ${where}. Is it a word from ${view.appLabel || "the app"}, or a name you made?`));
+    const actions = el("div", "dictionary-actions");
+    const yes = actionButton("App word", { variant: "primary" });
+    yes.addEventListener("click", () => handlers.edit("app_word", item.id));
+    const mine = actionButton("Mine", { variant: "ghost" });
+    mine.addEventListener("click", () => handlers.edit("mine", item.id));
+    actions.append(yes, mine);
+    row.append(actions);
+    box.append(row);
+  }
+  box.append(el("p", "muted table-note", "Kept only on the phone until you answer. “Mine” is never stored, only a code so Cyclone doesn't ask again."));
+  return box;
 }
 
 function row(set: DictSet, depth: number, view: AppDictionaryView, byId: Map<string, DictSet>, state: DictionaryViewState, handlers: DictionaryHandlers, repaint: () => void): HTMLElement {
