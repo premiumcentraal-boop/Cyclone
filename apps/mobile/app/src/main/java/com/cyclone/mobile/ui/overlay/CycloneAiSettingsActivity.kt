@@ -273,6 +273,36 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
+                // Plan 26 §6: tasks at the same time, behind the one on your screen.
+                var parallel by remember { mutableStateOf(com.cyclone.mobile.mind.mission.MindMissions.parallelEnabled(context)) }
+                val slots = remember { com.cyclone.mobile.mind.mission.MindMissions.behindSlots(context) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Tasks at the same time", fontWeight = FontWeight.Bold)
+                        Text(
+                            when {
+                                slots <= 0 -> "This phone has too little memory; tasks run one after another."
+                                else -> "While one task runs, up to $slots more can work behind your screen, each in its own background screen. " +
+                                    "They never use your screen; one that needs it waits for its turn."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = parallel && slots > 0,
+                        enabled = slots > 0,
+                        onCheckedChange = { on ->
+                            parallel = on
+                            com.cyclone.mobile.mind.mission.MindMissions.setParallelEnabled(context, on)
+                        },
+                    )
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
                 // Plan 26 (A42-1): one switch, one answer, one next step.
                 var capability by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.capability(context)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {

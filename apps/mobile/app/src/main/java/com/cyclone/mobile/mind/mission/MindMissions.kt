@@ -35,26 +35,36 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * Cyclone Mind on the phone: one mission at a time, one model, one continuous conversation, journaled after every
- * turn so an interrupted mission can pick up where it stopped. This object only wires the engine to Android; the
- * decisions are the model's and the boundaries are the harness's.
+ * Cyclone Mind on the phone: one model, one continuous conversation per mission, journaled after every turn so an
+ * interrupted mission can pick up where it stopped. This object only wires the engine to Android; the decisions are
+ * the model's and the boundaries are the harness's.
+ *
+ * Plan 26 §6 (parallel sessions, alpha.65): one mission is in **front** (the owner's screen, the overlay, the pill,
+ * the task card) and up to two work **behind** it, each on a background screen of its own, with a quiet notification
+ * each. A behind mission never touches the owner's screen: when it needs it, it waits and comes to the front when the
+ * front mission ends. All missions share one [OwnerInbox]; the owner sees one question at a time.
  */
 object MindMissions {
     private const val PREFS = "cyclone_ai"
     private const val ENABLED_KEY = "mind_runtime_enabled"
     private const val MINUTES_KEY = "mind_mission_minutes"
+    private const val PARALLEL_KEY = "mind_parallel_enabled"
 
     val inbox = OwnerInbox()
     private val liveState = MutableStateFlow<Mission?>(null)
     private val historyState = MutableStateFlow<List<Mission>>(emptyList())
+    private val behindState = MutableStateFlow<List<Mission>>(emptyList())
+    private val behindTasksState = MutableStateFlow<List<WorkspaceTaskUi>>(emptyList())
+    /** The front mission. */
     val live: StateFlow<Mission?> = liveState
     val history: StateFlow<List<Mission>> = historyState
+    /** Missions working behind the front one, oldest first. */
+    val behind: StateFlow<List<Mission>> = behindState
+    /** Their task cards (Task Kit reaches them by id; they are never the front card). */
+    val behindTasks: StateFlow<List<WorkspaceTaskUi>> = behindTasksState
 
     private val lock = Any()
-    private var worker: Thread? = null
-    @Volatile private var stopRequested = false
-    private var cancellation: ProviderCancellation? = null
-    private val ownerMessages = ConcurrentLinkedQueue<String>()
+    private val runs = LinkedHashMap<String, Run>()
     @Volatile private var store: MissionStore? = null
     @Volatile private var recovered = false
     @Volatile private var resumeCandidate: String? = null
@@ -62,12 +72,27 @@ object MindMissions {
     private const val AUTO_RESUME_LIMIT = 3
     private const val QUEUE_START_DELAY_MS = 1_500L
     @Volatile private var memory: com.cyclone.mobile.mind.MindMemory? = null
-    @Volatile private var livePlanes: com.cyclone.mobile.runtime.plane.MissionPlaneSession? = null
+
+    /** One running mission and everything that belongs to it alone. */
+    private class Run(initial: Mission, @Volatile var front: Boolean) {
+        val id: String = initial.id
+        val taskId = "mission-$id"
+        val startedAt = System.currentTimeMillis()
+        @Volatile var mission: Mission = initial
+        @Volatile var stopRequested = false
+        val cancellation = ProviderCancellation()
+        val ownerMessages = ConcurrentLinkedQueue<String>()
+        @Volatile var thread: Thread? = null
+        @Volatile var planes: com.cyclone.mobile.runtime.plane.MissionPlaneSession? = null
+        @Volatile var metrics: com.cyclone.mobile.mind.lab.MissionMetrics? = null
+        @Volatile var trail: com.cyclone.mobile.mind.learn.MindTrailRecorder? = null
+        /** The task card while behind; the front mission's card lives in [WorkspaceTasks]. */
+        @Volatile var card: WorkspaceTaskUi? = null
+    }
 
     private val hooks = object : OverlayChromeRuntime.MissionHooks {
         override fun stop() = MindMissions.stop()
         override fun ownerText(text: String): Boolean = steer(text)
-
     }
 
     fun enabled(context: Context): Boolean =
@@ -83,6 +108,40 @@ object MindMissions {
     fun setWorkingMinutes(context: Context, minutes: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(MINUTES_KEY, minutes.coerceIn(5, 120)).apply()
     }
+
+    /** Plan 26 §6: tasks at the same time (behind the front one). On by default where the phone can do it. */
+    fun parallelEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PARALLEL_KEY, true)
+
+    fun setParallelEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(PARALLEL_KEY, enabled).apply()
+    }
+
+    /** How many missions may work behind the front one on this phone. */
+    fun behindSlots(context: Context): Int = runCatching {
+        val info = android.app.ActivityManager.MemoryInfo()
+        context.getSystemService(android.app.ActivityManager::class.java)?.getMemoryInfo(info)
+        Crew.behindSlots(info.totalMem)
+    }.getOrDefault(0)
+
+    /** Where a new task would go now: in front, behind, or the queue (with why). */
+    fun admission(context: Context, goal: String, lab: Boolean = false): Crew.Admit {
+        val (frontLive, behindRunning) = synchronized(lock) { runs.values.any { it.front } to runs.values.count { !it.front } }
+        // A Lab run in front is a measurement: nothing runs next to it (and it may hold the screen without a plane).
+        val frontLab = synchronized(lock) { runs.values.any { it.front && it.mission.lab != null } }
+        return Crew.admit(Crew.Facts(
+            enabled = parallelEnabled(context),
+            frontLive = frontLive || isLive(),
+            behindRunning = behindRunning,
+            slots = behindSlots(context),
+            backgroundBlocker = if (frontLive) com.cyclone.mobile.runtime.plane.MissionPlanes.blocker(context) else null,
+            lab = lab || frontLab,
+            needsHands = Crew.needsHands(goal),
+        ))
+    }
+
+    /** A new task can start now (in front or behind). */
+    fun canAccept(context: Context, goal: String = ""): Boolean = admission(context, goal) !is Crew.Admit.Queue
 
     /** Learned-screen advice for the Mind; missing knowledge (or a store that will not open) just means no advice. */
     private fun learnedHints(context: Context): ((String, String) -> String?)? = runCatching {
@@ -110,9 +169,10 @@ object MindMissions {
         if (!recovered) {
             recovered = true
             val now = System.currentTimeMillis()
+            val running = synchronized(lock) { runs.keys.toSet() }
             // A mission that was working moments ago died with the process, not by the owner's choice.
             resumeCandidate = missions.list().firstOrNull {
-                it.status == MissionStatus.RUNNING && it.id != liveState.value?.id &&
+                it.status == MissionStatus.RUNNING && it.id !in running &&
                     now - it.updatedAtMs <= AUTO_RESUME_WINDOW_MS && it.resumes < AUTO_RESUME_LIMIT
             }?.id
             missions.recover(now, liveState.value?.id)
@@ -138,7 +198,14 @@ object MindMissions {
         resume(context, id)
     }
 
-    fun isLive(): Boolean = synchronized(lock) { worker?.isAlive == true }
+    /** A mission is running (in front, and maybe others behind it). */
+    fun isLive(): Boolean = synchronized(lock) { runs.values.any { it.thread?.isAlive == true } }
+
+    /** [missionId] works behind the front mission right now. */
+    fun isBehind(missionId: String): Boolean = synchronized(lock) { runs[missionId]?.front == false }
+
+    /** The running mission [missionId] (front or behind), or null. */
+    fun find(missionId: String): Mission? = synchronized(lock) { runs[missionId]?.mission }
 
     @Volatile private var queue: MissionQueue? = null
 
@@ -147,59 +214,76 @@ object MindMissions {
     }
 
     /**
-     * Plan 26 (A42-8): owner text while a mission runs. A clearly separate task waits as "Runs next"; anything else
-     * steers the running mission as before. Returns the queued goal, or null when it steered.
+     * Owner text while a mission runs. A clearly separate task starts behind the front one when the phone can (plan 26
+     * §6), otherwise it waits as "Runs next" (A42-8); anything else steers the front mission. Returns the new task's
+     * goal, or null when it steered.
      */
     fun offer(context: Context, text: String): String? {
         if (!isLive() || !MissionQueue.isNewTask(text)) { steer(text); return null }
-        val next = queue(context).add(text) ?: run { steer(text); return null }
-        liveState.value?.let { mission ->
-            WorkspaceTasks.update("mission-${mission.id}") { it.copy(message = "Runs next: ${next.goal.take(80)}") }
+        val goal = text.trim().take(2_000)
+        if (admission(context, goal) is Crew.Admit.Behind) {
+            val id = newId()
+            if (launch(context.applicationContext, Mission(id, goal, MissionStatus.RUNNING, System.currentTimeMillis(), System.currentTimeMillis(), "", ""),
+                    resume = null, attachment = null, front = false)) {
+                frontCard { it.copy(message = "Also working behind your screen: ${goal.take(80)}") }
+                return goal
+            }
         }
+        val next = queue(context).add(text) ?: run { steer(text); return null }
+        frontCard { it.copy(message = "Runs next: ${next.goal.take(80)}") }
         return next.goal
     }
 
-    /** Starts a new mission. Returns false when another mission is still running. */
+    private fun frontCard(change: (WorkspaceTaskUi) -> WorkspaceTaskUi) {
+        val front = synchronized(lock) { runs.values.firstOrNull { it.front } } ?: return
+        WorkspaceTasks.update(front.taskId, change)
+    }
+
+    private fun newId(): String = "m" + System.currentTimeMillis().toString(36) + UUID.randomUUID().toString().take(8)
+
+    /** Starts a new mission in front. Returns false when a mission is already in front. */
     fun start(context: Context, goal: String, attachment: TaskAttachment? = null): Boolean {
         val app = context.applicationContext
         val now = System.currentTimeMillis()
-        val id = "m" + now.toString(36) + UUID.randomUUID().toString().take(8)
-        val mission = Mission(id, goal.trim().take(2_000), MissionStatus.RUNNING, now, now, "", "")
-        return launch(app, mission, resume = null, attachment = attachment)
+        val mission = Mission(newId(), goal.trim().take(2_000), MissionStatus.RUNNING, now, now, "", "")
+        return launch(app, mission, resume = null, attachment = attachment, front = true)
     }
 
     /**
      * Plan 33 (C0): starts a mission the PC's Command Center assigned. The same Mind and boundaries as a mission the
-     * owner types; returns the mission id so the PC can follow it, or null when another mission is running.
+     * owner types. In front when nothing runs, behind the front one when the phone can (plan 26 §6); returns the
+     * mission id so the PC can follow it, or null when the phone cannot take it now.
      */
     fun startAssigned(context: Context, goal: String): String? {
         val app = context.applicationContext
         val now = System.currentTimeMillis()
-        val id = "m" + now.toString(36) + UUID.randomUUID().toString().take(8)
-        val mission = Mission(id, goal.trim().take(2_000), MissionStatus.RUNNING, now, now, "", "")
-        return id.takeIf { launch(app, mission, resume = null, attachment = null) }
+        val clean = goal.trim().take(2_000)
+        val front = when (admission(app, clean)) {
+            Crew.Admit.Front -> true
+            Crew.Admit.Behind -> false
+            is Crew.Admit.Queue -> return null
+        }
+        val mission = Mission(newId(), clean, MissionStatus.RUNNING, now, now, "", "")
+        return mission.id.takeIf { launch(app, mission, resume = null, attachment = null, front = front) }
     }
 
     /**
      * Starts a Cyclone Lab mission: same Mind, same boundaries, with [variant] applied to this one mission and the
-     * run tagged so the PC can score it. Returns the mission id, or null when another mission is running.
+     * run tagged so the PC can score it. Always alone and in front. Returns the mission id, or null when busy.
      */
     fun startLab(context: Context, goal: String, runId: String, variant: com.cyclone.mobile.mind.lab.MindLabVariant): String? {
+        if (isLive()) return null
         val app = context.applicationContext
         val now = System.currentTimeMillis()
-        val id = "m" + now.toString(36) + UUID.randomUUID().toString().take(8)
-        val mission = Mission(id, goal.trim().take(2_000), MissionStatus.RUNNING, now, now, "", "",
+        val mission = Mission(newId(), goal.trim().take(2_000), MissionStatus.RUNNING, now, now, "", "",
             lab = com.cyclone.mobile.mind.lab.MissionLab(runId, variant))
-        return id.takeIf { launch(app, mission, resume = null, attachment = null) }
+        return mission.id.takeIf { launch(app, mission, resume = null, attachment = null, front = true) }
     }
 
-    /** The live mission's metrics so far (the PC lab polls this), or null when [id] is not the live mission. */
-    fun liveMetrics(id: String): org.json.JSONObject? = liveMetrics?.takeIf { liveState.value?.id == id }?.toJson()
+    /** A running mission's metrics so far (the PC lab polls this), or null when [id] is not running. */
+    fun liveMetrics(id: String): org.json.JSONObject? = synchronized(lock) { runs[id]?.metrics }?.toJson()
 
-    @Volatile private var liveMetrics: com.cyclone.mobile.mind.lab.MissionMetrics? = null
-    @Volatile private var liveTrail: com.cyclone.mobile.mind.learn.MindTrailRecorder? = null
-
-    /** Continues a paused, failed or interrupted mission with its full conversation. */
+    /** Continues a paused, failed or interrupted mission with its full conversation, in front. */
     fun resume(context: Context, id: String): Boolean {
         val app = context.applicationContext
         val missions = store(app)
@@ -210,25 +294,36 @@ object MindMissions {
             MissionStatus.INTERRUPTED -> "Cyclone was stopped or restarted"
             else -> "it failed and the owner asked to try again"
         }
-        return launch(app, mission.copy(status = MissionStatus.RUNNING, resumes = mission.resumes + 1, summary = ""), journal, null, reason)
+        return launch(app, mission.copy(status = MissionStatus.RUNNING, resumes = mission.resumes + 1, summary = ""), journal, null, reason, front = true)
     }
 
+    /** Stops the front mission (the overlay's Stop). Missions behind it keep working; the oldest comes to the front. */
     fun stop() {
-        stopRequested = true
-        com.cyclone.mobile.runtime.plane.MissionPlanes.release()
-        synchronized(lock) { cancellation?.cancel() }
-        inbox.withdrawAll()
+        val front = synchronized(lock) { runs.values.firstOrNull { it.front } } ?: return
+        stop(front.id)
     }
+
+    /** Stops one mission, front or behind. False when it is not running. */
+    fun stop(missionId: String): Boolean {
+        val run = synchronized(lock) { runs[missionId] } ?: return false
+        run.stopRequested = true
+        run.planes?.releaseGate()
+        run.cancellation.cancel()
+        inbox.withdrawMission(missionId)
+        return true
+    }
+
+    private fun frontRun(): Run? = synchronized(lock) { runs.values.firstOrNull { it.front && it.thread?.isAlive == true } }
 
     /**
-     * Owner text while a mission runs: it answers the open question, or joins the conversation as a new instruction
-     * the model reads at its next turn.
+     * Owner text while a mission runs: it answers the front mission's open question, or joins its conversation as a
+     * new instruction the model reads at its next turn.
      */
     fun steer(text: String): Boolean {
-        if (!isLive()) return false
+        val front = frontRun() ?: return false
         val clean = text.trim().take(2_000)
         if (clean.isBlank()) return true
-        inbox.pending.value?.let { request ->
+        (inbox.openFor(front.id) ?: inbox.pending.value)?.let { request ->
             when (request.kind) {
                 OwnerRequestKind.QUESTION -> if (inbox.respond(request.id, OwnerResponse.Answer(clean))) return true
                 OwnerRequestKind.CONTROL -> if (clean.lowercase() in setOf("done", "ok", "klaar", "go")) {
@@ -237,20 +332,20 @@ object MindMissions {
                 else -> Unit
             }
         }
-        ownerMessages += clean
+        front.ownerMessages += clean
         return true
     }
 
     fun answer(requestId: String, response: OwnerResponse): Boolean = inbox.respond(requestId, response)
 
     /**
-     * "I'm done" from any surface. Whatever the mission is waiting for gets its answer: a hand-back completes, an open
-     * question learns the owner did it on the screen, an open check-in card counts as done by hand. Cyclone always
+     * "I'm done" from any surface. Whatever the front mission is waiting for gets its answer: a hand-back completes, an
+     * open question learns the owner did it on the screen, an open check-in card counts as done by hand. Cyclone always
      * gets the phone back.
      */
     fun ownerDone(): Boolean {
-        if (!isLive()) return false
-        inbox.pending.value?.let { request ->
+        val front = frontRun() ?: return false
+        inbox.openFor(front.id)?.let { request ->
             when (request.kind) {
                 OwnerRequestKind.CONTROL, OwnerRequestKind.VALUES -> inbox.respond(request.id, OwnerResponse.Done)
                 OwnerRequestKind.QUESTION -> inbox.respond(request.id,
@@ -262,115 +357,186 @@ object MindMissions {
         return true
     }
 
-    /** The owner took the phone from the task card; the mission's next action waits until they hand it back. */
+    /** The owner took the phone from the task card; the front mission's next action waits until they hand it back. */
     fun ownerTakesPhone(): Boolean {
-        if (!isLive()) return false
+        val front = frontRun() ?: return false
         com.cyclone.mobile.runtime.plane.MissionPlanes.ownerNeedsScreen()
         OverlayChromeRuntime.missionHandoff()
-        liveState.value?.let { mission ->
-            WorkspaceTasks.update("mission-${mission.id}") {
-                it.copy(phase = TaskPhase.HUMAN, message = "You have the phone. Tap I'm done to let Cyclone continue.",
-                    interruption = TaskInterruption(reason = "MIND_OWNER_HAS_PHONE", prompt = "You have the phone", canResumeAfterHuman = true))
-            }
+        WorkspaceTasks.update(front.taskId) {
+            it.copy(phase = TaskPhase.HUMAN, message = "You have the phone. Tap I'm done to let Cyclone continue.",
+                interruption = TaskInterruption(reason = "MIND_OWNER_HAS_PHONE", prompt = "You have the phone", canResumeAfterHuman = true))
         }
         return true
     }
 
     fun delete(context: Context, id: String) {
-        if (liveState.value?.id == id) return
+        if (synchronized(lock) { id in runs }) return
         store(context).delete(id)
         refresh(context)
     }
 
-    private fun launch(context: Context, initial: Mission, resume: MissionJournal?, attachment: TaskAttachment?, resumeReason: String = ""): Boolean {
+    // ---- running missions -------------------------------------------------------------------------------------------
+
+    private fun launch(context: Context, initial: Mission, resume: MissionJournal?, attachment: TaskAttachment?, resumeReason: String = "",
+                       front: Boolean): Boolean {
         synchronized(lock) {
-            if (worker?.isAlive == true) return false
-            stopRequested = false
-            ownerMessages.clear()
-            cancellation = ProviderCancellation()
-            liveState.value = initial
-            val thread = Thread({ run(context, initial, resume, attachment, resumeReason) }, "cyclone-mind")
-            worker = thread
-            OverlayChromeRuntime.attachMission(hooks)
+            if (front && runs.values.any { it.front }) return false
+            if (!front && runs.values.none { it.front }) return false
+            if (initial.id in runs) return false
+            val run = Run(initial, front)
+            runs[run.id] = run
+            if (front) {
+                liveState.value = initial
+                OverlayChromeRuntime.attachMission(hooks)
+            } else {
+                inbox.label(run.id, Crew.label(initial.goal))
+                publishBehind()
+            }
+            val thread = Thread({ execute(context, run, resume, attachment, resumeReason) }, "cyclone-mind-${run.id.takeLast(6)}")
+            run.thread = thread
             thread.start()
         }
         return true
     }
 
-    private fun run(context: Context, initial: Mission, resume: MissionJournal?, attachment: TaskAttachment?, resumeReason: String) {
-        val missions = store(context)
-        var mission = initial
-        val taskId = "mission-${mission.id}"
-        fun save(change: (Mission) -> Mission) {
-            mission = change(mission).copy(updatedAtMs = System.currentTimeMillis())
-            liveState.value = mission
-            runCatching { missions.save(mission) }
+    private fun publishBehind() {
+        val behind = runs.values.filter { !it.front }.sortedBy { it.startedAt }
+        behindState.value = behind.map { it.mission }
+        behindTasksState.value = behind.mapNotNull { it.card }
+    }
+
+    /** Updates [run]'s task card: the front card in [WorkspaceTasks], a behind card in its own notification. */
+    private fun card(context: Context, run: Run, change: (WorkspaceTaskUi) -> WorkspaceTaskUi) {
+        if (run.front) {
+            WorkspaceTasks.update(run.taskId, change)
+            return
         }
-        publishTask(context, taskId, mission)
-        MindMissionService.start(context, taskId, (workingMinutes(context) + 60) * 60_000L)
-        DeviceState.setController(DeviceState.Controller.AGENT)
-        OverlayChromeRuntime.missionWorking(taskId, "Thinking")
+        val next = change(run.card ?: baseCard(run.mission))
+        synchronized(lock) {
+            run.card = next
+            publishBehind()
+        }
+        BehindNotifications.post(context, next, inbox.openFor(run.id))
+    }
+
+    private fun baseCard(mission: Mission): WorkspaceTaskUi =
+        WorkspaceTaskUi("mission-${mission.id}", "default-foreground", "Cyclone Mind", "", mission.goal, phase = TaskPhase.WORKING,
+            engine = com.cyclone.mobile.task.TaskEngine.MIND,
+            message = "On it.", displayId = 0, startedAtMs = System.currentTimeMillis(), traceSessionId = mission.traceId,
+            plannedMilestones = mission.plan.map { it.text })
+
+    /**
+     * [run] becomes the front mission (the front one ended, or it needs the owner's screen and it is free): its task
+     * card moves to the overlay and the task notification, and its questions stop naming it.
+     */
+    private fun promote(context: Context, run: Run) {
+        val card = synchronized(lock) {
+            if (run.front || runs[run.id] !== run) return
+            if (runs.values.any { it.front && it !== run }) return
+            run.front = true
+            publishBehind()
+            run.card
+        }
+        runCatching { run.planes?.promote() }
+        inbox.label(run.id, null)
+        BehindNotifications.cancel(context, run.taskId)
+        liveState.value = run.mission
+        OverlayChromeRuntime.attachMission(hooks)
+        val task = (card ?: baseCard(run.mission)).copy(message = "Now in front: ${card?.message ?: "working"}".take(160))
+        runCatching { WorkspaceTasks.publishStart(task) }.onFailure { WorkspaceTasks.update(run.taskId) { task } }
+        com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.start(context)
+        MindMissionService.start(context, run.taskId, (workingMinutes(context) + 60) * 60_000L)
+        OverlayChromeRuntime.missionWorking(run.taskId, "Thinking")
+        run.mission.traceId?.let { AgentTraceRuntime.event(context, it, "CREW_FRONT", "The task came to the front") }
+    }
+
+    private fun execute(context: Context, run: Run, resume: MissionJournal?, attachment: TaskAttachment?, resumeReason: String) {
+        val missions = store(context)
+        val taskId = run.taskId
+        fun save(change: (Mission) -> Mission) {
+            val next = change(run.mission).copy(updatedAtMs = System.currentTimeMillis())
+            run.mission = next
+            if (run.front) liveState.value = next else synchronized(lock) { publishBehind() }
+            runCatching { missions.save(next) }
+        }
+        val mission0 = run.mission
+        if (run.front) {
+            publishTask(context, taskId, mission0)
+            MindMissionService.start(context, taskId, (workingMinutes(context) + 60) * 60_000L)
+            DeviceState.setController(DeviceState.Controller.AGENT)
+            OverlayChromeRuntime.missionWorking(taskId, "Thinking")
+        } else {
+            card(context, run) { it.copy(message = "Starting behind your screen.") }
+        }
         var traceId: String? = null
-        var outcome: MindOutcome? = null
-        var failure: String? = null
+        var outcome: MindOutcome?
+        var failure: String?
         try {
             val key = OpenRouterSecretStore.read(context)
             require(key.isNotBlank()) { "Add your OpenRouter API key in Cyclone's AI settings first." }
             // A lab variant changes only what it names, for this mission only. Lab runs never fall back to a backup
             // model, so a result always belongs to the model the variant asked for.
-            val variant = mission.lab?.variant
+            val variant = run.mission.lab?.variant
             val primaryId = variant?.modelId?.let(OpenRouterCatalogStore::canonicalId) ?: OpenRouterCatalogStore.activeId(context)
             require(primaryId.isNotBlank()) { "Choose a verified model in Cyclone's AI settings first." }
             val backupId = if (variant != null) null else OpenRouterCatalogStore.backupId(context).takeIf { it.isNotBlank() }
             val effort = variant?.effort ?: context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("openrouter_reasoning_effort", "medium")
-            traceId = mission.traceId?.takeIf { resume != null } ?: AgentTraceRuntime.start(context, mission.goal, primaryId)
+            traceId = run.mission.traceId?.takeIf { resume != null } ?: AgentTraceRuntime.start(context, run.mission.goal, primaryId)
             val trace = traceId
-            val cancel = synchronized(lock) { cancellation } ?: ProviderCancellation()
             fun model(id: String): MindModel {
                 val preset = OpenRouterCatalogStore.preset(context, id)
-                return OpenRouterMindModel(key, id, preset.label, preset.vision, effort, trace, cancel, { stopRequested }) { phase, _ ->
-                    if (phase.isNotBlank()) OverlayChromeRuntime.missionStatus("Thinking")
+                return OpenRouterMindModel(key, id, preset.label, preset.vision, effort, trace, run.cancellation, { run.stopRequested }) { phase, _ ->
+                    if (phase.isNotBlank() && run.front) OverlayChromeRuntime.missionStatus("Thinking")
                 }
             }
             val primary = model(primaryId)
             val backup = backupId?.let(::model)
             save { it.copy(modelId = primaryId, modelLabel = primary.label, traceId = trace) }
-            WorkspaceTasks.update(taskId) { it.copy(traceSessionId = trace) }
+            card(context, run) { it.copy(traceSessionId = trace) }
             AgentTraceRuntime.event(context, trace, if (resume == null) "MISSION_START" else "MISSION_RESUME",
-                if (resume == null) "Mission started with ${primary.label}" else "Mission resumed (${mission.resumes}) with ${primary.label}")
+                (if (resume == null) "Mission started with ${primary.label}" else "Mission resumed (${run.mission.resumes}) with ${primary.label}") +
+                    if (run.front) "" else ", behind the owner's screen")
 
             val device = AndroidMindDevice(context)
-            val owner = AndroidMindOwner(context, inbox, mission.id, { stopRequested },
+            val owner = AndroidMindOwner(context, inbox, run.id, { run.stopRequested },
                 onWaiting = { question ->
-                    waiting(context, taskId, question)
+                    waiting(context, run, question)
                     save { it.copy(status = if (question == null) MissionStatus.RUNNING else MissionStatus.WAITING, waitingFor = question) }
                 },
-                onStatus = { text -> status(context, taskId, text) },
-                onPlan = { steps -> save { it.copy(plan = steps) }; planToTask(taskId, steps) },
+                onStatus = { text -> status(context, run, text) },
+                onPlan = { steps -> save { it.copy(plan = steps) }; planToTask(context, run, steps) },
                 onHuman = { instruction ->
-                    human(context, taskId, instruction)
+                    human(context, run, instruction)
                     save { it.copy(status = if (instruction == null) MissionStatus.RUNNING else MissionStatus.WAITING, waitingFor = instruction) }
                 })
             // Planes (plan 25): the owner's missions may move between the main screen and a background screen. Lab
-            // runs stay on the screen so a measurement never depends on where it ran.
+            // runs stay on the screen so a measurement never depends on where it ran. A behind mission (plan 26 §6)
+            // starts with no screen at all and takes background screens of its own.
             val labPlane = variant?.plane?.let(com.cyclone.mobile.runtime.plane.PlaneMode::fromWire)
-            val planes = if (mission.lab == null || labPlane != null) com.cyclone.mobile.runtime.plane.MissionPlanes.begin(context, mission.id,
-                mission.goal, trace, modeOverride = labPlane).also { livePlanes = it } else null
-            val environment = planes?.initialEnvironment() ?: CycloneAgentEnvironment(context, userTaskGoal = mission.goal, ownerMission = true)
+            val planes = when {
+                !run.front -> com.cyclone.mobile.runtime.plane.MissionPlanes.beginBehind(context, run.id, run.mission.goal, trace,
+                    onPromote = { promote(context, run) },
+                    onWaiting = { text -> card(context, run) { it.copy(message = (text ?: "Working behind your screen.").take(160)) } })
+                run.mission.lab == null || labPlane != null -> com.cyclone.mobile.runtime.plane.MissionPlanes.begin(context, run.id,
+                    run.mission.goal, trace, modeOverride = labPlane)
+                else -> null
+            }
+            run.planes = planes
+            val environment = planes?.initialEnvironment() ?: CycloneAgentEnvironment(context, userTaskGoal = run.mission.goal, ownerMission = true)
             // Fresh lab runs neither read nor write the owner's memory: each run starts from the same place.
             val fresh = variant?.freshMemory == true
-            val labMemoryFile = if (fresh) File(context.cacheDir, "lab-memory-${mission.id}.json").also { it.delete() } else null
+            val labMemoryFile = if (fresh) File(context.cacheDir, "lab-memory-${run.id}.json").also { it.delete() } else null
             val memory = labMemoryFile?.let { com.cyclone.mobile.mind.MindMemory(it) } ?: memory(context)
-            val trail = com.cyclone.mobile.mind.learn.MindTrailRecorder(mission.id).also { liveTrail = it }
+            val trail = com.cyclone.mobile.mind.learn.MindTrailRecorder(run.id).also { run.trail = it }
             // The map is on for the owner; a Lab arm can turn it off to measure what it is worth.
             val useMap = variant?.useMap != false
-            val toolbox = PhoneMindToolbox(environment, owner, device, mission.goal, { stopRequested }, memory = memory, missionId = mission.id,
+            val toolbox = PhoneMindToolbox(environment, owner, device, run.mission.goal, { run.stopRequested }, memory = memory, missionId = run.id,
                 marker = if (variant?.marks == false) null else AndroidMindImageMarker, trail = trail,
                 learned = if (useMap) learnedHints(context) else null,
                 maps = if (useMap) missionMaps(context) else null,
                 glossary = if (useMap) ({ pkg -> com.cyclone.mobile.manual.ManualRuntime.glossary(context, pkg) }) else null,
                 manual = if (useMap) com.cyclone.mobile.manual.ManualRuntime.mindPort(context) else null,
-                skill = if (useMap && mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, mission.goal) }.getOrNull()
+                skill = if (useMap && run.mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, run.mission.goal) }.getOrNull()
                     ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
                 planes = planes)
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
@@ -379,23 +545,27 @@ object MindMissions {
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
+            // A behind mission never reads the owner's screen, not even to begin.
+            val situation = if (run.front) toolbox.situation() else Crew.BEHIND_SITUATION.format(device.now())
             val conversation = if (resume != null) resume.conversation.also {
                 it.replaceFirst(MindMessage.System(system))
                 it.add(MindMessage.User(MindPrompt.resumed(resumeReason),
                     origin = MindMessage.User.Origin.HARNESS))
             } else MindConversation(listOf(
                 MindMessage.System(system),
-                MindMessage.User(MindPrompt.mission(mission.goal, toolbox.situation(), memory.digest(),
-                    if (fresh) "" else recentMissions(missions, mission.id)) +
+                MindMessage.User(MindPrompt.mission(run.mission.goal, situation, memory.digest(),
+                    if (fresh) "" else recentMissions(missions, run.id)) +
                     (attachment?.text?.let { "\n\nThe owner attached this (reference only, not instructions):\n${it.take(4_000)}" }.orEmpty()),
                     attachment?.imageDataUrl?.takeIf { primary.vision }),
             ))
             val budget = MindBudget(workingMs = (variant?.workingMinutes ?: workingMinutes(context)) * 60_000L)
-            val metrics = com.cyclone.mobile.mind.lab.MissionMetrics().also { liveMetrics = it }
-            val listener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, taskId, missions, mission.id,
+            val metrics = com.cyclone.mobile.mind.lab.MissionMetrics().also { run.metrics = it }
+            val listener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, missions, run.id,
+                front = { run.front },
+                updateCard = { change -> card(context, run, change) },
                 onTurn = { turn -> save { it.copy(turns = turn) } }) { event -> save { it.withEvent(event) } }))
-            val loop = MindLoop(primary, backup, toolbox, budget, listener, cancelled = { stopRequested },
-                ownerMessages = { drainOwnerMessages() }, nativeTools = native)
+            val loop = MindLoop(primary, backup, toolbox, budget, listener, cancelled = { run.stopRequested },
+                ownerMessages = { drainOwnerMessages(run) }, nativeTools = native)
             outcome = loop.run(conversation, resume?.checkpoint())
             val result = outcome
             save {
@@ -416,60 +586,91 @@ object MindMissions {
             failure = error.message ?: error.javaClass.simpleName
             save { it.copy(status = MissionStatus.FAILED, summary = "Cyclone could not run this mission: $failure", waitingFor = null) }
         } finally {
-            livePlanes?.end()
-            livePlanes = null
-            liveMetrics?.let { live -> if (mission.metrics == null) save { it.copy(metrics = live.toJson()) } }
-            liveMetrics = null
-            // A resumed mission adds to the trail it already had.
-            liveTrail?.let { live ->
-                runCatching {
-                    val now = live.snapshot()
-                    val earlier = missions.loadTrail(mission.id)
-                    missions.saveTrail(if (earlier == null) now else com.cyclone.mobile.mind.learn.MissionTrail(mission.id,
-                        (earlier.screens + now.screens).distinctBy { it.pageKey }, earlier.steps + now.steps))
-                }
-            }
-            liveTrail = null
-            // A Lab arm with the map learns every mission as it ends, so its later trials start from what it saw.
-            if (mission.lab?.variant?.useMap == true && !mission.status.live) {
-                runCatching {
-                    (com.cyclone.mobile.mind.learn.MissionLearning.learn(context, mission.id) as? com.cyclone.mobile.mind.learn.LearnOutcome.Learned)
-                        ?.let { learned -> mission = mission.copy(learned = learned.report) }
-                }
-            }
-            runCatching { File(context.cacheDir, "lab-memory-${mission.id}.json").delete() }
-            // A saved skill that ran to the end keeps its place on the map fresh (plan 23). Lab runs never touch skills.
-            if (mission.status == MissionStatus.COMPLETED && mission.lab == null) {
-                runCatching { com.cyclone.mobile.market.Marketplace.regroundAfterRun(context, mission.id, mission.goal) }
-            }
-            val ok = mission.status == MissionStatus.COMPLETED
-            traceId?.let { trace ->
-                AgentTraceRuntime.finish(context, trace, when (mission.status) {
-                    MissionStatus.COMPLETED -> "COMPLETED"
-                    MissionStatus.CANCELLED -> "CANCELLED"
-                    MissionStatus.PAUSED -> "PAUSED"
-                    else -> "FAILED"
-                }, mission.summary.take(500), mission.turns)
-            }
-            finishTask(context, taskId, mission)
-            MindMissionService.stop(context)
-            OverlayChromeRuntime.missionFinished(taskId, ok, mission.summary.take(200).ifBlank { "Mission ended." })
-            synchronized(lock) {
-                worker = null
-                cancellation = null
-                OverlayChromeRuntime.detachMission(hooks)
-            }
-            inbox.withdrawAll()
-            liveState.value = null
-            historyState.value = runCatching { missions.list() }.getOrDefault(historyState.value)
-            WorkspaceTasks.scheduleQueuePromotion(context)
-            // Plan 26 (A42-8): the next queued task starts once this one has fully ended (not after a Stop).
-            if (mission.status != MissionStatus.CANCELLED) {
-                runCatching { queue(context).take() }.getOrNull()?.let { next ->
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ start(context, next.goal) }, QUEUE_START_DELAY_MS)
-                }
+            finish(context, run, missions, traceId, ::save)
+        }
+    }
+
+    private fun finish(context: Context, run: Run, missions: MissionStore, traceId: String?, save: ((Mission) -> Mission) -> Unit) {
+        run.planes?.end()
+        run.planes = null
+        run.metrics?.let { live -> if (run.mission.metrics == null) save { it.copy(metrics = live.toJson()) } }
+        run.metrics = null
+        // A resumed mission adds to the trail it already had.
+        run.trail?.let { live ->
+            runCatching {
+                val now = live.snapshot()
+                val earlier = missions.loadTrail(run.id)
+                missions.saveTrail(if (earlier == null) now else com.cyclone.mobile.mind.learn.MissionTrail(run.id,
+                    (earlier.screens + now.screens).distinctBy { it.pageKey }, earlier.steps + now.steps))
             }
         }
+        run.trail = null
+        var mission = run.mission
+        // A Lab arm with the map learns every mission as it ends, so its later trials start from what it saw.
+        if (mission.lab?.variant?.useMap == true && !mission.status.live) {
+            runCatching {
+                (com.cyclone.mobile.mind.learn.MissionLearning.learn(context, mission.id) as? com.cyclone.mobile.mind.learn.LearnOutcome.Learned)
+                    ?.let { learned -> mission = mission.copy(learned = learned.report); run.mission = mission }
+            }
+        }
+        runCatching { File(context.cacheDir, "lab-memory-${mission.id}.json").delete() }
+        // A saved skill that ran to the end keeps its place on the map fresh (plan 23). Lab runs never touch skills.
+        if (mission.status == MissionStatus.COMPLETED && mission.lab == null) {
+            runCatching { com.cyclone.mobile.market.Marketplace.regroundAfterRun(context, mission.id, mission.goal) }
+        }
+        val ok = mission.status == MissionStatus.COMPLETED
+        traceId?.let { trace ->
+            AgentTraceRuntime.finish(context, trace, when (mission.status) {
+                MissionStatus.COMPLETED -> "COMPLETED"
+                MissionStatus.CANCELLED -> "CANCELLED"
+                MissionStatus.PAUSED -> "PAUSED"
+                else -> "FAILED"
+            }, mission.summary.take(500), mission.turns)
+        }
+        inbox.withdrawMission(run.id)
+        val wasFront = run.front
+        if (wasFront) {
+            finishTask(context, run.taskId, mission)
+            OverlayChromeRuntime.missionFinished(run.taskId, ok, mission.summary.take(200).ifBlank { "Mission ended." })
+        } else {
+            finishBehind(context, run, mission)
+        }
+        val next = synchronized(lock) {
+            runs.remove(run.id)
+            publishBehind()
+            if (wasFront) {
+                OverlayChromeRuntime.detachMission(hooks)
+                // A behind mission that already took the owner's screen (it needed it while this one was ending) comes
+                // to the front; otherwise the one that started first.
+                val screen = com.cyclone.mobile.runtime.plane.MissionPlanes.front
+                runs.values.firstOrNull { !it.front && screen != null && it.planes === screen }
+                    ?: Crew.next(runs.values.filter { !it.front }.map { it.id to it.startedAt })?.let(runs::get)
+            } else null
+        }
+        if (wasFront) {
+            liveState.value = null
+            // Plan 26 §6: the oldest task behind the screen comes to the front, so the owner always sees one.
+            if (next != null) promote(context, next) else MindMissionService.stop(context)
+        }
+        historyState.value = runCatching { missions.list() }.getOrDefault(historyState.value)
+        WorkspaceTasks.scheduleQueuePromotion(context)
+        // Plan 26 (A42-8): the next queued task starts once a mission has fully ended (not after a Stop).
+        if (mission.status != MissionStatus.CANCELLED) startQueued(context)
+    }
+
+    private fun startQueued(context: Context) {
+        val peek = runCatching { queue(context) }.getOrNull() ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            val admit = runCatching { peek.all().firstOrNull()?.let { admission(context, it.goal) } }.getOrNull() ?: return@postDelayed
+            if (admit is Crew.Admit.Queue) return@postDelayed
+            val next = runCatching { peek.take() }.getOrNull() ?: return@postDelayed
+            if (admit is Crew.Admit.Front) start(context, next.goal)
+            else {
+                val now = System.currentTimeMillis()
+                launch(context.applicationContext, Mission(newId(), next.goal.trim().take(2_000), MissionStatus.RUNNING, now, now, "", ""),
+                    resume = null, attachment = null, front = false)
+            }
+        }, QUEUE_START_DELAY_MS)
     }
 
     fun memory(context: Context): com.cyclone.mobile.mind.MindMemory = memory ?: synchronized(lock) {
@@ -487,58 +688,58 @@ object MindMissions {
         })
     }
 
-    private fun drainOwnerMessages(): List<String> = buildList { while (true) add(ownerMessages.poll() ?: break) }
+    private fun drainOwnerMessages(run: Run): List<String> = buildList { while (true) add(run.ownerMessages.poll() ?: break) }
 
     // ---- the task card and notification --------------------------------------------------------------------------
 
     private fun publishTask(context: Context, taskId: String, mission: Mission) {
-        val task = WorkspaceTaskUi(taskId, "default-foreground", "Cyclone Mind", "", mission.goal, phase = TaskPhase.WORKING,
-            engine = com.cyclone.mobile.task.TaskEngine.MIND,
-            message = "On it.", displayId = 0, startedAtMs = System.currentTimeMillis(), traceSessionId = mission.traceId,
-            plannedMilestones = mission.plan.map { it.text })
+        val task = baseCard(mission).copy(taskId = taskId)
         runCatching { WorkspaceTasks.publishStart(task) }.onFailure { WorkspaceTasks.update(taskId) { task } }
         com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.start(context)
     }
 
-    private fun status(context: Context, taskId: String, text: String) {
-        WorkspaceTasks.update(taskId) { it.copy(message = text.take(160), phase = TaskPhase.WORKING, interruption = null) }
+    private fun status(context: Context, run: Run, text: String) {
+        card(context, run) { it.copy(message = text.take(160), phase = TaskPhase.WORKING, interruption = null) }
+        if (!run.front) return
         OverlayChromeRuntime.missionStatus(text.take(120))
         com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.progress(context, text)
     }
 
     /** The owner has the phone for a step: the task card and overlay ribbon offer "I'm done". */
-    private fun human(context: Context, taskId: String, instruction: String?) {
+    private fun human(context: Context, run: Run, instruction: String?) {
         if (instruction == null) {
-            WorkspaceTasks.update(taskId) { it.copy(phase = TaskPhase.WORKING, interruption = null) }
-            OverlayChromeRuntime.refreshExternalSurface()
+            card(context, run) { it.copy(phase = TaskPhase.WORKING, interruption = null) }
+            if (run.front) OverlayChromeRuntime.refreshExternalSurface()
             return
         }
-        WorkspaceTasks.update(taskId) {
+        card(context, run) {
             it.copy(phase = TaskPhase.HUMAN, message = instruction.take(160),
                 interruption = TaskInterruption(reason = "MIND_OWNER_HAS_PHONE", prompt = instruction.take(300), canResumeAfterHuman = true))
         }
+        if (!run.front) return
         OverlayChromeRuntime.missionStatus("Your turn: ${instruction.take(100)}")
         com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.waiting(context, instruction)
         OverlayChromeRuntime.refreshExternalSurface()
     }
 
-    private fun waiting(context: Context, taskId: String, question: String?) {
+    private fun waiting(context: Context, run: Run, question: String?) {
         // The overlay window changes shape (focusable card) when a check-in card opens or closes.
         OverlayChromeRuntime.refreshExternalSurface()
         if (question == null) {
-            WorkspaceTasks.update(taskId) { it.copy(phase = TaskPhase.WORKING, interruption = null) }
+            card(context, run) { it.copy(phase = TaskPhase.WORKING, interruption = null) }
             return
         }
-        WorkspaceTasks.update(taskId) {
+        card(context, run) {
             it.copy(phase = TaskPhase.REVIEW, message = question.take(160),
                 interruption = TaskInterruption(reason = "MIND_OWNER_REQUEST", prompt = question.take(300), canResumeAfterHuman = true))
         }
+        if (!run.front) return
         OverlayChromeRuntime.missionStatus(question.take(120))
         com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.waiting(context, question)
     }
 
-    private fun planToTask(taskId: String, steps: List<MindPlanStep>) {
-        WorkspaceTasks.update(taskId) { task ->
+    private fun planToTask(context: Context, run: Run, steps: List<MindPlanStep>) {
+        card(context, run) { task ->
             task.copy(plannedMilestones = steps.map { it.text.take(80) },
                 plannedMilestoneIndex = steps.indexOfFirst { it.status == "doing" || it.status == "todo" }.coerceAtLeast(0))
         }
@@ -556,18 +757,34 @@ object MindMissions {
         com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.finish(context, mission.status == MissionStatus.COMPLETED, message)
     }
 
+    /** A behind mission ended: its notification says how, once, and then stays dismissible. */
+    private fun finishBehind(context: Context, run: Run, mission: Mission) {
+        val phase = when (mission.status) {
+            MissionStatus.COMPLETED -> TaskPhase.DONE
+            MissionStatus.CANCELLED -> TaskPhase.STOPPED
+            else -> TaskPhase.FAILED
+        }
+        val message = mission.summary.ifBlank { "Mission ended." }.take(300)
+        val done = (run.card ?: baseCard(mission)).copy(phase = phase, message = message, outcome = message, interruption = null,
+            resumable = mission.status.resumable)
+        run.card = done
+        if (mission.status == MissionStatus.CANCELLED) BehindNotifications.cancel(context, run.taskId)
+        else BehindNotifications.post(context, done, null)
+    }
+
     /** Journals every turn and mirrors the model-visible story into the run trace. Never provider reasoning. */
     private class MissionListener(
         private val context: Context,
         private val traceId: String,
-        private val taskId: String,
         private val store: MissionStore,
         private val missionId: String,
+        private val front: () -> Boolean,
+        private val updateCard: ((WorkspaceTaskUi) -> WorkspaceTaskUi) -> Unit,
         private val onTurn: (Int) -> Unit,
         private val onEvent: (MissionEvent) -> Unit,
     ) : MindListener {
         override fun onModelStart(turn: Int, model: MindModel) {
-            OverlayChromeRuntime.missionStatus("Thinking")
+            if (front()) OverlayChromeRuntime.missionStatus("Thinking")
             onTurn(turn)
         }
 
@@ -576,7 +793,7 @@ object MindMissions {
             val calls = message.toolCalls.joinToString { it.name }
             AgentTraceRuntime.event(context, traceId, "MIND_TURN", "Turn $turn: ${said.take(300).ifBlank { calls.ifBlank { "(no action)" } }}",
                 code = "MIND_TURN", detail = if (calls.isBlank()) null else "calls: $calls")
-            if (said.isNotBlank()) WorkspaceTasks.update(taskId) { it.copy(message = said.take(160)) }
+            if (said.isNotBlank()) updateCard { it.copy(message = said.take(160)) }
         }
 
         override fun onToolStart(turn: Int, call: MindToolCall) {

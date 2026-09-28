@@ -30,10 +30,10 @@ class GatewayV5CommandAdapterTest {
 
     @Before fun install() {
         GatewayV5CommandAdapter.overlayReady = { overlay }
-        GatewayV5CommandAdapter.busy = { busy }
+        GatewayV5CommandAdapter.busyFor = { busy }
         GatewayV5CommandAdapter.humanHasControl = { false }
         GatewayV5CommandAdapter.start = { goal -> started += goal; "m1abcdefgh" }
-        GatewayV5CommandAdapter.live = { live }
+        GatewayV5CommandAdapter.running = { id -> live?.takeIf { it.id == id } }
         GatewayV5CommandAdapter.load = { id -> mission.takeIf { it.id == id }?.copy(status = MissionStatus.COMPLETED, summary = "Posted.") }
         GatewayV5CommandAdapter.moment = { moment }
         GatewayV5CommandAdapter.send = { task, command -> sent += task to command; TaskCommandResult.done(TaskEngine.MIND, "ok") }

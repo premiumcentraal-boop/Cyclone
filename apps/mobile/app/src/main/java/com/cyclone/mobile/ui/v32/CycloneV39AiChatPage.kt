@@ -401,6 +401,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                         val missionTask = mission?.let { m -> task?.takeIf { it.taskId == "mission-${m.id}" } }
                         if (mission != null && missionTask == null) {
                             item(key = "mission-${mission.id}") { CycloneLiveMissionCard(mission) }
+                            item(key = "behind-missions") { CycloneBehindMissions() }
                         } else (missionTask ?: task)?.let { current ->
                             item(key = "current-${current.taskId}") {
                                 InAppTaskStack(current)

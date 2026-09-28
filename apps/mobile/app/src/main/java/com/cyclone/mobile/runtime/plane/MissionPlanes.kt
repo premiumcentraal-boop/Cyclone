@@ -14,6 +14,7 @@ import com.cyclone.mobile.mind.MindApp
 import com.cyclone.mobile.mind.MindPlanes
 import com.cyclone.mobile.mind.MindToolResult
 import com.cyclone.mobile.mind.PhoneMindToolbox
+import com.cyclone.mobile.mind.mission.Crew
 import com.cyclone.mobile.runtime.background.BackgroundSetup
 import com.cyclone.mobile.runtime.background.WorkspaceRuntime
 import com.cyclone.mobile.runtime.session.ExecutionContext
@@ -115,7 +116,13 @@ object MissionPlanes {
         current?.end()
         val app = context.applicationContext
         val preferred = nextMode.also { nextMode = null }
-        return MissionPlaneSession(app, missionId, goal, traceId, modeOverride ?: preferred ?: mode(context)) { next ->
+        return MissionPlaneSession(app, missionId, goal, traceId, modeOverride ?: preferred ?: mode(context), publisher(app, missionId))
+            .also { current = it }
+    }
+
+    /** Only the front mission's plane reaches the pill and the task notification. */
+    private fun publisher(app: Context, missionId: String): (PlaneUi?) -> Unit = { next ->
+        if (current?.missionId == missionId) {
             val changed = uiState.value?.let { it.kind != next?.kind || it.available != next?.available } ?: true
             uiState.value = next
             // The task notification carries the move action: keep it in step with the plane.
@@ -123,13 +130,54 @@ object MissionPlanes {
                 runCatching { com.cyclone.mobile.ui.overlay.AgentTaskNotificationRuntime.renderTask(app, task) }
             }
         }
-            .also { current = it }
+    }
+
+    /**
+     * Plan 26 §6 (parallel sessions): a mission that works behind the front one. It starts with no screen, takes only
+     * background screens of its own, and waits to come to the front ([onPromote]) before it ever needs the owner's.
+     */
+    fun beginBehind(context: Context, missionId: String, goal: String, traceId: String?,
+                    onPromote: (MissionPlaneSession) -> Unit, onWaiting: (String?) -> Unit): MissionPlaneSession {
+        val app = context.applicationContext
+        return MissionPlaneSession(app, missionId, goal, traceId, PlaneMode.BACKGROUND, publisher(app, missionId),
+            behindStart = true, onPromote = onPromote, onWaiting = onWaiting)
+    }
+
+    /** A behind mission asks to become the front one: granted when no front mission holds the screen. */
+    @Synchronized
+    internal fun claimFront(session: MissionPlaneSession): Boolean {
+        val front = current
+        if (front != null && front !== session && !front.isEnded) return false
+        current = session
+        return true
+    }
+
+    /** The front mission's session, when one is running. */
+    val front: MissionPlaneSession? get() = current
+
+    // ---- app leases between missions (plan 26 §4): one Cyclone mission per app at a time ----
+
+    private val holders = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** The mission that holds [pkg] on a background screen, when it is not [missionId]. */
+    fun heldByOther(pkg: String, missionId: String): String? = holders[pkg]?.takeIf { it != missionId }
+
+    internal fun hold(missionId: String, pkg: String?) {
+        holders.entries.removeAll { it.value == missionId && it.key != pkg }
+        if (pkg != null) holders.putIfAbsent(pkg, missionId)
+    }
+
+    internal fun releaseApps(missionId: String) {
+        holders.entries.removeAll { it.value == missionId }
     }
 
     internal fun ended(session: MissionPlaneSession) {
-        if (current === session) {
-            current = null
-            uiState.value = null
+        releaseApps(session.missionId)
+        synchronized(this) {
+            if (current === session) {
+                current = null
+                uiState.value = null
+            }
         }
     }
 
@@ -179,9 +227,18 @@ class MissionPlaneSession internal constructor(
     private val traceId: String?,
     private val mode: PlaneMode,
     private val publish: (PlaneUi?) -> Unit,
+    /** Plan 26 §6: this mission works behind the front one (no owner's screen until it comes to the front). */
+    behindStart: Boolean = false,
+    private val onPromote: ((MissionPlaneSession) -> Unit)? = null,
+    /** The behind mission waits for something (the owner's screen, an app another task uses); null when it goes on. */
+    private val onWaiting: ((String?) -> Unit)? = null,
 ) : MindPlanes {
     @Volatile var plane: TaskPlane = TaskPlane.Screen
         private set
+    /** True while the mission works behind the front one; it becomes the front one at most once. */
+    @Volatile var behind: Boolean = behindStart
+        private set
+    val isEnded: Boolean get() = ended
     @Volatile private var toolbox: PhoneMindToolbox? = null
     @Volatile private var startDecided = false
     @Volatile private var startedIn: PlaneKind = PlaneKind.SCREEN
@@ -224,6 +281,19 @@ class MissionPlaneSession internal constructor(
         refresh()
     }
 
+    /**
+     * Plan 26 §6: this behind mission becomes the front one (the front mission ended). True when it is the front one
+     * now; it keeps working where it is (its background screen, or no screen yet).
+     */
+    fun promote(): Boolean {
+        if (!behind) return true
+        if (!MissionPlanes.claimFront(this)) return false
+        behind = false
+        trace("CREW_FRONT", "The task came to the front")
+        refresh()
+        return true
+    }
+
     fun startNow(): Boolean {
         if (waitingFor == null) return false
         startNowPressed = true
@@ -239,12 +309,28 @@ class MissionPlaneSession internal constructor(
 
     override fun before(tool: String, arguments: JSONObject): String? {
         if (ended) return null
-        val current = plane
         if (tool == "owner_takeover") {
-            if (current is TaskPlane.Background) switchTo(PlaneKind.SCREEN, "This step needs you on the phone.", PlaneSignal.OWNER_HANDS)
+            // A mission behind the screen hands over only once it is the front one.
+            if (behind && !awaitFront("This step needs you on the phone.")) return STOPPED
+            if (plane is TaskPlane.Background) switchTo(PlaneKind.SCREEN, "This step needs you on the phone.", PlaneSignal.OWNER_HANDS)
             return null
         }
+        if (behind && plane is TaskPlane.Screen) {
+            // Plan 26 §6: no screen of its own yet, and the owner's screen is not this mission's.
+            Crew.behindRefusal(tool, hasOwnScreen = false)?.let { return it }
+            if (tool == "open_app") {
+                startDecided = true
+                val pkg = resolve(arguments.optString("app")) ?: return "NOT RUN: that app is not installed or its name fits several apps. Use apps_list."
+                startPlane(pkg)
+                if (ended || stopping) return STOPPED
+                if (behind && plane is TaskPlane.Screen) return Crew.behindRefusal("screen_read", hasOwnScreen = false)
+            }
+            return null
+        }
+        val current = plane
         if (current is TaskPlane.Screen) {
+            // An app another Cyclone task works in on a background screen is not pulled onto the owner's screen.
+            if (tool == "open_app") resolve(arguments.optString("app"))?.let { pkg -> if (!waitForApp(pkg)) return STOPPED }
             if (tool == "open_app" && !startDecided) {
                 startDecided = true
                 val pkg = resolve(arguments.optString("app")) ?: return null
@@ -321,8 +407,16 @@ class MissionPlaneSession internal constructor(
     /** Plan 26 (A42-4, A42-5): where the first app of the mission runs, with the owner's preferences and who holds it. */
     @Synchronized
     private fun startPlane(pkg: String) {
+        if (!waitForApp(pkg)) return
         var facts = startFacts(pkg)
         var plan = StartPolicy.begin(facts)
+        if (behind) {
+            // Behind the front mission only a background screen of its own will do; anything else waits for the front.
+            if (plan is StartPlan.Background && enterBackground(pkg, plan.entry, plan.reason, facts)) return
+            if (!awaitFront("${facts.appLabel} needs your screen, so this task waits until the current one ends.")) return
+            facts = startFacts(pkg)
+            plan = StartPolicy.begin(facts)
+        }
         trace("PLANE_START", "${plan.javaClass.simpleName}: ${plan.reason}")
         if (plan is StartPlan.Ask) {
             val answer = askOwner?.invoke("${plan.reason} Where should Cyclone work in ${facts.appLabel}?", StartPolicy.ASK_CHOICES)
@@ -426,6 +520,7 @@ class MissionPlaneSession internal constructor(
     /** Background work moves to another app: a new background screen for it, the old one closed. */
     @Synchronized
     private fun moveApp(from: TaskPlane.Background, pkg: String) {
+        if (!waitForApp(pkg)) return
         val facts = startFacts(pkg)
         if (facts.holder == TargetHolder.OWNER) {
             // Plan 26 (A42-5): the owner is using that app: a second window, waiting, asking, or the screen, as chosen.
@@ -498,6 +593,7 @@ class MissionPlaneSession internal constructor(
 
     @Synchronized
     private fun switchTo(to: PlaneKind, reason: String, signal: PlaneSignal?): Boolean {
+        if (behind && to == PlaneKind.SCREEN && !awaitFront(reason)) return false
         if (ended || plane.kind == to) return plane.kind == to
         val from = plane
         val pkg = packageName()
@@ -531,11 +627,19 @@ class MissionPlaneSession internal constructor(
 
     /** The mission is on [where] now: the Mind acts there from its next step. */
     private fun land(where: TaskPlane, modelNote: String) {
+        if (where == TaskPlane.Screen && behind && !awaitFront(modelNote)) {
+            // Stopping while it waited: no screen of its own and never the owner's.
+            plane = TaskPlane.Screen
+            MissionPlanes.releaseApps(missionId)
+            refresh()
+            return
+        }
         plane = where
+        MissionPlanes.hold(missionId, (where as? TaskPlane.Background)?.let { WorkspaceRuntime.packageOf(it.sessionId) })
         when (where) {
             is TaskPlane.Background -> {
-                // The main screen is the owner's again while Cyclone works behind it.
-                DeviceState.setController(DeviceState.Controller.HUMAN)
+                // The main screen is the owner's again while Cyclone works behind it (a behind mission never had it).
+                if (!behind) DeviceState.setController(DeviceState.Controller.HUMAN)
                 backgroundSince = System.currentTimeMillis()
                 darkTicks = 0
                 ladder = RecoveryLadder(mode)
@@ -814,6 +918,51 @@ class MissionPlaneSession internal constructor(
         refresh()
     }
 
+    // ---- behind the front mission (plan 26 §6) -----------------------------------------------------------------
+
+    /**
+     * Waits until this behind mission may become the front one (the front mission ended), then promotes it. False when
+     * it stopped meanwhile. A front mission returns true at once.
+     */
+    private fun awaitFront(reason: String): Boolean {
+        if (!behind) return true
+        trace("CREW_WAIT_FRONT", reason)
+        runCatching { onWaiting?.invoke("Waiting for your screen: ${reason.trimEnd('.')}.") }
+        try {
+            while (!ended && !stopping) {
+                if (MissionPlanes.claimFront(this)) {
+                    behind = false
+                    trace("CREW_FRONT", "The task came to the front")
+                    runCatching { onWaiting?.invoke(null) }
+                    runCatching { onPromote?.invoke(this) }
+                    refresh()
+                    return true
+                }
+                Thread.sleep(WAIT_POLL_MS)
+            }
+        } catch (_: InterruptedException) {
+            return false
+        }
+        return false
+    }
+
+    /** Another Cyclone mission holds [pkg]: wait for it (one mission per app at a time). False when stopping. */
+    private fun waitForApp(pkg: String): Boolean {
+        if (MissionPlanes.heldByOther(pkg, missionId) == null) return true
+        val appLabel = label(pkg) ?: "that app"
+        trace("CREW_WAIT_APP", "Another Cyclone task uses $appLabel")
+        if (behind) runCatching { onWaiting?.invoke("Waiting for $appLabel: another Cyclone task uses it.") }
+        else { waitingFor = appLabel; note = "Waiting for $appLabel: another Cyclone task uses it."; refresh() }
+        try {
+            while (!ended && !stopping && !startNowPressed && MissionPlanes.heldByOther(pkg, missionId) != null) Thread.sleep(WAIT_POLL_MS)
+        } catch (_: InterruptedException) {
+            return false
+        } finally {
+            if (behind) runCatching { onWaiting?.invoke(null) } else { waitingFor = null; refresh() }
+        }
+        return !ended && !stopping
+    }
+
     // ---- helpers -------------------------------------------------------------------------------------------------
 
     private fun resolve(requested: String): String? {
@@ -872,6 +1021,7 @@ class MissionPlaneSession internal constructor(
         const val WATCH_MS = 1_000L
         const val WAIT_POLL_MS = 700L
         const val OWNER_LEFT_GRACE_MS = 1_500L
+        private const val STOPPED = "NOT RUN: the task is stopping."
         /** Apps known to open a second window; others are learned (AppPlaneCompat.secondWindow). */
         private val LIKELY_SECOND_WINDOW = setOf("com.android.chrome", "com.google.android.apps.docs.editors.docs",
             "com.google.android.apps.docs.editors.sheets", "com.google.android.apps.docs.editors.slides")

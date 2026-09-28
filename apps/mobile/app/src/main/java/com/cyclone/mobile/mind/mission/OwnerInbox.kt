@@ -44,33 +44,54 @@ sealed class OwnerResponse {
 data class OwnerWait(val response: OwnerResponse?, val waitedMs: Long, val cancelled: Boolean)
 
 /**
- * One place where a mission waits for its owner. The mission thread posts a request and blocks; the phone UI
- * (notification, request screen, overlay, app) shows [pending] and answers through [respond]. There is at most one
- * open request at a time because a mission is one train of thought.
+ * Where missions wait for their owner. A mission thread posts a request and blocks; the phone UI (notification,
+ * request screen, overlay, app) shows [pending] and answers through [respond].
+ *
+ * Each mission is one train of thought, so it has at most one open request: a new one replaces its previous one.
+ * Several missions (plan 26 §6, parallel sessions) may each have one open; the owner sees them one at a time, oldest
+ * first ([pending]), and [all] lists them. A mission working behind the owner's screen is named on its requests
+ * ([label]) so the owner knows which task asks.
  */
 class OwnerInbox(private val clock: () -> Long = System::currentTimeMillis) {
-    private val lock = Object()
-    private val state = MutableStateFlow<OwnerRequest?>(null)
-    private var response: OwnerResponse? = null
-    private var owner: String? = null
+    private class Slot(val request: OwnerRequest) {
+        var response: OwnerResponse? = null
+    }
 
+    private val lock = Object()
+    private val open = LinkedHashMap<String, Slot>()
+    private val labels = HashMap<String, String>()
+    private val state = MutableStateFlow<OwnerRequest?>(null)
+    private val allState = MutableStateFlow<List<OwnerRequest>>(emptyList())
+
+    /** The request the owner sees now: the oldest open one. */
     val pending: StateFlow<OwnerRequest?> = state
+    /** Every open request, oldest first. */
+    val all: StateFlow<List<OwnerRequest>> = allState
+
+    /** Names [missionId] on its requests ("For “Order the groceries”:"); null stops naming it (it came to the screen). */
+    fun label(missionId: String, label: String?) = synchronized(lock) {
+        if (label.isNullOrBlank()) labels.remove(missionId) else labels[missionId] = label.take(80)
+    }
 
     fun post(missionId: String, kind: OwnerRequestKind, text: String, choices: List<String> = emptyList(),
              fields: List<OwnerField> = emptyList(), gate: String? = null, send: OwnerSend? = null): OwnerRequest =
         synchronized(lock) {
-            val request = OwnerRequest("req-${UUID.randomUUID()}", missionId, kind, text.take(600), choices.take(6), clock(), fields.take(MAX_FIELDS),
+            val shown = labels[missionId]?.let { "$it $text" } ?: text
+            val request = OwnerRequest("req-${UUID.randomUUID()}", missionId, kind, shown.take(600), choices.take(6), clock(), fields.take(MAX_FIELDS),
                 gate, send)
-            response = null
-            owner = request.id
-            state.value = request
+            // A mission's new request replaces its previous one; other missions' requests stay open.
+            open.entries.removeAll { it.value.request.missionId == missionId }
+            open[request.id] = Slot(request)
+            publish()
+            lock.notifyAll()
             request
         }
 
-    /** Returns false when [requestId] is no longer the open request (answered, withdrawn or replaced). */
+    /** Returns false when [requestId] is no longer open (answered, withdrawn or replaced). */
     fun respond(requestId: String, reply: OwnerResponse): Boolean = synchronized(lock) {
-        if (owner != requestId || response != null) return false
-        response = reply
+        val slot = open[requestId] ?: return false
+        if (slot.response != null) return false
+        slot.response = reply
         lock.notifyAll()
         true
     }
@@ -81,8 +102,8 @@ class OwnerInbox(private val clock: () -> Long = System::currentTimeMillis) {
         try {
             synchronized(lock) {
                 while (true) {
-                    if (owner != request.id) return OwnerWait(null, clock() - started, cancelled = true)
-                    response?.let { return OwnerWait(it, clock() - started, cancelled = false) }
+                    val slot = open[request.id] ?: return OwnerWait(null, clock() - started, cancelled = true)
+                    slot.response?.let { return OwnerWait(it, clock() - started, cancelled = false) }
                     if (cancelled()) return OwnerWait(null, clock() - started, cancelled = true)
                     val left = timeoutMs - (clock() - started)
                     if (left <= 0) return OwnerWait(null, clock() - started, cancelled = false)
@@ -95,23 +116,36 @@ class OwnerInbox(private val clock: () -> Long = System::currentTimeMillis) {
     }
 
     /** Non-blocking: the owner's reply to the open request, if any; the request stays open. */
-    fun poll(requestId: String): OwnerResponse? = synchronized(lock) { response.takeIf { owner == requestId } }
+    fun poll(requestId: String): OwnerResponse? = synchronized(lock) { open[requestId]?.response }
+
+    /** The open request of [missionId], if it has one. */
+    fun openFor(missionId: String): OwnerRequest? = synchronized(lock) { open.values.firstOrNull { it.request.missionId == missionId }?.request }
 
     fun withdraw(requestId: String) = synchronized(lock) {
-        if (owner == requestId) {
-            owner = null
-            response = null
-            state.value = null
+        if (open.remove(requestId) != null) {
+            publish()
             lock.notifyAll()
         }
     }
 
-    /** Stops whatever the mission is waiting for (the owner pressed Stop). */
-    fun withdrawAll() = synchronized(lock) {
-        owner = null
-        response = null
-        state.value = null
+    /** Stops what one mission is waiting for (the owner stopped that mission). */
+    fun withdrawMission(missionId: String) = synchronized(lock) {
+        if (open.entries.removeAll { it.value.request.missionId == missionId }) publish()
+        labels.remove(missionId)
         lock.notifyAll()
+    }
+
+    /** Stops whatever every mission is waiting for. */
+    fun withdrawAll() = synchronized(lock) {
+        open.clear()
+        publish()
+        lock.notifyAll()
+    }
+
+    private fun publish() {
+        val list = open.values.map { it.request }
+        allState.value = list
+        state.value = list.firstOrNull()
     }
 
     private companion object {

@@ -270,6 +270,42 @@ release key (same publisher as alpha.40/41).
 
 ---
 
+### 6.1 As built (alpha.65): parallel sessions
+
+- **Front and behind:** `MindMissions` hosts missions (`Run`: worker, cancellation, owner messages, plane session,
+  metrics, trail, card). One is in front (overlay, pill, task card, service). Up to two work behind it, by memory
+  (`Crew.behindSlots`: 2 from 8 GB, 1 from 6 GB).
+- **Admission:** `Crew.admit` decides whether a new task goes to the front, behind or the queue. A behind task needs:
+  - background ready;
+  - not a Lab run, and no Lab run in front;
+  - not a task that needs the owner's hands;
+  - a free slot;
+  - the setting on.
+
+  Owner text that is a clearly separate task goes behind when admitted (`offer`); the Command Center's `cc.start`
+  too.
+- **Behind sessions:** `MissionPlanes.beginBehind` starts a plane session with no screen.
+  - **Before it has a screen of its own,** `Crew.behindRefusal` refuses every phone tool except open_app, set_timer
+    and set_alarm.
+  - **Its opening situation** is a fixed text (`Crew.BEHIND_SITUATION`); it never reads the owner's screen.
+  - **Any road to the owner's screen** (switchTo, land, owner_takeover, a start plan that is not a background screen)
+    waits in `awaitFront` until `MissionPlanes.claimFront` grants the front. Then `MindMissions.promote` moves the
+    card, service and overlay to it.
+  - **It never sets the phone's controller,** and its plane never reaches the pill.
+- **Promotion:** when the front mission ends, the behind mission that already holds the screen, or else the oldest,
+  comes to the front.
+- **App leases between missions:** `MissionPlanes.hold / heldByOther / waitForApp`. One mission per app on background
+  screens, and the front mission never opens an app another mission holds.
+- **One inbox:** `OwnerInbox` keeps one open request per mission. `pending` is the oldest, and requests from behind are
+  named by `label`. Task Kit answers a task's own request, and the front card also answers the visible one.
+- **Task Kit:** `TaskCommandBus` finds tasks behind the front one (`others`). `MindTaskController` stops and answers
+  them, and refuses screen commands for them. `BehindNotifications` posts one notification per behind task, with
+  Approve / Decline / Stop pending intents.
+- **Share gate:** `PublishGate.mark` records posting tasks; `active()` stays on while any of them runs.
+- **PC:** the Command Center dispatcher sends a phone up to 3 tasks (`PHONE_TASKS`), prefers phones with fewer, and
+  asks a phone that answered ASK_BUSY once per round.
+- **Not yet:** the Lab concurrency suite and per-task pills on the overlay.
+
 ## 7. Invariants kept
 
 - `PhoneToolExecutor` stays the only mutation path, with session and display on every action.

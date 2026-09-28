@@ -38,12 +38,23 @@ internal object GatewayV5CommandAdapter {
 
     /** Seams for JVM tests; production uses the overlay, the Mind and Task Kit. */
     internal var overlayReady: () -> Boolean = { OverlayChromeRuntime.isAttached() }
-    internal var busy: () -> Boolean = { OverlayChromeRuntime.hasExecutingTask() || MindMissions.isLive() || !WorkspaceTasks.canStartRequest() }
+    /** The phone cannot take [goal] now (plan 26 §6: a mission may start behind the running one when the phone can). */
+    internal var busyFor: (String) -> Boolean = { goal ->
+        OverlayChromeRuntime.hasExecutingTask() || !WorkspaceTasks.canStartRequest() ||
+            (MindMissions.isLive() && !MindMissions.canAccept(app(), goal))
+    }
     internal var humanHasControl: () -> Boolean = { DeviceState.controller == DeviceState.Controller.HUMAN }
     internal var start: (String) -> String? = { goal -> MindMissions.startAssigned(app(), goal) }
-    internal var live: () -> Mission? = { MindMissions.live.value }
+    /** The running mission [id], front or behind. */
+    internal var running: (String) -> Mission? = { id -> MindMissions.find(id) }
     internal var load: (String) -> Mission? = { MindMissions.store(app()).load(it) }
     internal var moment: () -> OwnerMoment? = { OwnerMomentsRuntime.current() }
+    /** The open moment of mission [id]: a mission behind the screen (plan 26 §6) has its own card and request. */
+    internal var momentFor: (String) -> OwnerMoment? = { id ->
+        if (MindMissions.isBehind(id)) com.cyclone.mobile.owner.OwnerMoments.project(
+            MindMissions.behindTasks.value.firstOrNull { it.taskId == "mission-$id" }, MindMissions.inbox.openFor(id))
+        else moment()
+    }
     internal var send: (String, TaskCommand) -> TaskCommandResult = { taskId, command -> TaskCommands.send(app(), taskId, command) }
     internal var deviceKey: () -> DeviceKey.Public = { DeviceKey.ensure() }
     /** Leases handed to each mission, so status can report their outcomes (ids only). */
@@ -55,6 +66,7 @@ internal object GatewayV5CommandAdapter {
         SealedDelivery.install(context)
         CommandMedia.install(context)
         PublishGate.liveMission = { MindMissions.live.value?.id }
+        PublishGate.running = { id -> MindMissions.find(id) != null }
     }
     private fun app(): Context = checkNotNull(context) { "command adapter not installed" }
 
@@ -84,7 +96,7 @@ internal object GatewayV5CommandAdapter {
         if (INLINE_SECRET.containsMatchIn(goal)) throw invalid("Do not put secrets in a task; Cyclone asks on the phone.")
         if (!overlayReady()) throw GatewayProtocolException("OVERLAY_UNAVAILABLE", "Turn on Cyclone's accessibility service on the phone.")
         if (humanHasControl()) throw GatewayProtocolException("HUMAN_HAS_CONTROL", "You have control of the phone. Give it back to Cyclone first.")
-        if (busy()) throw GatewayProtocolException("ASK_BUSY", "The phone is already running a task.")
+        if (busyFor(goal)) throw GatewayProtocolException("ASK_BUSY", "The phone is already running a task.")
         // Sealed secrets (C2) are checked and opened before the mission starts, all or nothing.
         val sealed = args.optJSONArray("sealed")
         val opened = if (sealed == null || sealed.length() == 0) emptyMap() else {
@@ -101,7 +113,7 @@ internal object GatewayV5CommandAdapter {
             throw GatewayProtocolException("ASK_BUSY", "The phone is already running a mission.")
         }
         // C3: a task that posts a file gates its final Share/Post as a send, for this mission only.
-        PublishGate.missionId = if (publish == true) id else null
+        PublishGate.mark(id, publish == true)
         if (opened.isNotEmpty()) {
             SealedDelivery.hold(id, opened)
             synchronized(missionLeases) { missionLeases[id] = opened.values.map { it.first.leaseId } }
@@ -111,9 +123,9 @@ internal object GatewayV5CommandAdapter {
 
     fun status(args: JSONObject): JSONObject {
         val id = missionId(args, setOf("missionId"))
-        val running = live()?.takeIf { it.id == id }
+        val running = running(id)
         val mission = running ?: load(id) ?: throw GatewayProtocolException("RUN_NOT_FOUND", "No such mission.")
-        val open = moment()?.takeIf { running != null && it.taskId == "mission-$id" }
+        val open = momentFor(id)?.takeIf { running != null && it.taskId == "mission-$id" }
         return JSONObject()
             .put("missionId", id)
             .put("status", mission.status.name.lowercase())
@@ -138,13 +150,13 @@ internal object GatewayV5CommandAdapter {
         val id = missionId(args, null)
         val action = (args.opt("action") as? String).orEmpty()
         if (action !in ANSWERS) throw invalid("action must be one of ${ANSWERS.joinToString()}.")
-        live()?.takeIf { it.id == id } ?: throw GatewayProtocolException("RUN_NOT_FOUND", "That mission is not running.")
+        running(id) ?: throw GatewayProtocolException("RUN_NOT_FOUND", "That mission is not running.")
         if (action == "stop") return result(send("mission-$id", TaskCommand.Stop))
 
         // Every other answer is to one open moment, named by its request id, so a changed request is never answered.
         val requestId = (args.opt("requestId") as? String).orEmpty()
         if (!REQUEST_ID.matches(requestId)) throw invalid("requestId is required.")
-        val open = moment()?.takeIf { it.taskId == "mission-$id" && it.requestId == requestId }
+        val open = momentFor(id)?.takeIf { it.taskId == "mission-$id" && it.requestId == requestId }
             ?: throw GatewayProtocolException("MOMENT_CHANGED", "Cyclone is not waiting for that any more.")
         if (open.kind == MomentKind.SECRET || open.kind == MomentKind.HANDOVER) {
             throw GatewayProtocolException("ANSWER_ON_PHONE", "Secure input and taking over happen on the phone.")

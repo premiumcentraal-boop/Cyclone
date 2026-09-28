@@ -6,7 +6,9 @@ Rules this module keeps:
   types is checked for secret-shaped content and refused; the vault is a later release (C1).
 - **Phones do the work.** A task becomes an ordinary Mind mission on one phone through the typed ``cc.*`` contract;
   the phone's GATE, Owner Moments and Secrets Card apply as always. "Done" is what the phone reports.
-- **One phone per account at a time** (the account lock), one Command Center task per phone at a time.
+- **One phone per account at a time** (the account lock). A phone takes up to three Command Center tasks at once
+  (plan 26 §6: one in front, up to two behind it on background screens); the phone decides whether it can take the
+  next one, and a phone with fewer running tasks is preferred.
 - **Approvals stay human.** The inbox shows a phone's open Owner Moment; only the owner's answer from Glass reaches
   the phone, for that exact request id. Nothing here approves by itself, and nothing times out into an approval.
 - **No replay.** A routine that missed its time (the PC was off) runs next time; a task is never started twice
@@ -45,6 +47,9 @@ FINISHED = {"completed": "succeeded", "gave_up": "failed", "failed": "failed", "
 WAIT_CODES = {"ASK_BUSY", "HUMAN_HAS_CONTROL", "OVERLAY_UNAVAILABLE", "DEVICE_DISCONNECTED", "PAIRING_REQUIRED",
               "DEVICE_NOT_FOUND", "AUTH_REJECTED"}
 WAIT_LIMIT_MS = 6 * 60 * 60_000
+# Plan 26 §6: tasks one phone may run at the same time (one in front, up to two behind). The phone refuses what it
+# cannot take (ASK_BUSY), and the task waits for the next tick as before.
+PHONE_TASKS = 3
 UNREACHABLE_LIMIT_MS = 30 * 60_000
 MISSED_GRACE_MS = 10 * 60_000
 MAX_GOAL = 1_800
@@ -907,7 +912,11 @@ class CommandCenter:
 
     def _dispatch(self, ready: dict[str, dict[str, Any]]) -> None:
         now = self._clock()
-        busy = {r["device_id"] for r in self._db.execute("SELECT device_id FROM run WHERE ended_at IS NULL")}
+        running: dict[str, int] = {}
+        for r in self._db.execute("SELECT device_id FROM run WHERE ended_at IS NULL"):
+            running[r["device_id"]] = running.get(r["device_id"], 0) + 1
+        # A phone that said it cannot take more this tick is not asked again until the next one.
+        full: set[str] = set()
         tasks = self._db.execute(
             "SELECT * FROM task WHERE status IN ('scheduled','waiting_device') AND next_try_at <= ? ORDER BY COALESCE(due_at, created_at)",
             (now,)).fetchall()
@@ -941,11 +950,13 @@ class CommandCenter:
             candidates = [task["device_id"]] if task["device_id"] else sorted(ready)
             if account and account["allowedDevices"]:
                 candidates = [d for d in candidates if d in account["allowedDevices"]]
-            candidates = [d for d in candidates if d in ready and d not in busy]
+            candidates = [d for d in candidates if d in ready and d not in full and running.get(d, 0) < PHONE_TASKS]
             if not candidates:
                 self._wait(task, "Waiting for a ready phone." if not task["device_id"] else "Waiting for the phone to be ready.")
                 continue
-            device = self._prefer(candidates, task["account_id"])
+            # An idle phone first; a busy one only takes a task behind its current one.
+            least = min(running.get(d, 0) for d in candidates)
+            device = self._prefer([d for d in candidates if running.get(d, 0) == least], task["account_id"])
             if make and make["then"] == "post":
                 media = json.loads(task["media"]) if task["media"] else None
                 if not media or media.get("deviceId") != device or media.get("state") != "sent":
@@ -995,6 +1006,8 @@ class CommandCenter:
             except DesktopRuntimeError as exc:
                 code = str(exc.code)
                 if code in WAIT_CODES:
+                    if code == "ASK_BUSY":
+                        full.add(device)
                     self._wait(task, _wait_reason(code))
                     continue
                 if code == "SEALED_REJECTED":
@@ -1014,7 +1027,7 @@ class CommandCenter:
             if sealed:
                 self.delivery.mark_delivered(task["id"], run_id, [e["leaseId"] for e in sealed])
             self._audit("engine", "task.start", task["id"], {"device": device, "run": run_id})
-            busy.add(device)
+            running[device] = running.get(device, 0) + 1
 
     # ---------------------------------------------------------------- C3: make with a connection, then post from a phone
 

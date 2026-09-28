@@ -136,7 +136,8 @@ class CommandCenterGuard(unittest.TestCase):
         gate = (phone / "policy/GatePolicy.kt").read_text(encoding="utf-8")
         assert "if (PublishGate.gates(selectedLabel)) return GateClass.SEND" in gate
         adapter = PHONE.read_text(encoding="utf-8")
-        assert "PublishGate.missionId = if (publish == true) id else null" in adapter
+        # Plan 26 §6: marked per task, so another task starting never turns a posting task's gate off.
+        assert "PublishGate.mark(id, publish == true)" in adapter
         center = (COMMAND / "center.py").read_text(encoding="utf-8")
         assert 'extra["publish"] = True' in center and "needs the owner's OK" in center
 

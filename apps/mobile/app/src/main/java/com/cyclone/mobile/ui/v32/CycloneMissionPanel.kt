@@ -69,6 +69,34 @@ fun CycloneLiveMissionCard(mission: Mission) {
     }
 }
 
+/**
+ * Plan 26 §6: missions working behind the front one, each on a background screen of its own. The owner can stop
+ * one (through Task Kit, like every task button); their questions come up one at a time on the owner card.
+ */
+@Composable
+fun CycloneBehindMissions() {
+    val context = LocalContext.current
+    val behind by MindMissions.behind.collectAsState()
+    if (behind.isEmpty()) return
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Behind your screen", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp))
+        behind.forEach { mission ->
+            CycloneSignatureCard(modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(mission.goal, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(statusLabel(mission), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { com.cyclone.mobile.task.TaskCommands.send(context, "mission-${mission.id}", com.cyclone.mobile.task.TaskCommand.Stop) },
+                        shape = RoundedCornerShape(18.dp), modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Stop this task" }) { Text("Stop") }
+                }
+            }
+        }
+    }
+}
+
 /** Missions that ended recently, with Resume where the conversation can continue. */
 @Composable
 fun CycloneRecentMissions(limit: Int = 4) {
@@ -76,7 +104,9 @@ fun CycloneRecentMissions(limit: Int = 4) {
     val history by MindMissions.history.collectAsState()
     val live by MindMissions.live.collectAsState()
     LaunchedEffect(Unit) { MindMissions.refresh(context) }
-    val recent = history.filter { it.id != live?.id }.take(limit)
+    val behind by MindMissions.behind.collectAsState()
+    val running = behind.map { it.id }.toSet() + listOfNotNull(live?.id)
+    val recent = history.filter { it.id !in running }.take(limit)
     if (recent.isEmpty()) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Missions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,

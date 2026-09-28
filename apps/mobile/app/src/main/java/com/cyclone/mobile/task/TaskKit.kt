@@ -96,6 +96,8 @@ class TaskCommandBus(
     private val controllers: List<TaskController>,
     private val current: () -> WorkspaceTaskUi?,
     private val log: (WorkspaceTaskUi?, TaskCommand, TaskCommandResult) -> Unit = { _, _, _ -> },
+    /** Tasks working behind the front one (plan 26 §6); a command may name one of them. */
+    private val others: () -> List<WorkspaceTaskUi> = { emptyList() },
 ) {
     init {
         val engines = controllers.map { it.engine }
@@ -105,7 +107,7 @@ class TaskCommandBus(
     fun controller(engine: TaskEngine): TaskController? = controllers.firstOrNull { it.engine == engine }
 
     fun send(taskId: String, command: TaskCommand): TaskCommandResult {
-        val task = current()?.takeIf { it.taskId == taskId }
+        val task = current()?.takeIf { it.taskId == taskId } ?: runCatching { others() }.getOrDefault(emptyList()).firstOrNull { it.taskId == taskId }
         val result = when {
             task == null -> TaskCommandResult.refused(null, "That task is no longer current.")
             else -> {

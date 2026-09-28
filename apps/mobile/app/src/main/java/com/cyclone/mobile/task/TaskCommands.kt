@@ -23,7 +23,7 @@ object TaskCommands {
 
     private val bus: TaskCommandBus by lazy {
         TaskCommandBus(listOf(MindTaskController, ClassicForegroundTaskController, BackgroundWorkspaceTaskController),
-            current = { WorkspaceTasks.state.value }, log = ::record)
+            current = { WorkspaceTasks.state.value }, log = ::record, others = { MindMissions.behindTasks.value })
     }
 
     fun send(context: Context, taskId: String, command: TaskCommand): TaskCommandResult {
@@ -93,7 +93,18 @@ object MindTaskController : TaskController {
         TaskCommand.Reply::class.java, TaskCommand.Fill::class.java, TaskCommand.MoveToBackground::class.java,
         TaskCommand.MoveToForeground::class.java, TaskCommand.AllowBackground::class.java, TaskCommand.StartNow::class.java)
 
-    private fun open(kind: OwnerRequestKind) = MindMissions.inbox.pending.value?.takeIf { it.kind == kind }
+    /** The task a command is for: its own open request first; the front card also answers what the owner sees now. */
+    private val target = ThreadLocal<WorkspaceTaskUi?>()
+
+    private fun missionOf(task: WorkspaceTaskUi?): String? = task?.taskId?.removePrefix("mission-")
+
+    private fun open(kind: OwnerRequestKind): com.cyclone.mobile.mind.mission.OwnerRequest? {
+        val id = missionOf(target.get())
+        id?.let { MindMissions.inbox.openFor(it) }?.takeIf { it.kind == kind }?.let { return it }
+        // A task behind the screen answers only its own requests; the front card answers the one on screen.
+        if (id != null && MindMissions.isBehind(id)) return null
+        return MindMissions.inbox.pending.value?.takeIf { it.kind == kind }
+    }
 
     private fun answer(kind: OwnerRequestKind, response: OwnerResponse, ok: String): TaskCommandResult {
         val request = open(kind) ?: return TaskCommandResult.refused(engine, "Cyclone is not waiting for that any more.")
@@ -101,7 +112,27 @@ object MindTaskController : TaskController {
         else TaskCommandResult.refused(engine, "That request was already answered.")
     }
 
-    override fun handle(task: WorkspaceTaskUi, command: TaskCommand): TaskCommandResult = when (command) {
+    private val BEHIND_COMMANDS = setOf(TaskCommand.Stop::class.java, TaskCommand.Approve::class.java, TaskCommand.Decline::class.java,
+        TaskCommand.Reply::class.java, TaskCommand.Fill::class.java)
+
+    override fun handle(task: WorkspaceTaskUi, command: TaskCommand): TaskCommandResult {
+        target.set(task)
+        try {
+            val id = missionOf(task)
+            // Plan 26 §6: a task working behind the screen can be stopped and answered; the screen stays the owner's.
+            if (id != null && MindMissions.isBehind(id)) {
+                if (command == TaskCommand.Stop) return if (MindMissions.stop(id)) TaskCommandResult.done(engine, "Stopping that task.")
+                    else TaskCommandResult.refused(engine, "That task is not running.")
+                if (command.javaClass !in BEHIND_COMMANDS) return TaskCommandResult.refused(engine,
+                    "That task works behind your screen; it comes to the front when the current one ends.")
+            }
+            return handleFront(task, command)
+        } finally {
+            target.remove()
+        }
+    }
+
+    private fun handleFront(task: WorkspaceTaskUi, command: TaskCommand): TaskCommandResult = when (command) {
         is TaskCommand.Reply -> when {
             command.text.isBlank() -> TaskCommandResult.refused(engine, "The answer is empty.")
             // A send waiting for approval: the answer is a change to the message ("change it to …"); nothing is sent.

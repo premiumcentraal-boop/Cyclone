@@ -108,18 +108,41 @@ def test_a_task_runs_on_a_ready_phone_and_finishes_with_the_phone_s_word(setup):
     assert center.verify_audit()
 
 
-def test_one_phone_per_account_and_one_task_per_phone(setup):
+def test_one_phone_per_account_and_up_to_three_tasks_per_phone(setup):
     center, contract, *_ = setup
     acc = account(center)
     first = center.create_task({"goal": "Check messages", "accountId": acc["id"]})
     second = center.create_task({"goal": "Check comments", "accountId": acc["id"]})
     third = center.create_task({"goal": "Set a timer", "deviceId": "phone-a"})
     center.tick()
-    assert [d for d, _ in contract.started] == ["phone-a"]
+    # Plan 26 §6: the phone takes the timer behind the first task; the account lock still holds the second.
+    assert [d for d, _ in contract.started] == ["phone-a", "phone-a"]
     assert center.get_task(second["id"])["status"] == "waiting_device"
     assert "Another phone is using this account." in center.get_task(second["id"])["cause"]
-    assert center.get_task(third["id"])["status"] == "waiting_device"
+    assert center.get_task(third["id"])["status"] == "running"
     assert center.get_task(first["id"])["status"] == "running"
+    # Three at once at most; a fourth waits for one of them to end.
+    fourth = center.create_task({"goal": "Open the calendar", "deviceId": "phone-a"})
+    fifth = center.create_task({"goal": "Open the weather", "deviceId": "phone-a"})
+    center.tick()
+    assert center.get_task(fourth["id"])["status"] == "running"
+    assert center.get_task(fifth["id"])["status"] == "waiting_device"
+    assert len(contract.started) == 3
+
+
+def test_a_phone_that_cannot_take_more_is_asked_once_per_tick(setup):
+    center, contract, *_ = setup
+    first = center.create_task({"goal": "Open the calendar", "deviceId": "phone-a"})
+    center.tick()
+    assert center.get_task(first["id"])["status"] == "running"
+    contract.refuse["phone-a"] = "ASK_BUSY"
+    calls = []
+    original = contract.cc_start
+    contract.cc_start = lambda device, goal, **kw: (calls.append(device), original(device, goal, **kw))[1]
+    for goal in ("Open the weather", "Open the notes"):
+        center.create_task({"goal": goal, "deviceId": "phone-a"})
+    center.tick()
+    assert calls == ["phone-a"]
 
 
 def test_a_busy_phone_means_wait_not_fail_and_unpaired_phones_are_never_used(setup):

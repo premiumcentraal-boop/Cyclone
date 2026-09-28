@@ -137,10 +137,10 @@ class SealedDeliveryTest {
     @Test fun ccStartOpensEnvelopesBeforeTheMissionAndRefusesBadOnes() {
         val adapter = com.cyclone.mobile.gateway.GatewayV5CommandAdapter
         adapter.overlayReady = { true }
-        adapter.busy = { false }
+        adapter.busyFor = { false }
         adapter.humanHasControl = { false }
         adapter.start = { "mabcdefgh" }
-        adapter.live = { null }
+        adapter.running = { null }
         adapter.load = { null }
         fun sealed() = org.json.JSONArray().put(JSONObject()
             .put("leaseId", "ls_fixture00000000").put("slot", "password")
