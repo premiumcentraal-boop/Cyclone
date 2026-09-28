@@ -1,6 +1,7 @@
 # Cyclone V5 Alpha 62: the working status shows the app, not Cyclone
 
-Developer alpha for owner testing. It builds on Alpha 61 (the Driver mode crash fix) and includes it.
+Developer alpha for owner testing. It builds on Alpha 60 and **includes the Driver mode crash fix** written as
+Alpha 61 (see `RELEASE_5.0.0-alpha.61.dev1.md`). Alpha 61 was not published separately: both ship here.
 - **Mobile:** `5.0.0-alpha.62.dev1` (version code 207).
 - **Cyclone for Windows:** `Cyclone-Setup-5.0.0-alpha.62.dev1.exe` (runtime `5.0.0-alpha.60.dev1`, unchanged).
 - **Glass:** `1.0.0-alpha.36` (unchanged).
