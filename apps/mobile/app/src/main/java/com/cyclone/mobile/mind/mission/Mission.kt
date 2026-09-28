@@ -51,6 +51,12 @@ data class Mission(
     val metrics: JSONObject? = null,
     /** Set when the owner pressed Learn on this run: what Cyclone learned from it. */
     val learned: com.cyclone.mobile.mind.learn.LearnReport? = null,
+    /** Plan 38: the plan's version (1 until the plan diverts), its label and earlier versions for "See v1". */
+    val planVersion: Int = 1,
+    val planLabel: String? = null,
+    val planHistory: List<List<MindPlanStep>> = emptyList(),
+    /** Plan 38: the owner paused the mission; it holds at its next step until resumed. */
+    val paused: Boolean = false,
 ) {
     fun withEvent(event: MissionEvent): Mission = copy(events = (events + event).takeLast(MAX_EVENTS), updatedAtMs = event.atMs)
 
@@ -62,7 +68,11 @@ data class Mission(
         .put("turns", turns).put("workingMs", workingMs)
         .put("usage", JSONObject().put("prompt", usage.promptTokens).put("completion", usage.completionTokens).put("cost", usage.costUsd))
         .put("summary", summary).put("evidence", evidence)
-        .put("plan", JSONArray().also { array -> plan.forEach { array.put(JSONObject().put("step", it.text).put("status", it.status)) } })
+        .put("plan", stepsJson(plan))
+        .put("planVersion", planVersion)
+        .put("planLabel", planLabel ?: JSONObject.NULL)
+        .put("planHistory", JSONArray().also { array -> planHistory.forEach { array.put(stepsJson(it)) } })
+        .put("paused", paused)
         .put("events", JSONArray().also { array -> events.forEach { array.put(it.toJson()) } })
         .put("traceId", traceId ?: JSONObject.NULL)
         .put("nativeTools", nativeTools)
@@ -75,6 +85,16 @@ data class Mission(
     companion object {
         const val SCHEMA = "cyclone-mission-v1"
         const val MAX_EVENTS = 60
+
+        fun stepsJson(steps: List<MindPlanStep>): JSONArray = JSONArray().also { array ->
+            steps.forEach { array.put(JSONObject().put("step", it.text).put("status", it.status).put("note", it.note ?: JSONObject.NULL).put("branch", it.branch)) }
+        }
+
+        fun steps(array: JSONArray?): List<MindPlanStep> = array?.let { a ->
+            (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let {
+                MindPlanStep(it.optString("step"), it.optString("status"), it.optString("note").takeUnless { _ -> it.isNull("note") || it.optString("note").isBlank() },
+                    it.optBoolean("branch")) } }
+        }.orEmpty()
 
         fun fromJson(json: JSONObject): Mission {
             val usage = json.optJSONObject("usage")
@@ -91,9 +111,11 @@ data class Mission(
                 usage = MindUsage(usage?.optInt("prompt") ?: 0, usage?.optInt("completion") ?: 0, usage?.optDouble("cost", 0.0) ?: 0.0),
                 summary = json.optString("summary"),
                 evidence = json.optString("evidence"),
-                plan = json.optJSONArray("plan")?.let { array ->
-                    (0 until array.length()).mapNotNull { i -> array.optJSONObject(i)?.let { MindPlanStep(it.optString("step"), it.optString("status")) } }
-                }.orEmpty(),
+                plan = steps(json.optJSONArray("plan")),
+                planVersion = json.optInt("planVersion", 1).coerceAtLeast(1),
+                planLabel = json.optString("planLabel").takeUnless { json.isNull("planLabel") || it.isBlank() },
+                planHistory = json.optJSONArray("planHistory")?.let { a -> (0 until a.length()).map { steps(a.optJSONArray(it)) } }.orEmpty(),
+                paused = json.optBoolean("paused"),
                 events = json.optJSONArray("events")?.let { array ->
                     (0 until array.length()).mapNotNull { i -> array.optJSONObject(i)?.let(MissionEvent::fromJson) }
                 }.orEmpty(),

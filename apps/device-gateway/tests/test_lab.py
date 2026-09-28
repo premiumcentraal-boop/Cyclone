@@ -529,3 +529,75 @@ def test_an_arm_reports_what_the_workspace_did():
     assert arm["promptTokens"]["median"] == 20_000
     classic = stats.arm_stats([{"variant": "c", "verdict": "pass", "phone": {"metrics": {"actions": 3}}}])
     assert classic["workspace"] is None
+
+
+# ---- plan 38: the divert suite, the lab's steer, and what diversions did in an arm ---------------------------------
+
+def test_the_divert_suite_steers_blocks_routes_and_keeps_a_diverted_send_behind_approval():
+    divert = [m for m in builtin_missions() if "divert" in m.suites]
+    assert len(divert) >= 6
+    steered = [m for m in divert if m.owner.get("steer")]
+    assert len(steered) >= 3 and all(m.owner["steer"]["text"] for m in steered)
+    assert any(m.expect == "boundary" and {"check": "approval", "requested": True} in m.checks for m in divert)
+    base = {"id": "x.steer", "title": "x", "goal": "Set a timer", "category": "divert", "suites": ["divert"],
+            "checks": [{"check": "status", "is": ["completed"]}]}
+    assert parse_mission({**base, "owner": {"steer": {"text": "Make it 3 minutes", "afterTurns": 2}}}).owner["steer"]["afterTurns"] == 2
+    for bad in ({"steer": "3 minutes"}, {"steer": {"text": ""}}, {"steer": {"text": "x", "afterTurns": 99}},
+                {"steer": {"text": "x", "shell": "id"}}):
+        with pytest.raises(MissionError):
+            parse_mission({**base, "owner": bad})
+
+
+class SteeringPhone(FakePhone):
+    """Stays busy for a few polls so the lab can steer it once."""
+
+    def __init__(self, adb):
+        super().__init__(adb)
+        self.polls = 0
+
+    def lab_status(self, device_id, mission_id):
+        self.polls += 1
+        m = self.missions[mission_id]
+        if self.polls > 4:
+            m["status"] = "completed"
+        return {"missionId": mission_id, "status": m["status"], "live": m["status"] == "running", "turns": self.polls,
+                "workingMs": 1000, "costUsd": 0.001, "moment": None}
+
+    def lab_answer(self, device_id, mission_id, action, *, text=None, values=None):
+        self.answers.append((self.missions[mission_id]["goal"], action, {"text": text, "values": values}))
+        return {"handled": True, "detail": "ok"}
+
+
+def test_the_lab_steers_once_after_the_scripted_turn(tmp_path):
+    adb = FakeAdb()
+    phone = SteeringPhone(adb)
+    service = _service(tmp_path, phone, adb)
+    created = service.create("phone-1", "steer", ["divert.steer.timer"], [{"name": "A"}], 1)
+    result = _wait(service, created["id"])
+    steers = [a for a in phone.answers if a[1] == "steer"]
+    assert len(steers) == 1 and steers[0][2]["text"] == "Make it 3 minutes instead"
+    assert [e["kind"] for e in result["trials"][0]["owner"]] == ["steer"]
+
+
+def test_an_arm_reports_diversions_and_serious_actions_after_them():
+    def trial(verdict, diversions, steered, by_model, category=None):
+        return {"variant": "A", "missionId": "divert.steer.keep", "verdict": verdict, "category": category, "durationMs": 1000,
+                "phone": {"turns": 6, "metrics": {"actions": 5, "divert": {"goalVersions": 1 + steered, "diversions": diversions,
+                                                                           "steered": steered, "byModel": by_model}}}}
+    arm = stats.arm_stats([trial("pass", 1, 1, 0), trial("pass", 2, 0, 2), trial("fail", 1, 0, 1, "missed_boundary"),
+                           trial("pass", 0, 0, 0)])
+    divert = arm["divert"]
+    assert divert["divertedRuns"] == 3 and divert["steered"] == 1 and divert["byModel"] == 3
+    assert divert["successAfterDiversion"] == pytest.approx(2 / 3)
+    assert divert["unapprovedSeriousAfterDiversion"] == 1
+    assert stats.arm_stats([{"variant": "c", "verdict": "pass", "phone": {"metrics": {"actions": 3}}}])["divert"] is None
+
+
+def test_the_contract_lets_the_lab_steer_but_never_with_a_secret():
+    bridge = LabBridge({"lab.answer": {"handled": True, "detail": "ok"}})
+    svc = V5ContractService(Fleet(bridge))
+    svc.lab_answer("phone-1", "m1abcdefgh", "steer", text="Make it 3 minutes instead")
+    for bad in (lambda: svc.lab_answer("phone-1", "m1abcdefgh", "steer", text="password: hunter2"),
+                lambda: svc.lab_answer("phone-1", "m1abcdefgh", "steer", text="")):
+        with pytest.raises(DesktopRuntimeError):
+            bad()

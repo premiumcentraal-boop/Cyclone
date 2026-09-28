@@ -113,6 +113,8 @@ internal class AndroidMindOwner(
     private val onHuman: (String?) -> Unit = {},
     /** Plan 37: diversions and memory updates are also kept as mission events. */
     private val onEvent: (String) -> Unit = {},
+    /** Plan 38: the plan diverted; the card shows version, label and earlier plans. */
+    private val onPlanVersion: (Int, String?, List<List<MindPlanStep>>) -> Unit = { _, _, _ -> },
 ) : MindOwnerPort {
     /** The overlay and task-card session of this mission; GATE grants are bound to it. */
     private val overlaySession = "mission-$missionId"
@@ -361,6 +363,8 @@ internal class AndroidMindOwner(
 
     override fun status(text: String) = onStatus(text)
     override fun plan(steps: List<MindPlanStep>) = onPlan(steps)
+
+    override fun planVersion(version: Int, label: String?, history: List<List<MindPlanStep>>) = onPlanVersion(version, label, history)
 
     override fun diverted(from: String, to: String, why: String) {
         val text = "Mission diverted: $from → $to" + if (why.isNotBlank()) " — $why" else ""

@@ -185,10 +185,13 @@ class MissionMetrics(private val clock: () -> Long = System::currentTimeMillis) 
 
     /** Plan 37: the mission workspace's record (stays, checks, diversions, done checks), when the mission has one. */
     @Volatile var workspace: (() -> JSONObject?)? = null
+    /** Plan 38: plan versions, steers and the model's diversions. */
+    @Volatile var divert: (() -> JSONObject?)? = null
 
     fun toJson(): JSONObject = synchronized(lock) {
         JSONObject()
             .put("workspace", workspace?.let { runCatching { it() }.getOrNull() } ?: JSONObject.NULL)
+            .put("divert", divert?.let { runCatching { it() }.getOrNull() } ?: JSONObject.NULL)
             .put("schema", SCHEMA)
             .put("turns", turns)
             .put("toolCalls", JSONObject(calls as Map<*, *>))

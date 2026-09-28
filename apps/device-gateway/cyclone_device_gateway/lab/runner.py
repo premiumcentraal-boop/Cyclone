@@ -362,6 +362,7 @@ class LabService:
         deadline = self.clock() + mission.minutes * 60 + 30
         answered: set[str] = set()
         stopped: str | None = None
+        steer = mission.owner.get("steer")
         while True:
             self.sleep(self.poll_seconds)
             try:
@@ -373,6 +374,14 @@ class LabService:
             if not status["live"]:
                 return stopped
             self._current(experiment, trial, f"working · {status['turns']} turns", status)
+            if steer and int(status.get("turns") or 0) >= int(steer.get("afterTurns", 1)):
+                # Plan 38: the lab changes the task mid-run, like an owner using Steer in the Ask bar.
+                owner_log.append({"kind": "steer", "action": "steer", "at": int(self.clock() * 1000), "fields": []})
+                try:
+                    self.contract.lab_answer(device, mission_id, "steer", text=steer["text"])
+                except DesktopRuntimeError:
+                    pass
+                steer = None
             moment = status.get("moment")
             if moment:
                 key = moment.get("requestId") or f"{moment['kind']}:{moment['text']}"

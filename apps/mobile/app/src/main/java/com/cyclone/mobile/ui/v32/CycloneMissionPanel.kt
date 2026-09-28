@@ -1,5 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -46,14 +47,8 @@ fun CycloneLiveMissionCard(mission: Mission) {
                 color = MaterialTheme.colorScheme.primary)
             Text(mission.goal, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium,
                 maxLines = 3, overflow = TextOverflow.Ellipsis)
-            if (mission.plan.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    mission.plan.forEach { step ->
-                        Text("${planMark(step.status)}  ${step.text}", style = MaterialTheme.typography.bodySmall,
-                            color = if (step.status == "done") MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-            }
+            // Plan 38: the plan with its branch after a diversion (struck dropped steps, the new route, "See v1").
+            CyclonePlanView(mission)
             mission.events.takeLast(3).forEach { event ->
                 Text((if (event.ok) "· " else "! ") + event.text, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -62,6 +57,10 @@ fun CycloneLiveMissionCard(mission: Mission) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                 // Planes (plan 25): the same pill as on the overlay.
                 com.cyclone.mobile.ui.overlay.PlanePill()
+                // Plan 38: a real pause (the mission holds at its next step) and Resume, through Task Kit.
+                TextButton(onClick = { com.cyclone.mobile.task.TaskCommands.send(context, "mission-${mission.id}",
+                        if (mission.paused) com.cyclone.mobile.task.TaskCommand.Unpause else com.cyclone.mobile.task.TaskCommand.Pause) },
+                    shape = RoundedCornerShape(18.dp), modifier = Modifier.heightIn(min = 48.dp)) { Text(if (mission.paused) "Resume" else "Pause") }
                 TextButton(onClick = { com.cyclone.mobile.task.TaskCommands.send(context, "mission-${mission.id}", com.cyclone.mobile.task.TaskCommand.Stop) }, shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Stop the mission" }) { Text("Stop") }
             }
@@ -77,17 +76,24 @@ fun CycloneLiveMissionCard(mission: Mission) {
 fun CycloneBehindMissions() {
     val context = LocalContext.current
     val behind by MindMissions.behind.collectAsState()
+    val viewed by com.cyclone.mobile.task.AskWhileWorking.viewed.collectAsState()
     if (behind.isEmpty()) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Behind your screen", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp))
         behind.forEach { mission ->
+            // Plan 38 (D7): opening a row makes it the task the Ask bar steers; tapping it again goes back to the front task.
+            val open = viewed == "mission-${mission.id}"
             CycloneSignatureCard(modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+                Row(Modifier.fillMaxWidth().clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                        com.cyclone.mobile.task.AskWhileWorking.view(if (open) null else "mission-${mission.id}")
+                    }.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(mission.goal, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(statusLabel(mission), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(statusLabel(mission) + if (open) " · the Ask bar changes this task" else "", style = MaterialTheme.typography.bodySmall,
+                            color = if (open) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (open) CyclonePlanView(mission)
                     }
                     TextButton(onClick = { com.cyclone.mobile.task.TaskCommands.send(context, "mission-${mission.id}", com.cyclone.mobile.task.TaskCommand.Stop) },
                         shape = RoundedCornerShape(18.dp), modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Stop this task" }) { Text("Stop") }
@@ -132,13 +138,6 @@ fun CycloneRecentMissions(limit: Int = 4) {
             }
         }
     }
-}
-
-private fun planMark(status: String) = when (status) {
-    "done" -> "✓"
-    "doing" -> "›"
-    "skipped" -> "–"
-    else -> "○"
 }
 
 private fun statusLabel(mission: Mission): String = when (mission.status) {

@@ -27,9 +27,16 @@ data class MindValuesReply(
     val waitedMs: Long = 0,
 )
 
-data class MindPlanStep(val text: String, val status: String) {
+/**
+ * A plan step as the owner sees it. Plan 38: after a diversion the plan card shows the step it replaced as `dropped`
+ * (struck through) and the new steps as [branch] rows; [note] is why ("Her DMs are closed", "You changed this").
+ */
+data class MindPlanStep(val text: String, val status: String, val note: String? = null, val branch: Boolean = false) {
+    val dropped: Boolean get() = status == DROPPED
+
     companion object {
         val STATUSES = listOf("todo", "doing", "done", "skipped")
+        const val DROPPED = "dropped"
     }
 }
 
@@ -56,6 +63,8 @@ interface MindOwnerPort {
     fun fill(reason: String, fields: List<MindValueField>, timeoutMs: Long): MindValuesReply = MindValuesReply(MindValuesOutcome.DECLINED)
     fun status(text: String) {}
     fun plan(steps: List<MindPlanStep>) {}
+    /** Plan 38: the plan card after a diversion: the version, its label and every version so far (for "See v1"). */
+    fun planVersion(version: Int, label: String?, history: List<List<MindPlanStep>>) {}
     /** Plan 37 §6: the mission changed course; the owner sees what it was, what it is now and why. */
     /** Plan 37 W3: a memory was added or changed; the owner sees it like "Memory updated" in a chat app. */
     fun memoryUpdated(text: String) { status("Memory updated: ${text.take(160)}") }

@@ -23,6 +23,8 @@ object MindPrompt {
         appendLine("- An app with a manual also shows \"Manual of …\" lines: things you can do (a1, a2…) with their path. abilities_find searches it for a goal and how_to_find says how to find one item in a list. go_to with ability=a3 walks the safe part (open, menus, tabs) and hands back; choosing, typing and confirming stay yours, with the usual approvals.")
         appendLine("- To write into a box: tap it, then type_text. If its ref is refused, tap_point on it and type_text with focused=true. Write a long message once and reuse the same text on a retry; do not rewrite it. Typing never sends: press send yourself when the mission asks for it.")
         appendLine("- For longer missions keep a short plan with plan_update and update it as steps finish.")
+        appendLine("- Plans change. When a step is blocked or something new comes up, decide yourself and change course: plan_update with divert (from, to, why); the owner sees it. Only serious actions (paying, sending, deleting, granting, signing in, posting) ask the owner, at that action.")
+        appendLine("- The owner may change the task while you work (\"The owner changed the task (goal v2)…\"). Follow the newest goal: re-plan with plan_update right away, keep what still fits, drop what it replaces.")
         appendLine()
         appendLine("## Memory")
         appendLine("- This conversation is your working memory, but old screens are shortened to one line after a while. When you read something you will need later (a name, a number, an address, a result), write it down with note.")
@@ -115,10 +117,18 @@ object MindPrompt {
             "step; look at the screen before acting."
 
     fun repeatedFailure(tool: String, times: Int): String =
-        "Harness note: $tool with these exact arguments has now failed $times times in a row. Doing it again will not help; try another way."
+        "Harness note: $tool with these exact arguments has now failed $times times in a row. Doing it again will not help; try another way. " +
+            "If this route is blocked, change course: plan_update with divert, then continue."
 
     const val COMPACTED =
         "Harness note: older screens in this conversation have now been shortened to one line each. Your plan, your notes and your own messages are intact; look at the screen again if you need details."
+
+    /** Plan 38: the owner's steer: a new version of the goal the plan must follow. */
+    fun steered(text: String, version: Int): String =
+        "The owner changed the task (goal v$version): \"${text.trim()}\"\nThis replaces whatever in the goal it contradicts. " +
+            "Update your plan now with plan_update (divert from what you were doing), then carry on with the new goal."
+
+    const val PAUSED = "Harness note: the owner paused the mission and has now resumed it. The phone may have changed; look at the screen before acting."
 
     fun rememberAsked(asked: String): String =
         "Harness note: the owner asked you to remember: \"${asked.trim()}\". Save it with remember now (it is kept for future missions), then carry on."

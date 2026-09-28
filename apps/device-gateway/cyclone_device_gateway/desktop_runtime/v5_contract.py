@@ -919,7 +919,7 @@ LAB_MISSION_ID = re.compile(r"^m[a-z0-9]{6,40}$")
 LAB_RUN_ID = re.compile(r"^[A-Za-z0-9_-]{6,80}$")
 LAB_STATUSES = frozenset({"running", "waiting", "completed", "gave_up", "failed", "cancelled", "paused", "interrupted"})
 LAB_MOMENT_KINDS = frozenset({"question", "values", "approval", "secret", "handover"})
-LAB_ANSWERS = frozenset({"reply", "fill", "decline", "stop"})
+LAB_ANSWERS = frozenset({"reply", "fill", "decline", "stop", "steer"})
 LAB_RECORD_KEYS = frozenset({
     "missionId", "goal", "status", "live", "summary", "evidence", "turns", "workingMs", "resumes", "createdAt",
     "updatedAt", "modelId", "modelLabel", "usage", "traceId", "lab", "metrics", "events", "app",
@@ -1542,11 +1542,12 @@ class V5ContractService:
 
     def lab_answer(self, device_id: str, mission_id: str, action: str, *, text: str | None = None,
                    values: dict[str, str] | None = None) -> dict[str, Any]:
-        """The lab plays the owner: reply, fill, decline or stop. It never approves and never sends a secret."""
+        """The lab plays the owner: reply, fill, decline, stop or steer (plan 38: change the task mid-run). It never
+        approves and never sends a secret."""
         if action not in LAB_ANSWERS:
-            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "The lab can reply, fill, decline or stop; it never approves.")
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "The lab can reply, fill, decline, stop or steer; it never approves.")
         args: dict[str, Any] = {"missionId": _lab_mission(mission_id), "action": action}
-        if action == "reply":
+        if action in {"reply", "steer"}:
             if not isinstance(text, str) or not text.strip() or len(text) > 500 or INLINE_SECRET.search(text):
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "A lab reply is 1..500 characters without secrets.")
             args["text"] = text.strip()

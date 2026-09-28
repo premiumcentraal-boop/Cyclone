@@ -34,7 +34,11 @@ class TaskKitTest {
         assertEquals(TaskCommand.Confirm("t1"), TaskCommand.parse("confirm", "t1"))
         assertEquals(null, TaskCommand.parse("explode"))
         // Commands that carry what the owner typed only parse with that input; nothing blank reaches an engine.
-        TaskCommand.ALL.filterNot { it is TaskCommand.Reply || it is TaskCommand.Fill }.forEach { assertNotNull(it.wire, TaskCommand.parse(it.wire)) }
+        val typed = setOf(TaskCommand.Reply::class, TaskCommand.Fill::class, TaskCommand.Steer::class, TaskCommand.Queue::class, TaskCommand.Parallel::class)
+        TaskCommand.ALL.filterNot { it::class in typed }.forEach { assertNotNull(it.wire, TaskCommand.parse(it.wire)) }
+        // Plan 38: Steer, Queue and Parallel carry the owner's text too; blank never reaches an engine.
+        listOf("steer", "queue", "parallel").forEach { assertEquals(null, TaskCommand.parse(it, text = "  ")) }
+        assertEquals(TaskCommand.Steer("make it 3 minutes"), TaskCommand.parse("steer", text = " make it 3 minutes "))
         assertEquals(null, TaskCommand.parse("reply", text = "   "))
         assertEquals(TaskCommand.Reply("the blue one"), TaskCommand.parse("reply", text = " the blue one "))
         assertEquals(null, TaskCommand.parse("fill"))

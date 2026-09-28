@@ -116,6 +116,8 @@ internal fun OverlayAppleComposerBar(
     onStopDictation: () -> Unit = {},
     onPrimary: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Plan 38: typed text sent while Cyclone works opens the Steer / Queue / Parallel list (null: not offered). */
+    onSendWhileWorking: (() -> Unit)? = null,
 ) {
     // Plan 27: the Ask bar on tilt-lit glass. Round controls carry the lit edge; the words sit on one soft pill that
     // fills the space between + and the voice button; the voice button becomes the glowing orb only while listening.
@@ -135,7 +137,9 @@ internal fun OverlayAppleComposerBar(
                 textStyle = TextStyle(color = SignatureInk, fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal),
                 cursorBrush = SolidColor(OverlayBlue),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (!working && text.isNotBlank()) onPrimary() }),
+                keyboardActions = KeyboardActions(onSend = {
+                    if (text.isNotBlank()) { if (!working) onPrimary() else onSendWhileWorking?.invoke() }
+                }),
                 modifier = Modifier.weight(1f).focusRequester(focusRequester)
                     .onFocusChanged { onFocusChanged(it.isFocused) }
                     .heightIn(min = 46.dp).veilPill().padding(horizontal = 18.dp, vertical = 12.dp)
@@ -153,7 +157,7 @@ internal fun OverlayAppleComposerBar(
                 description = if (voiceListening) "Listening. Tap to stop" else "Dictate request. Tap, or hold while you speak",
                 onStart = onDictate, onStop = onStopDictation,
             ) { tint -> SignatureIcon(SignatureGlyph.MIC, color = tint) }
-            OverlayRequestAction(working, paused, taskKey, text.isNotBlank(), onPrimary, onPause, onStop)
+            OverlayRequestAction(working, paused, taskKey, text.isNotBlank(), onPrimary, onPause, onStop, onSendWhileWorking)
         }
     }
 }
@@ -272,7 +276,20 @@ internal fun OverlayAppleStatusPill(
 internal fun OverlayRequestAction(
     working: Boolean, paused: Boolean, taskKey: String, canSend: Boolean,
     onSend: () -> Unit, onPauseOrResume: () -> Unit, onStop: () -> Unit,
+    onSendWhileWorking: (() -> Unit)? = null,
 ) {
+    // Plan 38: with typed text the button is Send even while working (it opens the options); empty, it is pause and
+    // the two-tap stop.
+    if (working && canSend && onSendWhileWorking != null) {
+        Box(Modifier.size(46.dp).clip(CircleShape)
+            .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color.White.copy(alpha = .07f), Color.White.copy(alpha = .02f))))
+            .litRim()
+            .clickable(role = Role.Button, onClick = onSendWhileWorking)
+            .semantics { contentDescription = "Send. Choose steer, queue or parallel" }, contentAlignment = Alignment.Center) {
+            SignatureIcon(SignatureGlyph.SEND, color = SignatureInk)
+        }
+        return
+    }
     val gesture = remember(taskKey, working) { ComposerStopGesture() }
     val pauseState by rememberUpdatedState(paused)
     val pauseAction by rememberUpdatedState(onPauseOrResume)

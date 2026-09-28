@@ -375,6 +375,28 @@ private fun ComposerPanel(
     // Plan 27: folded while working, the Ask bar becomes the island with the live status.
     val island = minimized && activeWork
     val mindTaskId = task?.taskId?.takeIf { it.startsWith(com.cyclone.mobile.task.TaskEngines.MIND_TASK_PREFIX) }
+    // Plan 38: while a Mind mission runs, typed text + send offers Steer / Queue / Parallel for the task on this card
+    // (D7), and the empty bar's button is the real pause (the mission holds at its next step) and the two-tap stop.
+    val mindLive by com.cyclone.mobile.mind.mission.MindMissions.live.collectAsState()
+    val mindTask = mindTaskId ?: mindLive?.let { "mission-${it.id}" }
+    val mindPaused = mindLive?.paused == true
+    var askOptions by remember { mutableStateOf<List<com.cyclone.mobile.task.AskWhileWorking.Option>?>(null) }
+    LaunchedEffect(mindTask) { if (mindTask == null) askOptions = null }
+    val sendWhileWorking: (() -> Unit)? = mindTask?.let { id -> {
+        focusManager.clearFocus()
+        keyboard?.hide()
+        askOptions = com.cyclone.mobile.mind.mission.MindMissions.askOptions(context, id, snapshot.composerText)
+    } }
+    val chooseAsk: (com.cyclone.mobile.task.AskWhileWorking.Choice) -> Unit = { choice ->
+        val text = snapshot.composerText
+        askOptions = null
+        val target = com.cyclone.mobile.mind.mission.MindMissions.viewedTaskId(mindTask)
+        if (target != null && text.isNotBlank()) {
+            val result = com.cyclone.mobile.task.TaskCommands.send(context, target, com.cyclone.mobile.task.AskWhileWorking.command(choice, text))
+            if (result.handled) onComposerChanged("")
+            else android.widget.Toast.makeText(context, result.detail, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
     val islandSnapshot = task?.let { remember(it) { com.cyclone.mobile.runtime.background.TaskPresentationProjector.project(it) } }
     // After the owner moves the task behind the screen, the stack settles into the island (their home screen shows).
     val planeState by com.cyclone.mobile.runtime.plane.MissionPlanes.ui.collectAsState()
@@ -431,30 +453,44 @@ private fun ComposerPanel(
                         appPackage = if (task != null) WorkingApp.forTask(task.taskId, task.packageName) else foregroundApp,
                         lines = lines,
                         fraction = islandSnapshot?.progressFraction,
-                        working = foregroundWorking || task?.working == true || snapshot.userPaused,
-                        paused = snapshot.userPaused,
-                        taskKey = snapshot.sessionId,
+                        working = foregroundWorking || task?.working == true || snapshot.userPaused || mindTask != null,
+                        paused = if (mindTask != null) mindPaused else snapshot.userPaused,
+                        taskKey = mindTask ?: snapshot.sessionId,
                         onOpen = { onAction(OverlayUserAction.ASK_CYCLONE) },
-                        onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
+                        onPause = {
+                            if (mindTask != null) com.cyclone.mobile.task.TaskCommands.send(context, mindTask,
+                                if (mindPaused) com.cyclone.mobile.task.TaskCommand.Unpause else com.cyclone.mobile.task.TaskCommand.Pause)
+                            else onAction(OverlayUserAction.TAKE_CONTROL)
+                        },
                         onStop = { onAction(OverlayUserAction.STOP_TASK) },
                     )
                 } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    askOptions?.takeIf { snapshot.composerText.isNotBlank() }?.let { options ->
+                        com.cyclone.mobile.ui.v32.CycloneAskOptions(options, chooseAsk, ink = com.cyclone.mobile.ui.v32.SignatureInk, accent = Color(0xFF83DBD7),
+                            surface = Color(0xE6141A22))
+                    }
                     OverlayAppleComposerBar(
                         text = snapshot.composerText,
                         onTextChanged = onComposerChanged,
                         focusRequester = focusRequester,
-                        onFocusChanged = {},
+                        onFocusChanged = { focused -> if (focused) askOptions = null },
                         placeholder = when {
                             snapshot.voiceListening -> OverlayCopy.LISTENING
                             else -> OverlayCopy.COMPOSER
                         },
                         menuOpen = accessory != ComposerAccessory.NONE,
                         voiceListening = snapshot.voiceListening,
-                        working = foregroundWorking || snapshot.userPaused,
-                        paused = snapshot.userPaused,
-                        taskKey = snapshot.sessionId,
-                        onPause = { onAction(OverlayUserAction.TAKE_CONTROL) },
+                        working = foregroundWorking || snapshot.userPaused || mindTask != null,
+                        paused = if (mindTask != null) mindPaused else snapshot.userPaused,
+                        taskKey = mindTask ?: snapshot.sessionId,
+                        onPause = {
+                            if (mindTask != null) com.cyclone.mobile.task.TaskCommands.send(context, mindTask,
+                                if (mindPaused) com.cyclone.mobile.task.TaskCommand.Unpause else com.cyclone.mobile.task.TaskCommand.Pause)
+                            else onAction(OverlayUserAction.TAKE_CONTROL)
+                        },
                         onStop = { onAction(OverlayUserAction.STOP_TASK) },
+                        onSendWhileWorking = sendWhileWorking,
                         onMenu = {
                             focusManager.clearFocus()
                             keyboard?.hide()
@@ -466,6 +502,7 @@ private fun ComposerPanel(
                             if (!foregroundWorking && !snapshot.userPaused && snapshot.composerText.isNotBlank()) submit()
                         },
                     )
+                    }
                 }
             }
         },
@@ -477,6 +514,15 @@ private fun ComposerPanel(
                     task != null -> OverlayWorkCard(task, minimize)
                     else -> OverlayForegroundCard(snapshot, minimize) { onAction(OverlayUserAction.STOP_TASK) }
                 }
+            }
+        }
+        // Plan 38 §4: after a diversion the card shows the branch: "Plan v2 · Changed course", the dropped step struck
+        // through and the new route with its reason. Nothing shows while the plan has not changed.
+        mindLive?.takeIf { mindTaskId == "mission-${it.id}" && it.planVersion > 1 }?.let { mission ->
+            Box(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                .background(Color(0xB3141A22)).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                com.cyclone.mobile.ui.v32.CyclonePlanView(mission, compact = true, ink = com.cyclone.mobile.ui.v32.SignatureInk,
+                    dim = com.cyclone.mobile.ui.v32.SignatureInk.copy(alpha = .62f), accent = Color(0xFF83DBD7))
             }
         }
         if (queued.isNotEmpty()) CyclonePendingRequests { onAction(OverlayUserAction.MINIMIZE) }

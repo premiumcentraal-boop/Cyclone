@@ -83,6 +83,12 @@ object MindMissions {
         @Volatile var stopRequested = false
         val cancellation = ProviderCancellation()
         val ownerMessages = ConcurrentLinkedQueue<String>()
+        /** Plan 38: the owner's steers; each becomes a new goal version at the next step. */
+        val steers = ConcurrentLinkedQueue<String>()
+        /** Plan 38: paused by the owner; the loop holds before its next step. */
+        @Volatile var paused = false
+        /** Saves a change to the mission (set while it runs). */
+        @Volatile var saver: (((Mission) -> Mission) -> Unit)? = null
         @Volatile var thread: Thread? = null
         @Volatile var planes: com.cyclone.mobile.runtime.plane.MissionPlaneSession? = null
         @Volatile var metrics: com.cyclone.mobile.mind.lab.MissionMetrics? = null
@@ -324,6 +330,91 @@ object MindMissions {
 
     private fun frontRun(): Run? = synchronized(lock) { runs.values.firstOrNull { it.front && it.thread?.isAlive == true } }
 
+    // ---- plan 38 (alpha.68): steer, queue, parallel, pause ------------------------------------------------------------
+
+    /** The task the owner is viewing, or the front task. */
+    private fun viewed(missionId: String?): Run? = synchronized(lock) { missionId?.let { runs[it] } } ?: frontRun()
+
+    /**
+     * Steer: the owner changes the task they are viewing. An open question of that task takes it as the answer;
+     * otherwise it is a new goal version the mission re-plans for at its next step. Never asked back.
+     */
+    fun steerTask(missionId: String?, text: String): Boolean {
+        val run = viewed(missionId) ?: return false
+        val clean = text.trim().take(2_000)
+        if (clean.isBlank()) return false
+        inbox.openFor(run.id)?.takeIf { it.kind == OwnerRequestKind.QUESTION }?.let { request ->
+            if (inbox.respond(request.id, OwnerResponse.Answer(clean))) return true
+        }
+        run.steers += clean
+        if (run.paused) run.paused = false
+        return true
+    }
+
+    /** Queue: the text runs as its own task after the current one ends. Returns its goal, or null when it can't. */
+    fun queueTask(context: Context, text: String): String? {
+        val next = queue(context).add(text) ?: return null
+        frontCard { it.copy(message = "Next: ${next.goal.take(80)}") }
+        return next.goal
+    }
+
+    /** Why a task can't start at the same time right now, or null when it can (behind the screen, or in front when idle). */
+    fun parallelBlocker(context: Context, text: String): String? {
+        if (!isLive()) return null
+        return when (val admit = admission(context, text.trim().take(2_000))) {
+            is Crew.Admit.Behind, Crew.Admit.Front -> null
+            is Crew.Admit.Queue -> admit.reason
+        }
+    }
+
+    /** Parallel: the text starts now as its own task, behind the screen. Null when it started, else why not. */
+    fun parallelTask(context: Context, text: String): String? {
+        val goal = text.trim().take(2_000)
+        if (goal.isBlank()) return "The task is empty."
+        if (!isLive()) return if (start(context, goal)) null else "Cyclone could not start it."
+        parallelBlocker(context, goal)?.let { return it }
+        val now = System.currentTimeMillis()
+        return if (launch(context.applicationContext, Mission(newId(), goal, MissionStatus.RUNNING, now, now, "", ""), resume = null,
+                attachment = null, front = false)) {
+            frontCard { it.copy(message = "Also working behind your screen: ${goal.take(80)}") }
+            null
+        } else "Cyclone could not start it."
+    }
+
+    /** Pause: the mission holds before its next step. The screen and app stay as they are. */
+    fun pause(context: Context, missionId: String?): Boolean {
+        val run = viewed(missionId) ?: return false
+        if (run.paused) return true
+        run.paused = true
+        run.saver?.invoke { it.copy(paused = true, status = MissionStatus.WAITING, waitingFor = "Paused") }
+        card(context, run) { it.copy(phase = com.cyclone.mobile.runtime.background.TaskPhase.PAUSED, message = "Paused. Tap Resume to continue.") }
+        return true
+    }
+
+    fun unpause(context: Context, missionId: String?): Boolean {
+        val run = viewed(missionId) ?: return false
+        if (!run.paused) return false
+        run.paused = false
+        run.saver?.invoke { it.copy(paused = false, status = MissionStatus.RUNNING, waitingFor = null) }
+        card(context, run) { it.copy(phase = com.cyclone.mobile.runtime.background.TaskPhase.WORKING, message = "Continuing.") }
+        return true
+    }
+
+    fun isPaused(missionId: String?): Boolean = viewed(missionId)?.paused == true
+
+    /** The Task Kit id of the task the owner is viewing ([taskId] when it still runs), or the front task; null when none. */
+    fun viewedTaskId(taskId: String?): String? = viewed(taskId?.removePrefix("mission-"))?.taskId
+
+    /**
+     * Plan 38: the rows the Ask bar offers for [text] while the viewed task works. Answer replaces Steer when that task
+     * waits on a question; Parallel is greyed with the reason when it can't start now; the highlight is only a hint.
+     */
+    fun askOptions(context: Context, taskId: String?, text: String): List<com.cyclone.mobile.task.AskWhileWorking.Option> {
+        val run = viewed(taskId?.removePrefix("mission-"))
+        val question = run?.let { inbox.openFor(it.id) }?.takeIf { it.kind == OwnerRequestKind.QUESTION }?.text
+        return com.cyclone.mobile.task.AskWhileWorking.options(question, parallelBlocker(context, text), MissionQueue.isNewTask(text))
+    }
+
     /**
      * Owner text while a mission runs: it answers the front mission's open question, or joins its conversation as a
      * new instruction the model reads at its next turn.
@@ -468,6 +559,7 @@ object MindMissions {
             if (run.front) liveState.value = next else synchronized(lock) { publishBehind() }
             runCatching { missions.save(next) }
         }
+        run.saver = ::save
         val mission0 = run.mission
         if (run.front) {
             publishTask(context, taskId, mission0)
@@ -518,7 +610,10 @@ object MindMissions {
                     human(context, run, instruction)
                     save { it.copy(status = if (instruction == null) MissionStatus.RUNNING else MissionStatus.WAITING, waitingFor = instruction) }
                 },
-                onEvent = { text -> save { it.withEvent(MissionEvent(System.currentTimeMillis(), text)) } })
+                onEvent = { text -> save { it.withEvent(MissionEvent(System.currentTimeMillis(), text)) } },
+                onPlanVersion = { version, label, history ->
+                    save { it.copy(planVersion = version, planLabel = label, planHistory = history.takeLast(MAX_PLAN_HISTORY)) }
+                })
             // Plan 37: a Lab arm chooses its context; the owner's missions follow the setting. Lab runs without the
             // knob stay classic, so older experiments measure the same thing.
             val workspace = if (variant?.context == com.cyclone.mobile.mind.lab.MindLabVariant.WORKSPACE ||
@@ -578,12 +673,14 @@ object MindMissions {
             val budget = MindBudget(workingMs = (variant?.workingMinutes ?: workingMinutes(context)) * 60_000L)
             val metrics = com.cyclone.mobile.mind.lab.MissionMetrics().also { run.metrics = it }
             workspace?.let { ws -> metrics.workspace = { ws.record() } }
+            metrics.divert = { toolbox.planVersions.record() }
             val listener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, missions, run.id,
                 front = { run.front },
                 updateCard = { change -> card(context, run, change) },
                 onTurn = { turn -> save { it.copy(turns = turn) } }) { event -> save { it.withEvent(event) } }))
             val loop = MindLoop(primary, backup, toolbox, budget, listener, cancelled = { run.stopRequested },
-                ownerMessages = { drainOwnerMessages(run) }, nativeTools = native, workspace = workspace)
+                ownerMessages = { drainOwnerMessages(run) }, nativeTools = native, workspace = workspace,
+                ownerSteers = { buildList { while (true) add(run.steers.poll() ?: break) } }, paused = { run.paused })
             outcome = loop.run(conversation, resume?.checkpoint())
             val result = outcome
             save {
@@ -708,6 +805,8 @@ object MindMissions {
         })
     }
 
+    private const val MAX_PLAN_HISTORY = 5
+
     private fun drainOwnerMessages(run: Run): List<String> = buildList { while (true) add(run.ownerMessages.poll() ?: break) }
 
     // ---- the task card and notification --------------------------------------------------------------------------
@@ -760,8 +859,10 @@ object MindMissions {
 
     private fun planToTask(context: Context, run: Run, steps: List<MindPlanStep>) {
         card(context, run) { task ->
-            task.copy(plannedMilestones = steps.map { it.text.take(80) },
-                plannedMilestoneIndex = steps.indexOfFirst { it.status == "doing" || it.status == "todo" }.coerceAtLeast(0))
+            // Plan 38: the overlay shows the plan as it is now; a branch step after a diversion reads "↳ …".
+            val shown = steps.filterNot { it.dropped }
+            task.copy(plannedMilestones = shown.map { (if (it.branch) "↳ " else "") + it.text.take(80) },
+                plannedMilestoneIndex = shown.indexOfFirst { it.status == "doing" || it.status == "todo" }.coerceAtLeast(0))
         }
     }
 

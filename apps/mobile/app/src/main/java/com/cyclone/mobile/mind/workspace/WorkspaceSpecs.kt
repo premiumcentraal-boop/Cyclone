@@ -37,20 +37,12 @@ object WorkspaceSpecs {
             }
             "note" -> properties.put("key", MindToolSpec.string("Optional: a short name for the fact, like address or ETA; a later note with the same key replaces it."))
             "plan_update" -> {
-                properties.optJSONObject("steps")?.optJSONObject("items")?.optJSONObject("properties")?.let { step ->
-                    step.put("app", MindToolSpec.string("Optional: the app this step happens in."))
-                    step.put("why", MindToolSpec.string("Optional: why this step, in a few words."))
-                }
+                // Plan 38: app, why and divert are part of plan_update in every run; the workspace adds done checks.
                 properties.put("done", MindToolSpec.array("Optional: how you and the owner will know the mission is done (1-5 checks).",
                     MindToolSpec.objectSchema(
                         "kind" to MindToolSpec.string("What to check.", DoneCheck.KINDS.toList()),
                         "value" to MindToolSpec.string("The words that show it, the recipient (for sent_to), or the answer."),
                         required = listOf("value"))))
-                properties.put("divert", MindToolSpec.objectSchema(
-                    "from" to MindToolSpec.string("What the plan was."),
-                    "to" to MindToolSpec.string("What it is now."),
-                    "why" to MindToolSpec.string("Why, in a few words."),
-                    required = listOf("from", "to", "why")).put("description", "Optional: say so when you change course; the owner sees it."))
             }
         }
         MindToolSpec(spec.name, spec.description, parameters)

@@ -924,4 +924,39 @@ class PhoneMindToolboxTest {
         assertTrue(stopped.text, stopped.text.startsWith("The manual walk stopped after 1 move"))
         assertEquals(listOf(false), port.walks.map { it.second })
     }
+
+    // ---- plan 38: plan versions in every run, whatever the settings ------------------------------------------------
+
+    @Test fun aDeclaredDivertBecomesPlanV2WithTheBranchTheOwnerSees() {
+        var shownVersion = 0
+        var shownLabel: String? = null
+        var diverted = ""
+        val base = FakeOwner()
+        val owner = object : MindOwnerPort by base {
+            override fun planVersion(version: Int, label: String?, history: List<List<MindPlanStep>>) { shownVersion = version; shownLabel = label }
+            override fun diverted(from: String, to: String, why: String) { diverted = "$from -> $to ($why)" }
+        }
+        val box = PhoneMindToolbox(FakeEnv(login), owner, device, "Tell Louella when I'll be there")
+        box.run("plan_update", """{"steps":[{"step":"Read her address","status":"done"},{"step":"DM her on Instagram","status":"doing"}]}""")
+        assertEquals(0, shownVersion)
+        val result = box.run("plan_update", """{"steps":[{"step":"Read her address","status":"done"},{"step":"Message her on WhatsApp","status":"doing"}],
+            "divert":{"from":"Instagram DM","to":"WhatsApp","why":"Her DMs are closed"}}""")
+        assertTrue(result.text.contains("Plan v2"))
+        assertEquals(2, shownVersion)
+        assertEquals("Changed course", shownLabel)
+        assertEquals("Instagram DM -> WhatsApp (Her DMs are closed)", diverted)
+        assertTrue(base.planned.any { it.dropped && it.text == "DM her on Instagram" })
+        assertTrue(base.planned.any { it.branch && it.note == "Her DMs are closed" })
+    }
+
+    @Test fun aSteerThatIsNeverPlannedForGetsOneFinishReminder() {
+        val box = PhoneMindToolbox(FakeEnv(login), FakeOwner(), device, "Set a timer for 5 minutes")
+        box.run("plan_update", """{"steps":[{"step":"Set 5 minutes","status":"doing"}]}""")
+        assertEquals(2, box.onSteer("Make it 3 minutes instead"))
+        val first = box.run("task_finish", """{"summary":"Timer running","evidence":"4:59"}""")
+        assertFalse(first.ok)
+        assertTrue(first.text.contains("goal v2"))
+        box.run("plan_update", """{"steps":[{"step":"Set 3 minutes","status":"done"}]}""")
+        assertEquals(1, box.planVersions.history.count { it.trigger == com.cyclone.mobile.mind.divert.PlanVersions.STEER })
+    }
 }

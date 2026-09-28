@@ -174,6 +174,8 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
     val keyboardController = LocalSoftwareKeyboardController.current
     val task by WorkspaceTasks.state.collectAsState()
     val liveMission by com.cyclone.mobile.mind.mission.MindMissions.live.collectAsState()
+    var askOptions by remember { mutableStateOf<List<com.cyclone.mobile.task.AskWhileWorking.Option>?>(null) }
+    LaunchedEffect(liveMission?.id) { if (liveMission == null) askOptions = null }
     val queuedRequests by WorkspaceTasks.requests.state.collectAsState()
     val foregroundActivity by OverlayChromeRuntime.activity.collectAsState()
     val foregroundSnapshot = remember(foregroundActivity) { OverlayChromeRuntime.snapshot() }
@@ -223,15 +225,29 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
             .apply()
     }
 
+    fun chooseAsk(choice: com.cyclone.mobile.task.AskWhileWorking.Choice) {
+        askOptions = null
+        val text = V39AiChatContract.normalizedRequest(composer)
+        val target = com.cyclone.mobile.mind.mission.MindMissions.viewedTaskId(com.cyclone.mobile.task.AskWhileWorking.viewed.value)
+        if (text.isBlank() || target == null) return
+        val result = com.cyclone.mobile.task.TaskCommands.send(context, target, com.cyclone.mobile.task.AskWhileWorking.command(choice, text))
+        if (result.handled) {
+            session.append(V39ChatRole.USER, text)
+            session.append(V39ChatRole.CYCLONE, result.detail)
+            composer = ""
+        } else message = result.detail
+    }
+
     fun submit(raw: String = composer) {
         message = ""
         val normalized = V39AiChatContract.normalizedRequest(raw)
         if (normalized.isBlank()) return
-        // One mind, one mission: while it runs, what the owner types is an answer or a new instruction for it.
-        if (com.cyclone.mobile.mind.mission.MindMissions.steer(normalized)) {
-            session.append(V39ChatRole.USER, normalized)
-            session.append(V39ChatRole.CYCLONE, "Passed to the running mission.")
-            composer = ""
+        // Plan 38: while a mission runs, the owner chooses what the text is: a change to the task they are viewing
+        // (Steer, or Answer to its question), the next task (Queue) or a task at the same time (Parallel).
+        if (com.cyclone.mobile.mind.mission.MindMissions.isLive()) {
+            drawerCollapsed = false
+            askOptions = com.cyclone.mobile.mind.mission.MindMissions.askOptions(context,
+                com.cyclone.mobile.task.AskWhileWorking.viewed.value, normalized)
             return
         }
 
@@ -466,7 +482,7 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                 label = "Ask Cyclone retraction",
             ) { minimized ->
                 if (minimized) {
-                val minimizedSendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
+                val minimizedSendEnabled = composer.isNotBlank() && liveMission != null || composer.isNotBlank() && when (previewRoute.intent) {
                     RequestIntent.PHONE_TASK -> true
                     RequestIntent.CHAT -> hasKey && !session.busy
                 }
@@ -542,10 +558,11 @@ internal fun V39AiChatPage(context: Context, refreshTick: Int, onSettings: () ->
                     TextButton(onClick = { chatJob?.cancel() }) { Text("Stop reply") }
                 }
             }
-            val sendEnabled = composer.isNotBlank() && when (previewRoute.intent) {
+            val sendEnabled = composer.isNotBlank() && liveMission != null || composer.isNotBlank() && when (previewRoute.intent) {
                 RequestIntent.PHONE_TASK -> true
                 RequestIntent.CHAT -> hasKey && !session.busy
             }
+            askOptions?.takeIf { composer.isNotBlank() }?.let { options -> CycloneAskOptions(options, ::chooseAsk) }
             // Plan 27: the same glass Ask bar as the overlay.
             GlassComposerBar(
                 text = composer,

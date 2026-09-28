@@ -31,7 +31,7 @@ internal object GatewayV5LabAdapter {
     const val MAX_GOAL = 2_000
     private val MISSION_ID = Regex("^m[a-z0-9]{6,40}$")
     private val INLINE_SECRET = Regex("(?i)(password|passcode|passwd|pin|otp|token|secret|api[_-]?key|authorization|cookie|cvv|credential)\\s*[:=]")
-    val ANSWERS = setOf("reply", "fill", "decline", "stop")
+    val ANSWERS = setOf("reply", "fill", "decline", "stop", "steer")
 
     /** Seams for JVM tests; production uses the overlay, the Mind and Task Kit. */
     internal var overlayReady: () -> Boolean = { OverlayChromeRuntime.isAttached() }
@@ -99,6 +99,10 @@ internal object GatewayV5LabAdapter {
                 ?.let { TaskCommand.Reply(it) } ?: throw invalid("reply needs text of 1..500 characters.")
             "fill" -> TaskCommand.Fill(values(args.optJSONObject("values")), remember = false)
             "decline" -> TaskCommand.Decline
+            // Plan 38: the lab changes the task mid-run, the same Steer the owner sends from the Ask bar.
+            "steer" -> (args.opt("text") as? String)?.trim()?.takeIf { it.isNotEmpty() && it.length <= 500 }
+                ?.also { if (INLINE_SECRET.containsMatchIn(it)) throw invalid("Do not put secrets in a lab answer.") }
+                ?.let { TaskCommand.Steer(it) } ?: throw invalid("steer needs text of 1..500 characters.")
             else -> TaskCommand.Stop
         }
         val result = send("mission-$id", command)

@@ -35,11 +35,19 @@ sealed class TaskCommand(val wire: String, val label: String) {
     data object AllowBackground : TaskCommand("allow_background", "Always in background")
     /** Plan 26: the mission waits for an app the owner is using; start now, on the owner's screen. */
     data object StartNow : TaskCommand("start_now", "Start now")
+    /** Plan 38: the owner changes the task they are viewing (typed in the Ask bar while Cyclone works). */
+    data class Steer(val text: String) : TaskCommand("steer", "Steer")
+    /** Plan 38: the typed text runs as its own task after this one. */
+    data class Queue(val text: String) : TaskCommand("queue", "Queue")
+    /** Plan 38: the typed text starts now as its own task, behind the screen. */
+    data class Parallel(val text: String) : TaskCommand("parallel", "Parallel")
+    /** Plan 38: a paused task continues. */
+    data object Unpause : TaskCommand("unpause", "Resume")
 
     companion object {
         // Lazy: the command objects extend this class, so they do not exist yet while its companion initializes.
         val ALL: List<TaskCommand> by lazy { listOf(Stop, TakeOver, Pause, Done, Autofill, Confirm(null), Approve, Decline, Reply(""), Fill(emptyMap(), false),
-            MoveToBackground, MoveToForeground, AllowBackground, StartNow) }
+            MoveToBackground, MoveToForeground, AllowBackground, StartNow, Steer(""), Queue(""), Parallel(""), Unpause) }
 
         fun parse(action: String?, confirmation: String? = null, text: String? = null): TaskCommand? = when (action?.trim()?.lowercase()) {
             "reply" -> text?.trim()?.takeIf { it.isNotEmpty() }?.let { Reply(it.take(2_000)) }
@@ -55,6 +63,10 @@ sealed class TaskCommand(val wire: String, val label: String) {
             "to_screen", "foreground", "screen" -> MoveToForeground
             "allow_background" -> AllowBackground
             "start_now" -> StartNow
+            "steer" -> text?.trim()?.takeIf { it.isNotEmpty() }?.let { Steer(it.take(2_000)) }
+            "queue" -> text?.trim()?.takeIf { it.isNotEmpty() }?.let { Queue(it.take(2_000)) }
+            "parallel" -> text?.trim()?.takeIf { it.isNotEmpty() }?.let { Parallel(it.take(2_000)) }
+            "unpause" -> Unpause
             else -> null
         }
     }

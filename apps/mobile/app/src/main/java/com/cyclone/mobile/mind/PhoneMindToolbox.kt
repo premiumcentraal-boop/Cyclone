@@ -91,6 +91,17 @@ class PhoneMindToolbox(
 
     override fun onOwnerMessage(text: String) = ownerSaid(text)
 
+    // ---- plan 38 (alpha.68): steers and diversions, always on ------------------------------------------------------
+    /** The mission's goal and plan versions; the owner's steers and the model's diversions land here. */
+    val planVersions = com.cyclone.mobile.mind.divert.PlanVersions(goal)
+
+    override fun onSteer(text: String): Int {
+        ownerSaid(text)
+        val next = planVersions.steer(text)
+        owner.status("You changed the task: ${text.take(120)}")
+        return next.number
+    }
+
     private fun ownerSaid(text: String) {
         ownerWords.append('\n').append(text)
         RememberIntent.detect(text)?.let {
@@ -859,7 +870,9 @@ class PhoneMindToolbox(
         // Plan 37 §6: when the owner named a recipient and this chat is another, the approval card says so.
         val chat = screen?.legacyPage?.title
         val chatApp = appLabel(screen?.packageName.orEmpty())
-        val changed = if (gated) workspace?.let { ws -> runCatching { ws.approvalNote(chat, chatApp) }.getOrNull() } else null
+        // Plan 38: after the model changed course, a serious action's approval says so (the owner's own steer needs no note).
+        val changed = if (gated) (workspace?.let { ws -> runCatching { ws.approvalNote(chat, chatApp) }.getOrNull() }
+            ?: planVersions.approvalNote()) else null
         val asked = (changed?.let { "$it " }.orEmpty()) + done.replaceFirstChar { it.lowercase() }
         val approval = if (!gated) null else if (draft != null)
             owner.awaitApproval(asked, ownerTimeoutMs, MindSend(draft, "", chatApp ?: ""))
@@ -1272,8 +1285,24 @@ class PhoneMindToolbox(
                 row.optString("app").trim().take(40).takeIf { it.isNotBlank() }, row.optString("why").trim().take(120).takeIf { it.isNotBlank() })
         }.take(20)
         plan = detailed.map { MindPlanStep(it.text, it.status) }
-        owner.plan(plan)
         val notes = mutableListOf<String>()
+        // Plan 38: every plan is versioned; a diversion (a steer, a declared divert, dropped steps) becomes plan vN.
+        val divert = arguments.optJSONObject("divert")?.let { d ->
+            val from = d.optString("from").trim()
+            val to = d.optString("to").trim()
+            if (from.isBlank() || to.isBlank()) null else com.cyclone.mobile.mind.divert.PlanVersions.Divert(from, to, d.optString("why").trim())
+        }
+        val wasSteered = planVersions.needsReplan
+        planVersions.turn = workspace?.turn ?: planVersions.turn
+        val diverted = planVersions.planned(plan, divert)
+        owner.plan(planVersions.display)
+        if (diverted) {
+            owner.planVersion(planVersions.versionNumber, planVersions.label, planVersions.earlierPlans)
+            val last = planVersions.history.last()
+            if (wasSteered) owner.status("Plan updated for your change")
+            else owner.diverted(last.from ?: "the earlier plan", last.to ?: planVersions.display.firstOrNull { it.branch }?.text ?: "a new plan", last.why.orEmpty())
+            notes += "Plan v${planVersions.versionNumber}: the owner sees what changed" + if (wasSteered) " (their change)." else "."
+        }
         workspace?.let { ws ->
             // Plan 37: never refused; every extra is optional.
             val before = ws.currentStep()?.text
@@ -1284,15 +1313,7 @@ class PhoneMindToolbox(
                 owner.status("Done when: " + done.joinToString(" · ") { it.label }.take(200))
                 notes += "Done checks kept (${done.size}); task_finish looks for them across the whole mission."
             }
-            arguments.optJSONObject("divert")?.let { divert ->
-                val from = divert.optString("from").trim()
-                val to = divert.optString("to").trim()
-                if (from.isNotBlank() && to.isNotBlank()) {
-                    val change = ws.divert(from, to, divert.optString("why"))
-                    owner.diverted(change.from, change.to, change.why)
-                    notes += "Diversion shown to the owner."
-                }
-            }
+            divert?.let { ws.divert(it.from, it.to, it.why) }
             val now = ws.currentStep()
             if (now != null && now.text != before) {
                 currentPackage()?.let { pkg -> runCatching { manualExcerpt(pkg) }.getOrNull() }?.let { notes += it }
@@ -1328,6 +1349,8 @@ class PhoneMindToolbox(
         val summary = arguments.optString("summary").trim()
         val evidence = arguments.optString("evidence").trim()
         if (summary.isBlank()) return MindToolResult.error("summary is required.")
+        // Plan 38: the owner changed the task and the plan never followed: one reminder, then any finish is accepted.
+        planVersions.finishNote()?.let { return MindToolResult(it, "finish: re-plan first", ok = false) }
         // Plan 37 W3: the owner asked to remember something and nothing was saved: one reminder, then any finish is accepted.
         rememberAsk?.takeIf { !remembered && !rememberNoted }?.let { asked ->
             rememberNoted = true
@@ -1487,9 +1510,15 @@ class PhoneMindToolbox(
             MindToolSpec("vault_fill", "Have the owner fill a secret field (password, code, card) through the Secrets Card. The value never reaches you.",
                 objectSchema("ref" to REF, "what" to string("What the field needs.", SLOTS.keys.toList()), "reason" to string("Short reason shown to the owner, e.g. Sign in to Gmail."),
                     required = listOf("ref", "what"))),
-            MindToolSpec("plan_update", "Write or update your plan for this mission. The owner sees it.",
+            MindToolSpec("plan_update", "Write or update your plan for this mission. The owner sees it. When you change course " +
+                "(a step is blocked, something new came up, the owner changed the task), say so with divert; the owner sees the change.",
                 objectSchema("steps" to array("The steps in order.", objectSchema("step" to string("What to do."),
-                    "status" to string("Progress.", MindPlanStep.STATUSES), required = listOf("step", "status"))), required = listOf("steps"))),
+                    "status" to string("Progress.", MindPlanStep.STATUSES),
+                    "app" to string("Optional: the app this step happens in."),
+                    "why" to string("Optional: why this step, in a few words."), required = listOf("step", "status"))),
+                    "divert" to objectSchema("from" to string("What the plan was."), "to" to string("What it is now."),
+                        "why" to string("Why, in a few words."), required = listOf("from", "to", "why")),
+                    required = listOf("steps"))),
             MindToolSpec("note", "Note a fact for later in this mission only.", objectSchema("text" to string("The fact."), required = listOf("text"))),
             MindToolSpec("remember", "Keep something for future missions: who a person is to the owner, the owner's preferences, which account " +
                 "to use, how the owner uses an app, what worked. Durable things only, never secrets. Always use it when the owner asks you to remember.",

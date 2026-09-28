@@ -266,6 +266,47 @@ class MindLoopTest {
         assertTrue(outcome.workingMs >= 120_000)
         assertEquals(110, outcome.usage.promptTokens)
     }
+
+    // ---- plan 38: steer and a real pause ----------------------------------------------------------------------------
+
+    @Test fun aSteerBecomesANewGoalVersionAtTheNextStep() {
+        val steers = mutableListOf("Make it 3 minutes instead")
+        var steered = ""
+        val tools = object : MindToolbox by standardTools {
+            override fun onSteer(text: String): Int { steered = text; return 2 }
+        }
+        val model = ScriptedModel("a", script = mutableListOf(reply("tap" to "{}"), reply("task_finish" to "{}")))
+        val conversation = fresh()
+        val outcome = MindLoop(model, null, tools, ownerSteers = { steers.toList().also { steers.clear() } }).run(conversation)
+        assertEquals(MindStatus.COMPLETED, outcome.status)
+        assertEquals("Make it 3 minutes instead", steered)
+        val note = conversation.all().filterIsInstance<MindMessage.User>().single { it.text.contains("goal v2") }
+        assertTrue(note.text.contains("Make it 3 minutes instead"))
+    }
+
+    @Test fun aPauseHoldsBeforeTheNextStepAndIsNotWorkingTime() {
+        var now = 0L
+        var pausedFor = 3
+        val model = ScriptedModel("a", script = mutableListOf(reply("task_finish" to "{}")))
+        val conversation = fresh()
+        val outcome = MindLoop(model, null, standardTools, clock = { now }, sleep = { now += it },
+            paused = { (pausedFor-- > 0) }).run(conversation)
+        assertEquals(MindStatus.COMPLETED, outcome.status)
+        assertTrue("the loop waited while paused", now > 0)
+        assertEquals("no model call happened while paused", 1, model.requests.size)
+        assertTrue(conversation.all().any { it is MindMessage.User && it.text == MindPrompt.PAUSED })
+        assertTrue("paused time is not working time", outcome.workingMs < now)
+    }
+
+    @Test fun aStopWhilePausedEndsWithoutAnotherStep() {
+        var stop = false
+        val model = ScriptedModel("a", script = mutableListOf())
+        var polls = 0
+        val outcome = MindLoop(model, null, standardTools, cancelled = { stop }, sleep = { if (++polls == 2) stop = true },
+            paused = { true }).run(fresh())
+        assertEquals(MindStatus.CANCELLED, outcome.status)
+        assertEquals(0, model.requests.size)
+    }
 }
 
 class MindConversationTest {

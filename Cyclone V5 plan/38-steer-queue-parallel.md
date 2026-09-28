@@ -1,7 +1,8 @@
 # 38 — Steer, queue, parallel, and plan diversions
 
-**Status:** plan, 2026-09-28, revised with the owner's decisions the same day (steer targets the task being viewed; diversions always on; the model decides, only serious cases confirm). One build run: **alpha.68**. Builds on the Mind (16), Task Kit (17), parallel sessions
-(26 §6) and the mission workspace (37). Nothing is built yet.
+**Status:** **built in alpha.68** (2026-09-28; see §8 for what shipped and what moved). Revised with the owner's
+decisions the same day (steer targets the task being viewed; diversions always on; the model decides, only serious
+cases confirm). Builds on the Mind (16), Task Kit (17), parallel sessions (26 §6) and the mission workspace (37).
 
 **The owner's ask:**
 > "Make the goals stay fresh if something new comes up that changes the mission, to a standard where it's reliable for
@@ -147,3 +148,32 @@ Plan v2 · Changed course
 
 - Automatic choice without the list (D1).
 - Undoing actions already done before a diversion (sent messages stay sent; the plan says so).
+
+## 8. As built (alpha.68)
+
+**Shipped:**
+- **Diversion core:** `mind/divert/PlanVersions.kt` holds the goal versions and the plan versions, the display rows
+  (dropped, branch, note), the one finish reminder after a steer and the approval note after a model's diversion.
+  It lives in the toolbox, so it runs in every mission (D6). A changed number makes a step a different step
+  ("5 minutes" → "3 minutes").
+- **Mind:** a real pause in `MindLoop` (a hold before the next step; not working time); steers become goal versions
+  with a harness note; `plan_update` has `divert` and step `app`/`why` in every run; a repeated failure suggests
+  changing course.
+- **Missions:** `steerTask`, `queueTask`, `parallelTask`, `parallelBlocker`, `pause`, `unpause`, `askOptions`,
+  `viewedTaskId`; plan versions and history (last 5) are saved in the mission record.
+- **Task Kit:** `Steer`, `Queue`, `Parallel`, `Unpause`; `Pause` is the real pause for Mind tasks (Take over stays).
+- **UI:** the options list (`task/AskWhileWorking.kt`, `ui/v32/CycloneSteerViews.kt`) on the overlay and in the Ask
+  page; the overlay button is Pause/Resume with the existing stop gesture; the plan card with the branch and
+  "See vN"; behind-screen tasks can be selected as the steered task.
+- **Lab:** the `divert` suite (6 missions), `owner.steer` with `afterTurns`, the lab's `steer` answer, and `divert`
+  metrics per arm.
+- **Guards:** `scripts/ci/tests/test_steer_divert_guard.py`.
+
+**Differs from the plan:**
+- There is no separate `DiversionPolicy` flag: the approval of every serious action is unchanged, and after a model's
+  diversion it starts with what changed. The alpha.66 recipient check still adds its note in workspace runs.
+- The stop gesture is the existing one (tap twice or hold two seconds), not a red "Tap again to stop" state.
+
+**Moved:** done checks re-derived from a steered goal; the Glass inspector branch and Glass charts for the divert
+metrics; a dedicated one-line island row (the change shows as the status line).
+

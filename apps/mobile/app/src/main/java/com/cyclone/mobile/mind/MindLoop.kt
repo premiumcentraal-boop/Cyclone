@@ -70,6 +70,10 @@ class MindLoop(
      * folded with a journal block, and the context ceiling is [MindBudget.workspaceChars]. Null runs the classic loop.
      */
     private val workspace: com.cyclone.mobile.mind.workspace.MissionWorkspace? = null,
+    /** Plan 38: the owner's steers (Steer in the Ask bar): each one is a new goal version the plan must follow. */
+    private val ownerSteers: () -> List<String> = { emptyList() },
+    /** Plan 38: the owner paused the mission; it holds before its next step, and the pause is not working time. */
+    private val paused: () -> Boolean = { false },
 ) {
     private var model: MindModel = primary
     private var usingBackup = false
@@ -108,6 +112,21 @@ class MindLoop(
             if (!warned && remaining <= budget.warnBeforeEndMs) {
                 warned = true
                 conversation.add(MindMessage.User(MindPrompt.budgetWarning((remaining / 60_000).coerceAtLeast(1)), origin = MindMessage.User.Origin.HARNESS))
+            }
+            if (paused()) {
+                val from = clock()
+                listener.onNotice(turn, "Paused by the owner.")
+                while (paused() && !cancelled()) sleep(PAUSE_POLL_MS)
+                ownerWaited += (clock() - from).coerceAtLeast(0)
+                if (cancelled()) return end(MindStatus.CANCELLED, "Stopped by the owner.", null, conversation)
+                conversation.add(MindMessage.User(MindPrompt.PAUSED, origin = MindMessage.User.Origin.HARNESS))
+                listener.onNotice(turn, "Resumed.")
+            }
+            ownerSteers().filter(String::isNotBlank).forEach { text ->
+                val version = runCatching { toolbox.onSteer(text) }.getOrDefault(0)
+                conversation.add(MindMessage.User(MindPrompt.steered(text, version.coerceAtLeast(2))))
+                listener.onNotice(turn, "Owner changed the task: ${text.take(160)}")
+                silentTurns = 0
             }
             ownerMessages().filter(String::isNotBlank).forEach {
                 conversation.add(MindMessage.User(MindPrompt.ownerMessage(it)))
@@ -332,6 +351,7 @@ class MindLoop(
         const val MAX_WAIT_MS = 30_000L
         const val MIN_CALL_MS = 20_000L
         const val REPEATED_FAILURE_NOTE_AT = 3
+        const val PAUSE_POLL_MS = 250L
         const val TEXT_PROTOCOL_MARKER = "## Tool calls"
     }
 }

@@ -91,7 +91,8 @@ object MindTaskController : TaskController {
     override val supported: Set<Class<out TaskCommand>> = setOf(TaskCommand.Stop::class.java, TaskCommand.TakeOver::class.java,
         TaskCommand.Pause::class.java, TaskCommand.Done::class.java, TaskCommand.Approve::class.java, TaskCommand.Decline::class.java,
         TaskCommand.Reply::class.java, TaskCommand.Fill::class.java, TaskCommand.MoveToBackground::class.java,
-        TaskCommand.MoveToForeground::class.java, TaskCommand.AllowBackground::class.java, TaskCommand.StartNow::class.java)
+        TaskCommand.MoveToForeground::class.java, TaskCommand.AllowBackground::class.java, TaskCommand.StartNow::class.java,
+        TaskCommand.Steer::class.java, TaskCommand.Queue::class.java, TaskCommand.Parallel::class.java, TaskCommand.Unpause::class.java)
 
     /** The task a command is for: its own open request first; the front card also answers what the owner sees now. */
     private val target = ThreadLocal<WorkspaceTaskUi?>()
@@ -113,13 +114,17 @@ object MindTaskController : TaskController {
     }
 
     private val BEHIND_COMMANDS = setOf(TaskCommand.Stop::class.java, TaskCommand.Approve::class.java, TaskCommand.Decline::class.java,
-        TaskCommand.Reply::class.java, TaskCommand.Fill::class.java)
+        TaskCommand.Reply::class.java, TaskCommand.Fill::class.java,
+        // Plan 38: the owner steers, pauses and resumes the task they are viewing, behind the screen too.
+        TaskCommand.Steer::class.java, TaskCommand.Pause::class.java, TaskCommand.Unpause::class.java,
+        TaskCommand.Queue::class.java, TaskCommand.Parallel::class.java)
 
     override fun handle(task: WorkspaceTaskUi, command: TaskCommand): TaskCommandResult {
         target.set(task)
         try {
             val id = missionOf(task)
             // Plan 26 §6: a task working behind the screen can be stopped and answered; the screen stays the owner's.
+            ask(id, command)?.let { return it }
             if (id != null && MindMissions.isBehind(id)) {
                 if (command == TaskCommand.Stop) return if (MindMissions.stop(id)) TaskCommandResult.done(engine, "Stopping that task.")
                     else TaskCommandResult.refused(engine, "That task is not running.")
@@ -158,7 +163,7 @@ object MindTaskController : TaskController {
             if (MindMissions.answer(request.id, OwnerResponse.TakeOver)) TaskCommandResult.done(engine, "You have the phone; tap I'm done to continue.")
             else TaskCommandResult.refused(engine, "That request was already answered.")
         }
-        TaskCommand.TakeOver, TaskCommand.Pause -> if (MindMissions.ownerTakesPhone()) TaskCommandResult.done(engine, "You have the phone; tap I'm done to continue.")
+        TaskCommand.TakeOver -> if (MindMissions.ownerTakesPhone()) TaskCommandResult.done(engine, "You have the phone; tap I'm done to continue.")
             else TaskCommandResult.refused(engine, "The mission is not running.")
         TaskCommand.Approve -> answer(OwnerRequestKind.APPROVAL, OwnerResponse.Approve, "Approved.")
         // Decline is "not now" for whatever is open: a question learns the owner would rather not answer.
@@ -178,6 +183,27 @@ object MindTaskController : TaskController {
         TaskCommand.StartNow -> if (MissionPlanes.startNow()) TaskCommandResult.done(engine, "Starting now, on your screen.")
             else TaskCommandResult.refused(engine, "Cyclone is not waiting for an app.")
         else -> TaskCommandResult.refused(engine, "${command.label} is not available for Cyclone Mind.")
+    }
+
+    /**
+     * Plan 38: what the owner sends from the Ask bar while Cyclone works (Steer, Queue, Parallel) and a real Pause and
+     * Resume, for the task they are viewing. Null for every other command.
+     */
+    private fun ask(id: String?, command: TaskCommand): TaskCommandResult? {
+        val context = TaskCommands.context()
+        return when (command) {
+            is TaskCommand.Steer -> if (MindMissions.steerTask(id, command.text)) TaskCommandResult.done(engine, "Changed: ${command.text.take(80)}")
+                else TaskCommandResult.refused(engine, "No task is running to change.")
+            is TaskCommand.Queue -> MindMissions.queueTask(context, command.text)?.let { TaskCommandResult.done(engine, "Next: ${it.take(80)}") }
+                ?: TaskCommandResult.refused(engine, "The queue is full.")
+            is TaskCommand.Parallel -> MindMissions.parallelTask(context, command.text)?.let { TaskCommandResult.refused(engine, it) }
+                ?: TaskCommandResult.done(engine, "Also working on it, behind your screen.")
+            TaskCommand.Pause -> if (MindMissions.pause(context, id)) TaskCommandResult.done(engine, "Paused. Tap Resume to continue.")
+                else TaskCommandResult.refused(engine, "The mission is not running.")
+            TaskCommand.Unpause -> if (MindMissions.unpause(context, id)) TaskCommandResult.done(engine, "Continuing.")
+                else TaskCommandResult.refused(engine, "The mission is not paused.")
+            else -> null
+        }
     }
 
     private fun move(to: PlaneKind): TaskCommandResult {
