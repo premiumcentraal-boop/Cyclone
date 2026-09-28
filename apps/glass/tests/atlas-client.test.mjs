@@ -418,3 +418,12 @@ test("a mapping mission sends whose account and a time budget; the job carries t
   assert.equal(job.boundary, "authentication");
   await assert.rejects(() => atlas.mappingStart(PLACE, { identity: "admin", budget: "10m" }), (error) => error.code === "INVALID_REQUEST");
 });
+
+test("mapping.start sends the picked model only when it is not the phone's own", async () => {
+  const phone = foregroundClient(JOB);
+  await phone.atlas.mappingStart(PLACE, { identity: "own", budget: "10m", model: "phone" });
+  assert.equal("describer" in JSON.parse(phone.calls[0].init.body), false);
+  const picked = foregroundClient(JOB);
+  await picked.atlas.mappingStart(PLACE, { identity: "own", budget: "10m", model: "z-ai/glm-5.3-flash" });
+  assert.deepEqual(JSON.parse(picked.calls[0].init.body).describer, { model: "z-ai/glm-5.3-flash" });
+});

@@ -368,6 +368,7 @@ object MindMissions {
                 marker = if (variant?.marks == false) null else AndroidMindImageMarker, trail = trail,
                 learned = if (useMap) learnedHints(context) else null,
                 maps = if (useMap) missionMaps(context) else null,
+                glossary = if (useMap) ({ pkg -> com.cyclone.mobile.manual.ManualRuntime.glossary(context, pkg) }) else null,
                 skill = if (useMap && mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, mission.goal) }.getOrNull()
                     ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
                 planes = planes)

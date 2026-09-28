@@ -47,6 +47,9 @@ V5_OPS = frozenset({
     "cc.status",
     "cc.answer",
     "cc.key",
+    "dictionary.get",
+    "dictionary.edit",
+    "models.list",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -888,6 +891,12 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op == "skills.list":
         _validate_skills_response(value)
         return value
+    if op in {"dictionary.get", "dictionary.edit"}:
+        _validate_dictionary_response(value, args)
+        return value
+    if op == "models.list":
+        _validate_models_response(value)
+        return value
     if op == "atlas.here":
         if set(value) != {"placeId", "roomId", "appVersion", "observedAt"}:
             raise _bad_knowledge("atlas.here")
@@ -1013,6 +1022,75 @@ def _validate_learn_response(value: dict[str, Any], args: dict[str, Any]) -> Non
 SKILL_ID = re.compile(r"^you\.[a-f0-9]{12}$")
 SKILL_GROUNDS = frozenset({"grounded", "partial", "needs-recheck", "not-grounded"})
 SKILL_KEYS = frozenset({"skillId", "name", "placeId", "ground", "detail", "routeMoves", "route", "finishSteps", "savedAt"})
+
+
+DICT_SET_ID = re.compile(r"^set:[\w]{1,40}$")
+DICT_ACTIONS = frozenset({"confirm", "reject", "lock", "unlock", "rename", "merge", "unmerge", "move", "kind"})
+DICT_STATUSES = frozenset({"candidate", "confirmed", "locked", "rejected", "merged", "retired"})
+DICT_TOP_KEYS = frozenset({"placeId", "appLabel", "currentVersion", "passes", "updatedAt", "coreKinds", "entries", "truncated",
+                           "audit", "health", "jev", "glossary"})
+DICT_ENTRY_KEYS = frozenset({"id", "kind", "name", "shownName", "nameProof", "aliases", "parentId", "path", "status", "redirectTo",
+                             "anchors", "markers", "observations", "days", "versions", "missedPasses", "note", "failedGates", "waiting"})
+DICT_ANCHOR_KEYS = frozenset({"kind", "roomKey", "screenTitle", "position", "siblings", "groups", "rowShape", "searchable", "searchLabel"})
+DESCRIBER_MODEL = re.compile(r"^[A-Za-z0-9._:/~-]{1,200}$")
+
+
+def _bad_dictionary(message: str) -> DesktopRuntimeError:
+    return DesktopRuntimeError(RuntimeErrorCode.PROTOCOL_MISMATCH, f"Phone dictionary response is invalid: {message}.")
+
+
+def _short_list(value: Any, limit: int, item_limit: int = 80) -> bool:
+    return isinstance(value, list) and len(value) <= limit and all(isinstance(v, str) and len(v) <= item_limit for v in value)
+
+
+def _validate_dictionary_response(value: dict[str, Any], args: dict[str, Any]) -> None:
+    """The app dictionary (plan 36 §7): structure only. Set names, anchors, ids and counts; never members or content."""
+    if set(value) != DICT_TOP_KEYS:
+        raise _bad_dictionary("keys")
+    if value["placeId"] != args.get("placeId"):
+        raise _bad_dictionary("place")
+    entries = value["entries"]
+    if not isinstance(entries, list) or len(entries) > 400 or not isinstance(value["truncated"], bool):
+        raise _bad_dictionary("entries")
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != DICT_ENTRY_KEYS:
+            raise _bad_dictionary("entry keys")
+        if not isinstance(entry["id"], str) or not DICT_SET_ID.match(entry["id"]) or entry["status"] not in DICT_STATUSES:
+            raise _bad_dictionary("entry id")
+        if not _short_text(entry["name"], 60) or not _short_text(entry["shownName"], 60) or not _short_text(entry["path"], 200):
+            raise _bad_dictionary("entry name")
+        if not _short_list(entry["aliases"], 8, 60) or not _short_list(entry["markers"], 6, 60) or not _short_list(entry["versions"], 8, 40):
+            raise _bad_dictionary("entry lists")
+        if not _is_int(entry["observations"]) or not _is_int(entry["days"]) or not _is_int(entry["missedPasses"]):
+            raise _bad_dictionary("entry counts")
+        anchors = entry["anchors"]
+        if not isinstance(anchors, list) or len(anchors) > 6:
+            raise _bad_dictionary("anchors")
+        for anchor in anchors:
+            if not isinstance(anchor, dict) or set(anchor) != DICT_ANCHOR_KEYS or anchor["kind"] not in {"list", "view"}:
+                raise _bad_dictionary("anchor keys")
+            if not _short_list(anchor["siblings"], 11, 60) or not _short_list(anchor["groups"], 12, 60):
+                raise _bad_dictionary("anchor lists")
+    if not isinstance(value["audit"], list) or len(value["audit"]) > 50:
+        raise _bad_dictionary("audit")
+    if not isinstance(value["glossary"], str) or len(value["glossary"]) > 6000:
+        raise _bad_dictionary("glossary")
+    if not isinstance(value["health"], dict) or not isinstance(value["jev"], dict):
+        raise _bad_dictionary("health")
+
+
+def _validate_models_response(value: dict[str, Any]) -> None:
+    """The phone's models for the PC's picker: ids, labels and whether each reads pictures. Never a key."""
+    if set(value) != {"active", "models"}:
+        raise _bad_dictionary("models keys")
+    rows = ([value["active"]] if value["active"] is not None else []) + (value["models"] if isinstance(value["models"], list) else [None])
+    if not isinstance(value["models"], list) or len(value["models"]) > 40:
+        raise _bad_dictionary("models")
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"id", "label", "vision"} or not isinstance(row["vision"], bool):
+            raise _bad_dictionary("model row")
+        if not isinstance(row["id"], str) or not DESCRIBER_MODEL.match(row["id"]) or not _short_text(row["label"], 80):
+            raise _bad_dictionary("model id")
 
 
 def _bad_skills(message: str) -> DesktopRuntimeError:
@@ -1374,6 +1452,36 @@ class V5ContractService:
         """The owner's saved skills and where each lives on the map (plan 23). Titles, health and counts only."""
         return self._call(device_id, "skills.list", {})
 
+    def dictionary_get(self, device_id: str, place_id: str) -> dict[str, Any]:
+        """An app's dictionary (plan 36 §7): its sets, where they live, the organizer's audit and health."""
+        if not isinstance(place_id, str) or not KNOWLEDGE_PLACE_ID.match(place_id):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "placeId must be package:<app>.")
+        return self._call(device_id, "dictionary.get", {"placeId": place_id})
+
+    def dictionary_edit(self, device_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """The owner's change to a set, from Glass only. The phone applies the organizer's rules."""
+        allowed = {"placeId", "action", "id", "into", "label", "parentId", "kind"}
+        if not isinstance(body, dict) or not set(body) <= allowed:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "dictionary edit has an unexpected field.")
+        if not isinstance(body.get("placeId"), str) or not KNOWLEDGE_PLACE_ID.match(body["placeId"]):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "placeId must be package:<app>.")
+        if body.get("action") not in DICT_ACTIONS:
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "Unknown dictionary action.")
+        for key in ("id", "into"):
+            if key in body and (not isinstance(body[key], str) or not DICT_SET_ID.match(body[key])):
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, f"{key} must be a set id.")
+        if "parentId" in body and body["parentId"] is not None and (not isinstance(body["parentId"], str) or not DICT_SET_ID.match(body["parentId"])):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "parentId must be a set id or null.")
+        if "label" in body and not _short_text(body["label"], 60):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "label must be short text.")
+        if "kind" in body and (not isinstance(body["kind"], str) or not re.fullmatch(r"[a-z_]{2,20}", body["kind"])):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "kind is malformed.")
+        return self._call(device_id, "dictionary.edit", dict(body))
+
+    def models_list(self, device_id: str) -> dict[str, Any]:
+        """The phone's models for the mapping start sheet's picker. The key stays on the phone."""
+        return self._call(device_id, "models.list", {})
+
     def cc_start(self, device_id: str, goal: str, *, task_id: str | None = None,
                  sealed: list[dict[str, Any]] | None = None, publish: bool = False) -> dict[str, Any]:
         """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret.
@@ -1493,6 +1601,16 @@ class V5ContractService:
             if args:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "skills.list takes no arguments.")
             return self.skills_list(device_id)
+        if op == "dictionary.get":
+            if set(args) != {"placeId"}:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "dictionary.get takes placeId only.")
+            return self.dictionary_get(device_id, args["placeId"])
+        if op == "dictionary.edit":
+            return self.dictionary_edit(device_id, args)
+        if op == "models.list":
+            if args:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "models.list takes no arguments.")
+            return self.models_list(device_id)
         if op == "learn.run":
             if set(args) != {"runId"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "learn.run takes runId only.")
@@ -1565,7 +1683,7 @@ class V5ContractService:
         if op == "mapping.start":
             allowed = {
                 "placeId", "persona", "sessionId", "displayId", "workspaceId", "workspaceGeneration",
-                "executionGeneration", "budget", "resumeJobId", "identity",
+                "executionGeneration", "budget", "resumeJobId", "identity", "describer",
             }
             if not set(args).issubset(allowed):
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "mapping.start has an unexpected field.")
@@ -1574,7 +1692,7 @@ class V5ContractService:
             if resume_job_id is not None:
                 if not isinstance(resume_job_id, str) or JOB_ID.fullmatch(resume_job_id) is None:
                     raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "resumeJobId is invalid.")
-                if any(key in args for key in ("placeId", "persona", "budget", "identity")):
+                if any(key in args for key in ("placeId", "persona", "budget", "identity", "describer")):
                     raise DesktopRuntimeError(
                         RuntimeErrorCode.INVALID_REQUEST,
                         "mapping.start resume accepts resumeJobId plus plane identity only.",
@@ -1585,6 +1703,12 @@ class V5ContractService:
                     _validate_budget(args["budget"])
                 if "identity" in args and args["identity"] not in MAPPING_IDENTITIES:
                     raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "identity must be own (look only) or test.")
+                if "describer" in args:
+                    describer = args["describer"]
+                    # Plan 36 §9: which model decides for the pass; "phone" is the phone's current model. Never a key.
+                    if not isinstance(describer, dict) or set(describer) != {"model"} or not isinstance(describer["model"], str) \
+                            or not DESCRIBER_MODEL.match(describer["model"]):
+                        raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "describer must be {\"model\": \"phone\" or a model id}.")
             return self._call(device_id, op, args)
 
         allowed_command = {"mappingJobId", "sessionId", "displayId", "workspaceId", "workspaceGeneration"}

@@ -160,6 +160,8 @@ object MappingDriverRuntime {
     private fun learnIfEnded(appContext: Context, ctx: JobContext) {
         val job = MappingSessionRuntime.controller(appContext).status(ctx.job.mappingJobId) ?: return
         if (!job.state.terminal) return
+        // The app dictionary's organizer runs once per ended pass, in the background (plan 36 §7.5).
+        runCatching { com.cyclone.mobile.manual.ManualRuntime.finish(appContext, job.mappingJobId) }
         runCatching {
             AppLearnerRuntime.initialize(appContext)
             val store = AppLearnerRuntime.store

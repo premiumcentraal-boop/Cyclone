@@ -65,14 +65,15 @@ internal object GatewayV5MappingAdapter {
         val allowed = setOf(
             "placeId", "persona", "sessionId", "displayId",
             "workspaceId", "workspaceGeneration", "executionGeneration",
-            "budget", "resumeJobId", "identity",
+            "budget", "resumeJobId", "identity", "describer",
         )
         requireOnly(args, allowed)
+        val describer = describer(args)
         val plane = planeRequest(args)
         val controller = MappingSessionRuntime.controller(context)
         val resumeJobId = optionalJobId(args, "resumeJobId")
         val job = if (resumeJobId != null) {
-            if (args.has("placeId") || args.has("persona") || args.has("budget") || args.has("identity")) {
+            if (args.has("placeId") || args.has("persona") || args.has("budget") || args.has("identity") || args.has("describer")) {
                 throw MappingSessionException(
                     "INVALID_REQUEST",
                     "mapping.start resume accepts resumeJobId plus phone-plane identity only.",
@@ -94,9 +95,26 @@ internal object GatewayV5MappingAdapter {
             )
             controller.start(request)
         }
+        if (resumeJobId == null) com.cyclone.mobile.manual.ManualRuntime.configure(job.mappingJobId, describer)
         // mapping.start owns the job; the phone driver walks it. Without this the job would idle.
         driverLauncher(context, job, resumeJobId == null)
         return jobJson(controller.status(job.mappingJobId) ?: job)
+    }
+
+    /**
+     * Which model decides for this pass (plan 36 §9): `{"model": "phone"}` is the phone's current model, resolved when
+     * the pass starts; any other value must be a model id. The key never leaves the phone.
+     */
+    private fun describer(args: JSONObject): String? {
+        if (!args.has("describer") || args.isNull("describer")) return null
+        val value = args.optJSONObject("describer") ?: throw MappingSessionException("INVALID_REQUEST", "describer must be an object.")
+        val extra = value.keys().asSequence().filter { it != "model" }.toList()
+        if (extra.isNotEmpty()) throw MappingSessionException("INVALID_REQUEST", "describer accepts only model.")
+        val model = value.optString("model").trim()
+        if (model.isEmpty() || model.length > 200 || !Regex("^[A-Za-z0-9._:/~-]+$").matches(model)) {
+            throw MappingSessionException("INVALID_REQUEST", "describer.model must be \"phone\" or a model id.")
+        }
+        return model
     }
 
     private fun mappingPause(context: Context, args: JSONObject): JSONObject {

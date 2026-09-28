@@ -1,6 +1,6 @@
 # 36 — The App Manual: a map builder that understands apps by itself
 
-**Status:** plan, 2026-09-28, with the owner's decisions (§0). Three build runs (M1–M3, §14). Builds on the mapper
+**Status:** plan, 2026-09-28, with the owner's decisions (§0). **The app dictionary (§7) is built in alpha.59 (§7.8).** Three build runs (M1–M3, §14). Builds on the mapper
 (plans 06, 20, 22), one map and grounded skills (23), the Mind's `go_to` (A37) and JEV watching (32).
 
 **The owner's ask:**
@@ -490,6 +490,39 @@ It sees the proposal's evidence (anchors, markers, app words) and the nearby dic
 | Delay | The organizer runs at the end of a pass; during the pass, candidates are used provisionally |
 | Cost | One batched model call per pass, and zero when the gates settle everything |
 | Privacy creep ("list of close friends") | Structure-only fields, CI guard, canary |
+
+### 7.8 As built (alpha.59)
+
+- **Core:** `manual/CoreKind.kt`: 24 kinds plus Other, with generic hint words.
+- **The app's words:** `manual/AppLexicon.kt`.
+  - The app's shipped strings, hashed. Templates match through digits only.
+  - A *vocabulary* proof covers downloaded names (every word shipped, the phrase not). The reader does not propose
+    them in production (`allowVocabulary = false`): a user's own folder or group-chat name can look the same.
+    Screen titles must be exact app strings.
+- **Reader:** `manual/StructureReader.kt`.
+  - Finds the title, category strips (with a selection, above 85% of the screen height), lists (row shape, lexicon
+    section headers, search, markers on at least half the rows) and a kind guess.
+  - It proposes a set per titled list and per category. The selected category also owns the list.
+- **Dictionary:** `manual/dictionary/DictionaryModel.kt`.
+  - Entries, anchors, audit and the JEV tally.
+  - `DictionaryPrivacy` checks every text in and out; JSON uses fixed keys.
+- **Organizer:** `manual/dictionary/Organizer.kt`.
+  - `record` folds proposals by resource, place or name.
+  - `run` works in parent-first rounds through the gates, then asks one batched question (at most 8 items) with the
+    fixed choices.
+  - Also: redirects, owner edits, health, glossary, and retiring after two missed passes.
+- **The question:** `OrganizerPrompt.kt`, with a strict parser. JEV's typed choice is watch-only (`ManualRuntime`).
+- **Wiring:**
+  - the mapper's `captureOnce` feeds each in-place screen;
+  - `learnIfEnded` runs the organizer in the background;
+  - `mapping.start` takes `describer: {model}`.
+- **Ops and routes:**
+  - phone ops `dictionary.get`, `dictionary.edit` (owner) and `models.list`;
+  - gateway routes `GET /v1/devices/{id}/dictionary`, `POST …/dictionary/edit` and `GET …/models`;
+  - the Glass Dictionary tab and the start-sheet model picker;
+  - the Mind gets the glossary with the map.
+- **Not yet:** revealers and probes (§5.1), the describer and abilities (M2), the screenshots switch, JEV ability picks
+  and the Lab dictionary-stability suite.
 
 ## 8. How agents use the manual: rapid navigation in three tiers
 

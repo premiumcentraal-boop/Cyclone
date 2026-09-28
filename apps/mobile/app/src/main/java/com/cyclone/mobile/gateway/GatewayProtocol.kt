@@ -72,6 +72,8 @@ internal object GatewayProtocol {
         "brain.recall",
         "teach.status",
         "debug.snapshot",
+        "dictionary.get",
+        "models.list",
     )
 
     val operations = linkedSetOf(
@@ -156,6 +158,10 @@ internal object GatewayProtocol {
         "cc.answer",
         "cc.key",
         "cc.media",
+        // The app dictionary (plan 36 §7): read it, the owner's edits from Glass, and the phone's models for the picker.
+        "dictionary.get",
+        "dictionary.edit",
+        "models.list",
     )
 
     fun parse(line: String): GatewayRequest {

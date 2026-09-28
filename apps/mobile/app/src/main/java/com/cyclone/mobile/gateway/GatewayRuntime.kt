@@ -430,6 +430,10 @@ internal object GatewayDispatcher {
             GatewayV5CommandAdapter.install(context)
             GatewayV5CommandAdapter.dispatch(request.op, request.args)
         }
+        "dictionary.get", "dictionary.edit", "models.list" -> {
+            GatewayV5ManualAdapter.install(context)
+            GatewayV5ManualAdapter.dispatch(request.op, request.args)
+        }
         "apps.list" -> GatewayV5AppsAdapter.dispatch(request.op, request.args)
         "share.status" -> {
             if (request.args.length() != 0) throw GatewayProtocolException("INVALID_REQUEST", "share.status takes no arguments.", request.id)

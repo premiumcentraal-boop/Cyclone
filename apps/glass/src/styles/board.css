@@ -971,3 +971,24 @@
   font-weight: 600;
   flex: 1 1 100%;
 }
+
+/* The app dictionary (plan 36 §7). */
+.dictionary { display: flex; flex-direction: column; gap: var(--space-4); }
+.dictionary-tools { display: flex; justify-content: flex-end; }
+.dictionary-kind { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4); }
+.dictionary-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.dictionary-set { border-left: 3px solid var(--border-strong); padding: var(--space-2) var(--space-3); }
+.dictionary-set.status-confirmed { border-left-color: var(--success, #1f9d55); }
+.dictionary-set.status-locked { border-left-color: var(--accent, #5b5bd6); }
+.dictionary-set.status-candidate { border-left-color: var(--warning, #c98a00); }
+.dictionary-set.status-rejected, .dictionary-set.status-merged, .dictionary-set.status-retired { opacity: 0.65; }
+.dictionary-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.dictionary-name { font-size: var(--text-md); }
+.dictionary-where, .dictionary-why, .dictionary-meta { margin: var(--space-1) 0 0; font-size: var(--text-sm); }
+.dictionary-why { color: var(--text-muted); }
+.dictionary-meta { font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.dictionary-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.dictionary-actions select, .model-select { max-width: 100%; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-sm); }
+.dictionary-rename { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.dictionary-health ul, .dictionary-log { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); }
+.dictionary-glossary pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--text-xs); background: var(--surface-muted); padding: var(--space-3); border-radius: var(--radius-md); }

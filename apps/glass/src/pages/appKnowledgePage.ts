@@ -3,6 +3,8 @@
  * entry room to each destination, with health from the runs that went there; versions say which app versions the map
  * was learned on and which doors may be stale after an update. Glass lays them out and links into the Map and Runs.
  */
+import { dictionaryView, type DictionaryViewState } from "../ui/dictionaryView.js";
+import { editDictionary, loadDictionary, type AppDictionaryView } from "../services/dictionary.js";
 import type { GlassContext } from "../app.js";
 import type { AppTab, Route } from "../core/router.js";
 import { loadApps, scenarioSummary, statusLabel as appStatusLabel, statusTone as appStatusTone, versionLabel, type PhoneApp } from "../services/apps.js";
@@ -41,7 +43,7 @@ type KnowledgeTab = Exclude<AppTab, "map">;
 export function appTabs(placeId: string, active: AppTab): HTMLElement {
   const tabs = el("nav", "tabs");
   const items: Array<[AppTab, string]> = [["map", "Map"], ["coverage", "Coverage"]];
-  if (placeId.startsWith("package:")) items.push(["skills", "Skills"], ["runs", "Runs"], ["versions", "Changes"], ["scenarios", "Scenarios"], ["screens", "Screens"], ["issues", "Issues"]);
+  if (placeId.startsWith("package:")) items.push(["skills", "Skills"], ["runs", "Runs"], ["versions", "Changes"], ["scenarios", "Scenarios"], ["screens", "Screens"], ["dictionary", "Dictionary"], ["issues", "Issues"]);
   else items.push(["screens", "Screens"]);
   for (const [tab, label] of items) {
     if (tab === active) {
@@ -112,6 +114,7 @@ export function createAppKnowledgePage(
       else if (route.tab === "coverage") await loadCoverage();
       else if (route.tab === "issues") await loadIssues();
       else if (route.tab === "skills") await loadSkillsTab();
+      else if (route.tab === "dictionary") await loadDictionaryTab();
       else await loadRuns();
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") return;
@@ -169,6 +172,27 @@ export function createAppKnowledgePage(
    * Skills (plan 23): the owner's saved skills that work in this app, each with its health on the map and the saved way
    * to where it works. Show on the map draws that way on the Taught map; Run starts it on the phone like any Ask.
    */
+  const dictionaryState: DictionaryViewState = { showHidden: false, renaming: null };
+  let dictionary: AppDictionaryView | null = null;
+
+  async function loadDictionaryTab(): Promise<void> {
+    dictionary = await loadDictionary(ctx.client, deviceId, placeId, controller.signal);
+    if (controller.signal.aborted) return;
+    paintDictionary();
+  }
+
+  function paintDictionary(message?: string): void {
+    if (!dictionary) return;
+    const view = dictionaryView(dictionary, dictionaryState, {
+      edit: (action, id, extra) => {
+        void editDictionary(ctx.client, deviceId, placeId, action, id, extra)
+          .then((next) => { dictionary = next; paintDictionary(); })
+          .catch((error: unknown) => paintDictionary((error as { message?: string })?.message ?? "The phone refused that change."));
+      },
+    }, () => paintDictionary());
+    setChildren(body, message ? el("p", "form-error", message) : null, view);
+  }
+
   async function loadSkillsTab(): Promise<void> {
     const list = await loadSkills(ctx.client, deviceId, controller.signal);
     if (controller.signal.aborted) return;

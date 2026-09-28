@@ -139,6 +139,8 @@ export type MissionBudget = "10m" | "30m" | "2h";
 export interface MappingMission {
   identity: MappingIdentity;
   budget: MissionBudget;
+  /** Which model decides new groups for the app dictionary (plan 36): "phone" (the phone's current model) or a model id. */
+  model?: string;
 }
 
 export const MISSION_BUDGETS: Readonly<Record<MissionBudget, MappingBudgetShape & { label: string }>> = Object.freeze({
@@ -384,7 +386,10 @@ export function createAtlasClient(options: AtlasClientOptions): AtlasClient {
           throw new AtlasClientError("INVALID_REQUEST", "Pick whose account to map with and how long.");
         }
         const { label: _label, ...budget } = shape;
-        return mappingCall("start", { placeId, persona: "mapping", identity: depth.identity, budget });
+        const body: Record<string, unknown> = { placeId, persona: "mapping", identity: depth.identity, budget };
+        // "phone" is the phone's own default, so it is not sent: an older phone never sees a field it doesn't know.
+        if (depth.model && depth.model !== "phone" && /^[A-Za-z0-9._:/~-]{1,200}$/.test(depth.model)) body.describer = { model: depth.model };
+        return mappingCall("start", body);
       }
       return mappingCall("start", { placeId, persona: "mapping", budget: { ...(MAPPING_DEPTHS[depth] ?? GLASS_MAPPING_BUDGET) } });
     },

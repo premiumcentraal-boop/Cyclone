@@ -62,8 +62,14 @@ class GatewayMappingObservationPort(
             runCatching {
                 trail?.observed(captured.id, captured.page, captured.elements.mapValues { (_, element) -> element.label to element.role })
             }
-            MappingStructuralProjection.fromGateway(captured)
+            val observation = MappingStructuralProjection.fromGateway(captured)
                 .copy(inPlace = PlaceResolver.matchesCurrent(page, session.placeId))
+            // The app dictionary (plan 36 §7): only the app's own words survive the reader; it never fails the pass.
+            if (observation.inPlace) {
+                com.cyclone.mobile.manual.ManualRuntime.observe(appContext, session.jobId, session.placeId,
+                    StructuralRoomClassifier.nodeKey(observation), captured)
+            }
+            observation
         }
 }
 

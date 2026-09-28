@@ -42,6 +42,8 @@ class PhoneMindToolbox(
     private val skill: MindSkillBrief? = null,
     /** Where the mission works (plan 25); null keeps it on the main screen as before. */
     private val planes: MindPlanes? = null,
+    /** The app's dictionary glossary (plan 36 §7.4), shown with the map the first time the Mind is in an app. */
+    private val glossary: ((String) -> String?)? = null,
 ) : MindToolbox {
     /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
     @Volatile private var env: CycloneAgentEnvironmentApi = env
@@ -218,9 +220,11 @@ class PhoneMindToolbox(
     /** The app's map, the first time the Mind is in an app Cyclone has learned. */
     private fun mapCard(packageName: String, pageKey: String): String? {
         val maps = maps ?: return null
-        val map = maps.map(packageName)?.takeIf { it.moves.isNotEmpty() } ?: return null
+        val map = maps.map(packageName)?.takeIf { it.moves.isNotEmpty() }
+        val words = runCatching { glossary?.invoke(packageName) }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (map == null && words == null) return null
         if (!maps.firstVisit(packageName)) return null
-        return map.card(appLabel(packageName) ?: packageName, map.locate(pageKey))
+        return listOfNotNull(map?.card(appLabel(packageName) ?: packageName, map.locate(pageKey)), words).joinToString("\n\n")
     }
 
     // ---- the map ---------------------------------------------------------------------------------------------------

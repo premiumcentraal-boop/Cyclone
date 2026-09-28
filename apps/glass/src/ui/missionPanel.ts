@@ -4,6 +4,7 @@
  * and refuses every door that could pay, send, delete, change a setting or touch security.
  */
 import { MISSION_BUDGETS, type MappingIdentity, type MappingJobView, type MappingMission, type MissionBudget } from "../services/atlasClient.js";
+import type { PhoneModels } from "../services/dictionary.js";
 import { el } from "./dom.js";
 import { actionButton, chip, type Tone } from "./components.js";
 import { icon } from "./icons.js";
@@ -27,6 +28,8 @@ export const MAPPING_PROMISE =
 export interface StartSheetOptions {
   appLabel: string;
   initial?: Partial<MappingMission>;
+  /** The phone's models for the picker (plan 36 §9); the phone's current model is the default. */
+  models?: Promise<PhoneModels | null> | PhoneModels | null;
   onStart(mission: MappingMission): void;
   onCancel(): void;
 }
@@ -35,6 +38,7 @@ export interface StartSheetOptions {
 export function startSheet(options: StartSheetOptions): HTMLElement {
   let identity: MappingIdentity = options.initial?.identity ?? "own";
   let budget: MissionBudget = options.initial?.budget ?? "10m";
+  let model: string = options.initial?.model ?? "phone";
   const overlay = el("div", "sheet-overlay");
   const sheet = el("div", "sheet mission-sheet");
   sheet.setAttribute("role", "dialog");
@@ -81,7 +85,25 @@ export function startSheet(options: StartSheetOptions): HTMLElement {
   cancel.addEventListener("click", () => options.onCancel());
   const start = actionButton("Start mapping", { icon: "play", variant: "primary" });
   start.classList.add("mission-start");
-  start.addEventListener("click", () => options.onStart({ identity, budget }));
+  start.addEventListener("click", () => options.onStart({ identity, budget, model }));
+
+  const modelSelect = el("select", "model-select") as HTMLSelectElement;
+  modelSelect.setAttribute("aria-label", "Model");
+  const fillModels = (models: PhoneModels | null): void => {
+    const options = [{ value: "phone", text: models?.active ? `Phone's model · ${models.active.label}` : "Phone's model" }];
+    for (const m of models?.models ?? []) if (m.id !== models?.active?.id) options.push({ value: m.id, text: m.label });
+    if (model !== "phone" && !options.some((o) => o.value === model)) options.push({ value: model, text: model });
+    modelSelect.replaceChildren(...options.map((o) => {
+      const node = el("option", undefined, o.text) as HTMLOptionElement;
+      node.value = o.value;
+      return node;
+    }));
+    modelSelect.value = model;
+  };
+  fillModels(null);
+  if (options.models) void Promise.resolve(options.models).then(fillModels).catch(() => undefined);
+  modelSelect.addEventListener("change", () => { model = modelSelect.value || "phone"; });
+  const modelNote = el("p", "muted mission-note", "It decides what new groups in the app are, like Followers or Close friends. Your key stays on the phone.");
   const actions = el("div", "sheet-actions");
   actions.append(cancel, start);
 
@@ -98,6 +120,7 @@ export function startSheet(options: StartSheetOptions): HTMLElement {
     title, lead,
     el("h3", "sheet-section", "Whose account"), identities,
     el("h3", "sheet-section", "How long"), budgets,
+    el("h3", "sheet-section", "Model"), modelSelect, modelNote,
     promise, testNote, actions,
   );
   overlay.addEventListener("click", (event) => {

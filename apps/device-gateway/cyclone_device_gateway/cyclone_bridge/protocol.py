@@ -27,6 +27,8 @@ ALLOWED_OPS = {
     "learn.run",
     # Grounded skills: the owner's saved skills and where each lives on the map.
     "skills.list",
+    # The app dictionary (plan 36 §7) and the phone's models for the mapping picker.
+    "dictionary.get", "dictionary.edit", "models.list",
 }
 UNAUTHENTICATED_OPS = {
     "trust.negotiate", "trust.begin", "trust.complete", "trust.session.begin", "trust.session.complete",

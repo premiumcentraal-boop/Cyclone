@@ -34,6 +34,7 @@ import { appTabs } from "./appKnowledgePage.js";
 import { deriveZones, layeredLayout, layoutCollapsed, runsThroughDoor, zoneSubModel, type LaneId, type ZoneMap } from "../maps/zones.js";
 import { createZoneOverview } from "../ui/zoneOverview.js";
 import { getScenarios } from "../services/knowledge.js";
+import { loadModels } from "../services/dictionary.js";
 import { listRuns, statusLabel as runStatusLabel, statusTone as runStatusTone, type RunSummary } from "../services/runs.js";
 
 /** Semantic zoom (plan 22): the app's story, one zone, one scenario lane, or every place at once. */
@@ -254,6 +255,7 @@ export function createAppPage(ctx: GlassContext, route: Extract<Route, { name: "
     sheet = startSheet({
       appLabel: app?.label ?? placeId.slice(placeId.indexOf(":") + 1),
       initial,
+      models: loadModels(ctx.client, deviceId).catch(() => null),
       onStart: startMission,
       onCancel: closeSheet,
     });
