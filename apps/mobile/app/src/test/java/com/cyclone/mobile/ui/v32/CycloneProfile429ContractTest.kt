@@ -103,11 +103,11 @@ class CycloneProfile429ContractTest {
 
     @Test fun inAppComposerUsesPlusMenuAndSharedModelIntelligenceSheet() {
         val source = source("ui/v32/CycloneV39AiChatPage.kt")
-        assertTrue(source.contains("contentDescription = \"Model and intelligence\""))
-        assertTrue(source.contains("CycloneModelIntelligencePanel("))
-        assertTrue(source.contains("showModelSelector = true"))
-        assertFalse(source.contains("modelLabel ="))
-        assertTrue(source.contains("onChange = ::persistAiControls"))
+        // R3: the + menu's "Model & intelligence" opens the header's model sheet, the one model control on the page.
+        assertTrue(source.contains("\"Model & intelligence\" -> modelMenuOpen = true"))
+        assertTrue(source.contains("AskModelSheet("))
+        assertTrue(File("src/main/java/com/cyclone/mobile/ui/v32/ask/AskSheets.kt").let { if (it.isFile) it else File("apps/mobile/app/src/main/java/com/cyclone/mobile/ui/v32/ask/AskSheets.kt") }.readText().contains("contentDescription = \"Model and thinking\""))
+        assertTrue(source.contains("onChanged = ::persistAiControls"))
         assertFalse(source.contains("showModelPill = false"))
     }
 }
