@@ -1,6 +1,6 @@
 # 38 — Steer, queue, parallel, and plan diversions
 
-**Status:** plan, 2026-09-28. One build run: **alpha.68**. Builds on the Mind (16), Task Kit (17), parallel sessions
+**Status:** plan, 2026-09-28, revised with the owner's decisions the same day (steer targets the task being viewed; diversions always on; the model decides, only serious cases confirm). One build run: **alpha.68**. Builds on the Mind (16), Task Kit (17), parallel sessions
 (26 §6) and the mission workspace (37). Nothing is built yet.
 
 **The owner's ask:**
@@ -16,10 +16,11 @@
 |---|---|---|
 | D1 | **The owner chooses; Cyclone suggests.** Sending while a task runs shows the options; the likely one is highlighted, never picked for you. | Today a guess (`MissionQueue.isNewTask`) decides between steering and a new task; a wrong guess changes the wrong task. |
 | D2 | **Steer is a diversion by the owner.** It updates the goal (v2, v3…), never asks back, and the plan must follow. | The owner's word is the goal. |
-| D3 | **One rule decides who decides a diversion** (§3): same result → Cyclone continues; different how → continue if the owner left it open, else ask once before that step; different who, money or public → always ask and pause at that step. | Predictable for every user, the same on every surface. |
-| D4 | **Every change is a plan version** with its trigger, tier, who decided and why. Nothing is overwritten. | What the panel draws, what the Lab measures and what a support person reads. |
+| D3 | **The model decides diversions** (§3), like a capable assistant would: it changes route, app, channel or account on its own and shows it. **Only serious cases confirm**, and they confirm at the action itself: the existing approvals for send, pay, delete, permission, sign-in and posting, which now also say what changed. A diversion never adds a separate stop. | Most decisions belong to the model; the owner is asked only where a mistake can't be undone. |
+| D4 | **Every change is a plan version** with its trigger, who decided, whether a serious action was flagged, and why. Nothing is overwritten. | What the panel draws, what the Lab measures and what a support person reads. |
 | D5 | **All buttons go through Task Kit**, like every task button. | The existing law (AGENTS.md). |
-| D6 | **Diversions work with or without the workspace setting.** Plan versions live in the toolbox; the workspace only adds them to its live state. | Core behaviour, not an experiment. |
+| D6 | **Diversions always work**, whatever the settings (workspace on or off, Lab or owner missions). Plan versions live in the toolbox; the workspace only adds them to its live state. | Core behaviour, not an experiment. |
+| D7 | **Steer goes to the task being viewed**: the task on the overlay card or the one open in the Ask page (a task behind the screen when its panel is open), otherwise the front task. | The owner steers what they are looking at. |
 
 ## 1. Today (from the code)
 
@@ -70,19 +71,18 @@
    action. The harness tells the model to divert or ask; the model declares it with `plan_update(divert=…)`.
 3. **New facts:** something the model read changes the best route. The model declares it.
 
-**Who decides (one rule, three tiers):**
+**Who decides: the model, with one safety net.**
 
-| Tier | The change | Owner-steered | Model-declared |
-|---|---|---|---|
-| **Route** | Same result, another way (another screen, a search instead of a menu) | apply | continue, show it |
-| **How** | Another app, channel or account | apply | continue if the goal left it open; otherwise ask once, before the step it affects, and keep doing reversible work meanwhile |
-| **What** | Another recipient, money, or what becomes public | apply | always ask, and pause at that step |
+| The change | What happens |
+|---|---|
+| Your steer | Applied at once; the model re-plans; never asked back |
+| Another route, app, channel or account, or a new fact | The model decides and continues; the plan card shows the change and why |
+| A serious action after a diversion (send, pay, delete, permission, sign-in, post) that goes to another recipient, amount or audience than you asked for | The action's existing approval asks, with the change on top: "You asked for Instagram; this goes by WhatsApp because her DMs are closed". Nothing else waits. |
 
-The tier is set by the harness, not the model: an app, channel or account change is **How**, and a recipient, amount
-or audience that differs from the goal or its done checks is **What** (the alpha.66 approval check, generalised).
-The ask is one card with **Go ahead** / **Keep original** / **Stop**, answered through Task Kit.
+The harness only flags what is serious (a recipient, amount or audience that differs from the goal or its done
+checks, the alpha.66 approval check generalised); it never blocks a route, app or channel change.
 
-**The record:** each plan version stores `steps`, `trigger` (steer, blocked, new_facts), `tier`, `decidedBy` (owner,
+**The record:** each plan version stores `steps`, `trigger` (steer, blocked, new_facts), `serious` (flagged or not), `decidedBy` (owner,
 model, harness), `why`, time and turn. The goal and done checks carry the same version number. The mission record,
 Glass and the Lab read it.
 
@@ -101,29 +101,31 @@ Plan v2 · Changed course
                         See v1  ›
 ```
 
-- A steer shows **You changed this** instead of the reason chip; an ask shows **Waiting for you** on the new step.
+- A steer shows **You changed this** instead of the reason chip. A serious action waiting for its approval shows
+  **Waiting for you** on its step, like any approval.
 - **See v1** shows the earlier plan. The island and the task notification show one line: "Changed course: WhatsApp
   instead of Instagram".
-- **Glass run inspector:** the same branch on the step timeline, with the tier and who decided.
+- **Glass run inspector:** the same branch on the step timeline, with who decided and any serious action it flagged.
 
 ## 5. Measuring it
 
 - **Lab suite `divert`** (6 missions):
   - scripted mid-task steers ("actually send it to Keep instead");
   - blocked routes (an app force-stopped mid-run, a missing app);
-  - a **What** change the lab declines.
-- **Metrics per arm:** diversions per run, asked vs automatic, owner overrides ("Keep original"), success after a
-  diversion, wrong-tier count (must be 0).
+  - a diversion that ends in a send to another recipient (the lab declines the approval).
+- **Metrics per arm:** diversions per run, decided by the model vs steered, success after a diversion, and serious
+  actions after a diversion that went out without approval (must be 0).
 - **Guards:**
   - every Ask-bar option and Pause/Resume/Stop goes through Task Kit;
-  - a **What** diversion cannot pass its step without an answer;
+  - a diversion never adds its own stop, and never bypasses the approval of a serious action;
+  - diversions run whatever the settings;
   - Parallel is only offered when `Crew.admit` allows it;
   - a steer always creates a goal version.
 
 ## 6. Build: alpha.68
 
 - **Phone:**
-  - **Diversion core:** `mind/divert/` with `PlanVersions`, `DiversionPolicy` (tiers), `GoalVersions`.
+  - **Diversion core:** `mind/divert/` with `PlanVersions`, `DiversionPolicy` (the serious-change flag), `GoalVersions`.
   - **Mind:** a real pause in `MindLoop` (a hold at the step boundary); steer creates Goal v2 plus a re-plan note;
     `plan_update` versions; blocked detection feeds the divert nudge.
   - **Task Kit:** the new commands.
@@ -131,7 +133,7 @@ Plan v2 · Changed course
     branches, the one-line island, the ask card.
 - **Gateway and Glass:** the `divert` suite and metrics; the inspector branch.
 - **Tests:**
-  - policy tiers;
+  - the serious-change flag on approvals;
   - a steer versions the goal and re-plans;
   - pause holds at a boundary and resumes;
   - two-tap stop;
@@ -144,6 +146,4 @@ Plan v2 · Changed course
 ## 7. Not in this plan
 
 - Automatic choice without the list (D1).
-- Steering a task that is behind the screen from the Ask bar: the bar steers the front task; tasks behind the screen
-  keep their own notifications.
 - Undoing actions already done before a diversion (sent messages stay sent; the plan says so).
