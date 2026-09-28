@@ -1,6 +1,6 @@
 # 36 — The App Manual: a map builder that understands apps by itself
 
-**Status:** plan, 2026-09-28, with the owner's decisions (§0). Three build runs (M1–M3, §13). Builds on the mapper
+**Status:** plan, 2026-09-28, with the owner's decisions (§0). Three build runs (M1–M3, §14). Builds on the mapper
 (plans 06, 20, 22), one map and grounded skills (23), the Mind's `go_to` (A37) and JEV watching (32).
 
 **The owner's ask:**
@@ -27,7 +27,7 @@ experiments to find out, and quizzes itself at the end to find the gaps.
   - **Default: the phone's current model** (the model selected in the phone's settings, `openrouter_model`), resolved
     when the pass starts.
   - The model's key stays on the phone; the PC only chooses which model.
-- **Screenshots: an on/off switch** with one short, human note (§8). Off by default.
+- **Screenshots: an on/off switch** with one short, human note (§9). Off by default.
 - **Lists are described by how they work, not by what's in them.** The manual records the list's order, its groups,
   how to find one item and what opening one shows. It never records the entries themselves.
 - **Categories are found automatically:** tabs, segments, filters and sub-categories (Instagram's Followers /
@@ -86,6 +86,7 @@ probed, walked, used in a run, taught by the owner, inferred) and a **confidence
 | **Categories** | A set of views of the same place (tabs, segments, chips, filters), their sub-categories, and which list each one shows | Messages › **Primary · General · Requests**; Profile › **Followers · Following** |
 | **Ability** | A thing a person can do, as a verb phrase, with the path that does it and 8–15 other phrasings | "Add a connector to a chat" → `Chat › + › Connectors › ‹pick›` |
 | **Fact** | A small learned truth for planning | "Temporary chats are not saved to history" |
+| **Dictionary** (§7) | The app's sets of things (under a fixed core kind), their markers and views, with stable ids. Every other entry tags these ids | `set:ig.close_friends` ⊂ Person, listed at Settings › Close friends |
 
 - **Effects** are a fixed set: `navigate`, `reveal` (opens a panel), `switch` (changes category), `scroll`, `edit`,
   `toggle`, `choose`, `send`, `pay`, `delete`, `grant`, `sign-in`, `external`.
@@ -176,7 +177,7 @@ every app shares, rather than about apps.
 ```
 
 1. **Perceive.** The accessibility tree, grouped into regions (top bar, category strip, body, bottom bar, floating
-   button, sheet). If screenshots are on (§8), a **masked** screenshot is taken: every content region is painted solid
+   button, sheet). If screenshots are on (§9), a **masked** screenshot is taken: every content region is painted solid
    before the picture leaves the phone.
 2. **Split** chrome from content (§4).
 3. **Recognise patterns** (§5.2): cheap, deterministic detectors label the regions with evidence and a confidence.
@@ -321,7 +322,176 @@ Order comes from the **shapes** of what the rows show, read and then discarded:
 Only the conclusion is stored ("newest first, pinned first"), and the ages and letters are thrown away. If there is
 no clear signal, the order is written as "the app's own order".
 
-## 7. How agents use the manual: rapid navigation in three tiers
+## 7. The app dictionary: one structure, kept in check
+
+**The owner's question:**
+> "How to make sure it stays close to one mapping structure … when it looks for close friends in Instagram it can
+> actually understand how to differentiate the different types of people without it all having to come from a text
+> explanation. Maybe one controlled organizer agent that keeps sub-categories in check and considers carefully before
+> making a new sub-sub-category … like an app dictionary, and then pages tag these confirmed sub-categories."
+
+**The answer: yes, with one change.** The organizer should be a **gatekeeper with rules and a short list of allowed
+decisions**, not a free agent. Most of its work is deterministic checks. A model is asked only the one narrow question
+that needs judgement, and every change it makes can be undone.
+
+### 7.1 The designs weighed
+
+Six designs were compared. Each is scored 1 (poor) to 5 (strong) on what this system needs:
+
+- **Consistent:** the same thing gets the same name and id across passes, models and app versions.
+- **App concepts:** it can hold what only this app has ("Close friends", "Requests").
+- **Survives model errors:** one bad model answer can't corrupt the map.
+- **Tells things apart without prose:** an agent can check "is this row a close friend?" from structure.
+- **Privacy:** it can't turn into a list of your people.
+- **Cost / effort:** tokens per pass and build work (5 = cheap).
+
+| Design | Consistent | App concepts | Survives model errors | Tells apart without prose | Privacy | Cost / effort | Total |
+|---|---|---|---|---|---|---|---|
+| A. Free-text descriptions only (the plan so far) | 1 | 4 | 2 | 1 | 4 | 5 | 17 |
+| B. One fixed schema for all apps, written by hand | 5 | 1 | 5 | 3 | 5 | 3 | 22 |
+| C. The model invents types freely on every pass | 1 | 5 | 1 | 2 | 3 | 3 | 15 |
+| D. Several agents debate each new category | 3 | 4 | 3 | 2 | 4 | 1 | 17 |
+| E. No names: embeddings cluster similar things | 2 | 3 | 3 | 2 | 2 | 3 | 15 |
+| **F. Fixed core + per-app dictionary behind a gatekeeper** | **5** | **5** | **4** | **5** | **5** | **4** | **28** |
+
+- **A drifts.** "Followers", "People who follow you" and "Your followers" become three things, and nothing can be
+  checked.
+- **B is consistent but blind to anything it didn't foresee.** It would slowly fill with app-specific rules, which §5.2
+  forbids.
+- **C is the owner's worry realised:** a new sub-sub-category every pass, with synonyms and orphans.
+- **D costs several model calls per decision and still has no memory of past decisions.** Consistency comes from
+  stored ids and rules, not from debate.
+- **E can't explain itself or be checked,** and embeddings of rows risk encoding content.
+- **F takes B's consistency for the few things every app shares, and a governed dictionary for the rest.** Its only
+  weakness, a wrong merge or split, is handled in §7.6.
+
+**Chosen: F.**
+
+### 7.2 Layer 1: a small fixed core (the same in every app)
+
+About 25 **core kinds**, fixed in code and changed only by a release: **Person, Conversation, Message, Post, Media,
+File, Link, Place, Event, Task, Product, Order, Payment, Account, Setting, Notification, Group, Page/Channel, Search
+result, Draft, Collection, Tool/Connector, Model/Assistant, Other**.
+- Every list item, typed slot and ability parameter is **one core kind** or a set under one.
+- This is what lets "message a person" mean the same in WhatsApp, Instagram and Gmail, and lets the ability index
+  match across apps.
+
+### 7.3 Layer 2: the per-app dictionary
+
+Each app has one dictionary, shared by all of its versions, and each entry carries the versions it was seen in. An
+entry is one of four things:
+
+| Entry | Meaning | Instagram example (illustrative) |
+|---|---|---|
+| **Set** | A named group of one core kind, defined by where the app shows it | **Followers** ⊂ Person · **Following** ⊂ Person · **Close friends** ⊂ Person · **Message requests** ⊂ Conversation |
+| **Relation** | How two sets relate, stated only when proven | Close friends and Followers: *overlap unknown* until evidence shows otherwise |
+| **Marker** | A structural sign the app uses to show membership or state | "Remove" button on a row (only in Followers); a badge with the app's content description; an unread dot |
+| **View** | A category or filter that shows a set | Messages › **Requests** shows Message requests |
+
+Each entry holds these, and **no prose is needed to use it**:
+- a **stable id** that is never reused (`set:ig.close_friends`);
+- its **core kind** and its **parent** (a set can sit under another set, up to 3 levels deep);
+- its **canonical name, from the app's own words** (lexicon or chrome), plus aliases;
+- its **anchors:** where it is listed (a screen and category path), its markers, and how membership changes (the
+  action, with its risk);
+- its **recognition signature,** which lets a walker **test membership from structure** at run time:
+  - "this row is in the Close friends list";
+  - "this row shows the *Remove* marker, so the person follows you";
+- **provenance, confidence and status:** *candidate*, *confirmed* or *locked* (owner-locked).
+
+**How this tells people apart without text.** A Person in Instagram isn't described in words. The map knows
+*structurally* which sets it can be in, where each set is listed, which marker shows membership, and how to check one.
+So "add Sam to close friends" becomes:
+1. Resolve the set (`set:ig.close_friends`).
+2. Take its "membership changes" anchor. That is a change, so it asks you.
+3. Before acting, check with the recognition signature that Sam isn't already in it.
+
+The one-line descriptions stay, but only as a help for reading. The ids and anchors carry the meaning.
+
+**Privacy: sets are defined by structure, never by members.** The dictionary may say *Close friends* exists, where it
+is listed and how to check someone. It never stores who is in it, how many there are, or any name. A CI guard rejects
+any dictionary field that isn't chrome, a slot, a shape or an id, and the canary check covers the dictionary too.
+
+### 7.4 Pages tag the dictionary; they don't describe people
+
+Screens, lists, categories, markers and abilities point at dictionary ids instead of free text:
+- the Followers screen's list: `item: set:ig.followers ⊂ core:Person`, `view of: set:ig.followers`;
+- ability "Open a chat with ‹Person›": parameter `core:Person`, with the path Messages › Search;
+- ability "Add ‹Person› to ‹Close friends›": parameter `core:Person`, target `set:ig.close_friends`, effect `change`
+  (asks you).
+
+When the Mind or JEV reads the manual, it gets a **glossary block** first (the app's sets, with parents and anchors,
+usually 10–40 lines) and then the relevant screens. Words in a goal ("close friends", "beste vrienden", "my CF list")
+match a set by its name, aliases and paraphrases, and the set leads to its anchors.
+
+### 7.5 The organizer (gatekeeper)
+
+Describers and probes **propose**; only the organizer **admits**. It runs once at the end of each pass, on the batch of
+proposals, and also when a run or a teaching session proposes something.
+
+**Step 1: deterministic gates.** A proposal fails early if any gate fails.
+
+| Gate | The rule |
+|---|---|
+| **Named by the app** | The name must be the app's own words (lexicon or stable chrome). The model can never invent a set name. |
+| **Anchored** | The set must have a structural anchor: its own list, a category or filter that shows it, or a marker only its members carry. |
+| **Not a duplicate** | Same string resource id, same anchor fingerprint, or a normalised alias match → merge into the existing entry, never create. |
+| **Seen twice** | Seen in 2 observations, or 1 probe with a confirmed prediction. Otherwise it stays a *candidate*. |
+| **Depth and fan-out** | At most 3 levels under a core kind, and at most 12 children per parent before a review is required. |
+| **Useful** | Referenced by a list, a view or an ability, or needed to answer a self-quiz goal. Otherwise it stays a candidate. |
+
+**Step 2: one narrow model question, only for what the gates can't settle.** This is a typed choice with a fixed set
+of answers:
+- `NEW(parent)`: a new set under this parent;
+- `SAME_AS(id)`: the same set as an existing one (becomes an alias);
+- `SUBSET_OF(id)`;
+- `KEEP_CANDIDATE`;
+- `REJECT`.
+
+It sees the proposal's evidence (anchors, markers, app words) and the nearby dictionary entries, never content.
+- It is one batched call per pass, typically 0–5 questions.
+- A decision-shaped question is exactly what **JEV** is built for. JEV watches these decisions from M2, next to the
+  model, and can take them over when its numbers earn it.
+
+**Step 3: audit.** Every admission, merge and split is recorded with its evidence. The owner sees it in Glass.
+
+### 7.6 Keeping it correct over time
+
+- **Mistakes can be undone.** A merge keeps the old id as a redirect. A split gives new ids and repoints what tagged
+  the old one. Abilities keep working through redirects.
+- **Owner locks.** The owner can rename (as an alias), merge, reject or **lock** an entry in Glass. The organizer never
+  changes a locked entry.
+- **App updates.** An entry not seen in a new version is marked *not seen in 404.0*, not deleted. It is removed only
+  after two passes without it.
+- **Model changes.** Ids, gates and stored decisions don't depend on which model is picked (§9). A new model can only
+  propose, and the gates judge the same way.
+- **Health check.** After each pass the organizer reports orphans (sets nothing points at), near-duplicates (similar
+  anchors), sets that are too deep or too wide, and candidates older than 30 days. The self-quiz (§5.5) also asks
+  set-shaped goals ("who are my close friends?" → where to look, not names).
+
+### 7.7 What it improves, and what it could hurt
+
+**Improves:**
+- **Consistency:** one name and one id per concept, across passes, models and versions.
+- **Precision:** abilities take typed parameters, so "close friends" can't be confused with "followers" when their
+  anchors differ.
+- **Checks at run time:** membership is tested from structure before acting.
+- **Smaller prompts:** a glossary instead of paragraphs.
+- **Transfer across apps:** core kinds let "message a person" work anywhere, and set patterns seen in other apps
+  (blocked, muted, requests) become hypotheses to probe. They are never admitted without evidence.
+
+**Could hurt, and the guard against each:**
+
+| Risk | Guard |
+|---|---|
+| Over-structuring (too many tiny sets) | "Useful" and "seen twice" gates; fan-out limit; candidates don't show to agents by default |
+| A wrong merge or split spreads | Redirects and reversible ids, the audit, owner locks, health report |
+| Rigidity: something doesn't fit the core | `Other` as a core kind; the core grows only through a release with fixtures |
+| Delay | The organizer runs at the end of a pass; during the pass, candidates are used provisionally |
+| Cost | One batched model call per pass, and zero when the gates settle everything |
+| Privacy creep ("list of close friends") | Structure-only fields, CI guard, canary |
+
+## 8. How agents use the manual: rapid navigation in three tiers
 
 | Tier | Who decides | When | Cost |
 |---|---|---|---|
@@ -348,7 +518,7 @@ no clear signal, the order is written as "the app's own order".
   - the first surprise hands control back to the Mind;
   - the approval boundaries are unchanged.
 
-## 8. Settings: the model and screenshots
+## 9. Settings: the model and screenshots
 
 **In Glass, on the mapping start sheet** (remembered per app, with a default in Glass settings):
 
@@ -368,14 +538,15 @@ no clear signal, the order is written as "the app's own order".
   split. The echo check (§4) still applies to what the model writes back.
 - **On the phone,** App Maps settings shows the same two choices for passes started there.
 
-## 9. Glass
+## 10. Glass
 
 - **Map tab:**
   - real screen names with a one-line purpose under each;
   - panels hang off their screen;
   - lists show as one card ("‹a chat› · newest first · Search");
   - category sets show as tabs on the card;
-  - zones get real names.
+  - zones get real names;
+  - each list and category shows its dictionary set as a small tag ("Person › Close friends").
 - **Place inspector:**
   - *What it's for*;
   - *Controls*, by region, with their effect and risk;
@@ -391,10 +562,15 @@ no clear signal, the order is written as "the app's own order".
 - **Report:**
   - "Answers 17 of 20 goals · 3 to explore" (§5.5);
   - **Map deeper** explores exactly those.
-- **Export manual** gives the §3.1 Markdown.
+- **Dictionary tab:**
+  - the app's sets as a tree under their core kinds, each with its anchors, markers, versions and status
+    (candidate, confirmed, locked);
+  - **Rename** (as an alias), **Merge**, **Reject** and **Lock**;
+  - the organizer's audit ("Close friends admitted: named by the app, own list, seen twice") and the health report.
+- **Export manual** gives the §3.1 Markdown, with the glossary block first.
 - **Agent MCP:** a read-only `app_manual(app, query?)` tool. It returns manual text, never content.
 
-## 10. Measuring it: the Lab suites
+## 11. Measuring it: the Lab suites
 
 - **Find the feature:**
   - 30 plain-language goals per app across 5 apps (ChatGPT, Instagram, Gmail, WhatsApp, Settings), each with its
@@ -404,16 +580,21 @@ no clear signal, the order is written as "the app's own order".
 - **Map quality:** for each app, a hand-written checklist of the lists (with their order and search), the category
   sets (with sub-categories) and the key panels. Scored as the share the pass found correctly, with and without
   screenshots, and per model.
-- **JEV:** agreement and calibration on ability picks.
+- **JEV:** agreement and calibration on ability picks and on organizer decisions.
+- **Dictionary stability:**
+  - map the same app twice with different models, and check the share of sets that get the same ids;
+  - count duplicates and orphans left after the organizer runs;
+  - check against a hand-written list of each app's sets.
 - **Privacy:** the canary scan in every suite. One hit fails the suite.
 - **Targets for M3:**
   - ≥ 85% top-1 ability match;
   - ≥ 90% success on navigation goals;
   - ≥ 60% fewer model calls than Mind alone;
   - ≥ 80% map-quality score;
+  - ≥ 90% of sets matched across two models, and 0 duplicate sets after the organizer runs;
   - 0 canary hits.
 
-## 11. Safety (CI-guarded where marked)
+## 12. Safety (CI-guarded where marked)
 
 - **Never kept:** content. Only the app's own words, typed slots and shapes are stored. *(guard: canary, echo
   check)*
@@ -422,11 +603,14 @@ no clear signal, the order is written as "the app's own order".
 - **Look-only probes** are reveal, switch, scroll, sample, long-press reveal and back. They never type, choose,
   toggle, send, follow or sign in. *(guard, via `MapperDoorRisk`)*
 - **No app-specific rules** in the mapper. *(guard)*
+- **The dictionary holds structure only:** set names from the app's own words, anchors, markers and ids. It never
+  holds members, counts or names of people. *(guard: field whitelist, canary)*
+- **Only the organizer admits sets.** Describers and models can only propose. *(guard)*
 - **The manual is advice.** Walks check every step, stop at the first surprise, and keep every approval boundary.
 - **JEV is watch-only** until promoted, and never approves, types or chooses content. *(guard)*
 - **The MCP tool is read-only** and returns manual text only. *(guard)*
 
-## 12. What changes in the code
+## 13. What changes in the code
 
 - **Phone, `brain/graphv2/AtlasContracts.kt`:**
   - `AtlasPrivacy` gains `AppLexicon`, `ChromeFilter` and `ContentShapes`;
@@ -441,31 +625,38 @@ no clear signal, the order is written as "the app's own order".
   - `ManualDescriber` (hypothesise and revise calls, JSON schema, echo check, masked screenshots);
   - `SelfQuiz`;
   - `AbilityIndex` (BM25, paraphrases);
-  - `ManualRenderer` (Markdown, Mind excerpts).
+  - `ManualRenderer` (Markdown, glossary block, Mind excerpts);
+  - `CoreKinds` (the fixed core, in code);
+  - `AppDictionary` (entries, ids, redirects, versions, locks);
+  - `Organizer` (the gates, the batched typed-choice question, the audit and the health report).
 - **Phone, `mind/`:**
   - `find`, `go_to(ability)` and `how_to_find`;
   - excerpts replace the map card;
   - Learn writes abilities.
 - **Phone, `voice/JevShadow.kt`:** becomes a shared `Jev` client, with a second watch-only question.
-- **Phone ops:** `models.list`, `mapping.start` gains `describer`, and `manual.get`, `manual.search`, `manual.export`.
+- **Phone ops:**
+  - `models.list`;
+  - `mapping.start` gains `describer`;
+  - `manual.get`, `manual.search` and `manual.export`;
+  - `dictionary.get` and `dictionary.edit` (rename, merge, reject, lock: the owner only, from Glass).
 - **Gateway:** forwards the new ops and adds the read-only agent MCP tool.
 - **Glass:**
   - the start sheet's model picker and screenshots switch;
-  - Map tab, inspector, Abilities tab, report and Export.
+  - Map tab, inspector, Abilities and Dictionary tabs, report and Export.
 - **Lab:** find-the-feature, map quality, JEV ability tally and the canary scan.
 
-## 13. Releases
+## 14. Releases
 
 | Release | Contents | Exit criteria |
 |---|---|---|
-| **M1: The app's own words, lists and categories** | App lexicon, chrome filter and content shapes; the pattern library; reveal, switch, scroll and sample probes; lists (order, groups, how to find one) and category sets with sub-categories; real names in Glass; the model picker and screenshots switch; canary guard | On the owner's phone: ChatGPT shows Chat, Sidebar, the Add panel from "+" and the chat list "newest first · Search chats". Instagram shows Messages' Primary / General / Requests and Profile's Followers / Following. 0 canary hits |
-| **M2: The describer, abilities and self-quiz** | Hypothesise → probe → revise loop; abilities with paraphrases and provenance; the self-quiz and targeted Map deeper; Learn and teaching write abilities; Abilities tab; Export; `app_manual` MCP tool | "Add a connector to a chat" and "see message requests" are found and walked; the report shows the quiz score |
-| **M3: Rapid navigation** | Ability index; Tier 0 walks; `find`, `go_to(ability)`, `how_to_find`; Mind excerpts; JEV watching; the Lab suites; diff passes; self-healing selectors | The §10 targets on the owner's phone, stated honestly |
+| **M1: The app's own words, lists and categories** | App lexicon, chrome filter and content shapes; the pattern library; reveal, switch, scroll and sample probes; lists (order, groups, how to find one) and category sets with sub-categories; real names in Glass; the model picker and screenshots switch; canary guard. **Dictionary foundations:** the core kinds, the dictionary store with stable ids, and the deterministic gates (sets admitted only when named by the app, anchored and seen twice); lists and categories tag set ids | On the owner's phone: ChatGPT shows Chat, Sidebar, the Add panel from "+" and the chat list "newest first · Search chats". Instagram shows Messages' Primary / General / Requests and Profile's Followers / Following, each as a set under Person or Conversation. Two passes give the same ids. 0 canary hits |
+| **M2: The describer, abilities and self-quiz** | Hypothesise → probe → revise loop; abilities with paraphrases and provenance; the self-quiz and targeted Map deeper; Learn and teaching write abilities; Abilities tab; Export; `app_manual` MCP tool. **The organizer:** the batched typed-choice question, redirects for merges and splits, owner locks, the audit and the health report, the Dictionary tab, and JEV watching organizer decisions. Abilities take typed parameters | "Add a connector to a chat" and "see message requests" are found and walked; "add ‹Person› to Close friends" resolves to its set and asks first; the report shows the quiz score |
+| **M3: Rapid navigation** | Ability index; Tier 0 walks; `find`, `go_to(ability)`, `how_to_find`; Mind excerpts; JEV watching; the Lab suites; diff passes; self-healing selectors | The §11 targets on the owner's phone, stated honestly |
 
 These are runs 3–5 in plan 35 (alpha.59–61), ahead of parallel sessions. JEV's promotion for abilities follows its
 Lab numbers, as in Drive.
 
-## 14. Still open
+## 15. Still open
 
 - **Sharing manuals** between the owner's phones through the Command Center: planned for M2. Manuals hold no content.
 - **A public manual library**, as marketplace cards, is later and needs its own decision.
