@@ -973,6 +973,78 @@ def get_openrouter_llm(
     return ModelFactory.create_model(ep)
 
 
+def _env_secret(*names: str) -> str | None:
+    """Return the first non-empty env/settings secret among ``names``."""
+    import os
+
+    for name in names:
+        val = os.environ.get(name)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    try:
+        from artemis.config.settings import settings
+
+        for name in names:
+            secret = getattr(settings, name, None)
+            if secret is None:
+                continue
+            raw = secret.get_secret_value() if hasattr(secret, "get_secret_value") else str(secret)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+    except Exception:
+        pass
+    return None
+
+
+def remap_google_model_for_openrouter(model_name: str) -> str:
+    """Map a bare Google model id onto an OpenRouter ``google/...`` slug."""
+    name = (model_name or "").strip()
+    if not name:
+        return "google/gemini-2.5-flash"
+    if name.startswith("models/"):
+        name = name[len("models/") :]
+    if "/" in name:
+        return name
+    lower = name.lower()
+    if "flash-lite" in lower or lower.endswith("-lite"):
+        return "google/gemini-2.5-flash-lite"
+    if lower.startswith("gemini-"):
+        # Native 3.x ids are not always on OpenRouter; 2.5-flash is the safe Mode A util.
+        return "google/gemini-2.5-flash"
+    return f"google/{name}"
+
+
+def get_utils_llm(
+    model_name: str = "gemini-2.5-flash",
+    temperature: float | None = None,
+    timeout: float | None = None,
+) -> BaseChatModel:
+    """Utils/VLM factory that never hard-requires Gemini when OpenRouter is configured.
+
+    Mode A / Cyclone Glass often runs OpenRouter-only (no GOOGLE_API_KEY). Step
+    memory lenses historically defaulted to bare ``gemini-*`` names and blew up
+    inside ChatGoogleGenerativeAI validation, burning retries and stalling Flash.
+    Prefer Google when a Gemini key exists; otherwise route through OpenRouter.
+    """
+    name = (model_name or "gemini-2.5-flash").strip()
+    if name.startswith("models/"):
+        name = name[len("models/") :]
+    if "/" in name:
+        return get_openrouter_llm(name, temperature=temperature, timeout=timeout)
+    if _env_secret("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+        return get_google_llm(name, temperature=temperature, timeout=timeout)
+    if _env_secret("OPEN_ROUTER_API_KEY", "OPENROUTER_API_KEY"):
+        return get_openrouter_llm(
+            remap_google_model_for_openrouter(name),
+            temperature=temperature,
+            timeout=timeout,
+        )
+    raise RuntimeError(
+        "No GOOGLE_API_KEY/GEMINI_API_KEY or OPENROUTER_API_KEY available for utils LLM "
+        f"(requested model={name!r})."
+    )
+
+
 def get_grok_llm(
     model_name: str,
     temperature: float | None = None,

@@ -19,6 +19,7 @@ Optional:
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import os
 import urllib.error
@@ -492,9 +493,9 @@ class CycloneGatewayDriver(BaseDeviceDriver):
         )
 
     async def get_current_package(self) -> str | None:
-        if self._current_package:
-            return self._current_package
-        await self.get_screen_data(skip_settling=True)
+        # Foreground verification must never reuse the pre-launch package.
+        self._current_package = None
+        await asyncio.to_thread(self._observe, include_screenshot=False, mode="compact")
         return self._current_package
 
     async def execute_shell(self, command: str, timeout_seconds: float = 15.0) -> str:

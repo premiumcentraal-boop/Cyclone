@@ -255,6 +255,11 @@ async def stop_task(
         # Empty or non-JSON body: fall back to the query parameters.
         pass
 
+    # An untargeted UI Stop drains the queue as well as the active worker.
+    # Session/device-scoped cancellation retains its isolation semantics.
+    if not target_sid and not target_dev:
+        target_all = True
+
     # stop_tasks updates scheduler state and asyncio events owned by this loop.
     stopped = task_queue_service.stop_tasks(
         clear_all=target_all,
@@ -262,7 +267,11 @@ async def stop_task(
         device_id=target_dev,
     )
     if stopped:
-        return {"status": "stopped", "session_id": target_sid}
+        return {"status": "stopped", "session_id": target_sid, "drained": bool(target_all)}
+    # Untargeted drain always clears queue ownership; never leave clients
+    # thinking a phantom running/queued task remains after empty-body Stop.
+    if target_all:
+        return {"status": "stopped", "session_id": target_sid, "drained": True}
     return {"status": "no_running_task"}
 
 

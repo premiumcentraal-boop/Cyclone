@@ -225,6 +225,20 @@ class Agent:
         if os.environ.get("ARTEMIS_CLOUD_MODE") == "1":
             device_id = os.environ.get("ADB_DEVICE_SERIAL", "cloud_device")
             platform = DevicePlatform.ANDROID
+        elif cyclone_connected():
+            # Mode A: Cyclone phone routes are authoritative — do not require
+            # a raw ADB serial to be enumerated on the host.
+            device_id = (
+                (os.environ.get("CYCLONE_DEVICE_ID") or "").strip()
+                or (self._config.device_id or "")
+                or (os.environ.get("ADB_DEVICE_SERIAL") or "").strip()
+                or "cyclone-mode-a"
+            )
+            platform = DevicePlatform.ANDROID
+            logger.info(
+                f"Cyclone-connected Mode A: using device_id={device_id} "
+                "(skipping ADB device enumeration)"
+            )
         elif not self._config.device_id or not self._config.device_platform:
             device_id, platform, _ = get_first_device(logger=logger)
         else:
@@ -242,7 +256,12 @@ class Agent:
         publish_startup_progress(
             "device_check", "Checking the Android device", session_id=self._session_id
         )
-        if os.environ.get("ARTEMIS_CLOUD_MODE") != "1":
+        if cyclone_connected():
+            # Mode A has no ADB authority for observe/act; leave clients unset
+            # so later Cyclone branches skip helper / dumpsys paths.
+            self._adb_client = None
+            self._ui_adb_client = None
+        elif os.environ.get("ARTEMIS_CLOUD_MODE") != "1":
             self._init_clients(
                 device_id=device_id,
                 platform=platform,

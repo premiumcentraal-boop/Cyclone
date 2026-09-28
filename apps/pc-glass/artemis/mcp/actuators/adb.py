@@ -312,6 +312,8 @@ class AdbActuator:
                 "play store": "com.android.vending",
                 "playstore": "com.android.vending",
             }
+            from artemis.cyclone.launch_goal import APP_PACKAGES
+            aliases.update(APP_PACKAGES)
             target_pkg = aliases.get(app_name.strip().lower())
             if not target_pkg:
                 try:

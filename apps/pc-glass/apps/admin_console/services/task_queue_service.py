@@ -1226,6 +1226,12 @@ class TaskQueueService:
         state.active_session_id = None
         state.current_goal = None
         state.current_profile = None
+        # Force-clear local run bookkeeping so /api/status cannot stay
+        # "running"/"queued" after an untargeted drain acknowledgement.
+        # Workers were already signalled/killed above; lingering map entries
+        # would keep state.is_running true until a late finalizer ran.
+        state.active_runs.clear()
+        state.current_process = None
 
         cls._clear_pause_file()
 

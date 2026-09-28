@@ -95,6 +95,11 @@ function Start-GlassHidden {
     return @{ Ok = $false; Message = 'uv not found on PATH. Install https://docs.astral.sh/uv/' }
   }
   Import-GlassModeAEnv
+  $requiredModeA = @('CYCLONE_DEVICE_GATEWAY_URL', 'CYCLONE_SESSION_ID', 'CYCLONE_DEVICE_GATEWAY_TOKEN', 'CYCLONE_DEVICE_ID')
+  $missingModeA = @($requiredModeA | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_, 'Process')) })
+  if ($missingModeA.Count -gt 0) {
+    return @{ Ok = $false; Message = ('Missing Mode A configuration: ' + ($missingModeA -join ', ')) }
+  }
   $env:CYCLONE_CONNECTED = '1'
   $env:PYTHONUNBUFFERED = '1'
   Write-GlassLog "Starting Cyclone Glass in $root (port $Port) session=$($env:CYCLONE_SESSION_ID) tokenLen=$($env:CYCLONE_DEVICE_GATEWAY_TOKEN.Length) device=$($env:CYCLONE_DEVICE_ID)"

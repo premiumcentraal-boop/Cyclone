@@ -323,26 +323,20 @@ class StepCapsuleLens(StepLens):
 
     def _get_llm(self):
         if self._llm is None:
-            from artemis.services.llm import get_google_llm, get_openrouter_llm
+            from artemis.services.llm import get_utils_llm
 
-            if "/" in (self._model_name or ""):
-                self._llm = get_openrouter_llm(model_name=self._model_name, temperature=0.0)
-            else:
-                self._llm = get_google_llm(model_name=self._model_name, temperature=0.0)
+            # OpenRouter-or-Google: never construct ChatGoogleGenerativeAI when
+            # only OPENROUTER_API_KEY is configured (Mode A / Cyclone Glass).
+            self._llm = get_utils_llm(model_name=self._model_name or "gemini-2.5-flash", temperature=0.0)
         return self._llm
 
     def _get_fallback_llm(self):
         if self._fallback_llm is None and self._fallback_model_name:
-            from artemis.services.llm import get_google_llm, get_openrouter_llm
+            from artemis.services.llm import get_utils_llm
 
-            if "/" in (self._fallback_model_name or ""):
-                self._fallback_llm = get_openrouter_llm(
-                    model_name=self._fallback_model_name, temperature=0.0
-                )
-            else:
-                self._fallback_llm = get_google_llm(
-                    model_name=self._fallback_model_name, temperature=0.0
-                )
+            self._fallback_llm = get_utils_llm(
+                model_name=self._fallback_model_name, temperature=0.0
+            )
         return self._fallback_llm
 
     @property

@@ -69,6 +69,17 @@ def get_first_device(
             if logger:
                 logger.error(f"ADB command failed: {e}")
 
+    # Mode A fallback: Cyclone device id when no ADB serial is attached.
+    try:
+        from artemis.drivers.factory import cyclone_connected
+
+        if cyclone_connected():
+            cid = (os.environ.get("CYCLONE_DEVICE_ID") or "").strip()
+            if cid:
+                return cid, DevicePlatform.ANDROID, None
+    except Exception:
+        pass
+
     return None, None, None
 
 

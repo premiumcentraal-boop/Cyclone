@@ -169,7 +169,7 @@ class StepMemoryService:
         while key not in self._summaries:
             async with self._semaphore:
                 succeeded = await self._attempt(key)
-            if succeeded:
+            if succeeded or key in self._failed:
                 return
 
             retry_count = self._retry_counts.get(key, 0) + 1
@@ -210,6 +210,17 @@ class StepMemoryService:
             summary = await self._lens.render(key, payload)
         except Exception as e:
             logger.warning(f"StepMemoryService: lens '{self._lens.name}' attempt failed: {e}")
+            # Permanent config errors (missing Gemini key under OpenRouter-only Mode A)
+            # must not burn the full retry budget — mark failed immediately.
+            msg = str(e).lower()
+            if "api key required" in msg or ("api_key" in msg and "required" in msg):
+                self._failed.add(key)
+                self._retry_counts[key] = self._retry_limit + 1
+                self._on_status(key, "failed")
+                logger.warning(
+                    f"StepMemoryService: permanent auth/config error for lens "
+                    f"'{self._lens.name}' — skipping further retries for this job."
+                )
             return False
         if not summary:
             return False

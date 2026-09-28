@@ -167,18 +167,9 @@ class VisualStepSummarizer(StepMemoryService):
         try:
             self._llm = get_llm(ctx, name="summarizer", is_utils=True)
         except Exception:
-            try:
-                if "/" in target_model:
-                    from artemis.services.llm import get_openrouter_llm
-                    self._llm = get_openrouter_llm(model_name=target_model, temperature=0.0)
-                else:
-                    self._llm = get_google_llm(model_name=target_model, temperature=0.0)
-            except Exception:
-                if "/" in target_model:
-                    from artemis.services.llm import get_openrouter_llm
-                    self._llm = get_openrouter_llm(model_name=target_model, temperature=0.0)
-                else:
-                    self._llm = get_google_llm(model_name=target_model, temperature=0.0)
+            from artemis.services.llm import get_utils_llm
+
+            self._llm = get_utils_llm(model_name=target_model, temperature=0.0)
         try:
             configured = getattr(self._llm, "model", None) or getattr(self._llm, "model_name", None)
             if isinstance(configured, str) and configured:

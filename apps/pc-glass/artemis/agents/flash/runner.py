@@ -972,7 +972,111 @@ class FlashRunner:
             )
             if name not in action_names:
                 index_elements = self._extend_index_snapshot(state, index_elements, before_len)
+            if injected:
+                continue
+            # Launch-only goals: exit as soon as manage_app/open_app succeeds
+            # or the target package is already foreground — stop HOME/drawer loops.
+            launch_done = await self._complete_launch_goal_if_met(
+                name, args, turn, pre_screenshot_bytes, xml_list, messages
+            )
+            if launch_done is not None:
+                return launch_done, pre_screenshot_bytes, xml_list, action_sequence
         return None, pre_screenshot_bytes, xml_list, action_sequence
+
+
+    async def _complete_launch_goal_if_met(
+        self,
+        name: str,
+        args: dict,
+        turn: "_TurnRecord",
+        pre_screenshot_bytes,
+        xml_list,
+        messages: list[BaseMessage],
+    ):
+        """Complete launch-only goals when open_app/manage_app succeeds or package matches.
+
+        Multi-step goals ("Open Gmail then...") return None from launch_goal_package
+        and keep the full Flash loop. Injected guidance does not use this short-circuit.
+        """
+        from artemis.cyclone.launch_goal import launch_goal_package
+        from artemis.drivers.cyclone.gateway_driver import CycloneGatewayDriver
+
+        package = launch_goal_package(self.goal)
+        if not package:
+            return None
+        driver = getattr(self.controller, "driver", None)
+        if not isinstance(driver, CycloneGatewayDriver):
+            return None
+
+        manage_launch = (
+            name == "manage_app" and str(args.get("action", "")).lower() == "launch"
+        )
+        last_status = turn.actions[-1][1] if turn.actions else None
+        open_app_ok = manage_launch and last_status == "success"
+
+        foreground = None
+        try:
+            foreground = await driver.get_current_package()
+        except Exception:
+            foreground = None
+        package_ok = foreground == package
+
+        if not (open_app_ok or package_ok):
+            return None
+
+        if package_ok:
+            explanation = f"Verified {package} in foreground via Cyclone."
+        else:
+            explanation = (
+                f"Launched {package} via Cyclone manage_app/phone.open_app "
+                f"(foreground now {foreground!r})."
+            )
+        return await self._finalize_task_report(
+            "report_task_status",
+            {"status": "completed", "explanation": explanation},
+            str(uuid.uuid4()),
+            "",
+            {},
+            pre_screenshot_bytes,
+            xml_list,
+            messages,
+        )
+
+    async def _maybe_complete_launch_goal_at_turn_start(
+        self,
+        pre_screenshot_bytes,
+        xml_list,
+        messages: list[BaseMessage],
+    ):
+        """If a launch-only goal is already foreground, finish before another vision turn."""
+        from artemis.cyclone.launch_goal import launch_goal_package
+        from artemis.drivers.cyclone.gateway_driver import CycloneGatewayDriver
+
+        package = launch_goal_package(self.goal)
+        if not package:
+            return None
+        driver = getattr(self.controller, "driver", None)
+        if not isinstance(driver, CycloneGatewayDriver):
+            return None
+        try:
+            foreground = await driver.get_current_package()
+        except Exception:
+            return None
+        if foreground != package:
+            return None
+        return await self._finalize_task_report(
+            "report_task_status",
+            {
+                "status": "completed",
+                "explanation": f"Verified {package} already in foreground via Cyclone.",
+            },
+            str(uuid.uuid4()),
+            "",
+            {},
+            pre_screenshot_bytes,
+            xml_list,
+            messages,
+        )
 
     @staticmethod
     def _turn_index_snapshot(state: State) -> list[dict]:
@@ -1067,6 +1171,15 @@ class FlashRunner:
             # Commit the previous turn: its step ids and outcomes exist now.
             self._commit_turn(ledger, previous_turn)
             previous_turn = None
+
+            # Launch-only: if the target app is already foreground, stop
+            # before another vision/drawer turn.
+            early = await self._maybe_complete_launch_goal_at_turn_start(
+                current_pre_screenshot_bytes, current_xml_list, []
+            )
+            if early is not None:
+                self._commit_turn(ledger, previous_turn)
+                return early
 
             # Check for real-time injected instructions: the verbatim text
             # is stamped on the step, the guidance pair goes to the tail.

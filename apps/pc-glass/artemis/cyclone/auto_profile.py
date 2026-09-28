@@ -91,19 +91,23 @@ def assess_tier(goal: str, guidelines: dict[str, Any] | None = None) -> tuple[st
     text = (goal or "").strip()
     lower = text.lower()
 
-    for pat in g.get("easy_patterns") or []:
-        try:
-            if re.search(pat, text, flags=re.IGNORECASE):
-                return "easy", f"matched easy_pattern {pat!r}"
-        except re.error:
-            continue
-
     hard_hits = [k for k in (g.get("hard_keywords") or []) if k.lower() in lower]
     # Multi-step cues
     if " and then " in lower or lower.count(" then ") >= 1:
         hard_hits.append("then-chain")
     if hard_hits:
         return "hard", "hard cues: " + ", ".join(hard_hits[:6])
+
+    # Broad launch regexes also match "open Gmail and star ...". Check
+    # conjunctions before allowing those patterns to classify a single launch.
+    if re.search(r"\b(and|then|after)\b", lower):
+        return "medium", "launch/navigation with additional instructions"
+    for pat in g.get("easy_patterns") or []:
+        try:
+            if re.search(pat, text, flags=re.IGNORECASE):
+                return "easy", f"matched easy_pattern {pat!r}"
+        except re.error:
+            continue
 
     # Medium: open X and do something light, or anything not easy/hard
     if re.search(r"\b(open|launch|go to)\b", lower) and len(text.split()) > 4:
