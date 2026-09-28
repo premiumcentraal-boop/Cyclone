@@ -8,16 +8,22 @@ Alpha 61 (see `RELEASE_5.0.0-alpha.61.dev1.md`). Alpha 61 was not published sepa
 
 ## What changed
 
-While Cyclone works, its status now shows **the logo of the app it is working in**, the way a call or a timer shows
-its app. Before, several places showed Cyclone's own logo.
+While Cyclone works, its status now shows **the logo of the app it is working in**. This is what the Alpha 43 overlay
+redesign asked for (plan 27, `docs/design/CYCLONE_TILT_GLASS.md` principle 10):
+- "Real app logos (the current app in front) replace generic Cyclone branding wherever a task works in an app."
+- "Cyclone's own mark appears only when there is no app (idle, a fresh ask)."
+
+Alpha 43 built this for tasks with a record. Tasks on your screen, the in-app task bars and the live notification still
+showed Cyclone.
 
 | Where | Before | Now |
 |---|---|---|
 | **Overlay island** (the folded working bar), on-screen tasks | Cyclone's logo, always | The app on screen that the task works in |
 | **Overlay island**, background tasks | Cyclone's logo until the task reported an app | The app the task works in, as soon as it is known |
-| **Overlay working card**, on-screen tasks | Cyclone's logo, always | The app on screen |
+| **Overlay working card**, on-screen tasks | Cyclone's logo, always | The apps it worked in, as the design's header: the last three, the current one 34 dp in front with a teal ring |
 | **In-app island** | As the overlay | As the overlay |
 | **In-app task cards** (the task list, the Ask panel, View progress) | Cyclone's own launcher icon whenever the task was on a Cyclone screen | The app the task last worked in |
+| **Live notification** (the picture beside the text) | The task's raw package, which could be Cyclone | The app the task works in. The small status-bar icon stays Cyclone's: Android requires the app's own. |
 
 **Rules:**
 - Cyclone itself, the system bars and the home screen never count as "the app". Cyclone keeps the last real app it
@@ -36,7 +42,13 @@ that lacks the lifecycle). **The Drive button was the only case.**
 
 ## Validation and limits
 
-- **Passes:** a JVM test of the app choice (`WorkingAppTest`), all CI guards, and the Mobile CI build and unit tests.
+- **Passes:**
+  - a JVM test of the app choice (`WorkingAppTest`);
+  - a new CI guard (`test_working_app_logo.py`): Cyclone's mark on the glass is only ever the fallback, and no task bar
+    or notification uses the raw package again;
+  - all CI guards;
+  - the Mobile CI build and unit tests.
+- **Unchanged, as designed:** the idle bubble keeps Cyclone's mark.
 - **Home screen:** Cyclone now asks Android which app is the home screen, so the launcher is never shown. This adds
   one manifest `<queries>` entry, not a permission.
 - **Physical status: UNVERIFIED.**

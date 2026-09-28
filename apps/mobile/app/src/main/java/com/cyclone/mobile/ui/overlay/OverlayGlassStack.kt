@@ -340,10 +340,12 @@ internal fun OverlayForegroundCard(snapshot: OverlayChromeSnapshot, onMinimize: 
         ?: snapshot.bullets.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
         ?: if (snapshot.state == OverlayChromeState.LIVE) "Watching the phone and continuing…" else "Using your phone…"
     val app by WorkingApp.foreground.collectAsState()
+    // The apps this on-screen task has worked in (the last three, the current one in front), like a recorded task's
+    // card; Cyclone's mark only before any app is known.
+    val apps = remember(snapshot.sessionId, app) { TaskAppTrail.record("screen:${snapshot.sessionId}", app) }
     GlassCard {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            // The app on screen, which this task works in; Cyclone's mark only before any app is known.
-            app?.let { AppLogo(it, 34.dp, current = true) } ?: CycloneMark(28)
+            HeaderApps(apps)
             Spacer(Modifier.weight(1f))
             StatusChip(CycloneTaskVisualState.WORKING)
             CollapseButton(onMinimize)

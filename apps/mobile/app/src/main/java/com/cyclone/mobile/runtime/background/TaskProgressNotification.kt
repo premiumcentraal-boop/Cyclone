@@ -40,7 +40,8 @@ internal object TaskProgressNotification {
             .setOngoing(task.working)
             .setAutoCancel(!task.working)
             .addExtras(Bundle().apply { putBoolean(REQUEST_PROMOTED_ONGOING, task.working) })
-        appIcon(context, task.packageName)?.let { builder.setLargeIcon(it) }
+        // The app the task works in (plan 27: never Cyclone itself); the small status-bar icon stays Cyclone's, as Android requires.
+        com.cyclone.mobile.ui.overlay.WorkingApp.forTask(task.taskId, task.packageName)?.let { appIcon(context, it) }?.let { builder.setLargeIcon(it) }
         if (task.working) {
             val percent = TaskNotificationProjection.progressPercent(task)
             // Plan 27: on Android 16 the Live Update shows the task's real steps as segments.
