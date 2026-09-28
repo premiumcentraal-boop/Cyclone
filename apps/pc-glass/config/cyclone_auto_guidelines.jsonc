@@ -1,0 +1,42 @@
+{
+  // Cyclone PC Glass — Auto profile guidelines (start-of-run mapping).
+  "tiers": {
+    "easy": {
+      "profile": "flash"
+    },
+    "medium": {
+      "profile": "flash"
+    },
+    "hard": {
+      "profile": "pro",
+      "verification_level": "checkpoints",
+      "explorer_mode": "pro"
+    }
+  },
+  "easy_patterns": [
+    "^\\s*open\\s+[\\w .'-]+\\s*$",
+    "^\\s*launch\\s+[\\w .'-]+\\s*$",
+    "^\\s*go to\\s+[\\w .'-]+\\s*$"
+  ],
+  "hard_keywords": [
+    "monitor",
+    "every minute",
+    "every hour",
+    "poll",
+    "diagnose",
+    "extract",
+    "summarize",
+    "report",
+    "compare",
+    "checkout",
+    "payment",
+    "fill out",
+    "fill in",
+    "sign up",
+    "book a",
+    "multi-step",
+    "and then",
+    "after that",
+    "several apps"
+  ]
+}
