@@ -103,4 +103,37 @@ class GatewayV5ManualAdapterTest {
         val bad = runCatching { call("dictionary.edit", """{"placeId":"package:com.example","action":"mine","id":"set:messages"}""") }
         assertTrue(bad.exceptionOrNull() is GatewayProtocolException)
     }
+
+    @Test
+    fun manualGetServesAbilitiesHitsQuizScoresAndMarkdown() {
+        val room = "screen:list:0123456789abcdef"
+        val panel = "screen:unknown:fedcba98765abcde"
+        dict = dict.copy(
+            screens = mapOf(
+                room to com.cyclone.mobile.manual.dictionary.ScreenCard(room, title = "Messages", category = "Primary", seen = 3, purpose = "Your direct messages.",
+                    list = com.cyclone.mobile.manual.dictionary.ListNote("2 texts", "newest_first", emptyList(), true, "Search")),
+                panel to com.cyclone.mobile.manual.dictionary.ScreenCard(panel, via = "Add photos and files", panelOf = room, items = listOf("Camera", "Files"), seen = 1)),
+            doors = mapOf("edge:" + "a".repeat(64) to com.cyclone.mobile.manual.dictionary.DoorCard("edge:" + "a".repeat(64), room, panel, "Add photos and files", "reveal")),
+            quiz = com.cyclone.mobile.manual.dictionary.QuizResult(9, listOf(
+                com.cyclone.mobile.manual.dictionary.QuizGoal("see the primary chats", null, 0.2),
+                com.cyclone.mobile.manual.dictionary.QuizGoal("attach a file", "ab:0123456789ab", 0.9))),
+        )
+        val out = call("manual.get", """{"placeId":"package:com.example","query":"attach a file from the camera"}""")
+        val abilities = (0 until out.getJSONArray("abilities").length()).map { out.getJSONArray("abilities").getJSONObject(it) }
+        val camera = abilities.single { it.getString("name") == "Camera (in Add photos and files)" }
+        assertEquals("offer", camera.getString("kind"))
+        assertEquals("Camera", camera.getString("pick"))
+        assertEquals(camera.getString("id"), out.getJSONArray("hits").getJSONObject(0).getString("id"))
+        assertFalse("an offer is never a Tier 0 walk", out.getBoolean("clear"))
+        assertEquals(1, out.getJSONObject("quiz").getInt("answered"))
+        val scores = out.getJSONObject("scores")
+        // A named place, a panel with offers and an ordered list, but the one confirmed category is not proven yet.
+        assertEquals(0.75, scores.getDouble("map"), 0.01)
+        assertEquals(0.5, scores.getDouble("quiz"), 0.01)
+        assertTrue(out.getString("markdown"), out.getString("markdown").contains("- **Messages** — Your direct messages."))
+        val dictionary = call("dictionary.get", """{"placeId":"package:com.example"}""")
+        assertTrue(dictionary.toString(), dictionary.toString().contains("\"order\":\"newest_first\""))
+        val extra = runCatching { call("manual.get", """{"placeId":"package:com.example","members":true}""") }
+        assertTrue(extra.exceptionOrNull() is GatewayProtocolException)
+    }
 }

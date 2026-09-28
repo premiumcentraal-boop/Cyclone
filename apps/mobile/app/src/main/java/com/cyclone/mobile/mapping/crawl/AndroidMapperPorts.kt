@@ -69,7 +69,10 @@ class GatewayMappingObservationPort(
                 com.cyclone.mobile.manual.ManualRuntime.observe(appContext, session.jobId, session.placeId,
                     StructuralRoomClassifier.nodeKey(observation), captured, observation)
             }
-            observation
+            // Map deeper (plan 36 §5.5): doors whose words fit an unanswered goal are tried first. Safety is unchanged.
+            val focus = runCatching { com.cyclone.mobile.manual.ManualRuntime.focusDoors(session.jobId, captured, observation) }.getOrDefault(emptySet())
+            if (focus.isEmpty()) observation
+            else observation.copy(doors = observation.doors.map { if (it.key in focus) it.copy(focus = true) else it })
         }
 }
 

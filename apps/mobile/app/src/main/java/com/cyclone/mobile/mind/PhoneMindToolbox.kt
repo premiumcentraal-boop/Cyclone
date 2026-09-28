@@ -44,6 +44,8 @@ class PhoneMindToolbox(
     private val planes: MindPlanes? = null,
     /** The app's dictionary glossary (plan 36 §7.4), shown with the map the first time the Mind is in an app. */
     private val glossary: ((String) -> String?)? = null,
+    /** The App Manual (plan 36 §8): abilities, their search and checked walks; null when the manual is off. */
+    private val manual: com.cyclone.mobile.manual.MindManualPort? = null,
 ) : MindToolbox {
     /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
     @Volatile private var env: CycloneAgentEnvironmentApi = env
@@ -63,7 +65,13 @@ class PhoneMindToolbox(
     val currentPlan: List<MindPlanStep> get() = plan
     val lastScreen: AgentPageCard? get() = screen
 
-    override fun specs(): List<MindToolSpec> = if (maps == null) SPECS.filterNot { it.name == "go_to" } else SPECS
+    override fun specs(): List<MindToolSpec> = SPECS.filter { spec ->
+        when (spec.name) {
+            "go_to" -> maps != null || manual != null
+            in MANUAL_TOOLS -> manual != null
+            else -> true
+        }
+    }
 
     override fun situation(): String {
         val observed = env.observe(goal)
@@ -155,7 +163,9 @@ class PhoneMindToolbox(
         "set_timer" -> setTimer(arguments)
         "set_alarm" -> setAlarm(arguments)
         "apps_list" -> appsList(arguments.optString("query"))
-        "go_to" -> goTo(arguments.optString("screen"))
+        "go_to" -> arguments.optString("ability").takeIf { it.isNotBlank() }?.let(::goToAbility) ?: goTo(arguments.optString("screen"))
+        "abilities_find" -> abilitiesFind(arguments.optString("goal"), arguments.optString("app"))
+        "how_to_find" -> howToFind(arguments.optString("list"), arguments.optString("app"))
         "recall" -> recall(arguments.optString("topic").ifBlank { goal })
         "owner_ask" -> ownerAsk(arguments)
         "vault_fill" -> vaultFill(arguments)
@@ -218,13 +228,108 @@ class PhoneMindToolbox(
     private fun read() = observeAndRender(null)
 
     /** The app's map, the first time the Mind is in an app Cyclone has learned. */
+    private val manualShown = HashSet<String>()
+
     private fun mapCard(packageName: String, pageKey: String): String? {
-        val maps = maps ?: return null
-        val map = maps.map(packageName)?.takeIf { it.moves.isNotEmpty() }
+        if (maps == null && manual == null) return null
+        val map = maps?.map(packageName)?.takeIf { it.moves.isNotEmpty() }
         val words = runCatching { glossary?.invoke(packageName) }.getOrNull()?.takeIf { it.isNotBlank() }
-        if (map == null && words == null) return null
-        if (!maps.firstVisit(packageName)) return null
-        return listOfNotNull(map?.card(appLabel(packageName) ?: packageName, map.locate(pageKey)), words).joinToString("\n\n")
+        val excerpt = runCatching { manualExcerpt(packageName) }.getOrNull()
+        if (map == null && words == null && excerpt == null) return null
+        if (!(maps?.firstVisit(packageName) ?: manualShown.add(packageName))) return null
+        return listOfNotNull(map?.card(appLabel(packageName) ?: packageName, map.locate(pageKey)), words, excerpt).joinToString("\n\n")
+    }
+
+    // ---- the App Manual (plan 36 §8) --------------------------------------------------------------------------------
+
+    /** Short handles ("a3") for abilities shown to the Mind in this mission, and which app each belongs to. */
+    private val abilityHandles = LinkedHashMap<String, Pair<String, String>>()
+
+    private fun handle(packageName: String, abilityId: String): String {
+        abilityHandles.entries.firstOrNull { it.value == (packageName to abilityId) }?.let { return it.key }
+        val next = "a${abilityHandles.size + 1}"
+        abilityHandles[next] = packageName to abilityId
+        return next
+    }
+
+    /** The few manual lines that fit the mission's goal, shown with the map the first time in an app. */
+    private fun manualExcerpt(packageName: String): String? {
+        val view = manual?.view(packageName) ?: return null
+        val hits = view.index.search(goal, 5).filter { it.score >= 0.34 }
+        return ManualTexts.excerpt(view, hits) { handle(packageName, it.id) }
+    }
+
+    private fun currentPackage(): String? = screen?.legacyPage?.packageName ?: screen?.packageName
+
+    private fun manualFor(app: String): Pair<String, com.cyclone.mobile.manual.ManualView>? {
+        val port = manual ?: return null
+        val packageName = app.takeIf { it.isNotBlank() }?.let(::resolvePackage) ?: currentPackage() ?: return null
+        return port.view(packageName)?.let { packageName to it }
+    }
+
+    private fun abilitiesFind(goalText: String, app: String): MindToolResult {
+        if (goalText.isBlank()) return MindToolResult.error("goal is required: what you want to do in the app, in plain words.")
+        val (packageName, view) = manualFor(app)
+            ?: return MindToolResult.error("There is no manual for ${app.ifBlank { "this app" }} yet. Find the way yourself.")
+        val hits = view.index.search(goalText, 6)
+        if (hits.isEmpty()) return MindToolResult("The manual of ${view.appLabel} has nothing that fits \"$goalText\". Find the way yourself.",
+            "abilities_find: nothing", ok = true)
+        return MindToolResult(ManualTexts.excerpt(view, hits) { handle(packageName, it.id) }!!, "abilities_find \"${goalText.take(60)}\": ${hits.size}")
+    }
+
+    private fun howToFind(list: String, app: String): MindToolResult {
+        val (packageName, view) = manualFor(app)
+            ?: return MindToolResult.error("There is no manual for ${app.ifBlank { "this app" }} yet.")
+        val finds = view.howToFind(list).take(4)
+        if (finds.isEmpty()) return MindToolResult("The manual of ${view.appLabel} knows no searchable or ordered list yet.", "how_to_find: none")
+        val lines = finds.joinToString("\n") { a -> "  ${handle(packageName, a.id)} ${a.name} → ${a.pathText}: ${a.note ?: "scroll to find one"}" }
+        return MindToolResult("Lists in ${view.appLabel} and how to find one item (go_to with ability=<handle> walks there):\n$lines",
+            "how_to_find \"${list.take(40)}\"")
+    }
+
+    /**
+     * Walks an ability's safe part (navigate, reveal, switch) with the manual's doors, checking the screen after every
+     * press, and stops at the first surprise. What is left to choose (an offer, a button) is left to the Mind.
+     */
+    private fun goToAbility(handle: String): MindToolResult {
+        val port = manual ?: return MindToolResult.error("The manual is not available in this mission.")
+        val (packageName, abilityId) = abilityHandles[handle.trim()]
+            ?: return MindToolResult.error("\"$handle\" is not an ability handle from abilities_find or the manual lines (like a3).")
+        val view = port.view(packageName) ?: return MindToolResult.error("The manual of that app is gone.")
+        val ability = view.ability(abilityId) ?: return MindToolResult.error("That ability is no longer in the manual.")
+        if (!fresh || screen == null) env.observe(goal).page?.let(::bind)
+        var opened = 0
+        if (currentPackage() != packageName) {
+            val open = act("phone.open_app", JSONObject().put("package", packageName), "Opened ${view.appLabel}")
+            if (!open.ok) return open
+            opened = 1
+        }
+        val walkPort = object : com.cyclone.mobile.manual.ManualWalkPort {
+            override fun here(): com.cyclone.mobile.manual.ManualHere? {
+                if (!fresh || screen == null) env.observe(goal).page?.let(::bind)
+                val page = screen ?: return null
+                val words = refs.all().map { it.label }.filter { it.isNotBlank() } + listOfNotNull(page.legacyPage?.title)
+                return com.cyclone.mobile.manual.ManualHere(page.legacyPage?.packageName ?: page.packageName, page.legacyPage?.pageKey, words.toSet())
+            }
+
+            override fun press(label: String): com.cyclone.mobile.manual.ManualPress {
+                val candidates = refs.all().filter { !it.editable }
+                val ref = candidates.firstOrNull { it.label.equals(label, true) }
+                    ?: candidates.filter { it.label.startsWith(label, true) }.singleOrNull()
+                    ?: return com.cyclone.mobile.manual.ManualPress.NOT_ON_SCREEN
+                val done = act("phone.click", JSONObject().put("elementId", ref.elementId), "Manual: tapped ${ref.ref} \"${ref.label}\"", ref)
+                return if (done.ok) com.cyclone.mobile.manual.ManualPress.DONE else com.cyclone.mobile.manual.ManualPress.REFUSED
+            }
+        }
+        val outcome = com.cyclone.mobile.manual.ManualNavigator(view.dictionary, walkPort).walk(ability)
+        val arrived = outcome is com.cyclone.mobile.manual.ManualWalk.Arrived
+        if (outcome !is com.cyclone.mobile.manual.ManualWalk.Lost && outcome !is com.cyclone.mobile.manual.ManualWalk.NotInApp) {
+            runCatching { port.walked(packageName, ability.id, arrived) }
+        }
+        val moves = outcome.moves + opened
+        val header = ManualTexts.walkHeader(ability, outcome)
+        val result = observeAndRender(header)
+        return result.copy(ok = arrived, changedScreen = moves > 0, mapMoves = moves)
     }
 
     // ---- the map ---------------------------------------------------------------------------------------------------
@@ -234,8 +339,8 @@ class PhoneMindToolbox(
      * settle and GATE as a tap). Stops at the first surprise and hands back with the real screen.
      */
     private fun goTo(wanted: String): MindToolResult {
-        val maps = maps ?: return MindToolResult.error("go_to is not available in this mission.")
-        if (wanted.isBlank()) return MindToolResult.error("screen is required: a handle like s3 from the map, or a screen name.")
+        if (wanted.isBlank()) return MindToolResult.error("screen or ability is required: a screen handle like s3 from the map, or an ability handle like a3.")
+        val maps = maps ?: return MindToolResult.error("There is no learned map in this mission; use go_to with ability=<handle> from abilities_find.")
         if (!fresh || screen == null) env.observe(goal).page?.let(::bind)
         val page = screen?.legacyPage ?: return MindToolResult.error("The screen could not be read.")
         val app = appLabel(page.packageName) ?: page.packageName
@@ -1076,6 +1181,8 @@ class PhoneMindToolbox(
         private val PHONE_TOOLS = setOf("screen_read", "screen_look", "screen_find", "tap", "tap_point", "long_press", "type_text",
             "press_enter", "scroll", "swipe", "back", "home", "wait", "open_app", "open_link", "open_settings", "set_timer",
             "set_alarm", "vault_fill", "open_notification", "go_to")
+        /** Read-only manual tools: offered only when the mission has the App Manual. */
+        private val MANUAL_TOOLS = setOf("abilities_find", "how_to_find")
         private val TAP_TOOLS = setOf("phone.click", "phone.tap", "phone.tap_point")
         private val REVALIDATION = Regex("Target revalidation: ([A-Z_]+)")
         private val NAVIGATION = setOf("phone.open_app", "phone.launch_intent", "phone.open_settings", "phone.set_timer", "phone.set_alarm", "phone.back", "phone.home")
@@ -1107,8 +1214,17 @@ class PhoneMindToolbox(
             MindToolSpec("screen_find", "Find elements on the current screen matching a description, including ones not listed in the screen summary.",
                 objectSchema("query" to string("What to look for, e.g. \"install button\" or \"search\"."), required = listOf("query"))),
             MindToolSpec("tap", "Tap an element.", objectSchema("ref" to REF, required = listOf("ref"))),
-            MindToolSpec("go_to", "Walk to a screen of the current app using its learned map (shown as \"Map of …\" once you are in a learned app). Cyclone taps the known way itself, checking the screen after every step, and stops if anything differs.",
-                objectSchema("screen" to string("A screen handle from the map, like s3, or its name."), required = listOf("screen"))),
+            MindToolSpec("go_to", "Walk to a screen of the current app using its learned map (shown as \"Map of …\" once you are in a learned app), " +
+                "or do an ability from the app's manual (handles like a3 from abilities_find or the manual lines). Cyclone taps the known way itself, " +
+                "checking the screen after every step, and stops if anything differs. It never chooses, types or confirms: that stays yours.",
+                objectSchema("screen" to string("A screen handle from the map, like s3, or its name."),
+                    "ability" to string("An ability handle from the manual, like a3."))),
+            MindToolSpec("abilities_find", "Search the app's manual for things you can do that fit a goal, with the path and how sure the manual is. " +
+                "Cheaper than exploring: use it first in an app that has a manual.",
+                objectSchema("goal" to string("What you want to do, in plain words, e.g. \"see message requests\"."),
+                    "app" to string("The app's name or package; default: the app on screen."), required = listOf("goal"))),
+            MindToolSpec("how_to_find", "How to find one item in a list of the app (a chat, a person, a file): its search, order and groups, from the manual.",
+                objectSchema("list" to string("Which list, e.g. \"chats\" or \"followers\"."), "app" to string("The app's name or package; default: the app on screen."))),
             MindToolSpec("long_press", "Long-press an element.", objectSchema("ref" to REF, required = listOf("ref"))),
             MindToolSpec("swipe", "Swipe on the screen or on one element: carousels, tabs, photos, horizontal lists. left moves the content left.",
                 objectSchema("direction" to string("Which way the content moves.", listOf("left", "right", "up", "down")), "ref" to REF,

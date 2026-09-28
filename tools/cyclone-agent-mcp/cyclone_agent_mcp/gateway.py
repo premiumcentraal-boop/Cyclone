@@ -411,6 +411,15 @@ class GatewayClient:
             {},
         )
 
+    def app_manual(self, device_id: str, package_name: str, query: str | None = None) -> Any:
+        params = {"placeId": f"package:{package_name}"}
+        if query:
+            params["q"] = query
+        return self._bounded_route(
+            "GET",
+            f"/v1/devices/{urllib.parse.quote(device_id, safe='')}/manual?{urllib.parse.urlencode(params)}",
+        )
+
     def lab_missions(self) -> Any:
         return self._bounded_route("GET", "/v1/lab/missions")
 

@@ -141,6 +141,8 @@ export interface MappingMission {
   budget: MissionBudget;
   /** Which model decides new groups for the app dictionary (plan 36): "phone" (the phone's current model) or a model id. */
   model?: string;
+  /** Map deeper (plan 36 §5.5): the phone tries first the doors that fit the goals its manual could not answer. */
+  deeper?: boolean;
 }
 
 export const MISSION_BUDGETS: Readonly<Record<MissionBudget, MappingBudgetShape & { label: string }>> = Object.freeze({
@@ -389,6 +391,8 @@ export function createAtlasClient(options: AtlasClientOptions): AtlasClient {
         const body: Record<string, unknown> = { placeId, persona: "mapping", identity: depth.identity, budget };
         // "phone" is the phone's own default, so it is not sent: an older phone never sees a field it doesn't know.
         if (depth.model && depth.model !== "phone" && /^[A-Za-z0-9._:/~-]{1,200}$/.test(depth.model)) body.describer = { model: depth.model };
+        // Only a flag crosses: the phone reads its own quiz gaps. Sent only when set, so older phones never see it.
+        if (depth.deeper === true) body.deeper = true;
         return mappingCall("start", body);
       }
       return mappingCall("start", { placeId, persona: "mapping", budget: { ...(MAPPING_DEPTHS[depth] ?? GLASS_MAPPING_BUDGET) } });

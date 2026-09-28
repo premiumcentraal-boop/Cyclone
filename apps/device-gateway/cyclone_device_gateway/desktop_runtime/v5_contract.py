@@ -50,6 +50,7 @@ V5_OPS = frozenset({
     "dictionary.get",
     "dictionary.edit",
     "models.list",
+    "manual.get",
 })
 ASK_STATES = frozenset({"idle", "working", "action-needed", "needs-secret", "done", "failed"})
 ASK_MILESTONE_STATES = frozenset({"pending", "active", "done", "action-needed", "failed"})
@@ -897,6 +898,9 @@ def validate_android_response(op: str, value: dict[str, Any], args: dict[str, An
     if op == "models.list":
         _validate_models_response(value)
         return value
+    if op == "manual.get":
+        _validate_manual_response(value, args)
+        return value
     if op == "atlas.here":
         if set(value) != {"placeId", "roomId", "appVersion", "observedAt"}:
             raise _bad_knowledge("atlas.here")
@@ -1032,7 +1036,19 @@ DICT_EDGE = re.compile(r"^edge:[0-9a-f]{16,64}$")
 DICT_STATUSES = frozenset({"candidate", "confirmed", "locked", "rejected", "merged", "retired"})
 DICT_TOP_KEYS = frozenset({"placeId", "appLabel", "currentVersion", "passes", "updatedAt", "coreKinds", "entries", "truncated",
                            "audit", "health", "jev", "glossary", "screens", "doors", "review"})
-DICT_SCREEN_KEYS = frozenset({"roomKey", "name", "title", "category", "via", "panelOf", "items", "sets", "seen"})
+DICT_SCREEN_KEYS = frozenset({"roomKey", "name", "title", "category", "via", "panelOf", "items", "sets", "seen", "purpose", "list"})
+DICT_LIST_KEYS = frozenset({"shape", "order", "groups", "searchable", "searchLabel"})
+LIST_ORDERS = frozenset({"newest_first", "oldest_first", "a_z"})
+ABILITY_ID = re.compile(r"^ab:[0-9a-f]{12}$")
+ABILITY_KINDS = frozenset({"open", "panel", "switch", "offer", "control", "find"})
+ABILITY_EFFECTS = frozenset({"navigate", "reveal", "switch", "choose", "asks"})
+ABILITY_KEYS = frozenset({"id", "kind", "name", "place", "placeName", "path", "tap", "pick", "effect", "setId", "provenance",
+                          "confidence", "note", "say"})
+MANUAL_TOP_KEYS = frozenset({"placeId", "appLabel", "currentVersion", "abilities", "truncated", "query", "hits", "clear", "quiz",
+                             "scores", "markdown"})
+MANUAL_SCORE_KEYS = frozenset({"map", "dictionary", "quiz", "walks", "places", "named", "panels", "lists", "ordered", "abilities",
+                               "walkedAbilities"})
+MAX_MANUAL_QUERY = 200
 DICT_DOOR_KEYS = frozenset({"edgeId", "from", "to", "label", "kind"})
 DICT_REVIEW_KEYS = frozenset({"id", "name", "screenTitle", "siblings", "seenAt"})
 DICT_ENTRY_KEYS = frozenset({"id", "kind", "name", "shownName", "nameProof", "aliases", "parentId", "path", "status", "redirectTo",
@@ -1097,6 +1113,8 @@ def _validate_dictionary_response(value: dict[str, Any], args: dict[str, Any]) -
             raise _bad_dictionary("screen panel")
         if not _short_list(screen["items"], 12, 60) or not _short_list(screen["sets"], 12, 48) or not _is_int(screen["seen"]):
             raise _bad_dictionary("screen lists")
+        if not _short_text(screen["purpose"], 120, nullable=True) or not _valid_list_note(screen["list"]):
+            raise _bad_dictionary("screen purpose")
     for door in doors:
         if not isinstance(door, dict) or set(door) != DICT_DOOR_KEYS or not DICT_EDGE.match(str(door["edgeId"])):
             raise _bad_dictionary("door keys")
@@ -1108,6 +1126,73 @@ def _validate_dictionary_response(value: dict[str, Any], args: dict[str, Any]) -
             raise _bad_dictionary("review keys")
         if not _short_text(item["name"], 60) or not _short_text(item["screenTitle"], 60, nullable=True) or not _short_list(item["siblings"], 11, 60):
             raise _bad_dictionary("review")
+
+
+def _valid_list_note(note: Any) -> bool:
+    """A list as the manual keeps it: row shape, order, the app's section headers and its search. Never a row."""
+    if note is None:
+        return True
+    return isinstance(note, dict) and set(note) == DICT_LIST_KEYS and _short_text(note["shape"], 40) \
+        and (note["order"] is None or note["order"] in LIST_ORDERS) and _short_list(note["groups"], 12, 60) \
+        and isinstance(note["searchable"], bool) and _short_text(note["searchLabel"], 60, nullable=True)
+
+
+def _score(value: Any) -> bool:
+    return value is None or (isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1)
+
+
+def _validate_manual_response(value: dict[str, Any], args: dict[str, Any]) -> None:
+    """The App Manual (plan 36 §8): abilities in the app's own words, the self-quiz, scores and Markdown. Never content."""
+    if set(value) != MANUAL_TOP_KEYS or value["placeId"] != args.get("placeId"):
+        raise _bad_dictionary("manual keys")
+    if not _short_text(value["appLabel"], 80) or not _short_text(value["currentVersion"], 40, nullable=True):
+        raise _bad_dictionary("manual app")
+    abilities = value["abilities"]
+    if not isinstance(abilities, list) or len(abilities) > 400 or not isinstance(value["truncated"], bool) or not isinstance(value["clear"], bool):
+        raise _bad_dictionary("abilities")
+    ids = set()
+    for ability in abilities:
+        if not isinstance(ability, dict) or set(ability) != ABILITY_KEYS or not ABILITY_ID.match(str(ability["id"])):
+            raise _bad_dictionary("ability keys")
+        if ability["kind"] not in ABILITY_KINDS or ability["effect"] not in ABILITY_EFFECTS or ability["provenance"] not in {"mapped", "walked"}:
+            raise _bad_dictionary("ability kind")
+        if not _short_text(ability["name"], 120) or not DICT_ROOM.match(str(ability["place"])) or not _short_list(ability["path"], 10, 60):
+            raise _bad_dictionary("ability place")
+        for key in ("placeName", "tap", "pick"):
+            if not _short_text(ability[key], 60, nullable=True):
+                raise _bad_dictionary("ability words")
+        if ability["setId"] is not None and not DICT_SET_ID.match(str(ability["setId"])):
+            raise _bad_dictionary("ability set")
+        if not _score(ability["confidence"]) or ability["confidence"] is None or not _short_text(ability["note"], 200, nullable=True) \
+                or not _short_list(ability["say"], 8, 70):
+            raise _bad_dictionary("ability details")
+        ids.add(ability["id"])
+    if not _short_text(value["query"], MAX_MANUAL_QUERY, nullable=True):
+        raise _bad_dictionary("query")
+    hits = value["hits"]
+    if not isinstance(hits, list) or len(hits) > 8 or any(
+            not isinstance(h, dict) or set(h) != {"id", "score"} or h["id"] not in ids or not _score(h["score"]) or h["score"] is None for h in hits):
+        raise _bad_dictionary("hits")
+    quiz = value["quiz"]
+    if quiz is not None:
+        if not isinstance(quiz, dict) or set(quiz) != {"at", "asked", "answered", "goals"} or not _is_int(quiz["asked"]) \
+                or not _is_int(quiz["answered"]) or not _is_int(quiz["at"]) or not isinstance(quiz["goals"], list) or len(quiz["goals"]) > 24:
+            raise _bad_dictionary("quiz")
+        for goal in quiz["goals"]:
+            if not isinstance(goal, dict) or set(goal) != {"goal", "abilityId", "score"} or not _short_text(goal["goal"], 90) \
+                    or (goal["abilityId"] is not None and not ABILITY_ID.match(str(goal["abilityId"]))) or not _score(goal["score"]):
+                raise _bad_dictionary("quiz goal")
+    scores = value["scores"]
+    if not isinstance(scores, dict) or set(scores) != MANUAL_SCORE_KEYS:
+        raise _bad_dictionary("scores")
+    for key in ("map", "dictionary", "quiz", "walks"):
+        if not _score(scores[key]):
+            raise _bad_dictionary("score")
+    for key in ("places", "named", "panels", "lists", "ordered", "abilities", "walkedAbilities"):
+        if not _is_int(scores[key]):
+            raise _bad_dictionary("score counts")
+    if not isinstance(value["markdown"], str) or len(value["markdown"]) > 60_000:
+        raise _bad_dictionary("markdown")
 
 
 def _validate_models_response(value: dict[str, Any]) -> None:
@@ -1518,6 +1603,18 @@ class V5ContractService:
         """The phone's models for the mapping start sheet's picker. The key stays on the phone."""
         return self._call(device_id, "models.list", {})
 
+    def manual_get(self, device_id: str, place_id: str, query: str | None = None) -> dict[str, Any]:
+        """An app's manual (plan 36 §8): abilities with their paths, the self-quiz, scores and the manual as Markdown."""
+        if not isinstance(place_id, str) or not KNOWLEDGE_PLACE_ID.match(place_id):
+            raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "placeId must be package:<app>.")
+        args: dict[str, Any] = {"placeId": place_id}
+        if query is not None:
+            if not isinstance(query, str) or len(query) > MAX_MANUAL_QUERY:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "query must be at most 200 characters.")
+            if query.strip():
+                args["query"] = query.strip()
+        return self._call(device_id, "manual.get", args)
+
     def cc_start(self, device_id: str, goal: str, *, task_id: str | None = None,
                  sealed: list[dict[str, Any]] | None = None, publish: bool = False) -> dict[str, Any]:
         """Plan 33 (C0): start an assigned task as an ordinary Mind mission. Goal text only, never a secret.
@@ -1647,6 +1744,10 @@ class V5ContractService:
             if args:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "models.list takes no arguments.")
             return self.models_list(device_id)
+        if op == "manual.get":
+            if not {"placeId"} <= set(args) <= {"placeId", "query"}:
+                raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "manual.get takes placeId and query only.")
+            return self.manual_get(device_id, args["placeId"], args.get("query"))
         if op == "learn.run":
             if set(args) != {"runId"}:
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "learn.run takes runId only.")
@@ -1719,7 +1820,7 @@ class V5ContractService:
         if op == "mapping.start":
             allowed = {
                 "placeId", "persona", "sessionId", "displayId", "workspaceId", "workspaceGeneration",
-                "executionGeneration", "budget", "resumeJobId", "identity", "describer",
+                "executionGeneration", "budget", "resumeJobId", "identity", "describer", "deeper",
             }
             if not set(args).issubset(allowed):
                 raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "mapping.start has an unexpected field.")
@@ -1728,7 +1829,7 @@ class V5ContractService:
             if resume_job_id is not None:
                 if not isinstance(resume_job_id, str) or JOB_ID.fullmatch(resume_job_id) is None:
                     raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "resumeJobId is invalid.")
-                if any(key in args for key in ("placeId", "persona", "budget", "identity", "describer")):
+                if any(key in args for key in ("placeId", "persona", "budget", "identity", "describer", "deeper")):
                     raise DesktopRuntimeError(
                         RuntimeErrorCode.INVALID_REQUEST,
                         "mapping.start resume accepts resumeJobId plus plane identity only.",
@@ -1745,6 +1846,9 @@ class V5ContractService:
                     if not isinstance(describer, dict) or set(describer) != {"model"} or not isinstance(describer["model"], str) \
                             or not DESCRIBER_MODEL.match(describer["model"]):
                         raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "describer must be {\"model\": \"phone\" or a model id}.")
+                # Plan 36 §5.5: Map deeper. The phone uses its own self-quiz gaps; no words cross from the PC.
+                if "deeper" in args and not isinstance(args["deeper"], bool):
+                    raise DesktopRuntimeError(RuntimeErrorCode.INVALID_REQUEST, "deeper must be true or false.")
             return self._call(device_id, op, args)
 
         allowed_command = {"mappingJobId", "sessionId", "displayId", "workspaceId", "workspaceGeneration"}

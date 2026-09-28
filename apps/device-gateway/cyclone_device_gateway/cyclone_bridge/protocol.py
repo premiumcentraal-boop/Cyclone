@@ -29,6 +29,8 @@ ALLOWED_OPS = {
     "skills.list",
     # The app dictionary (plan 36 §7) and the phone's models for the mapping picker.
     "dictionary.get", "dictionary.edit", "models.list",
+    # The App Manual (plan 36 §8): abilities, the self-quiz and the manual as text. Read only.
+    "manual.get",
 }
 UNAUTHENTICATED_OPS = {
     "trust.negotiate", "trust.begin", "trust.complete", "trust.session.begin", "trust.session.complete",

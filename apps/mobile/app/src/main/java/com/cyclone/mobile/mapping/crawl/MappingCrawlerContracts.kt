@@ -133,6 +133,8 @@ data class MappingDoor(
     val regionKey: String? = null,
     val enabled: Boolean = true,
     val visible: Boolean = true,
+    /** Map deeper: this door's words fit a goal the manual could not answer, so it is tried first (still judged first). */
+    val focus: Boolean = false,
 )
 
 /**

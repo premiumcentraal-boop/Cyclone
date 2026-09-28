@@ -83,6 +83,10 @@ def create_v5_contract_router(runtime: Any, token: str) -> APIRouter:
     def models_list(device_id: str):
         return _call(lambda: service.models_list(device_id))
 
+    @router.get("/v1/devices/{device_id}/manual", dependencies=[Depends(auth)])
+    def manual_get(device_id: str, placeId: str = Query(..., max_length=200), q: str | None = Query(None, max_length=200)):
+        return _call(lambda: service.manual_get(device_id, placeId, q))
+
     @router.post("/v1/devices/{device_id}/runs/{run_id}/learn", dependencies=[Depends(auth)])
     def runs_learn(device_id: str, run_id: str):
         return _call(lambda: service.learn_run(device_id, run_id))

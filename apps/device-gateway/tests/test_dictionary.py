@@ -30,9 +30,11 @@ DICT = {
     "jev": {"summary": "No decisions yet.", "answered": 0, "agreed": 0, "sureAnswered": 0, "sureAgreed": 0},
     "glossary": "Dictionary of Instagram:\n  set:primary = Conversation › Messages › Primary",
     "screens": [{"roomKey": "screen:list:0123456789abcdef", "name": "Messages", "title": "Messages", "category": "Primary", "via": None,
-                 "panelOf": None, "items": ["Add photos and files"], "sets": ["set:primary"], "seen": 3},
+                 "panelOf": None, "items": ["Add photos and files"], "sets": ["set:primary"], "seen": 3, "purpose": "Your direct messages.",
+                 "list": {"shape": "2 texts · image", "order": "newest_first", "groups": [], "searchable": True, "searchLabel": "Search"}},
                 {"roomKey": "screen:unknown:fedcba98765abcde", "name": "Add photos and files", "title": None, "category": None,
-                 "via": "Add photos and files", "panelOf": "screen:list:0123456789abcdef", "items": ["Camera", "Files"], "sets": [], "seen": 1}],
+                 "via": "Add photos and files", "panelOf": "screen:list:0123456789abcdef", "items": ["Camera", "Files"], "sets": [], "seen": 1,
+                 "purpose": None, "list": None}],
     "doors": [{"edgeId": "edge:" + "a" * 64, "from": "screen:list:0123456789abcdef", "to": "screen:unknown:fedcba98765abcde",
                "label": "Add photos and files", "kind": "reveal"}],
     "review": [{"id": "rv:0123456789abcdef", "name": "Close friends", "screenTitle": "Messages", "siblings": ["Primary"], "seenAt": 5}],
@@ -123,3 +125,50 @@ def test_screens_doors_and_the_review_queue_are_validated_and_answered():
         bad, _ = service({"dictionary.get": broken})
         with pytest.raises(DesktopRuntimeError):
             bad.dictionary_get("phone-1", PLACE)
+
+
+ABILITY = {"id": "ab:0123456789ab", "kind": "offer", "name": "Camera (in Add photos and files)", "place": "screen:unknown:fedcba98765abcde",
+           "placeName": "Add photos and files", "path": ["Messages", "Add photos and files", "Camera"], "tap": None, "pick": "Camera",
+           "effect": "choose", "setId": None, "provenance": "mapped", "confidence": 0.75, "note": None, "say": ["Camera"]}
+MANUAL = {
+    "placeId": PLACE, "appLabel": "Instagram", "currentVersion": "402.0", "abilities": [ABILITY], "truncated": False,
+    "query": "attach a photo", "hits": [{"id": "ab:0123456789ab", "score": 0.91}], "clear": False,
+    "quiz": {"at": 5, "asked": 2, "answered": 1, "goals": [{"goal": "attach a photo", "abilityId": "ab:0123456789ab", "score": 0.91},
+                                                          {"goal": "order a pizza", "abilityId": None, "score": 0.0}]},
+    "scores": {"map": 0.75, "dictionary": 1.0, "quiz": 0.5, "walks": None, "places": 1, "named": 1, "panels": 1, "lists": 1, "ordered": 1,
+               "abilities": 1, "walkedAbilities": 0},
+    "markdown": "# Instagram (com.instagram.android) · 402.0 · look only\n",
+}
+
+
+def test_the_manual_is_read_only_validated_and_routed():
+    assert "manual.get" in ALLOWED_OPS and "manual.get" in V5_OPS
+    svc, bridge = service({"manual.get": MANUAL})
+    assert svc.manual_get("phone-1", PLACE, " attach a photo ")["hits"][0]["id"] == "ab:0123456789ab"
+    assert bridge.calls == [("manual.get", {"placeId": PLACE, "query": "attach a photo"})]
+    with pytest.raises(DesktopRuntimeError):
+        svc.manual_get("phone-1", PLACE, "x" * 300)
+    with pytest.raises(DesktopRuntimeError):
+        svc.forward("phone-1", "manual.get", {"placeId": PLACE, "members": True})
+    for broken in ({**MANUAL, "members": ["Sam"]},
+                   {**MANUAL, "abilities": [{**ABILITY, "rowText": "See you at 7"}]},
+                   {**MANUAL, "abilities": [{**ABILITY, "effect": "pay"}]},
+                   {**MANUAL, "hits": [{"id": "ab:ffffffffffff", "score": 0.9}]},
+                   {**MANUAL, "scores": {**MANUAL["scores"], "map": 3}},
+                   {**MANUAL, "quiz": {**MANUAL["quiz"], "goals": [{"goal": "x" * 200, "abilityId": None, "score": 0}]}}):
+        bad, _ = service({"manual.get": broken})
+        with pytest.raises(DesktopRuntimeError):
+            bad.manual_get("phone-1", PLACE)
+    app = FastAPI()
+    app.include_router(create_v5_contract_router(SimpleNamespace(v5_contract=svc, fleet=None), "secret"))
+    client = TestClient(app)
+    assert client.get(f"/v1/devices/phone-1/manual?placeId={PLACE}").status_code == 401
+    got = client.get(f"/v1/devices/phone-1/manual?placeId={PLACE}&q=attach", headers={"Authorization": "Bearer secret"})
+    assert got.status_code == 200 and got.json()["scores"]["quiz"] == 0.5
+
+
+def test_map_deeper_is_a_plain_flag():
+    svc, bridge = service({"mapping.start": {}})
+    with pytest.raises(DesktopRuntimeError):
+        svc.forward("phone-1", "mapping.start", {"placeId": PLACE, "persona": "mapping", "deeper": ["order", "pizza"]})
+    assert bridge.calls == []

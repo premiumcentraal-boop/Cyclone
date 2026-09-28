@@ -853,4 +853,75 @@ class PhoneMindToolboxTest {
         val off = PhoneMindToolbox(FakeEnv(screens.getValue("home")), FakeOwner(), device, "goal")
         assertFalse(off.specs().any { it.name == "go_to" })
     }
+
+    // ---- the App Manual (alpha.64) ------------------------------------------------------------------------------------
+
+    private class ManualPort(val dict: com.cyclone.mobile.manual.dictionary.AppDictionary) : com.cyclone.mobile.manual.MindManualPort {
+        val walks = mutableListOf<Pair<String, Boolean>>()
+        override fun view(packageName: String) =
+            if (packageName == dict.packageName) com.cyclone.mobile.manual.ManualView.of(dict, "Settings") else null
+        override fun walked(packageName: String, abilityId: String, ok: Boolean) { walks += abilityId to ok }
+    }
+
+    private fun settingsManual(): com.cyclone.mobile.manual.dictionary.AppDictionary {
+        val home = "screen:home:0000000000000001"
+        val display = "screen:list:0000000000000002"
+        val timeout = "screen:list:0000000000000003"
+        val screens = listOf(
+            com.cyclone.mobile.manual.dictionary.ScreenCard(home, title = "Settings", items = listOf("Display", "Network"), seen = 3, pageKeys = listOf("key-home")),
+            com.cyclone.mobile.manual.dictionary.ScreenCard(display, title = "Display", items = listOf("Screen timeout", "Brightness"), seen = 2, pageKeys = listOf("key-display")),
+            com.cyclone.mobile.manual.dictionary.ScreenCard(timeout, title = "Screen timeout", seen = 1, pageKeys = listOf("key-timeout")),
+        ).associateBy { it.roomKey }
+        val doors = listOf(
+            com.cyclone.mobile.manual.dictionary.DoorCard("edge:" + "1".repeat(16), home, display, "Display", "settings", 5),
+            com.cyclone.mobile.manual.dictionary.DoorCard("edge:" + "2".repeat(16), display, timeout, "Screen timeout", "menu", 5),
+        ).associateBy { it.edgeId }
+        return com.cyclone.mobile.manual.dictionary.AppDictionary("com.android.settings", screens = screens, doors = doors)
+    }
+
+    @Test fun theManualFindsAbilitiesAndGoToWalksOneThroughTheActPath() {
+        val screens = settingsScreens()
+        val env = FakeEnv(screens.getValue("home"))
+        env.onAct = { _, params ->
+            when (params.optString("elementId").substringAfterLast(':')) {
+                "d" -> env.screen = screens.getValue("display")
+                "t" -> env.screen = screens.getValue("timeout")
+            }
+        }
+        val port = ManualPort(settingsManual())
+        val box = PhoneMindToolbox(env, FakeOwner(), device, "set the screen timeout", manual = port)
+        assertTrue(box.specs().map { it.name }.containsAll(listOf("go_to", "abilities_find", "how_to_find")))
+
+        val first = box.run("screen_read")
+        assertTrue(first.text, first.text.contains("Manual of Settings"))
+        assertTrue(first.text, first.text.contains("a1 Open Screen timeout → Settings › Display › Screen timeout"))
+
+        val found = box.run("abilities_find", """{"goal":"change the brightness"}""")
+        assertTrue(found.text, found.text.contains("Brightness (on Display)"))
+
+        val walked = box.run("go_to", """{"ability":"a1"}""")
+        assertTrue(walked.text, walked.text.startsWith("Walked “Open Screen timeout” from the manual in 2 moves"))
+        assertTrue(walked.ok)
+        assertEquals(2, walked.mapMoves)
+        assertEquals(listOf("phone.click", "phone.click"), env.acts.map { it.first })
+        assertEquals(1, port.walks.size)
+        assertTrue(port.walks.single().second)
+
+        val unknown = box.run("go_to", """{"ability":"a99"}""")
+        assertTrue(unknown.text, unknown.text.startsWith("ERROR:"))
+        assertFalse(PhoneMindToolbox(env, FakeOwner(), device, "goal").specs().any { it.name == "abilities_find" })
+    }
+
+    @Test fun aManualWalkStopsAtTheFirstSurpriseAndCountsAgainstTheAbility() {
+        val screens = settingsScreens()
+        val env = FakeEnv(screens.getValue("home"))
+        env.onAct = { _, _ -> env.screen = FakeScreen("com.android.settings", listOf(Control("x", "New page")), pageKey = "key-new", title = "New") }
+        val port = ManualPort(settingsManual())
+        val box = PhoneMindToolbox(env, FakeOwner(), device, "set the screen timeout", manual = port)
+        box.run("screen_read")
+        val stopped = box.run("go_to", """{"ability":"a1"}""")
+        assertFalse(stopped.ok)
+        assertTrue(stopped.text, stopped.text.startsWith("The manual walk stopped after 1 move"))
+        assertEquals(listOf(false), port.walks.map { it.second })
+    }
 }

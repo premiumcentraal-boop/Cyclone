@@ -996,3 +996,26 @@
 .dictionary-review-item p { margin: 0 0 var(--space-2); }
 .dictionary-places { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--space-4); }
 .dictionary-place-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* App → Abilities (plan 36 §10): what you can do in an app, the self-quiz and Map deeper. */
+.abilities { display: flex; flex-direction: column; gap: 14px; }
+.manual-report { display: flex; flex-direction: column; gap: 8px; }
+.manual-actions, .ability-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.quiz-gaps { margin: 0; padding-left: 18px; font-size: var(--text-sm); }
+.ability-search { display: flex; gap: 8px; align-items: center; }
+.ability-search .input { flex: 1; min-width: 0; }
+.ability-list { display: flex; flex-direction: column; gap: 8px; }
+.ability-row { display: flex; flex-direction: column; gap: 6px; }
+.ability-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ability-name { font-weight: 650; margin-right: 4px; }
+.ability-path { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ability-step {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  font-size: var(--text-sm);
+}
+.ability-step.last { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.ability-facts { display: flex; flex-wrap: wrap; gap: 12px; font-size: var(--text-sm); }
+.ability-hits .ability-row { border-color: var(--accent); }

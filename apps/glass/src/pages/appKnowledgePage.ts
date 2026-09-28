@@ -4,6 +4,8 @@
  * was learned on and which doors may be stale after an update. Glass lays them out and links into the Map and Runs.
  */
 import { dictionaryView, type DictionaryViewState } from "../ui/dictionaryView.js";
+import { abilitiesView, tryItGoal } from "../ui/abilitiesView.js";
+import { loadManual, manualFileName } from "../services/manual.js";
 import { editDictionary, loadDictionary, type AppDictionaryView } from "../services/dictionary.js";
 import type { GlassContext } from "../app.js";
 import type { AppTab, Route } from "../core/router.js";
@@ -43,7 +45,7 @@ type KnowledgeTab = Exclude<AppTab, "map">;
 export function appTabs(placeId: string, active: AppTab): HTMLElement {
   const tabs = el("nav", "tabs");
   const items: Array<[AppTab, string]> = [["map", "Map"], ["coverage", "Coverage"]];
-  if (placeId.startsWith("package:")) items.push(["skills", "Skills"], ["runs", "Runs"], ["versions", "Changes"], ["scenarios", "Scenarios"], ["screens", "Screens"], ["dictionary", "Dictionary"], ["issues", "Issues"]);
+  if (placeId.startsWith("package:")) items.push(["abilities", "Abilities"], ["skills", "Skills"], ["runs", "Runs"], ["versions", "Changes"], ["scenarios", "Scenarios"], ["screens", "Screens"], ["dictionary", "Dictionary"], ["issues", "Issues"]);
   else items.push(["screens", "Screens"]);
   for (const [tab, label] of items) {
     if (tab === active) {
@@ -115,6 +117,7 @@ export function createAppKnowledgePage(
       else if (route.tab === "issues") await loadIssues();
       else if (route.tab === "skills") await loadSkillsTab();
       else if (route.tab === "dictionary") await loadDictionaryTab();
+      else if (route.tab === "abilities") await loadAbilitiesTab();
       else await loadRuns();
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") return;
@@ -191,6 +194,30 @@ export function createAppKnowledgePage(
       },
     }, () => paintDictionary());
     setChildren(body, message ? el("p", "form-error", message) : null, view);
+  }
+
+  /** Abilities (plan 36 §10): what you can do in the app, the self-quiz, Map deeper, Try it and Export. */
+  let abilityQuery = "";
+  async function loadAbilitiesTab(note?: string): Promise<void> {
+    const view = await loadManual(ctx.client, deviceId, placeId, abilityQuery, controller.signal);
+    if (controller.signal.aborted) return;
+    setChildren(body, abilitiesView(view, abilityQuery, {
+      search: (query) => {
+        abilityQuery = query.trim();
+        void loadAbilitiesTab().catch((error) => setChildren(body, knowledgeError(error, () => void load())));
+      },
+      mapDeeper: () => {
+        void phoneClient(ctx, deviceId, deps.fetch).mappingStart(placeId as never, { identity: "own", budget: "30m", deeper: true })
+          .then(() => ctx.navigate({ name: "app", placeId, tab: "map" }))
+          .catch((error: unknown) => void loadAbilitiesTab(error instanceof Error ? error.message : String(error)));
+      },
+      tryIt: (ability) => {
+        void phoneClient(ctx, deviceId, deps.fetch).askStart(tryItGoal(ability, view.appLabel || placeId))
+          .then(() => void loadAbilitiesTab(`Started on the phone: ${ability.name}. Follow it on the Phone page.`))
+          .catch((error: unknown) => void loadAbilitiesTab(error instanceof Error ? error.message : String(error)));
+      },
+      exportManual: () => downloadText(manualFileName(view), view.markdown),
+    }, note));
   }
 
   async function loadSkillsTab(): Promise<void> {
@@ -668,6 +695,19 @@ export function createAppKnowledgePage(
 
   void load();
   return { element, destroy: () => controller.abort() };
+}
+
+/** Saves text as a file in the browser (the exported manual). Nothing leaves the PC. */
+function downloadText(name: string, text: string): void {
+  if (typeof document === "undefined" || typeof URL === "undefined" || typeof Blob === "undefined") return;
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 export function knowledgeError(error: unknown, retry: () => void): HTMLElement {

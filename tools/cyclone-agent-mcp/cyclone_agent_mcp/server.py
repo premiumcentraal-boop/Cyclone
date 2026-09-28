@@ -258,6 +258,16 @@ def build_server(phone_tools: PhoneTools | None = None) -> MCPServer:
         return tools.call("phone_routine_cancel", {"device_id": device_id, "run_id": run_id})
 
     @mcp.tool(annotations=READ)
+    def phone_app_manual(device_id: str, app: str, query: str | None = None) -> dict[str, Any]:
+        """Read an app's manual from a paired phone: what you can do in the app (abilities), the path to each in the app's
+        own words, how to find one item in its lists, the self-quiz and the manual as Markdown. With query, the abilities
+        that fit it first. Read only: it never taps anything and holds no content (no chats, names or messages)."""
+        args: dict[str, Any] = {"device_id": device_id, "app": app}
+        if query:
+            args["query"] = query
+        return tools.call("phone_app_manual", args)
+
+    @mcp.tool(annotations=READ)
     def phone_lab_missions() -> dict[str, Any]:
         """List Cyclone Lab missions (goal, suite, how success is read from the phone) for measuring Cyclone."""
         return tools.call("phone_lab_missions", {})

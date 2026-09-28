@@ -62,6 +62,12 @@ internal object GatewayV5ManualAdapter {
                     else -> render(pkg, editor(pkg, edit(args)))
                 }
             }
+            "manual.get" -> {
+                only(args, setOf("placeId", "query"))
+                val pkg = packageOf(args)
+                val query = if (args.has("query") && !args.isNull("query")) args.optString("query").trim().take(200) else ""
+                manual(pkg, load(pkg), query)
+            }
             "models.list" -> {
                 only(args, emptySet())
                 val (active, list) = models()
@@ -152,7 +158,12 @@ internal object GatewayV5ManualAdapter {
                         .put("panelOf", c.panelOf ?: JSONObject.NULL)
                         .put("items", JSONArray(c.items))
                         .put("sets", JSONArray(com.cyclone.mobile.manual.dictionary.ManualScreens.setsOn(dict, c.roomKey).map { it.id }.take(12)))
-                        .put("seen", c.seen))
+                        .put("seen", c.seen)
+                        .put("purpose", c.purpose ?: JSONObject.NULL)
+                        .put("list", c.list?.let { l ->
+                            JSONObject().put("shape", l.shape).put("order", l.order ?: JSONObject.NULL).put("groups", JSONArray(l.groups))
+                                .put("searchable", l.searchable).put("searchLabel", l.searchLabel ?: JSONObject.NULL)
+                        } ?: JSONObject.NULL))
                 }
             })
             .put("doors", JSONArray().also { out ->
@@ -172,6 +183,94 @@ internal object GatewayV5ManualAdapter {
                 }
             })
     }
+
+    const val MAX_ABILITIES = 400
+    const val MAX_MARKDOWN = 60_000
+
+    /**
+     * `manual.get` (plan 36 §8, §10, §11): the app's abilities with their paths, the self-quiz, the manual as Markdown
+     * and the Lab scores; with a query, the abilities that fit it. The app's own words and structure only.
+     */
+    fun manual(pkg: String, dict: AppDictionary, query: String): JSONObject {
+        val view = com.cyclone.mobile.manual.ManualView.of(dict, label(pkg))
+        val hits = if (query.isBlank()) emptyList() else view.index.search(query, 8)
+        return JSONObject()
+            .put("placeId", "package:$pkg")
+            .put("appLabel", view.appLabel.take(80))
+            .put("currentVersion", version(pkg)?.take(40) ?: JSONObject.NULL)
+            .put("abilities", JSONArray().also { out ->
+                view.abilities.sortedWith(compareByDescending<com.cyclone.mobile.manual.Ability> { it.confidence }.thenBy { it.name })
+                    .take(MAX_ABILITIES).forEach { out.put(ability(it)) }
+            })
+            .put("truncated", view.abilities.size > MAX_ABILITIES)
+            .put("query", query.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+            .put("hits", JSONArray().also { out -> hits.forEach { out.put(JSONObject().put("id", it.ability.id).put("score", round(it.score))) } })
+            .put("clear", com.cyclone.mobile.manual.AbilityIndex.clear(hits))
+            .put("quiz", dict.quiz?.let { q ->
+                JSONObject().put("at", q.at).put("asked", q.goals.size).put("answered", q.answered)
+                    .put("goals", JSONArray().also { out ->
+                        q.goals.forEach { g -> out.put(JSONObject().put("goal", g.goal).put("abilityId", g.abilityId ?: JSONObject.NULL).put("score", round(g.score))) }
+                    })
+            } ?: JSONObject.NULL)
+            .put("scores", scores(dict, view))
+            .put("markdown", com.cyclone.mobile.manual.ManualRenderer.markdown(dict, view.appLabel, version(pkg), view.abilities).take(MAX_MARKDOWN))
+    }
+
+    private fun ability(a: com.cyclone.mobile.manual.Ability): JSONObject = JSONObject()
+        .put("id", a.id)
+        .put("kind", a.kind.wire)
+        .put("name", a.name.take(120))
+        .put("place", a.place)
+        .put("placeName", a.placeName ?: JSONObject.NULL)
+        .put("path", JSONArray(a.path.take(10)))
+        .put("tap", a.tap ?: JSONObject.NULL)
+        .put("pick", a.pick ?: JSONObject.NULL)
+        .put("effect", a.effect)
+        .put("setId", a.setId ?: JSONObject.NULL)
+        .put("provenance", a.provenance)
+        .put("confidence", round(a.confidence))
+        .put("note", a.note?.take(200) ?: JSONObject.NULL)
+        .put("say", JSONArray(a.say.take(8)))
+
+    /**
+     * The Lab's scores for one app (plan 36 §11), each 0–1 or null when there is nothing to score yet:
+     * - map: named places, panels with what they offer, lists with a known order, categories proven;
+     * - dictionary: groups without a health problem;
+     * - quiz: goals the manual alone answers;
+     * - walks: ability walks that arrived.
+     */
+    fun scores(dict: AppDictionary, view: com.cyclone.mobile.manual.ManualView): JSONObject {
+        fun share(n: Int, of: Int): Double? = if (of <= 0) null else n.toDouble() / of
+        val places = dict.screens.values.filter { !it.isPanel }
+        val panels = dict.screens.values.filter { it.isPanel }
+        val lists = dict.screens.values.mapNotNull { it.list }
+        val views = dict.active().filter { e -> e.anchors.any { it.kind == com.cyclone.mobile.manual.AnchorKind.VIEW } }
+        val parts = listOfNotNull(
+            share(places.count { it.name != null }, places.size),
+            share(panels.count { it.items.isNotEmpty() }, panels.size),
+            share(lists.count { it.order != null }, lists.size),
+            share(views.count { it.proven }, views.size),
+        )
+        val health = Organizer.health(dict, now(), version(dict.packageName))
+        val troubled = (health.orphans + health.nearDuplicates.flatMap { listOf(it.first, it.second) } + health.tooDeep + health.tooWide).toSet()
+        val active = dict.active()
+        val walked = dict.abilityStats.values.sumOf { it.walked }
+        val failed = dict.abilityStats.values.sumOf { it.failed }
+        return JSONObject()
+            .put("map", parts.takeIf { it.isNotEmpty() }?.let { round(it.average()) } ?: JSONObject.NULL)
+            .put("dictionary", share(active.count { it.id !in troubled }, active.size)?.let(::round) ?: JSONObject.NULL)
+            .put("quiz", dict.quiz?.let { q -> share(q.answered, q.goals.size)?.let(::round) } ?: JSONObject.NULL)
+            .put("walks", share(walked, walked + failed)?.let(::round) ?: JSONObject.NULL)
+            .put("places", places.size)
+            .put("named", places.count { it.name != null })
+            .put("panels", panels.size)
+            .put("lists", lists.size)
+            .put("ordered", lists.count { it.order != null })
+            .put("abilities", view.abilities.size)
+            .put("walkedAbilities", view.abilities.count { it.provenance == "walked" })
+    }
+
+    private fun round(value: Double): Double = Math.round(value * 100) / 100.0
 
     private fun entry(dict: AppDictionary, e: DictEntry): JSONObject {
         val gates = if (e.status == EntryStatus.CANDIDATE) Organizer.check(dict, e) else null

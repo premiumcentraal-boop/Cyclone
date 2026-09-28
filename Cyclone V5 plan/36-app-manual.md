@@ -546,6 +546,35 @@ It sees the proposal's evidence (anchors, markers, app words) and the nearby dic
 - **JEV is parked by the owner** (2026-09-28). The organizer watcher from alpha.59 stays watch-only, and nothing new
   uses JEV.
 
+### 7.10 As built (alpha.64): abilities, the navigator and the self-quiz
+
+- **Lists:** `manual/ListOrder.kt` concludes newest first, oldest first or A–Z from row shapes (ages, weekdays, dates,
+  first letters). The texts are read in `StructureReader.findLists` and dropped there; only the order is kept, on the
+  list anchor and on the screen's `ListNote` (shape, order, section headers, search).
+- **Screen cards** also keep the phone's structural page keys (for "where am I") and a describer-written `purpose`.
+  Dictionary schema 3 adds `abilityStats`, `phrasings` and `quiz`, all through `DictionaryPrivacy` (model text:
+  `sentence`, one line, no digits runs, emails or links).
+- **Abilities** (`manual/Abilities.kt`) are derived, never stored: open a screen, open a panel, switch a category,
+  an offer in a panel, a button on a screen, find one in a list. Stable ids (`ab:` + hash). Paths are the words on the
+  doors from the app's first screen. A button the approval rules would ask about is marked "asks". Runs teach them:
+  a walk that arrives marks the ability walked and raises its confidence; one that stops lowers it.
+- **The index** (`AbilityIndex`): rarity-weighted word coverage (0–1) with generic verb folding; the Tier 0 rule is a
+  score ≥ 0.8, 0.3 ahead of the next, and a navigation-only walk.
+- **The navigator** (`ManualNavigator`) walks only doors the mapper walked, by their words, and checks every landing in
+  plain code: the page key, else the place's title or most of its button words. The first surprise stops it. It never
+  taps an ability's pick (an offer, a button); a switch taps its category last.
+- **The describer** (`ManualDescriber`) runs after the organizer with the pass's model: one call writes purposes,
+  phrasings and about 20 goals. `SelfQuiz` answers each goal from the index alone; unanswered goals are the gaps.
+- **Map deeper:** `mapping.start {deeper: true}` (a flag only). The phone turns its own quiz gaps into focus words and
+  tries doors with those words first; they still pass the safety check.
+- **The Mind:** `abilities_find(goal)`, `go_to(ability=a3)` and `how_to_find(list)`, plus a few manual lines that fit
+  the mission's goal with the map card. Choosing, typing and confirming stay the Mind's, with the usual approvals.
+- **Surfaces:** phone op `manual.get` (read only; abilities, hits, quiz, scores, Markdown); gateway route
+  `GET /v1/devices/{id}/manual`; the Glass **Abilities** tab (search, Try it, the quiz report, Map deeper, Export
+  manual); the agent MCP's read-only `phone_app_manual`.
+- **Not yet:** masked screenshots for the describer, sharing manuals between phones, the Lab find-the-feature suite
+  with hand-written goals (the self-quiz stands in until the owner's first passes), JEV (parked).
+
 ## 8. How agents use the manual: rapid navigation in three tiers
 
 | Tier | Who decides | When | Cost |

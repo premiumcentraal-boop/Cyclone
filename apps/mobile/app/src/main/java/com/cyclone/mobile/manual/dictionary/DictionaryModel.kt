@@ -84,10 +84,37 @@ data class ScreenCard(
     val items: List<String> = emptyList(),
     val seen: Int = 0,
     val lastSeenAt: Long = 0,
+    /** The phone's structural page keys for this place (`package:Class:hash`), so a walk can tell where it is. */
+    val pageKeys: List<String> = emptyList(),
+    /** One line on what the place is for, written by the describer from the app's words only (alpha.64). */
+    val purpose: String? = null,
+    /** The place's main list, in structure only. */
+    val list: ListNote? = null,
 ) {
     val isPanel: Boolean get() = panelOf != null
     /** The name shown on the map: the title, else the door that led here, else the selected category. */
     val name: String? get() = title ?: via ?: category
+}
+
+/** A list as the manual keeps it: row shape, order, the app's section headers, and how to find one row. */
+data class ListNote(
+    val shape: String,
+    val order: String? = null,
+    val groups: List<String> = emptyList(),
+    val searchable: Boolean = false,
+    val searchLabel: String? = null,
+)
+
+/** How often walking an ability worked (plan 36 §5.6): runs teach the manual. Counts and a time only. */
+data class AbilityStat(val walked: Int = 0, val failed: Int = 0, val lastAt: Long = 0)
+
+/** One self-quiz goal (plan 36 §5.5): a plain-language goal and the ability the manual answers it with, if any. */
+data class QuizGoal(val goal: String, val abilityId: String? = null, val score: Double = 0.0)
+
+/** The last self-quiz: how many goals the manual alone can answer. */
+data class QuizResult(val at: Long, val goals: List<QuizGoal>) {
+    val answered: Int get() = goals.count { it.abilityId != null }
+    val gaps: List<String> get() = goals.filter { it.abilityId == null }.map { it.goal }
 }
 
 /** A walked door between two rooms, with the app's words on it. [edgeId] is the Atlas edge id. */
@@ -132,6 +159,12 @@ data class AppDictionary(
     val doors: Map<String, DoorCard> = emptyMap(),
     /** Hashes of names the owner said are their own ("Mine"): never asked again, never stored as text. */
     val declined: Set<String> = emptySet(),
+    /** Per ability id: how often walking it worked or stopped (alpha.64). */
+    val abilityStats: Map<String, AbilityStat> = emptyMap(),
+    /** Per ability id: other ways a person says it, written by the describer from the app's words (alpha.64). */
+    val phrasings: Map<String, List<String>> = emptyMap(),
+    /** The last self-quiz (alpha.64), or null before the first describer run. */
+    val quiz: QuizResult? = null,
 ) {
     /** Follows merges to the entry that stands for [id] now. */
     fun resolve(id: String?): DictEntry? {
@@ -187,6 +220,9 @@ data class AppDictionary(
         const val MAX_SCREENS = 300
         const val MAX_DOORS = 600
         const val MAX_DECLINED = 500
+        const val MAX_ABILITY_STATS = 600
+        const val MAX_PHRASINGS = 8
+        const val MAX_QUIZ = 24
     }
 }
 
@@ -214,6 +250,7 @@ object DictionaryPrivacy {
         siblings = texts(anchor.siblings, 11),
         groups = texts(anchor.groups, 12),
         searchLabel = text(anchor.searchLabel),
+        order = anchor.order?.takeIf { com.cyclone.mobile.manual.ListOrder.fromWire(it) != null },
         rowShape = anchor.rowShape?.takeIf { SHAPE.matches(it) },
         roomKey = anchor.roomKey.takeIf { ROOM.matches(it) } ?: "screen:unknown",
         containerKey = anchor.containerKey.takeIf { HEX.matches(it) } ?: "0",
@@ -242,8 +279,39 @@ object DictionaryPrivacy {
             via = text(card.via),
             panelOf = card.panelOf?.takeIf { ROOM.matches(it) && it != card.roomKey },
             items = texts(card.items, 12),
+            pageKeys = card.pageKeys.filter { PAGE_KEY.matches(it) }.distinct().take(MAX_PAGE_KEYS),
+            purpose = sentence(card.purpose, 18, 120),
+            list = card.list?.let(::list),
         )
     }
+
+    fun list(note: ListNote): ListNote? {
+        val shape = note.shape.takeIf { SHAPE.matches(it) } ?: return null
+        return note.copy(
+            shape = shape,
+            order = note.order?.takeIf { com.cyclone.mobile.manual.ListOrder.fromWire(it) != null },
+            groups = texts(note.groups, 12),
+            searchLabel = text(note.searchLabel),
+        )
+    }
+
+    /**
+     * A short sentence written by a model from the app's words (a purpose, a phrasing, a quiz goal): one line, no
+     * captured values (emails, links, codes or long numbers).
+     */
+    fun sentence(raw: String?, maxWords: Int, maxLength: Int): String? {
+        val value = raw?.trim()?.replace(Regex("\\s+"), " ")?.trim('"', '“', '”', ' ') ?: return null
+        if (value.isEmpty() || value.length > maxLength || value.split(' ').size > maxWords) return null
+        if (Regex("\\d{3,}|@|https?:|www\\.|[<>{}\\[\\]]").containsMatchIn(value)) return null
+        if (AtlasPrivacy.structuralLabel(value, "").isBlank()) return null
+        return value
+    }
+
+    fun phrasing(raw: String?): String? = sentence(raw, 10, 70)
+    fun goal(raw: String?): String? = sentence(raw, 12, 90)
+
+    const val MAX_PAGE_KEYS = 4
+    private val PAGE_KEY = Regex("^[A-Za-z][A-Za-z0-9_.]{1,120}:[A-Za-z0-9_$]{1,80}:[0-9a-f]{28}$")
 
     fun door(card: DoorCard): DoorCard? {
         if (!EDGE.matches(card.edgeId) || !ROOM.matches(card.from) || !ROOM.matches(card.to)) return null
@@ -266,18 +334,20 @@ object DictionaryJson {
     val ENTRY_KEYS = setOf("id", "kind", "name", "nameProof", "resKey", "aliases", "ownerLabel", "parentId", "parentHint",
         "status", "anchors", "markers", "observations", "days", "firstSeenAt", "lastSeenAt", "versions", "missedPasses",
         "redirectTo", "note", "proven")
-    val SCREEN_KEYS = setOf("roomKey", "title", "category", "via", "panelOf", "items", "seen", "lastSeenAt")
+    val SCREEN_KEYS = setOf("roomKey", "title", "category", "via", "panelOf", "items", "seen", "lastSeenAt", "pageKeys", "purpose", "list")
+    val LIST_KEYS = setOf("shape", "order", "groups", "searchable", "searchLabel")
     val DOOR_KEYS = setOf("edgeId", "from", "to", "label", "kind", "lastSeenAt")
     val ANCHOR_KEYS = setOf("kind", "roomKey", "containerKey", "screenTitle", "position", "siblings", "groups", "rowShape",
-        "searchable", "searchLabel")
+        "searchable", "searchLabel", "order")
 
     fun write(dictionary: AppDictionary): JSONObject = JSONObject()
-        .put("schema", 2)
+        .put("schema", 3)
         .put("screens", JSONArray().also { out ->
             dictionary.screens.values.mapNotNull(DictionaryPrivacy::screen).forEach { c ->
                 out.put(JSONObject().put("roomKey", c.roomKey).put("title", c.title ?: JSONObject.NULL).put("category", c.category ?: JSONObject.NULL)
                     .put("via", c.via ?: JSONObject.NULL).put("panelOf", c.panelOf ?: JSONObject.NULL).put("items", JSONArray(c.items))
-                    .put("seen", c.seen).put("lastSeenAt", c.lastSeenAt))
+                    .put("seen", c.seen).put("lastSeenAt", c.lastSeenAt).put("pageKeys", JSONArray(c.pageKeys))
+                    .put("purpose", c.purpose ?: JSONObject.NULL).put("list", c.list?.let(::list) ?: JSONObject.NULL))
             }
         })
         .put("doors", JSONArray().also { out ->
@@ -287,6 +357,24 @@ object DictionaryJson {
             }
         })
         .put("declined", JSONArray(dictionary.declined.filter { HASH.matches(it) }.take(AppDictionary.MAX_DECLINED)))
+        .put("abilityStats", JSONArray().also { out ->
+            dictionary.abilityStats.entries.filter { ABILITY.matches(it.key) }.sortedByDescending { it.value.lastAt }.take(AppDictionary.MAX_ABILITY_STATS)
+                .forEach { (id, s) -> out.put(JSONObject().put("id", id).put("walked", s.walked).put("failed", s.failed).put("lastAt", s.lastAt)) }
+        })
+        .put("phrasings", JSONArray().also { out ->
+            dictionary.phrasings.entries.filter { ABILITY.matches(it.key) }.take(AppDictionary.MAX_ABILITY_STATS).forEach { (id, says) ->
+                val clean = says.mapNotNull(DictionaryPrivacy::phrasing).distinct().take(AppDictionary.MAX_PHRASINGS)
+                if (clean.isNotEmpty()) out.put(JSONObject().put("id", id).put("say", JSONArray(clean)))
+            }
+        })
+        .put("quiz", dictionary.quiz?.let { q ->
+            JSONObject().put("at", q.at).put("goals", JSONArray().also { out ->
+                q.goals.mapNotNull { g -> DictionaryPrivacy.goal(g.goal)?.let { g.copy(goal = it) } }.take(AppDictionary.MAX_QUIZ).forEach { g ->
+                    out.put(JSONObject().put("goal", g.goal).put("abilityId", g.abilityId?.takeIf { ABILITY.matches(it) } ?: JSONObject.NULL)
+                        .put("score", Math.round(g.score * 100) / 100.0))
+                }
+            })
+        } ?: JSONObject.NULL)
         .put("packageName", dictionary.packageName)
         .put("passes", dictionary.passes)
         .put("updatedAt", dictionary.updatedAt)
@@ -334,6 +422,14 @@ object DictionaryJson {
         .put("rowShape", a.rowShape ?: JSONObject.NULL)
         .put("searchable", a.searchable)
         .put("searchLabel", a.searchLabel ?: JSONObject.NULL)
+        .put("order", a.order ?: JSONObject.NULL)
+
+    fun list(l: ListNote): JSONObject = JSONObject()
+        .put("shape", l.shape)
+        .put("order", l.order ?: JSONObject.NULL)
+        .put("groups", JSONArray(l.groups))
+        .put("searchable", l.searchable)
+        .put("searchLabel", l.searchLabel ?: JSONObject.NULL)
 
     fun read(json: JSONObject): AppDictionary {
         val entries = LinkedHashMap<String, DictEntry>()
@@ -361,7 +457,8 @@ object DictionaryJson {
             for (i in 0 until array.length()) {
                 val c = array.optJSONObject(i) ?: continue
                 val card = DictionaryPrivacy.screen(ScreenCard(c.optString("roomKey"), nullable(c, "title"), nullable(c, "category"), nullable(c, "via"),
-                    nullable(c, "panelOf"), strings(c.optJSONArray("items")), c.optInt("seen"), c.optLong("lastSeenAt"))) ?: continue
+                    nullable(c, "panelOf"), strings(c.optJSONArray("items")), c.optInt("seen"), c.optLong("lastSeenAt"),
+                    strings(c.optJSONArray("pageKeys")), nullable(c, "purpose"), c.optJSONObject("list")?.let(::parseList))) ?: continue
                 screens[card.roomKey] = card
             }
         }
@@ -375,9 +472,38 @@ object DictionaryJson {
             }
         }
         val declined = strings(json.optJSONArray("declined")).filter { HASH.matches(it) }.toSet()
+        val stats = LinkedHashMap<String, AbilityStat>()
+        json.optJSONArray("abilityStats")?.let { array ->
+            for (i in 0 until array.length()) {
+                val s = array.optJSONObject(i) ?: continue
+                val id = s.optString("id").takeIf { ABILITY.matches(it) } ?: continue
+                stats[id] = AbilityStat(s.optInt("walked").coerceAtLeast(0), s.optInt("failed").coerceAtLeast(0), s.optLong("lastAt"))
+            }
+        }
+        val phrasings = LinkedHashMap<String, List<String>>()
+        json.optJSONArray("phrasings")?.let { array ->
+            for (i in 0 until array.length()) {
+                val p = array.optJSONObject(i) ?: continue
+                val id = p.optString("id").takeIf { ABILITY.matches(it) } ?: continue
+                val says = strings(p.optJSONArray("say")).mapNotNull(DictionaryPrivacy::phrasing).distinct().take(AppDictionary.MAX_PHRASINGS)
+                if (says.isNotEmpty()) phrasings[id] = says
+            }
+        }
+        val quiz = json.optJSONObject("quiz")?.let { q ->
+            QuizResult(q.optLong("at"), q.optJSONArray("goals")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    val g = a.optJSONObject(i) ?: return@mapNotNull null
+                    val goal = DictionaryPrivacy.goal(g.optString("goal")) ?: return@mapNotNull null
+                    QuizGoal(goal, nullable(g, "abilityId")?.takeIf { ABILITY.matches(it) }, g.optDouble("score", 0.0).coerceIn(0.0, 1.0))
+                }
+            }.orEmpty().take(AppDictionary.MAX_QUIZ))
+        }
         return AppDictionary(json.optString("packageName"), entries, audit.takeLast(AppDictionary.MAX_AUDIT), jev,
-            json.optInt("passes"), json.optLong("updatedAt"), screens, doors, declined)
+            json.optInt("passes"), json.optLong("updatedAt"), screens, doors, declined, stats, phrasings, quiz)
     }
+
+    private fun parseList(json: JSONObject): ListNote? = DictionaryPrivacy.list(ListNote(json.optString("shape"), nullable(json, "order"),
+        strings(json.optJSONArray("groups")), json.optBoolean("searchable"), nullable(json, "searchLabel")))
 
     private fun strings(array: JSONArray?): List<String> = array?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotBlank) } }.orEmpty()
     private fun nullable(json: JSONObject, key: String): String? = json.optString(key).takeIf { json.has(key) && !json.isNull(key) && it.isNotBlank() }
@@ -422,9 +548,12 @@ object DictionaryJson {
         rowShape = nullable(json, "rowShape"),
         searchable = json.optBoolean("searchable"),
         searchLabel = nullable(json, "searchLabel"),
+        order = nullable(json, "order"),
     )
     }
 
     val ID = Regex("^set:[\\p{L}\\p{N}_]{1,40}$")
     val HASH = Regex("^[0-9a-f]{24}$")
+    /** An ability id: `ab:` and 12 hex characters of a hash of what it does (stable across passes). */
+    val ABILITY = Regex("^ab:[0-9a-f]{12}$")
 }

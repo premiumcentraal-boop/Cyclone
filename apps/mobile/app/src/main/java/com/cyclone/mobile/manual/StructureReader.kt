@@ -54,6 +54,8 @@ data class Anchor(
     val rowShape: String? = null,
     val searchable: Boolean = false,
     val searchLabel: String? = null,
+    /** How the list is ordered (a [ListOrder] wire value), concluded from row shapes that are then thrown away. */
+    val order: String? = null,
 ) {
     /** Two anchors are the same place when their kind, container and position agree. */
     val identity: String get() = "${kind.wire}|$containerKey|${position ?: ""}"
@@ -71,6 +73,15 @@ data class SetProposal(
     val proven: Boolean = false,
 )
 
+/** The main list of a screen, in structure only: its row shape, order, section headers and how to find one row. */
+data class ListSeen(
+    val shape: String,
+    val order: ListOrder?,
+    val groups: List<String>,
+    val searchable: Boolean,
+    val searchLabel: String?,
+)
+
 /** A category row as seen on one screen: its structural key and which of its (named) items was selected. */
 data class StripSeen(val key: String, val selected: String?, val labels: List<String>)
 
@@ -83,6 +94,8 @@ data class ScreenFindings(
     val selectedCategory: String? = null,
     /** The app's words on this screen's own buttons (outside list rows and category rows), at most 12. */
     val controls: List<String> = emptyList(),
+    /** The screen's main list, when it has one. */
+    val list: ListSeen? = null,
 )
 
 /**
@@ -99,6 +112,8 @@ class StructureReader(
      * they are not proposed until probes can tell a downloaded menu from a user's own name. Off in production.
      */
     private val allowVocabulary: Boolean = false,
+    /** Today, for reading ages like "Mon" or "12 Sep" (plan 36 §6.3). */
+    private val today: () -> java.time.LocalDate = { java.time.LocalDate.now() },
 ) {
     private fun chrome(raw: String): ChromeWord? = lexicon.chrome(raw)?.takeIf { allowVocabulary || it.proof == ChromeProof.LEXICON }
 
@@ -132,6 +147,7 @@ class StructureReader(
             rowShape = list.shape,
             searchable = search != null,
             searchLabel = search?.label,
+            order = list.order?.wire,
         )
 
         if (title != null && !titleIsApp && mainList != null) {
@@ -178,7 +194,8 @@ class StructureReader(
         val seen = strips.filter { it.region == Region.CATEGORY }.map { strip ->
             StripSeen(strip.key, strip.items.firstOrNull { it.selected && it.word != null }?.word?.text, strip.items.mapNotNull { it.word?.text })
         }
-        return ScreenFindings(title, seen, lists.size, proposals, selected?.word?.takeIf { it.proof == ChromeProof.LEXICON }?.text, controls)
+        val listSeen = mainList?.let { ListSeen(it.shape, it.order, it.headers.map { h -> h.text }.distinct().take(12), search != null, search?.label) }
+        return ScreenFindings(title, seen, lists.size, proposals, selected?.word?.takeIf { it.proof == ChromeProof.LEXICON }?.text, controls, listSeen)
     }
 
     // ---- lists ----
@@ -190,6 +207,7 @@ class StructureReader(
         val markers: List<ChromeWord>,
         val shape: String,
         val rowEvidence: List<String>,
+        val order: ListOrder?,
     )
 
     private fun findLists(visible: List<UiNode>, children: Map<String?, List<UiNode>>, byId: Map<String, UiNode>): List<FoundList> =
@@ -224,9 +242,15 @@ class StructureReader(
             }.joinToString(" · ")
             val rowEvidence = rows.take(6).flatMap { row -> (descendants(row, children) + row).map { idWord(it.resourceId) } }
                 .filter { it.isNotBlank() }.distinct().take(20)
+            // Row texts are read for their shapes (ages, first letters) and dropped here: only the order is kept.
+            val rowTexts = rows.map { row ->
+                (listOf(row) + descendants(row, children)).sortedWith(compareBy({ it.top }, { it.left }))
+                    .map { it.text.trim() }.filter { it.isNotBlank() && it != REDACTED }
+            }
             FoundList(
                 key = "${idWord(container.resourceId)}|${container.className}|${byId[container.parentId ?: ""]?.className.orEmpty()}",
                 rows = rows, headers = headers, markers = markers, shape = shape, rowEvidence = rowEvidence,
+                order = ListOrder.of(rowTexts, today()),
             )
         }
 

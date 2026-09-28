@@ -65,15 +65,16 @@ internal object GatewayV5MappingAdapter {
         val allowed = setOf(
             "placeId", "persona", "sessionId", "displayId",
             "workspaceId", "workspaceGeneration", "executionGeneration",
-            "budget", "resumeJobId", "identity", "describer",
+            "budget", "resumeJobId", "identity", "describer", "deeper",
         )
         requireOnly(args, allowed)
         val describer = describer(args)
+        val wantsDeeper = deeper(args)
         val plane = planeRequest(args)
         val controller = MappingSessionRuntime.controller(context)
         val resumeJobId = optionalJobId(args, "resumeJobId")
         val job = if (resumeJobId != null) {
-            if (args.has("placeId") || args.has("persona") || args.has("budget") || args.has("identity") || args.has("describer")) {
+            if (args.has("placeId") || args.has("persona") || args.has("budget") || args.has("identity") || args.has("describer") || args.has("deeper")) {
                 throw MappingSessionException(
                     "INVALID_REQUEST",
                     "mapping.start resume accepts resumeJobId plus phone-plane identity only.",
@@ -95,7 +96,13 @@ internal object GatewayV5MappingAdapter {
             )
             controller.start(request)
         }
-        if (resumeJobId == null) com.cyclone.mobile.manual.ManualRuntime.configure(job.mappingJobId, describer)
+        if (resumeJobId == null) {
+            // Map deeper (plan 36 §5.5): the words of the goals the manual could not answer, from the phone's own quiz.
+            val focus = if (!wantsDeeper) emptyList() else job.placeId.removePrefix("package:").let { pkg ->
+                com.cyclone.mobile.manual.SelfQuiz.focusWords(com.cyclone.mobile.manual.ManualRuntime.dictionary(context, pkg).quiz)
+            }
+            com.cyclone.mobile.manual.ManualRuntime.configure(job.mappingJobId, describer, focus)
+        }
         // mapping.start owns the job; the phone driver walks it. Without this the job would idle.
         driverLauncher(context, job, resumeJobId == null)
         return jobJson(controller.status(job.mappingJobId) ?: job)
@@ -105,6 +112,12 @@ internal object GatewayV5MappingAdapter {
      * Which model decides for this pass (plan 36 §9): `{"model": "phone"}` is the phone's current model, resolved when
      * the pass starts; any other value must be a model id. The key never leaves the phone.
      */
+    private fun deeper(args: JSONObject): Boolean = when (val raw = args.opt("deeper")) {
+        null, JSONObject.NULL -> false
+        is Boolean -> raw
+        else -> throw MappingSessionException("INVALID_REQUEST", "deeper must be true or false.")
+    }
+
     private fun describer(args: JSONObject): String? {
         if (!args.has("describer") || args.isNull("describer")) return null
         val value = args.optJSONObject("describer") ?: throw MappingSessionException("INVALID_REQUEST", "describer must be an object.")

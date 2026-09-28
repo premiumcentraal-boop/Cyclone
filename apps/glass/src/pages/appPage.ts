@@ -280,7 +280,7 @@ export function createAppPage(ctx: GlassContext, route: Extract<Route, { name: "
         after: { places: model.screens.length, doors: model.edges.length, zones: map.zones.length, blocked: report.blocked, unconfirmed: report.unconfirmed, scenariosKnown: report.scenariosKnown },
         onViewMap: () => setView({ kind: "overview" }),
         onMapAgain: () => openSheet(lastMission ?? undefined),
-        onMapDeeper: () => startMission({ identity: lastMission?.identity ?? mine.identity ?? "own", budget: "30m" }),
+        onMapDeeper: () => startMission({ identity: lastMission?.identity ?? mine.identity ?? "own", budget: "30m", model: lastMission?.model, deeper: true }),
       }));
       return;
     }

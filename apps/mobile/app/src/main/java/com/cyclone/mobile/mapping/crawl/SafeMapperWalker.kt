@@ -304,5 +304,5 @@ internal object StructuralDoorPolicy {
     )
 
     fun rank(doors: List<MappingDoor>): List<MappingDoor> =
-        doors.sortedWith(compareBy<MappingDoor> { priority[it.kind] ?: 100 }.thenBy { it.key })
+        doors.sortedWith(compareBy<MappingDoor> { !it.focus }.thenBy { priority[it.kind] ?: 100 }.thenBy { it.key })
 }

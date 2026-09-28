@@ -430,7 +430,7 @@ internal object GatewayDispatcher {
             GatewayV5CommandAdapter.install(context)
             GatewayV5CommandAdapter.dispatch(request.op, request.args)
         }
-        "dictionary.get", "dictionary.edit", "models.list" -> {
+        "dictionary.get", "dictionary.edit", "models.list", "manual.get" -> {
             GatewayV5ManualAdapter.install(context)
             GatewayV5ManualAdapter.dispatch(request.op, request.args)
         }

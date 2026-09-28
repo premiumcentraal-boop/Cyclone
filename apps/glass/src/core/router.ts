@@ -1,6 +1,6 @@
 /** Hash routes. Hash routing keeps the gateway's static mount trivial (one index.html under /glass/). */
-export type AppTab = "map" | "coverage" | "skills" | "screens" | "scenarios" | "versions" | "runs" | "issues" | "dictionary";
-const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios", "versions", "runs", "issues", "dictionary"];
+export type AppTab = "map" | "coverage" | "skills" | "screens" | "scenarios" | "versions" | "runs" | "issues" | "dictionary" | "abilities";
+const APP_TABS: AppTab[] = ["map", "coverage", "skills", "screens", "scenarios", "versions", "runs", "issues", "dictionary", "abilities"];
 /** Plan 33 (C0): the Command Center's sections. */
 export type CommandTab = "approvals" | "tasks" | "routines" | "results" | "accounts" | "vault" | "connections";
 const COMMAND_TABS: CommandTab[] = ["approvals", "tasks", "routines", "results", "accounts", "vault", "connections"];

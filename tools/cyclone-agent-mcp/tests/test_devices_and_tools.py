@@ -301,3 +301,26 @@ def test_lab_tools_start_experiments_and_report_failures_compactly():
                 {"device_id": "phone-1", "name": "x", "missions": ["nav.home"], "repetitions": 99}):
         assert tools.call("phone_lab_start", bad)["error"]["code"] == "INVALID_REQUEST"
     assert tools.call("phone_lab_report", {"experiment_id": "../../etc"})["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_app_manual_is_read_only_and_validated():
+    class ManualGateway(FakeToolsGateway):
+        def app_manual(self, device_id, package_name, query=None):
+            self.calls.append(("app_manual", device_id, package_name, query))
+            return {"appLabel": "Instagram", "currentVersion": "402.0", "query": query, "clear": True,
+                    "abilities": [{"id": "ab:0123456789ab", "name": "Requests on Messages"}, {"id": "ab:ffffffffffff", "name": "Open Settings"}],
+                    "hits": [{"id": "ab:0123456789ab", "score": 0.94}], "quiz": None, "scores": {"map": 0.75}, "markdown": "# Instagram"}
+
+    gateway = ManualGateway([DeviceSummary("phone-1", "READY")])
+    tools = PhoneTools(gateway)
+    out = tools.call("phone_app_manual", {"device_id": "phone-1", "app": "com.instagram.android", "query": " message requests "})
+    assert gateway.calls[-1] == ("app_manual", "phone-1", "com.instagram.android", "message requests")
+    assert out["clearMatch"] is True
+    assert out["matches"][0]["name"] == "Requests on Messages" and out["matches"][0]["fit"] == 0.94
+    contract = next(c for c in TOOL_CONTRACTS if c.name == "phone_app_manual")
+    assert contract.read_only and contract.phone_scoped
+    for bad in ({"device_id": "phone-1", "app": "../etc"},
+                {"device_id": "phone-1", "app": "com.instagram.android", "query": "x" * 300},
+                {"device_id": "phone-1", "app": "com.instagram.android", "shell": "id"}):
+        result = tools.call("phone_app_manual", bad)
+        assert not isinstance(result, dict) or "abilities" not in result, bad

@@ -74,6 +74,7 @@ internal object GatewayProtocol {
         "debug.snapshot",
         "dictionary.get",
         "models.list",
+        "manual.get",
     )
 
     val operations = linkedSetOf(
@@ -162,6 +163,8 @@ internal object GatewayProtocol {
         "dictionary.get",
         "dictionary.edit",
         "models.list",
+        // The App Manual (plan 36 §8): abilities, the self-quiz and the manual as text. Read only.
+        "manual.get",
     )
 
     fun parse(line: String): GatewayRequest {

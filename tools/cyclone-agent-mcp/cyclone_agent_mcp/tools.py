@@ -46,6 +46,7 @@ ROUTINE_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 LAB_EXPERIMENT_ID = re.compile(r"^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$")
 LAB_MISSION_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
+APP_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
 LAB_VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap"})
 TARGET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
 
@@ -571,6 +572,30 @@ class PhoneTools:
         run_id = _required_id(args, "run_id", RUN_ID)
         return self.gateway.routine_cancel(device_id, run_id)
 
+
+    def phone_app_manual(self, args: dict[str, Any]) -> Any:
+        """An app's manual (plan 36 §8): what you can do in it and the path to each, in the app's own words. Read only."""
+        _only_keys(args, {"device_id", "app", "query"})
+        device_id = _required_id(args, "device_id", TARGET_ID)
+        app = args.get("app")
+        if not isinstance(app, str) or not APP_PACKAGE.match(app):
+            raise ValueError("app is the app's package name, like com.instagram.android")
+        query = args.get("query")
+        if query is not None and (not isinstance(query, str) or len(query) > 200):
+            raise ValueError("query is at most 200 characters")
+        manual = self.gateway.app_manual(device_id, app, query.strip() if query else None)
+        if not isinstance(manual, dict) or "abilities" not in manual:
+            return manual
+        # Hits first when there is a query; the full list stays available in the Markdown.
+        hits = {h.get("id"): h.get("score") for h in manual.get("hits") or [] if isinstance(h, dict)}
+        abilities = manual.get("abilities") or []
+        best = [dict(a, fit=hits[a["id"]]) for a in abilities if isinstance(a, dict) and a.get("id") in hits]
+        best.sort(key=lambda a: -(a.get("fit") or 0))
+        return {
+            "app": manual.get("appLabel"), "version": manual.get("currentVersion"), "query": manual.get("query"),
+            "clearMatch": manual.get("clear"), "matches": best, "abilities": abilities if not hits else abilities[:40],
+            "quiz": manual.get("quiz"), "scores": manual.get("scores"), "markdown": manual.get("markdown"),
+        }
 
     def phone_lab_missions(self, args: dict[str, Any]) -> Any:
         _only_keys(args, set())

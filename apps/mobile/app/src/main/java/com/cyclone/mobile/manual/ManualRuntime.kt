@@ -49,9 +49,36 @@ object ManualRuntime {
 
     // ---- pass lifecycle ----
 
-    /** mapping.start: remembers which model decides for this pass ("phone" = the phone's current model). */
-    fun configure(jobId: String, model: String?) {
+    /**
+     * mapping.start: remembers which model decides for this pass ("phone" = the phone's current model) and, for "Map
+     * deeper", the words of the goals the manual could not answer: doors with those words are tried first.
+     */
+    fun configure(jobId: String, model: String?, focus: List<String> = emptyList()) {
         choices[jobId] = model?.takeIf { it.isNotBlank() } ?: PHONE_MODEL
+        val words = AbilityIndex.terms(focus).filter { it.length > 2 }.distinct().take(24)
+        if (words.isEmpty()) focusWords.remove(jobId) else focusWords[jobId] = words.toSet()
+    }
+
+    private val focusWords = ConcurrentHashMap<String, Set<String>>()
+
+    /** The pass's Map deeper words, when it has any. */
+    fun focus(jobId: String): Set<String> = focusWords[jobId].orEmpty()
+
+    /**
+     * Map deeper: the doors of [observation] whose words (the app's own) share a word with the pass's focus. They still
+     * pass every safety check; they are only tried first.
+     */
+    internal fun focusDoors(
+        jobId: String,
+        captured: com.cyclone.mobile.gateway.GatewayObservation,
+        observation: com.cyclone.mobile.mapping.crawl.MappingObservation,
+    ): Set<String> {
+        val focus = focusWords[jobId] ?: return emptySet()
+        return observation.doors.filter { door ->
+            val element = captured.elements[door.elementId] ?: return@filter false
+            val words = AbilityIndex.terms(listOfNotNull(element.label, element.evidence.optString("contentDescription")))
+            words.any { it in focus }
+        }.map { it.key }.toSet()
     }
 
     /** Resolves "phone" to the phone's current model id, when the pass starts. */
@@ -91,7 +118,7 @@ object ManualRuntime {
             synchronized(lock) {
                 var dict = load(app, packageName)
                 if (split.appStrings.isNotEmpty()) dict = Organizer.record(dict, split.appStrings, PassInfo(now, pass.versionName))
-                dict = ManualScreens.observed(dict, roomKey, found, now)
+                dict = ManualScreens.observed(dict, roomKey, found, now, captured.page.pageKey)
                 save(app, dict)
                 if (split.downloaded.isNotEmpty()) reviews.getOrPut(packageName) { ReviewQueue() }.offer(dict, split.downloaded, now)
             }
@@ -133,10 +160,11 @@ object ManualRuntime {
     fun finish(context: Context, jobId: String) {
         val pass = passes.remove(jobId) ?: return
         choices.remove(jobId)
+        focusWords.remove(jobId)
         val app = context.applicationContext
         worker.execute {
+            val label = appLabel(app, pass.packageName)
             runCatching {
-                val label = appLabel(app, pass.packageName)
                 val judge = judgeFactory(app, label, pass.modelChoice)
                 val watched = if (judge == null) null else WatchedJudge(judge) { questions, decisions -> watchJev(app, pass.packageName, label, questions, decisions) }
                 synchronized(lock) {
@@ -144,7 +172,59 @@ object ManualRuntime {
                     save(app, result.dictionary)
                 }
             }
+            // Then the describer (alpha.64): purposes, phrasings and the self-quiz, with the same model. Never blocks a pass.
+            runCatching { describe(app, pass.packageName, label, pass.modelChoice) }
         }
+    }
+
+    // ---- the describer, abilities and walks (alpha.64) ----
+
+    /** Seam for tests and the Lab: who writes the describer's answer ((system, user) → reply text). */
+    internal var describerFactory: (Context, String) -> ((String, String) -> String)? = { context, model -> modelText(context, model, "manual-describer") }
+
+    private fun describe(context: Context, packageName: String, appLabel: String, model: String) {
+        val ask = describerFactory(context, model) ?: return
+        val question = synchronized(lock) {
+            val dict = load(context, packageName)
+            ManualDescriber.question(dict, appLabel, Abilities.derive(dict))
+        } ?: return
+        val answer = ManualDescriber.parse(ask(question.system, question.user), question) ?: return
+        // The dictionary may have moved on while the model answered: the answer goes onto the current one, by handle.
+        synchronized(lock) { save(context, ManualDescriber.apply(load(context, packageName), answer, System.currentTimeMillis())) }
+    }
+
+    fun view(context: Context, packageName: String): ManualView? = runCatching {
+        val dict = dictionary(context, packageName)
+        if (dict.screens.isEmpty() && dict.entries.isEmpty()) return null
+        ManualView(dict, appLabel(context, packageName), Abilities.derive(dict))
+    }.getOrNull()
+
+    /** The manual as the Mind reaches it. */
+    fun mindPort(context: Context): MindManualPort {
+        val app = context.applicationContext
+        return object : MindManualPort {
+            override fun view(packageName: String): ManualView? = this@ManualRuntime.view(app, packageName)
+            override fun walked(packageName: String, abilityId: String, ok: Boolean) = recordWalk(app, packageName, abilityId, ok)
+        }
+    }
+
+    /** A walk of an ability ended: runs teach the manual (plan 36 §5.6). Counts and a time only. */
+    fun recordWalk(context: Context, packageName: String, abilityId: String, ok: Boolean) {
+        runCatching {
+            if (!com.cyclone.mobile.manual.dictionary.DictionaryJson.ABILITY.matches(abilityId)) return
+            synchronized(lock) {
+                val app = context.applicationContext
+                val dict = load(app, packageName)
+                val old = dict.abilityStats[abilityId] ?: com.cyclone.mobile.manual.dictionary.AbilityStat()
+                val next = old.copy(walked = old.walked + if (ok) 1 else 0, failed = if (ok) 0 else old.failed + 1, lastAt = System.currentTimeMillis())
+                save(app, dict.copy(abilityStats = dict.abilityStats + (abilityId to next)))
+            }
+        }
+    }
+
+    /** The manual as Markdown (plan 36 §3.1): the glossary first, then screens, abilities and the self-quiz. */
+    fun markdown(context: Context, packageName: String): String? = view(context, packageName)?.let { v ->
+        ManualRenderer.markdown(v.dictionary, v.appLabel, currentVersion(context, packageName), v.abilities)
     }
 
     // ---- reading and owner edits ----
@@ -237,6 +317,20 @@ object ManualRuntime {
                 val reply = model.complete(MindModelRequest(messages, emptyList(), nativeTools = false, budgetMs = 60_000))
                 return OrganizerPrompt.parse(reply.text, questions)
             }
+        }
+    }
+
+    /** The pass's model as plain text in and out, for the describer. Null without a key or a model. */
+    private fun modelText(context: Context, modelId: String, purpose: String): ((String, String) -> String)? {
+        val key = OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
+        val id = resolveModel(context, modelId).takeIf { it.isNotBlank() } ?: return null
+        val preset = OpenRouterCatalogStore.preset(context, id)
+        return { system, user ->
+            val model = OpenRouterMindModel(key, id, preset.label, preset.vision, null, purpose, ProviderCancellation(), { false })
+            val messages = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", system))
+                .put(JSONObject().put("role", "user").put("content", user))
+            model.complete(MindModelRequest(messages, emptyList(), nativeTools = false, budgetMs = 90_000)).text
         }
     }
 

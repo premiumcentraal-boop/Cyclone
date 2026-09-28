@@ -21,6 +21,8 @@ export interface ManualScreen {
   items: string[];
   sets: string[];
   seen: number;
+  /** One line on what the place is for, written by the describer from the app's words (alpha.64). */
+  purpose: string | null;
 }
 
 export interface ManualDoor { edgeId: string; from: string; to: string; label: string | null; kind: string }
@@ -259,6 +261,7 @@ function parseScreen(raw: unknown): ManualScreen | null {
     items: strs(r.items, 12),
     sets: Array.isArray(r.sets) ? r.sets.map(setId).filter((x): x is string => x !== null).slice(0, 12) : [],
     seen: int(r.seen),
+    purpose: strOrNull(r.purpose, 120),
   };
 }
 
@@ -295,7 +298,7 @@ export function applyManualNames(model: AtlasViewModel, manual: AppDictionaryVie
       const card = cards.get(screen.screenId);
       if (!card?.name) return screen;
       const over = card.panelOf ? nameOf(card.panelOf) : null;
-      const purpose = card.panelOf ? (over ? `Panel over ${over}` : "Panel") : card.category ? `${card.category} selected` : screen.purpose;
+      const purpose = card.panelOf ? (over ? `Panel over ${over}` : "Panel") : card.purpose ?? (card.category ? `${card.category} selected` : screen.purpose);
       return { ...screen, label: card.name, purpose, landmarks: card.items.length ? card.items.slice(0, 3) : screen.landmarks };
     }),
     edges: model.edges.map((edge) => {

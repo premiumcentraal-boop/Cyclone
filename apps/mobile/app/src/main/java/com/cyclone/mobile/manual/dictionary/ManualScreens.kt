@@ -9,14 +9,18 @@ import com.cyclone.mobile.manual.ScreenFindings
  */
 object ManualScreens {
     /** One screen as read: its title, selected category and the app's words on its own buttons. */
-    fun observed(dict: AppDictionary, roomKey: String, found: ScreenFindings, at: Long): AppDictionary {
+    fun observed(dict: AppDictionary, roomKey: String, found: ScreenFindings, at: Long, pageKey: String? = null): AppDictionary {
         val old = dict.screens[roomKey] ?: ScreenCard(roomKey)
+        val seenList = found.list?.let { l -> ListNote(l.shape, l.order?.wire, l.groups, l.searchable, l.searchLabel) }
         val next = DictionaryPrivacy.screen(old.copy(
             title = found.title?.text ?: old.title,
             category = found.selectedCategory ?: old.category,
             items = (found.controls + old.items).distinct().take(12),
             seen = old.seen + 1,
             lastSeenAt = at,
+            // Newest first: a page key that changed with the app keeps the old ones only until they fall off.
+            pageKeys = (listOfNotNull(pageKey) + old.pageKeys).distinct().take(DictionaryPrivacy.MAX_PAGE_KEYS),
+            list = seenList?.let { l -> l.copy(order = l.order ?: old.list?.order, groups = (l.groups + old.list?.groups.orEmpty()).distinct().take(12)) } ?: old.list,
         )) ?: return dict
         return dict.copy(screens = cap(dict.screens + (roomKey to next)))
     }
