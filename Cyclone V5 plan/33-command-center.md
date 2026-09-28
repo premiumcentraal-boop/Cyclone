@@ -1,7 +1,7 @@
 # 33 — Cyclone Command Center: the final plan
 
 **Status:** final plan, 2026-09-27. **C0 built in alpha.51** (§12.1), **C1 in alpha.54** (§12.2), **C2 in alpha.55** (§12.3), **C3 with pre-authorised leases in alpha.56**
-(§12.4); C4–C6 not started. Physical acceptance of C0–C3 is UNVERIFIED.
+(§12.4), **C5 Pages with the workspace redesign in alpha.61** (§12.5); C4 and C6 not started. Physical acceptance of C0–C3 is UNVERIFIED.
 
 **The owner's ask:**
 > "Credentials can be safely sent to the phone in tasks, and managed and saved in the dashboard. It should hold all
@@ -454,6 +454,64 @@ stated as owed until you test it.
 
 **Start with C0 → C2.** That is the core of the ask: one place for your accounts and tasks, and phones that log in
 for a task without the password ever being visible to anything but you and that phone.
+
+### 12.5 C5 as built: Pages and the workspace redesign (alpha.61)
+
+Built ahead of C4 at the owner's request ("a Notion-like Command Center"). The editor is Cyclone's own (DOM APIs, no
+dependency), which keeps the Glass guard; this settles plan 35's open Pages decision.
+- **Store** (`command/pages.py`, `PageStore` on `CommandCenter.pages`):
+  - `page(id, parent_id, title, icon, blocks, plain, position, version, created/updated, archived_at)` and
+    `page_ref(page_id, kind, target)`.
+  - **Blocks are typed and validated:**
+    - text (`p h1 h2 h3 todo bullet number quote callout`) with spans `{t, b?, i?, c?, s?}` or `{ref}`;
+    - `divider`;
+    - `ref` (one card);
+    - `view` (source `tasks routines approvals phones pages results accounts connections`, a layout, a filter);
+    - `board` (`items[{id, title, status todo/doing/done, due, refs, note, taskId}]`, layout `board/table/calendar`).
+  - **References** are `{kind page/device/skill/routine/task/account/connection, id (per-kind pattern), label}`.
+  - **Limits:** 1000 blocks, 1 MB, 500 cards, 10 deep, 5000 pages.
+  - **No secrets:** `INLINE_SECRET` refuses text, labels and titles that hold one.
+  - **Saves:** `update` needs the current `version`; a stale save raises `PageConflict`, which the route turns into a
+    409 `PAGE_CHANGED`. `_index` rewrites `page_ref`, and `backlinks(kind, id)` reads it.
+  - **Search:** `LIKE` over title and a `plain` text column.
+  - **Moving and the trash:** `move` checks for cycles and depth, and `before` places a page among its siblings.
+    `archive` / `restore` take a subtree; `delete` works only from the trash.
+  - **Templates** (`blank`, `weekly`, `daily`, `content`) are built server-side.
+  - **Audit:** create, rename, move, archive, restore and delete; content edits are not audited.
+- **Routes:** `/v1/cc/pages` (tree and templates; create), `/v1/cc/pages/{id}` (get; save), `/move`, `/archive`,
+  `/restore`, `/delete`, `/v1/cc/pages-trash`, `/v1/cc/pages-search?q=`, `/v1/cc/backlinks?kind=&id=`. All behind the
+  bearer.
+- **Glass shell:**
+  - `core/router.ts`: `#/command` is the workspace home, `#/command/page/<id>` a page, `#/command/trash` the trash, and
+    `modeOf(route)` gives the face.
+  - `app.ts`: the top-left `brand-switch` shows the current face's logo in front (`ui/logos.ts`: `cycloneLogo`, the
+    phone app's arcs, and `commandLogo`). Pressing it goes to the other face at its last route. The face swaps the
+    sidebar: the Glass nav without a Command Center item, or `workspace/sidebar.ts`. Ctrl/⌘K opens quick find.
+- **Workspace** (`src/workspace/`):
+  - `sidebar.ts`: search, Home, Inbox with a count, the databases, and the page tree (open/close, + inside, ⋯ menu:
+    rename, move to top level, trash). Dropping a page onto another nests it.
+  - `home.ts`: a greeting, template tiles, waiting approvals, recent pages, running tasks, upcoming routines, phones.
+  - `pageView.ts`: breadcrumb, icon picker, title, the editor, "Pages inside" and "Mentioned in". Autosave after
+    600 ms carries `version`; a 409 reloads; a 4xx waits for the next edit; network errors retry.
+  - `editor.ts`:
+    - contenteditable text blocks read back with `readSpans`; mentions are `contenteditable=false` chips;
+    - caret arithmetic with a mention counted as one character (`splitSpans`, `deleteRange`, `insertRef`,
+      `textBefore` in `services/pages.ts`);
+    - the `/` menu (`SLASH_ITEMS`), `@` mentions from `directory.ts` (`loadDirectory`, cached 15 s), and markdown
+      shortcuts;
+    - Enter splits (lists continue; an empty item ends the list), Backspace at the start joins, and arrows move
+      between blocks;
+    - Ctrl+B/I/E and Ctrl+Shift+S; pasting lines makes blocks;
+    - drag by the handle, and the ⋮⋮ menu: turn into, duplicate, move, delete.
+  - `views.ts`: live views with list, table, board, calendar and gallery layouts (`renderRows`, shared with the
+    Tasks database), refreshed every 10 s.
+  - `plan.ts`: plan boards with drag between columns and onto calendar days, and a peek dialog per card (status,
+    date, links, notes). "Send to a phone" is `command.createTask` with the linked phone and account.
+  - `quickFind.ts` and `trash.ts`.
+- **Databases in the workspace:** `createCommandPage(ctx, tab, {workspace: true})` gives a clean header (Inbox,
+  Tasks, …) with the create form behind New, and Tasks as a table, board or calendar.
+- **Tests and checks:** `tests/test_command_pages.py` (5), `tests/workspace.test.mjs` (14), and a guard
+  (`test_pages_are_typed_blocks_without_secrets`).
 
 ## 13. Open decisions for the owner
 

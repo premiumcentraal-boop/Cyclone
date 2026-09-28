@@ -220,6 +220,27 @@ class CommandCenterGuard(unittest.TestCase):
         cards = (GLASS / "services/cards.ts").read_text(encoding="utf-8")
         assert "hash" not in cards.split("export const CURATED")[1], "curated cards never pre-approve a tool by hash"
 
+    # Plan 33 C5 (alpha.59): pages hold typed blocks and never secrets; saves are versioned; deleting goes through the trash.
+    def test_pages_are_typed_blocks_without_secrets(self):
+        pages = (COMMAND / "pages.py").read_text(encoding="utf-8")
+        schema = pages[pages.index('PAGES_SCHEMA = """'):pages.index('"""', pages.index('PAGES_SCHEMA = """') + 20)].lower()
+        for word in ("password", "secret", "token", "otp", "cookie", "value"):
+            assert word not in schema, f"page schema must not hold {word}"
+        assert "if INLINE_SECRET.search(value):" in pages and "Pages never keep secrets" in pages, "page text is screened for secrets"
+        assert 'raise CommandError("Unknown block type.")' in pages and '_only(span, {"t", *MARKS}, "text")' in pages, "only typed blocks and spans"
+        assert 'if body["version"] != row["version"]:' in pages and "raise PageConflict(" in pages, "a stale save is refused, never merged"
+        assert 'raise CommandError("Move the page to the trash first.")' in pages
+        assert "print(" not in pages and "logging" not in pages
+        api = (COMMAND / "api.py").read_text(encoding="utf-8")
+        assert '"PAGE_CHANGED"' in api and "status_code=409" in api
+        editor = (GLASS / "workspace/editor.ts").read_text(encoding="utf-8")
+        assert "function readSpans(" in editor and "innerHTML" not in editor and "insertAdjacentHTML" not in editor, "the editor reads typed spans, never markup"
+        plan = (GLASS / "workspace/plan.ts").read_text(encoding="utf-8")
+        assert "command.createTask(ctx.client" in plan, "a plan card reaches a phone only as an ordinary Command Center task"
+        for name in ("workspace/plan.ts", "workspace/editor.ts", "workspace/views.ts", "workspace/pageView.ts"):
+            text = (GLASS / name).read_text(encoding="utf-8")
+            assert "cc.start" not in text and "/v1/devices/" not in text, f"{name}: the workspace never commands a phone directly"
+
 
 if __name__ == "__main__":
     unittest.main()

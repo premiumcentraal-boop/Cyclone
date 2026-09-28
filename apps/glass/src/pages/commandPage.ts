@@ -33,6 +33,7 @@ import type { GlassPage } from "./page.js";
 import { createVaultView, type VaultView } from "./vaultView.js";
 import { vaultApi } from "../services/vault.js";
 import { checkGoalRefs, createConnectionsView, createMakeEditor, type ConnectionsView } from "./connectionsView.js";
+import { TASK_GROUPS, renderRows, taskRow } from "../workspace/views.js";
 
 const POLL_MS = 5_000;
 const TABS: Array<{ id: CommandTab; label: string }> = [
@@ -54,8 +55,20 @@ interface Data {
   approvals: CcApproval[];
 }
 
-export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage {
-  const element = el("div", "page page-command");
+/** Titles for the workspace (plan 33, C5): each database is its own clean screen, reached from the sidebar. */
+const INFO: Record<CommandTab, [string, string, string | null]> = {
+  approvals: ["Inbox", "What your phones and connections are waiting for you to decide.", null],
+  tasks: ["Tasks", "Work a phone does once: now, at a time, or after connection steps.", "New task"],
+  routines: ["Routines", "Tasks on a schedule. A missed time is skipped, never replayed.", "New routine"],
+  results: ["Results", "Every run, what happened and why.", null],
+  accounts: ["Accounts", "The accounts your phones sign in to. Never their passwords.", "New account"],
+  vault: ["Vault", "Passwords sealed in your browser. This PC keeps only ciphertext.", null],
+  connections: ["Connections", "MCP servers, APIs and programs Cyclone may call for your tasks.", null],
+};
+
+export function createCommandPage(ctx: GlassContext, tab: CommandTab, options: { workspace?: boolean } = {}): GlassPage {
+  const workspace = options.workspace === true;
+  const element = el("div", workspace ? "page page-command ws-db" : "page page-command");
   const stats = el("div", "cc-stats");
   const notice = el("p", "cc-notice");
   const form = el("div", "cc-form-area");
@@ -67,14 +80,41 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
   let devices = ctx.devices;
 
   const tabs = segmented<CommandTab>(TABS, tab, (id) => ctx.navigate({ name: "command", tab: id }));
-  element.append(
-    pageHeader("Command Center", "Your accounts, tasks and routines on every phone. Phones do the work; you approve what matters."),
-    stats,
-    tabs.element,
-    notice,
-    form,
-    body,
-  );
+  let taskLayout: "table" | "board" | "calendar" = "table";
+  let month = new Date();
+  if (workspace) {
+    const [title, subtitle, newLabel] = INFO[tab];
+    const actions: HTMLElement[] = [];
+    if (newLabel) {
+      const toggle = actionButton(newLabel, { variant: "primary" });
+      form.hidden = true;
+      toggle.addEventListener("click", () => {
+        form.hidden = !form.hidden;
+        toggle.classList.toggle("active", !form.hidden);
+      });
+      actions.push(toggle);
+    }
+    element.append(pageHeader(title, subtitle, actions), notice, form);
+    if (tab === "tasks") {
+      const layouts = segmented<"table" | "board" | "calendar">([{ id: "table", label: "Table" }, { id: "board", label: "Board" }, { id: "calendar", label: "Calendar" }], taskLayout, (id) => {
+        taskLayout = id;
+        layouts.set(id);
+        renderBody();
+      });
+      layouts.element.classList.add("ws-db-layouts");
+      element.append(layouts.element);
+    }
+    element.append(body);
+  } else {
+    element.append(
+      pageHeader("Command Center", "Your accounts, tasks and routines on every phone. Phones do the work; you approve what matters."),
+      stats,
+      tabs.element,
+      notice,
+      form,
+      body,
+    );
+  }
 
   const say = (text: string, tone: "ok" | "error" = "ok") => {
     notice.textContent = text;
@@ -416,7 +456,13 @@ export function createCommandPage(ctx: GlassContext, tab: CommandTab): GlassPage
   }
 
   function tasksView(): HTMLElement {
-    if (!data.tasks.length) return emptyState({ icon: "runs", title: "No tasks yet", body: "Create a task above. It runs on the phone you pick, or on any ready phone." });
+    if (!data.tasks.length) return emptyState({ icon: "runs", title: "No tasks yet", body: workspace ? "Press New task, or send a card from a page's plan to a phone." : "Create a task above. It runs on the phone you pick, or on any ready phone." });
+    if (workspace && taskLayout !== "table") {
+      return renderRows(data.tasks.map((t) => taskRow({ ...ctx, devices }, t)), taskLayout, TASK_GROUPS, () => month, (m) => {
+        month = m;
+        renderBody();
+      });
+    }
     const table = el("table", "cc-table");
     table.append(headRow("Task", "Phone", "Account", "Status", "Detail", ""));
     for (const t of data.tasks) {

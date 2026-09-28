@@ -2,7 +2,7 @@
  * Glass shell: sidebar, phone picker, one mounted page. Owns the device list and the route; pages own their data.
  * Glass has no intelligence: everything below reads from or commands the phone through the local gateway.
  */
-import { parseRoute, routeHref, sectionOf, type AppTab, type Route } from "./core/router.js";
+import { isCommandTab, modeOf, parseRoute, routeHref, sectionOf, type AppTab, type Mode, type Route } from "./core/router.js";
 import { deviceReadiness, listDevices, pickDevice, type GlassDevice, type NotReadyReason } from "./services/devices.js";
 import { GatewayError, type GatewayClient } from "./services/gateway.js";
 import { el, setChildren } from "./ui/dom.js";
@@ -24,6 +24,11 @@ import { createAttachPage } from "./pages/attachPage.js";
 import { createCommandPage } from "./pages/commandPage.js";
 import { welcome } from "./services/pc.js";
 import { createWelcomeCard } from "./ui/welcomeCard.js";
+import { commandLogo, cycloneLogo } from "./ui/logos.js";
+import { createWorkspaceSidebar, type WorkspaceSidebar } from "./workspace/sidebar.js";
+import { createWorkspaceHome } from "./workspace/home.js";
+import { createPageView } from "./workspace/pageView.js";
+import { createTrashPage } from "./workspace/trash.js";
 
 export const DEVICE_STORAGE_KEY = "cyclone.glass.device.v1";
 const DEVICE_REFRESH_MS = 5_000;
@@ -56,7 +61,13 @@ type PageFactory = (ctx: GlassContext, route: Route) => GlassPage;
 
 const PAGES: Record<Route["name"], PageFactory> = {
   home: (ctx) => createHomePage(ctx),
-  command: (ctx, route) => createCommandPage(ctx, route.name === "command" ? route.tab : "approvals"),
+  command: (ctx, route) => {
+    const r = route as Extract<Route, { name: "command" }>;
+    if (r.tab === "page" && r.pageId) return createPageView(ctx, r.pageId);
+    if (r.tab === "trash") return createTrashPage(ctx);
+    if (isCommandTab(r.tab)) return createCommandPage(ctx, r.tab, { workspace: true });
+    return createWorkspaceHome(ctx);
+  },
   apps: (ctx, route) => createAppsPage(ctx, route),
   app: (ctx, route) =>
     route.name === "app" && route.tab !== "map"
@@ -74,9 +85,8 @@ const PAGES: Record<Route["name"], PageFactory> = {
   settings: (ctx) => createSettingsPage(ctx),
 };
 
-const NAV: Array<{ section: "home" | "command" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market"; label: string; icon: IconName; route: Route }> = [
+const NAV: Array<{ section: "home" | "apps" | "runs" | "phone" | "devices" | "knowledge" | "lab" | "market"; label: string; icon: IconName; route: Route }> = [
   { section: "home", label: "Home", icon: "home", route: { name: "home" } },
-  { section: "command", label: "Command Center", icon: "layers", route: { name: "command", tab: "approvals" } },
   { section: "devices", label: "Devices", icon: "plug", route: { name: "devices" } },
   { section: "apps", label: "Apps", icon: "apps", route: { name: "apps" } },
   { section: "runs", label: "Runs", icon: "runs", route: { name: "runs" } },
@@ -92,6 +102,13 @@ export class GlassApp {
   private readonly nav = el("nav", "sidebar-nav");
   private readonly footerNav = el("nav", "sidebar-nav sidebar-nav-bottom");
   private readonly picker = el("div", "device-picker");
+  /** The top-left switcher: the current face's logo in front, the other one behind it. */
+  private readonly brand = el("button", "brand brand-switch");
+  private glassSidebar: HTMLElement | null = null;
+  private workspace: WorkspaceSidebar | null = null;
+  private mode: Mode = "glass";
+  private readonly last: Record<Mode, Route> = { glass: { name: "home" }, command: { name: "command", tab: "home" } };
+  private unlistenKeys: (() => void) | null = null;
   private route: Route;
   private page: GlassPage | null = null;
   private pageKey = "";
@@ -114,6 +131,14 @@ export class GlassApp {
   async start(): Promise<void> {
     this.renderShell();
     this.unlistenHash = this.options.onHashChange(() => this.onHashChange());
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === "k" && this.mode === "command") {
+        event.preventDefault();
+        this.workspace?.find();
+      }
+    };
+    globalThis.document?.addEventListener?.("keydown", onKey as EventListener);
+    this.unlistenKeys = () => globalThis.document?.removeEventListener?.("keydown", onKey as EventListener);
     await this.refreshDevices();
     this.timer = this.options.setInterval(() => void this.refreshDevices(), DEVICE_REFRESH_MS);
     // Plan 31: the run/stop card, once, the first time Glass opens on this PC.
@@ -139,6 +164,9 @@ export class GlassApp {
     if (this.timer !== null) this.options.clearInterval(this.timer);
     this.timer = null;
     this.unlistenHash?.();
+    this.unlistenKeys?.();
+    this.workspace?.destroy();
+    this.workspace = null;
     this.page?.destroy();
     this.page = null;
   }
@@ -179,7 +207,7 @@ export class GlassApp {
   }
 
   private routeKey(): string {
-    return `${this.route.name}:${this.route.name === "app" ? `${this.route.placeId}/${this.route.tab}/${this.route.route?.join(",") ?? ""}` : this.route.name === "run" ? this.route.runId : this.route.name === "lab" ? this.route.experimentId ?? "" : this.route.name === "command" ? this.route.tab : ""}`;
+    return `${this.route.name}:${this.route.name === "app" ? `${this.route.placeId}/${this.route.tab}/${this.route.route?.join(",") ?? ""}` : this.route.name === "run" ? this.route.runId : this.route.name === "lab" ? this.route.experimentId ?? "" : this.route.name === "command" ? `${this.route.tab}/${this.route.pageId ?? ""}` : ""}`;
   }
 
   private deviceSignature(): string {
@@ -218,14 +246,62 @@ export class GlassApp {
     this.renderPage(false);
   }
 
+  /** The switcher shows the face you are on in front. Pressing it goes to the other face, where you left it. */
+  private renderBrand(): void {
+    const command = this.mode === "command";
+    const stack = el("span", "brand-stack");
+    const back = el("span", "brand-back");
+    back.append(command ? cycloneLogo() : commandLogo());
+    const front = el("span", "brand-front");
+    front.append(command ? commandLogo() : cycloneLogo());
+    stack.append(back, front);
+    const names = el("span", "brand-names");
+    const sub = el("span", "brand-version", command ? "Your Cyclone workspace" : `v${this.options.version.split(" ")[0]}`);
+    sub.title = `Cyclone Glass ${this.options.version}`;
+    names.append(el("span", "brand-name", command ? "Command Center" : "Cyclone Glass"), sub);
+    this.brand.type = "button";
+    this.brand.dataset.mode = this.mode;
+    const other = command ? "Cyclone Glass (phones, apps, runs and settings)" : "the Command Center (pages, tasks, routines and plans)";
+    this.brand.setAttribute("aria-label", `${command ? "Command Center" : "Cyclone Glass"}. Switch to ${other}`);
+    this.brand.title = `Switch to ${command ? "Cyclone Glass" : "the Command Center"}`;
+    setChildren(this.brand, stack, names, el("span", "brand-swap", "⇄"));
+  }
+
+  private switchMode(): void {
+    const target = this.mode === "command" ? this.last.glass : this.last.command;
+    this.options.setHash(routeHref(target));
+  }
+
+  /** Swap the sidebar when the face changes: the Glass nav, or the Command Center's workspace sidebar. */
+  private applyMode(): void {
+    const mode = modeOf(this.route);
+    this.last[mode] = this.route;
+    if (mode === this.mode && (mode === "glass" ? this.glassSidebar?.parentNode : this.workspace)) {
+      this.workspace?.setRoute(this.route);
+      return;
+    }
+    this.mode = mode;
+    this.renderBrand();
+    let sidebar: HTMLElement;
+    if (mode === "command") {
+      this.workspace ??= createWorkspaceSidebar(() => this.context(), this.brand, this.options.root);
+      this.workspace.element.insertBefore(this.brand, this.workspace.element.firstChild ?? null);
+      this.workspace.setRoute(this.route);
+      sidebar = this.workspace.element;
+    } else {
+      this.glassSidebar?.insertBefore(this.brand, this.glassSidebar.firstChild ?? null);
+      sidebar = this.glassSidebar!;
+    }
+    this.options.root.className = `glass-app mode-${mode}`;
+    setChildren(this.options.root, sidebar, this.main, ...(this.welcomeCard ? [this.welcomeCard] : []));
+  }
+
   private renderShell(): void {
     const sidebar = el("aside", "glass-sidebar");
-    const brand = el("div", "brand");
-    const mark = el("div", "brand-mark");
-    mark.append(icon("map", "icon brand-icon"));
-    const names = el("div", "brand-names");
-    names.append(el("span", "brand-name", "Cyclone Glass"), el("span", "brand-version", this.options.version));
-    brand.append(mark, names);
+    this.glassSidebar = sidebar;
+    this.brand.addEventListener("click", () => this.switchMode());
+    this.mode = modeOf(this.route) === "glass" ? "command" : "glass"; // forces the first applyMode to draw
+    const brand = this.brand;
 
     for (const item of NAV) this.nav.append(this.navItem(item.section, item.label, item.icon, item.route));
     this.footerNav.append(
@@ -241,9 +317,8 @@ export class GlassApp {
 
     const note = el("p", "sidebar-note", "Cyclone thinks on the phone. Glass shows what it knows and did.");
     sidebar.append(brand, this.picker, this.nav, el("div", "sidebar-spacer"), this.footerNav, note);
-    setChildren(this.options.root, sidebar, this.main);
-    this.options.root.className = "glass-app";
     this.renderPicker();
+    this.applyMode();
   }
 
   private navItem(section: string, label: string, name: IconName, route: Route): HTMLAnchorElement {
@@ -281,6 +356,7 @@ export class GlassApp {
   }
 
   private renderPage(force: boolean): void {
+    this.applyMode();
     const key = this.routeKey();
     if (!force && key === this.pageKey && this.page) return;
     this.page?.destroy();

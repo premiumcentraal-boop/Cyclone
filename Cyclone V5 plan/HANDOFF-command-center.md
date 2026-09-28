@@ -9,6 +9,15 @@
   - `GrantStore` also holds `{query, value}`.
   - `task.make` is now `{steps, then}` (read it with `steps.plan_of`).
   - PyYAML is a gateway dependency.
+- **Update:** another session shipped `5.0.0-alpha.58.dev2` (code 203), `5.0.0-alpha.59.dev1` (code 204, the app
+  dictionary) and `5.0.0-alpha.60.dev1` (code 205, Glass `1.0.0-alpha.36`, the App Manual foundation); see plan 36
+  and plan 35's new order.
+- **Update:** the owner moved Pages forward. Alpha.61 (`5.0.0-alpha.61.dev1`, Glass `1.0.0-alpha.37`, code 206) is
+  the Command Center redesign and C5 Pages; see plan 33 §12.5.
+  - Glass has two faces, switched by the top-left logo.
+  - Workspace code lives in `apps/glass/src/workspace/`; the pages store is `command/pages.py`.
+  - Plan 35 is the source of truth for the order of the next runs (the rest of the App Manual, then parallel sessions).
+    The run list below keeps its original numbers.
 
 Read this whole file once. Then work the plan in plan 35, one release per run, the way it is described here.
 

@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from ..auth import verify_bearer
 from ..desktop_runtime.models import DesktopRuntimeError
 from .center import CommandCenter, CommandError
+from .pages import TEMPLATES as PAGE_TEMPLATES
 
 
 def create_command_router(runtime: Any, token: str) -> APIRouter:
@@ -31,8 +32,11 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
         return center
 
     def call(fn):
+        from .pages import PageConflict
         try:
             return fn()
+        except PageConflict as exc:
+            raise HTTPException(status_code=409, detail={"code": "PAGE_CHANGED", "message": str(exc)}) from exc
         except CommandError as exc:
             raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(exc)}) from exc
         except DesktopRuntimeError as exc:
@@ -279,6 +283,51 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
         meta, path = call(lambda: cc().connections.artifact(artifact_id))
         return FileResponse(path, media_type=meta["mime"], filename=meta["name"],
                             headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+    # Plan 33 (C5): pages. Typed blocks only, no secrets, versioned saves, trash first.
+    @router.get("/v1/cc/pages", dependencies=[Depends(auth)])
+    def pages():
+        return call(lambda: {"pages": cc().pages.tree(), "templates": sorted(PAGE_TEMPLATES)})
+
+    @router.post("/v1/cc/pages", dependencies=[Depends(auth)])
+    def page_create(body: dict[str, Any]):
+        return call(lambda: cc().pages.create(body_of(body)))
+
+    @router.get("/v1/cc/pages-trash", dependencies=[Depends(auth)])
+    def page_trash():
+        return call(lambda: {"pages": cc().pages.trash()})
+
+    @router.get("/v1/cc/pages-search", dependencies=[Depends(auth)])
+    def page_search(q: str = Query(default="", max_length=100)):
+        return call(lambda: {"pages": cc().pages.search(q)})
+
+    @router.get("/v1/cc/backlinks", dependencies=[Depends(auth)])
+    def backlinks(kind: str = Query(default="", max_length=20), id: str = Query(default="", max_length=160)):  # noqa: A002
+        return call(lambda: {"pages": cc().pages.backlinks(kind, id)})
+
+    @router.get("/v1/cc/pages/{page_id}", dependencies=[Depends(auth)])
+    def page_get(page_id: str):
+        return call(lambda: cc().pages.get(page_id))
+
+    @router.post("/v1/cc/pages/{page_id}", dependencies=[Depends(auth)])
+    def page_update(page_id: str, body: dict[str, Any]):
+        return call(lambda: cc().pages.update(page_id, body_of(body)))
+
+    @router.post("/v1/cc/pages/{page_id}/move", dependencies=[Depends(auth)])
+    def page_move(page_id: str, body: dict[str, Any]):
+        return call(lambda: cc().pages.move(page_id, body_of(body)))
+
+    @router.post("/v1/cc/pages/{page_id}/archive", dependencies=[Depends(auth)])
+    def page_archive(page_id: str):
+        return call(lambda: cc().pages.archive(page_id))
+
+    @router.post("/v1/cc/pages/{page_id}/restore", dependencies=[Depends(auth)])
+    def page_restore(page_id: str):
+        return call(lambda: cc().pages.restore(page_id))
+
+    @router.post("/v1/cc/pages/{page_id}/delete", dependencies=[Depends(auth)])
+    def page_delete(page_id: str):
+        return call(lambda: cc().pages.delete(page_id))
 
     @router.get("/v1/cc/audit", dependencies=[Depends(auth)])
     def audit(limit: int = Query(default=200, ge=1, le=1000)):
