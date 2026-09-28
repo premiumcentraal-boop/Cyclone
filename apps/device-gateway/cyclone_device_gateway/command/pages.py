@@ -327,6 +327,12 @@ class PageStore:
             row = self._row(page_id)
             return self._public(row)
 
+    def version(self, page_id: str) -> dict[str, Any]:
+        """A cheap check Glass polls, so a page changed elsewhere (another window, the AI) shows up while open."""
+        with self._c._lock:
+            row = self._row(page_id)
+            return {"id": row["id"], "version": row["version"], "updatedAt": row["updated_at"], "archivedAt": row["archived_at"]}
+
     def _row(self, page_id: Any) -> Any:
         if not isinstance(page_id, str) or not PAGE_ID.match(page_id):
             raise CommandError("No such page.")
@@ -382,7 +388,7 @@ class PageStore:
 
     # ------------------------------------------------------------------ writing
 
-    def create(self, body: Any) -> dict[str, Any]:
+    def create(self, body: Any, *, actor: str = "owner") -> dict[str, Any]:
         if not isinstance(body, dict):
             raise CommandError("Send {title?, icon?, parentId?, template?}.")
         _only(body, {"title", "icon", "parentId", "template", "blocks"}, "page")
@@ -412,10 +418,10 @@ class PageStore:
                 " VALUES (?,?,?,?,?,?,?,?,?,?,NULL)",
                 (page_id, parent, title, icon, json.dumps(blocks, ensure_ascii=False), plain_text(blocks), self._next_position(parent), 1, now, now))
             self._index(page_id, blocks)
-            self._c._audit("owner", "page.create", page_id, {"parent": parent, "template": template})
+            self._c._audit(actor, "page.create", page_id, {"parent": parent, "template": template})
             return self._public(self._row(page_id))
 
-    def update(self, page_id: str, body: Any) -> dict[str, Any]:
+    def update(self, page_id: str, body: Any, *, actor: str = "owner") -> dict[str, Any]:
         if not isinstance(body, dict) or "version" not in body:
             raise CommandError("Send {version, title?, icon?, blocks?}.")
         _only(body, {"version", "title", "icon", "blocks"}, "page")
@@ -444,7 +450,9 @@ class PageStore:
             if blocks is not None:
                 self._index(page_id, blocks)
             if "title" in fields and fields["title"] != row["title"]:
-                self._c._audit("owner", "page.rename", page_id)
+                self._c._audit(actor, "page.rename", page_id)
+            elif actor != "owner":
+                self._c._audit(actor, "page.edit", page_id)
             return self._public(self._row(page_id))
 
     def move(self, page_id: str, body: Any) -> dict[str, Any]:

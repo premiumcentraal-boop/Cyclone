@@ -24,7 +24,15 @@ export interface Editor {
   element: HTMLElement;
   blocks(): Block[];
   focusStart(): void;
+  /** Where the caret is (block id and offset), so a reloaded page can put it back. */
+  caretAt(): { blockId: string; offset: number } | null;
+  focusBlock(blockId: string, offset: number): void;
   destroy(): void;
+}
+
+export interface EditorOptions {
+  /** "/ Ask AI": open the AI about this page. */
+  askAi?(): void;
 }
 
 interface Row {
@@ -47,7 +55,7 @@ const TYPE_LABEL: Record<TextType, string> = {
 };
 const isText = (b: Block): b is TextBlock => (TEXT_TYPES as readonly string[]).includes(b.type);
 
-export function createEditor(ctx: GlassContext, pageId: string, initial: Block[], onChange: (blocks: Block[]) => void): Editor {
+export function createEditor(ctx: GlassContext, pageId: string, initial: Block[], onChange: (blocks: Block[]) => void, options: EditorOptions = {}): Editor {
   const element = el("div", "ws-editor");
   let blocks: Block[] = initial.length ? initial.slice() : [textBlock("p")];
   let rows: Row[] = [];
@@ -699,10 +707,19 @@ export function createEditor(ctx: GlassContext, pageId: string, initial: Block[]
       return;
     }
     const item = menu.items[i];
+    const slashAt = menu.start;
     closeMenu();
     if (!item) return;
-    const made = item.make();
     const current = blocks[at] as TextBlock;
+    if (item.action === "ai") {
+      blocks[at] = { ...current, text: rest };
+      renderSpans(editable, rest);
+      place(editable, slashAt);
+      changed();
+      options.askAi?.();
+      return;
+    }
+    const made = item.make();
     if (isText(made)) {
       if (!textLength(rest)) {
         blocks[at] = convertBlock({ ...current, text: [] }, made.type as TextType);
@@ -737,6 +754,18 @@ export function createEditor(ctx: GlassContext, pageId: string, initial: Block[]
       const first = rows.findIndex((r) => r.editable);
       if (first >= 0) place(rows[first].editable!, 0);
     },
+    caretAt() {
+      const active = globalThis.document?.activeElement;
+      const index = rows.findIndex((r) => r.editable && (r.editable === active || r.editable.contains?.(active as Node)));
+      if (index < 0) return null;
+      const editable = rows[index].editable!;
+      return { blockId: blocks[index].id, offset: caret(editable, textLength(readSpans(editable))) };
+    },
+    focusBlock(blockId: string, offset: number) {
+      const index = blocks.findIndex((b) => b.id === blockId);
+      const editable = index >= 0 ? rows[index]?.editable : null;
+      if (editable) place(editable, Math.min(offset, textLength(readSpans(editable))));
+    },
     destroy() {
       for (const r of rows) r.destroy();
       closeMenu();
@@ -747,7 +776,7 @@ export function createEditor(ctx: GlassContext, pageId: string, initial: Block[]
 const SLASH_ICON: Record<string, string> = {
   p: "¶", h1: "H1", h2: "H2", h3: "H3", todo: "☑", bullet: "•", number: "1.", quote: "❝", callout: "💡", divider: "—",
   board: "▦", calendar: "🗓️", "view-tasks": "▶️", "view-tasks-board": "▦", "view-routines": "🔁", "view-approvals": "✋",
-  "view-phones": "📱", "view-results": "✅", "view-pages": "📄",
+  "view-phones": "📱", "view-results": "✅", "view-pages": "📄", ai: "✨",
 };
 
 export { spanLength };

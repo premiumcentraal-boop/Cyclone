@@ -29,6 +29,9 @@ import { createWorkspaceSidebar, type WorkspaceSidebar } from "./workspace/sideb
 import { createWorkspaceHome } from "./workspace/home.js";
 import { createPageView } from "./workspace/pageView.js";
 import { createTrashPage } from "./workspace/trash.js";
+import { createAiPanel, type AiPanel } from "./workspace/aiPanel.js";
+import { createAiSettings } from "./workspace/aiSettings.js";
+import { workspaceBus } from "./workspace/directory.js";
 
 export const DEVICE_STORAGE_KEY = "cyclone.glass.device.v1";
 const DEVICE_REFRESH_MS = 5_000;
@@ -65,6 +68,7 @@ const PAGES: Record<Route["name"], PageFactory> = {
     const r = route as Extract<Route, { name: "command" }>;
     if (r.tab === "page" && r.pageId) return createPageView(ctx, r.pageId);
     if (r.tab === "trash") return createTrashPage(ctx);
+    if (r.tab === "ai") return createAiSettings(ctx);
     if (isCommandTab(r.tab)) return createCommandPage(ctx, r.tab, { workspace: true });
     return createWorkspaceHome(ctx);
   },
@@ -106,6 +110,7 @@ export class GlassApp {
   private readonly brand = el("button", "brand brand-switch");
   private glassSidebar: HTMLElement | null = null;
   private workspace: WorkspaceSidebar | null = null;
+  private aiPanel: AiPanel | null = null;
   private mode: Mode = "glass";
   private readonly last: Record<Mode, Route> = { glass: { name: "home" }, command: { name: "command", tab: "home" } };
   private unlistenKeys: (() => void) | null = null;
@@ -136,7 +141,13 @@ export class GlassApp {
         event.preventDefault();
         this.workspace?.find();
       }
+      if ((event.ctrlKey || event.metaKey) && String(event.key).toLowerCase() === "j" && this.mode === "command") {
+        event.preventDefault();
+        if (this.aiPanel?.isOpen()) this.aiPanel.close();
+        else this.showAi(this.route.name === "command" && this.route.tab === "page" ? this.route.pageId ?? null : null);
+      }
     };
+    workspaceBus.handleAskAi((pageId) => this.showAi(pageId));
     globalThis.document?.addEventListener?.("keydown", onKey as EventListener);
     this.unlistenKeys = () => globalThis.document?.removeEventListener?.("keydown", onKey as EventListener);
     await this.refreshDevices();
@@ -167,6 +178,9 @@ export class GlassApp {
     this.unlistenKeys?.();
     this.workspace?.destroy();
     this.workspace = null;
+    workspaceBus.handleAskAi(null);
+    this.aiPanel?.destroy();
+    this.aiPanel = null;
     this.page?.destroy();
     this.page = null;
   }
@@ -272,6 +286,14 @@ export class GlassApp {
     this.options.setHash(routeHref(target));
   }
 
+  /** Ask AI: the panel beside the workspace, about one page or the whole workspace. */
+  private showAi(pageId: string | null): void {
+    if (this.mode !== "command") return;
+    this.aiPanel ??= createAiPanel(() => this.context());
+    if (!this.aiPanel.element.parentNode) this.options.root.append(this.aiPanel.element);
+    this.aiPanel.open(pageId);
+  }
+
   /** Swap the sidebar when the face changes: the Glass nav, or the Command Center's workspace sidebar. */
   private applyMode(): void {
     const mode = modeOf(this.route);
@@ -293,7 +315,10 @@ export class GlassApp {
       sidebar = this.glassSidebar!;
     }
     this.options.root.className = `glass-app mode-${mode}`;
-    setChildren(this.options.root, sidebar, this.main, ...(this.welcomeCard ? [this.welcomeCard] : []));
+    if (mode !== "command") this.aiPanel?.close();
+    if (!this.aiPanel?.isOpen()) this.options.root.classList.remove("ai-docked");
+    const panel = mode === "command" && this.aiPanel ? [this.aiPanel.element] : [];
+    setChildren(this.options.root, sidebar, this.main, ...panel, ...(this.welcomeCard ? [this.welcomeCard] : []));
   }
 
   private renderShell(): void {

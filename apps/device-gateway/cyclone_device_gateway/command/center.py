@@ -133,7 +133,8 @@ CREATE INDEX IF NOT EXISTS approval_state ON approval(state);
 class CommandCenter:
     def __init__(self, path: Path, contract: CommandContract, devices: Callable[[], list[dict[str, Any]]], *,
                  clock: Callable[[], int] = _now_ms, local_now: Callable[[], datetime] | None = None,
-                 tick_seconds: float = 5.0, connections: dict[str, Any] | None = None) -> None:
+                 tick_seconds: float = 5.0, connections: dict[str, Any] | None = None,
+                 ai: dict[str, Any] | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
@@ -175,6 +176,9 @@ class CommandCenter:
         # Plan 33 (C5): pages, the workspace's Notion-like documents with live references.
         from .pages import PageStore
         self.pages = PageStore(self)
+        # Plan 33 §7 (C4, moved forward): the AI project manager, on the owner's OpenRouter key.
+        from .ai import AiStore
+        self.ai = AiStore(self, **(ai or {}))
 
     # ---------------------------------------------------------------- lifecycle
 

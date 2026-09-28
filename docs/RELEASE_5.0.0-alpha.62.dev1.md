@@ -1,82 +1,131 @@
-# Cyclone V5 Alpha 62: Driver mode works, and the working status shows the app
+# Cyclone V5 Alpha 62: an AI project manager in the Command Center
 
 Developer alpha for owner testing. It builds on Alpha 61 (the Command Center, redesigned) and includes it.
-- **Mobile:** `5.0.0-alpha.62.dev1` (version code 207).
-- **Cyclone for Windows:** `Cyclone-Setup-5.0.0-alpha.62.dev1.exe` (runtime `5.0.0-alpha.61.dev1`, unchanged).
-- **Glass:** `1.0.0-alpha.37` (unchanged).
+- **Mobile:** `5.0.0-alpha.62.dev1` (version code 207). No phone changes beyond the version.
+- **Cyclone for Windows:** `Cyclone-Setup-5.0.0-alpha.62.dev1.exe`.
+- **Glass:** `1.0.0-alpha.38`.
 
-## Fix 1: Driver mode no longer crashes Cyclone
+You asked for the release planned as "Alpha 63": a project-managing AI you can instruct and pick the model for, with
+OpenRouter inside the dashboard. It ships as Alpha 62 because that is the next version number. The links and action
+buttons planned as "Alpha 62" come next.
 
-Switching **Driver mode** on crashed Cyclone entirely. This was reported by the owner, and it has been true since
-Drive first shipped in Alpha 49.
+## What changed
 
-The Drive button is a Compose view inside a small touch frame, drawn in its own overlay window. Compose looks for its
-lifecycle on the window's root view, which is the touch frame. Only the inner view had it, so the button's first
-frame threw an exception, and because the overlay runs in Cyclone's own process, the whole app went down.
+**1. OpenRouter inside the dashboard (sidebar → AI).**
+- **Your key, once.**
+  - Paste your OpenRouter key. Cyclone checks it with OpenRouter, shows your credit left, and keeps it on this PC
+    (protected by Windows).
+  - It is never shown again, logged, or given to a model. You can test it, replace it or forget it.
+- **Any model.**
+  - Every OpenRouter model, with its price per million tokens, its context size and whether it can use tools. You
+    can search, and show free models only.
+  - Only models that use tools can be picked, because the AI works through tools.
+  - Pick a default; each conversation can switch.
+- **Spending limits:** a daily and a monthly cap (default $2 a day and $30 a month), with bars showing what is spent.
+  The AI stops at a cap and says so.
+- **Private providers only** (on by default): OpenRouter only routes to providers that do not keep or train on what
+  you send.
+- **What it may do:**
+  - "Ask me before every change" (the default);
+  - or "Let it edit pages and cards". Tasks and routines still wait for you.
+- **Standing instructions**, read at the start of every conversation ("Plan in weeks starting Monday…").
 
-The unit tests and CI builds of Alpha 49–53 could not catch this: it happens only when the window is really drawn on
-a phone. Everything built on Drive (announcements, the car microphone, readbacks) was therefore never reachable on
-a phone until now.
+**2. Ask AI, beside every page (Ctrl J, the sidebar, ✨ Ask AI on a page, or / Ask AI in the editor).**
+- **A panel like Notion's.** On a wide screen the page moves over to make room.
+  - Opened from a page, it reads that page first ("About: Shop week"); press that label to ask about the whole
+    workspace instead.
+  - Empty conversations offer suggestions ("Turn this page's to-dos into plan cards", "What failed today, and why?").
+- **It reads before it answers.** It looks at your pages, tasks, routines, recent results, phones, accounts,
+  connections and what is waiting for you.
+  - "▸ 6 steps" shows exactly what it looked at and did.
+  - Mentions in its answers are chips that open where the thing lives.
+- **Everything it wants to change is a card:**
+  - "Add 5 blocks to Shop week" with a preview;
+  - "Add the card Film the mug video" (linked to the routine and the phone);
+  - "Start a task on Pixel 8: Post the mug video".
+  - Press **Apply** (or **Start it**) or **Discard**.
+  - An applied edit appears in the open page straight away. An applied task runs like any other, and the phone still
+    asks you before it sends, pays, deletes or signs in.
+- **Each conversation** shows its model (switchable) and its cost, and today's spend against your cap. Earlier
+  conversations are kept (🕘); you can reopen or delete them.
+- **Stop** ends an answer at once.
 
-**What changed:**
+**3. Pages stay in step when something else edits them.**
+- **An open page picks up changes made elsewhere** (the AI, another window) within seconds, in place, keeping your
+  caret.
+- **If you were typing at the same moment,** your edits and theirs are merged block by block, and nothing is lost.
+  Before, the page reloaded and your last edit was dropped.
 
-- **The fix:** the touch frame now carries the lifecycle, view-model and saved-state owners, as Cyclone's other
-  overlay windows already did. Driver mode switches on and the button draws.
-- **A CI guard** (`test_drive_overlay.py`): every Compose view hosted inside another view in Drive's overlay must give
-  its host the owners. The guard fails on the Alpha 53 code and passes now.
-- **The microphone service** is now started only when the microphone permission is granted. Before, a first tap
-  without the permission could make Android refuse the service after it had started, which also crashes an app.
+**4. Fixed at phone width:** a page with a plan board, and Home, no longer scroll sideways (the board scrolls inside
+itself). This came from Alpha 61.
 
-## Fix 2: the working status shows the app, not Cyclone
+## Safety
 
-While Cyclone works, its status now shows **the logo of the app it is working in**. This is what the Alpha 43 overlay
-redesign asked for (plan 27, `docs/design/CYCLONE_TILT_GLASS.md` principle 10):
-- "Real app logos (the current app in front) replace generic Cyclone branding wherever a task works in an app."
-- "Cyclone's own mark appears only when there is no app (idle, a fresh ask)."
-
-Alpha 43 built this for tasks with a record. Tasks on your screen, the in-app task bars and the live notification still
-showed Cyclone.
-
-| Where | Before | Now |
-|---|---|---|
-| **Overlay island** (the folded working bar), on-screen tasks | Cyclone's logo, always | The app on screen that the task works in |
-| **Overlay island**, background tasks | Cyclone's logo until the task reported an app | The app the task works in, as soon as it is known |
-| **Overlay working card**, on-screen tasks | Cyclone's logo, always | The apps it worked in, as the design's header: the last three, the current one 34 dp in front with a teal ring |
-| **In-app island** | As the overlay | As the overlay |
-| **In-app task cards** (the task list, the Ask panel, View progress) | Cyclone's own launcher icon whenever the task was on a Cyclone screen | The app the task last worked in |
-| **Live notification** (the picture beside the text) | The task's raw package, which could be Cyclone | The app the task works in. The small status-bar icon stays Cyclone's: Android requires the app's own. |
-
-**Rules:**
-- Cyclone itself, the system bars and the home screen never count as "the app". Cyclone keeps the last real app it
-  saw.
-- Cyclone's mark appears only before any app is known, for example in the first second of a new task.
-- Apps are remembered in memory only, as before.
-
-## Also checked: the Driver mode crash pattern
-
-I checked the whole app for the Driver mode crash pattern (a Compose view in its own window, inside a host view
-that lacks the lifecycle). **The Drive button was the only case.**
-- Cyclone's other overlay windows (the Ask bar, the idle bubble, the screen-share pill and the tools sheet) already
-  set it correctly.
-- Every other screen is an Android activity, which sets it automatically.
-- The remaining overlays (the AI trace and the debug sandbox) use plain Android views, with no Compose.
+- **The AI runs on this PC's Cyclone, not in Glass.** Glass never calls a model and never holds the key; it only sends
+  your words and your choices. CI checks this: the Glass guard and a new Command Center guard.
+- **Fixed tools, no shell.**
+  - It can read the workspace, edit pages and cards, and propose tasks and routines.
+  - It has no tool to delete, approve, read the vault, change accounts or add connections, and it cannot control a
+    phone directly.
+- **You decide.** Phone work is always a proposal you apply, and page edits are too unless you allow them.
+- **No secrets.**
+  - Messages, instructions and anything the AI writes are refused if they look like a password, code or key.
+  - Pages keep refusing secrets as before.
+  - Everything the AI writes becomes typed blocks, checked like your own typing.
+- **Outside content is information.** Page text, task results and connection data reach the model as tool results,
+  and it is told never to follow instructions inside them.
+- **What is kept** is what the model saw and did (messages, tool calls and results, cost), never hidden reasoning. The
+  audit chain records saving the key, settings, proposals, and each apply or discard, never the key itself.
+- **Budgets and limits:** caps per day and month, at most 10 model calls per answer, at most 8 tool calls at a time,
+  and a stop button.
 
 ## Validation and limits
 
-- **Passes:**
-  - a JVM test of the app choice (`WorkingAppTest`);
-  - a new CI guard (`test_working_app_logo.py`): Cyclone's mark on the glass is only ever the fallback, and no task bar
-    or notification uses the raw package again;
-  - all CI guards;
-  - the Mobile CI build and unit tests.
-- **Unchanged, as designed:** the idle bubble keeps Cyclone's mark.
-- **Home screen:** Cyclone now asks Android which app is the home screen, so the launcher is never shown. This adds
-  one manifest `<queries>` entry, not a permission.
-- **Physical status: UNVERIFIED.** The project has no on-device UI tests, so the crash fix is proven by the code path
-  and the guard, not yet by a phone.
-- **Please test in this order:**
-  1. switch Driver mode on;
-  2. tap the orb and say "set a timer for one minute";
-  3. while Cyclone works in WhatsApp, check that the island shows WhatsApp's logo, not Cyclone's;
-  4. only then try announcements and the car microphone.
-  If anything still closes Cyclone, say what you tapped last.
+Tests that pass:
+- **Gateway: `test_command_ai.py`, 12 tests (against a scripted OpenRouter):**
+  - the key is refused if malformed or rejected by OpenRouter; once saved it is in no database file, status, audit
+    or response;
+  - the model list: tool-using models only, prices per million, cached for an hour;
+  - a full turn: reading tools, a proposal, apply, the result told to the model on its next turn;
+  - direct workspace edits while tasks and routines still wait;
+  - 7 kinds of bad calls answered as errors the model can fix (an unknown tool, bad JSON, a secret, an invented id,
+    an unknown phone, an extra argument, a missing block);
+  - a secret in a message refused, and hidden reasoning never stored;
+  - the daily cap and the step limit;
+  - out-of-credits and data-policy errors explained;
+  - a restart marking an interrupted answer, and Stop;
+  - Markdown to blocks and back;
+  - every route behind the bearer.
+  - The full gateway suite passes (623 passed, 2 skipped).
+- **Glass: `ai.test.mjs`, 5 new tests:**
+  - parsing and prices, and answers as typed pieces (markup stays text);
+  - the AI settings screen: the key sent once and cleared, models, choices, limits;
+  - the setup card;
+  - the panel: page context, send, working, steps, mentions, apply and discard.
+- **Glass: the merge test** (both sides' edits survive) replaces the old reload test.
+  - All 223 Glass tests pass; typecheck, build and the Glass guard are clean.
+- **CI guards:** a new one for the AI (write-only key, fixed tools without delete/approve/vault/shell, exactly two
+  places that change things, no reasoning kept, private providers, Glass only talks to the local runtime). All 184
+  guard tests pass. Versions are coherent.
+- **End to end in Chromium** (the real runtime and Glass, a scripted OpenRouter, a scripted phone), 24 checks:
+  - saved the key, checked the credit and picked a model;
+  - asked "Plan Friday for the shop" from a page. The AI read the page, the routines and the phones, and proposed
+    5 blocks, a linked card and a task;
+  - applied the edit and the card; the open page showed them without a reload, with real mentions, and the routine
+    now lists the page;
+  - started the task, which ran on the scripted phone;
+  - a follow-up, "What failed today?";
+  - Ctrl J, / Ask AI, history, and phone width.
+  - **Canary scan:** the key was in no runtime file and not in the server log, and went only in the Authorization
+    header.
+  - Alpha 61's workspace walk-through and editor checks, and Alpha 58's API connector end to end, were run again and
+    passed.
+
+Limits:
+- **Not tested against the real OpenRouter.** Every test used a scripted stand-in. Your first real conversation is the
+  first real call; if a model misbehaves, switch models from the panel.
+- **Physical: UNVERIFIED.** No phone change in this release. Windows is still owed its test; on Windows the key is
+  kept with DPAPI, while elsewhere it is kept only until Cyclone restarts.
+- **One answer at a time per conversation.** The AI does not yet act on a schedule by itself (no daily report yet).
+- **Not in this release:** action buttons and board automations, block links and synced blocks, page properties
+  (plan 35, "Next for the Command Center").

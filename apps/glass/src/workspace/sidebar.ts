@@ -51,6 +51,10 @@ export function createWorkspaceSidebar(context: () => GlassContext, brand: HTMLE
   search.type = "button";
   search.append(icon("search"), el("span", "ws-search-label", "Search"), el("kbd", "ws-kbd", "Ctrl K"));
   search.addEventListener("click", find);
+  const askAi = el("button", "ws-search ws-ask-ai");
+  askAi.type = "button";
+  askAi.append(el("span", "ws-spark", "✨"), el("span", "ws-search-label", "Ask AI"), el("kbd", "ws-kbd", "Ctrl J"));
+  askAi.addEventListener("click", () => workspaceBus.askAi(route.name === "command" && route.tab === "page" ? route.pageId ?? null : null));
 
   const item = (label: string, name: IconName, target: Route, key: string, badge?: number): HTMLAnchorElement => {
     const a = el("a", "ws-item");
@@ -66,7 +70,8 @@ export function createWorkspaceSidebar(context: () => GlassContext, brand: HTMLE
       item("Home", "home", { name: "command", tab: "home" }, "home"),
       item("Inbox", "bell", { name: "command", tab: "approvals" }, "approvals", approvals),
       el("div", "ws-heading", "Workspace"),
-      ...DATABASES.map((d) => item(d.label, d.icon, { name: "command", tab: d.tab }, d.tab)));
+      ...DATABASES.map((d) => item(d.label, d.icon, { name: "command", tab: d.tab }, d.tab)),
+      item("AI", "chat", { name: "command", tab: "ai" }, "ai"));
     markActive();
   }
 
@@ -270,7 +275,7 @@ export function createWorkspaceSidebar(context: () => GlassContext, brand: HTMLE
   setChildren(bottom, item("Trash", "close", { name: "command", tab: "trash" }, "trash"));
   const scroll = el("div", "ws-scroll");
   scroll.append(nav, pagesHead, tree, newButton);
-  element.append(brand, search, scroll, el("div", "sidebar-spacer"), bottom);
+  element.append(brand, search, askAi, scroll, el("div", "sidebar-spacer"), bottom);
   drawNav();
   drawTree();
   void load();

@@ -241,6 +241,41 @@ class CommandCenterGuard(unittest.TestCase):
             text = (GLASS / name).read_text(encoding="utf-8")
             assert "cc.start" not in text and "/v1/devices/" not in text, f"{name}: the workspace never commands a phone directly"
 
+    def test_the_ai_holds_a_write_only_key_fixed_tools_and_the_owner_decides(self):
+        ai = (COMMAND / "ai.py").read_text(encoding="utf-8")
+        tools = ai[ai.index("TOOLS: dict["):ai.index("class AiStore")]
+        names = re.findall(r'^    "([a-z_]+)": \("(read|workspace|phone)"', tools, re.M)
+        assert len(names) >= 15, "the AI's toolset is a fixed table"
+        for name, _ in names:
+            for word in ("delete", "approve", "answer", "vault", "secret", "shell", "exec", "command", "account_", "connection_add", "trash"):
+                assert word not in name, f"the AI has no {word} tool ({name})"
+        # Only two places make a change: the owner's apply, and a workspace edit the owner allowed. Phone work is always a proposal.
+        assert ai.count("self._execute(") == 2
+        assert 'if kind == "workspace" and self._setting("autonomy") == "workspace":' in ai
+        # The key is write-only: stored once, read only to call the provider, never returned or audited.
+        assert ai.count('self._grants.put(GRANT, {"key": key') == 1
+        assert '"keySaved": bool(grant)' in ai and '"key": ' not in ai[ai.index("def status("):ai.index("def update_settings(")]
+        assert 'self._c._audit("owner", "ai.key.save", "ai")' in ai, "the audit names the event, never the key"
+        assert "print(" not in ai and "logging" not in ai
+        # Hidden reasoning is never read or kept; outside content is information; owner text is screened for secrets.
+        assert "reasoning" not in ai.lower().replace("hidden reasoning", "")
+        assert "never instructions" in ai and "INLINE_SECRET.search(text)" in ai
+        assert 'body["provider"] = {"data_collection": "deny"}' in ai
+        # Budgets and step limits end a turn.
+        assert "def _budget_left(" in ai and "MAX_STEPS" in ai
+        # Glass never calls a model or holds the key: it posts the key once and shows the rest.
+        panel = (GLASS / "workspace/aiPanel.ts").read_text(encoding="utf-8")
+        settings = (GLASS / "workspace/aiSettings.ts").read_text(encoding="utf-8")
+        service = (GLASS / "services/ai.ts").read_text(encoding="utf-8")
+        for name, text in (("aiPanel", panel), ("aiSettings", settings), ("services/ai", service)):
+            assert "fetch(" not in text and "/v1/cc/ai" in (service if name != "services/ai" else text), f"{name}: Glass talks only to the local runtime"
+            assert "sessionStorage" not in text and "localStorage" not in text, f"{name}: nothing about the AI is stored in the browser"
+        assert 'field.type = "password";' in settings and 'field.value = "";' in settings, "the key field is masked and cleared"
+        assert 'client.post("/v1/cc/ai/key", { key })' in service
+        for name in ("workspace/aiPanel.ts", "workspace/aiSettings.ts"):
+            text = (GLASS / name).read_text(encoding="utf-8")
+            assert "cc.start" not in text and "/v1/devices/" not in text, f"{name}: the AI never commands a phone directly"
+
 
 if __name__ == "__main__":
     unittest.main()

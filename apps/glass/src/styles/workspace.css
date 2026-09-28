@@ -123,6 +123,10 @@
 /* ------------------------------------------------------------------ the page canvas */
 .mode-command .glass-main { background: var(--surface); }
 .ws-page-screen { min-height: 100vh; color: var(--ws-ink); }
+/* A wide plan board scrolls inside its block; it never widens the page (the document is as wide as the screen allows,
+   not as wide as its widest board). */
+.ws-doc { width: 100%; box-sizing: border-box; min-width: 0; }
+.ws-editor, .ws-view, .ws-plan { min-width: 0; }
 .ws-topbar {
   position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding: 10px var(--space-4); background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(6px);
@@ -398,5 +402,7 @@ a.ws-crumb:hover { background: var(--ws-hover); color: var(--ws-ink); }
   .glass-app.mode-command { grid-template-columns: 1fr; }
   .ws-topbar { flex-wrap: wrap; row-gap: 4px; }
   .ws-crumbs { flex-basis: 100%; }
+  .ws-top-actions { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .ws-top-btn { padding: 4px 6px; }
   .mode-command .ws-sidebar { position: static; height: auto; max-height: 45vh; }
 }

@@ -8,6 +8,7 @@ import { modeOf, parseRoute, routeHref } from "../.test-dist/core/router.js";
 import {
   buildTree, deleteRange, filterSlash, insertRef, itemsByStatus, listNumber, markdownShortcut, monthGrid, moveBlock, normalizeSpans,
   parseBlock, parsePage, searchDirectory, splitSpans, textBefore, textLength,
+  mergeBlocks,
 } from "../.test-dist/services/pages.js";
 import { workspaceBus } from "../.test-dist/workspace/directory.js";
 import { createEditor } from "../.test-dist/workspace/editor.js";
@@ -330,20 +331,25 @@ test("a plan board adds cards, changes their status and sends one to the phone i
   }
 });
 
-test("a page saves by itself with its version, and reloads when another window changed it", async () => {
+test("a page saves by itself with its version, and merges when the page changed elsewhere", async () => {
   installMiniDom();
   workspaceBus.pagesChanged();
   const saves = [];
   let version = 5;
-  let conflict = false;
-  const page = () => ({ ...meta(PAGE, "Weekly plan", null, { icon: "🗓️" }), blocks: [{ id: "bone0001", type: "p", text: [{ t: "Hello" }] }], version, archivedAt: null,
+  let conflicts = 0;
+  let extra = [];
+  const page = () => ({ ...meta(PAGE, "Weekly plan", null, { icon: "🗓️" }), blocks: [{ id: "bone0001", type: "p", text: [{ t: "Hello" }] }, ...extra], version, archivedAt: null,
     path: [{ id: "pg_parent0001", title: "Shop", icon: "🛍️" }], children: [meta("pg_child00001", "Replies")], backlinks: [meta("pg_other00001", "Daily check")] });
   const gateway = fakeGateway({ ...DIRECTORY_ROUTES, [`GET /v1/cc/pages/${PAGE}`]: page,
+    [`GET /v1/cc/pages/${PAGE}/version`]: () => ({ id: PAGE, version, archivedAt: null }),
     [`POST /v1/cc/pages/${PAGE}`]: ({ body }) => {
       saves.push(body);
-      if (conflict) return new Response(JSON.stringify({ detail: { code: "PAGE_CHANGED", message: "changed" } }), { status: 409 });
+      if (conflicts > 0) {
+        conflicts -= 1;
+        return new Response(JSON.stringify({ detail: { code: "PAGE_CHANGED", message: "changed" } }), { status: 409 });
+      }
       version += 1;
-      return page();
+      return { ...page(), blocks: body.blocks ?? page().blocks };
     } });
   const { ctx } = ctxWith(gateway.fetch);
   const view = createPageView(ctx, PAGE);
@@ -352,6 +358,7 @@ test("a page saves by itself with its version, and reloads when another window c
     assert.match(view.element.textContent, /Shop/);
     assert.match(view.element.textContent, /Pages inside/);
     assert.match(view.element.textContent, /Mentioned in 1 page/);
+    assert.match(view.element.textContent, /Ask AI/);
     const title = view.element.querySelector(".ws-title");
     title.value = "Week 40";
     title.dispatchEvent({ type: "input" });
@@ -364,15 +371,35 @@ test("a page saves by itself with its version, and reloads when another window c
     await flush();
     assert.equal(saves[1].version, 6);
     assert.deepEqual(saves[1].blocks[0].text, [{ t: "Hello there" }]);
-    conflict = true;
-    type(view.element.querySelector(".ws-text"), "Stale edit");
+    // Elsewhere (the AI, another window) the page moved on: its first line is back to "Hello" there and a line was added.
+    version = 9;
+    extra = [{ id: "bai00001", type: "p", text: [{ t: "Added by the AI" }] }];
+    conflicts = 1;
+    type(view.element.querySelector(".ws-text"), "My edit");
     await sleep(700);
     await flush(12);
-    assert.match(view.element.querySelector(".ws-save").textContent, /another window; reloaded/);
-    assert.equal(view.element.querySelector(".ws-text").textContent, "Hello", "the page shows what is saved");
+    assert.match(view.element.querySelector(".ws-save").textContent, /Merged with changes made elsewhere/);
+    await sleep(700);
+    await flush(12);
+    const last = saves.at(-1);
+    assert.equal(last.version, 9, "the merge saves on top of the newest version");
+    assert.deepEqual(last.blocks.map((b) => b.text[0].t), ["My edit", "Added by the AI"], "both sides' edits survive");
+    assert.deepEqual([...view.element.querySelectorAll(".ws-text")].map((n) => n.textContent), ["My edit", "Added by the AI"]);
   } finally {
     view.destroy();
   }
+});
+
+test("merging blocks: mine win where I changed them, theirs elsewhere, new blocks keep their place", () => {
+  const p = (id, t) => ({ id, type: "p", text: [{ t }] });
+  const base = [p("b0001", "one"), p("b0002", "two"), p("b0003", "three")];
+  const mine = [p("b0001", "ONE"), p("bnew1", "mine new"), p("b0002", "two")];
+  const theirs = [p("b0001", "one"), p("b0002", "TWO"), p("b0003", "three"), p("bnew2", "theirs new")];
+  assert.deepEqual(mergeBlocks(base, mine, theirs).map((b) => b.text[0].t), ["ONE", "mine new", "TWO", "theirs new"]);
+  // They changed a block I deleted: it stays. I changed a block they deleted: it stays.
+  const theirs2 = [p("b0002", "two"), p("b0003", "THREE")];
+  const mine2 = [p("b0001", "ONE!"), p("b0002", "two")];
+  assert.deepEqual(mergeBlocks(base, mine2, theirs2).map((b) => b.text[0].t), ["ONE!", "two", "THREE"]);
 });
 
 test("home: templates start a page, and what is waiting, running and next is listed", async () => {
