@@ -69,4 +69,6 @@ interface MindToolbox {
     fun execute(call: MindToolCall, arguments: JSONObject): MindToolResult
     /** A compact description of the current phone state for the opening message; never secrets. */
     fun situation(): String = ""
+    /** Plan 37 W3: the owner said something during the mission (a message); a toolbox may listen for memory requests. */
+    fun onOwnerMessage(text: String) {}
 }

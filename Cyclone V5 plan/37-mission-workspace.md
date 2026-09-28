@@ -1,6 +1,6 @@
 # 37 — The mission workspace: structured context that makes a run feel like it understands
 
-**Status:** plan, 2026-09-28, revised the same day after a flexibility review (§15). **W1 and W2 built in alpha.66 (§16).** The revisions: guidance instead of gates, no new
+**Status:** plan, 2026-09-28, revised the same day after a flexibility review (§15). **W1 and W2 built in alpha.66 (§16); W3 built in alpha.67 as memory v2 (§17).** The revisions: guidance instead of gates, no new
 tools (existing ones gain optional arguments), nothing scrapped (folded and recallable). Four build runs (W1–W4, §12),
 inserted before fleet health in plan 35. Builds on the
 Mind (plan 16), Hands (21), planes (25–28), direct actions (29), the App Manual (36) and parallel sessions (26 §6).
@@ -522,4 +522,31 @@ W1 (the workspace) and W2 (expect and done) shipped together as alpha.66, behind
 **Not yet (W3–W4 and small follow-ups):** People & notes, recipes and traps, prefetch, `cache_control` breakpoints,
 a harness-drafted done check, and the stays timeline in Glass's run inspector (the record is already in the mission
 metrics as `workspace`).
+
+## 17. As built (alpha.67: W3 as memory v2)
+
+The owner asked for memory that is "especially sensitive to people asking to remember something from the run" and
+"doesn't become a mess", like ChatGPT and Claude, or an open-source project that has mastered it. W3 was built by
+upgrading the Mind's memory rather than adding a second store, so there is one place for everything Cyclone keeps.
+
+**The technique:** mem0 (Chhikara et al., 2025): each candidate memory is compared with similar existing ones and
+becomes ADD, UPDATE, DELETE or NOOP. Cyclone does the comparison in code (person cards by name; word overlap for the
+rest) and lets the running Mind be the judge where code can't: similar memories come back with the result, and the
+Mind says `replaces=<id>` or calls `forget`. No second model call. Like ChatGPT's saved memories, every change is shown
+("Memory updated") and the owner manages the list.
+
+**Built:**
+- `MindMemory` v2: kinds `person` / `preference` / `app` / `fact`, `source` (owner or learned), person cards with
+  relation, handles per app and note, history of earlier versions, NOOP/UPDATE/ADD with similar ones returned,
+  `replaces`, one-off values refused unless the owner asked, eviction of learned memories first, `peopleIn(goal)`, a
+  grouped `digest(goal)`, sealing at rest (`KeystoreMemorySealer`, AES-GCM) with migration of the plain file.
+- `RememberIntent` (English and Dutch; questions and reminders excluded), heard in the goal (mission brief line), in
+  messages during the mission (a harness note) and in `owner_ask` answers; the one-time reminder at `task_finish`.
+- `remember` gains optional `kind`, `person`, `relation`, `app`, `handle`, `replaces` (no new tool); people only when
+  the owner named them; `MindOwnerPort.memoryUpdated` (task card line + mission event); the grouped Memory card.
+
+**Differences from §8:** one encrypted store instead of a separate `OwnerNotes`; people the owner names in a task are
+kept directly (the owner said it), people read on screens are refused with a hint to ask; lists (close friends) are
+kept as notes on the person or app rather than a separate type. The resolver is `peopleIn` plus the digest order; the
+handle check at send is the alpha.66 approval line.
 

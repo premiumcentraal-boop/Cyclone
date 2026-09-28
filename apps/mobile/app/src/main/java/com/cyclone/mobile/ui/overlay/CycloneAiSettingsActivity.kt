@@ -380,19 +380,37 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
             SettingsCard {
                 val memory = remember { com.cyclone.mobile.mind.mission.MindMissions.memory(context) }
                 var facts by remember { mutableStateOf(memory.all()) }
-                Text("What Cyclone Mind remembers", fontWeight = FontWeight.Bold)
+                Text("Memory", fontWeight = FontWeight.Bold)
                 Text(
-                    "Facts the Mind kept for future missions. It never keeps passwords, codes, keys or card numbers. Remove anything you don't want it to know.",
+                    "What Cyclone keeps for future tasks: people you told it about, your preferences, how you use apps. Say \"remember…\" " +
+                        "in a task to add something. It never keeps passwords, codes, keys or card numbers, and it is encrypted on this phone.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (facts.isEmpty()) {
                     Text("Nothing yet.", style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    facts.take(50).forEach { fact ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(fact.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { memory.forget(fact.id); facts = memory.all() }) { Text("Forget") }
+                    // Plan 37 W3: grouped like a small profile, newest first within each group.
+                    listOf(
+                        com.cyclone.mobile.mind.MindMemory.PERSON to "People",
+                        com.cyclone.mobile.mind.MindMemory.PREFERENCE to "Your preferences",
+                        com.cyclone.mobile.mind.MindMemory.APP to "Apps",
+                        com.cyclone.mobile.mind.MindMemory.FACT to "Other",
+                    ).forEach { (kind, title) ->
+                        val group = facts.filter { it.kind == kind }
+                        if (group.isNotEmpty()) {
+                            Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+                            group.take(50).forEach { fact ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(fact.text, style = MaterialTheme.typography.bodyMedium)
+                                        Text(if (fact.source == com.cyclone.mobile.mind.MindMemory.OWNER) "You asked Cyclone to remember this"
+                                            else "Cyclone kept this", style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    TextButton(onClick = { memory.forget(fact.id); facts = memory.all() }) { Text("Forget") }
+                                }
+                            }
                         }
                     }
                     TextButton(onClick = { memory.forgetAll(); facts = memory.all() }) { Text("Forget everything") }

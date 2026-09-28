@@ -57,6 +57,8 @@ interface MindOwnerPort {
     fun status(text: String) {}
     fun plan(steps: List<MindPlanStep>) {}
     /** Plan 37 §6: the mission changed course; the owner sees what it was, what it is now and why. */
+    /** Plan 37 W3: a memory was added or changed; the owner sees it like "Memory updated" in a chat app. */
+    fun memoryUpdated(text: String) { status("Memory updated: ${text.take(160)}") }
     fun diverted(from: String, to: String, why: String) { status("Mission diverted: $from → $to" + if (why.isNotBlank()) " ($why)" else "") }
 }
 

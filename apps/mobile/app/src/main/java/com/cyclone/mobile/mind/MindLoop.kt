@@ -111,6 +111,11 @@ class MindLoop(
             }
             ownerMessages().filter(String::isNotBlank).forEach {
                 conversation.add(MindMessage.User(MindPrompt.ownerMessage(it)))
+                // Plan 37 W3: a memory request mid-mission is named for the model, so it is never missed.
+                runCatching { toolbox.onOwnerMessage(it) }
+                RememberIntent.detect(it)?.let { asked ->
+                    conversation.add(MindMessage.User(MindPrompt.rememberAsked(asked), origin = MindMessage.User.Origin.HARNESS))
+                }
                 listener.onNotice(turn, "Owner: ${it.take(160)}")
                 silentTurns = 0
             }

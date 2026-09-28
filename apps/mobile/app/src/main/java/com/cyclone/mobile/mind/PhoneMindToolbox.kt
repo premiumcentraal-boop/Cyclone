@@ -80,6 +80,25 @@ class PhoneMindToolbox(
     }.let { specs -> if (workspace != null) workspaceSpecs ?: com.cyclone.mobile.mind.workspace.WorkspaceSpecs.extend(specs).also { workspaceSpecs = it } else specs }
 
     private var workspaceSpecs: List<MindToolSpec>? = null
+
+    // ---- plan 37 W3 (alpha.67): memory the owner asks for -------------------------------------------------------------
+    /** What the owner asked Cyclone to remember in this mission (goal, a message or an answer), until it is saved. */
+    private var rememberAsk: String? = RememberIntent.detect(goal)
+    private var remembered = false
+    private var rememberNoted = false
+    /** Everything the owner said in this mission: people the owner named may be remembered, people read on screens not. */
+    private val ownerWords = StringBuilder(goal)
+
+    override fun onOwnerMessage(text: String) = ownerSaid(text)
+
+    private fun ownerSaid(text: String) {
+        ownerWords.append('\n').append(text)
+        RememberIntent.detect(text)?.let {
+            rememberAsk = it
+            remembered = false
+            rememberNoted = false
+        }
+    }
     /** Installed apps as (label, package), for expectation checks; read once per mission. */
     private val appPairs: List<Pair<String, String>> by lazy { runCatching { device.apps().map { it.label to it.packageName } }.getOrDefault(emptyList()) }
 
@@ -192,7 +211,7 @@ class PhoneMindToolbox(
         "vault_fill" -> vaultFill(arguments)
         "plan_update" -> planUpdate(arguments)
         "note" -> note(arguments)
-        "remember" -> remember(arguments.optString("fact"))
+        "remember" -> remember(arguments)
         "forget" -> forget(arguments.optString("id"))
         "tap_point" -> tapPoint(arguments)
         "swipe" -> swipe(arguments)
@@ -1119,7 +1138,8 @@ class PhoneMindToolbox(
             if (result.ok) typed += "${field.label} → ${ref.ref}" else failed += field.label
         }
         val remembered = if (reply.remember) given.count { (field, value) ->
-            memory?.remember("The owner's ${field.label.lowercase()}: $value", missionId) is MindMemory.Saved.Stored
+            memory?.remember(MindMemory.Candidate("The owner's ${field.label.lowercase()}: $value", source = MindMemory.OWNER), missionId)
+                ?.let { it !is MindMemory.Saved.Refused } == true
         } else 0
         val header = buildString {
             append("The owner gave: ")
@@ -1147,13 +1167,52 @@ class PhoneMindToolbox(
         return observeAndRender(header).copy(ok = reply.answered, ownerWaitMs = reply.waitedMs, changedScreen = true)
     }
 
-    private fun remember(fact: String): MindToolResult {
+    /**
+     * Plan 37 W3: keeps a memory the way mem0 does (add, update, merge or nothing), with this model as the judge:
+     * similar older memories come back so it can say `replaces`. What the owner asked for is marked as theirs; people
+     * are kept only when the owner told Cyclone about them. The owner sees "Memory updated" on the task card.
+     */
+    private fun remember(arguments: JSONObject): MindToolResult {
         val store = memory ?: return MindToolResult.error("Memory is not available in this mission.")
-        return when (val saved = store.remember(fact, missionId)) {
-            is MindMemory.Saved.Stored -> MindToolResult("Remembered as ${saved.fact.id}. It will be available in future missions.", "remembered: ${saved.fact.text.take(120)}")
-            is MindMemory.Saved.Updated -> MindToolResult("Already remembered as ${saved.fact.id}.", "remembered again: ${saved.fact.text.take(120)}")
-            is MindMemory.Saved.Refused -> MindToolResult.error("Not remembered: ${saved.reason}.")
+        val fact = arguments.optString("fact").trim()
+        val person = arguments.optString("person").trim().takeIf { it.isNotBlank() }
+        if (person != null && rememberAsk == null && !ownerWords.toString().contains(person, ignoreCase = true)) {
+            return MindToolResult.error("Not remembered: keep people only when the owner told you about them. Ask the owner (owner_ask) if they want $person remembered.")
         }
+        val candidate = MindMemory.Candidate(
+            text = fact,
+            kind = arguments.optString("kind").trim().lowercase().takeIf { it in MindMemory.KINDS } ?: MindMemory.FACT,
+            person = person,
+            relation = arguments.optString("relation").takeIf { it.isNotBlank() },
+            app = arguments.optString("app").takeIf { it.isNotBlank() },
+            handle = arguments.optString("handle").takeIf { it.isNotBlank() },
+            replaces = arguments.optString("replaces").takeIf { it.isNotBlank() },
+            source = if (rememberAsk != null) MindMemory.OWNER else MindMemory.LEARNED,
+        )
+        val saved = store.remember(candidate, missionId)
+        val kept = when (saved) {
+            is MindMemory.Saved.Stored -> saved.fact
+            is MindMemory.Saved.Updated -> saved.fact
+            is MindMemory.Saved.Refused -> return MindToolResult.error("Not remembered: ${saved.reason}.")
+        }
+        remembered = true
+        val changed = saved !is MindMemory.Saved.Updated || saved.previous != null
+        if (changed) owner.memoryUpdated(kept.text)
+        val text = buildString {
+            when (saved) {
+                is MindMemory.Saved.Stored -> append("Memory updated: [${kept.id}] ${kept.text}")
+                is MindMemory.Saved.Updated -> if (saved.previous != null) append("Memory updated: [${kept.id}] ${kept.text} (it was: ${saved.previous.take(160)})")
+                    else append("Already remembered as [${kept.id}]: ${kept.text}")
+                else -> Unit
+            }
+            append(". The owner sees it and can change it in Settings → AI → Memory.")
+            (saved as? MindMemory.Saved.Stored)?.similar?.takeIf { it.isNotEmpty() }?.let { similar ->
+                append("\nSimilar memories: ")
+                append(similar.joinToString("; ") { "[${it.id}] ${it.text.take(100)}" })
+                append(". If the new one replaces an older one, call remember again with replaces=<id>; if an older one is wrong, forget it.")
+            }
+        }
+        return MindToolResult(text, "remembered: ${kept.text.take(120)}")
     }
 
     private fun forget(id: String): MindToolResult {
@@ -1169,7 +1228,11 @@ class PhoneMindToolbox(
         val choices = arguments.optJSONArray("choices")?.let { list -> (0 until list.length()).map { list.optString(it).trim() }.filter(String::isNotBlank) }.orEmpty()
         owner.status("Waiting for your answer")
         val reply = owner.ask(question.take(500), choices.take(6), ownerTimeoutMs)
-        return if (reply.answered) MindToolResult("The owner answered: ${reply.text}", "owner: ${reply.text.take(120)}", ownerWaitMs = reply.waitedMs)
+        if (reply.answered) ownerSaid(reply.text)
+        val ask = if (reply.answered) RememberIntent.detect(reply.text) else null
+        return if (reply.answered) MindToolResult("The owner answered: ${reply.text}" +
+            (ask?.let { "\n\nThe owner asked you to remember: \"$it\". Save it with remember." }.orEmpty()),
+            "owner: ${reply.text.take(120)}", ownerWaitMs = reply.waitedMs)
         else MindToolResult("The owner has not answered after ${reply.waitedMs / 60_000} min. Continue with what you can, or give up and say what you needed.",
             "owner: no answer", ok = false, ownerWaitMs = reply.waitedMs)
     }
@@ -1265,6 +1328,12 @@ class PhoneMindToolbox(
         val summary = arguments.optString("summary").trim()
         val evidence = arguments.optString("evidence").trim()
         if (summary.isBlank()) return MindToolResult.error("summary is required.")
+        // Plan 37 W3: the owner asked to remember something and nothing was saved: one reminder, then any finish is accepted.
+        rememberAsk?.takeIf { !remembered && !rememberNoted }?.let { asked ->
+            rememberNoted = true
+            return MindToolResult("Before finishing: the owner asked you to remember \"$asked\". Save it with remember " +
+                "(or, if it cannot be kept, say why in the summary), then call task_finish again.", "finish: remember first", ok = false)
+        }
         // Plan 37 §5: one nudge when a done check is nowhere in the mission; a second finish is always accepted.
         workspace?.let { ws -> runCatching { ws.finishNote(summary) }.getOrNull() }?.let { return MindToolResult(it, "finish: done check not found", ok = false) }
         if (evidence.isBlank() && finishRejections < MAX_FINISH_REJECTIONS) {
@@ -1422,8 +1491,16 @@ class PhoneMindToolbox(
                 objectSchema("steps" to array("The steps in order.", objectSchema("step" to string("What to do."),
                     "status" to string("Progress.", MindPlanStep.STATUSES), required = listOf("step", "status"))), required = listOf("steps"))),
             MindToolSpec("note", "Note a fact for later in this mission only.", objectSchema("text" to string("The fact."), required = listOf("text"))),
-            MindToolSpec("remember", "Keep a fact for future missions: the owner's preferences, public account names, where things are in apps, what worked. Never secrets.",
-                objectSchema("fact" to string("One short, self-contained fact."), required = listOf("fact"))),
+            MindToolSpec("remember", "Keep something for future missions: who a person is to the owner, the owner's preferences, which account " +
+                "to use, how the owner uses an app, what worked. Durable things only, never secrets. Always use it when the owner asks you to remember.",
+                objectSchema("fact" to string("One short, self-contained memory (for a person: what to know about them, may be empty)."),
+                    "kind" to string("Optional: what kind of memory.", MindMemory.KINDS.toList()),
+                    "person" to string("Optional: the person's name, for a memory about someone the owner told you about."),
+                    "relation" to string("Optional: who the person is to the owner, e.g. girlfriend, boss, mom."),
+                    "app" to string("Optional: the app this is about, e.g. Instagram."),
+                    "handle" to string("Optional: the person's name or handle in that app, e.g. lo.06."),
+                    "replaces" to string("Optional: the id of an older memory this one replaces, like f7."),
+                    required = listOf("fact"))),
             MindToolSpec("forget", "Delete a remembered fact that is wrong or outdated.", objectSchema("id" to string("The fact id, like f12."), required = listOf("id"))),
             MindToolSpec("task_finish", "End the mission as done. Only after you have seen that the goal is achieved.",
                 objectSchema("summary" to string("One or two sentences for the owner."), "evidence" to string("What on the screen shows it is done."),
