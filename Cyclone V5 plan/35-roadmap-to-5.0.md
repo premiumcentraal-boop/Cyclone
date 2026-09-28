@@ -35,27 +35,40 @@ These are all stated as UNVERIFIED in their release notes:
 | 3 | **alpha.59: App Manual M1: own words, lists and categories** (app dictionary, own words, lists and categories built in alpha.59; revealers, probes and the screenshots switch follow) | The app's own words kept (APK lexicon + chrome filter), never your content (canary guard). A generic UI pattern library; safe probes (reveal, switch category, scroll, one sample); lists recorded by how they work (order, groups, how to find one) and category sets with sub-categories; real names in Glass; model picker on the PC (default: the phone's model) and a screenshots switch | 36 |
 | 4 | **alpha.60: App Manual foundation** (built) | Places, panels and doors named in the app's own words on the map; reveal doors open "+" and ⋯ panels and read what they offer; categories proven in one pass; "app word or yours?" for downloaded names (memory only until answered); places in the phone AI's glossary | 36 |
 | 5 | **alpha.61: Command Center redesign and Pages (C5)** (built; the owner moved it forward) | A Notion-like workspace: pages and sub-pages, a block editor with / blocks and @ references to phones, skills, routines, tasks, accounts, connections and pages, plan boards (board, table, calendar) whose cards become tasks, live views, backlinks, templates, quick find, the trash. The top-left logo switches between the Command Center and Glass | 33 §9, §12.5 |
-| 6 | **alpha.62: App Manual: describer, abilities, navigator** | One description per kind of screen; "things you can do" with paths and other phrasings; the self-quiz and targeted Map deeper; saved-route replay and `find` / `go_to(ability)` for the phone's AI; plain-code screen checks from the dictionary's anchors; Lab map-quality, stability and find-the-feature scores. JEV is parked | 36 |
-| 7 | **alpha.63: Parallel sessions** | The phone runs up to 2 background missions plus your screen. Each has its own task card, inbox, plane and leases. Per-session notifications and pill; the Lab concurrency suite. The Command Center then sends a phone more than one task at a time | 26 §6 |
-| 8 | **alpha.64: Fleet health and alerts** | Phone heartbeat (battery, heat, storage, network, versions), quarantine after 3 infrastructure failures, "phones behind on updates". Alerts to your phone or email: phone offline over 10 minutes, success rate under 80%, a login failing twice, a cap reached. Metrics per recipe, account and phone | 33 §10–11 |
-| 9 | **alpha.65: Coordinator (C4)** | The AI coordinator in the runtime. Fixed tools: accounts, phones, recipes, tasks, routines, runs, artifacts, connections — no vault values, no approving, no adding connections. Also: budgets (tasks and credits a day), a daily or weekly report page, the Lab coordinator suite, and Cyclone as an MCP server so Claude or Codex can create tasks behind the same approvals | 33 §7, §8 |
-| 10 | **alpha.66: Smarter routines** | Richer schedules (monthly, "first Monday"), triggers (a notification, an email, a webhook, another task's result), approval batching for identical kinds, per-kind approval timeouts (the run pauses, never auto-approves) | 33 §5–6 |
-| 11 | **alpha.67: Vault, complete** | Passkey unlock (Glass served at `localhost`, which WebAuthn allows). "Remember on this phone" with remote revoke. SMS and email codes read on the phone and filled, never stored. Password rotation as a recipe with 7-day rollback. Sign-up for accounts you own, with the new password sealed back to the vault. Encrypted export (Argon2id) | 33 §4.3–4.5 |
-| 12 | **alpha.68: Mission desk + Drive finish** | The mission desk (write long text once, deliver it exactly). The Drive Lab voice suite. JEV promotion if the car test earned it | 21, 32 |
-| 13–14 | **alpha.69–70: Hosted, multi-site (C6)** | Cloud Command Center (Postgres, a durable job engine), the PC as an outbound edge, members and roles, SSO. A second site's phones take tasks from the cloud; the vault stays zero-knowledge. Two runs | 33 §12 |
-| 15–16 | **5.0.0-rc.1 → 5.0.0 / Glass 1.0** | Hardening: a full physical pass on the Pixel and Windows, plan 9's exit criteria (a secrets fill, a Gmail map, a Chrome-host map, an Ask using a live slot, overlay yield, the pay-block GATE). Also: a signed Windows installer (today `CI_UNSIGNED`), a stable channel next to development, and docs. One RC run, then fixes and 5.0 | 9 |
+| 6 | **alpha.62: AI project manager in the Command Center (C4, first part)** (built; the owner moved it forward) | OpenRouter inside the dashboard: the owner's key (write-only), any tool-using model with prices, daily and monthly caps, private providers only. Ask AI beside every page (Ctrl J, / Ask AI): it reads the workspace with fixed tools, writes pages and cards as proposals (or directly, if allowed), and proposes tasks and routines the owner applies. Pages merge edits made elsewhere | 33 §7, §12.6 |
+| 7 | **alpha.63: App Manual: describer, abilities, navigator** | One description per kind of screen; "things you can do" with paths and other phrasings; the self-quiz and targeted Map deeper; saved-route replay and `find` / `go_to(ability)` for the phone's AI; plain-code screen checks from the dictionary's anchors; Lab map-quality, stability and find-the-feature scores. JEV is parked | 36 |
+| 8 | **alpha.64: Parallel sessions** | The phone runs up to 2 background missions plus your screen. Each has its own task card, inbox, plane and leases. Per-session notifications and pill; the Lab concurrency suite. The Command Center then sends a phone more than one task at a time | 26 §6 |
+| 9 | **alpha.65: Fleet health and alerts** | Phone heartbeat (battery, heat, storage, network, versions), quarantine after 3 infrastructure failures, "phones behind on updates". Alerts to your phone or email: phone offline over 10 minutes, success rate under 80%, a login failing twice, a cap reached. Metrics per recipe, account and phone | 33 §10–11 |
+| 10 | **alpha.66: Coordinator (C4), the rest** | The AI project manager is built (alpha.62, §12.6). Still to do: budgets in tasks per day, a daily or weekly report page the AI writes, the Lab coordinator suite, and Cyclone as an MCP server so Claude or Codex can create tasks behind the same approvals | 33 §7, §8 |
+| 11 | **alpha.67: Smarter routines** | Richer schedules (monthly, "first Monday"), triggers (a notification, an email, a webhook, another task's result), approval batching for identical kinds, per-kind approval timeouts (the run pauses, never auto-approves) | 33 §5–6 |
+| 12 | **alpha.68: Vault, complete** | Passkey unlock (Glass served at `localhost`, which WebAuthn allows). "Remember on this phone" with remote revoke. SMS and email codes read on the phone and filled, never stored. Password rotation as a recipe with 7-day rollback. Sign-up for accounts you own, with the new password sealed back to the vault. Encrypted export (Argon2id) | 33 §4.3–4.5 |
+| 13 | **alpha.69: Mission desk + Drive finish** | The mission desk (write long text once, deliver it exactly). The Drive Lab voice suite. JEV promotion if the car test earned it | 21, 32 |
+| 14–15 | **alpha.70–71: Hosted, multi-site (C6)** | Cloud Command Center (Postgres, a durable job engine), the PC as an outbound edge, members and roles, SSO. A second site's phones take tasks from the cloud; the vault stays zero-knowledge. Two runs | 33 §12 |
+| 16–17 | **5.0.0-rc.1 → 5.0.0 / Glass 1.0** | Hardening: a full physical pass on the Pixel and Windows, plan 9's exit criteria (a secrets fill, a Gmail map, a Chrome-host map, an Ask using a live slot, overlay yield, the pay-block GATE). Also: a signed Windows installer (today `CI_UNSIGNED`), a stable channel next to development, and docs. One RC run, then fixes and 5.0 | 9 |
 
-**Total:** about **16 build runs**, plus the owner's tests. Runs 1–2, 4 and 5 are built; run 3 is partly built (the
-app dictionary). Run 6 finishes the App Manual (plan 36), at the owner's request. Runs 7–12 make the fleet dependable
-and complete. Runs 13–14 are the bigger product steps. Runs 15–16 ship 5.0.
+**Total:** about **17 build runs**, plus the owner's tests. Runs 1–2, 4, 5 and 6 are built; run 3 is partly built (the
+app dictionary). Run 7 finishes the App Manual (plan 36). Runs 8–13 make the fleet dependable and complete. Runs 14–15
+are the bigger product steps. Runs 16–17 ship 5.0. The owner's next Command Center asks (action buttons that run
+automations, links between pages' blocks, synced blocks, page properties) are listed under "Next for the Command
+Center".
+
+## Next for the Command Center (owner's ask, not yet scheduled)
+
+- **Links across pages:** link to one block; synced blocks; one plan across all pages' cards; page properties
+  (status, date, tags, related phones, routines, accounts); "Mentioned in" with the sentence.
+- **Action buttons:** a Button block whose steps run a routine, create a task, send a board's cards, call a connection
+  tool or make a page, instantly and behind the same approvals; board automations (a card moved to Doing is sent to a
+  phone; a finished task moves its card to Done).
+- **Notion polish:** undo and redo for whole blocks, toggles and indented blocks, tables with your own columns, images and
+  files, page history, comments, saved templates, favourites, live multi-window editing.
 
 ## Decisions still open
 
 - **Pages:** decided and built in alpha.61 as an in-house block editor (it keeps the Glass guard). Real-time
   co-editing (Yjs) is not in it.
-- **Hosted (runs 13–14):** where it runs and who pays for it, whether it is wanted at all, and SSO provider.
-- **Windows signing (run 15):** a code-signing certificate is needed for a signed installer.
-- **Stable channel (run 15):** when development builds stop going to your daily phone.
+- **Hosted (runs 14–15):** where it runs and who pays for it, whether it is wanted at all, and SSO provider.
+- **Windows signing (run 16):** a code-signing certificate is needed for a signed installer.
+- **Stable channel (run 16):** when development builds stop going to your daily phone.
 
 ## What stays true through every run
 

@@ -11,8 +11,25 @@ import { deviceReadiness } from "../services/devices.js";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
+const pageListeners = new Set<(pageId: string) => void>();
+let askAiHandler: ((pageId: string | null) => void) | null = null;
 
 export const workspaceBus = {
+  /** A page changed outside its editor (the AI applied an edit); an open page checks for the new version. */
+  onPageChanged(fn: (pageId: string) => void): () => void {
+    pageListeners.add(fn);
+    return () => pageListeners.delete(fn);
+  },
+  pageChanged(pageId: string): void {
+    for (const fn of [...pageListeners]) fn(pageId);
+  },
+  /** Opens the AI panel (the app owns it), about one page or the whole workspace. */
+  handleAskAi(fn: ((pageId: string | null) => void) | null): void {
+    askAiHandler = fn;
+  },
+  askAi(pageId: string | null = null): void {
+    askAiHandler?.(pageId);
+  },
   onPagesChanged(fn: Listener): () => void {
     listeners.add(fn);
     return () => listeners.delete(fn);

@@ -32,11 +32,14 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
         return center
 
     def call(fn):
+        from .ai import AiError
         from .pages import PageConflict
         try:
             return fn()
         except PageConflict as exc:
             raise HTTPException(status_code=409, detail={"code": "PAGE_CHANGED", "message": str(exc)}) from exc
+        except AiError as exc:
+            raise HTTPException(status_code=409, detail={"code": "AI_UNAVAILABLE", "message": str(exc)}) from exc
         except CommandError as exc:
             raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(exc)}) from exc
         except DesktopRuntimeError as exc:
@@ -328,6 +331,72 @@ def create_command_router(runtime: Any, token: str) -> APIRouter:
     @router.post("/v1/cc/pages/{page_id}/delete", dependencies=[Depends(auth)])
     def page_delete(page_id: str):
         return call(lambda: cc().pages.delete(page_id))
+
+    @router.get("/v1/cc/pages/{page_id}/version", dependencies=[Depends(auth)])
+    def page_version(page_id: str):
+        return call(lambda: cc().pages.version(page_id))
+
+    # Plan 33 §7 (C4, moved forward): the AI project manager. The OpenRouter key goes in once and never comes back out;
+    # the model's changes are proposals the owner applies (tasks and routines always).
+    @router.get("/v1/cc/ai", dependencies=[Depends(auth)])
+    def ai_status():
+        return call(lambda: cc().ai.status())
+
+    @router.post("/v1/cc/ai/settings", dependencies=[Depends(auth)])
+    def ai_settings(body: dict[str, Any]):
+        return call(lambda: cc().ai.update_settings(body_of(body)))
+
+    @router.post("/v1/cc/ai/key", dependencies=[Depends(auth)])
+    def ai_key(body: dict[str, Any]):
+        return call(lambda: cc().ai.set_key(body_of(body)))
+
+    @router.post("/v1/cc/ai/key/test", dependencies=[Depends(auth)])
+    def ai_key_test():
+        return call(lambda: cc().ai.test_key())
+
+    @router.post("/v1/cc/ai/key/forget", dependencies=[Depends(auth)])
+    def ai_key_forget():
+        return call(lambda: cc().ai.forget_key())
+
+    @router.get("/v1/cc/ai/models", dependencies=[Depends(auth)])
+    def ai_models(all: bool = Query(default=False), refresh: bool = Query(default=False)):
+        return call(lambda: cc().ai.models(everything=all, refresh=refresh))
+
+    @router.get("/v1/cc/ai/conversations", dependencies=[Depends(auth)])
+    def ai_conversations():
+        return call(lambda: {"conversations": cc().ai.conversations(), "proposals": cc().ai.open_proposals()})
+
+    @router.post("/v1/cc/ai/conversations", dependencies=[Depends(auth)])
+    def ai_new_conversation(body: dict[str, Any]):
+        return call(lambda: cc().ai.create_conversation(body_of(body)))
+
+    @router.get("/v1/cc/ai/conversations/{conversation_id}", dependencies=[Depends(auth)])
+    def ai_conversation(conversation_id: str):
+        return call(lambda: cc().ai.get(conversation_id))
+
+    @router.post("/v1/cc/ai/conversations/{conversation_id}", dependencies=[Depends(auth)])
+    def ai_update_conversation(conversation_id: str, body: dict[str, Any]):
+        return call(lambda: cc().ai.update_conversation(conversation_id, body_of(body)))
+
+    @router.post("/v1/cc/ai/conversations/{conversation_id}/messages", dependencies=[Depends(auth)])
+    def ai_send(conversation_id: str, body: dict[str, Any]):
+        return call(lambda: cc().ai.send(conversation_id, body_of(body)))
+
+    @router.post("/v1/cc/ai/conversations/{conversation_id}/stop", dependencies=[Depends(auth)])
+    def ai_stop(conversation_id: str):
+        return call(lambda: cc().ai.stop(conversation_id))
+
+    @router.post("/v1/cc/ai/conversations/{conversation_id}/delete", dependencies=[Depends(auth)])
+    def ai_delete(conversation_id: str):
+        return call(lambda: cc().ai.delete_conversation(conversation_id))
+
+    @router.post("/v1/cc/ai/proposals/{proposal_id}/apply", dependencies=[Depends(auth)])
+    def ai_apply(proposal_id: str):
+        return call(lambda: cc().ai.apply(proposal_id))
+
+    @router.post("/v1/cc/ai/proposals/{proposal_id}/discard", dependencies=[Depends(auth)])
+    def ai_discard(proposal_id: str):
+        return call(lambda: cc().ai.discard(proposal_id))
 
     @router.get("/v1/cc/audit", dependencies=[Depends(auth)])
     def audit(limit: int = Query(default=200, ge=1, le=1000)):

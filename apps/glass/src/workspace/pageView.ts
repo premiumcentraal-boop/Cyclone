@@ -1,12 +1,13 @@
 /**
  * One page of the workspace (plan 33, C5): its path, icon and title, the block editor, the pages inside it and the
- * pages that mention it. Edits save by themselves a moment after typing stops; a save names the version it edited,
- * so a page changed in another tab is reloaded instead of overwritten.
+ * pages that mention it. Edits save by themselves a moment after typing stops; a save names the version it edited.
+ * When the page changed elsewhere (another window, the AI), a quiet page reloads in place, and a refused save is
+ * merged block by block (mergeBlocks) instead of losing either side's edits.
  */
 import type { GlassContext } from "../app.js";
 import { looksSecret } from "../services/command.js";
 import { GatewayError } from "../services/gateway.js";
-import { pagesApi, type Block, type Page } from "../services/pages.js";
+import { mergeBlocks, pagesApi, type Block, type Page } from "../services/pages.js";
 import { el, setChildren } from "../ui/dom.js";
 import { emptyState, loadingState } from "../ui/components.js";
 import { relativeTime } from "../ui/format.js";
@@ -15,6 +16,7 @@ import { workspaceBus } from "./directory.js";
 import { createEditor, type Editor } from "./editor.js";
 
 const SAVE_AFTER_MS = 600;
+const WATCH_MS = 4_000;
 const ICONS = ["📄", "🗓️", "✅", "🎬", "📱", "🛍️", "💡", "📌", "🚀", "📈", "🔁", "✨", "🧭", "📝", "💬", "🔥", "⭐", "🏠", "🎯", "🧪"];
 
 export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
@@ -26,6 +28,11 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
   let page: Page | null = null;
   let editor: Editor | null = null;
   let version = 0;
+  /** The blocks as the server had them at `version`: the base for a three-way merge. */
+  let base: Block[] = [];
+  let watching = false;
+  /** Merges in a row without a successful save: a page that keeps changing under us is reloaded instead. */
+  let merges = 0;
   let pending: { title?: string; icon?: string; blocks?: Block[] } = {};
   let timer: ReturnType<typeof setTimeout> | null = null;
   let saving = false;
@@ -58,15 +65,15 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     try {
       const saved = await pagesApi.save(ctx.client, page.id, { version, ...body });
       version = saved.version;
+      base = saved.blocks;
+      merges = 0;
       page = { ...page, ...saved, blocks: page.blocks };
       say(Object.keys(pending).length ? "Editing…" : "Saved");
       if (body.title !== undefined || body.icon !== undefined) workspaceBus.pagesChanged();
     } catch (err) {
       if (err instanceof GatewayError && err.status === 409) {
-        pending = {};
-        say("Changed in another window; reloaded.", "warn");
         saving = false;
-        await open(false);
+        await merge({ ...body, ...pending });
         return;
       }
       pending = { ...body, ...pending };
@@ -82,6 +89,66 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     else if (!refused && Object.keys(pending).length) timer = setTimeout(() => void flush(), SAVE_AFTER_MS);
   }
 
+  /** A save was refused because the page changed elsewhere: take theirs, put my edits on top, and save that. */
+  async function merge(mine: typeof pending): Promise<void> {
+    pending = {};
+    merges += 1;
+    if (merges > 3) {
+      merges = 0;
+      say("Changed elsewhere; reloaded.", "warn");
+      await open(false);
+      return;
+    }
+    try {
+      const fresh = await pagesApi.get(ctx.client, pageId);
+      if (destroyed) return;
+      const where = editor?.caretAt() ?? null;
+      const blocks = mine.blocks ? mergeBlocks(base, editor?.blocks() ?? mine.blocks, fresh.blocks) : fresh.blocks;
+      page = { ...fresh, blocks };
+      version = fresh.version;
+      base = fresh.blocks;
+      drawBar(page);
+      drawDoc(page);
+      if (where) editor?.focusBlock(where.blockId, where.offset);
+      const again: typeof pending = {};
+      if (mine.blocks) again.blocks = blocks;
+      if (mine.title !== undefined) again.title = mine.title;
+      if (mine.icon !== undefined) again.icon = mine.icon;
+      if (Object.keys(again).length) schedule(again);
+      say("Merged with changes made elsewhere.", "warn");
+    } catch (err) {
+      say(`Not saved: ${(err as Error).message}`, "warn");
+    }
+  }
+
+  /** Pick up a version made elsewhere while nothing here is waiting to save. */
+  async function check(): Promise<void> {
+    if (watching || destroyed || !page || saving || timer || Object.keys(pending).length) return;
+    if (globalThis.document?.hidden) return;
+    watching = true;
+    try {
+      const now = await pagesApi.version(ctx.client, pageId);
+      if (destroyed || now.version <= version || saving || timer || Object.keys(pending).length) return;
+      if (now.archivedAt) return void open(false);
+      const fresh = await pagesApi.get(ctx.client, pageId);
+      if (destroyed || saving || timer || Object.keys(pending).length) return;
+      const titleFocused = globalThis.document?.activeElement?.classList?.contains("ws-title");
+      if (titleFocused) return;
+      const where = editor?.caretAt() ?? null;
+      page = fresh;
+      version = fresh.version;
+      base = fresh.blocks;
+      drawBar(fresh);
+      drawDoc(fresh);
+      if (where) editor?.focusBlock(where.blockId, where.offset);
+      say("Updated", "ok");
+    } catch {
+      // A missed check is fine; the next one tries again.
+    } finally {
+      watching = false;
+    }
+  }
+
   function drawBar(p: Page): void {
     const crumbs = el("nav", "ws-crumbs");
     crumbs.setAttribute("aria-label", "Where this page is");
@@ -94,6 +161,10 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     for (const up of p.path) crumbs.append(el("span", "ws-crumb-sep", "/"), link(`${up.icon ? `${up.icon} ` : ""}${up.title}`, `#/command/page/${encodeURIComponent(up.id)}`));
     crumbs.append(el("span", "ws-crumb-sep", "/"), el("span", "ws-crumb ws-crumb-here", `${p.icon ? `${p.icon} ` : ""}${p.title}`));
     const actions = el("div", "ws-top-actions");
+    const ask = el("button", "ws-top-btn ws-ask", "✨ Ask AI");
+    ask.type = "button";
+    ask.title = "Ask the AI about this page (Ctrl J)";
+    ask.addEventListener("click", () => void flush().then(() => workspaceBus.askAi(p.id)));
     const sub = el("button", "ws-top-btn", "+ Page inside");
     sub.type = "button";
     sub.addEventListener("click", () => void pagesApi.create(ctx.client, { parentId: p.id }).then((child) => {
@@ -106,7 +177,7 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
       workspaceBus.pagesChanged();
       ctx.navigate(p.parentId ? { name: "command", tab: "page", pageId: p.parentId } : { name: "command", tab: "home" });
     }).catch((err: Error) => say(err.message, "warn")));
-    actions.append(status, sub, trash);
+    actions.append(status, ask, sub, trash);
     setChildren(bar, crumbs, actions);
   }
 
@@ -151,7 +222,7 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
     editor = createEditor(ctx, p.id, p.blocks, (blocks) => {
       if (page) page = { ...page, blocks };
       schedule({ blocks });
-    });
+    }, { askAi: () => void flush().then(() => workspaceBus.askAi(p.id)) });
     const extras = el("div", "ws-extras");
     if (p.children.length) {
       const box = el("section", "ws-related");
@@ -185,6 +256,7 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
       if (destroyed) return;
       page = loaded;
       version = loaded.version;
+      base = loaded.blocks;
       if (loaded.archivedAt) {
         setChildren(doc, emptyState({ icon: "book", title: "This page is in the trash", body: "Restore it from the trash to edit it." }));
         setChildren(bar);
@@ -200,10 +272,15 @@ export function createPageView(ctx: GlassContext, pageId: string): GlassPage {
   }
 
   void open(true);
+  const watch = globalThis.setInterval?.(() => void check(), WATCH_MS);
+  (watch as { unref?: () => void } | undefined)?.unref?.();
+  const unlisten = workspaceBus.onPageChanged((id) => { if (id === pageId) void check(); });
   return {
     element,
     destroy() {
       destroyed = true;
+      if (watch !== undefined) globalThis.clearInterval?.(watch);
+      unlisten();
       if (Object.keys(pending).length) void flush();
       editor?.destroy();
     },

@@ -1,7 +1,8 @@
 # 33 — Cyclone Command Center: the final plan
 
 **Status:** final plan, 2026-09-27. **C0 built in alpha.51** (§12.1), **C1 in alpha.54** (§12.2), **C2 in alpha.55** (§12.3), **C3 with pre-authorised leases in alpha.56**
-(§12.4), **C5 Pages with the workspace redesign in alpha.61** (§12.5); C4 and C6 not started. Physical acceptance of C0–C3 is UNVERIFIED.
+(§12.4), **C5 Pages with the workspace redesign in alpha.61** (§12.5), **C4's AI project manager in alpha.62** (§12.6); the rest of C4
+and C6 not started. Physical acceptance of C0–C3 is UNVERIFIED.
 
 **The owner's ask:**
 > "Credentials can be safely sent to the phone in tasks, and managed and saved in the dashboard. It should hold all
@@ -513,6 +514,64 @@ dependency), which keeps the Glass guard; this settles plan 35's open Pages deci
 - **Tests and checks:** `tests/test_command_pages.py` (5), `tests/workspace.test.mjs` (14), and a guard
   (`test_pages_are_typed_blocks_without_secrets`).
 
+### 12.6 C4, first part, as built: the AI project manager (alpha.62)
+
+Moved forward at the owner's request ("a project-managing AI you can instruct and choose the model for, with OpenRouter
+inside the dashboard"). It is the §7 coordinator's core, in the runtime (D7); Glass only shows it.
+- **Key and models** (`command/ai.py`, `AiStore` on `CommandCenter.ai`):
+  - The owner's OpenRouter key is saved once in the connections key store (DPAPI on Windows). It is checked with
+    OpenRouter's `/key` endpoint first, and is never returned, logged, audited or put in a model's context.
+  - The model list comes from `/models` (cached for an hour), with prices, context sizes and tool support. Only
+    tool-using models can be chosen. There is a default model, and each conversation can pick another.
+  - `provider.data_collection = deny` is sent by default ("Private providers only").
+- **Conversations:**
+  - A turn runs in the runtime: at most 10 model calls and 8 tool calls per step.
+  - It stops at the daily or monthly cap, which is counted from the cost OpenRouter reports.
+  - A turn that a restart cuts off is marked as failed.
+  - What is kept is the owner's messages, the answers, the tool calls and results, and the cost. Hidden reasoning is
+    never read or kept.
+  - Notes about applied or discarded proposals reach the model on its next turn only.
+- **Tools** (fixed JSON schemas, audited):
+  - Reads:
+    - pages: list, search, read (as Markdown with block ids);
+    - tasks, routines, results, phones;
+    - accounts (names and health only), connections (names and allowed tools);
+    - approvals (read only).
+  - Workspace edits:
+    - create a page;
+    - append to a page, update one block, rename a page;
+    - add or update a plan card, with links.
+  - Phone work, always proposed:
+    - create a task;
+    - create, run, or pause/resume a routine.
+  - There is no tool for delete, approve, vault, accounts, adding connections or a shell.
+- **The owner decides:**
+  - Page and card edits are proposals unless the owner picks "Let it edit pages and cards".
+  - Phone work is always a proposal, applied by the owner.
+  - An applied task then runs like any task, with the phone's usual approvals.
+- **Pages as Markdown** (`command/pagetext.py`): the AI writes simple Markdown with `@[kind:id]` mentions.
+  - The Markdown becomes typed blocks and goes through `validate_blocks`, so the no-markup and no-secrets rules hold.
+  - Unknown ids are refused back to the model.
+  - Previews and answers show the current names of what they mention.
+- **Glass:**
+  - Ask AI is a slide-over panel, docked beside the page on wide screens. It opens with Ctrl J, from the sidebar, from
+    "✨ Ask AI" on a page, or with "/ Ask AI" in the editor.
+  - The panel has page context, suggestions, a steps list, proposal cards (Apply / Start it / Discard), a model per
+    conversation, the costs, and history.
+  - AI settings holds the key (masked, write-only), the model picker, the caps with spending bars, the choices, the
+    standing instructions, and what the AI can and cannot do.
+  - The provider's name reaches Glass only as data, so the Glass guard's rule ("no model or provider calls") still holds.
+- **Pages kept in step:**
+  - An open page checks its version every 4 s and reloads in place when it is quiet, keeping the caret.
+  - A save refused because the page changed elsewhere is merged block by block (`mergeBlocks`) and saved on top.
+    The server still refuses stale saves.
+- **Still to do for the rest of C4:**
+  - budgets in tasks per day;
+  - the daily and weekly report page;
+  - the Lab coordinator suite;
+  - Cyclone as an MCP server;
+  - action buttons and automations (plan 35).
+
 ## 13. Open decisions for the owner
 
 1. **Pre-authorised routine leases** (routines log in while you're away), yes or no? Yes is convenient; no means every
@@ -520,7 +579,8 @@ dependency), which keeps the Glass guard; this settles plan 35's open Pages deci
 2. **"Remember on this phone"** as the default for your own phones? It is faster and works offline, but a secret then
    stays on the phone.
 3. **Local-first only for now, or plan C6 soon?** Hosted mode is where teams and multiple sites come in.
-4. **The model for the coordinator:** the same OpenRouter model as the Mind, or a cheaper planner model?
+4. ~~**The model for the coordinator**~~: decided in alpha.62. The owner picks any tool-using OpenRouter model (a
+   default, and per conversation), on a separate key from the phone's.
 
 ## 14. Not in this plan
 

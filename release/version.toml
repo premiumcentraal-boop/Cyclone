@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.61 dev1: the Command Center, redesigned (plan 33 C5) - a Notion-like workspace of pages with @ references to phones, skills, routines, tasks, accounts and connections, plan boards whose cards become tasks, live views and quick find; the top-left logo switches between the Command Center and Glass.
+# Cyclone V5 alpha.62 dev1: the AI project manager (plan 33 C4, first part) - OpenRouter inside the Command Center (the owner's key, write-only; any tool-using model; caps; private providers), Ask AI beside every page with fixed tools, proposals the owner applies, and pages that merge edits made elsewhere.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.61.dev1"
+product_version = "5.0.0-alpha.62.dev1"
 channel = "development"
-android_version_code = 206
-python_version = "5.0.0-alpha.61.dev1"
+android_version_code = 207
+python_version = "5.0.0-alpha.62.dev1"
 
 [components]
-mobile = "5.0.0-alpha.61.dev1"
+mobile = "5.0.0-alpha.62.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.37"
-device_gateway = "5.0.0-alpha.61.dev1"
-mcp = "5.0.0-alpha.61.dev1"
+glass = "1.0.0-alpha.38"
+device_gateway = "5.0.0-alpha.62.dev1"
+mcp = "5.0.0-alpha.62.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha61-dev1-command-center-pages"
+candidate_generation = "cyclone-v5-alpha62-dev1-ai-project-manager"

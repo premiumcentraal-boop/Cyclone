@@ -43,7 +43,9 @@ a = Analysis(
                    # Plan 34 M3/M4: API connectors (imported inside ConnectionStore) and the YAML reader they use.
                    "cyclone_device_gateway.command.openapi", "yaml",
                    # Plan 33 C5: pages (imported inside CommandCenter.__init__), and the step chain.
-                   "cyclone_device_gateway.command.pages", "cyclone_device_gateway.command.steps"],
+                   "cyclone_device_gateway.command.pages", "cyclone_device_gateway.command.steps",
+                   # Plan 33 §7: the AI project manager and the page Markdown it reads and writes.
+                   "cyclone_device_gateway.command.ai", "cyclone_device_gateway.command.pagetext"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

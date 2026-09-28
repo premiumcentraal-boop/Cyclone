@@ -163,6 +163,10 @@ export const pagesApi = {
   create: async (client: GatewayClient, body: { title?: string; icon?: string; parentId?: string | null; template?: Template }) =>
     parsePage(await client.post("/v1/cc/pages", Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined && v !== null)))),
   get: async (client: GatewayClient, id: string) => parsePage(await client.get(`/v1/cc/pages/${enc(id)}`)),
+  version: async (client: GatewayClient, id: string) => {
+    const r = obj(await client.get(`/v1/cc/pages/${enc(id)}/version`));
+    return { version: num(r.version), archivedAt: typeof r.archivedAt === "number" ? r.archivedAt : null };
+  },
   save: async (client: GatewayClient, id: string, body: { version: number; title?: string; icon?: string; blocks?: Block[] }) =>
     parsePage(await client.post(`/v1/cc/pages/${enc(id)}`, body)),
   move: async (client: GatewayClient, id: string, parentId: string | null, before?: string) =>
@@ -298,11 +302,15 @@ export interface SlashItem {
   label: string;
   hint: string;
   keywords: string;
-  group: "Basic" | "Live" | "Plan";
+  group: "AI" | "Basic" | "Live" | "Plan";
+  /** An action instead of a block: "ai" opens the AI about the page. */
+  action?: "ai";
   make(): Block;
 }
 
 export const SLASH_ITEMS: SlashItem[] = [
+  { id: "ai", label: "Ask AI", hint: "Plan, write or organise this page with your AI", keywords: "ai ask assistant write plan summarise organise help",
+    group: "AI", action: "ai", make: () => textBlock("p") },
   { id: "p", label: "Text", hint: "Plain writing", keywords: "text paragraph", group: "Basic", make: () => textBlock("p") },
   { id: "h1", label: "Heading 1", hint: "Big section heading", keywords: "title h1 heading", group: "Basic", make: () => textBlock("h1") },
   { id: "h2", label: "Heading 2", hint: "Medium heading", keywords: "h2 heading subtitle", group: "Basic", make: () => textBlock("h2") },
@@ -411,4 +419,37 @@ export function monthGrid(year: number, month: number): Array<Array<Date | null>
 export function sameDay(a: Date, ms: number): boolean {
   const b = new Date(ms);
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// ------------------------------------------------------------------------------------------------ merging a page changed elsewhere
+
+/**
+ * A three-way merge, block by block, for a save refused because the page changed elsewhere (another window, the AI):
+ * blocks I changed keep my version; blocks only they changed keep theirs; blocks I added are placed after the block
+ * they followed; blocks I deleted stay deleted unless they changed them. Their order wins.
+ */
+export function mergeBlocks(base: Block[], mine: Block[], theirs: Block[]): Block[] {
+  const key = (b: Block) => JSON.stringify(b);
+  const baseById = new Map(base.map((b) => [b.id, key(b)]));
+  const mineById = new Map(mine.map((b) => [b.id, b]));
+  const theirIds = new Set(theirs.map((b) => b.id));
+  const out: Block[] = [];
+  for (const t of theirs) {
+    const m = mineById.get(t.id);
+    const was = baseById.get(t.id);
+    if (!m) {
+      if (was !== undefined && was === key(t)) continue;
+      out.push(t);
+      continue;
+    }
+    out.push(was !== undefined && key(m) !== was ? m : t);
+  }
+  mine.forEach((m, i) => {
+    if (theirIds.has(m.id)) return;
+    if (baseById.has(m.id) && baseById.get(m.id) === key(m)) return;
+    let at = -1;
+    for (let j = i - 1; j >= 0 && at < 0; j--) at = out.findIndex((o) => o.id === mine[j].id);
+    out.splice(at + 1, 0, m);
+  });
+  return out;
 }

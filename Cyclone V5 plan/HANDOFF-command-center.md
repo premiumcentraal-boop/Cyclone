@@ -18,6 +18,14 @@
   - Workspace code lives in `apps/glass/src/workspace/`; the pages store is `command/pages.py`.
   - Plan 35 is the source of truth for the order of the next runs (the rest of the App Manual, then parallel sessions).
     The run list below keeps its original numbers.
+- **Update:** alpha.62 (`5.0.0-alpha.62.dev1`, Glass `1.0.0-alpha.38`, code 207) is the AI project manager (C4, first
+  part; plan 33 §12.6), which the owner asked for.
+  - `command/ai.py` holds the OpenRouter key (write-only, in `connections.grants` under `ai:openrouter`), the model
+    list, caps, conversations, the fixed tools and proposals.
+  - `command/pagetext.py` converts pages to and from Markdown.
+  - In Glass, `workspace/aiPanel.ts` and `workspace/aiSettings.ts` never name a provider in code; the name reaches them
+    as data (the Glass guard).
+  - Tests use a scripted OpenRouter (`tests/test_command_ai.py`); nothing calls the real one in CI.
 
 Read this whole file once. Then work the plan in plan 35, one release per run, the way it is described here.
 
