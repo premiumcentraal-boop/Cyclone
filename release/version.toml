@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.68 dev1: steer, queue, parallel and plan diversions (plan 38) - typed text sent while Cyclone works offers Steer (or Answer), Queue and Parallel for the task being viewed, an empty Ask bar is a real pause and a two-tap stop, the model changes course on its own and every change is a plan version the task card draws as a branch, and serious actions after a diversion still wait for the owner.
+# Cyclone V5 alpha.69 dev1: the AI screen redesign (R3) - the Cyclone rain behind dark smoked glass that takes its colours, the model selector in the header, a greeting with suggestions and recent runs, a menu drawer and a logo panel, and an optional background video the owner picks from their phone.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.68.dev1"
+product_version = "5.0.0-alpha.69.dev1"
 channel = "development"
-android_version_code = 213
+android_version_code = 214
 python_version = "5.0.0-alpha.68.dev1"
 
 [components]
-mobile = "5.0.0-alpha.68.dev1"
+mobile = "5.0.0-alpha.69.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha68-dev1-steer"
+candidate_generation = "cyclone-v5-alpha69-dev1-ai-screen"
