@@ -139,7 +139,7 @@ object DriverOverlay {
         private val lifecycles = mutableListOf<OverlayComposeLifecycle>()
         private val buttonPx = ((buttonDp + DRIVER_GLOW.value * 2) * density).toInt()
 
-        private val button = ButtonHost(context).apply { addView(compose { ButtonContent() }) }
+        private val button = ButtonHost(context).also { host -> host.addView(compose(host) { ButtonContent() }) }
         private val buttonParams = WindowManager.LayoutParams(buttonPx, buttonPx, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT)
             .apply { gravity = Gravity.TOP or Gravity.START }
@@ -215,8 +215,18 @@ object DriverOverlay {
             place()
         }
 
-        private fun compose(content: @Composable () -> Unit): ComposeView {
+        /**
+         * A ComposeView for one overlay window. Compose looks up the lifecycle from the window's root view, so when the
+         * ComposeView sits inside a host (the button's touch frame), the host carries the owners too; without them
+         * the first frame throws and takes the whole app down.
+         */
+        private fun compose(host: View? = null, content: @Composable () -> Unit): ComposeView {
             val owner = OverlayComposeLifecycle().also { it.start(); lifecycles += it }
+            host?.apply {
+                setViewTreeLifecycleOwner(owner)
+                setViewTreeViewModelStoreOwner(owner)
+                setViewTreeSavedStateRegistryOwner(owner)
+            }
             return ComposeView(context).apply {
                 setViewTreeLifecycleOwner(owner)
                 setViewTreeViewModelStoreOwner(owner)
