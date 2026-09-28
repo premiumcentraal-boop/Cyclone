@@ -206,7 +206,6 @@ internal fun V39AiChatPage(
     val foregroundSnapshot = remember(foregroundActivity) { OverlayChromeRuntime.snapshot() }
     val foregroundWorking = task == null && foregroundActivity in setOf(OverlayChromeState.WORKING, OverlayChromeState.LIVE)
     val attached by PendingTaskAttachment.present.collectAsState()
-    val backdrop = LocalCycloneLiquidBackdrop.current
     val prefs = context.getSharedPreferences(V39AiChatContract.PREFS, Context.MODE_PRIVATE)
     val scope = rememberCoroutineScope()
     val session = V39AiChatSessionRuntime
