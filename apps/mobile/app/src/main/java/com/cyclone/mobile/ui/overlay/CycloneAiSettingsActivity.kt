@@ -273,6 +273,32 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
+                // Plan 37: the mission workspace, off until the Lab shows it wins every suite.
+                var workspace by remember { mutableStateOf(com.cyclone.mobile.mind.mission.MindMissions.workspaceEnabled(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Mission workspace (new)", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Cyclone keeps a live plan, what it collected and where it is in view for the AI, folds apps it has left into " +
+                                "a short journal, and checks each step against what it expected. Faster, cheaper long tasks across apps. " +
+                                "Off by default while it is being measured.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = workspace,
+                        onCheckedChange = { on ->
+                            workspace = on
+                            com.cyclone.mobile.mind.mission.MindMissions.setWorkspaceEnabled(context, on)
+                        },
+                    )
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
                 // Plan 26 §6: tasks at the same time, behind the one on your screen.
                 var parallel by remember { mutableStateOf(com.cyclone.mobile.mind.mission.MindMissions.parallelEnabled(context)) }
                 val slots = remember { com.cyclone.mobile.mind.mission.MindMissions.behindSlots(context) }

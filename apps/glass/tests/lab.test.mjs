@@ -56,6 +56,8 @@ test("variants send only what was filled in; helpers read the gateway's numbers"
     { name: "B", modelId: "vendor/model", effort: "low", workingMinutes: 10, marks: false, freshMemory: false, promptAddendum: "Prefer links." });
   assert.deepEqual(cleanVariant({ name: "map off", useMap: false }), { name: "map off", useMap: false });
   assert.deepEqual(cleanVariant({ name: "map on", useMap: true }), { name: "map on" });
+  assert.deepEqual(cleanVariant({ name: "ws", context: "workspace" }), { name: "ws", context: "workspace" });
+  assert.deepEqual(cleanVariant({ name: "odd", context: null }), { name: "odd" });
   assert.equal(rateText(0.8, [0.49, 0.94]), "80% (49–94)");
   assert.equal(rateText(null), "—");
   assert.equal(estimate(CATALOG.missions, 2, 3).runs, 18);

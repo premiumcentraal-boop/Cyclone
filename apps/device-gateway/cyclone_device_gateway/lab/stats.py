@@ -82,6 +82,32 @@ def arm_stats(trials: list[dict[str, Any]]) -> dict[str, Any]:
         "categories": dict(Counter(t.get("category") for t in scored if t.get("verdict") == "fail")),
         "causes": dict(Counter(t.get("cause") for t in scored if t.get("verdict") == "fail").most_common(8)),
         "tools": dict(sum((Counter(m.get("toolCalls") or {}) for m in metrics), Counter()).most_common(12)),
+        "promptTokens": _num(((_record(t).get("usage") or {}).get("promptTokens")) for t in scored),
+        "workspace": _workspace([((m.get("workspace") or {}).get("metrics") or {}) for m in metrics]),
+    }
+
+
+def _workspace(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Plan 37: what the mission workspace did in an arm (absent for classic arms)."""
+    items = [w for w in items if w]
+    if not items:
+        return None
+    checks = Counter()
+    for w in items:
+        checks.update({k: int(v) for k, v in (w.get("checks") or {}).items() if isinstance(v, (int, float))})
+    judged = checks["held"] + checks["missed"] + checks["unchanged"]
+    done = Counter()
+    for w in items:
+        done.update({k: int(v) for k, v in (w.get("done") or {}).items() if isinstance(v, (int, float))})
+    return {
+        "missions": len(items),
+        "stays": _num(w.get("stays") for w in items),
+        "expectHitRate": checks["held"] / judged if judged else None,
+        "checks": dict(checks),
+        "surprises": _num(w.get("surprises") for w in items),
+        "diversions": sum(int(w.get("diversions") or 0) for w in items),
+        "folded": _num(w.get("folded") for w in items),
+        "done": dict(done),
     }
 
 

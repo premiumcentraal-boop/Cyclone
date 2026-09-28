@@ -46,6 +46,12 @@ class PhoneMindToolbox(
     private val glossary: ((String) -> String?)? = null,
     /** The App Manual (plan 36 §8): abilities, their search and checked walks; null when the manual is off. */
     private val manual: com.cyclone.mobile.manual.MindManualPort? = null,
+    /**
+     * Plan 37: the mission workspace. With it, tools gain optional arguments (no new tools), screens say what changed
+     * and whether an expectation held, the app's section comes back on every visit, and notes, plan and done checks
+     * feed the live state. Null keeps the classic toolbox exactly as before.
+     */
+    private val workspace: com.cyclone.mobile.mind.workspace.MissionWorkspace? = null,
 ) : MindToolbox {
     /** The phone the Mind acts on; swapped by [rebind] when the mission changes plane. */
     @Volatile private var env: CycloneAgentEnvironmentApi = env
@@ -71,7 +77,11 @@ class PhoneMindToolbox(
             in MANUAL_TOOLS -> manual != null
             else -> true
         }
-    }
+    }.let { specs -> if (workspace != null) workspaceSpecs ?: com.cyclone.mobile.mind.workspace.WorkspaceSpecs.extend(specs).also { workspaceSpecs = it } else specs }
+
+    private var workspaceSpecs: List<MindToolSpec>? = null
+    /** Installed apps as (label, package), for expectation checks; read once per mission. */
+    private val appPairs: List<Pair<String, String>> by lazy { runCatching { device.apps().map { it.label to it.packageName } }.getOrDefault(emptyList()) }
 
     override fun situation(): String {
         val observed = env.observe(goal)
@@ -96,8 +106,19 @@ class PhoneMindToolbox(
         runCatching { planes?.before(call.name, arguments) }.getOrNull()?.let { refusal ->
             return noted(MindToolResult(refusal, "${call.name}: not run here", ok = false))
         }
+        val target = workspace?.let { workspaceTarget(call.name, arguments) }
+        workspace?.let { ws ->
+            if (call.name in com.cyclone.mobile.mind.workspace.WorkspaceSpecs.MOVE_TOOLS) {
+                ws.movingOnPurpose(arguments.optString("carry").ifBlank { arguments.optString("why") }.takeIf { it.isNotBlank() })
+            }
+            if (call.name in com.cyclone.mobile.mind.workspace.WorkspaceSpecs.EXPECT_TOOLS) {
+                ws.beginAction(call.name, arguments.optString("expect").takeIf { it.isNotBlank() },
+                    arguments.optInt("step", 0).takeIf { it > 0 })
+            }
+        }
         val result = phoneStep(call, arguments)
         runCatching { planes?.after(call.name, result) }
+        workspace?.let { ws -> runCatching { if (result.changedScreen || !result.ok) ws.acted(call.name, target, result.ok) } }
         return noted(result)
     }
 
@@ -157,7 +178,7 @@ class PhoneMindToolbox(
         "back" -> act("phone.back", JSONObject(), "Pressed Back")
         "home" -> act("phone.home", JSONObject(), "Went to the Home screen")
         "wait" -> waitFor(arguments)
-        "open_app" -> openApp(arguments.optString("app"))
+        "open_app" -> openApp(arguments.optString("app"), arguments.optBoolean("resume"))
         "open_link" -> openLink(arguments.optString("url"))
         "open_settings" -> openSettings(arguments)
         "set_timer" -> setTimer(arguments)
@@ -166,11 +187,11 @@ class PhoneMindToolbox(
         "go_to" -> arguments.optString("ability").takeIf { it.isNotBlank() }?.let(::goToAbility) ?: goTo(arguments.optString("screen"))
         "abilities_find" -> abilitiesFind(arguments.optString("goal"), arguments.optString("app"))
         "how_to_find" -> howToFind(arguments.optString("list"), arguments.optString("app"))
-        "recall" -> recall(arguments.optString("topic").ifBlank { goal })
+        "recall" -> recallWorkspace(arguments) ?: recall(arguments.optString("topic").ifBlank { goal })
         "owner_ask" -> ownerAsk(arguments)
         "vault_fill" -> vaultFill(arguments)
         "plan_update" -> planUpdate(arguments)
-        "note" -> MindToolResult("Noted.", "note: ${arguments.optString("text").take(160)}")
+        "note" -> note(arguments)
         "remember" -> remember(arguments.optString("fact"))
         "forget" -> forget(arguments.optString("id"))
         "tap_point" -> tapPoint(arguments)
@@ -203,7 +224,36 @@ class PhoneMindToolbox(
         val bound = refs.bind(page, controls)
         fieldValues = bound.filter { it.editable && !it.password }
             .mapNotNull { ref -> env.fieldValue(ref.elementId)?.let { ref.elementId to it } }.toMap()
+        workspace?.let { ws -> runCatching { ws.observe(facts(page, bound)) } }
         return bound
+    }
+
+    /** Plan 37: the facts of this screen the workspace compares. Password fields are never read; values are scrubbed. */
+    private fun facts(page: AgentPageCard, bound: List<MindRef>): com.cyclone.mobile.mind.workspace.ScreenFacts {
+        val labels = bound.map { it.label }.filter { it.isNotBlank() }
+        val states = bound.mapNotNull { ref ->
+            val evidence = controlsById[ref.elementId]?.evidence ?: return@mapNotNull null
+            when {
+                evidence.optBoolean("checkable") -> ref.label to if (evidence.optBoolean("checked")) "on" else "off"
+                evidence.optBoolean("selected") -> ref.label to "selected"
+                else -> null
+            }
+        }.filter { it.first.isNotBlank() }.toMap()
+        val fields = bound.filter { it.editable && !it.password }.associate { ref ->
+            ref.label to com.cyclone.mobile.mind.mission.MindRedaction.scrub(fieldValues[ref.elementId].orEmpty()).take(120)
+        }.filterKeys { it.isNotBlank() }
+        return com.cyclone.mobile.mind.workspace.ScreenFacts(page.packageName, appLabel(page.packageName) ?: page.packageName,
+            page.legacyPage?.title?.takeIf { it.isNotBlank() }, (MindScreen.textLines(page) + labels).distinct().take(80), fields, states)
+    }
+
+    /** What an action worked on, in the app's own words, for the stay's journal block. */
+    private fun workspaceTarget(tool: String, arguments: JSONObject): String? = when {
+        arguments.optString("ref").isNotBlank() -> refs.resolve(arguments.optString("ref"))?.label
+        tool == "open_app" -> arguments.optString("app")
+        tool == "open_link" -> arguments.optString("url").take(60)
+        tool == "type_text" -> arguments.optString("text").take(30)
+        tool == "go_to" -> arguments.optString("ability").ifBlank { arguments.optString("screen") }
+        else -> null
     }
 
     private fun observeAndRender(header: String?, image: Boolean = false): MindToolResult {
@@ -218,8 +268,16 @@ class PhoneMindToolbox(
         val bound = bind(page)
         val rendered = MindScreen.render(page, bound, appLabel(page.packageName), controlsById, fieldValues)
         val hint = runCatching { page.legacyPage?.let { learned?.invoke(it.packageName, it.pageKey) } }.getOrNull()
-        val card = runCatching { page.legacyPage?.let { mapCard(it.packageName, it.pageKey) } }.getOrNull()
-        val text = listOfNotNull(header, rendered, hint, card).joinToString("\n\n")
+        val ws = workspace
+        val card = runCatching {
+            page.legacyPage?.let { legacy ->
+                // Plan 37: in a workspace run the app's section comes on arrival in an app, also on every return.
+                if (ws == null) mapCard(legacy.packageName, legacy.pageKey)
+                else if (ws.takeSection(page.packageName)) mapCard(legacy.packageName, legacy.pageKey, always = true) else null
+            }
+        }.getOrNull()
+        val lines = ws?.let { runCatching { it.screenLines(facts(page, bound), appPairs) }.getOrNull() }.orEmpty()
+        val text = listOfNotNull(header, rendered, lines.takeIf { it.isNotEmpty() }?.joinToString("\n"), hint, card).joinToString("\n\n")
         val brief = (header ?: "Read the screen") + " — " + MindScreen.brief(page, appLabel(page.packageName))
         val dataUrl = observed.image?.optString("pngBase64")?.takeIf { it.isNotBlank() }?.let { png -> prepareShot(page, bound, png, observed.image!!) }
         return MindToolResult(text, brief.take(200), imageDataUrl = dataUrl)
@@ -230,13 +288,13 @@ class PhoneMindToolbox(
     /** The app's map, the first time the Mind is in an app Cyclone has learned. */
     private val manualShown = HashSet<String>()
 
-    private fun mapCard(packageName: String, pageKey: String): String? {
+    private fun mapCard(packageName: String, pageKey: String, always: Boolean = false): String? {
         if (maps == null && manual == null) return null
         val map = maps?.map(packageName)?.takeIf { it.moves.isNotEmpty() }
         val words = runCatching { glossary?.invoke(packageName) }.getOrNull()?.takeIf { it.isNotBlank() }
         val excerpt = runCatching { manualExcerpt(packageName) }.getOrNull()
         if (map == null && words == null && excerpt == null) return null
-        if (!(maps?.firstVisit(packageName) ?: manualShown.add(packageName))) return null
+        if (!always && !(maps?.firstVisit(packageName) ?: manualShown.add(packageName))) return null
         return listOfNotNull(map?.card(appLabel(packageName) ?: packageName, map.locate(pageKey)), words, excerpt).joinToString("\n\n")
     }
 
@@ -255,7 +313,10 @@ class PhoneMindToolbox(
     /** The few manual lines that fit the mission's goal, shown with the map the first time in an app. */
     private fun manualExcerpt(packageName: String): String? {
         val view = manual?.view(packageName) ?: return null
-        val hits = view.index.search(goal, 5).filter { it.score >= 0.34 }
+        // Plan 37: in a workspace run the manual lines follow the plan step the mission is on, then the goal.
+        val step = workspace?.currentStep()?.text
+        val hits = (step?.let { view.index.search(it, 3).filter { hit -> hit.score >= 0.34 } }.orEmpty() +
+            view.index.search(goal, 5).filter { it.score >= 0.34 }).distinctBy { it.ability.id }.sortedByDescending { it.score }.take(6)
         return ManualTexts.excerpt(view, hits) { handle(packageName, it.id) }
     }
 
@@ -582,7 +643,7 @@ class PhoneMindToolbox(
         return observeAndRender("Waited $seconds s.").copy(changedScreen = true)
     }
 
-    private fun openApp(requested: String): MindToolResult {
+    private fun openApp(requested: String, resume: Boolean = false): MindToolResult {
         if (requested.isBlank()) return MindToolResult.error("app is required (a name or a package).")
         val apps = device.apps()
         val wanted = requested.trim().lowercase()
@@ -596,7 +657,11 @@ class PhoneMindToolbox(
             "\"$requested\" is not installed on this phone (or has no launcher icon). apps_list shows what is installed; " +
                 "to install an app, open its Play Store page with open_link market://details?id=<package> or search the Play Store.",
             "open_app \"$requested\": not installed", ok = false)
-        return act("phone.open_app", JSONObject().put("package", app.packageName), "Opened ${app.label}")
+        val opened = act("phone.open_app", JSONObject().put("package", app.packageName), "Opened ${app.label}")
+        // Plan 37: resume shows where this mission left the app, so the model can go back there (go_to or by hand).
+        val left = if (resume) workspace?.leftOf(app.packageName) else null
+        return if (left == null) opened else opened.copy(text = opened.text +
+            "\n\nWhere this mission left ${app.label} (stay ${left.first}): ${left.second}")
     }
 
     private fun openLink(raw: String): MindToolResult {
@@ -760,7 +825,7 @@ class PhoneMindToolbox(
                 params.put("elementId", again.elementId)
             }
         }
-        owner.status(done)
+        owner.status(workspace?.narrate(done) ?: done)
         fresh = false
         // Read before the tap: what is in the message box now is what a send tap sends.
         val boxBefore = composerDraft()
@@ -772,9 +837,14 @@ class PhoneMindToolbox(
         // A send from a chat's message box: the approval carries the box's exact text, read live, so the owner (or Drive,
         // after reading it back word for word) approves exactly what the tap sends.
         val draft = if (gated) boxBefore else null
+        // Plan 37 §6: when the owner named a recipient and this chat is another, the approval card says so.
+        val chat = screen?.legacyPage?.title
+        val chatApp = appLabel(screen?.packageName.orEmpty())
+        val changed = if (gated) workspace?.let { ws -> runCatching { ws.approvalNote(chat, chatApp) }.getOrNull() } else null
+        val asked = (changed?.let { "$it " }.orEmpty()) + done.replaceFirstChar { it.lowercase() }
         val approval = if (!gated) null else if (draft != null)
-            owner.awaitApproval(done.replaceFirstChar { it.lowercase() }, ownerTimeoutMs, MindSend(draft, "", appLabel(screen?.packageName.orEmpty()) ?: ""))
-            else owner.awaitApproval(done.replaceFirstChar { it.lowercase() }, ownerTimeoutMs)
+            owner.awaitApproval(asked, ownerTimeoutMs, MindSend(draft, "", chatApp ?: ""))
+            else owner.awaitApproval(asked, ownerTimeoutMs)
         if (approval != null && !(approval.outcome == MindApproval.NOT_PENDING && envelope.errorClass == AgentFailureClass.POLICY_DENIED)) {
             waited += approval.waitedMs
             when (approval.outcome) {
@@ -793,6 +863,7 @@ class PhoneMindToolbox(
                         retryParams.put("elementId", again.elementId)
                     }
                     envelope = env.act(tool, retryParams, goal)
+                    if (draft != null && envelope.androidExecutionOk) workspace?.sent(chatApp.orEmpty(), chat.orEmpty())
                 }
                 MindApproval.DECLINED -> return finishAction(tool, null, approval.change?.let { change ->
                     "Not sent yet: the owner wants a change first: \"$change\". Edit the message box to make exactly that change, then press send again."
@@ -1129,19 +1200,73 @@ class PhoneMindToolbox(
 
     private fun planUpdate(arguments: JSONObject): MindToolResult {
         val steps = arguments.optJSONArray("steps") ?: return MindToolResult.error("steps is required.")
-        plan = (0 until steps.length()).mapNotNull { index ->
-            val row = steps.optJSONObject(index) ?: return@mapNotNull steps.optString(index).takeIf(String::isNotBlank)?.let { MindPlanStep(it.take(140), "todo") }
+        val detailed = (0 until steps.length()).mapNotNull { index ->
+            val row = steps.optJSONObject(index) ?: return@mapNotNull steps.optString(index).takeIf(String::isNotBlank)?.let {
+                com.cyclone.mobile.mind.workspace.MissionWorkspace.Step(it.take(140), "todo") }
             val text = row.optString("step").trim().take(140)
-            if (text.isBlank()) null else MindPlanStep(text, row.optString("status").lowercase().takeIf { it in MindPlanStep.STATUSES } ?: "todo")
+            if (text.isBlank()) null else com.cyclone.mobile.mind.workspace.MissionWorkspace.Step(text,
+                row.optString("status").lowercase().takeIf { it in MindPlanStep.STATUSES } ?: "todo",
+                row.optString("app").trim().take(40).takeIf { it.isNotBlank() }, row.optString("why").trim().take(120).takeIf { it.isNotBlank() })
         }.take(20)
+        plan = detailed.map { MindPlanStep(it.text, it.status) }
         owner.plan(plan)
-        return MindToolResult("Plan updated (${plan.size} steps).", "plan: " + plan.joinToString(" · ") { "${it.status}:${it.text.take(40)}" }.take(180))
+        val notes = mutableListOf<String>()
+        workspace?.let { ws ->
+            // Plan 37: never refused; every extra is optional.
+            val before = ws.currentStep()?.text
+            ws.setPlan(detailed)
+            val done = com.cyclone.mobile.mind.workspace.DoneCheck.parse(arguments.optJSONArray("done"))
+            if (done.isNotEmpty()) {
+                ws.setDone(done)
+                owner.status("Done when: " + done.joinToString(" · ") { it.label }.take(200))
+                notes += "Done checks kept (${done.size}); task_finish looks for them across the whole mission."
+            }
+            arguments.optJSONObject("divert")?.let { divert ->
+                val from = divert.optString("from").trim()
+                val to = divert.optString("to").trim()
+                if (from.isNotBlank() && to.isNotBlank()) {
+                    val change = ws.divert(from, to, divert.optString("why"))
+                    owner.diverted(change.from, change.to, change.why)
+                    notes += "Diversion shown to the owner."
+                }
+            }
+            val now = ws.currentStep()
+            if (now != null && now.text != before) {
+                currentPackage()?.let { pkg -> runCatching { manualExcerpt(pkg) }.getOrNull() }?.let { notes += it }
+            }
+        }
+        return MindToolResult((listOf("Plan updated (${plan.size} steps).") + notes).joinToString("\n"),
+            "plan: " + plan.joinToString(" · ") { "${it.status}:${it.text.take(40)}" }.take(180))
+    }
+
+    /** Plan 37: a note is a collected fact the live state keeps through every fold. Secrets are refused. */
+    private fun note(arguments: JSONObject): MindToolResult {
+        val text = arguments.optString("text").trim()
+        val ws = workspace ?: return MindToolResult("Noted.", "note: ${text.take(160)}")
+        if (text.isBlank()) return MindToolResult.error("text is required.")
+        if (MindMemory.looksSecret(text)) return MindToolResult.error("Not noted: it looks like a secret (password, code, key or card/account number).")
+        val entry = ws.collect(arguments.optString("key").takeIf { it.isNotBlank() }, text,
+            appLabel(currentPackage().orEmpty()) ?: currentPackage().orEmpty().ifBlank { "phone" })
+        return MindToolResult("Collected as ${entry.key}; it stays in the live state.", "note ${entry.key}: ${entry.value.take(140)}")
+    }
+
+    /** Plan 37 (D10): recall(turn=…) and recall(stay=…) unfold what the prompt shows folded. */
+    private fun recallWorkspace(arguments: JSONObject): MindToolResult? {
+        val ws = workspace ?: return null
+        val turn = arguments.optInt("turn", 0)
+        val stay = arguments.optInt("stay", 0)
+        if (turn <= 0 && stay <= 0) return null
+        val text = if (stay > 0) ws.recallStay(stay) else ws.recallTurn(turn)
+        return text?.let { MindToolResult(it, if (stay > 0) "recall stay $stay" else "recall turn $turn") }
+            ?: MindToolResult.error(if (stay > 0) "There is no stay $stay in this mission." else "Turn $turn has no results to show.")
     }
 
     private fun finish(arguments: JSONObject): MindToolResult {
         val summary = arguments.optString("summary").trim()
         val evidence = arguments.optString("evidence").trim()
         if (summary.isBlank()) return MindToolResult.error("summary is required.")
+        // Plan 37 §5: one nudge when a done check is nowhere in the mission; a second finish is always accepted.
+        workspace?.let { ws -> runCatching { ws.finishNote(summary) }.getOrNull() }?.let { return MindToolResult(it, "finish: done check not found", ok = false) }
         if (evidence.isBlank() && finishRejections < MAX_FINISH_REJECTIONS) {
             finishRejections++
             return MindToolResult.error("evidence is required: say what on the screen shows the goal is done.")

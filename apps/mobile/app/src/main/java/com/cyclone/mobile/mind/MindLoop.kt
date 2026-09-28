@@ -8,6 +8,8 @@ data class MindBudget(
     val maxTurns: Int = 400,
     val perCallMs: Long = 180_000L,
     val maxContextChars: Int = 150_000,
+    /** Plan 37: the ceiling for workspace runs, which fold per app stay long before this. */
+    val workspaceChars: Int = 100_000,
     val warnBeforeEndMs: Long = 3 * 60_000L,
 )
 
@@ -31,6 +33,8 @@ data class MindCheckpoint(
     val nativeTools: Boolean,
     val modelId: String,
     val conversation: MindConversation,
+    /** Plan 37: the mission workspace's state, when the mission runs with one. */
+    val workspace: org.json.JSONObject? = null,
 )
 
 /** What the loop reports while it runs. Implementations must not block for long. */
@@ -61,6 +65,11 @@ class MindLoop(
     /** Owner messages sent while the mission runs; drained at the start of each turn. */
     private val ownerMessages: () -> List<String> = { emptyList() },
     nativeTools: Boolean = true,
+    /**
+     * Plan 37: the mission workspace. With it, each call ends with the live state (never stored), closed app stays are
+     * folded with a journal block, and the context ceiling is [MindBudget.workspaceChars]. Null runs the classic loop.
+     */
+    private val workspace: com.cyclone.mobile.mind.workspace.MissionWorkspace? = null,
 ) {
     private var model: MindModel = primary
     private var usingBackup = false
@@ -73,6 +82,7 @@ class MindLoop(
     private var warned = false
     private var compactionNoted = false
     private val failures = mutableMapOf<String, Int>()
+    private var workspaceFailed = false
 
     val currentModel: MindModel get() = model
     val nativeToolsActive: Boolean get() = native
@@ -89,6 +99,7 @@ class MindLoop(
             native = native && it.nativeTools
         }
         var silentTurns = 0
+        workspace?.attach { conversation.all() }
         while (true) {
             if (cancelled()) return end(MindStatus.CANCELLED, "Stopped by the owner.", null, conversation)
             if (turn >= budget.maxTurns) return end(MindStatus.OUT_OF_BUDGET, outOfBudget("turn limit reached", conversation), null, conversation)
@@ -104,10 +115,12 @@ class MindLoop(
                 silentTurns = 0
             }
             turn++
-            if (conversation.compact(budget.maxContextChars) > 0 && !compactionNoted) {
+            val ceiling = if (workspace != null) budget.workspaceChars else budget.maxContextChars
+            if (conversation.compact(ceiling) > 0 && !compactionNoted) {
                 compactionNoted = true
                 conversation.add(MindMessage.User(MindPrompt.COMPACTED, origin = MindMessage.User.Origin.HARNESS))
             }
+            workspace?.let { ws -> guarded { ws.beginTurn(turn, conversation.size(), working(), budget.workingMs) } }
             val reply = when (val attempt = ask(conversation, remaining)) {
                 is Attempt.Reply -> attempt.reply
                 is Attempt.Stop -> return end(attempt.status, attempt.summary, null, conversation)
@@ -128,6 +141,10 @@ class MindLoop(
             }
             silentTurns = 0
             val ending = executeCalls(reply.toolCalls, conversation)
+            workspace?.let { ws ->
+                guarded { ws.endTurn(conversation) }
+                if (ending == null) guarded { ws.stepAdvice()?.let { conversation.add(MindMessage.User(it, origin = MindMessage.User.Origin.HARNESS)) } }
+            }
             checkpoint(conversation)
             if (ending != null) return end(
                 if (ending.ending == MindEnding.COMPLETED) MindStatus.COMPLETED else MindStatus.GAVE_UP,
@@ -205,7 +222,8 @@ class MindLoop(
             val left = budget.workingMs - working()
             if (left <= 0) return Attempt.Stop(MindStatus.OUT_OF_BUDGET, outOfBudget("working time used up", conversation))
             listener.onModelStart(turn, model)
-            val request = MindModelRequest(conversation.toWire(native), toolbox.specs(), native,
+            val tail = workspace?.let { ws -> guarded { ws.liveState() } }
+            val request = MindModelRequest(conversation.toWire(native, tail), toolbox.specs(), native,
                 budget.perCallMs.coerceAtMost(left.coerceAtLeast(MIN_CALL_MS)))
             try {
                 return Attempt.Reply(model.complete(request))
@@ -280,7 +298,22 @@ class MindLoop(
     }
 
     private fun checkpoint(conversation: MindConversation) =
-        listener.checkpoint(MindCheckpoint(turn, working(), usage, native, model.id, conversation))
+        listener.checkpoint(MindCheckpoint(turn, working(), usage, native, model.id, conversation,
+            workspace?.let { ws -> guarded { ws.toJson() } }))
+
+    /**
+     * Plan 37: the workspace must never stop a mission. A failure in it is reported once and that part of the turn
+     * runs as a classic one.
+     */
+    private fun <T> guarded(block: () -> T): T? = try {
+        block()
+    } catch (error: Exception) {
+        if (!workspaceFailed) {
+            workspaceFailed = true
+            listener.onNotice(turn, "Mission workspace trouble (${error.javaClass.simpleName}); this turn continues without it.")
+        }
+        null
+    }
 
     private fun end(status: MindStatus, summary: String, evidence: String?, conversation: MindConversation): MindOutcome {
         checkpoint(conversation)

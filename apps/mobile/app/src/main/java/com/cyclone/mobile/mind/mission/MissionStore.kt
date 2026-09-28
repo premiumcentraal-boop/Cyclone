@@ -16,8 +16,10 @@ data class MissionJournal(
     val usage: MindUsage,
     val nativeTools: Boolean,
     val modelId: String,
+    /** Plan 37: the mission workspace, when the mission ran with one. */
+    val workspace: JSONObject? = null,
 ) {
-    fun checkpoint(): MindCheckpoint = MindCheckpoint(turn, workingMs, usage, nativeTools, modelId, conversation)
+    fun checkpoint(): MindCheckpoint = MindCheckpoint(turn, workingMs, usage, nativeTools, modelId, conversation, workspace)
 }
 
 /**
@@ -40,6 +42,7 @@ class MissionStore(private val root: File, private val keep: Int = 40) {
             .put("nativeTools", checkpoint.nativeTools)
             .put("modelId", checkpoint.modelId)
             .put("conversation", redact(checkpoint.conversation).toJournal())
+            .put("workspace", checkpoint.workspace?.let { runCatching { JSONObject(MindRedaction.scrub(it.toString())) }.getOrNull() } ?: JSONObject.NULL)
         write(journal(missionId), json.toString())
     }
 
@@ -55,6 +58,7 @@ class MissionStore(private val root: File, private val keep: Int = 40) {
             usage = MindUsage(usage?.optInt("prompt") ?: 0, usage?.optInt("completion") ?: 0, usage?.optDouble("cost", 0.0) ?: 0.0),
             nativeTools = json.optBoolean("nativeTools", true),
             modelId = json.optString("modelId"),
+            workspace = json.optJSONObject("workspace"),
         )
     }
 

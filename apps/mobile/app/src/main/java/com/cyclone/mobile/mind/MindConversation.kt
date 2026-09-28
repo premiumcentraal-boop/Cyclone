@@ -100,6 +100,41 @@ class MindConversation(initial: List<MindMessage> = emptyList()) {
         return shortened
     }
 
+    /**
+     * Plan 37 (D10): folds messages [from, to) without removing any. Tool results show their one-line brief (their full
+     * text stays in [MindMessage.Tool.full] for recall), screenshots are dropped, provider reasoning is dropped and the
+     * model's own words are trimmed to [keepText] characters. Indices never move, so tool calls keep their results.
+     * Returns how many tool results were folded.
+     */
+    fun fold(from: Int, to: Int, keepText: Int): Int {
+        var folded = 0
+        for (index in from.coerceAtLeast(0) until to.coerceAtMost(messages.size)) {
+            val message = messages[index]
+            messages[index] = when (message) {
+                is MindMessage.Tool -> if (message.compacted) message else { folded++; message.copy(compacted = true) }
+                is MindMessage.User -> if (message.imageDataUrl != null) message.copy(imageDataUrl = null, text = message.text + " [earlier screenshot removed]") else message
+                is MindMessage.Assistant -> message.copy(reasoningDetails = null,
+                    text = if (message.text.length > keepText) message.text.take(keepText) + "…" else message.text)
+                is MindMessage.System -> message
+            }
+        }
+        return folded
+    }
+
+    /** Characters of tool results from [from] on that are still shown in full. */
+    fun unfoldedToolChars(from: Int): Int =
+        messages.drop(from.coerceAtLeast(0)).sumOf { if (it is MindMessage.Tool && !it.compacted) it.full.length else 0 }
+
+    /**
+     * The wire with a trailing message that is rebuilt every turn and never stored (plan 37 §2: the live state). The
+     * stored conversation stays a byte-exact prefix, so provider prompt caching keeps working.
+     */
+    fun toWire(nativeTools: Boolean, tail: String?): JSONArray {
+        val wire = toWire(nativeTools)
+        if (!tail.isNullOrBlank()) wire.put(JSONObject().put("role", "user").put("content", tail))
+        return wire
+    }
+
     /** OpenAI/OpenRouter chat messages. With [nativeTools] false, tool traffic is rendered as plain text turns. */
     fun toWire(nativeTools: Boolean): JSONArray {
         val out = JSONArray()

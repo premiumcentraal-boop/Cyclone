@@ -116,6 +116,9 @@ class MindMemory(private val file: File, private val clock: () -> Long = System:
         const val SCHEMA = "cyclone-mind-memory-v1"
         const val MAX_CHARS = 300
         private val SECRET_WORDS = Regex("(?i)\\b(password|passcode|wachtwoord|pin code|otp|one[- ]time code|verification code|cvv|cvc|api key|secret key|private key|seed phrase|recovery phrase)\\b")
+        /** True when [text] looks like it holds a secret: refused by memory and by the mission workspace alike. */
+        fun looksSecret(text: String): Boolean =
+            com.cyclone.mobile.mind.mission.MindRedaction.scrub(text) != text || SECRET_WORDS.containsMatchIn(text)
         private val STOP = setOf("the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "is", "my", "me", "de", "het", "een", "van", "op", "en", "mijn")
         private fun words(text: String): Set<String> =
             text.lowercase().split(Regex("[^\\p{L}\\p{N}@.]+")).map { it.trim('.') }.filter { it.length >= 2 && it !in STOP }.toSet()

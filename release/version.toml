@@ -1,20 +1,20 @@
-# Cyclone V5 alpha.65 dev1: parallel sessions (plan 26 §6) - one task in front and up to two behind it on background screens of their own (by memory), one shared question queue, per-task notifications with Stop through Task Kit, one Cyclone task per app, and the Command Center sending a phone up to three tasks.
+# Cyclone V5 alpha.66 dev1: the mission workspace (plan 37) - every model call ends with a live state (plan, collected facts, where and the way back, surprises), apps the mission left fold into a journal with recall, actions may say what they expect and are checked, done checks are looked for across the whole mission, diversions are shown; no new tools and no new gates. Off by default for owner missions; a Lab context knob and multiapp/long suites measure it.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.65.dev1"
+product_version = "5.0.0-alpha.66.dev1"
 channel = "development"
-android_version_code = 210
-python_version = "5.0.0-alpha.65.dev1"
+android_version_code = 211
+python_version = "5.0.0-alpha.66.dev1"
 
 [components]
-mobile = "5.0.0-alpha.65.dev1"
+mobile = "5.0.0-alpha.66.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
 # Cyclone Glass web app (apps/glass). Its own line.
-glass = "1.0.0-alpha.39"
-device_gateway = "5.0.0-alpha.65.dev1"
-mcp = "5.0.0-alpha.65.dev1"
+glass = "1.0.0-alpha.40"
+device_gateway = "5.0.0-alpha.66.dev1"
+mcp = "5.0.0-alpha.66.dev1"
 
 [release]
 previous_mobile_version = "4.8.0"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha65-dev1-parallel-sessions"
+candidate_generation = "cyclone-v5-alpha66-dev1-mission-workspace"

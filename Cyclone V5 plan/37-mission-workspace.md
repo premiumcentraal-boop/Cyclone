@@ -1,6 +1,6 @@
 # 37 — The mission workspace: structured context that makes a run feel like it understands
 
-**Status:** plan, 2026-09-28, revised the same day after a flexibility review (§15): guidance instead of gates, no new
+**Status:** plan, 2026-09-28, revised the same day after a flexibility review (§15). **W1 and W2 built in alpha.66 (§16).** The revisions: guidance instead of gates, no new
 tools (existing ones gain optional arguments), nothing scrapped (folded and recallable). Four build runs (W1–W4, §12),
 inserted before fleet health in plan 35. Builds on the
 Mind (plan 16), Hands (21), planes (25–28), direct actions (29), the App Manual (36) and parallel sessions (26 §6).
@@ -428,11 +428,11 @@ phone?".
 | Run | Release | Delivers | Exit criteria |
 |---|---|---|---|
 | **W1** | **alpha.66: Mission workspace** | Modules 1–8 with budgets and caching; app stays with transient surfaces and hysteresis, journal blocks, `open_app(why, carry, resume)` and `recall(turn, stay)`; the ledger, where-line and loop line; module 7 on every return; plan `app`/`why`/`divert`; diversions (minor, declared, shown on the existing approvals) with narration, plan card and journal chips; the setting (off) and the Lab `context` knob; suites `multiapp` and `long`; stays in the run record and Glass inspector | All unit tests and guards; Lab: no regression on `core` with the workspace on; the first `multiapp`/`long` numbers published in the release notes |
-| **W2** | **alpha.67: Expect and done** | `step`/`expect` on screen-changing tools, `ExpectCheck`, `ScreenDelta`, surprises and the step note; `plan_update(done)`, the harness's draft and `DoneCheck` across the whole mission on `task_finish`; expect hit rate and done-check metrics in the Lab and Glass | Lab: expect hit rate reported; done-check pass rate ≥95% on completed missions; still no regression |
-| **W3** | **alpha.68: People and notes** | `OwnerNotes` (encrypted), People & notes on the phone, proposals and suggestions, `Resolver`, the send check, Glass read-only view; the `people` suite | `people` suite with 0 wrong recipients; privacy guards; canary absent everywhere |
-| **W4** | **alpha.69: Recipes, traps, speed; promotion** | `MissionRecipes`, `AppTraps`, prefetch, `cache_control` breakpoints, cached-token metrics; the promotion run of §11 and, if it passes, the workspace becomes the default for owner missions | The §11 promotion rule holds for the owner's model and its backup |
+| **W2** | **alpha.66 (with W1): Expect and done** | `step`/`expect` on screen-changing tools, `ExpectCheck`, `ScreenDelta`, surprises and the step note; `plan_update(done)`, the harness's draft and `DoneCheck` across the whole mission on `task_finish`; expect hit rate and done-check metrics in the Lab and Glass | Lab: expect hit rate reported; done-check pass rate ≥95% on completed missions; still no regression |
+| **W3** | **alpha.67: People and notes** | `OwnerNotes` (encrypted), People & notes on the phone, proposals and suggestions, `Resolver`, the send check, Glass read-only view; the `people` suite | `people` suite with 0 wrong recipients; privacy guards; canary absent everywhere |
+| **W4** | **alpha.68: Recipes, traps, speed; promotion** | `MissionRecipes`, `AppTraps`, prefetch, `cache_control` breakpoints, cached-token metrics; the promotion run of §11 and, if it passes, the workspace becomes the default for owner missions | The §11 promotion rule holds for the owner's model and its backup |
 
-Fleet health and alerts (plan 33 §10–11, planned as alpha.66) moves to **alpha.70**; plan 35 is renumbered.
+Fleet health and alerts (plan 33 §10–11, planned as alpha.66) moves to **alpha.69**; plan 35 is renumbered.
 
 Every release states physical acceptance as owed until the owner tests it on the Pixel.
 
@@ -492,4 +492,34 @@ today, and at the end three labelled blocks that answer the questions it would o
 plan, what did I already get, where am I and how do I get back, what is this app like around here). Nothing in them
 has to be obeyed. The Lab rules (§11) make "not more turns on `core`" and "≤2% false misses" hard conditions, so
 structure that gets in the way cannot become the default.
+
+## 16. As built (alpha.66: W1 + W2)
+
+W1 (the workspace) and W2 (expect and done) shipped together as alpha.66, behind **Settings → AI → Mission workspace
+(new)** (off) and the Lab `context` knob (absent = classic).
+
+**Built:**
+- `mind/workspace/`: `MissionWorkspace` (stays with surfaces and hysteresis, ledger, plan, done checks, diversions,
+  surprises, folding with journal blocks, recall, live state, metrics, resume), `Surfaces`, `ScreenFacts`/`ScreenDelta`,
+  `ExpectCheck` (conservative, whole-token handles), `DoneCheck`, `WorkspaceSpecs` (optional arguments only).
+- `MindConversation.fold`/`unfoldedToolChars`/`toWire(native, tail)`; `MindLoop` (`workspace`, `workspaceChars`
+  100k, the live state as the last message, `endTurn` folding, step advice, every call `guarded`); the workspace in
+  the mission journal (redacted) for resume.
+- `PhoneMindToolbox`: facts per observation, "Changed:"/"Check:" under screens, the app's section on every stay,
+  manual lines following the plan step, `open_app(why, carry, resume)`, `recall(turn, stay)`, `note(key)` as ledger
+  (secrets refused), `plan_update(app, why, done, divert)`, the done nudge in `task_finish`, the approval line and the
+  sends it records, narration on the task card.
+- `MindOwnerPort.diverted` (task card line + mission event); `MindPrompt.workspaceRules()`.
+- Lab: `MindLabVariant.context`, gateway `CONTEXTS`, suites `multiapp` (6) and `long` (5), arm stats `workspace`
+  (expect hit rate, stays, diversions, done) and `promptTokens`; Glass Lab toggle and arm line.
+
+**Differences from the plan above:**
+- **The screen stays in the newest tool result** (as before) instead of a rebuilt module 8; the live state follows it
+  as the last message. The effect is the same (one full screen, the live state last) with no duplication.
+- **The app section is part of the arrival screen's result**, so it folds with its stay; it returns on each new stay.
+- **Diversions at approvals** ride on the existing card (§6 as revised); there is no separate card.
+
+**Not yet (W3–W4 and small follow-ups):** People & notes, recipes and traps, prefetch, `cache_control` breakpoints,
+a harness-drafted done check, and the stays timeline in Glass's run inspector (the record is already in the mission
+metrics as `workspace`).
 

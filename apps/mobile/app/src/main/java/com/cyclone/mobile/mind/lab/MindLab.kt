@@ -39,6 +39,8 @@ data class MindLabVariant(
      * lab runs on the screen (as before), so older experiments measure the same thing.
      */
     val plane: String? = null,
+    /** Plan 37: classic or workspace context. Null keeps lab runs classic, so older experiments measure the same thing. */
+    val context: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
@@ -50,9 +52,13 @@ data class MindLabVariant(
         .put("promptAddendum", promptAddendum)
         .put("useMap", useMap)
         .put("plane", plane ?: JSONObject.NULL)
+        .put("context", context ?: JSONObject.NULL)
 
     companion object {
-        val KEYS = setOf("name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane")
+        val KEYS = setOf("name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane", "context")
+        const val CLASSIC = "classic"
+        const val WORKSPACE = "workspace"
+        val CONTEXTS = setOf(CLASSIC, WORKSPACE)
         val PLANES = setOf("automatic", "screen", "background")
         private val NAME = Regex("^[A-Za-z0-9 ._-]{1,40}$")
         private val MODEL = Regex("^[a-z0-9][a-z0-9._-]{0,60}/[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$")
@@ -81,8 +87,10 @@ data class MindLabVariant(
             require(!INLINE_SECRET.containsMatchIn(addendum)) { "Do not put secrets in a lab prompt." }
             val plane = json.optNullableString("plane")
             require(plane == null || plane in PLANES) { "variant.plane must be automatic, screen or background." }
+            val context = json.optNullableString("context")
+            require(context == null || context in CONTEXTS) { "variant.context must be classic or workspace." }
             MindLabVariant(name, model, effort, minutes, json.optBooleanStrict("marks", true), json.optBooleanStrict("freshMemory", true), addendum,
-                json.optBooleanStrict("useMap", true), plane)
+                json.optBooleanStrict("useMap", true), plane, context)
         }
 
         private fun JSONObject.optNullableString(key: String): String? =
@@ -175,8 +183,12 @@ class MissionMetrics(private val clock: () -> Long = System::currentTimeMillis) 
 
     override fun checkpoint(checkpoint: MindCheckpoint) = Unit
 
+    /** Plan 37: the mission workspace's record (stays, checks, diversions, done checks), when the mission has one. */
+    @Volatile var workspace: (() -> JSONObject?)? = null
+
     fun toJson(): JSONObject = synchronized(lock) {
         JSONObject()
+            .put("workspace", workspace?.let { runCatching { it() }.getOrNull() } ?: JSONObject.NULL)
             .put("schema", SCHEMA)
             .put("turns", turns)
             .put("toolCalls", JSONObject(calls as Map<*, *>))

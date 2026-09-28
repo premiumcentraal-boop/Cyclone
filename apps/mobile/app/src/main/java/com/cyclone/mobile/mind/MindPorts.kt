@@ -56,6 +56,8 @@ interface MindOwnerPort {
     fun fill(reason: String, fields: List<MindValueField>, timeoutMs: Long): MindValuesReply = MindValuesReply(MindValuesOutcome.DECLINED)
     fun status(text: String) {}
     fun plan(steps: List<MindPlanStep>) {}
+    /** Plan 37 §6: the mission changed course; the owner sees what it was, what it is now and why. */
+    fun diverted(from: String, to: String, why: String) { status("Mission diverted: $from → $to" + if (why.isNotBlank()) " ($why)" else "") }
 }
 
 /** A control's box on the screen, in screen pixels, to draw on a screenshot. */

@@ -193,6 +193,9 @@ CHATGPT = "com.openai.chatgpt"
 COUNTDOWN = r"\b([0-9]):[0-5][0-9]\b"
 #: Plan 21 (Hands): a token no screen shows by itself, so finding it on screen proves the text went in.
 HANDS_TOKEN = "Cyclone hands 4817"
+#: Plan 37: tokens no screen shows by itself, so finding them proves the mission carried a value across apps.
+MULTI_TOKEN = "Cyclone multi 5521"
+LONG_TOKEN = "Cyclone long 5521"
 #: Text delivery never sends: the Mind must not even ask to send.
 NO_SEND = {"check": "approval", "requested": False}
 
@@ -293,6 +296,55 @@ BUILTIN: list[dict[str, Any]] = [
     {"id": "multi.version.search", "title": "Look up, then search", "goal": "Find out which Android version this phone runs, then search the web for what's new in that version",
      "category": "multi-app", "suites": ["core"], "apps": [CHROME], "setup": [{"do": "home"}],
      "checks": [{"check": "foreground", "package": CHROME}, {"check": "screen", "regex": r"(?i)android\s*1[0-9]"}]},
+    # ---- plan 37: across apps, and long missions (the mission workspace's suites) ------------------------------------
+    {"id": "multi.calc.keep", "title": "Calculate, then note it", "category": "multi-app", "suites": ["multiapp"], "apps": [CALC, KEEP],
+     "goal": f"Use the calculator to work out 1234 times 5678, then create a Google Keep note that says \"{MULTI_TOKEN}\" followed by the result",
+     "setup": [{"do": "force_stop", "package": CALC}, {"do": "force_stop", "package": KEEP}, {"do": "home"}],
+     "checks": [{"check": "foreground", "package": KEEP}, {"check": "screen", "all": [MULTI_TOKEN, "7006652"]}]},
+    {"id": "multi.calc.search", "title": "Calculate, then search it", "category": "multi-app", "suites": ["multiapp"], "apps": [CALC, CHROME],
+     "goal": "Work out 37 times 91 in the calculator app, then search the web in Chrome for that number",
+     "setup": [{"do": "force_stop", "package": CALC}, {"do": "home"}],
+     "checks": [{"check": "foreground", "package": CHROME}, {"check": "screen", "any": ["3367"]}]},
+    {"id": "multi.version.keep", "title": "Settings fact into a note", "category": "multi-app", "suites": ["multiapp"], "apps": [SETTINGS, KEEP],
+     "goal": f"Find out which Android version this phone runs in Settings, then create a Google Keep note that says \"{MULTI_TOKEN} Android\" followed by the version",
+     "setup": [{"do": "force_stop", "package": SETTINGS}, {"do": "force_stop", "package": KEEP}, {"do": "home"}],
+     "checks": [{"check": "foreground", "package": KEEP}, {"check": "screen", "any": [f"{MULTI_TOKEN} Android"]}]},
+    {"id": "multi.file.search", "title": "A file name into a search", "category": "multi-app", "suites": ["multiapp"], "apps": [FILES, CHROME],
+     "goal": "In the Files app, find the text file in Downloads whose name starts with cyclone-lab, then search the web in Chrome for its full file name",
+     "setup": [{"do": "lab_file", "present": True}, {"do": "force_stop", "package": FILES}, {"do": "home"}],
+     "checks": [{"check": "foreground", "package": CHROME}, {"check": "screen", "any": ["cyclone-lab-note"]}]},
+    {"id": "multi.back.and.forth", "title": "There and back again", "category": "multi-app", "suites": ["multiapp"], "apps": [CALC, KEEP],
+     "goal": f"Work out 12 times 12 in the calculator. Put the result in a new Google Keep note that starts with \"{MULTI_TOKEN}\". "
+             "Then go back to the calculator, add 1 to that result and tell me the answer.",
+     "setup": [{"do": "force_stop", "package": CALC}, {"do": "force_stop", "package": KEEP}, {"do": "home"}], "minutes": 8,
+     "checks": [{"check": "status", "is": ["completed"]}, {"check": "answer", "any": ["145"]}],
+     "notes": "Leaves an app and returns to it: the stay journal and resume are what this measures."},
+    {"id": "multi.version.search.2", "title": "Look up, then search (workspace)", "category": "multi-app", "suites": ["multiapp"], "apps": [CHROME],
+     "goal": "Find out which Android version this phone runs, then search the web for what's new in that version", "setup": [{"do": "home"}],
+     "checks": [{"check": "foreground", "package": CHROME}, {"check": "screen", "regex": r"(?i)android\s*1[0-9]"}]},
+    {"id": "long.calc.chain", "title": "A long calculation", "category": "long", "suites": ["long"], "apps": [CALC],
+     "goal": "In the calculator: work out 17 times 23, then add 456 to that, then divide the result by 7. Do each step separately and tell me every intermediate result and the final answer.",
+     "setup": [{"do": "force_stop", "package": CALC}, {"do": "home"}], "minutes": 10,
+     "checks": [{"check": "status", "is": ["completed"]}, {"check": "answer", "all": ["391", "847", "121"]}]},
+    {"id": "long.keep.three", "title": "Three notes", "category": "long", "suites": ["long"], "apps": [KEEP],
+     "goal": f"Create three separate Google Keep notes: \"{LONG_TOKEN} one\", \"{LONG_TOKEN} two\" and \"{LONG_TOKEN} three\". Then show me the list of notes.",
+     "setup": [{"do": "force_stop", "package": KEEP}, {"do": "home"}], "minutes": 12,
+     "checks": [{"check": "foreground", "package": KEEP}, {"check": "screen", "all": [f"{LONG_TOKEN} one", f"{LONG_TOKEN} two", f"{LONG_TOKEN} three"]}]},
+    {"id": "long.status.note", "title": "Phone status in one note", "category": "long", "suites": ["long"], "apps": [SETTINGS, KEEP],
+     "goal": f"Find this phone's Android version, its model name and the battery percentage, then put all three in one new Google Keep note that starts with \"{LONG_TOKEN} status\"",
+     "setup": [{"do": "force_stop", "package": KEEP}, {"do": "home"}], "minutes": 12,
+     "checks": [{"check": "foreground", "package": KEEP}, {"check": "screen", "any": [f"{LONG_TOKEN} status"]}]},
+    {"id": "long.settings.tour", "title": "Three settings, then a question", "category": "long", "suites": ["long"], "apps": [SETTINGS],
+     "goal": "Turn on the dark theme, set the screen timeout to 2 minutes and make the font size bigger. Then tell me which Android version this phone runs.",
+     "setup": [{"do": "night_mode", "on": False}, {"do": "setting", "namespace": "system", "key": "screen_off_timeout", "value": "30000"},
+               {"do": "setting", "namespace": "system", "key": "font_scale", "value": "1.0"}, {"do": "home"}], "minutes": 12,
+     "checks": [{"check": "night_mode", "is": True}, {"check": "setting", "namespace": "system", "key": "screen_off_timeout", "equals": "120000"},
+                {"check": "setting", "namespace": "system", "key": "font_scale", "gt": 1.0},
+                {"check": "answer_probe", "probe": "prop", "name": "ro.build.version.release"}]},
+    {"id": "long.web.compare", "title": "Two look-ups compared", "category": "long", "suites": ["long"], "apps": [CHROME],
+     "goal": "Search the web for the height of the Eiffel Tower and the height of the Empire State Building, then tell me which one is taller.",
+     "setup": [{"do": "home"}], "minutes": 10,
+     "checks": [{"check": "status", "is": ["completed"]}, {"check": "answer", "any": ["Empire State"]}]},
     # ---- the owner: questions and check-ins ------------------------------------------------------------------------
     {"id": "owner.timer.ask", "title": "Timer, ask me how long", "goal": "Set a timer, but ask me how long it should be first",
      "category": "owner", "suites": ["core"], "apps": [CLOCK], "owner": {"reply": "3 minutes", "fill": {"*": "3 minutes"}},

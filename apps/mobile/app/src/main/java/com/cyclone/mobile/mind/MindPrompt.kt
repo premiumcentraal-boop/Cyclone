@@ -60,6 +60,19 @@ object MindPrompt {
         }
     }.trimEnd()
 
+    /**
+     * Plan 37: how to read the mission workspace. Appended to the system prompt only in workspace runs, so the prefix
+     * stays identical for the whole mission. Everything in it is optional help; nothing is required.
+     */
+    fun workspaceRules(): String = buildString {
+        appendLine("## Your workspace")
+        appendLine("- After your conversation you may get a LIVE STATE block, rebuilt every turn: the plan, what you collected, surprises, where you are and how to get back. It is Cyclone's bookkeeping to help you; the SCREEN is the truth when they disagree.")
+        appendLine("- In an app with a map or manual you get its section when you arrive, also when you come back to it. Hints, not orders: use them when they fit.")
+        appendLine("- Under a new screen, \"Changed:\" says what is new since the last one. If you give an action an expect (optional; put exact words or handles in quotes), \"Check:\" says whether it held.")
+        appendLine("- When you leave an app, its old screens are folded to one line and a JOURNAL block keeps what you did, got and where you left it. Nothing is lost: recall with turn or stay shows it again in full.")
+        appendLine("- Optional extras you may use: note with a key keeps a value in the live state; plan_update may take done checks (how you will know it is done) and divert when you change course (the owner sees it); open_app may take why, carry and resume. None of them is required; use them when they help.")
+    }.trimEnd()
+
     /** The owner's goal as the first user message, with the phone's situation so the model can plan before looking. */
     fun mission(goal: String, situation: String, memory: String = "", recentMissions: String = ""): String = buildString {
         appendLine("Mission from the owner:")

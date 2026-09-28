@@ -494,3 +494,38 @@ def test_the_planes_suite_keeps_the_owners_screen_and_the_plane_knob_is_checked(
         raise AssertionError("an unknown plane must be refused")
     except LabError:
         pass
+
+
+# ---- alpha.66: the mission workspace (plan 37) ------------------------------------------------------------------------
+
+def test_the_context_knob_picks_classic_or_workspace():
+    from cyclone_device_gateway.lab.runner import validate_variants
+    arms = validate_variants([{"name": "classic", "context": "classic"}, {"name": "workspace", "context": "workspace"}])
+    assert [a["context"] for a in arms] == ["classic", "workspace"]
+    with pytest.raises(LabError):
+        validate_variants([{"name": "bad", "context": "everything"}])
+
+
+def test_the_multiapp_and_long_suites_carry_values_across_apps_and_turns():
+    missions = builtin_missions()
+    multi = [m for m in missions if "multiapp" in m.suites]
+    long = [m for m in missions if "long" in m.suites]
+    assert len(multi) >= 6 and len(long) >= 5
+    assert all(len(m.apps) >= 2 for m in multi if m.id != "multi.version.search.2")
+    assert all(m.minutes >= 8 for m in long)
+    assert "multi.back.and.forth" in {m.id for m in multi}
+
+
+def test_an_arm_reports_what_the_workspace_did():
+    def trial(verdict, held, missed, unchanged, stays):
+        return {"variant": "ws", "missionId": "multi.calc.keep", "verdict": verdict, "durationMs": 1000,
+                "phone": {"turns": 8, "usage": {"promptTokens": 20_000}, "metrics": {"actions": 8, "workspace": {"metrics": {
+                    "stays": stays, "checks": {"held": held, "missed": missed, "unchanged": unchanged}, "surprises": missed + unchanged,
+                    "diversions": 1, "folded": 4, "done": {"items": 1, "verified": 1, "unverified": 0}}}}}}
+    arm = stats.arm_stats([trial("pass", 6, 1, 1, 2), trial("pass", 4, 0, 0, 3)])
+    assert arm["workspace"]["expectHitRate"] == pytest.approx(10 / 12)
+    assert arm["workspace"]["diversions"] == 2
+    assert arm["workspace"]["stays"]["median"] == 2.5
+    assert arm["promptTokens"]["median"] == 20_000
+    classic = stats.arm_stats([{"variant": "c", "verdict": "pass", "phone": {"metrics": {"actions": 3}}}])
+    assert classic["workspace"] is None

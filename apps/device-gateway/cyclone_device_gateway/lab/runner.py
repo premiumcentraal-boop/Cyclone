@@ -26,9 +26,11 @@ from .verdict import Measure, TrialFacts, judge
 
 EXPERIMENT_ID = re.compile(r"^exp-[0-9]{8}-[0-9]{6}-[a-z0-9]{4}$")
 VARIANT_NAME = re.compile(r"^[A-Za-z0-9 ._-]{1,40}$")
-VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane"})
+VARIANT_KEYS = frozenset({"name", "modelId", "effort", "workingMinutes", "marks", "freshMemory", "promptAddendum", "useMap", "plane", "context"})
 #: Plan 26: where the mission works; absent keeps lab runs on the screen.
 PLANES = frozenset({"automatic", "screen", "background"})
+#: Plan 37: the context a mission runs with; absent keeps lab runs classic.
+CONTEXTS = frozenset({"classic", "workspace"})
 BOOLEAN_KNOBS = ("marks", "freshMemory", "useMap")
 MAX_TRIALS = 600
 POLL_SECONDS = 2.0
@@ -77,6 +79,8 @@ def validate_variants(raw: Any) -> list[dict[str, Any]]:
             raise LabError("marks, freshMemory and useMap are true or false.")
         if "plane" in variant and variant["plane"] is not None and variant["plane"] not in PLANES:
             raise LabError("plane is automatic, screen or background.")
+        if "context" in variant and variant["context"] is not None and variant["context"] not in CONTEXTS:
+            raise LabError("context is classic or workspace.")
         name = variant["name"].strip()
         if not VARIANT_NAME.match(name) or name in names:
             raise LabError("Variant names are unique, 1..40 letters, digits, space, dot, dash or underscore.")

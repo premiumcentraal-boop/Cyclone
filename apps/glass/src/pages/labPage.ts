@@ -110,11 +110,12 @@ interface VariantDraft {
   marks: boolean;
   freshMemory: boolean;
   useMap: boolean;
+  workspace: boolean;
   promptAddendum: string;
 }
 
 function draft(name: string): VariantDraft {
-  return { name, modelId: "", effort: "", minutes: "", marks: true, freshMemory: true, useMap: true, promptAddendum: "" };
+  return { name, modelId: "", effort: "", minutes: "", marks: true, freshMemory: true, useMap: true, workspace: false, promptAddendum: "" };
 }
 
 function builder(ctx: () => GlassContext, catalog: LabCatalog): HTMLElement {
@@ -276,6 +277,7 @@ function toVariant(draftValue: VariantDraft): LabVariant {
     marks: draftValue.marks,
     freshMemory: draftValue.freshMemory,
     useMap: draftValue.useMap,
+    context: draftValue.workspace ? "workspace" : null,
     promptAddendum: draftValue.promptAddendum,
   });
 }
@@ -339,6 +341,7 @@ function variantEditor(variant: VariantDraft, index: number, remove: () => void,
     toggle("Numbered boxes on screenshots", variant.marks, (v) => (variant.marks = v)),
     toggle("Start fresh (no memory)", variant.freshMemory, (v) => (variant.freshMemory = v)),
     toggle("Run from the map (learned routes and go_to)", variant.useMap, (v) => (variant.useMap = v)),
+    toggle("Mission workspace (live state, app stays, checks)", variant.workspace, (v) => (variant.workspace = v)),
   );
   box.append(head, grid, toggles, field("Prompt addition", addendum));
   return box;
@@ -469,6 +472,14 @@ function armRow(name: string, arm: LabArm, variant?: LabVariant): HTMLElement {
     statTile("Median turns", arm.turns.median == null ? "—" : String(Math.round(arm.turns.median))),
   );
   row.append(head, tiles, el("p", "lab-hint", `${arm.scored} scored runs${arm.infra ? `, ${arm.infra} not measured` : ""}${arm.ownerAsks ? `, asked you ${arm.ownerAsks}×` : ""}.`));
+  const ws = arm.workspace;
+  if (ws) {
+    const hit = ws.expectHitRate == null ? "—" : `${Math.round(ws.expectHitRate * 100)}%`;
+    const unverified = ws.done.unverified ?? 0;
+    row.append(el("p", "lab-hint", `Workspace: ${hit} of checked steps went as expected · ` +
+      `${ws.stays.median == null ? "—" : ws.stays.median} app stays per run · ${ws.diversions} diversions · ` +
+      `${unverified} done checks unverified.`));
+  }
   const causes = Object.entries(arm.causes);
   if (causes.length) row.append(el("p", "lab-hint", "Why runs failed: " + causes.map(([c, n]) => `${c} (${n})`).join(", ")));
   return row;
@@ -482,6 +493,7 @@ function describe(variant?: LabVariant): string {
   if (variant.marks === false) parts.push("no numbered boxes");
   if (variant.freshMemory === false) parts.push("with memory");
   if (variant.useMap === false) parts.push("map off");
+  if (variant.context === "workspace") parts.push("workspace");
   if (variant.promptAddendum) parts.push("prompt addition");
   return parts.join(" · ");
 }

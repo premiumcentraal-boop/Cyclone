@@ -32,6 +32,8 @@ export interface LabVariant {
   freshMemory?: boolean;
   /** Run from the learned map (hints, map card, go_to). On unless an arm turns it off. */
   useMap?: boolean;
+  /** Plan 37: the mission workspace (live state, app stays, checks) or the classic context. Absent: classic. */
+  context?: "classic" | "workspace" | null;
   promptAddendum?: string;
 }
 
@@ -87,6 +89,19 @@ export interface LabArm {
   categories: Record<string, number>;
   causes: Record<string, number>;
   tools: Record<string, number>;
+  /** Plan 37: what the mission workspace did in this arm; absent for classic arms. */
+  workspace?: LabWorkspaceStats | null;
+}
+
+export interface LabWorkspaceStats {
+  missions: number;
+  stays: NumberSummary;
+  expectHitRate: number | null;
+  checks: Record<string, number>;
+  surprises: NumberSummary;
+  diversions: number;
+  folded: NumberSummary;
+  done: Record<string, number>;
 }
 
 export interface LabComparison {
@@ -189,6 +204,7 @@ export function cleanVariant(raw: LabVariant): LabVariant {
   if (raw.marks === false) out.marks = false;
   if (raw.freshMemory === false) out.freshMemory = false;
   if (raw.useMap === false) out.useMap = false;
+  if (raw.context === "workspace" || raw.context === "classic") out.context = raw.context;
   if (raw.promptAddendum && raw.promptAddendum.trim()) out.promptAddendum = raw.promptAddendum.trim();
   return out;
 }

@@ -111,6 +111,8 @@ internal class AndroidMindOwner(
     private val onPlan: (List<MindPlanStep>) -> Unit,
     /** The owner has the phone: the task card shows "I'm done". Null when Cyclone has it back. */
     private val onHuman: (String?) -> Unit = {},
+    /** Plan 37 §6: a diversion is also kept as a mission event. */
+    private val onDiverted: (String) -> Unit = {},
 ) : MindOwnerPort {
     /** The overlay and task-card session of this mission; GATE grants are bound to it. */
     private val overlaySession = "mission-$missionId"
@@ -359,6 +361,12 @@ internal class AndroidMindOwner(
 
     override fun status(text: String) = onStatus(text)
     override fun plan(steps: List<MindPlanStep>) = onPlan(steps)
+
+    override fun diverted(from: String, to: String, why: String) {
+        val text = "Mission diverted: $from → $to" + if (why.isNotBlank()) " — $why" else ""
+        onStatus(text)
+        onDiverted(text)
+    }
 
     private companion object {
         const val POLL_MS = 300L

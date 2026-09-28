@@ -49,6 +49,7 @@ object MindMissions {
     private const val ENABLED_KEY = "mind_runtime_enabled"
     private const val MINUTES_KEY = "mind_mission_minutes"
     private const val PARALLEL_KEY = "mind_parallel_enabled"
+    private const val WORKSPACE_KEY = "mind_workspace_enabled"
 
     val inbox = OwnerInbox()
     private val liveState = MutableStateFlow<Mission?>(null)
@@ -115,6 +116,14 @@ object MindMissions {
 
     fun setParallelEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(PARALLEL_KEY, enabled).apply()
+    }
+
+    /** Plan 37: the mission workspace for the owner's missions. Off until the Lab promotes it. */
+    fun workspaceEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(WORKSPACE_KEY, false)
+
+    fun setWorkspaceEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(WORKSPACE_KEY, enabled).apply()
     }
 
     /** How many missions may work behind the front one on this phone. */
@@ -508,7 +517,14 @@ object MindMissions {
                 onHuman = { instruction ->
                     human(context, run, instruction)
                     save { it.copy(status = if (instruction == null) MissionStatus.RUNNING else MissionStatus.WAITING, waitingFor = instruction) }
-                })
+                },
+                onDiverted = { text -> save { it.withEvent(MissionEvent(System.currentTimeMillis(), text)) } })
+            // Plan 37: a Lab arm chooses its context; the owner's missions follow the setting. Lab runs without the
+            // knob stay classic, so older experiments measure the same thing.
+            val workspace = if (variant?.context == com.cyclone.mobile.mind.lab.MindLabVariant.WORKSPACE ||
+                variant == null && workspaceEnabled(context)) {
+                com.cyclone.mobile.mind.workspace.MissionWorkspace.fromJson(resume?.workspace) ?: com.cyclone.mobile.mind.workspace.MissionWorkspace()
+            } else null
             // Planes (plan 25): the owner's missions may move between the main screen and a background screen. Lab
             // runs stay on the screen so a measurement never depends on where it ran. A behind mission (plan 26 §6)
             // starts with no screen at all and takes background screens of its own.
@@ -538,12 +554,13 @@ object MindMissions {
                 manual = if (useMap) com.cyclone.mobile.manual.ManualRuntime.mindPort(context) else null,
                 skill = if (useMap && run.mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, run.mission.goal) }.getOrNull()
                     ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
-                planes = planes)
+                planes = planes, workspace = workspace)
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
+                (if (workspace != null) "\n\n" + MindPrompt.workspaceRules() else "") +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
             // A behind mission never reads the owner's screen, not even to begin.
             val situation = if (run.front) toolbox.situation() else Crew.BEHIND_SITUATION.format(device.now())
@@ -560,12 +577,13 @@ object MindMissions {
             ))
             val budget = MindBudget(workingMs = (variant?.workingMinutes ?: workingMinutes(context)) * 60_000L)
             val metrics = com.cyclone.mobile.mind.lab.MissionMetrics().also { run.metrics = it }
+            workspace?.let { ws -> metrics.workspace = { ws.record() } }
             val listener = com.cyclone.mobile.mind.lab.TeeMindListener(listOf(metrics, MissionListener(context, trace, missions, run.id,
                 front = { run.front },
                 updateCard = { change -> card(context, run, change) },
                 onTurn = { turn -> save { it.copy(turns = turn) } }) { event -> save { it.withEvent(event) } }))
             val loop = MindLoop(primary, backup, toolbox, budget, listener, cancelled = { run.stopRequested },
-                ownerMessages = { drainOwnerMessages(run) }, nativeTools = native)
+                ownerMessages = { drainOwnerMessages(run) }, nativeTools = native, workspace = workspace)
             outcome = loop.run(conversation, resume?.checkpoint())
             val result = outcome
             save {
