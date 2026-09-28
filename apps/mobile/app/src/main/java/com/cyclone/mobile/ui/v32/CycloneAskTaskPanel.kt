@@ -174,7 +174,7 @@ private fun TaskCardHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(CycloneConversationTokens.space8),
     ) {
-        CycloneAppIcon(snapshot.packageName, Modifier.size(26.dp))
+        CycloneAppIcon(com.cyclone.mobile.ui.overlay.WorkingApp.forTask(snapshot.taskId, snapshot.packageName), Modifier.size(26.dp))
         Text(
             snapshot.app.ifBlank { "Cyclone" },
             style = MaterialTheme.typography.labelMedium,

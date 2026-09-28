@@ -51,7 +51,7 @@ fun CycloneTaskProgress(task: WorkspaceTaskUi, modifier: Modifier = Modifier) {
         CycloneGlassSurface(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    CycloneAppIcon(task.packageName)
+                    CycloneAppIcon(com.cyclone.mobile.ui.overlay.WorkingApp.forTask(task.taskId, task.packageName))
                     Column(Modifier.weight(1f)) {
                         Text(task.title, style = MaterialTheme.typography.titleSmall)
                         Text(ui.subtitle, style = MaterialTheme.typography.bodyMedium, maxLines = 3)

@@ -127,7 +127,7 @@ class WorkspaceProgressActivity : ComponentActivity() {
             }
             if (task != null) {
                 Surface(shape = RoundedCornerShape(11.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                    CycloneAppIcon(task.packageName, Modifier.padding(5.dp).size(30.dp))
+                    CycloneAppIcon(com.cyclone.mobile.ui.overlay.WorkingApp.forTask(task.taskId, task.packageName), Modifier.padding(5.dp).size(30.dp))
                 }
                 Spacer(Modifier.size(10.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {

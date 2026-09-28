@@ -155,6 +155,14 @@ class CycloneAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** The home screen apps: never shown as "the app Cyclone works in". */
+    private val homePackages: Set<String> by lazy {
+        runCatching {
+            packageManager.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_HOME), 0).mapNotNull { it.activityInfo?.packageName }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
         runCatching { recordObservationEvent(event) }
@@ -166,7 +174,11 @@ class CycloneAccessibilityService : AccessibilityService() {
             val host = preferredForegroundRoot()
             if (!TaskSurfaceWindows.eventBelongsToTask(eventWindow?.type, packageName.orEmpty(), host?.packageName?.toString())) return
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                host?.packageName?.toString()?.let { DeviceState.currentPackage = it }
+                host?.packageName?.toString()?.let {
+                    DeviceState.currentPackage = it
+                    // The working status shows the app Cyclone works in, not the home screen or Cyclone itself.
+                    com.cyclone.mobile.ui.overlay.WorkingApp.seen(it, homePackages)
+                }
                 host?.className?.toString()?.let { DeviceState.currentClassName = it }
             }
             DeviceState.lastUiEventAtMs = System.currentTimeMillis()

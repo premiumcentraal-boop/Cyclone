@@ -334,6 +334,7 @@ private fun ComposerPanel(
     val clearedCards = com.cyclone.mobile.ui.v32.TaskCardDismissals.cleared(context)
     val task = workspace?.takeIf { com.cyclone.mobile.ui.v32.taskCardVisible(it, clearedCards) }
     val foregroundWorking = snapshot.state == OverlayChromeState.WORKING || snapshot.state == OverlayChromeState.LIVE
+    val foregroundApp by WorkingApp.foreground.collectAsState()
     val activeWork = task?.working == true || foregroundWorking
     val imePx = LocalOverlayImeBottomPx.current
     val keyboardHeightDp = with(LocalDensity.current) {
@@ -426,7 +427,8 @@ private fun ComposerPanel(
                         OverlayGlassCopy.island(it.currentMilestone, it.title, it.completedCount, it.totalCount)
                     } ?: OverlayGlassCopy.island(snapshot.statusMessage ?: snapshot.bullets.firstOrNull(), "Cyclone is working", 0, null)
                     WorkIsland(
-                        appPackage = task?.let { TaskAppTrail.record(it.taskId, it.packageName).lastOrNull() },
+                        // The app Cyclone works in: the task's own, or for an on-screen task the app on screen.
+                        appPackage = if (task != null) WorkingApp.forTask(task.taskId, task.packageName) else foregroundApp,
                         lines = lines,
                         fraction = islandSnapshot?.progressFraction,
                         working = foregroundWorking || task?.working == true || snapshot.userPaused,

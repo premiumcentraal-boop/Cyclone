@@ -53,7 +53,6 @@ import com.cyclone.mobile.ui.overlay.OverlayOwnerCard
 import com.cyclone.mobile.ui.overlay.OverlayStackGeometry
 import com.cyclone.mobile.ui.overlay.OverlayWorkCard
 import com.cyclone.mobile.ui.overlay.PlaneRow
-import com.cyclone.mobile.ui.overlay.TaskAppTrail
 import com.cyclone.mobile.ui.overlay.WorkIsland
 import com.cyclone.mobile.ui.overlay.glass.GlassRoundButton
 import com.cyclone.mobile.ui.overlay.glass.TiltGlassTheme
@@ -89,7 +88,7 @@ internal fun InAppTaskStack(task: WorkspaceTaskUi) {
                 2 -> {
                     val snapshot = TaskPresentationProjector.project(task)
                     WorkIsland(
-                        appPackage = TaskAppTrail.record(task.taskId, task.packageName).lastOrNull(),
+                        appPackage = com.cyclone.mobile.ui.overlay.WorkingApp.forTask(task.taskId, task.packageName),
                         lines = OverlayGlassCopy.island(snapshot.currentMilestone, snapshot.title, snapshot.completedCount, snapshot.totalCount),
                         fraction = snapshot.progressFraction,
                         working = task.working,

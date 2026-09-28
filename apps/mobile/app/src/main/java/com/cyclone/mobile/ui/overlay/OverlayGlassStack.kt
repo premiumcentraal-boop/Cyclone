@@ -339,9 +339,11 @@ internal fun OverlayForegroundCard(snapshot: OverlayChromeSnapshot, onMinimize: 
     val status = snapshot.statusMessage?.trim()?.takeIf { it.isNotBlank() }
         ?: snapshot.bullets.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
         ?: if (snapshot.state == OverlayChromeState.LIVE) "Watching the phone and continuing…" else "Using your phone…"
+    val app by WorkingApp.foreground.collectAsState()
     GlassCard {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CycloneMark(28)
+            // The app on screen, which this task works in; Cyclone's mark only before any app is known.
+            app?.let { AppLogo(it, 34.dp, current = true) } ?: CycloneMark(28)
             Spacer(Modifier.weight(1f))
             StatusChip(CycloneTaskVisualState.WORKING)
             CollapseButton(onMinimize)

@@ -34,6 +34,11 @@
         <intent>
             <action android:name="android.intent.action.SET_TIMER" />
         </intent>
+        <!-- The home screen app, so the working status never shows the launcher as the app Cyclone works in. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
