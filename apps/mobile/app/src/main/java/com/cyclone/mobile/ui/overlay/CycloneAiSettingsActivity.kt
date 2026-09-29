@@ -236,8 +236,8 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text("Fast mode", fontWeight = FontWeight.Bold)
                         Text(
-                            "The Mind hands routine steps to a fast model that does each one in about a second and hands it back " +
-                                "the moment it isn't sure. Approvals, secrets and the finish stay with the Mind and with you. " +
+                            "The smart model plans the whole run; a fast model carries it out, a second per move, doing the low-risk moves " +
+                                "itself and asking the smart model when the screen doesn't match. Anything that can't be undone still asks you. " +
                                 "Banking, payment and authenticator apps are never done fast.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -281,6 +281,18 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                             )
                         }
                         Switch(checked = fast.images, onCheckedChange = { save(fast.copy(images = it)) })
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Smart model checks ahead", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "While the fast model works, the smart model reviews the rest of the plan, and it always has before " +
+                                    "anything that can't be undone. Faster and safer; it uses a few more smart-model calls.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = fast.lookahead, onCheckedChange = { save(fast.copy(lookahead = it)) })
                     }
                 }
             }

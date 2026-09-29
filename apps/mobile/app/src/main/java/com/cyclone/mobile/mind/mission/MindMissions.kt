@@ -644,7 +644,8 @@ object MindMissions {
             // Plan 41: Fast mode gives the Mind the Pilot; off (the default) keeps every mission exactly as before.
             val fastSettings = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
             val fast = com.cyclone.mobile.mind.pilot.FastMode.decider(context, fastSettings)
-                ?.let { com.cyclone.mobile.mind.pilot.PilotSetup(it, fastSettings.pilot(), fastSettings.activeModel) }
+                ?.let { com.cyclone.mobile.mind.pilot.PilotSetup(it, fastSettings.pilot(), fastSettings.activeModel,
+                    com.cyclone.mobile.mind.pilot.MindPilotAdvisor(primary)) }
             val toolbox = PhoneMindToolbox(environment, owner, device, run.mission.goal, { run.stopRequested }, memory = memory, missionId = run.id,
                 marker = if (variant?.marks == false) null else AndroidMindImageMarker, trail = trail,
                 learned = if (useMap) learnedHints(context) else null,

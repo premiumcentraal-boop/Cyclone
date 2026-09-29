@@ -32,9 +32,11 @@ data class FastModeSettings(
     val decisionModel: String = FastMode.DEFAULT_DECISION_MODEL,
     val images: Boolean = true,
     val sureness: FastSureness = FastSureness.CAREFUL,
+    /** The smart model reviews the rest of the plan in parallel while the rapid model works. */
+    val lookahead: Boolean = true,
 ) {
     val activeModel: String get() = if (route == FastRoute.DECISIONS) decisionModel else model
-    fun pilot() = PilotSettings(sureness.bar, images && route == FastRoute.MODEL)
+    fun pilot() = PilotSettings(sureness.bar, images && route == FastRoute.MODEL, lookahead)
 }
 
 /**
@@ -55,6 +57,7 @@ object FastMode {
             decisionModel = p.getString("decision_model", null)?.takeIf { it.isNotBlank() } ?: DEFAULT_DECISION_MODEL,
             images = p.getBoolean("images", true),
             sureness = FastSureness.of(p.getString("sureness", null)),
+            lookahead = p.getBoolean("lookahead", true),
         )
     }
 
@@ -62,7 +65,8 @@ object FastMode {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean("enabled", settings.enabled).putString("route", settings.route.wire)
             .putString("model", settings.model.trim()).putString("decision_model", settings.decisionModel.trim())
-            .putBoolean("images", settings.images).putString("sureness", settings.sureness.wire).apply()
+            .putBoolean("images", settings.images).putString("sureness", settings.sureness.wire)
+            .putBoolean("lookahead", settings.lookahead).apply()
     }
 
     /** The decider for a mission, or null when Fast mode is off or there is no OpenRouter key. */
@@ -71,6 +75,19 @@ object FastMode {
         val key = com.cyclone.mobile.ai.OpenRouterSecretStore.read(context).takeIf { it.isNotBlank() } ?: return null
         return OpenRouterPilotDecider(key, settings.route, settings.activeModel)
     }
+}
+
+/**
+ * The smart model's short side channel (plan 41): the mission's own model, asked one small question with no tools and a
+ * JSON verdict back. Used for bumps and for the parallel look-ahead; the Mind's conversation is not touched.
+ */
+class MindPilotAdvisor(private val model: com.cyclone.mobile.mind.MindModel) : PilotAdvisor {
+    override fun review(review: PilotReview): PilotVerdict? = runCatching {
+        val reply = model.complete(com.cyclone.mobile.mind.MindModelRequest(PilotWire.advisorMessages(review), emptyList(), false, ADVISOR_MS))
+        PilotWire.parseVerdict(reply.text)
+    }.getOrNull()
+
+    companion object { const val ADVISOR_MS = 45_000L }
 }
 
 /**

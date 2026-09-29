@@ -65,7 +65,7 @@ class PilotToolboxTest {
         assertFalse(result.ok)
         assertFalse(result.changedScreen)
         assertTrue(env.acts.isEmpty())
-        assertTrue(result.text, result.text.contains("The fast model handed step 1 back to you: unexpected screen"))
+        assertTrue(result.text, result.text.contains("The rapid model handed step 1 back to you") && result.text.contains("unexpected screen"))
         assertTrue(result.brief, result.brief.contains("handed back"))
     }
 
@@ -82,6 +82,22 @@ class PilotToolboxTest {
             assertTrue(env.acts.isEmpty())
         }
         assertEquals(0, asked)
+    }
+
+    @Test fun toolMovesGoThroughTheMindsOwnTools() {
+        val env = FakeEnv(chats)
+        val toolbox = box(env, picking(Pilot.OPEN_APP to "id", Pilot.STEP_DONE to "id"))
+        val result = toolbox.pilot("""{"steps":[{"do":"Open WhatsApp","app":"WhatsApp","expect":"WhatsApp is open"}]}""")
+        assertTrue(result.text, result.ok)
+        assertEquals(listOf("phone.open_app"), env.acts.map { it.first })
+    }
+
+    @Test fun anUnplannedIrreversibleTapNeverHappensWithoutTheSmartModel() {
+        val env = FakeEnv(chat)
+        val result = box(env, picking("Send" to "label")).pilot("""{"steps":[{"do":"Send it"}]}""")
+        assertFalse(result.ok)
+        assertTrue(env.acts.isEmpty())
+        assertTrue(result.text, result.text.contains("looks irreversible (Send)"))
     }
 
     @Test fun stepsAreRequired() {

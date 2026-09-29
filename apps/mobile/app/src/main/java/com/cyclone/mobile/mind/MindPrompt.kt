@@ -6,10 +6,12 @@ package com.cyclone.mobile.mind
  */
 object MindPrompt {
     /** Plan 41: Fast mode is on. The Pilot is an option for routine stretches, never a duty. */
-    const val PILOT_RULES = "Fast mode is on. When the next steps are routine and clear (opening, finding, tapping through menus, " +
-        "typing text you already decided), hand them to pilot with an expect for each step: a fast model does them in about a second " +
-        "each and hands a step back to you, with the reason, the moment it is not sure. Keep choices, judgement, replies and the " +
-        "finish for yourself. When a step comes back, read the screen and decide the next move."
+    const val PILOT_RULES = "Fast mode is on. Once you know the task, write the whole run as a plan and give it to pilot: every step you " +
+        "imagine, each with an expect, the app, link or exact text it needs, and risk=irreversible on a send, payment, delete or post. " +
+        "A rapid model runs the plan in about a second per move and asks you short questions on the side when the screen doesn't " +
+        "match. Example: message lo.06 on Instagram = open Instagram (app), open Direct messages, search, type lo.06, open the chat " +
+        "with lo.06, type the message (text), tap Send (irreversible). Keep choices, judgement and the finish for yourself; when the " +
+        "plan comes back to you, read the screen and decide."
 
     fun system(ownerName: String?, nativeTools: Boolean, tools: List<MindToolSpec>, now: String, device: String): String = buildString {
         // Stable parts first, changing context last: the prefix stays identical turn after turn (prompt caching) and
