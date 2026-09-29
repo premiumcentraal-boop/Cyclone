@@ -38,12 +38,14 @@ object DriverMode {
     fun spot(context: Context, landscape: Boolean): ButtonSpot {
         val p = prefs(context)
         val k = if (landscape) "land" else "port"
-        return ButtonSpot(p.getBoolean("spot_${k}_right", true), p.getFloat("spot_${k}_y", 0.62f))
+        // Before alpha.71 the button snapped to a side; that side becomes the spot's edge.
+        val x = if (p.contains("spot_${k}_x")) p.getFloat("spot_${k}_x", 1f) else if (p.getBoolean("spot_${k}_right", true)) 1f else 0f
+        return ButtonSpot(x, p.getFloat("spot_${k}_y", 0.62f))
     }
 
     fun saveSpot(context: Context, landscape: Boolean, spot: ButtonSpot) {
         val k = if (landscape) "land" else "port"
-        prefs(context).edit().putBoolean("spot_${k}_right", spot.right).putFloat("spot_${k}_y", spot.yFraction).apply()
+        prefs(context).edit().putFloat("spot_${k}_x", spot.xFraction).putFloat("spot_${k}_y", spot.yFraction).remove("spot_${k}_right").apply()
     }
 
     private fun prefs(context: Context): SharedPreferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

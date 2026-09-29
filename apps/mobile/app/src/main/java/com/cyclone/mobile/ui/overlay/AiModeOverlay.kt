@@ -195,9 +195,9 @@ object DriverOverlay {
             val bounds = wm.currentWindowMetrics.bounds
             val landscape = bounds.width() > bounds.height()
             val spot = DriverMode.spot(context, landscape)
-            val margin = (6 * density).toInt()
-            buttonParams.x = if (spot.right) bounds.width() - buttonPx - margin else margin
-            buttonParams.y = (spot.yFraction * bounds.height() - buttonPx / 2f).toInt().coerceIn(0, (bounds.height() - buttonPx).coerceAtLeast(0))
+            val (x, y) = spot.corner(bounds.width(), bounds.height(), buttonPx, (6 * density).toInt())
+            buttonParams.x = x
+            buttonParams.y = y
             if (button.isAttachedToWindow) runCatching { wm.updateViewLayout(button, buttonParams) }
         }
 
@@ -210,7 +210,7 @@ object DriverOverlay {
 
         fun drop() {
             val bounds = wm.currentWindowMetrics.bounds
-            val spot = ButtonSpot.snap(buttonParams.x + buttonPx / 2f, buttonParams.y + buttonPx / 2f, bounds.width().toFloat(), bounds.height().toFloat())
+            val spot = ButtonSpot.at(buttonParams.x + buttonPx / 2f, buttonParams.y + buttonPx / 2f, bounds.width().toFloat(), bounds.height().toFloat())
             DriverMode.saveSpot(context, bounds.width() > bounds.height(), spot)
             place()
         }
@@ -353,9 +353,12 @@ internal fun AiModePanel(face: VoiceFace, level: Float, onOrb: () -> Unit, onSto
             .padding(horizontal = 20.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(face.status.uppercase(), color = if (face.warm) GlassWarm else GlassMuted, fontSize = 12.sp, letterSpacing = 1.6.sp,
-            fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(12.dp))
+        // The small status word shows only when no caption already says it (never "LISTENING" over "Listening…").
+        if (face.showStatus) {
+            Text(face.status.uppercase(), color = if (face.warm) GlassWarm else GlassMuted, fontSize = 12.sp, letterSpacing = 1.6.sp,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+        }
         if (face.you.isNotBlank()) {
             Caption(face.you, GlassMuted, 20, FontWeight.Medium)
             Spacer(Modifier.height(8.dp))

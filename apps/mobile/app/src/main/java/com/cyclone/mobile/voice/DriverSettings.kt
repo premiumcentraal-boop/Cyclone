@@ -1,5 +1,7 @@
 package com.cyclone.mobile.voice
 
+import kotlin.math.roundToInt
+
 /** The owner's Drive settings (Settings → Driver mode and Settings → Voice). Stored by [DriverMode]; no secrets. */
 data class DriverSettings(
     val enabled: Boolean = false,
@@ -38,13 +40,25 @@ data class DriverSettings(
 }
 
 /**
- * Where the AI button sits, per orientation (plan 32: hold 1 s, drag, snap to an edge, remembered). [yFraction] is
- * the button's centre as a fraction of the usable height, so the spot survives a font or bar change.
+ * Where the AI button sits, per orientation (plan 32: hold it one second, then drag it anywhere; remembered).
+ * [xFraction] and [yFraction] are the button's centre as fractions of the screen, so the spot survives a rotation,
+ * a font or a bar change; [corner] keeps the whole button on screen however the screen changes.
  */
-data class ButtonSpot(val right: Boolean = true, val yFraction: Float = 0.62f) {
+data class ButtonSpot(val xFraction: Float = 1f, val yFraction: Float = 0.62f) {
+    /** The button's top-left corner on a [width] x [height] screen: wholly on screen, [margin] from the side edges. */
+    fun corner(width: Int, height: Int, button: Int, margin: Int): Pair<Int, Int> {
+        val maxX = (width - button - margin).coerceAtLeast(margin.coerceAtMost(width - button).coerceAtLeast(0))
+        val minX = margin.coerceAtMost(maxX)
+        val x = (xFraction * width - button / 2f).roundToInt().coerceIn(minX, maxX)
+        val y = (yFraction * height - button / 2f).roundToInt().coerceIn(0, (height - button).coerceAtLeast(0))
+        return x to y
+    }
+
     companion object {
-        /** Snap a dropped button: the nearer side, and a height kept clear of the very top and bottom. */
-        fun snap(centreX: Float, centreY: Float, width: Float, height: Float): ButtonSpot =
-            ButtonSpot(right = centreX >= width / 2f, yFraction = if (height <= 0f) 0.62f else (centreY / height).coerceIn(0.12f, 0.88f))
+        /** Where a dropped button stays: exactly where it was let go, clear of the very top and bottom. */
+        fun at(centreX: Float, centreY: Float, width: Float, height: Float): ButtonSpot = ButtonSpot(
+            xFraction = if (width <= 0f) 1f else (centreX / width).coerceIn(0f, 1f),
+            yFraction = if (height <= 0f) 0.62f else (centreY / height).coerceIn(0.06f, 0.94f),
+        )
     }
 }

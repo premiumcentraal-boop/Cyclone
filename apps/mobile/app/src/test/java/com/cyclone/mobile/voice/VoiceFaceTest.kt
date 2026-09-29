@@ -119,10 +119,37 @@ class VoiceFaceTest {
         assertEquals(listOf<Short>(16, 32767), Wav.samples(bytes).toList())
     }
 
-    @Test fun `a dropped button snaps to the nearer edge`() {
-        assertTrue(ButtonSpot.snap(900f, 500f, 1080f, 2400f).right)
-        assertFalse(ButtonSpot.snap(100f, 500f, 1080f, 2400f).right)
-        assertEquals(0.12f, ButtonSpot.snap(100f, 0f, 1080f, 2400f).yFraction)
-        assertEquals(0.88f, ButtonSpot.snap(100f, 2400f, 1080f, 2400f).yFraction)
+    @Test fun `a dropped button stays where it was let go, wholly on screen`() {
+        val spot = ButtonSpot.at(540f, 1200f, 1080f, 2400f)
+        assertEquals(0.5f, spot.xFraction, 0.0001f)
+        assertEquals(0.5f, spot.yFraction, 0.0001f)
+        assertEquals(540 - 50 to 1200 - 50, spot.corner(1080, 2400, 100, 16))
+        // Clear of the very top and bottom, and never off the sides.
+        assertEquals(0.06f, ButtonSpot.at(100f, 0f, 1080f, 2400f).yFraction, 0.0001f)
+        assertEquals(0.94f, ButtonSpot.at(100f, 2400f, 1080f, 2400f).yFraction, 0.0001f)
+        assertEquals(0f, ButtonSpot.at(-50f, 500f, 1080f, 2400f).xFraction, 0f)
+        assertEquals(16 to 0, ButtonSpot(0f, 0f).corner(1080, 2400, 100, 16))
+        assertEquals(1080 - 100 - 16 to 2400 - 100, ButtonSpot(1f, 1f).corner(1080, 2400, 100, 16))
+        // The default is the right edge, where older phones kept it; a rotation keeps the same fraction of the screen.
+        assertEquals(1080 - 100 - 16, ButtonSpot().corner(1080, 2400, 100, 16).first)
+        val landscape = spot.corner(2400, 1080, 100, 16)
+        assertEquals(1200 - 50 to 540 - 50, landscape)
+        // A screen smaller than the button still gives a place on it.
+        assertEquals(0 to 0, ButtonSpot(0.5f, 0.5f).corner(80, 80, 100, 16))
+    }
+
+    @Test fun `listening says so once, in the large caption`() {
+        val listening = VoiceFace.of(VoiceTurn().on(VoiceEvent.Tap).turn)
+        assertEquals("Listening", listening.status)
+        assertEquals(VoiceCopy.CAPTION_LISTENING, listening.cyclone)
+        assertFalse(listening.showStatus)
+        assertTrue(VoiceFace.repeats("Listening…", "Listening"))
+        assertTrue(VoiceFace.repeats("Needs you: pay €24.90?", "Needs you"))
+        assertFalse(VoiceFace.repeats("One moment…", "Thinking"))
+        assertFalse(VoiceFace.repeats("Working on it", "Work"))
+        assertFalse(VoiceFace.repeats("", "Listening"))
+        // A different word stays: "Thinking" over "One moment…".
+        val thinking = listening.copy(status = "Thinking", cyclone = VoiceCopy.CAPTION_THINKING)
+        assertTrue(thinking.showStatus)
     }
 }
