@@ -18,7 +18,9 @@ class ProfileLifecycleTest {
     @Test fun `a removed profile stays seven days, then goes`() {
         val removed = 1_000_000L
         assertEquals(7, ProfileTrash.daysLeft(removed, removed))
-        assertEquals("Deletes in 6 days", ProfileTrash.line(removed, removed + day + 1))
+        // Whole days left, rounded down: "today" only when less than a day is left.
+        assertEquals("Deletes in 6 days", ProfileTrash.line(removed, removed + day))
+        assertEquals("Deletes in 5 days", ProfileTrash.line(removed, removed + day + 1))
         assertEquals("Deletes tomorrow", ProfileTrash.line(removed, removed + 6 * day - 1))
         assertEquals("Deletes today", ProfileTrash.line(removed, removed + 6 * day + 1))
         assertFalse(ProfileTrash.expired(removed, removed + 7 * day - 1))

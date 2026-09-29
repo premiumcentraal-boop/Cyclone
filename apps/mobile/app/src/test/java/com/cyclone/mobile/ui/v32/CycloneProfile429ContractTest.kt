@@ -13,9 +13,11 @@ class CycloneProfile429ContractTest {
 
     @Test fun profilesDefaultToAllAndRetainActiveAndAppGroups() {
         val source = source("ui/v32/CycloneProfilesPage.kt")
-        assertTrue(source.contains("private enum class ProfilesTab { ACTIVE, ALL, GROUPS }"))
+        // Plan 40 P1 adds Deleted, shown only when something is in it.
+        assertTrue(source.contains("private enum class ProfilesTab { ACTIVE, ALL, GROUPS, DELETED }"))
         assertTrue(source.contains("mutableStateOf(ProfilesTab.ALL)"))
         assertTrue(source.contains("\"Active (\${activeProfiles.size})\", \"All profiles\", \"Groups\""))
+        assertTrue(source.contains("listOf(\"Deleted (\${trash.size})\")"))
     }
 
     @Test fun profilesAggregateWorkspacesByAndroidIdentityNotByApp() {
