@@ -52,6 +52,19 @@ class HomeR4ContractTest {
         assertTrue(r6.contains("HorizontalPager(pager"))
     }
 
+    @Test fun thePlusDrawerRisesAboveTheAskBarAndLabelsAreNotClipped() {
+        val composer = source("com/cyclone/mobile/ui/v32/CycloneHomeComposer.kt")
+        // Owner's report (alpha.73): the + panel opened under the bar and pushed it up. It is a drawer above it now.
+        assertTrue(composer.indexOf("CycloneAttachmentTools(") in 0 until composer.indexOf("        capsule {"))
+        assertTrue(composer.contains("expandVertically(expandFrom = Alignment.Bottom)"))
+        assertTrue(composer.contains("BackHandler(tools) { tools = false }"))
+        // Owner's report: "Routines" was cut off by the capsule clip around the round action and its label.
+        val r6 = source("com/cyclone/mobile/ui/v32/HomeR6.kt")
+        val action = r6.substringAfter("private fun HomeAction(")
+        assertFalse(action.contains("Modifier.clip(ContinuousCapsule).clickable"))
+        assertTrue(action.contains("maxLines = 1, softWrap = false"))
+    }
+
     @Test fun homeAskBarIsTheSmokedBarWithItsDots() {
         val composer = source("com/cyclone/mobile/ui/v32/CycloneHomeComposer.kt")
         assertTrue(composer.contains("val askBackdrop = com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop.current"))

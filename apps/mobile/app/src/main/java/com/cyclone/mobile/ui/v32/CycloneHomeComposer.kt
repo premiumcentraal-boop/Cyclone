@@ -115,6 +115,46 @@ fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) ->
                 ) { inner() }
             }
         }
+        // The + drawer rises above the Ask bar (never under it), on the same glass as the bar's sheets.
+        androidx.activity.compose.BackHandler(tools) { tools = false }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = tools,
+            enter = androidx.compose.animation.expandVertically(expandFrom = Alignment.Bottom) + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Bottom) + androidx.compose.animation.fadeOut(),
+        ) {
+            val drawer = if (askBackdrop != null) {
+                Modifier.fillMaxWidth()
+                    .askGlass(28.dp, GlassTier.CHROME, 0.3f, smoke = com.cyclone.mobile.ui.v32.ask.AskGlass.SHEET_SMOKE + 0.1f)
+                    .clip(com.kyant.capsule.ContinuousRoundedRectangle(28.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            } else Modifier.fillMaxWidth()
+            Box(drawer.semantics { contentDescription = "Attachments" }) {
+                CycloneAttachmentTools(
+                    onCamera = {
+                        tools = false
+                        context.startActivity(
+                            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                                .putExtra("camera", true),
+                        )
+                    },
+                    onFiles = {
+                        tools = false
+                        context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
+                    },
+                    onPhotos = {
+                        tools = false
+                        context.startActivity(
+                            Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
+                                .putExtra("photos", true),
+                        )
+                    },
+                    onShareScreen = {
+                        tools = false
+                        com.cyclone.mobile.capture.LiveScreenShare.start(context)
+                    },
+                )
+            }
+        }
         capsule {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 8.dp),
@@ -173,33 +213,6 @@ fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) ->
                     SignatureAction(SignatureGlyph.SEND, "Send request", onClick = { send() }, selected = true)
                 }
             }
-        }
-
-        if (tools) {
-            CycloneAttachmentTools(
-                onCamera = {
-                    tools = false
-                    context.startActivity(
-                        Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
-                            .putExtra("camera", true),
-                    )
-                },
-                onFiles = {
-                    tools = false
-                    context.startActivity(Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java))
-                },
-                onPhotos = {
-                    tools = false
-                    context.startActivity(
-                        Intent(context, com.cyclone.mobile.ui.overlay.OverlayAttachmentActivity::class.java)
-                            .putExtra("photos", true),
-                    )
-                },
-                onShareScreen = {
-                    tools = false
-                    com.cyclone.mobile.capture.LiveScreenShare.start(context)
-                },
-            )
         }
 
         if (error.isNotBlank()) {

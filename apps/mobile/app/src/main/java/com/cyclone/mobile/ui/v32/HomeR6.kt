@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -240,7 +241,9 @@ internal fun HomeActions(onAi: () -> Unit, onRoutines: () -> Unit, onBrain: () -
 @Composable
 private fun HomeAction(icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(
-        Modifier.clip(ContinuousCapsule).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 6.dp, vertical = 4.dp),
+        // A soft rounded press area: a capsule here would clip the corners of a wide label ("Routines").
+        Modifier.widthIn(min = 76.dp).clip(com.kyant.capsule.ContinuousRoundedRectangle(18.dp))
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 4.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -248,6 +251,7 @@ private fun HomeAction(icon: ImageVector, label: String, onClick: () -> Unit) {
             Modifier.size(58.dp).clip(CircleShape).background(AskCalm.Veil).border(0.8.dp, AskCalm.VeilRim, CircleShape),
             contentAlignment = Alignment.Center,
         ) { Icon(icon, null, Modifier.size(24.dp), tint = AskGlass.Ink) }
-        Text(label, color = AskGlass.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, style = TextStyle(shadow = AskTextShadow))
+        Text(label, color = AskGlass.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false,
+            style = TextStyle(shadow = AskTextShadow))
     }
 }
