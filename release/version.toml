@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.72 dev1: the app redesign (R5) and Drive hearing the owner - every in-app page on one glass world over the Cyclone rain, navigation as darker chrome glass, Home in the AI page's style, Visual quality (Auto, Full or Lite), and Drive's microphone fixed with Android's speech recognizer as fallback.
+# Cyclone V5 alpha.73 dev1: calm and findable (R6) - every page but the AI page on a still calm blue, a smart search that finds settings, runs, routines, skills, apps and profiles by kind, and Home with a profile slider.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.72.dev1"
+product_version = "5.0.0-alpha.73.dev1"
 channel = "development"
-android_version_code = 217
+android_version_code = 218
 python_version = "5.0.0-alpha.68.dev1"
 
 [components]
-mobile = "5.0.0-alpha.72.dev1"
+mobile = "5.0.0-alpha.73.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha72-dev1-app-glass-drive-mic"
+candidate_generation = "cyclone-v5-alpha73-dev1-calm-search"

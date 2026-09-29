@@ -26,7 +26,9 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.71:** Drive, polished (the intro film, the button dragged anywhere, "Listening" once).
 - **alpha.72 (the other agent):** the app redesign (R5, `docs/design/redesign/rounds/R5-app.md`) with Home (R4),
   Visual quality (Auto / Full / Lite), and Drive's microphone fix with Android's recognizer as fallback. The builds
-  below shift by two more: B1 is alpha.73, and so on.
+  below shift by two more.
+- **alpha.73 (the other agent):** R6, calm and findable (`docs/design/redesign/rounds/R6-calm.md`): the calm blue on
+  every page but AI, the smart search and Home's profile slider. B1 is alpha.74, and so on.
 - **Test counts at alpha.68:**
   - phone: 2096 tests, 0 failures;
   - gateway suite: passes;
