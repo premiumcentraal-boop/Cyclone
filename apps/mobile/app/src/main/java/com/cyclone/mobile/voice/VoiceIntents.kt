@@ -31,7 +31,27 @@ object VoiceIntents {
         "hour" to 3_600, "hours" to 3_600, "uur" to 3_600, "uren" to 3_600,
     )
 
+    /** Plan 42: a timer command's length in seconds, for Instant mode; null when it isn't one. */
+    fun timerSeconds(transcript: String): Int? {
+        val words = VoiceRules.normalize(transcript)
+        if (words.isEmpty() || words.size > 12) return null
+        return seconds(words.joinToString(" "))
+    }
+
+    /** Plan 42: an alarm command's time (24 h), for Instant mode; null when it isn't one. */
+    fun alarmTime(transcript: String): Pair<Int, Int>? {
+        val words = VoiceRules.normalize(transcript)
+        if (words.isEmpty() || words.size > 12) return null
+        return clock(words.joinToString(" "))?.let { it.first to it.second }
+    }
+
     private fun timer(text: String): Understanding? {
+        val seconds = seconds(text) ?: return null
+        val span = spoken(seconds)
+        return Understanding(VoiceKind.TASK, "Set a timer for $span.", "Setting a ${spokenCompound(seconds)} timer.", "", 1.0)
+    }
+
+    private fun seconds(text: String): Int? {
         if (!TIMER_WORD.containsMatchIn(text)) return null
         val tokens = text.split(' ').filterNot { it in setOf("and", "en") }
         var seconds = 0
@@ -67,8 +87,7 @@ object VoiceIntents {
         if (!matched || seconds !in 1..(24 * 3_600)) return null
         // Nothing else may be in the sentence but the command words: "timer for pasta" is the model's job.
         if (rest.any { it !in TIMER_OPENERS }) return null
-        val span = spoken(seconds)
-        return Understanding(VoiceKind.TASK, "Set a timer for $span.", "Setting a ${spokenCompound(seconds)} timer.", "", 1.0)
+        return seconds
     }
 
     private fun spoken(seconds: Int): String {
@@ -98,6 +117,16 @@ object VoiceIntents {
     private val CLOCK = Regex("^(\\d{1,2})(?: (\\d{1,2}))?(?: (am|pm|a m|p m|uur|o'clock|oclock|in the morning|in the evening|tonight))?$")
 
     private fun alarm(text: String): Understanding? {
+        val (hour, minute, suffix) = clock(text) ?: return null
+        val clock = if (suffix.isNotEmpty()) {
+            val h12 = (hour % 12).let { if (it == 0) 12 else it }
+            "$h12:${minute.toString().padStart(2, '0')}$suffix"
+        } else "$hour:${minute.toString().padStart(2, '0')}"
+        return Understanding(VoiceKind.TASK, "Set an alarm for $clock.", "Setting an alarm for $clock.", "", 1.0)
+    }
+
+    /** The alarm's hour (24 h), minute and the spoken AM/PM suffix, or null. */
+    private fun clock(text: String): Triple<Int, Int, String>? {
         val time = (ALARM.find(text) ?: WAKE.find(text))?.groupValues?.get(1)?.trim() ?: return null
         // "7:30" normalizes to "7 30"; number words are accepted for the hour.
         val parts = time.split(' ')
@@ -113,11 +142,7 @@ object VoiceIntents {
             "pm", "p m", "in the evening", "tonight" -> { if (hour > 12) return null; if (hour < 12) hour += 12; " PM" }
             else -> ""
         }
-        val clock = if (suffix.isNotEmpty()) {
-            val h12 = (hour % 12).let { if (it == 0) 12 else it }
-            "$h12:${minute.toString().padStart(2, '0')}$suffix"
-        } else "$hour:${minute.toString().padStart(2, '0')}"
-        return Understanding(VoiceKind.TASK, "Set an alarm for $clock.", "Setting an alarm for $clock.", "", 1.0)
+        return Triple(hour, minute, suffix)
     }
 
     // ---- numbers ----------------------------------------------------------------------------------------------------
