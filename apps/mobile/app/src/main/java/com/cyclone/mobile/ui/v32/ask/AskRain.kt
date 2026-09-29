@@ -26,6 +26,9 @@ import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import com.cyclone.mobile.ui.overlay.tracefield.TraceFieldShader
 import kotlin.math.ceil
 import kotlin.math.roundToInt
@@ -44,6 +47,31 @@ fun AskRainField(modifier: Modifier = Modifier) {
     DisposableEffect(rain) { onDispose { rain?.release() } }
     val still = remember { AskRain.animationsOff(context) }
     val clock = remember { mutableFloatStateOf(AskRain.START_S) }
+    // The official scene (alpha.70): decoded only while the page is on screen and the app in front.
+    val scene = remember { AskScene(context.applicationContext) }
+    val lifecycle = remember(context) { (context as? LifecycleOwner)?.lifecycle }
+    DisposableEffect(scene, lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> scene.start(still)
+                Lifecycle.Event.ON_PAUSE -> scene.stop()
+                else -> Unit
+            }
+        }
+        lifecycle?.addObserver(observer)
+        if (lifecycle == null || lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) scene.start(still)
+        onDispose {
+            lifecycle?.removeObserver(observer)
+            scene.stop()
+        }
+    }
+    if (rain != null && still) {
+        // Still mode: one redraw once the scene's single frame is ready.
+        LaunchedEffect(scene) {
+            while (scene.frame == null && !scene.failed) kotlinx.coroutines.delay(50)
+            clock.floatValue = AskRain.START_S + 0.001f
+        }
+    }
     if (rain != null && !still) {
         LaunchedEffect(rain) {
             var start = -1L
@@ -60,7 +88,7 @@ fun AskRainField(modifier: Modifier = Modifier) {
         }
     }
     Canvas(modifier) {
-        val drawn = rain?.draw(this, clock.floatValue) ?: false
+        val drawn = rain?.draw(this, clock.floatValue, scene.frame?.takeIf { !scene.failed }) ?: false
         if (!drawn) drawRect(AskRain.FALLBACK)
     }
 }
@@ -92,9 +120,18 @@ fun AskScrim(modifier: Modifier = Modifier, greeting: Boolean = false) {
 internal class AskRain private constructor(private val shader: RuntimeShader, private val atlas: Bitmap) {
     private val brush = ShaderBrush(shader)
 
-    fun draw(scope: DrawScope, time: Float): Boolean = runCatching {
+    /** [scene] is the newest decoded scene frame, or null for the drawn dome. */
+    fun draw(scope: DrawScope, time: Float, scene: Bitmap? = null): Boolean = runCatching {
         shader.setFloatUniform("res", scope.size.width, scope.size.height)
         shader.setFloatUniform("time", time)
+        if (scene != null && !scene.isRecycled) {
+            shader.setInputShader("scene", BitmapShader(scene, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+                .apply { filterMode = BitmapShader.FILTER_MODE_LINEAR })
+            shader.setFloatUniform("sceneSize", scene.width.toFloat(), scene.height.toFloat())
+            shader.setFloatUniform("sceneOn", 1f)
+        } else {
+            shader.setFloatUniform("sceneOn", 0f)
+        }
         scope.drawRect(brush)
     }.isSuccess
 
@@ -108,9 +145,11 @@ internal class AskRain private constructor(private val shader: RuntimeShader, pr
         const val LOOP_S = 3_600f
         /** About 30 fps: the rain is calm, so half the display rate is plenty and saves battery. */
         const val FRAME_NS = 32_000_000L
-        const val CELL_W_DP = 5f
-        const val CELL_H_DP = 7.5f
-        const val TEXT_DP = 6.8f
+        /** The mock-up's density: 90 digits across a 1080 px (360 dp) screen. */
+        const val CELL_W_DP = 4f
+        const val CELL_H_DP = 6f
+        const val TEXT_DP = 5.4f
+        private val NO_SCENE: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         val FALLBACK = Brush.verticalGradient(listOf(Color(0xFF0B0D12), Color(0xFF15101A), Color(0xFF07080B)))
 
         fun animationsOff(context: Context): Boolean = runCatching {
@@ -138,6 +177,10 @@ internal class AskRain private constructor(private val shader: RuntimeShader, pr
             shader.setFloatUniform("glyphCount", glyphs.length.toFloat())
             shader.setFloatUniform("res", 1f, 1f)
             shader.setFloatUniform("time", START_S)
+            // Every child shader must be bound before the first draw; the real scene replaces this per frame.
+            shader.setInputShader("scene", BitmapShader(NO_SCENE, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP))
+            shader.setFloatUniform("sceneSize", 1f, 1f)
+            shader.setFloatUniform("sceneOn", 0f)
             AskRain(shader, atlas)
         }.getOrNull()
 
@@ -148,6 +191,9 @@ internal class AskRain private constructor(private val shader: RuntimeShader, pr
          */
         const val SOURCE = """
 uniform shader atlas;
+uniform shader scene;
+uniform float2 sceneSize;
+uniform float sceneOn;
 uniform float2 res;
 uniform float2 cell;
 uniform float glyphCount;
@@ -176,6 +222,17 @@ half4 main(float2 p) {
     float lum = clamp((0.16 + 0.84 * glow) * (1.0 - 0.85 * frame), 0.0, 1.0);
     half3 tint = palette(time * 0.012 + r * 0.9);
 
+    // The official scene: each cell's light is the scene's brightest channel, its colour the rest (centre-cropped).
+    float sceneScale = max(res.x / sceneSize.x, res.y / sceneSize.y);
+    half3 ghost = half3(0.0);
+    if (sceneOn > 0.5) {
+        half3 sc = scene.eval((cc - res * 0.5) / sceneScale + sceneSize * 0.5).rgb;
+        float l = max(max(float(sc.r), float(sc.g)), float(sc.b));
+        lum = l;
+        tint = sc / half(max(l, 0.02));
+        ghost = scene.eval((p - res * 0.5) / sceneScale + sceneSize * 0.5).rgb;
+    }
+
     float rows = res.y / cell.y;
     float gap = rows * (0.9 + 1.3 * hash1(float2(id.x, 7.7)));
     float speed = 7.0 + 16.0 * hash1(float2(id.x, 3.1));
@@ -190,9 +247,12 @@ half4 main(float2 p) {
     float glyph = atlas.eval(float2(gi * cell.x + local.x, local.y)).a;
 
     float inten = clamp(lum * (0.95 + 0.6 * trail) + 0.12 * trail, 0.0, 1.5);
-    half3 c = mix(tint, half3(1.0), half(lum * 0.3));
+    if (sceneOn > 0.5 && lum < 0.05) inten = 0.03 * trail;
+    half3 c = sceneOn > 0.5 ? tint : mix(tint, half3(1.0), half(lum * 0.3));
     c = mix(c, half3(1.0), half(0.8 * isHead));
-    half3 outc = c * half(glyph * inten * 1.2) + c * half(inten * 0.16);
+    half3 outc = sceneOn > 0.5
+        ? c * half(glyph * inten * 1.25) + c * half(inten * 0.42) + ghost * 0.09
+        : c * half(glyph * inten * 1.2) + c * half(inten * 0.16);
     return half4(outc, 1.0);
 }
 """

@@ -26,6 +26,7 @@ burger menu · logo menu · running task. Supersedes R2's proposals for this pag
 | Element | Compose | File | Notes |
 | --- | --- | --- | --- |
 | Rain | `AskRainField` (AGSL `RuntimeShader` via `ShaderBrush`) | `ui/v32/ask/AskRain.kt` | Glyph atlas from `TraceFieldShader.GLYPHS`, 5 × 7.5 dp cells. About 30 fps while the page is visible. Still with Android animations off. Falls back to a dark gradient if the shader fails. |
+| Official scene (alpha.70) | `AskScene` + `AskRainField` | `ui/v32/ask/AskScene.kt`, `res/raw/ask_scene.mp4` | A 80 × 144, 30 fps, ~725 KB video baked by `R3/bake_scene.py` (same exposure, contrast, saturation and whitening as the owner-approved dome render). It holds only each cell's light (brightest channel) and colour; the shader draws the digits live at 4 × 6 dp, with white rain heads, a 0.42 colour tile and a 0.09 ghost, as in `render.py`'s colour mode. Decoded on one background thread, only while the page is visible; one frame with animations off; the drawn dome if the phone cannot decode it. |
 | Owner's video | `AskVideoField` + `AskBackground` | `ui/v32/ask/AskBackground.kt` | Logo panel › **Background video** picks a video on the phone (`OpenDocument`, `video/*`). Cyclone keeps only Android's read grant and the URI, plays it muted, looped and centre-cropped in a `TextureView` the glass blurs, pauses it in the background, and falls back to the rain if it cannot be read. **Use the rain** hands the grant back. Nothing is copied or uploaded; no video ships in the APK. |
 | Scrim | `AskScrim` | `ui/v32/ask/AskRain.kt` | Top 45%, bottom 35%, overall 12% black, plus a soft shade behind the greeting. |
 | Smoked glass | `Modifier.smokedGlass(backdrop, radius, smoke)` | `ui/v32/ask/SmokedGlass.kt` | Kyant `drawBackdrop`: `vibrancy()`, `blur(20 dp)`, `lens(12 dp, 20 dp)`, white highlight, soft shadow; surface black at `AskGlass.SMOKE` (0.52), shine band from `LocalAskShine`. Without a backdrop it is painted (`#E0121418` + white hairline). |
@@ -50,3 +51,11 @@ burger menu · logo menu · running task. Supersedes R2's proposals for this pag
 
 - The bottom tab bar keeps its current look (R1's liquid navigation is a separate round).
 - The floating overlay over other apps keeps Tilt Glass teal: an overlay cannot blur another app's pixels.
+
+## Scene provenance
+
+The official scene is baked from the "Powers of Ten"-style zoom the owner supplied (Pinterest pin
+1070801248913334924, downloaded via Klickpin). The owner judged it AI-generated with no copyright claim and chose to
+ship it (2026-09-29). No original creator or licence could be found: the pin carries no credit and its file no
+metadata. If a rights holder objects, replace `res/raw/ask_scene.mp4` with a bake of another clip
+(`python3 R3/bake_scene.py SRC ask_scene.mp4`); nothing else changes.

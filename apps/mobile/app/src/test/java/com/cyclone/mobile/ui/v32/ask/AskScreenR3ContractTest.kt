@@ -143,6 +143,24 @@ class AskScreenR3ContractTest {
         assertTrue(sheets.contains("AskBackground.useRain(context)"))
     }
 
+    @Test fun officialSceneIsTinyAndDrivesTheLiveDigits() {
+        val asset = listOf(File("src/main/res/raw/ask_scene.mp4"), File("app/src/main/res/raw/ask_scene.mp4"),
+            File("apps/mobile/app/src/main/res/raw/ask_scene.mp4")).first(File::isFile)
+        // The scene carries only each cell's light and colour; the digits are drawn live. It stays under 1 MB.
+        assertTrue("scene is ${asset.length()} bytes", asset.length() in 100_000L until 1_000_000L)
+        val rain = ask("AskRain.kt")
+        assertTrue(rain.contains("uniform shader scene;"))
+        assertTrue(rain.contains("float l = max(max(float(sc.r), float(sc.g)), float(sc.b));"))
+        assertTrue(rain.contains("scene.frame?.takeIf { !scene.failed }"))
+        assertTrue(rain.contains("Lifecycle.Event.ON_PAUSE -> scene.stop()"))
+        assertTrue(rain.contains("const val CELL_W_DP = 4f"))
+        val decoder = ask("AskScene.kt")
+        assertTrue(decoder.contains("R.raw.ask_scene"))
+        assertTrue(decoder.contains("if (still && frame != null) break"))
+        assertTrue(decoder.contains("failed = true"))
+        listOf("http", "OpenRouter", "FileOutputStream").forEach { assertFalse(decoder.contains(it)) }
+    }
+
     @Test fun navigationStillOwnsTheAiDestination() {
         val app = source("com/cyclone/mobile/ui/v32/CycloneV32App.kt")
         assertTrue(app.contains("if (!settingsOpen) CycloneV32BottomBar(destination)"))
