@@ -200,6 +200,7 @@ class CommandCenter:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self.connections.mrz.start()
         self._thread = threading.Thread(target=self._loop, name="cyclone-command-center", daemon=True)
         self._thread.start()
 

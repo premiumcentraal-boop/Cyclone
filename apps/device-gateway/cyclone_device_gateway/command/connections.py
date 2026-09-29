@@ -229,7 +229,8 @@ class ConnectionStore:
     def __init__(self, center: "CommandCenter", root: Path, *, grants: GrantStore | None = None,
                  send: Callable[..., mcp.Response] = mcp.http, fetch: Callable[..., tuple[str, int, str]] = mcp.fetch_file,
                  spawn: Callable[[Callable[[], None]], None] | None = None, sleep: Callable[[float], None] = time.sleep,
-                 api_send: Callable[..., mcp.Response] | None = None) -> None:
+                 api_send: Callable[..., mcp.Response] | None = None,
+                 mrz_settings: Path | None = None, mrz_send: Callable[..., mcp.Response] | None = None) -> None:
         self._c = center
         self.root = root
         self.artifacts_dir = root / "artifacts"
@@ -266,6 +267,9 @@ class ConnectionStore:
             # A call that was running when the runtime stopped did not finish; say so instead of leaving it running.
             center._db.execute("UPDATE tool_call SET state = 'failed', summary = 'Cyclone restarted while this ran.', finished_at = ?"
                                " WHERE state = 'running'", (center._clock(),))
+
+        from .mrz import MrzDiscovery
+        self.mrz = MrzDiscovery(self, settings=mrz_settings, send=mrz_send or mcp.http)
 
     # ------------------------------------------------------------------ connections
 
@@ -1082,6 +1086,7 @@ class ConnectionStore:
         if not isinstance(arguments, dict) or len(json.dumps(arguments)) > MAX_ARGUMENTS:
             raise CommandError("arguments are an object of at most 8 KB.")
         _screened(arguments)
+        self.mrz.recover(connection_id, tool)
         with self._c._lock:
             row = self._row(connection_id)
             allowed = set(json.loads(row["allowed"]))
@@ -1289,6 +1294,9 @@ class ConnectionStore:
 
     def _save_url(self, url: str, row: Any, call: Any, prompt: str) -> str:
         loopback = urllib.parse.urlsplit(row["url"]).hostname in mcp.LOOPBACK
+        # A local stdio MRZ server returns Studio job URLs. Permit only that linked
+        # origin's output routes; generic local servers still cannot fetch localhost.
+        loopback = loopback or self.mrz.artifact_allowed(row["id"], url)
         temporary = self.artifacts_dir / f"download-{secrets.token_hex(8)}.part"
         try:
             mime, size, digest = self._fetch(url, temporary, limit=MAX_FILE, allow_loopback=loopback)
@@ -1353,6 +1361,7 @@ class ConnectionStore:
 
     def close(self) -> None:
         """The runtime stops: local servers stop with it."""
+        self.mrz.close()
         self.local.stop_all()
 
     def calls(self, limit: int = 100) -> list[dict[str, Any]]:
