@@ -83,7 +83,7 @@ internal fun DriverModeSettings(context: Context, refresh: () -> Unit) {
             onSelect = { i -> DriverMode.update(context) { it.copy(buttonDp = DriverSettings.BUTTON_SIZES[i]) } },
             modifier = Modifier.fillMaxWidth(),
         )
-        DriveNote("Tap the orb to talk. Hold it for a second, then drag it to either edge; it stays there.")
+        DriveNote("Tap the orb to talk. Hold it for a second, then drag it anywhere; it stays there.")
         if (settings.enabled) InTheCar(context, settings)
         DriveNote("Stop is always one tap. Paying, deleting, permissions, passwords and handing the phone to you always wait until you're stopped.")
         DriveNote("Use it hands-free with the phone mounted, and keep your eyes on the road. Cyclone is not a replacement for Android Auto.")

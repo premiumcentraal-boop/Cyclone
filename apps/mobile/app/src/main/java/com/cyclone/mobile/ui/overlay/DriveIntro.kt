@@ -1,6 +1,7 @@
 package com.cyclone.mobile.ui.overlay
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -110,7 +111,11 @@ class DriveIntroActivity : ComponentActivity() {
             runCatching { context.startActivity(intent(context)) }
         }
 
-        /** From the Quick Settings tile: collapses the shade and opens the film. */
+        /**
+         * From the Quick Settings tile: collapses the shade and opens the film. Android 14+ takes a PendingIntent; the
+         * Intent form is used only on Android 13, where it is the only one there is.
+         */
+        @SuppressLint("StartActivityAndCollapseDeprecated")
         fun startFromTile(tile: TileService) {
             runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

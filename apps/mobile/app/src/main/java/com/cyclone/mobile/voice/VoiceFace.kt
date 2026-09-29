@@ -35,7 +35,18 @@ data class VoiceFace(
     val description: String,
     val stateDescription: String,
 ) {
+    /** The small status word shows only when neither caption already says it: one word, said once. */
+    val showStatus: Boolean get() = status.isNotBlank() && listOf(you, cyclone).none { repeats(it, status) }
+
     companion object {
+        private fun words(text: String): List<String> = text.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotBlank() }
+
+        /** True when [caption] opens with the same words as [status] ("Listening…" repeats "Listening"). */
+        fun repeats(caption: String, status: String): Boolean {
+            val said = words(status)
+            return said.isNotEmpty() && words(caption).take(said.size) == said
+        }
+
         fun of(turn: VoiceTurn): VoiceFace {
             val needsYou = turn.moment != null
             // An announced message waits for a tap: the orb glows until it is answered or a minute passes.
