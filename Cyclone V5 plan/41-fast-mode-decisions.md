@@ -1,7 +1,8 @@
 # 41 — Fast mode: decision models for very fast runs
 
-**Written:** 2026-09-29, at 5.0.0-alpha.75, the day OpenAI announced its Decisions API. **Status:** research plan;
-nothing here is built.
+**Written:** 2026-09-29, at 5.0.0-alpha.75, the day OpenAI announced its Decisions API. **Status:** the parallel Pilot
+is built in alpha.76, behind Fast mode (off by default); see §14. Watch mode, the ledger (F0) and Builds A and C are
+plans.
 **Owner's brief:** use ChatGPT's decisions AI, images included, to make Cyclone runs very fast. It becomes Cyclone's
 **Fast mode**, configured in Settings. Compare three builds and pick the best structure, using everything the One Mind
 taught us about reliability.
@@ -347,6 +348,62 @@ alongside, and the harness compares:
 3. **Default screenshots:** When needed (recommended) or Never.
 4. **Default "Keep Fast off" apps:** banking, payment and authenticators (recommended), plus any the owner adds.
 5. **Order:** F0 (the ledger) next, then F1. Recommended: yes; F0 helps every run even with Fast mode off.
+
+## 14. As built (alpha.76): the parallel Pilot
+
+**The owner's direction (2026-09-29):**
+- The Pilot, with the fallback to the smart model decided by the rapid model itself.
+- Then the parallel version: the rapid model makes most low-risk decisions itself; only irreversible ones ask a human.
+- It uses tool calls when a step needs them. "A rapid yes/no decision board".
+- It starts from a full run plan by the smart model, and bumps the smart model where the screen doesn't match.
+
+Three versions were compared visually (Step, Goal, Parallel). The Step Pilot was built first (a5547bbb); the parallel
+Pilot is built on it and is what alpha.76 ships.
+
+**How it works** (`mind/pilot/Pilot.kt`, pure plus one look-ahead thread; `PhoneMindToolbox.pilotRun`):
+- **The plan.** The Mind's `pilot` tool takes the whole run: 1–20 steps, each
+  `{do, expect, text, app, link, risk: irreversible}`. `MindPrompt.PILOT_RULES` asks for a full plan and uses the
+  Instagram message as the example. The tool is offered only when Fast mode is on.
+- **The decision board.** One rapid call per move answers three things:
+  - `fits_plan` (yes/no);
+  - `needs_smart` (yes/no);
+  - the move. The moves are ≤12 shortlisted controls (never secret fields; a text field gets the step's exact
+    `text`), `step_done`, `open_app` and `open_link` (only when the step names them), `press_enter` (only after
+    typing), `scroll_down`, `scroll_up`, `back`, `wait`, and `hand_back` with a reason.
+- **Bumps.** A board "no fit" or "needs smart", `hand_back`, below the sureness bar, no or invalid answer, a repeat,
+  or too many moves asks the smart model's side channel (`MindPilotAdvisor`). That is the mission's own model with a
+  small no-tools request and a JSON verdict:
+  - `revise` replaces the plan from the current step, and the run carries on;
+  - `ok` carries on (or, for a doubt the rapid model can't resolve, hands the step to the Mind);
+  - `return` hands the step to the Mind.
+  At most 3 bumps per run. Hard problems (needs the owner, sensitive screen, secret text, a refused move, stopped)
+  never bump; they go to the Mind.
+- **In parallel.** The look-ahead starts when the run enters a new app, and at a step with an irreversible step
+  within the next three. It runs on a background thread while the rapid model keeps moving. A verdict that arrives is
+  applied at the next move. A planned irreversible move waits (up to 30 s) for a pending review.
+- **Risk is code.** `Pilot.irreversible` (send, pay, delete, post, confirm, … in English and Dutch) and Enter
+  outside a search field count as irreversible:
+  - unplanned: bump the smart model to confirm, or hand back when there is no side channel;
+  - planned: it goes through `act`, so the owner's approval asks as always.
+- **The Mind receives** the record (moves with confidence and time, bumps, revisions), who handed back and why, the
+  steps left, and the real screen.
+- **Settings:** Model & intelligence → Fast mode (off by default): route, model, how sure, screenshots, and "Smart
+  model checks ahead" (on).
+
+**Tests:**
+- `PilotTest` (21) and `PilotToolboxTest` (7);
+- `test_pilot_guard.py`: moves only through `act`; sensitive checks before questions; unplanned irreversible moves
+  never happen; a planned one waits for the review; hard problems skip the side channel; tool moves use the plan's
+  own app and link; no finishing, secrets or approvals decided by the Pilot;
+- the workspace guard counts 40 specs.
+
+**Not yet:**
+- Watch mode and its tally;
+- the ledger's event settle (F0);
+- the run card split, and Lab suites and promotion;
+- OpenAI Decisions itself (no public contract yet).
+
+Side-channel calls are not counted in the mission's usage. Physical use is UNVERIFIED.
 
 ## 13. Sources
 

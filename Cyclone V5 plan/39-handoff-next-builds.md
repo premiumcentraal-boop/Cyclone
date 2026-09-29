@@ -32,8 +32,9 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.74 (the other agent):** Home fixes (the + drawer above the Ask bar, unclipped labels) and plan 40
   (profiles as a workhorse).
 - **alpha.75 (the other agent):** plan 40 P1 and P2: profile removal with a 7-day Recently deleted, deletion only
-  after an automatic backup, and Cyclone Carry (memory, skills and settings follow you on every switch). B1 is
-  alpha.76, and so on.
+  after an automatic backup, and Cyclone Carry (memory, skills and settings follow you on every switch).
+- **alpha.76 (the other agent):** plan 41's parallel Pilot, Fast mode in Settings (off by default). B1 is alpha.77, and
+  so on.
 - **Test counts at alpha.68:**
   - phone: 2096 tests, 0 failures;
   - gateway suite: passes;
