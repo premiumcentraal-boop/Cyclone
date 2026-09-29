@@ -30,7 +30,10 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
 - **alpha.73 (the other agent):** R6, calm and findable (`docs/design/redesign/rounds/R6-calm.md`): the calm blue on
   every page but AI, the smart search and Home's profile slider.
 - **alpha.74 (the other agent):** Home fixes (the + drawer above the Ask bar, unclipped labels) and plan 40
-  (profiles as a workhorse). B1 is alpha.75, and so on.
+  (profiles as a workhorse).
+- **alpha.75 (the other agent):** plan 40 P1 and P2: profile removal with a 7-day Recently deleted, deletion only
+  after an automatic backup, and Cyclone Carry (memory, skills and settings follow you on every switch). B1 is
+  alpha.76, and so on.
 - **Test counts at alpha.68:**
   - phone: 2096 tests, 0 failures;
   - gateway suite: passes;

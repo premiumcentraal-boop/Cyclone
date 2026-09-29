@@ -1,6 +1,6 @@
 # 40 — Profiles as a workhorse: one Cyclone, every profile
 
-**Written:** 2026-09-29, at 5.0.0-alpha.73. **Status:** deep dive and plan; nothing here is built yet.
+**Written:** 2026-09-29, at 5.0.0-alpha.73. **Status:** P1 and P2 built in alpha.75 (see §8); P3–P5 are plans.
 **Owner's brief:** Cyclone should be the hub that brings your whole workhorse into every profile: skills, knowledge
 and settings. Spinning up, renaming and deleting profiles should feel easy and safe, with backups and undo before
 anything is deleted. Then: what would make this a truly great feature.
@@ -181,3 +181,48 @@ until the owner tests them on the Pixel.
 2. **The grace period before a removed profile is deleted:** recommend 7 days.
 3. **App-data snapshots:** recommend opt-in per removal, showing the size first.
 4. **Order:** recommend P1 first (safety before power), then P2.
+
+**The owner's answers (2026-09-29):** people memory is shared across profiles, clearly labelled by the profile it
+came from; removed profiles can be restored for 7 days from a trash bin, like a photos app, and can be deleted for
+good from there; backups are automatic; build P1 and P2.
+
+## 8. As built (alpha.75)
+
+**P1: lifecycle and safety.**
+- **Remove** (from a profile's detail, on the main profile only): `am stop-user`, then the profile moves to
+  **Recently deleted** (the Profiles tab "Deleted"). It is hidden from Home's slider and search, and can't be opened.
+  **Restore** brings it back untouched.
+- **Delete now / Delete all**, or by itself after 7 days (checked each time Cyclone opens):
+  1. an **automatic backup** first: each app's data (credential and device storage) as tar files in the main
+     Cyclone's own files, smallest first within 70% of free space, largest left out and listed;
+  2. only if the backup was made, `pm remove-user`, then a check that Android removed it.
+  Backups are listed under Deleted and cleared after 30 days.
+- **Rename** with a colour and an emoji in one sheet.
+- **Guards:** typed commands (`STOP_USER`, `REMOVE_USER`, `MEASURE_APP_DATA`, `BACKUP_APP_DATA`, `OWN_BACKUP`,
+  `LABEL_BACKUP`) with shape checks; only `Cyclone_` users Cyclone owns; never the main or current profile; never
+  while a task runs; only from the main profile's Cyclone. `ProfileLifecycleTest`,
+  `test_profile_lifecycle_guard.py`.
+- **Not yet:** restoring a backup into a new profile (P4); the backup is kept for that.
+
+**P2: Cyclone Carry, both ways from the start.**
+- **When:** every switch through Cyclone, in any direction (the main profile included). The Cyclone you leave packs;
+  the Cyclone you open takes it in. It never blocks a switch; Profiles says what came, and when a carry out didn't
+  arrive.
+- **What:** people memory, the Brain's verified skills and learned paths, notes, how well Cyclone opens each app,
+  and the Drive and Visual quality settings.
+- **Sealed:** AES-256-GCM, with the key wrapped by RSA-OAEP for the destination's Keystore key; the destination and
+  the switch's nonce are bound as associated data. Memory is opened in one profile and sealed again with the other's
+  memory key. The answer carries counts only.
+- **People memory, labelled by profile:**
+  - each memory keeps the profile it came from and its id there; Memory groups them ("This profile", "From Work")
+    and the Mind's digest says "(from Work)";
+  - what a profile learns goes on its own cards, never on a card from another profile;
+  - newer wording wins; forgetting a memory forgets it in every profile (forgotten records are kept 90 days).
+- **Skills:** the most recently used row wins; notes are only added; app evidence only grows for apps the profile
+  has.
+- **Never carried:** keys, tokens, pairing, sessions, the vault, chat history, missions, run logs; any row, memory or
+  setting that looks like a secret.
+- **Tests:** `MemoryCarryTest`, `CarryRulesTest` (the sealed bundle included), `test_profile_carry_guard.py`.
+- **Not yet (P3):** app maps, the atlas, dictionaries, playbooks, routines and marketplace skills (files, not rows);
+  deleting a skill in one profile doesn't delete it in the others; switches made outside Cyclone (Android's own user
+  switcher) carry nothing.
