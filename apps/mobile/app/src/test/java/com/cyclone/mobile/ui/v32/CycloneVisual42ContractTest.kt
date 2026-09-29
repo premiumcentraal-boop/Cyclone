@@ -8,8 +8,8 @@ import org.junit.Test
 class CycloneVisual42ContractTest {
     @Test fun homeReadsRealReadinessRoutinesAndTaskState() {
         val home = source("CycloneV32App.kt")
-        assertTrue(home.contains("CyclonePageHeader("))
-        assertTrue(home.contains("title = greeting"))
+        // R4: the greeting is AskGreeting on the rain; readiness is a glass status chip.
+        assertTrue(home.contains("com.cyclone.mobile.ui.v32.ask.AskGreeting(greeting, readinessBody"))
         assertTrue(home.contains("CyclonePermissionSetup.phoneControlSnapshot(context)"))
         assertTrue(home.contains("AutomationRuntime.store.listAutomations()"))
         assertTrue(home.contains("WorkspaceTasks.state.collectAsState()"))
@@ -17,7 +17,7 @@ class CycloneVisual42ContractTest {
         assertTrue(home.contains("V39AiChatSessionRuntime.pendingRequest = request"))
         assertTrue(home.contains("InAppTaskStack(current)"))
         assertTrue(home.contains("cyclonePageInsets()"))
-        assertTrue(home.contains("CycloneStatusPill(readinessLabel"))
+        assertTrue(home.contains("AskStatusChip(readinessLabel, positive = false, onClick = onSettings)"))
         assertTrue(home.contains("ProfileRescueBar()"))
         assertFalse(home.contains("Your phone, simplified"))
         assertFalse(home.contains("Button(onClick = onAi"))

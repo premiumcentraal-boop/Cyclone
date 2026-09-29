@@ -286,7 +286,14 @@ internal fun SignatureAction(
 ) {
     Box(
         modifier.size(48.dp).clip(CircleShape)
-            .background(if (selected) SignatureTeal.copy(alpha = .12f) else Color.Transparent)
+            .background(
+                when {
+                    !selected -> Color.Transparent
+                    // On the R3/R4 rain the selected action is a white veil, not teal.
+                    com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop.current != null -> Color.White.copy(alpha = .14f)
+                    else -> SignatureTeal.copy(alpha = .12f)
+                },
+            )
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,

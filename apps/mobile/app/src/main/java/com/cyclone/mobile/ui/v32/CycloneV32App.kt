@@ -210,177 +210,146 @@ private fun V32HomePage(
     // The live task is already shown as the full card; recent rows list everything else.
     val history = recent.filter { it.taskId != live?.taskId }
 
-    Column(Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = cyclonePageInsets(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item {
-                CycloneMatrixAppBar(
-                    onLeading = onSettings,
-                    leadingDescription = "Settings",
-                    onMark = onAi,
-                    markDescription = "Open Ask Cyclone",
-                )
-            }
+    // R4: Home on the AI page's material (R3): the Cyclone rain (drawn, no video) behind smoked glass.
+    com.cyclone.mobile.ui.v32.ask.AskGlassPage(withScene = false) {
+        Column(Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = cyclonePageInsets(),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                item { com.cyclone.mobile.ui.v32.ask.AskHomeHeader(onSettings = onSettings, onAi = onAi) }
 
-            item {
-                CyclonePageHeader(
-                    title = greeting,
-                    subtitle = readinessBody,
-                    modifier = Modifier.padding(top = 18.dp, bottom = 6.dp),
-                    centered = true,
-                    trailing = {
-                        if (!ready.ready) {
-                            Box(
-                                Modifier
-                                    .clickable(onClick = onSettings)
-                                    .semantics { contentDescription = "Settings, $readinessLabel" }
-                                    .heightIn(min = 44.dp)
-                                    .padding(horizontal = 2.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                CycloneStatusPill(readinessLabel, positive = ready.ready)
-                            }
-                        }
-                    },
-                )
-            }
-
-            item {
-                HomeQuickActions(
-                    onSeed = { seed = (seed.first + 1) to it },
-                    onRoutines = onRoutines,
-                )
-            }
-
-            live?.let { current ->
-                item { CycloneMatrixSectionHeader("Current task") }
                 item {
-                    com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
-                    InAppTaskStack(current)
+                    com.cyclone.mobile.ui.v32.ask.AskGreeting(greeting, readinessBody, Modifier.padding(top = 8.dp)) {
+                        if (!ready.ready) com.cyclone.mobile.ui.v32.ask.AskStatusChip(readinessLabel, positive = false, onClick = onSettings)
+                    }
                 }
-            }
 
-            if (history.isNotEmpty()) {
-                item { CycloneMatrixSectionHeader("Recent activity", "Open chat", onAi) }
-                items(history, key = { "recent-${it.taskId}" }) { HomeRecentRow(it, onAi) }
-            }
-
-            item { CycloneMatrixSectionHeader("Your routines", "See all", onRoutines) }
-
-            if (routines.isEmpty()) {
                 item {
-                    CycloneMatrixCard(Modifier.fillMaxWidth(), cornerRadius = 20.dp, onClick = onRoutines, contentPadding = 14.dp) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            CycloneMatrixIconTile(size = 42.dp) {
-                                Icon(Icons.Rounded.Bolt, null, Modifier.size(21.dp), tint = TealMatrix.Teal)
+                    HomeQuickActions(
+                        onSeed = { seed = (seed.first + 1) to it },
+                        onRoutines = onRoutines,
+                    )
+                }
+
+                live?.let { current ->
+                    item { com.cyclone.mobile.ui.v32.ask.AskSectionHeader("Current task") }
+                    item {
+                        com.cyclone.mobile.ui.overlay.glass.FollowPhoneLight()
+                        InAppTaskStack(current)
+                    }
+                }
+
+                if (history.isNotEmpty()) {
+                    item { com.cyclone.mobile.ui.v32.ask.AskSectionHeader("Recent activity", "Open chat", onAi) }
+                    item {
+                        com.cyclone.mobile.ui.v32.ask.AskGlassList(shineOffset = 0.45f) {
+                            history.forEachIndexed { index, entry ->
+                                if (index > 0) com.cyclone.mobile.ui.v32.ask.AskDivider(Modifier.padding(start = 62.dp))
+                                HomeRecentRow(entry, onAi)
                             }
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("Create your first routine", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    "Describe it to Cyclone or teach it by doing.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = TealMatrix.Muted.copy(alpha = .7f))
                         }
                     }
                 }
-            } else {
-                items(routines.take(5), key = { it.id }) { routine ->
-                    HomeRoutineRow(routine, onRoutines)
+
+                item { com.cyclone.mobile.ui.v32.ask.AskSectionHeader("Your routines", "See all", onRoutines) }
+                item {
+                    com.cyclone.mobile.ui.v32.ask.AskGlassList(shineOffset = 0.55f) {
+                        if (routines.isEmpty()) {
+                            com.cyclone.mobile.ui.v32.ask.AskListRow(
+                                title = "Create your first routine",
+                                subtitle = "Describe it to Cyclone or teach it by doing.",
+                                onClick = onRoutines,
+                                leading = {
+                                    com.cyclone.mobile.ui.v32.ask.AskTile {
+                                        Icon(Icons.Rounded.Bolt, null, Modifier.size(20.dp), tint = com.cyclone.mobile.ui.v32.ask.AskGlass.Ink)
+                                    }
+                                },
+                                trailing = {
+                                    Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = com.cyclone.mobile.ui.v32.ask.AskGlass.Faint)
+                                },
+                            )
+                        } else {
+                            routines.take(5).forEachIndexed { index, routine ->
+                                if (index > 0) com.cyclone.mobile.ui.v32.ask.AskDivider(Modifier.padding(start = 62.dp))
+                                HomeRoutineRow(routine, onRoutines)
+                            }
+                        }
+                    }
                 }
             }
-        }
 
-        // One Ask Cyclone capsule, pinned above the tab bar exactly like the reference.
-        Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(top = 4.dp, bottom = 6.dp)) {
-            CycloneHomeComposer(seed = seed) { request ->
-                V39AiChatSessionRuntime.pendingRequest = request
-                onAi()
+            // One Ask Cyclone capsule, pinned above the tab bar: the AI page's smoked Ask bar.
+            Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(top = 4.dp, bottom = 6.dp)) {
+                CycloneHomeComposer(seed = seed) { request ->
+                    V39AiChatSessionRuntime.pendingRequest = request
+                    onAi()
+                }
             }
         }
     }
 }
 
+/** Home's quick actions (R4): four smoked-glass chips that fill the Ask bar; the owner still sends. */
 @Composable
 internal fun HomeQuickActions(onSeed: (String) -> Unit, onRoutines: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CycloneMatrixQuickAction(Icons.Rounded.CalendarMonth, "Plan my day", { onSeed("Plan my day") }, Modifier.weight(1f))
-            CycloneMatrixQuickAction(Icons.Rounded.Search, "Research a topic", { onSeed("Research ") }, Modifier.weight(1f))
+            com.cyclone.mobile.ui.v32.ask.AskChip(Icons.Rounded.CalendarMonth, "Plan my day", "Calendar and to-dos", Modifier.weight(1f), 0.30f,
+                onClickLabel = "Write in the Ask bar") { onSeed("Plan my day") }
+            com.cyclone.mobile.ui.v32.ask.AskChip(Icons.Rounded.Search, "Research a topic", "Sources and a summary", Modifier.weight(1f), 0.35f,
+                onClickLabel = "Write in the Ask bar") { onSeed("Research ") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CycloneMatrixQuickAction(Icons.Rounded.Apps, "Open an app", { onSeed("Open ") }, Modifier.weight(1f))
-            CycloneMatrixQuickAction(Icons.Rounded.AutoAwesome, "Create a routine", onRoutines, Modifier.weight(1f))
+            com.cyclone.mobile.ui.v32.ask.AskChip(Icons.Rounded.Apps, "Open an app", "And do something in it", Modifier.weight(1f), 0.40f,
+                onClickLabel = "Write in the Ask bar") { onSeed("Open ") }
+            com.cyclone.mobile.ui.v32.ask.AskChip(Icons.Rounded.AutoAwesome, "Create a routine", "Automate something", Modifier.weight(1f), 0.45f,
+                onClick = onRoutines)
         }
     }
 }
 
 @Composable
 internal fun HomeRecentRow(item: RecentActivityItem, onOpen: () -> Unit) {
-    val tone = when (item.state) {
-        CycloneTaskVisualState.ACTION_NEEDED, CycloneTaskVisualState.FAILED -> MatrixTone.ATTENTION
-        else -> MatrixTone.NEUTRAL
-    }
-    CycloneMatrixCard(Modifier.fillMaxWidth(), tone = tone, cornerRadius = 18.dp, onClick = onOpen, contentPadding = 12.dp) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            CycloneMatrixIconTile(size = 40.dp) {
-                CycloneAppIcon(item.packageName.takeIf(String::isNotBlank), Modifier.size(28.dp))
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    CycloneRecentActivity.statusLine(item),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (item.state == CycloneTaskVisualState.DONE) TealMatrix.Success else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-            when (item.state) {
-                CycloneTaskVisualState.DONE -> CycloneMatrixCheck()
-                CycloneTaskVisualState.WORKING -> CycloneMatrixRing(item.progress)
-                else -> CycloneMatrixAttention()
-            }
-        }
-    }
+    com.cyclone.mobile.ui.v32.ask.AskListRow(
+        title = item.title,
+        subtitle = CycloneRecentActivity.statusLine(item),
+        subtitleColor = if (item.state == CycloneTaskVisualState.DONE) com.cyclone.mobile.ui.v32.ask.AskGlass.Done
+            else com.cyclone.mobile.ui.v32.ask.AskGlass.Muted,
+        onClick = onOpen,
+        leading = {
+            com.cyclone.mobile.ui.v32.ask.AskTile { CycloneAppIcon(item.packageName.takeIf(String::isNotBlank), Modifier.size(26.dp)) }
+        },
+        trailing = {
+            com.cyclone.mobile.ui.v32.ask.AskStatePip(
+                when (item.state) {
+                    CycloneTaskVisualState.DONE -> com.cyclone.mobile.ui.v32.ask.AskPipState.DONE
+                    CycloneTaskVisualState.WORKING -> com.cyclone.mobile.ui.v32.ask.AskPipState.WORKING
+                    else -> com.cyclone.mobile.ui.v32.ask.AskPipState.NEEDS_YOU
+                },
+                item.progress,
+            )
+        },
+    )
 }
 
 @Composable
 private fun HomeRoutineRow(routine: AutomationDefinition, onOpen: () -> Unit) {
-    CycloneMatrixCard(Modifier.fillMaxWidth(), cornerRadius = 18.dp, onClick = onOpen, contentPadding = 12.dp) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            CycloneMatrixIconTile(size = 40.dp) {
-                CycloneAppIcon(routine.appPackages.firstOrNull(), Modifier.size(28.dp))
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(routine.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    routine.v32TriggerSummary(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+    com.cyclone.mobile.ui.v32.ask.AskListRow(
+        title = routine.name,
+        subtitle = routine.v32TriggerSummary(),
+        onClick = onOpen,
+        leading = {
+            com.cyclone.mobile.ui.v32.ask.AskTile { CycloneAppIcon(routine.appPackages.firstOrNull(), Modifier.size(26.dp)) }
+        },
+        trailing = {
             if (routine.enabled) {
-                Box(Modifier.size(8.dp).background(TealMatrix.Success, CircleShape))
+                Box(Modifier.size(8.dp).background(com.cyclone.mobile.ui.v32.ask.AskGlass.Done, CircleShape))
             }
-            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = TealMatrix.Muted.copy(alpha = .7f))
-        }
-    }
+            Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = com.cyclone.mobile.ui.v32.ask.AskGlass.Faint)
+        },
+    )
 }
 
 @Composable

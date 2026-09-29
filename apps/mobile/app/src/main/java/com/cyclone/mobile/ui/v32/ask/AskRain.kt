@@ -40,7 +40,7 @@ import kotlin.math.roundToInt
  * off it is one still frame; if the shader cannot run, a dark gradient stands in.
  */
 @Composable
-fun AskRainField(modifier: Modifier = Modifier) {
+fun AskRainField(modifier: Modifier = Modifier, withScene: Boolean = true) {
     val density = LocalDensity.current.density
     val context = LocalContext.current
     val rain = remember(density) { AskRain.create(density) }
@@ -48,9 +48,10 @@ fun AskRainField(modifier: Modifier = Modifier) {
     val still = remember { AskRain.animationsOff(context) }
     val clock = remember { mutableFloatStateOf(AskRain.START_S) }
     // The official scene (alpha.70): decoded only while the page is on screen and the app in front.
-    val scene = remember { AskScene(context.applicationContext) }
+    // Home (R4) draws the rain alone: [withScene] false keeps the dome and never starts the decoder.
+    val scene = remember(withScene) { if (withScene) AskScene(context.applicationContext) else null }
     val lifecycle = remember(context) { (context as? LifecycleOwner)?.lifecycle }
-    DisposableEffect(scene, lifecycle) {
+    if (scene != null) DisposableEffect(scene, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> scene.start(still)
@@ -65,7 +66,7 @@ fun AskRainField(modifier: Modifier = Modifier) {
             scene.stop()
         }
     }
-    if (rain != null && still) {
+    if (rain != null && still && scene != null) {
         // Still mode: one redraw once the scene's single frame is ready.
         LaunchedEffect(scene) {
             while (scene.frame == null && !scene.failed) kotlinx.coroutines.delay(50)
@@ -88,7 +89,7 @@ fun AskRainField(modifier: Modifier = Modifier) {
         }
     }
     Canvas(modifier) {
-        val drawn = rain?.draw(this, clock.floatValue, scene.frame?.takeIf { !scene.failed }) ?: false
+        val drawn = rain?.draw(this, clock.floatValue, scene?.frame?.takeIf { !scene.failed }) ?: false
         if (!drawn) drawRect(AskRain.FALLBACK)
     }
 }

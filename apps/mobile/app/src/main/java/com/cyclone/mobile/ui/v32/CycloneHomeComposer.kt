@@ -51,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +60,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.cyclone.mobile.ui.v32.ask.askWhorls
+import com.cyclone.mobile.ui.v32.ask.smokedGlass
 
 @Composable
 fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) -> Unit) {
@@ -93,11 +96,26 @@ fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) ->
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Home is a launcher, not a second AI settings surface. Model and intelligence live in
         // the AI workspace; phone autonomy lives in Settings. The capsule is the Ask Cyclone glass.
-        CycloneSignatureGlass(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
-            focused = focused,
-            refract = true,
-        ) {
+        // R4: on Home's rain the capsule is the AI page's smoked Ask bar (dots and shine); elsewhere the teal glass.
+        val askBackdrop = com.cyclone.mobile.ui.v32.ask.LocalAskBackdrop.current
+        val capsule: @Composable (@Composable () -> Unit) -> Unit = { inner ->
+            if (askBackdrop != null) {
+                Box(
+                    Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                        .smokedGlass(askBackdrop, 33.dp, shine = com.cyclone.mobile.ui.v32.ask.LocalAskShine.current, shineOffset = 0.7f,
+                            shape = com.kyant.capsule.ContinuousCapsule)
+                        .askWhorls(),
+                    contentAlignment = Alignment.Center,
+                ) { inner() }
+            } else {
+                CycloneSignatureGlass(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                    focused = focused,
+                    refract = true,
+                ) { inner() }
+            }
+        }
+        capsule {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -119,8 +137,8 @@ fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) ->
                         .focusRequester(focusRequester)
                         .onFocusChanged { focused = it.isFocused }
                         .semantics { contentDescription = "Home request composer" },
-                    cursorBrush = SolidColor(SignatureTeal),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = SignatureInk),
+                    cursorBrush = SolidColor(if (askBackdrop != null) Color.White else SignatureTeal),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = if (askBackdrop != null) Color.White else SignatureInk),
                     maxLines = 2,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
@@ -129,7 +147,7 @@ fun CycloneHomeComposer(seed: Pair<Int, String> = 0 to "", onSubmit: (String) ->
                             if (text.isEmpty()) {
                                 Text(
                                     "Ask Cyclone…",
-                                    color = SignatureMuted,
+                                    color = if (askBackdrop != null) com.cyclone.mobile.ui.v32.ask.AskGlass.Muted else SignatureMuted,
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
                             }
