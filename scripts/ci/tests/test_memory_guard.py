@@ -31,7 +31,7 @@ def test_the_finish_reminds_once_and_never_traps():
 
 def test_memory_stays_tidy_and_refuses_secrets_and_one_off_values():
     memory = read(MIND / "MindMemory.kt")
-    for marker in ("val card = facts.firstOrNull { it.kind == PERSON && it.subject.equals(person, ignoreCase = true) }",
+    for marker in ("val card = facts.firstOrNull { it.profile == null && it.kind == PERSON && it.subject.equals(person, ignoreCase = true) }",
                    "scored.firstOrNull { it.second >= UPDATE_AT }", "candidate.replaces", "if (looksSecret(everything))",
                    "candidate.source != OWNER && TRANSIENT.containsMatchIn(clean)", "history = pushed(old.history, old.text)"):
         assert marker in memory, marker

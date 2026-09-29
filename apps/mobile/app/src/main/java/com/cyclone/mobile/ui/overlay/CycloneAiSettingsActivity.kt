@@ -383,32 +383,46 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
                 Text("Memory", fontWeight = FontWeight.Bold)
                 Text(
                     "What Cyclone keeps for future tasks: people you told it about, your preferences, how you use apps. Say \"remember…\" " +
-                        "in a task to add something. It never keeps passwords, codes, keys or card numbers, and it is encrypted on this phone.",
+                        "in a task to add something. It never keeps passwords, codes, keys or card numbers, and it is encrypted on this phone. " +
+                        "Your profiles share it when you switch between them, each memory labelled with the profile it came from; " +
+                        "forgetting one here forgets it in every profile.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (facts.isEmpty()) {
                     Text("Nothing yet.", style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    // Plan 37 W3: grouped like a small profile, newest first within each group.
-                    listOf(
-                        com.cyclone.mobile.mind.MindMemory.PERSON to "People",
-                        com.cyclone.mobile.mind.MindMemory.PREFERENCE to "Your preferences",
-                        com.cyclone.mobile.mind.MindMemory.APP to "Apps",
-                        com.cyclone.mobile.mind.MindMemory.FACT to "Other",
-                    ).forEach { (kind, title) ->
-                        val group = facts.filter { it.kind == kind }
-                        if (group.isNotEmpty()) {
-                            Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
-                            group.take(50).forEach { fact ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(fact.text, style = MaterialTheme.typography.bodyMedium)
-                                        Text(if (fact.source == com.cyclone.mobile.mind.MindMemory.OWNER) "You asked Cyclone to remember this"
-                                            else "Cyclone kept this", style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Plan 40 P2: memory is shared by every profile and grouped by the profile it came from (this one
+                    // first); plan 37 W3: within each, grouped like a small profile, newest first.
+                    val names = remember {
+                        runCatching { com.cyclone.mobile.runtime.workspaces.ProfileRegistryStore.records(context).associate { it.id to it.label } }
+                            .getOrDefault(emptyMap()) + ("main" to "Profile A")
+                    }
+                    val byProfile = com.cyclone.mobile.mind.MemoryCarry.byProfile(facts)
+                    byProfile.forEach { (profile, profileFacts) ->
+                        if (byProfile.size > 1 || profile != null) {
+                            Text(if (profile == null) "This profile" else "From ${names[profile] ?: profileFacts.first().profileLabel ?: "another profile"}",
+                                fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        }
+                        listOf(
+                            com.cyclone.mobile.mind.MindMemory.PERSON to "People",
+                            com.cyclone.mobile.mind.MindMemory.PREFERENCE to "Your preferences",
+                            com.cyclone.mobile.mind.MindMemory.APP to "Apps",
+                            com.cyclone.mobile.mind.MindMemory.FACT to "Other",
+                        ).forEach { (kind, title) ->
+                            val group = profileFacts.filter { it.kind == kind }
+                            if (group.isNotEmpty()) {
+                                Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+                                group.take(50).forEach { fact ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(fact.text, style = MaterialTheme.typography.bodyMedium)
+                                            Text(if (fact.source == com.cyclone.mobile.mind.MindMemory.OWNER) "You asked Cyclone to remember this"
+                                                else "Cyclone kept this", style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        TextButton(onClick = { memory.forget(fact.id); facts = memory.all() }) { Text("Forget") }
                                     }
-                                    TextButton(onClick = { memory.forget(fact.id); facts = memory.all() }) { Text("Forget") }
                                 }
                             }
                         }

@@ -165,6 +165,9 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     var backups by remember { mutableStateOf(emptyList<com.cyclone.mobile.runtime.workspaces.ProfileBackup>()) }
     var confirm by remember { mutableStateOf<Pair<String, String>?>(null) }
     var looking by remember { mutableStateOf<String?>(null) }
+    // Plan 40 P2: what the last switch carried here, and whether the last carry out of here arrived.
+    var carried by remember { mutableStateOf<com.cyclone.mobile.runtime.workspaces.CarryReport?>(null) }
+    var carryFailed by remember { mutableStateOf(false) }
 
     var ownerUser by remember { mutableStateOf<Int?>(null) }
     var verifiedCurrentUser by remember { mutableStateOf<Int?>(null) }
@@ -173,6 +176,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     val foregroundExecuting = remember(overlayActivity) { OverlayChromeRuntime.hasExecutingTask() }
     LaunchedEffect(refreshTick) {
         verifiedCurrentUser = null
+        carried = com.cyclone.mobile.runtime.workspaces.ProfileCarry.lastReport(context)
+        carryFailed = com.cyclone.mobile.runtime.workspaces.ProfileCarry.lastSentFailed(context)
         withContext(Dispatchers.IO) { runCatching { ProfileSetupRuntime.visibleProfileIdentity() } }
             .onSuccess { (owner, current) -> ownerUser = owner; verifiedCurrentUser = current }
     }
@@ -387,6 +392,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                 { tab = ProfilesTab.entries[it] },
             )
         }
+
+        if (tab == ProfilesTab.ALL && (carried != null || carryFailed)) item { ProfileCarryNote(carried, carryFailed) }
 
         if (activeProfiles.size > 1) {
             item {

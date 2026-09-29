@@ -18,8 +18,39 @@ internal object ProfileBootstrapRuntime {
     private const val SERVICE = "$PKG/.runtime.workspaces.ProfileBootstrapService"
     private const val SHIZUKU_PERMISSION = "moe.shizuku.manager.permission.API_V23"
     private const val MAX_OUTPUT = 262144
+    const val CARRY_ACTION = "com.cyclone.PROFILE_CARRY"
 
     fun prepare(context: Context, target: Int, profile: String) = prepareInternal(context, target, profile, false)
+
+    /**
+     * Plan 40 P2: brings what this profile's Cyclone knows (memory, skills, settings) into [target]'s, in any
+     * direction, the main profile included. The bundle is sealed for [target]'s Keystore key and bound to this switch;
+     * [target]'s Cyclone takes it in and answers with the nonce. Callers treat a failure as "nothing was carried".
+     */
+    fun carry(context: Context, target: Int): CarryReport {
+        require(context.packageName == PKG)
+        val source = ProfileSetupRuntime.currentUserId()
+        require(target >= 0 && target != source)
+        check(run("/system/bin/am", "get-started-user-state", "$target").contains("RUNNING_UNLOCKED")) { "That profile is locked." }
+        val targetUid = packageUid(target, PKG)
+        val folder = "/data/user_de/$target/$PKG/files"
+        run("/system/bin/rm", "-f", "$folder/profile-bootstrap-public.txt", "$folder/carry-inbox.json", "$folder/carry-result.json")
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE)
+        val publicKey = poll { runCatching { run("/system/bin/cat", "$folder/profile-bootstrap-public.txt").trim().takeIf { it.isNotBlank() } }.getOrNull() }
+        val nonce = UUID.randomUUID().toString()
+        val plain = ProfileCarry.pack(context).toString().toByteArray(Charsets.UTF_8)
+        val sealed = try { ProfileTransferCipher.seal(publicKey, plain, CarryRules.cipherContext(target, nonce)) } finally { plain.fill(0) }
+        val envelope = JSONObject().put("source", source).put("target", target).put("nonce", nonce).put("bundle", sealed)
+        writePrivate("$folder/carry-inbox.json", targetUid, envelope.toString())
+        run("/system/bin/am", "start-foreground-service", "--user", "$target", "-n", SERVICE, "-a", CARRY_ACTION)
+        return poll(tries = 150) {
+            val ack = runCatching { JSONObject(run("/system/bin/cat", "$folder/carry-result.json")) }.getOrNull()
+            if (ack?.optString("nonce") == nonce && ack.optInt("user", -1) == target) {
+                check(ack.optBoolean("ok")) { "The other profile's Cyclone couldn't take in what was carried." }
+                CarryReport.fromJson(ack.getJSONObject("report"))
+            } else null
+        }
+    }
 
     fun requestRepair(context: Context) {
         val target = ProfileSetupRuntime.currentUserId()
@@ -161,8 +192,8 @@ internal object ProfileBootstrapRuntime {
         return uid
     }
 
-    private fun <T : Any> poll(read: () -> T?): T {
-        repeat(30) { read()?.let { return it }; Thread.sleep(200) }
+    private fun <T : Any> poll(tries: Int = 30, read: () -> T?): T {
+        repeat(tries) { read()?.let { return it }; Thread.sleep(200) }
         error("Cyclone couldn't verify the receiving profile. Your current profile was kept open.")
     }
 
@@ -170,7 +201,7 @@ internal object ProfileBootstrapRuntime {
     private fun run(vararg args: String): String = execute(args.joinToString(" ", transform = ::quote))
 
     private fun writePrivate(path: String, uid: Int, data: String) {
-        require(path.matches(Regex("/data/user_de/[0-9]+/com\\.cyclone\\.mobile/files/profile-bootstrap\\.json")))
+        require(path.matches(Regex("/data/user_de/[0-9]+/com\\.cyclone\\.mobile/files/(profile-bootstrap|carry-inbox)\\.json")))
         execute("umask 077; cat > ${quote(path)} && chown $uid:$uid ${quote(path)} && restorecon ${quote(path)}", data)
     }
 

@@ -21,6 +21,7 @@ import java.security.spec.MGF1ParameterSpec
 class ProfileBootstrapService : Service() {
     private val repairScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var repairJob: Job? = null
+    private var carryJob: Job? = null
     override fun onDestroy() { repairScope.cancel(); super.onDestroy() }
     override fun onCreate() {
         super.onCreate()
@@ -41,6 +42,12 @@ class ProfileBootstrapService : Service() {
                     runCatching { ProfileBootstrapRuntime.reportRepairFailure(intent.getIntExtra("target", -1)) }
                 }
                 finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
+            }
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ProfileBootstrapRuntime.CARRY_ACTION) {
+            if (carryJob?.isActive != true) carryJob = repairScope.launch {
+                try { takeInCarry() } finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId) }
             }
             return START_NOT_STICKY
         }
@@ -105,6 +112,34 @@ class ProfileBootstrapService : Service() {
         }
         return START_NOT_STICKY
     }
+    /**
+     * Plan 40 P2: takes in what another profile's Cyclone carried here. The bundle opens only with this profile's
+     * Keystore key and only for this switch's nonce; memory is sealed again with this profile's own memory key.
+     * The answer holds counts, never content.
+     */
+    private fun takeInCarry() {
+        val folder = createDeviceProtectedStorageContext().filesDir
+        val input = File(folder, "carry-inbox.json")
+        val result = File(folder, "carry-result.json")
+        var nonce = ""
+        try {
+            val envelope = JSONObject(input.readText())
+            input.delete()
+            nonce = envelope.getString("nonce")
+            val me = ProfileSetupRuntime.currentUserId()
+            check(envelope.getInt("target") == me && envelope.getInt("source") != me) { "Carry identity mismatch" }
+            val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val plain = ProfileTransferCipher.open(store.getKey(ALIAS, null) as java.security.PrivateKey, envelope.getJSONObject("bundle"),
+                CarryRules.cipherContext(me, nonce))
+            val report = try { ProfileCarry.absorb(this, JSONObject(String(plain, Charsets.UTF_8))) } finally { plain.fill(0) }
+            result.writeText(JSONObject().put("nonce", nonce).put("user", me).put("ok", true).put("report", report.toJson()).toString())
+        } catch (_: Exception) {
+            input.delete()
+            // Never log the bundle or what failed inside it.
+            result.writeText(JSONObject().put("nonce", nonce).put("user", ProfileSetupRuntime.currentUserId()).put("ok", false).toString())
+        }
+    }
+
     companion object {
         private const val ALIAS = "cyclone.profile.bootstrap.v1"
     }

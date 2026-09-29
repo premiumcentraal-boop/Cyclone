@@ -14,6 +14,11 @@ import java.util.Base64
  * - `fact`: anything else durable.
  * [source] is `owner` when the owner asked for it to be remembered, `learned` when the Mind chose to keep it.
  * [history] keeps the last few earlier versions, so an update never silently loses what was there.
+ *
+ * People memory is shared across the owner's profiles (plan 40 P2) and stays labelled by where it came from:
+ * [profile] is null for a memory made in this profile, or the id of the profile that made it ([profileLabel] is that
+ * profile's name when it was last carried, [origin] its id there). [changedAtMs] is when its words last changed, so
+ * the newer wording wins when two profiles meet.
  */
 data class MindFact(
     val id: String,
@@ -28,12 +33,20 @@ data class MindFact(
     val note: String? = null,
     val source: String = MindMemory.LEARNED,
     val history: List<String> = emptyList(),
+    val profile: String? = null,
+    val profileLabel: String? = null,
+    val origin: String? = null,
+    val changedAtMs: Long = 0,
 ) {
+    /** When the words last changed (older files have no such time: then when it was made). */
+    val changed: Long get() = maxOf(changedAtMs, createdAtMs)
+
     fun toJson(): JSONObject = JSONObject().put("id", id).put("text", text).put("created", createdAtMs)
         .put("used", lastUsedAtMs).put("mission", missionId ?: JSONObject.NULL)
         .put("kind", kind).put("subject", subject ?: JSONObject.NULL).put("relation", relation ?: JSONObject.NULL)
         .put("handles", JSONObject(handles as Map<*, *>)).put("note", note ?: JSONObject.NULL).put("source", source)
-        .put("history", JSONArray(history))
+        .put("history", JSONArray(history)).put("profile", profile ?: JSONObject.NULL)
+        .put("profile_label", profileLabel ?: JSONObject.NULL).put("origin", origin ?: JSONObject.NULL).put("changed", changedAtMs)
 
     companion object {
         fun fromJson(json: JSONObject): MindFact {
@@ -41,8 +54,22 @@ data class MindFact(
             val handles = json.optJSONObject("handles")?.let { h -> h.keys().asSequence().associateWith { h.optString(it) } }.orEmpty()
             return MindFact(json.getString("id"), json.optString("text"), json.optLong("created"), json.optLong("used"), opt("mission"),
                 opt("kind") ?: MindMemory.FACT, opt("subject"), opt("relation"), handles, opt("note"), opt("source") ?: MindMemory.LEARNED,
-                json.optJSONArray("history")?.let { a -> (0 until a.length()).map(a::optString) }.orEmpty())
+                json.optJSONArray("history")?.let { a -> (0 until a.length()).map(a::optString) }.orEmpty(),
+                opt("profile"), opt("profile_label"), opt("origin"), json.optLong("changed"))
         }
+    }
+}
+
+/**
+ * A memory the owner forgot, remembered only by where it came from and when, so a copy in another profile is
+ * forgotten too instead of coming back on the next switch. [profile] is null for this profile's own memories.
+ */
+data class ForgottenFact(val profile: String?, val id: String, val atMs: Long) {
+    fun toJson(): JSONObject = JSONObject().put("profile", profile ?: JSONObject.NULL).put("id", id).put("at", atMs)
+
+    companion object {
+        fun fromJson(json: JSONObject) =
+            ForgottenFact(json.optString("profile").takeUnless { json.isNull("profile") || it.isBlank() }, json.getString("id"), json.getLong("at"))
     }
 }
 
@@ -121,13 +148,15 @@ class MindMemory(
         candidate.replaces?.trim()?.takeIf { it.isNotBlank() }?.let { id ->
             val old = facts.firstOrNull { it.id == id } ?: return Saved.Refused("there is no memory $id")
             val updated = if (old.kind == PERSON) mergePerson(old, clean, relation, app, handle, candidate.source, now)
-                else old.copy(text = clean, lastUsedAtMs = now, source = stronger(old.source, candidate.source), history = pushed(old.history, old.text))
+                else old.copy(text = clean, lastUsedAtMs = now, source = stronger(old.source, candidate.source), history = pushed(old.history, old.text),
+                    changedAtMs = now)
             return save(facts, old, updated, old.text)
         }
 
         // A person: one card per person; new details merge into it.
         if (kind == PERSON && person != null) {
-            val card = facts.firstOrNull { it.kind == PERSON && it.subject.equals(person, ignoreCase = true) }
+            // This profile's own card: a card carried from another profile stays that profile's.
+            val card = facts.firstOrNull { it.profile == null && it.kind == PERSON && it.subject.equals(person, ignoreCase = true) }
             if (card != null) {
                 val merged = mergePerson(card, clean, relation, app, handle, candidate.source, now)
                 return if (merged.text == card.text) save(facts, card, merged.copy(history = card.history), null) else save(facts, card, merged, card.text)
@@ -139,7 +168,7 @@ class MindMemory(
             return add(facts, fact)
         }
 
-        val same = facts.filter { it.kind == kind && (kind != APP || it.subject.equals(app, ignoreCase = true)) }
+        val same = facts.filter { it.profile == null && it.kind == kind && (kind != APP || it.subject.equals(app, ignoreCase = true)) }
         val text = if (kind == APP && app != null && !clean.startsWith(app, ignoreCase = true)) "$app: $clean" else clean
         // NOOP: the same memory again.
         same.firstOrNull { squash(it.text).equals(text, ignoreCase = true) }?.let { existing ->
@@ -149,7 +178,7 @@ class MindMemory(
         val scored = same.map { it to overlap(it.text, text) }.sortedByDescending { it.second }
         scored.firstOrNull { it.second >= UPDATE_AT }?.first?.let { old ->
             return save(facts, old, old.copy(text = text, lastUsedAtMs = now, source = stronger(old.source, candidate.source),
-                history = pushed(old.history, old.text)), old.text)
+                history = pushed(old.history, old.text), changedAtMs = now), old.text)
         }
         // ADD, with the related ones shown so the Mind can replace one if it is now wrong.
         val fact = MindFact(nextId(facts), text, now, now, missionId, kind, app, source = candidate.source)
@@ -169,7 +198,8 @@ class MindMemory(
         val subject = card.subject ?: ""
         val text = render(subject, relation ?: card.relation, handles, note)
         return card.copy(text = text, relation = relation ?: card.relation, handles = handles, note = note, lastUsedAtMs = now,
-            source = stronger(card.source, source), history = if (text != card.text) pushed(card.history, card.text) else card.history)
+            source = stronger(card.source, source), history = if (text != card.text) pushed(card.history, card.text) else card.history,
+            changedAtMs = if (text != card.text) now else card.changedAtMs)
     }
 
     private fun save(facts: MutableList<MindFact>, old: MindFact, updated: MindFact, previous: String?): Saved {
@@ -192,13 +222,35 @@ class MindMemory(
 
     @Synchronized fun forget(id: String): Boolean {
         val facts = read()
-        val kept = facts.filterNot { it.id == id.trim() }
-        if (kept.size == facts.size) return false
-        write(kept)
+        val gone = facts.filter { it.id == id.trim() }
+        if (gone.isEmpty()) return false
+        write(facts - gone.toSet(), forgotten + gone.map { MemoryCarry.forgotten(it, clock()) })
         return true
     }
 
-    @Synchronized fun forgetAll() = write(emptyList())
+    @Synchronized fun forgetAll() {
+        val facts = read()
+        write(emptyList(), forgotten + facts.map { MemoryCarry.forgotten(it, clock()) })
+    }
+
+    /**
+     * What this profile hands to another one (plan 40 P2): every memory labelled with the profile it came from
+     * ([me], named [myLabel], for its own), and what was forgotten. Nothing that looks like a secret ever leaves.
+     */
+    @Synchronized fun export(me: String, myLabel: String): MemoryCarry.Parcel = MemoryCarry.export(read(), forgotten, me, myLabel, clock())
+
+    /** Takes in another profile's memories: newer words win, forgotten stays forgotten, each keeps its profile. */
+    @Synchronized fun absorb(parcel: MemoryCarry.Parcel, me: String): MemoryCarry.Result {
+        val result = MemoryCarry.absorb(read(), forgotten, parcel, me, clock())
+        val facts = result.facts.toMutableList()
+        while (facts.size > limit) {
+            val victim = facts.filter { it.source != OWNER }.minByOrNull { maxOf(it.lastUsedAtMs, it.createdAtMs) }
+                ?: facts.minByOrNull { maxOf(it.lastUsedAtMs, it.createdAtMs) }!!
+            facts.remove(victim)
+        }
+        write(facts, result.forgotten)
+        return result
+    }
 
     /** Memories sharing words with [query] (names, relations and handles count), best first; marks them as used. */
     @Synchronized fun search(query: String, max: Int = 12): List<MindFact> {
@@ -237,7 +289,7 @@ class MindMemory(
         val chosen = mutableListOf<MindFact>()
         var used = 0
         for (fact in ranked) {
-            val line = "- [${fact.id}] ${fact.text}"
+            val line = "- [${fact.id}] ${fact.text}${fromLine(fact)}"
             if (used + line.length > maxChars) continue
             chosen += fact
             used += line.length + 1
@@ -245,7 +297,7 @@ class MindMemory(
         touch(facts, chosen.filter { it.id in people })
         return SECTIONS.mapNotNull { (kind, title) ->
             chosen.filter { it.kind == kind }.takeIf { it.isNotEmpty() }?.let { list ->
-                "$title\n" + list.joinToString("\n") { "- [${it.id}] ${it.text}" + if (it.source == OWNER) " (the owner asked)" else "" }
+                "$title\n" + list.joinToString("\n") { "- [${it.id}] ${it.text}" + (if (it.source == OWNER) " (the owner asked)" else "") + fromLine(it) }
             }
         }.joinToString("\n")
     }
@@ -260,7 +312,11 @@ class MindMemory(
     private fun nextId(facts: List<MindFact>): String =
         "f" + ((facts.mapNotNull { it.id.removePrefix("f").toIntOrNull() }.maxOrNull() ?: 0) + 1)
 
+    /** What was forgotten, as of the last [read]; every public call reads before it writes. */
+    private var forgotten: List<ForgottenFact> = emptyList()
+
     private fun read(): List<MindFact> = runCatching {
+        forgotten = emptyList()
         if (!file.isFile) return emptyList()
         val raw = file.readText()
         val text = when {
@@ -268,14 +324,20 @@ class MindMemory(
                 ?: return emptyList()
             else -> raw // a memory file from before alpha.67; the next write seals it
         }
-        val array = JSONObject(text).optJSONArray("facts") ?: JSONArray()
+        val doc = JSONObject(text)
+        val gone = doc.optJSONArray("forgotten") ?: JSONArray()
+        forgotten = (0 until gone.length()).mapNotNull { gone.optJSONObject(it)?.let { json -> runCatching { ForgottenFact.fromJson(json) }.getOrNull() } }
+        val array = doc.optJSONArray("facts") ?: JSONArray()
         (0 until array.length()).mapNotNull { array.optJSONObject(it)?.let { json -> runCatching { MindFact.fromJson(json) }.getOrNull() } }
     }.getOrDefault(emptyList())
 
-    private fun write(facts: List<MindFact>) {
+    private fun write(facts: List<MindFact>, gone: List<ForgottenFact> = forgotten) {
         file.parentFile?.mkdirs()
         val temp = File(file.parentFile, file.name + ".tmp")
-        val json = JSONObject().put("schema", SCHEMA).put("facts", JSONArray().also { array -> facts.forEach { array.put(it.toJson()) } }).toString()
+        val kept = MemoryCarry.tidy(gone, clock())
+        forgotten = kept
+        val json = JSONObject().put("schema", SCHEMA).put("facts", JSONArray().also { array -> facts.forEach { array.put(it.toJson()) } })
+            .put("forgotten", JSONArray().also { array -> kept.forEach { array.put(it.toJson()) } }).toString()
         temp.writeText(sealer?.let { SEALED_PREFIX + Base64.getEncoder().encodeToString(it.seal(json.toByteArray(Charsets.UTF_8))) } ?: json)
         if (!temp.renameTo(file)) { file.delete(); temp.renameTo(file) }
     }
@@ -324,6 +386,7 @@ class MindMemory(
             return x.intersect(y).size.toDouble() / x.union(y).size
         }
         private fun squash(text: String) = text.replace(Regex("\\s+"), " ").trim()
+        private fun fromLine(fact: MindFact) = fact.profile?.let { " (from ${fact.profileLabel ?: "another profile"})" } ?: ""
         private fun pushed(history: List<String>, old: String) = (history + old).takeLast(HISTORY)
         private fun stronger(a: String, b: String) = if (a == OWNER || b == OWNER) OWNER else LEARNED
     }

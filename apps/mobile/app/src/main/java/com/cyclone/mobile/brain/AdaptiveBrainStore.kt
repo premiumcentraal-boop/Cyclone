@@ -544,6 +544,88 @@ class AdaptiveBrainStore(private val context: Context) : SQLiteOpenHelper(contex
         })
     }
 
+    /**
+     * Plan 40 P2: the Brain's skills, paths and notes as rows for another profile (most recently used first), and
+     * how well Cyclone opens each app. Rows that look like they hold a secret stay here.
+     */
+    @Synchronized
+    fun carryRows(): JSONObject {
+        val out = JSONObject()
+        com.cyclone.mobile.runtime.workspaces.CarryRules.tables.forEach { table ->
+            val rows = JSONArray()
+            readableDatabase.query(table.name, table.columns.toTypedArray(), null, null, null, null, "${table.time} DESC",
+                "${com.cyclone.mobile.runtime.workspaces.CarryRules.ROWS_PER_TABLE}").use { c ->
+                while (c.moveToNext()) {
+                    val row = JSONObject()
+                    table.columns.forEachIndexed { i, column ->
+                        row.put(column, when (c.getType(i)) {
+                            android.database.Cursor.FIELD_TYPE_NULL -> JSONObject.NULL
+                            android.database.Cursor.FIELD_TYPE_INTEGER -> c.getLong(i)
+                            android.database.Cursor.FIELD_TYPE_FLOAT -> c.getDouble(i)
+                            else -> c.getString(i)
+                        })
+                    }
+                    if (com.cyclone.mobile.runtime.workspaces.CarryRules.safeRow(table, row)) rows.put(row)
+                }
+            }
+            out.put(table.name, rows)
+        }
+        out.put("apps", JSONArray().also { apps -> listApps().forEach {
+            apps.put(JSONObject().put("package", it.packageName).put("ok", it.openSuccessCount).put("failed", it.openFailureCount))
+        } })
+        return out
+    }
+
+    /**
+     * Takes in another profile's rows: a skill or path used more recently there replaces this one, new ones are
+     * added, notes are only added, and app evidence only grows for apps this profile has. Returns rows changed.
+     */
+    @Synchronized
+    fun absorbRows(incoming: JSONObject): Int {
+        var changed = 0
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            com.cyclone.mobile.runtime.workspaces.CarryRules.tables.forEach { table ->
+                val rows = incoming.optJSONArray(table.name) ?: return@forEach
+                for (index in 0 until minOf(rows.length(), com.cyclone.mobile.runtime.workspaces.CarryRules.ROWS_PER_TABLE)) {
+                    val row = rows.optJSONObject(index) ?: continue
+                    if (!com.cyclone.mobile.runtime.workspaces.CarryRules.safeRow(table, row)) continue
+                    val localTime = db.query(table.name, arrayOf(table.time), "${table.key} = ?", arrayOf(row.getString(table.key)),
+                        null, null, null).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+                    if (!com.cyclone.mobile.runtime.workspaces.CarryRules.takes(table, localTime, row.optLong(table.time))) continue
+                    val values = ContentValues()
+                    table.columns.forEach { column ->
+                        when (val value = row.opt(column)) {
+                            null, JSONObject.NULL -> values.putNull(column)
+                            is Int -> values.put(column, value.toLong())
+                            is Long -> values.put(column, value)
+                            is Double -> values.put(column, value)
+                            is Float -> values.put(column, value.toDouble())
+                            is Number -> values.put(column, value.toDouble())
+                            else -> values.put(column, value.toString())
+                        }
+                    }
+                    if (db.insertWithOnConflict(table.name, null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) changed++
+                }
+            }
+            val apps = incoming.optJSONArray("apps") ?: JSONArray()
+            for (index in 0 until apps.length()) {
+                val app = apps.optJSONObject(index) ?: continue
+                val existing = app(app.optString("package")) ?: continue
+                val ok = maxOf(existing.openSuccessCount, app.optInt("ok"))
+                val failed = maxOf(existing.openFailureCount, app.optInt("failed"))
+                if (ok == existing.openSuccessCount && failed == existing.openFailureCount) continue
+                db.update("app_inventory", ContentValues().apply { put("open_success_count", ok); put("open_failure_count", failed) },
+                    "package_name = ?", arrayOf(existing.packageName))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return changed
+    }
+
     private fun updateAppOpenEvidence(packageName: String, ok: Boolean) {
         val existing = app(packageName)
         val label = existing?.label ?: appLabel(packageName) ?: packageName

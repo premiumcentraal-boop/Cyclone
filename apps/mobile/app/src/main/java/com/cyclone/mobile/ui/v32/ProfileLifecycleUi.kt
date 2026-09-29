@@ -1,6 +1,7 @@
 package com.cyclone.mobile.ui.v32
 
 import android.content.Context
+import android.text.format.DateUtils
 import android.text.format.Formatter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,6 +34,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cyclone.mobile.runtime.workspaces.CarryReport
+import com.cyclone.mobile.runtime.workspaces.CarryRules
 import com.cyclone.mobile.runtime.workspaces.CycloneProfileRecord
 import com.cyclone.mobile.runtime.workspaces.ProfileBackup
 import com.cyclone.mobile.runtime.workspaces.ProfileTrash
@@ -144,6 +147,26 @@ internal fun ProfileConfirmDialog(title: String, body: String, confirm: String, 
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/**
+ * Plan 40 P2: one quiet line about Cyclone Carry: what the last switch brought into this profile, and a note when the
+ * last carry out of it didn't arrive (the switch itself still happened).
+ */
+@Composable
+internal fun ProfileCarryNote(report: CarryReport?, sentFailed: Boolean) {
+    val line = report?.let { r -> CarryRules.line(r)?.let { "$it · ${DateUtils.getRelativeTimeSpanString(r.atMs)}" } }
+    CycloneSimpleCard(Modifier.fillMaxWidth()) {
+        Text("Cyclone Carry", style = MaterialTheme.typography.titleSmall)
+        Text(
+            listOfNotNull(
+                line ?: "Your memory, skills and settings go with you each time you switch profiles.",
+                if (sentFailed) "Last time, what you learned here couldn't be carried to the next profile. It will go with your next switch." else null,
+            ).joinToString("\n"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /** The words for each lifecycle step, in one place (and pinned by tests). */

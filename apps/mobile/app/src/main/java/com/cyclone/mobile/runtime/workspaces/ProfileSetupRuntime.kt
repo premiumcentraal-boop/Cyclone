@@ -147,6 +147,11 @@ object ProfileSetupRuntime {
                 }
                 target
             }
+            if (user != currentUserId()) {
+                // Plan 40 P2: what this Cyclone knows goes with you. Best effort: a carry never blocks the switch.
+                onProgress("Bringing your memory and skills…")
+                ProfileCarry.noteSent(context, runCatching { ProfileBootstrapRuntime.carry(context, user) }.isSuccess)
+            }
             val activeUser = ProfileSetupParser.currentUserId(runRequired(ProfileSetupPlan.currentUser()))
             check(activeUser == currentUserId() || activeUser == user) { "Your active profile changed. The switch was cancelled." }
             check(!Layer2Workspaces.gated()) { "Resolve the pending review before switching." }
