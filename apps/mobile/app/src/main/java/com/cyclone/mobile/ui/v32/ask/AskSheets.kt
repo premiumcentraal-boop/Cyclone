@@ -1,10 +1,6 @@
 package com.cyclone.mobile.ui.v32.ask
 
-import android.Manifest
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -74,7 +70,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.app.ActivityCompat
 import com.cyclone.mobile.ai.OpenRouterCatalogStore
 import com.cyclone.mobile.ai.OpenRouterModelPreset
 import com.cyclone.mobile.mind.mission.MindMissions
@@ -413,9 +408,9 @@ internal fun AskLogoPanel(modifier: Modifier = Modifier, onSettings: (section: S
         }
         AskPanelRow(Icons.Rounded.DirectionsCar, "Driver mode", onClick = null) {
             AskSwitch(drive.enabled, "Driver mode") { on ->
-                val mic = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                if (on && !mic) context.findActivity()?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.RECORD_AUDIO), 324) }
                 DriverMode.setEnabled(context, on)
+                // Turning it on plays the short Drive film, which asks for the microphone at its end if needed.
+                if (on) com.cyclone.mobile.ui.overlay.DriveIntroActivity.start(context)
             }
         }
         AskPanelRow(Icons.Rounded.Person, "User notes", onClick = null) {
@@ -473,6 +468,3 @@ private fun AskSwitch(checked: Boolean, label: String, onChange: (Boolean) -> Un
         Box(Modifier.offset(x = knob).size(24.dp).clip(CircleShape).background(Color.White))
     }
 }
-
-private fun Context.findActivity(): Activity? = generateSequence(this) { (it as? ContextWrapper)?.baseContext }
-    .filterIsInstance<Activity>().firstOrNull()

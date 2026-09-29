@@ -83,6 +83,9 @@
         <activity android:name=".ui.ProfileRescueActivity" android:exported="false" />
         <activity android:name=".ui.overlay.OverlayAttachmentActivity" android:exported="false" />
         <activity android:name=".ui.overlay.CycloneAiSettingsActivity" android:exported="false" />
+        <!-- Plan 32: the short film that plays when Driver mode is turned on. Dark from the first frame, no recents entry. -->
+        <activity android:name=".ui.overlay.DriveIntroActivity" android:exported="false" android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
         <activity android:name=".runtime.background.WorkspaceProgressActivity" android:exported="false" />
         <activity android:name=".runtime.background.BackgroundSetupActivity" android:exported="false" />
         <activity android:name=".runtime.background.WorkspaceActivity" android:exported="false" />

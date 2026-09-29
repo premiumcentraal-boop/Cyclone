@@ -1,7 +1,6 @@
 package com.cyclone.mobile.ui.v32
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.compose.foundation.clickable
@@ -35,8 +34,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.app.ActivityCompat
 import com.cyclone.mobile.ai.OpenRouterSecretStore
+import com.cyclone.mobile.ui.overlay.DriveIntroActivity
 import com.cyclone.mobile.voice.DriverMode
 import com.cyclone.mobile.voice.DriverSettings
 import com.cyclone.mobile.voice.JevWatch
@@ -67,8 +66,9 @@ internal fun DriverModeSettings(context: Context, refresh: () -> Unit) {
             }
             Spacer(Modifier.width(12.dp))
             CycloneLiquidToggle(checked = settings.enabled, onCheckedChange = { on ->
-                if (on && !mic) (context as? Activity)?.let { ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.RECORD_AUDIO), 324) }
                 DriverMode.setEnabled(context, on)
+                // Turning it on plays the short Drive film, which asks for the microphone at its end if needed.
+                if (on) DriveIntroActivity.start(context)
                 refresh()
             })
         }

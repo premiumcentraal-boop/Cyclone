@@ -8,8 +8,11 @@ class DriverTile : TileService() {
     override fun onStartListening() = render()
 
     override fun onClick() {
-        DriverMode.setEnabled(this, !DriverMode.enabled(this))
+        val on = !DriverMode.enabled(this)
+        DriverMode.setEnabled(this, on)
         render()
+        // Turning it on from the shade plays the short Drive film too.
+        if (on) com.cyclone.mobile.ui.overlay.DriveIntroActivity.startFromTile(this)
     }
 
     private fun render() {

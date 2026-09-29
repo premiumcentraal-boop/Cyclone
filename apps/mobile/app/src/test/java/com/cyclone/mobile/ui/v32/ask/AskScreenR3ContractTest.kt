@@ -114,9 +114,11 @@ class AskScreenR3ContractTest {
         assertTrue(sheets.contains("canResume = live == null"))
         assertTrue(sheets.contains("MindMissions.resume(context, mission.id)"))
         assertTrue(sheets.contains("MindMissions.delete(context, mission.id)"))
-        // Driver mode switches exactly as in Settings, asking for the microphone first.
-        assertTrue(sheets.contains("Manifest.permission.RECORD_AUDIO"))
+        // Driver mode switches exactly as in Settings: turning it on plays the Drive film, which asks for the microphone.
         assertTrue(sheets.contains("DriverMode.setEnabled(context, on)"))
+        assertTrue(sheets.contains("if (on) com.cyclone.mobile.ui.overlay.DriveIntroActivity.start(context)"))
+        val intro = source("com/cyclone/mobile/ui/overlay/DriveIntro.kt")
+        assertTrue(intro.contains("askMic.launch(Manifest.permission.RECORD_AUDIO)"))
         assertTrue(sheets.contains("com.cyclone.mobile.brain.UserMdRuntime.setEnabled(context, on)"))
         listOf("getSharedPreferences", "OpenRouterSecretStore", "writeText(", "Log.").forEach {
             assertFalse("sheets must not use $it", sheets.contains(it))
