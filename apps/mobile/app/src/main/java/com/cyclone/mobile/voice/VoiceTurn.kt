@@ -75,6 +75,11 @@ sealed interface VoiceEvent {
     data class OfferExpired(val id: String) : VoiceEvent
     /** The big Stop button: ends the voice turn and the task. */
     data object Stop : VoiceEvent
+    /**
+     * Plan 42 (Live): the modes router finished a quick request. [say] is null for a silent success (a sound instead);
+     * [promoted] means it went on as a Flash or Mind mission.
+     */
+    data class QuickDone(val ok: Boolean, val say: String?, val promoted: Boolean) : VoiceEvent
     /** "Not now" while Cyclone asks: declines the open question and closes. */
     data object NotNow : VoiceEvent
 }
@@ -91,6 +96,10 @@ sealed interface VoiceEffect {
     data object StopSpeaking : VoiceEffect
     /** Start a new Ask with [goal], exactly as if typed. */
     data class Submit(val goal: String) : VoiceEffect
+    /** Plan 42 (Live): the same, for a quick command; the session reports back with [VoiceEvent.QuickDone]. */
+    data class Quick(val goal: String) : VoiceEffect
+    /** Plan 42 (Live): open the microphone again for up to [ms] of silence, for a follow-up or the rest of a sentence. */
+    data class KeepListening(val ms: Int) : VoiceEffect
     data class Send(val answer: VoiceAnswer) : VoiceEffect
 }
 
@@ -120,6 +129,14 @@ data class VoiceTurn(
     val offer: VoiceOffer? = null,
     /** The SEND moment whose readback was heard to the end: only then does a yes approve it. */
     val readbackHeard: String? = null,
+    /** Plan 42 (Live): quick commands go straight to the modes router (off when Speed is Always Mind). */
+    val quickCommands: Boolean = true,
+    /** Plan 42 (Live): how long the mic stays open after a quick action; 0 closes it. */
+    val keepListeningMs: Int = 8_000,
+    /** A quick command is with the router now. */
+    val quickLive: Boolean = false,
+    /** The mic reopened after a quick action: what the owner says next may finish the sentence ("… and take a selfie"). */
+    val keptOpen: Boolean = false,
 ) {
     data class Step(val turn: VoiceTurn, val effects: List<VoiceEffect>)
 
@@ -137,7 +154,10 @@ data class VoiceTurn(
     fun on(event: VoiceEvent): Step = when (event) {
         VoiceEvent.Tap -> tap()
         VoiceEvent.Heard -> if (phase == VoicePhase.LISTENING) step(copy(phase = VoicePhase.TRANSCRIBING), VoiceEffect.Transcribe) else same()
-        VoiceEvent.NothingHeard -> if (phase == VoicePhase.LISTENING) rest(listOf(VoiceEffect.Play(Earcon.CLOSE_SOFT))) else same()
+        VoiceEvent.NothingHeard -> if (phase == VoicePhase.LISTENING) {
+            // The window after a quick action closes quietly: nothing was wanted.
+            rest(if (keptOpen) emptyList() else listOf(VoiceEffect.Play(Earcon.CLOSE_SOFT)))
+        } else same()
         is VoiceEvent.Transcript -> if (phase == VoicePhase.TRANSCRIBING) transcript(event.text) else same()
         is VoiceEvent.Understood -> if (phase == VoicePhase.UNDERSTANDING) understood(event.understanding) else same()
         is VoiceEvent.Failed -> if (phase in LISTEN_PHASES) say(failure(event.failure), AfterSpeech.CLOSE, VoicePhase.DONE) else same()
@@ -152,6 +172,7 @@ data class VoiceTurn(
         VoiceEvent.NotNow -> notNow()
         is VoiceEvent.Announce -> announceMessage(event.offer)
         is VoiceEvent.OfferExpired -> if (offer?.id == event.id) step(copy(offer = null)) else same()
+        is VoiceEvent.QuickDone -> quickDone(event)
     }
 
     // ---- events -----------------------------------------------------------------------------------------------------
@@ -196,11 +217,19 @@ data class VoiceTurn(
             else sayClosing(VoiceCopy.OKAY, text.trim())
         }
         is VoiceRules.Screen.Pass -> {
-            val understanding = copy(phase = VoicePhase.UNDERSTANDING, heard = screen.text)
+            val said = if (keptOpen) VoiceQuick.continuation(screen.text) else screen.text
+            val understanding = copy(phase = VoicePhase.UNDERSTANDING, heard = said, keptOpen = false)
             // Instant commands (a timer, an alarm) need no model when nothing is being asked: the confirmation starts now.
-            val instant = if (!answering && followUp == null) VoiceIntents.parse(screen.text) else null
-            if (instant != null) understanding.understood(instant)
-            else step(understanding, VoiceEffect.Understand(screen.text, VoiceContext(followUp, openAsk(), recentGoals, taskLive, language)))
+            val instant = if (!answering && followUp == null) VoiceIntents.parse(said) else null
+            when {
+                instant != null -> understanding.understood(instant)
+                // Plan 42 (Live): a quick command goes to the router at once: no model reading, no "On it.".
+                quickCommands && !answering && followUp == null && !taskLive && !quickLive &&
+                    com.cyclone.mobile.mind.modes.InstantGrammar.quick(said) ->
+                    step(understanding.copy(phase = VoicePhase.WORKING, quickLive = true, unclearCount = 0,
+                        recentGoals = (recentGoals + said).takeLast(3)), VoiceEffect.Quick(said))
+                else -> step(understanding, VoiceEffect.Understand(said, VoiceContext(followUp, openAsk(), recentGoals, taskLive, language)))
+            }
         }
     }
 
@@ -227,6 +256,28 @@ data class VoiceTurn(
             VoiceKind.CONFIRM -> if (open != null) confirm(open) else sayClosing(VoiceCopy.NOTHING_OPEN)
             VoiceKind.DECLINE -> if (open != null) declineMoment(heard) else sayClosing(VoiceCopy.OKAY)
         }
+    }
+
+    /**
+     * Plan 42 (Live): a quick command came back. Done: a sound (or the short line when silent success is off) and the
+     * mic stays open. Handed up: it is a task now, confirmed like one. Failed: said, then closed.
+     */
+    private fun quickDone(event: VoiceEvent.QuickDone): Step {
+        if (!quickLive) return same()
+        val back = copy(quickLive = false)
+        if (event.promoted) {
+            val s = back.say(VoiceCopy.DEFAULT_ACK, AfterSpeech.WORK, VoicePhase.ACKING)
+            return Step(s.turn.copy(taskLive = true, stillSaid = false, stopping = false), s.effects)
+        }
+        if (!event.ok) return back.sayClosing(VoiceCopy.failed(event.say))
+        val line = event.say
+        if (line != null) {
+            val s = back.say(line, if (keepListeningMs > 0) AfterSpeech.LISTEN else AfterSpeech.CLOSE, VoicePhase.DONE)
+            return Step(s.turn.copy(keptOpen = keepListeningMs > 0), s.effects)
+        }
+        if (keepListeningMs <= 0) return Step(back.copy(phase = back.restPhase()), listOf(VoiceEffect.Play(Earcon.DONE)))
+        return Step(back.copy(phase = VoicePhase.LISTENING, keptOpen = true, heard = "", said = ""),
+            listOf(VoiceEffect.Play(Earcon.DONE), VoiceEffect.KeepListening(keepListeningMs)))
     }
 
     /** What the owner said after an announcement: the reply's content, a yes or no, or a new request of their own. */
@@ -297,6 +348,7 @@ data class VoiceTurn(
             if (taskLive) add(VoiceEffect.Send(VoiceAnswer.Stop))
         }
         return Step(copy(phase = VoicePhase.CLOSED, speaking = false, stopping = taskLive, followUp = null, unclearCount = 0, offer = null,
+            quickLive = false, keptOpen = false,
             pendingEnd = null, said = if (taskLive) VoiceCopy.STOPPED else said), effects)
     }
 
@@ -401,10 +453,10 @@ data class VoiceTurn(
     }
 
     private fun sayClosing(line: String, heardText: String = heard): Step =
-        say(line, AfterSpeech.CLOSE, VoicePhase.DONE).let { Step(it.turn.copy(heard = heardText, followUp = null, unclearCount = 0), it.effects) }
+        say(line, AfterSpeech.CLOSE, VoicePhase.DONE).let { Step(it.turn.copy(heard = heardText, followUp = null, unclearCount = 0, keptOpen = false), it.effects) }
 
     private fun rest(effects: List<VoiceEffect>): Step =
-        Step(copy(phase = restPhase(), followUp = null, unclearCount = 0, speaking = false), effects)
+        Step(copy(phase = restPhase(), followUp = null, unclearCount = 0, speaking = false, keptOpen = false), effects)
 
     private fun restPhase(): VoicePhase = if (taskLive) VoicePhase.WORKING else VoicePhase.CLOSED
 

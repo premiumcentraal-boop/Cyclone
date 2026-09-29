@@ -18,7 +18,7 @@ class DriveVoiceFallbackContractTest {
 
     @Test fun recordingWaitsForTheMicrophoneService() {
         val session = voice("VoiceSession.kt")
-        val listen = session.substringAfter("private fun listen() {").substringBefore("private suspend fun listenWithRecognizer(")
+        val listen = session.substringAfter("private fun listen(waitMs: Int? = null) {").substringBefore("private suspend fun listenWithRecognizer(")
         assertTrue(listen.indexOf("VoiceService.startAndWait(app)") in 0 until listen.indexOf("capture.record("))
         val service = voice("VoiceService.kt")
         assertTrue(service.contains(".onSuccess { _foreground.value = true }"))

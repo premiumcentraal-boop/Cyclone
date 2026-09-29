@@ -723,6 +723,9 @@ object PhoneToolExecutor {
             "phone.direct_contacts_find" -> direct(com.cyclone.mobile.direct.DirectActions.contactsFind(context, p))
             "phone.direct_alarm" -> direct(com.cyclone.mobile.direct.DirectActions.alarm(context, p))
             "phone.direct_timer" -> direct(com.cyclone.mobile.direct.DirectActions.timer(context, p))
+            "phone.direct_flashlight" -> direct(com.cyclone.mobile.direct.DirectActions.flashlight(context, p))
+            "phone.direct_volume" -> direct(com.cyclone.mobile.direct.DirectActions.volume(context, p))
+            "phone.direct_media" -> direct(com.cyclone.mobile.direct.DirectActions.media(context, p))
             "phone.open_notification" -> {
                 val generation = DeviceState.uiGeneration()
                 val opened = openNotification(p.optString("key").takeIf { it.isNotBlank() })
@@ -753,6 +756,24 @@ object PhoneToolExecutor {
                 launchedOutcome(service, before, p, generation, JSONObject().put("started", true))
             }
             "phone.launch_intent" -> {
+                // Plan 42 (Instant): the camera, ready to take a photo (the front one for a selfie). Nothing is captured
+                // here; the shutter is a separate, visible tap.
+                if (p.optString("action") == "camera") {
+                    val front = p.optBoolean("front", false)
+                    val intent = Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (front) {
+                        intent.putExtra("android.intent.extras.CAMERA_FACING", 1)
+                            .putExtra("android.intent.extras.LENS_FACING_FRONT", 1)
+                            .putExtra("android.intent.extra.USE_FRONT_CAMERA", true)
+                    }
+                    val eventGeneration = DeviceState.uiGeneration()
+                    try {
+                        context.startActivity(intent)
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        return errorResult(PhoneToolErrorCode.ACTION_FAILED, "No camera app on this phone")
+                    }
+                    return launchedOutcome(service, before, p, eventGeneration, JSONObject().put("camera", if (front) "front" else "back").put("started", true))
+                }
                 val uri = p.optString("uri")
                 if (uri.isBlank()) return errorResult(PhoneToolErrorCode.INVALID_REQUEST, "uri is required")
                 val parsed = Uri.parse(uri)

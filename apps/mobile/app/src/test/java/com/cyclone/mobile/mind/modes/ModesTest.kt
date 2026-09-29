@@ -227,4 +227,17 @@ class ModesTest {
         listOf("set a timer for 5 minutes", "turn on the flashlight", "volume down", "pause").forEach { assertTrue(it, InstantRun.run(match(it), phone).done) }
         assertEquals(listOf("timer 300", "torch true", "volume false", "media play_pause"), phone.did)
     }
+
+    @Test fun quickCommandsForLiveVoice() {
+        listOf("swipe up", "open my camera", "take a picture of me", "call my mom", "click Pokemon Go", "open Instagram", "volume up")
+            .forEach { assertTrue(it, InstantGrammar.quick(it)) }
+        listOf("open Instagram and message Louella", "what's the weather tomorrow", "tell Louella I'm late", "")
+            .forEach { assertFalse(it, InstantGrammar.quick(it)) }
+    }
+
+    @Test fun instantCopyIsShort() {
+        assertEquals("Opening the camera", InstantCopy.working(match("open my camera")))
+        assertEquals("Took the photo.", InstantCopy.done(InstantOutcome(true, listOf("opened the front camera", "took the photo"), 2)))
+        assertEquals("Done.", InstantCopy.done(InstantOutcome(true, emptyList(), 0)))
+    }
 }

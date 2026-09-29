@@ -224,6 +224,50 @@ object DirectActions {
 
     private fun label(params: JSONObject): String? = params.optString("label").trim().take(60).ifBlank { null }
 
+    // ---- plan 42 (Instant): the torch, the volume and the media keys ------------------------------------------------
+
+    /** The flashlight on or off, through Android's torch API. */
+    fun flashlight(context: Context, params: JSONObject): DirectResult {
+        val on = params.optBoolean("on", true)
+        val cameras = context.getSystemService(android.hardware.camera2.CameraManager::class.java)
+            ?: return DirectResult.refused(DirectResult.UNAVAILABLE, "No camera service on this phone")
+        return try {
+            val id = cameras.cameraIdList.firstOrNull { id ->
+                cameras.getCameraCharacteristics(id).get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            } ?: return DirectResult.refused(DirectResult.UNAVAILABLE, "This phone has no flashlight")
+            cameras.setTorchMode(id, on)
+            DirectResult(JSONObject().put("flashlight", if (on) "on" else "off"))
+        } catch (_: Exception) {
+            DirectResult.refused(DirectResult.FAILED, "The flashlight could not be switched (the camera may be in use)")
+        }
+    }
+
+    /** One step of the media volume up or down, with Android's own volume panel so the owner sees it. */
+    fun volume(context: Context, params: JSONObject): DirectResult {
+        val up = params.optString("direction", "up") != "down"
+        val audio = context.getSystemService(android.media.AudioManager::class.java)
+            ?: return DirectResult.refused(DirectResult.UNAVAILABLE, "No audio service on this phone")
+        audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+            if (up) android.media.AudioManager.ADJUST_RAISE else android.media.AudioManager.ADJUST_LOWER, android.media.AudioManager.FLAG_SHOW_UI)
+        return DirectResult(JSONObject().put("volume", audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC))
+            .put("max", audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)))
+    }
+
+    /** A media key (play/pause, next, previous) to whatever is playing. */
+    fun media(context: Context, params: JSONObject): DirectResult {
+        val code = when (params.optString("action", "play_pause")) {
+            "next" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+            "previous" -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            "play_pause" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            else -> return DirectResult.refused(DirectResult.INVALID, "action is play_pause, next or previous")
+        }
+        val audio = context.getSystemService(android.media.AudioManager::class.java)
+            ?: return DirectResult.refused(DirectResult.UNAVAILABLE, "No audio service on this phone")
+        audio.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+        audio.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+        return DirectResult(JSONObject().put("sent", params.optString("action", "play_pause")))
+    }
+
     private fun start(context: Context, intent: Intent): DirectResult? {
         intent.putExtra(AlarmClock.EXTRA_SKIP_UI, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {

@@ -13,6 +13,11 @@ object MindPrompt {
         "with lo.06, type the message (text), tap Send (irreversible). Keep choices, judgement and the finish for yourself; when the " +
         "plan comes back to you, read the screen and decide."
 
+    /** Plan 42: a Flash run, a few routine steps the router sent here. */
+    const val FLASH = "This is a quick run: a few routine steps. Act at once, keep turns short, and finish as soon as it is done."
+    const val FLASH_WITH_PILOT = "This is a quick run: a few routine steps. Write the whole run as a plan and give it to pilot " +
+        "straight away; keep only choices and the finish for yourself."
+
     fun system(ownerName: String?, nativeTools: Boolean, tools: List<MindToolSpec>, now: String, device: String): String = buildString {
         // Stable parts first, changing context last: the prefix stays identical turn after turn (prompt caching) and
         // the rules read before the facts.

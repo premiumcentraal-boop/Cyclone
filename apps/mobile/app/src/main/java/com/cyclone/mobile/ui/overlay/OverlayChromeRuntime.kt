@@ -393,28 +393,33 @@ object OverlayChromeRuntime {
      * A new request, typed or spoken. [driving] is Drive's (plan 32): the work goes to the background when the phone
      * can do it, otherwise it borrows the screen and gives it back to the app the owner was in ([DriveScreen]).
      */
-    fun submitRequest(text: String, driving: Boolean = false) {
+    /**
+     * [onModes] (plan 42, Live voice) hears how the request ended: done by Instant, answered, or handed to a mission.
+     * Every path that does not reach the modes router reports it as handed on, so a caller never waits forever.
+     */
+    fun submitRequest(text: String, driving: Boolean = false, onModes: ((com.cyclone.mobile.mind.modes.ModeResult) -> Unit)? = null) {
+        val handedOn = { onModes?.invoke(com.cyclone.mobile.mind.modes.ModeResult(com.cyclone.mobile.mind.modes.Mode.MIND, null, true, promoted = true)); Unit }
         val request = text.trim().take(2_000)
-        if (request.isBlank()) return
+        if (request.isBlank()) return handedOn()
         if (driving) synchronized(lock) { service }?.let { DriveScreen.begin(it) }
         if (missionHooks?.ownerText(request) == true) {
             updateComposer("")
-            return
+            return handedOn()
         }
-        val context = synchronized(lock) { service } ?: return
+        val context = synchronized(lock) { service } ?: return handedOn()
         synchronized(lock) { controller?.keyboardClosed() }
         val busy = !com.cyclone.mobile.runtime.background.WorkspaceTasks.canStartRequest()
         if (busy) {
             runCatching { com.cyclone.mobile.runtime.background.WorkspaceTasks.queueRequest(request) }
                 .onSuccess { updateComposer("") }
                 .onFailure { android.widget.Toast.makeText(context, it.message, android.widget.Toast.LENGTH_LONG).show() }
-            return
+            return handedOn()
         }
         // Only explicit intent selects isolation. Naming an app is ordinary foreground use.
         val target = com.cyclone.mobile.runtime.background.ExecutionTargetResolver.resolve(request)
         if (target is com.cyclone.mobile.runtime.background.ExecutionTarget.Profile) {
             android.widget.Toast.makeText(context, "Open the requested profile in Profiles before continuing.", android.widget.Toast.LENGTH_LONG).show()
-            return
+            return handedOn()
         }
         val apps = context.packageManager.queryIntentActivities(
             android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
@@ -435,7 +440,7 @@ object OverlayChromeRuntime {
                 context.startActivity(android.content.Intent(context, com.cyclone.mobile.runtime.background.WorkspaceActivity::class.java)
                     .putExtra("goal", request).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             }
-            return
+            return handedOn()
         }
         val accepted = synchronized(lock) {
             pendingGateChallenge = null
@@ -457,8 +462,8 @@ object OverlayChromeRuntime {
                 !PendingTaskAttachment.present.value && com.cyclone.mobile.runtime.background.ExecutionTargetResolver.isSimpleLaunch(
                     request, it.loadLabel(context.packageManager).toString())
             }?.activityInfo?.packageName
-            runAiRequest(request, launch)
-        }
+            runAiRequest(request, launch, onModes)
+        } else handedOn()
     }
 
     fun updateVoice(listening: Boolean, transcript: String? = null, message: String? = null) {
@@ -469,8 +474,10 @@ object OverlayChromeRuntime {
         synchronized(lock) { controller?.beginVoiceInput() }
     }
 
-    private fun runAiRequest(request: String, launchPackage: String? = null) {
-        val context = synchronized(lock) { service } ?: return
+    private fun runAiRequest(request: String, launchPackage: String? = null,
+                             onModes: ((com.cyclone.mobile.mind.modes.ModeResult) -> Unit)? = null) {
+        val handedOn = { onModes?.invoke(com.cyclone.mobile.mind.modes.ModeResult(com.cyclone.mobile.mind.modes.Mode.MIND, null, true, promoted = true)); Unit }
+        val context = synchronized(lock) { service } ?: return handedOn()
         synchronized(lock) {
             aiJob?.cancel()
             adaptiveAgent?.cancelActiveTask()
@@ -478,13 +485,13 @@ object OverlayChromeRuntime {
         // Taken exactly once per request; a simple app launch never carries an attachment.
         val attachment = if (launchPackage == null) PendingTaskAttachment.take() else null
         // Cyclone Mind: one model, one conversation, one mission. The classic agent remains for owners who turn it off.
-        if (launchPackage == null && com.cyclone.mobile.mind.mission.MindMissions.enabled(context)) {
-            if (!com.cyclone.mobile.mind.mission.MindMissions.start(context, request, attachment)) {
-                // Plan 26: a clearly separate task waits as "Runs next"; anything else steers the running mission.
-                com.cyclone.mobile.mind.mission.MindMissions.offer(context, request)
-            }
+        // Plan 42: the modes router picks Instant, Flash or the Mind first; a request while a mission runs still goes to
+        // that mission ("Runs next" or a steer).
+        if (com.cyclone.mobile.mind.mission.MindMissions.enabled(context)) {
+            com.cyclone.mobile.mind.modes.CycloneModes.handle(context, request, attachment, voice = onModes != null) { onModes?.invoke(it) }
             return
         }
+        handedOn()
         val shared = TaskHarnessState.applyTrajectory(
             WorkspaceTaskUi(
                 "foreground-${java.util.UUID.randomUUID()}",

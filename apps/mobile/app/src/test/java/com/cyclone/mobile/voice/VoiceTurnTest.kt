@@ -187,7 +187,8 @@ class VoiceTurnTest {
         val r = Run()
         r.on(VoiceEvent.Tap); r.on(VoiceEvent.Heard)
         assertTrue(r.on(VoiceEvent.Tap).isEmpty())
-        r.on(VoiceEvent.Transcript("open maps"))
+        // A request for the understanding model (a quick command like "open maps" goes straight to the router).
+        r.on(VoiceEvent.Transcript("find a gas station on the way"))
         assertTrue(r.on(VoiceEvent.Tap).isEmpty())
     }
 

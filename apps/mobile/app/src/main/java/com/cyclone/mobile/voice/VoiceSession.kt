@@ -132,7 +132,9 @@ class VoiceSession(context: Context) {
 
     private fun dispatch(event: VoiceEvent) {
         val step = _turn.value.on(event)
-        _turn.value = step.turn.copy(language = DriverMode.settings.value.language)
+        val modes = com.cyclone.mobile.mind.modes.CycloneModes.settings(app)
+        _turn.value = step.turn.copy(language = DriverMode.settings.value.language,
+            quickCommands = modes.speed != com.cyclone.mobile.mind.modes.Speed.MIND, keepListeningMs = modes.keepListeningSeconds * 1_000)
         step.effects.forEach(::run)
         if (step.turn.phase == VoicePhase.WORKING) armStillWorking() else if (!step.turn.taskLive) stillJob?.cancel()
     }
@@ -149,11 +151,16 @@ class VoiceSession(context: Context) {
                 effect.then == AfterSpeech.WORK && _turn.value.phase == VoicePhase.ACKING && effect.line != it })
             VoiceEffect.StopSpeaking -> { speakJob?.cancel(); speech.stop() }
             is VoiceEffect.Submit -> OverlayChromeRuntime.submitRequest(effect.goal, driving = true)
+            // Plan 42 (Live): the same Ask, with the modes router's result back for a sound, a word or an ack.
+            is VoiceEffect.Quick -> OverlayChromeRuntime.submitRequest(effect.goal, driving = true) { result ->
+                scope.launch { dispatch(VoiceEvent.QuickDone(result.ok, result.say, result.promoted)) }
+            }
+            is VoiceEffect.KeepListening -> listen(effect.ms)
             is VoiceEffect.Send -> send(effect.answer)
         }
     }
 
-    private fun listen() {
+    private fun listen(waitMs: Int? = null) {
         listenJob?.cancel()
         listeningSince = SystemClock.uptimeMillis()
         clip = null
@@ -173,7 +180,8 @@ class VoiceSession(context: Context) {
                 if (recognizer) {
                     listenWithRecognizer(settings.language)
                 } else {
-                    val tuning = VoiceActivity.Tuning(endSilenceMs = settings.endSilenceMs)
+                    val tuning = waitMs?.let { VoiceActivity.Tuning(endSilenceMs = settings.endSilenceMs, noSpeechMs = it) }
+                        ?: VoiceActivity.Tuning(endSilenceMs = settings.endSilenceMs)
                     // Once the owner is really talking, open the connection to OpenRouter so the transcription skips
                     // the handshake. A silent or blip-only open never gets here: it still costs no call at all.
                     val warm = { scope.launch(Dispatchers.IO) {
