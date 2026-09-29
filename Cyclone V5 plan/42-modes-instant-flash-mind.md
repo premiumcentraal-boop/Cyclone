@@ -187,6 +187,17 @@ mic ─► on-device streaming recognition (partials every ~100 ms)
 - **Stay open.** After an Instant action the mic stays open for the next command for **8 s**, with no button press
   or wake word: "open camera" → "take a picture" → "swipe left" → "share it". The existing "Listening" state shows it,
   and a soft earcon marks when it closes.
+- **The mic never closes on a quick action.** An early commit fires the action but keeps recognising, with no gap
+  between "commit" and "listening again", so the rest of a sentence is never lost:
+  - **Words within ~1.5 s of the commit are the same sentence.** "open my camera … and take a picture of me" becomes
+    one request. The camera is already open (a done move in the baton), and "take a picture of me" continues from
+    there in Instant.
+  - **A correction undoes what can be undone.** "open my camera … no, the gallery" presses Back when the early action
+    opened the wrong app, then does the corrected command. It never undoes anything irreversible, which Instant never
+    does anyway.
+  - **A continuation Instant can't do promotes with the baton:** "open my camera … and send it to Lou" → the Mind,
+    starting from the open camera.
+  - **Silence after the action** is the normal ping-pong window below.
 - **Barge-in.** Speaking over Cyclone stops it and routes the new words, as Drive already does for speech.
 - **One run for a chain.** Commands in one ping-pong window share one run card with one timeline, so the Mind sees
   them as context if a later command promotes.
@@ -300,7 +311,7 @@ Each milestone is a code-only push checked by CI; there is one release at the en
 | **M2** | The grammar | `mind/modes/InstantGrammar.kt` (from `VoiceIntents`): gestures, open app, tap a label (fuzzy, unique), camera/photo/selfie, call a name, timers/alarms, flashlight, volume, media, setting pages; English and Dutch; a `prefix()` for prewarm | `InstantGrammarTest`, with your examples as fixtures |
 | **M3** | The router | `mind/modes/ModeRouter.kt`: Stage 0 → Board 0 (`route`, `intent`, `target`) → rules. Every entry goes through it (Ask, Drive, voice, Glass, Command Center) | `ModeRouterTest`; guard: no entry calls `MindMissions.start` directly |
 | **M4** | Instant engine | `mind/modes/InstantRun.kt`: the catalogue as typed tool calls; act → settle → Box B; 3-move limit; the call cancel window; the never-list | `InstantRunTest` (fake phone): swipe, tap by name, selfie with shutter, call with one and two matches, promote on typing |
-| **M5** | Live voice | `SpeechToText` streaming partials; the grammar on partials; adaptive end of speech (~250 ms on complete commands); prewarm; silent success (earcon + haptic, no "On it."); keep listening 8 s; the answer path with local facts and a 10 s budget; `VoiceTurn` routes through the router instead of `Submit` | `LiveTurnTest` (pure turn machine with scripted partials and timings); `VoiceTimings` targets as tests |
+| **M5** | Live voice | the mic stays open through an early commit (continuation within ~1.5 s joins the sentence; "no, …" corrections undo what can be undone); `SpeechToText` streaming partials; the grammar on partials; adaptive end of speech (~250 ms on complete commands); prewarm; silent success (earcon + haptic, no "On it."); keep listening 8 s; the answer path with local facts and a 10 s budget; `VoiceTurn` routes through the router instead of `Submit` | `LiveTurnTest` (pure turn machine with scripted partials and timings, including "open my camera … and take a picture of me" and "… no, the gallery"); `VoiceTimings` targets as tests |
 | **M6** | Flash mode | `mind/modes/FlashRun.kt`: fast planner (strict JSON plan) + the parallel Pilot + the Mind's side channel | `FlashRunTest` |
 | **M7** | Baton and promotion | `RunBaton`; Instant → Flash → Mind; the Mind's opening from the baton; Live chains on one run; mid-run commands as steer or queue (plan 38) | `BatonTest`, `PromotionTest`; guard: no replay of a done move |
 | **M8** | Surfaces | The mode chip and one timeline on the run card; the Speed and Live cards; search keywords; Drive's panel shows "Listening" during the ping-pong window | Compose contract tests; `test_modes_guard.py` |
