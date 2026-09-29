@@ -5,6 +5,12 @@ package com.cyclone.mobile.mind
  * then gets out of the way: no phrase tables, no scripted flows. The model reads the goal and decides.
  */
 object MindPrompt {
+    /** Plan 41: Fast mode is on. The Pilot is an option for routine stretches, never a duty. */
+    const val PILOT_RULES = "Fast mode is on. When the next steps are routine and clear (opening, finding, tapping through menus, " +
+        "typing text you already decided), hand them to pilot with an expect for each step: a fast model does them in about a second " +
+        "each and hands a step back to you, with the reason, the moment it is not sure. Keep choices, judgement, replies and the " +
+        "finish for yourself. When a step comes back, read the screen and decide the next move."
+
     fun system(ownerName: String?, nativeTools: Boolean, tools: List<MindToolSpec>, now: String, device: String): String = buildString {
         // Stable parts first, changing context last: the prefix stays identical turn after turn (prompt caching) and
         // the rules read before the facts.

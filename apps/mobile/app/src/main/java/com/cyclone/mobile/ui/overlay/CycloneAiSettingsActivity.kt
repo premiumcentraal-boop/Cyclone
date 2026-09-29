@@ -226,6 +226,68 @@ private fun AiSettingsContent(context: Context, onBack: () -> Unit) {
 
         item {
             SettingsCard {
+                // Plan 41: Fast mode, the Pilot. Off by default; the full Mind always takes over when the fast model is unsure.
+                var fast by remember { mutableStateOf(com.cyclone.mobile.mind.pilot.FastMode.settings(context)) }
+                fun save(next: com.cyclone.mobile.mind.pilot.FastModeSettings) {
+                    fast = next
+                    com.cyclone.mobile.mind.pilot.FastMode.save(context, next)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Fast mode", fontWeight = FontWeight.Bold)
+                        Text(
+                            "The Mind hands routine steps to a fast model that does each one in about a second and hands it back " +
+                                "the moment it isn't sure. Approvals, secrets and the finish stay with the Mind and with you. " +
+                                "Banking, payment and authenticator apps are never done fast.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = fast.enabled, onCheckedChange = { save(fast.copy(enabled = it)) })
+                }
+                if (fast.enabled) {
+                    Spacer(Modifier.size(8.dp))
+                    Text("Fast decisions by", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.mind.pilot.FastRoute.entries.forEach { route ->
+                            FilterChip(selected = fast.route == route, onClick = { save(fast.copy(route = route)) }, label = { Text(route.label) })
+                        }
+                    }
+                    var model by remember(fast.route) { mutableStateOf(fast.activeModel) }
+                    androidx.compose.material3.OutlinedTextField(
+                        value = model,
+                        onValueChange = { value ->
+                            model = value.take(120)
+                            save(if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) fast.copy(decisionModel = model) else fast.copy(model = model))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text(if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) "Decision model (OpenRouter)" else "Fast model (OpenRouter)") },
+                    )
+                    Text("How sure before acting", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.cyclone.mobile.mind.pilot.FastSureness.entries.forEach { level ->
+                            FilterChip(selected = fast.sureness == level, onClick = { save(fast.copy(sureness = level)) }, label = { Text(level.label) })
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Screenshots when needed", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (fast.route == com.cyclone.mobile.mind.pilot.FastRoute.DECISIONS) "Decision models get text only for now."
+                                else "Only when the screen's text isn't enough, never with a password, code or card field on screen.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = fast.images, onCheckedChange = { save(fast.copy(images = it)) })
+                    }
+                }
+            }
+        }
+
+        item {
+            SettingsCard {
                 // Planes (plan 25): where missions work. The pill on a running task switches either way.
                 var planeMode by remember { mutableStateOf(com.cyclone.mobile.runtime.plane.MissionPlanes.mode(context)) }
                 val blocker = remember { com.cyclone.mobile.runtime.plane.MissionPlanes.blocker(context) }

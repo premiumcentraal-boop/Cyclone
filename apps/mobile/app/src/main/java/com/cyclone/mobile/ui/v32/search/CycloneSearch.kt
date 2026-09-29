@@ -122,7 +122,7 @@ object CycloneSearch {
  */
 object SettingsIndex {
     val items: List<SearchItem> = listOf(
-        entry("Model & API", "AI", "model", "openrouter", "api key", "key", "gpt", "claude", "llm", "provider"),
+        entry("Model & API", "AI", "model", "openrouter", "api key", "key", "gpt", "claude", "llm", "provider", "fast mode", "pilot", "decisions"),
         entry("Default intelligence", "AI", "reasoning", "thinking", "effort", "smart", "speed"),
         entry("Phone autonomy", "AI", "permission", "ask often", "independent", "balanced", "control", "approval"),
         entry("User notes", "AI", "memory", "about me", "notes", "personal"),

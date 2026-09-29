@@ -641,6 +641,10 @@ object MindMissions {
             val trail = com.cyclone.mobile.mind.learn.MindTrailRecorder(run.id).also { run.trail = it }
             // The map is on for the owner; a Lab arm can turn it off to measure what it is worth.
             val useMap = variant?.useMap != false
+            // Plan 41: Fast mode gives the Mind the Pilot; off (the default) keeps every mission exactly as before.
+            val fastSettings = com.cyclone.mobile.mind.pilot.FastMode.settings(context)
+            val fast = com.cyclone.mobile.mind.pilot.FastMode.decider(context, fastSettings)
+                ?.let { com.cyclone.mobile.mind.pilot.PilotSetup(it, fastSettings.pilot(), fastSettings.activeModel) }
             val toolbox = PhoneMindToolbox(environment, owner, device, run.mission.goal, { run.stopRequested }, memory = memory, missionId = run.id,
                 marker = if (variant?.marks == false) null else AndroidMindImageMarker, trail = trail,
                 learned = if (useMap) learnedHints(context) else null,
@@ -649,13 +653,14 @@ object MindMissions {
                 manual = if (useMap) com.cyclone.mobile.manual.ManualRuntime.mindPort(context) else null,
                 skill = if (useMap && run.mission.lab == null) runCatching { com.cyclone.mobile.market.Marketplace.groundedSkillFor(context, run.mission.goal) }.getOrNull()
                     ?.let { (listing, anchor) -> anchor?.let { com.cyclone.mobile.mind.MindSkillBrief(listing.name, it) } } else null,
-                planes = planes, workspace = workspace)
+                planes = planes, workspace = workspace, fast = fast)
             // Plan 26: the start question ("you are using WhatsApp: when you're done / now / take it") is the mission's
             // own owner question, answered on the same card as any other.
             planes?.attach(toolbox) { question, choices -> owner.ask(question, choices, 10 * 60_000L).takeIf { it.answered }?.text }
             val native = resume?.nativeTools ?: (OpenRouterCatalogStore.lookup(primaryId)?.nativeTools != false)
             val system = MindPrompt.system(null, native, toolbox.specs(), device.now(), device.device()) +
                 (if (workspace != null) "\n\n" + MindPrompt.workspaceRules() else "") +
+                (if (fast != null) "\n\n" + MindPrompt.PILOT_RULES else "") +
                 variant?.promptAddendum?.takeIf { it.isNotBlank() }?.let { "\n\nLab instruction for this mission (from the developer's experiment):\n$it" }.orEmpty()
             // A behind mission never reads the owner's screen, not even to begin.
             val situation = if (run.front) toolbox.situation() else Crew.BEHIND_SITUATION.format(device.now())

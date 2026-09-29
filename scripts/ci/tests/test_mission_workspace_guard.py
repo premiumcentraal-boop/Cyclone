@@ -17,7 +17,8 @@ def read(path: Path) -> str:
 def test_the_workspace_adds_no_tools_only_optional_arguments():
     toolbox = read(MIND / "PhoneMindToolbox.kt")
     specs = toolbox[toolbox.index("val SPECS: List<MindToolSpec> = listOf("):]
-    assert len(re.findall(r'MindToolSpec\("[a-z_]+"', specs)) == 39
+    # 39 tools, plus plan 41's pilot, which is offered only when Fast mode is on (see test_pilot_guard.py).
+    assert len(re.findall(r'MindToolSpec\("[a-z_]+"', specs)) == 40
     extend = read(WORKSPACE / "WorkspaceSpecs.kt")
     assert 'MindToolSpec("' not in extend, "the workspace must not define tools of its own"
     assert "MindToolSpec(spec.name, spec.description, parameters)" in extend
