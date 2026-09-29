@@ -66,7 +66,7 @@ import kotlinx.coroutines.withContext
 
 private enum class ProfilesTab { ACTIVE, ALL, GROUPS }
 
-private data class ProfileCluster(
+internal data class ProfileCluster(
     val key: String,
     val recordId: String?,
     val label: String,
@@ -87,7 +87,7 @@ private data class AppProfileGroup(
     val activeCount: Int get() = profiles.count { it.active }
 }
 
-private fun buildProfileClusters(
+internal fun buildProfileClusters(
     workspaces: List<Workspace>,
     records: List<CycloneProfileRecord>,
     waiting: Set<String>,

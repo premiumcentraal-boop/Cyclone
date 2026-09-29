@@ -22,6 +22,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -66,6 +67,7 @@ fun CycloneV32TopBar(
     ready: Boolean,
     onSettings: () -> Unit,
     onBack: () -> Unit,
+    onSearch: (() -> Unit)? = null,
 ) {
     Surface(color = Color.Transparent) {
         Row(
@@ -99,6 +101,12 @@ fun CycloneV32TopBar(
                 ),
                 modifier = Modifier.weight(1f),
             )
+            if (settingsOpen && onSearch != null && com.cyclone.mobile.ui.v32.ask.inAskGlass()) {
+                // R6: the smart search from Settings, finding any setting (or anything else) by its words.
+                com.cyclone.mobile.ui.v32.ask.AskRoundChip("Search", onSearch, shineOffset = 0.2f) {
+                    Icon(Icons.Rounded.Search, null, Modifier.size(20.dp), tint = com.cyclone.mobile.ui.v32.ask.AskGlass.Ink)
+                }
+            }
             if (!settingsOpen) {
                 Surface(
                     modifier = Modifier.clickable(onClick = onSettings),

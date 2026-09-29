@@ -69,6 +69,8 @@ fun CycloneMobileV32App() {
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var settingsSection by rememberSaveable { mutableStateOf("") }
         var marketOpen by rememberSaveable { mutableStateOf(false) }
+        // R6: the smart search opens over any page.
+        var searchOpen by rememberSaveable { mutableStateOf(false) }
         fun backFromSettings() {
             if (settingsSection.isNotEmpty()) settingsSection = "" else settingsOpen = false
         }
@@ -111,6 +113,7 @@ fun CycloneMobileV32App() {
                                 ready = phoneReady,
                                 onSettings = {},
                                 onBack = { backFromSettings() },
+                                onSearch = { searchOpen = true },
                             )
                         }
                     },
@@ -145,6 +148,9 @@ fun CycloneMobileV32App() {
                                             onAi = { destination = V32Destination.AI },
                                             onRoutines = { destination = V32Destination.ROUTINES },
                                             onSettings = { settingsOpen = true },
+                                            onSearch = { searchOpen = true },
+                                            onProfiles = { destination = V32Destination.PROFILES },
+                                            onBrain = { destination = V32Destination.BRAIN },
                                         )
                                         V32Destination.PROFILES -> CycloneProfilesPage(context, refreshTick) { destination = V32Destination.AI }
                                         V32Destination.AI -> V39AiChatPage(
@@ -170,6 +176,27 @@ fun CycloneMobileV32App() {
                         }
                     }
                 }
+                if (searchOpen) {
+                    com.cyclone.mobile.ui.v32.search.CycloneSearchSheet(
+                        onResult = { item ->
+                            searchOpen = false
+                            openSearchResult(context, item,
+                                onSettings = { section ->
+                                    if (section == "Set up Cyclone") setupOpen = true
+                                    else { settingsSection = section; settingsOpen = true }
+                                },
+                                onDestination = { settingsOpen = false; marketOpen = false; destination = it },
+                            )
+                        },
+                        onAsk = { query ->
+                            searchOpen = false
+                            V39AiChatSessionRuntime.pendingRequest = query
+                            settingsOpen = false
+                            destination = V32Destination.AI
+                        },
+                        onDismiss = { searchOpen = false },
+                    )
+                }
                 if (setupOpen) {
                     SetupCardSheet(context, refreshTick, com.cyclone.mobile.setup.SetupCard.byId(setupOnly)) {
                         setupOpen = false
@@ -189,53 +216,46 @@ private fun V32HomePage(
     onAi: () -> Unit,
     onRoutines: () -> Unit,
     onSettings: () -> Unit,
+    onSearch: () -> Unit,
+    onProfiles: () -> Unit,
+    onBrain: () -> Unit,
 ) {
     val ready = CyclonePermissionSetup.phoneControlSnapshot(context)
     val task by com.cyclone.mobile.runtime.background.WorkspaceTasks.state.collectAsState()
     val recent by CycloneRecentActivity.items.collectAsState()
     val routines = remember(refreshTick) { AutomationRuntime.store.listAutomations() }
-    var seed by remember { mutableStateOf(0 to "") }
-    val greeting = when (LocalTime.now().hour) {
-        in 5..11 -> "Good morning"
-        in 12..17 -> "Good afternoon"
-        else -> "Good evening"
-    }
+    val profiles = rememberHomeProfiles(context, refreshTick)
     val readinessLabel = when {
         ready.ready -> "Ready"
         ready.needsRepair -> "Repair"
         else -> "Setup"
     }
-    val readinessBody = when {
-        ready.ready -> "What would you like to do today?"
-        ready.needsRepair -> "Phone control needs a moment"
-        else -> "A few steps to get set up"
-    }
     val live = task?.takeIf { it.phase != TaskPhase.STOPPED }
     // The live task is already shown as the full card; recent rows list everything else.
     val history = recent.filter { it.taskId != live?.taskId }
 
-    // R4: Home on the AI page's material (R3): the Cyclone rain (drawn, no video) behind smoked glass.
-    com.cyclone.mobile.ui.v32.ask.AskGlassPage(withScene = false) {
+    // R6 (docs/design/redesign/rounds/R6-calm.md): Home on the calm blue, like a banking app's home. The header with the
+    // search pill, the profile slider, four round actions, then the live task, recent activity and routines.
+    com.cyclone.mobile.ui.v32.ask.AskGlassPage(withScene = false, greetingShade = false) {
         Column(Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 contentPadding = cyclonePageInsets(),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                item { com.cyclone.mobile.ui.v32.ask.AskHomeHeader(onSettings = onSettings, onAi = onAi) }
+                item { HomeTopBar(onSettings = onSettings, onSearch = onSearch, onAi = onAi) }
 
-                item {
-                    com.cyclone.mobile.ui.v32.ask.AskGreeting(greeting, readinessBody, Modifier.padding(top = 8.dp)) {
-                        if (!ready.ready) com.cyclone.mobile.ui.v32.ask.AskStatusChip(readinessLabel, positive = false, onClick = onSettings)
+                item { ProfileSlider(profiles) { onProfiles() } }
+
+                if (!ready.ready) {
+                    item {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            com.cyclone.mobile.ui.v32.ask.AskStatusChip(readinessLabel, positive = false, onClick = onSettings)
+                        }
                     }
                 }
 
-                item {
-                    HomeQuickActions(
-                        onSeed = { seed = (seed.first + 1) to it },
-                        onRoutines = onRoutines,
-                    )
-                }
+                item { HomeActions(onAi = onAi, onRoutines = onRoutines, onBrain = onBrain, onMore = onSettings) }
 
                 live?.let { current ->
                     item { com.cyclone.mobile.ui.v32.ask.AskSectionHeader("Current task") }
@@ -284,13 +304,44 @@ private fun V32HomePage(
                 }
             }
 
-            // One Ask Cyclone capsule, pinned above the tab bar: the AI page's smoked Ask bar.
+            // One Ask Cyclone capsule, pinned above the tab bar: the AI page's Ask bar.
             Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(top = 4.dp, bottom = 6.dp)) {
-                CycloneHomeComposer(seed = seed) { request ->
+                CycloneHomeComposer(seed = 0 to "") { request ->
                     V39AiChatSessionRuntime.pendingRequest = request
                     onAi()
                 }
             }
+        }
+    }
+}
+
+/**
+ * Opens what a smart-search result points at (R6). Every result opens a page of Cyclone, except an app, which the
+ * owner asked to open, launched like a launcher would; nothing here acts on the phone for the model.
+ */
+private fun openSearchResult(
+    context: Context,
+    item: com.cyclone.mobile.ui.v32.search.SearchItem,
+    onSettings: (String) -> Unit,
+    onDestination: (V32Destination) -> Unit,
+) {
+    when (item.category) {
+        com.cyclone.mobile.ui.v32.search.SearchCategory.SETTINGS -> onSettings(item.target)
+        com.cyclone.mobile.ui.v32.search.SearchCategory.RUNS -> {
+            V39AiChatSessionRuntime.pendingOpenRun = item.target
+            onDestination(V32Destination.AI)
+        }
+        com.cyclone.mobile.ui.v32.search.SearchCategory.ROUTINES -> {
+            RoutinesNav.pending = item.target
+            onDestination(V32Destination.ROUTINES)
+        }
+        com.cyclone.mobile.ui.v32.search.SearchCategory.SKILLS -> onDestination(V32Destination.BRAIN)
+        com.cyclone.mobile.ui.v32.search.SearchCategory.PROFILES -> onDestination(V32Destination.PROFILES)
+        com.cyclone.mobile.ui.v32.search.SearchCategory.APPS -> {
+            val launch = context.packageManager.getLaunchIntentForPackage(item.target)
+                ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (launch != null) runCatching { context.startActivity(launch) }
+                .onFailure { Toast.makeText(context, "Couldn't open ${item.title}", Toast.LENGTH_SHORT).show() }
         }
     }
 }

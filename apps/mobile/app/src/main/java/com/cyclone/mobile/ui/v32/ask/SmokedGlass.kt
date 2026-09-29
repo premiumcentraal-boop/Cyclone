@@ -91,7 +91,11 @@ fun Modifier.askGlass(
     smokedGlass(
         backdrop = LocalAskBackdrop.current,
         radius = radius,
-        smoke = smoke ?: if (tier == GlassTier.CHROME) AskGlass.CHROME_SMOKE else AskGlass.SMOKE,
+        smoke = smoke ?: when {
+            LocalAskCalm.current -> if (tier == GlassTier.CHROME) AskCalm.CHROME_SMOKE else AskCalm.SMOKE
+            tier == GlassTier.CHROME -> AskGlass.CHROME_SMOKE
+            else -> AskGlass.SMOKE
+        },
         shine = LocalAskShine.current,
         shineOffset = shineOffset,
         shape = shape,

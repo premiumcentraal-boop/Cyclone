@@ -21,7 +21,7 @@ class AppR5ContractTest {
         assertTrue(app.contains("AskGlassWorld(aiStage = destination == V32Destination.AI && !settingsOpen && !marketOpen)"))
         val world = ask("AskGlassWorld.kt")
         assertTrue(world.contains("LocalAskWorld provides true"))
-        assertTrue(world.contains("AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop), withScene = aiStage, quality = quality)"))
+        assertTrue(world.contains("else -> AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop), withScene = true, quality = quality)"))
         // The owner's video plays only while the AI page is in front.
         assertTrue(world.contains("val stageVideo = video?.takeIf { aiStage }"))
         // Home and the AI page draw no rain of their own inside the world.
@@ -41,7 +41,8 @@ class AppR5ContractTest {
         assertTrue(glass.contains("const val CHROME_SMOKE = 0.72f"))
         assertTrue(AskGlass.CHROME_SMOKE > AskGlass.SMOKE)
         assertTrue(AskGlass.CHROME_BLUR_DP > AskGlass.BLUR_DP)
-        assertTrue(glass.contains("smoke = smoke ?: if (tier == GlassTier.CHROME) AskGlass.CHROME_SMOKE else AskGlass.SMOKE"))
+        assertTrue(glass.contains("tier == GlassTier.CHROME -> AskGlass.CHROME_SMOKE"))
+        assertTrue(AskCalm.CHROME_SMOKE > AskCalm.SMOKE)
         // Header chips, the model pill, sheets, the Ask bars, trays (the tab bar), back chips and status chips.
         assertTrue(ask("AskScreen.kt").contains(".askGlass(size / 2, GlassTier.CHROME"))
         assertTrue(ask("AskScreen.kt").contains(".askGlass(22.dp, GlassTier.CHROME"))

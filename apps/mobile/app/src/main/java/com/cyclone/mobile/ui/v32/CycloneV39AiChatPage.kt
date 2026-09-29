@@ -144,6 +144,8 @@ internal object V39AiChatSessionRuntime {
     val messages = mutableStateListOf<V39ChatMessage>()
     val submitGate = V39AiSubmitGate()
     var pendingRequest by mutableStateOf("")
+    /** R6: a run picked in the smart search; the page opens its menu on that run. */
+    var pendingOpenRun by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
     var status by mutableStateOf("")
 
@@ -392,6 +394,14 @@ internal fun V39AiChatPage(
             toolsOpen = false
         } else if (toolsOpen || modelMenuOpen) {
             drawerCollapsed = false
+        }
+    }
+
+    LaunchedEffect(session.pendingOpenRun) {
+        session.pendingOpenRun?.let {
+            session.pendingOpenRun = null
+            openRun = it
+            menuOpen = true
         }
     }
 

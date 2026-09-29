@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +60,10 @@ fun CycloneRoutinesPage(context: Context, refreshTick: Int, onAi: () -> Unit, on
     var grouping by rememberSaveable { mutableIntStateOf(0) }
     var group by rememberSaveable { mutableStateOf<String?>(null) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
+    // R6: a routine picked in the smart search opens straight to its detail.
+    LaunchedEffect(RoutinesNav.pending) {
+        RoutinesNav.pending?.let { selected = it; RoutinesNav.pending = null }
+    }
     var create by remember { mutableStateOf(false) }
     var mode by rememberSaveable { mutableStateOf("") }
 
@@ -385,4 +390,9 @@ private fun RoutineCreateRow(
         }
         Icon(Icons.Rounded.ChevronRight, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .72f))
     }
+}
+
+/** R6: where the smart search leaves the routine to open. */
+internal object RoutinesNav {
+    var pending by androidx.compose.runtime.mutableStateOf<String?>(null)
 }

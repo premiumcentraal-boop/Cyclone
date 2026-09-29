@@ -117,8 +117,9 @@ fun AskGlassWorld(
         LocalAskShine provides shine,
         LocalGlassQuality provides quality,
         LocalGlassPalette provides GlassPalette.SMOKE,
+        LocalAskCalm provides !aiStage,
     ) {
-        Box(modifier.fillMaxSize().background(AskWorld.Canvas).nestedScroll(scrollHold)) {
+        Box(modifier.fillMaxSize().background(if (aiStage) AskWorld.Canvas else AskCalm.Bottom).nestedScroll(scrollHold)) {
             if (lite) {
                 // The shared blur sits under the rain, so it is never seen itself: it only records the blurred rain
                 // for the content panels above to sample. One blur a frame instead of one per panel.
@@ -132,10 +133,15 @@ fun AskGlassWorld(
                         ),
                 )
             }
+            // R6: the rain (and the scene or the owner's video) is the AI page's alone; every other page rests on the
+            // calm blue, which never moves.
             val stageVideo = video?.takeIf { aiStage }
-            if (stageVideo != null) AskVideoField(stageVideo, Modifier.matchParentSize().layerBackdrop(backdrop))
-            else AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop), withScene = aiStage, quality = quality)
-            AskScrim(Modifier.matchParentSize())
+            when {
+                !aiStage -> AskCalmField(Modifier.matchParentSize().layerBackdrop(backdrop))
+                stageVideo != null -> AskVideoField(stageVideo, Modifier.matchParentSize().layerBackdrop(backdrop))
+                else -> AskRainField(Modifier.matchParentSize().layerBackdrop(backdrop), withScene = true, quality = quality)
+            }
+            if (aiStage) AskScrim(Modifier.matchParentSize())
             content()
         }
     }

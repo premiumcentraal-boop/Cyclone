@@ -54,17 +54,16 @@ class CycloneTealMatrixTest {
 
     @Test fun homeFollowsTheTealMatrixReference() {
         val home = source("CycloneV32App.kt")
-        // R4: Home is on the AI page's material (rain + smoked glass); the same content, the new components.
-        assertTrue(home.contains("com.cyclone.mobile.ui.v32.ask.AskGlassPage(withScene = false)"))
-        assertTrue(home.contains("com.cyclone.mobile.ui.v32.ask.AskHomeHeader(onSettings = onSettings, onAi = onAi)"))
-        assertTrue(home.contains("HomeQuickActions("))
-        assertTrue(home.contains("\"Plan my day\""))
+        // R6: Home on the calm blue with smoked glass; the header with search, the profile slider and round actions.
+        assertTrue(home.contains("com.cyclone.mobile.ui.v32.ask.AskGlassPage(withScene = false, greetingShade = false)"))
+        assertTrue(home.contains("HomeTopBar(onSettings = onSettings, onSearch = onSearch, onAi = onAi)"))
+        assertTrue(home.contains("HomeActions(onAi = onAi, onRoutines = onRoutines, onBrain = onBrain, onMore = onSettings)"))
         assertTrue(home.contains("\"Research a topic\""))
         assertTrue(home.contains("\"Create a routine\""))
         assertTrue(home.contains("AskSectionHeader(\"Recent activity\", \"Open chat\", onAi)"))
         assertTrue(home.contains("com.cyclone.mobile.ui.v32.ask.AskPipState.DONE"))
         assertTrue(home.contains("item.progress,"))
-        assertTrue(home.contains("CycloneHomeComposer(seed = seed)"))
+        assertTrue(home.contains("CycloneHomeComposer(seed = 0 to \"\")"))
         assertTrue(home.contains("LaunchedEffect(task) { CycloneRecentActivity.record(task) }"))
         assertTrue(home.contains("CycloneSignatureSystemBars(enabled = true, glass = true)"))
     }
