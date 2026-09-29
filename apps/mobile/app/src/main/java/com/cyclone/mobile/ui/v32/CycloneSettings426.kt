@@ -51,6 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -127,7 +128,7 @@ internal fun CycloneSettingsPage426(
     val essentialsReady = listOf(phoneControl.ready, notificationAccess, resultNotifications, batteryUnrestricted).count { it }
     val setupCards = remember { com.cyclone.mobile.setup.SetupState.cards(context) }
     val setupDone = remember(refreshTick) { com.cyclone.mobile.setup.SetupState.done(context).size }
-    remember(context) { com.cyclone.mobile.ui.v32.ask.VisualQuality.load(context) }
+    LaunchedEffect(context) { com.cyclone.mobile.ui.v32.ask.VisualQuality.load(context) }
     val qualityMode by com.cyclone.mobile.ui.v32.ask.VisualQuality.mode.collectAsState()
     val resolvedQuality by com.cyclone.mobile.ui.v32.ask.VisualQuality.resolved.collectAsState()
 

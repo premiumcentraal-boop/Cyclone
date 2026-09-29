@@ -86,7 +86,10 @@ fun AskGlassWorld(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val context = LocalContext.current
-    remember(context) { VisualQuality.load(context); AskBackground.load(context) }
+    LaunchedEffect(context) {
+        VisualQuality.load(context)
+        AskBackground.load(context)
+    }
     val quality by VisualQuality.resolved.collectAsState()
     val lite = quality == GlassQuality.LITE
     val backdrop = rememberLayerBackdrop()
