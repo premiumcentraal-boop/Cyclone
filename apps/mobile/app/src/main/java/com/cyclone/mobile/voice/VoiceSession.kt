@@ -64,7 +64,7 @@ class VoiceSession(context: Context) {
     private var liveTaskId: String? = null
     /**
      * Set when Drive's own recording could not hear the owner (a silenced or busy microphone) or its transcription
-     * failed: the rest of this Drive session uses Android's speech recognizer (alpha.71).
+     * failed: the rest of this Drive session uses Android's speech recognizer (alpha.72).
      */
     @Volatile private var systemRecognizer = false
 
@@ -165,7 +165,7 @@ class VoiceSession(context: Context) {
             val car = if (settings.bluetoothMic && !recognizer) async { capture.routeToCar() } else null
             // The earcon first: the detector learns the room's noise, not our own sound.
             earconJob?.join()
-            // Alpha.71: the microphone service must hold the microphone before recording starts. Starting it is
+            // Alpha.72: the microphone service must hold the microphone before recording starts. Starting it is
             // asynchronous, and a recording opened before it was silenced by Android while Cyclone is in the
             // background (Drive's usual place, over Maps): the owner spoke and nothing was heard.
             VoiceService.startAndWait(app)
@@ -240,7 +240,7 @@ class VoiceSession(context: Context) {
                     val model = model(key) { it.stt } ?: return@withContext VoiceEvent.Failed(VoiceFailure.OFFLINE)
                     VoiceEvent.Transcript(OpenRouterStt(OpenRouterVoice(key), model).transcribe(samples, DriverMode.settings.value.language, ::track))
                 } catch (error: VoiceCallException) {
-                    // The next tap listens with Android's recognizer instead of sending another clip (alpha.71).
+                    // The next tap listens with Android's recognizer instead of sending another clip (alpha.72).
                     if (error.failure != VoiceFailure.NO_KEY) systemRecognizer = true
                     VoiceEvent.Failed(error.failure)
                 } finally {

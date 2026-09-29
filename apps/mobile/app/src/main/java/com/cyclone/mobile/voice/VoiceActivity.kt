@@ -29,7 +29,7 @@ class VoiceActivity(private val tuning: Tuning = Tuning()) {
         /** Voice is this many times louder than the noise floor (RMS). */
         val floorRatio: Double = 2.5,
         /**
-         * Below this RMS (of 32767) nothing is voice, however quiet the room. Alpha.71 lowered it from 350: the
+         * Below this RMS (of 32767) nothing is voice, however quiet the room. Alpha.72 lowered it from 350: the
          * VOICE_RECOGNITION source has no gain control, and a phone in a car mount hears normal speech at 150–400.
          * The noise floor ratio and the speech zero-crossing range still keep noise out.
          */

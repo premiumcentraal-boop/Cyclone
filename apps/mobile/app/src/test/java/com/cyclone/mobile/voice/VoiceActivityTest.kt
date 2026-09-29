@@ -121,7 +121,7 @@ class VoiceActivityTest {
     }
 
     @Test fun `quiet speech from a phone in a car mount is heard`() {
-        // Alpha.71: about 200 RMS, what a mounted phone hears without gain control. The old 350 floor dropped it.
+        // Alpha.72: about 200 RMS, what a mounted phone hears without gain control. The old 350 floor dropped it.
         val result = run(silence(300, amplitude = 8), speech(1_500, amplitude = 700.0), silence(1_000, amplitude = 8))
         assertTrue("was $result", result is VoiceActivity.Result.Heard)
     }

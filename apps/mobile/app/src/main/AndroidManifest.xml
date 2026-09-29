@@ -30,7 +30,7 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
-        <!-- Drive (alpha.71): Android's speech recognizer. Without this query Android 11+ hides it from Cyclone, so
+        <!-- Drive (alpha.72): Android's speech recognizer. Without this query Android 11+ hides it from Cyclone, so
              on-device speech to text and the fallback for a silenced microphone could never find it. -->
         <intent>
             <action android:name="android.speech.RecognitionService" />

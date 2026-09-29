@@ -82,10 +82,11 @@ class VoiceBoundaries(unittest.TestCase):
 
     def test_the_microphone_opens_only_after_a_tap_and_its_service_only_while_listening(self):
         session = code((VOICE / "VoiceSession.kt").read_text(encoding="utf-8"))
-        self.assertEqual(session.count("VoiceService.start("), 1)
+        # Alpha.72: listening starts the service and waits until it holds the microphone (startAndWait), still once.
+        self.assertEqual(session.count("VoiceService.start"), 1)
         listen = session[session.index("private fun listen()"):]
         listen = listen[: listen.index("\n    private fun ")]
-        self.assertIn("VoiceService.start(app)", listen)
+        self.assertIn("VoiceService.startAndWait(app)", listen)
         self.assertIn("VoiceService.stop(app)", listen)
         # No wake word: nothing in voice/ listens without the turn asking for it.
         for name, text in voice_sources():

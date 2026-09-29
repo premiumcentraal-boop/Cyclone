@@ -27,7 +27,7 @@ sealed interface VoiceAnswer {
 
 enum class VoiceFailure {
     NO_KEY, OFFLINE, NOT_HEARD, MIC_BUSY, NO_MIC,
-    /** The recording ran but Android gave it only silence (alpha.71): the session retries with the system recognizer. */
+    /** The recording ran but Android gave it only silence (alpha.72): the session retries with the system recognizer. */
     MIC_SILENCED,
 }
 

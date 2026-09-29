@@ -1,6 +1,6 @@
 # R5: the whole app on one glass world
 
-**Status:** built in 5.0.0-alpha.71.dev1. Physical acceptance UNVERIFIED.
+**Status:** built in 5.0.0-alpha.72.dev1. Physical acceptance UNVERIFIED.
 **Scope:** every in-app page (Home, Profiles, AI, Routines, Brain, Marketplace, Settings). The floating overlay is
 unchanged ("no overlays yet"): it stays teal, and its theme never enters the glass world.
 

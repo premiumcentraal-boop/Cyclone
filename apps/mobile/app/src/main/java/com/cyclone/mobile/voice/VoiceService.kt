@@ -54,7 +54,7 @@ class VoiceService : Service() {
         val foreground: StateFlow<Boolean> = _foreground
 
         /**
-         * Starts the service and waits until it is really in the foreground (alpha.71). Starting it is asynchronous:
+         * Starts the service and waits until it is really in the foreground (alpha.72). Starting it is asynchronous:
          * recording before it holds the microphone is what Android silences for an app in the background. False if
          * it did not come up in [FOREGROUND_WAIT_MS]; the recording then still runs, and a silenced one is caught by
          * [MicSilence] and handed to the system recognizer.

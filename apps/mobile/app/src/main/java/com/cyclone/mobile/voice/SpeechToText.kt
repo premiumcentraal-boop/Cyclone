@@ -40,7 +40,7 @@ class OnDeviceStt(private val context: Context) {
     /**
      * Listens with Android's recognizer until the owner stops; [onLevel] follows the voice. The on-device recognizer
      * goes first (offline, private); if it cannot serve this language or its model is missing, the phone's standard
-     * recognizer takes over in the same turn (alpha.71).
+     * recognizer takes over in the same turn (alpha.72).
      */
     suspend fun listen(language: String, onLevel: (Float) -> Unit): Result = withContext<Result>(Dispatchers.Main) {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) return@withContext Result.Failed(VoiceFailure.NOT_HEARD)

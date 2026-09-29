@@ -3,7 +3,7 @@ package com.cyclone.mobile.voice
 import kotlin.math.abs
 
 /**
- * Tells a silenced microphone from a quiet room (alpha.71). When Android does not let an app in the background use
+ * Tells a silenced microphone from a quiet room (alpha.72). When Android does not let an app in the background use
  * the microphone, the recording still "works" but every sample is zero. A real microphone, even in a silent car with
  * noise suppression on, always shows a few steps of noise. So [windowMs] of samples that never leave
  * [DIGITAL_ZERO] means nobody can be heard, and Drive switches to Android's own speech recognizer instead of waiting
