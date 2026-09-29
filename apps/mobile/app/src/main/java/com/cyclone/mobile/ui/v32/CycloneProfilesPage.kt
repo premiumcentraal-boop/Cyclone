@@ -203,10 +203,10 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                 waiting = queued
                 records = saved
                 error = ""
-            }
-            backups = withContext(Dispatchers.IO) { com.cyclone.mobile.runtime.workspaces.ProfileBackups.list(context) }.onFailure {
+            }.onFailure {
                 error = "Profiles couldn't load. Open profile setup to repair."
             }
+            backups = withContext(Dispatchers.IO) { com.cyclone.mobile.runtime.workspaces.ProfileBackups.list(context) }
         }
     }
 
