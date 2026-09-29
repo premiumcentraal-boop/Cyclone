@@ -28,7 +28,9 @@ already exists to build on, how to test it, and the traps. Plan 35 stays the lis
   Visual quality (Auto / Full / Lite), and Drive's microphone fix with Android's recognizer as fallback. The builds
   below shift by two more.
 - **alpha.73 (the other agent):** R6, calm and findable (`docs/design/redesign/rounds/R6-calm.md`): the calm blue on
-  every page but AI, the smart search and Home's profile slider. B1 is alpha.74, and so on.
+  every page but AI, the smart search and Home's profile slider.
+- **alpha.74 (the other agent):** Home fixes (the + drawer above the Ask bar, unclipped labels) and plan 40
+  (profiles as a workhorse). B1 is alpha.75, and so on.
 - **Test counts at alpha.68:**
   - phone: 2096 tests, 0 failures;
   - gateway suite: passes;
