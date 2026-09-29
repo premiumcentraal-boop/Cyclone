@@ -151,7 +151,7 @@ class AskScreenR3ContractTest {
         val rain = ask("AskRain.kt")
         assertTrue(rain.contains("uniform shader scene;"))
         assertTrue(rain.contains("float l = max(max(float(sc.r), float(sc.g)), float(sc.b));"))
-        assertTrue(rain.contains("scene.frame?.takeIf { !scene.failed }"))
+        assertTrue(rain.contains("scene?.frame?.takeIf { !scene.failed }"))
         assertTrue(rain.contains("Lifecycle.Event.ON_PAUSE -> scene.stop()"))
         assertTrue(rain.contains("const val CELL_W_DP = 4f"))
         val decoder = ask("AskScene.kt")

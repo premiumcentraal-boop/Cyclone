@@ -55,8 +55,10 @@ class CycloneAppleUiContractTest {
     }
 
     @Test fun pagesDoNotDoublePadTheTabBar() {
+        // R4: Home's title is AskGreeting on the rain; the other consumer pages keep CyclonePageHeader until R5.
+        assertTrue(source("CycloneV32App.kt").contains("AskGreeting(greeting, readinessBody"))
+        assertFalse(source("CycloneV32App.kt").contains("‹"))
         listOf(
-            "CycloneV32App.kt",
             "CycloneProfilesPage.kt",
             "CycloneRoutinesPage.kt",
             "CycloneV39BrainPage.kt",
@@ -88,8 +90,10 @@ class CycloneAppleUiContractTest {
         assertFalse(design.contains("shadowElevation"))
         assertFalse(design.contains("eyebrow.uppercase()"))
 
+        // R4: Home's title is AskGreeting on the rain; the other consumer pages keep CyclonePageHeader until R5.
+        assertTrue(source("CycloneV32App.kt").contains("AskGreeting(greeting, readinessBody"))
+        assertFalse(source("CycloneV32App.kt").contains("‹"))
         listOf(
-            "CycloneV32App.kt",
             "CycloneProfilesPage.kt",
             "CycloneRoutinesPage.kt",
             "CycloneV39BrainPage.kt",
