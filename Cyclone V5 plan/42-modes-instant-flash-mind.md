@@ -357,3 +357,42 @@ Each milestone is a code-only push checked by CI; there is one release at the en
 3. **Default Speed:** "Instant for commands" until the Lab passes, then Auto (recommended)?
 4. **Keep listening after a quick action:** 8 s (recommended), or another length?
 5. **Numbering:** alpha.77 "Cyclone Live", shifting B1 to alpha.78 (recommended)?
+
+## 14. As built (alpha.77)
+
+**Owner decisions (§13) taken with the recommended defaults, to revisit:**
+- calls use the 2 s cancel window;
+- "picture of me" uses the front camera and the shutter at once;
+- the default is "Instant for commands";
+- the mic keeps listening for 8 s;
+- this build is alpha.77, and B1 moves to alpha.78.
+
+**Built:**
+- **M1:** `mind/modes/DecisionBox.kt` and `OpenRouterDecisionBox`. It has the chat route with a strict schema and
+  the decision route (text only), on Fast mode's model, with a 5 s deadline.
+- **M2:** `InstantGrammar` (parse, `quick`, `prefix`). `VoiceIntents` now exposes `timerSeconds` and `alarmTime`.
+- **M3:** `ModeRouter`:
+  - Stage 0: the grammar and local answers;
+  - the rules;
+  - Board 0, in Auto only.
+
+  `CycloneModes.handle` is the one entry for Ask and Drive: `OverlayChromeRuntime.runAiRequest`, including simple
+  app launches when the Mind is on.
+- **M4:**
+  - `InstantRun` and `AndroidInstantHands`, which move through `CycloneAgentEnvironment`.
+  - A camera branch in `phone.launch_intent` (`action: camera`, `front`), and the direct tools `phone.direct_flashlight`,
+    `phone.direct_volume` and `phone.direct_media`.
+  - Calls use `tel:` and then the Call button, found by name or by the decision box.
+- **M5, in part:**
+  - `VoiceEffect.Quick`, which goes to the router with no understanding call and no ack;
+  - `VoiceEvent.QuickDone`;
+  - silent success with the done earcon;
+  - `KeepListening(8 s)`, with continuation and "no, …" replacement (`VoiceQuick`).
+- **M6:** a Flash run is a Mind mission with a quick-run note (`MindPrompt.FLASH` / `FLASH_WITH_PILOT`).
+- **M7:** the baton reaches the Mind's opening message through `MindMissions.start(handover, flash)`. A stop never
+  promotes.
+- **M8, in part:** the Speed card with the Live switches, and `test_modes_guard.py`.
+
+**Not built yet:** streaming partials, early commit, prewarm, the haptic, undo on "no", `FlashRun` with its own
+planner, the mode chip and timeline, search keywords, routing for Command Center and Glass, and M9 (the Lab).
+
