@@ -1,253 +1,348 @@
-# 42 — Cyclone Modes: Instant, Flash, Mind (smart mode routing)
+# 42 — Cyclone Modes and Live voice: Instant, Flash, Mind
 
-**Written:** 2026-09-29, at 5.0.0-alpha.76 (the parallel Pilot). **Status:** build plan for the next major alpha;
-nothing here is built yet.
+**Written:** 2026-09-29, at 5.0.0-alpha.76 (the parallel Pilot). **Status:** the final build plan for the next major
+alpha (5.0.0-alpha.77, "Cyclone Live"); nothing here is built yet.
+
 **Owner's brief:**
-- **Instant:** a new mode that does obvious one-step or very simple requests immediately, using decision boxes and
-  Cyclone's tools, without a smart model planning first:
+- **Instant.** Obvious one-step or very simple requests happen immediately, with decision boxes and Cyclone's tools,
+  without a smart model planning first:
   - "swipe up" swipes up;
   - "click Pokemon Go" taps it;
   - "take a picture of me" opens the camera and takes it;
   - "call my mom" opens the call and continues while it's obvious.
-- **Promotion:** when Instant can't go on (it needs typed input, a choice, a search), it promotes itself to Flash, and
-  Flash to higher modes.
-- **Smart mode routing:** modes are chosen instantly and promoted or demoted as the run needs. It replaces how
-  requests are handled today.
+- **Promotion.** When Instant can't go on (typed input, a choice, a search) it promotes itself to Flash, and Flash to
+  higher modes.
+- **Smart mode routing.** Modes are chosen instantly and promoted or demoted as the run needs. It replaces how requests
+  are handled today.
+- **Live voice.** The same in Drive and voice: a ping-pong. "I say something and it instantly happens."
+  - It doesn't talk much and doesn't start a Mind chat.
+  - A dedicated decision call either answers or commits to a fast action, well under 10 seconds.
+  - "Open my camera": about a second after the words end, the camera is open.
 
 ## 0. The answer in short
 
-Three modes, one router, one baton:
+**Three modes, one router, one baton:**
 
-| Mode | What decides | Typical time to the first move | Plans? | Types text? | Irreversible? |
+| Mode | What decides | First move after the request | Plans? | Types text? | Irreversible? |
 |---|---|---|---|---|---|
 | **Instant** | Local grammar, then decision boxes (typed choices only) | **0.05–0.6 s** | No | No | Never (a call gets a 2 s cancel window) |
-| **Flash** | A fast model writes a short plan; the rapid runner (plan 41's Pilot) walks it | ~1–2 s | Short plan | Only the plan's text | Only when planned, with approval |
-| **Mind** | The smart model, one conversation (plan 16), with the Pilot for routine stretches | several s | Full plan | Yes | With approval |
+| **Flash** | A fast model writes a short plan; the parallel Pilot (plan 41) walks it | ~1–2 s | Short plan | Only the plan's text | Only when planned, with approval |
+| **Mind** | The One Mind (plan 16), with the Pilot for routine stretches | several s | Full plan | Yes | With approval |
 
-- **The router** picks the lowest mode that can do the request, in one decision-box call or none at all.
-- **Promotion** happens the moment a mode meets something it can't do. It carries a **baton** (goal, moves done, the
-  screen now, why) so the next mode continues and never redoes a move.
-- **Demotion** is the Mind handing routine stretches to the Pilot (built), and single commands during a run going to
-  Instant.
+**Live** is the voice front end of the same router:
+- it recognises speech while you talk;
+- it commits the moment a complete command is heard;
+- it answers with a sound and the action, not with words.
 
-## 1. What exists and is reused
+It speaks only when it needs you (a question, "which Mom?") or when you asked for an answer.
 
-| Piece | Where | Used for |
-|---|---|---|
-| Direct abilities: timer, alarm, calendar add and find, contacts find, notification reply | `PhoneToolExecutor` `phone.direct_*`, plan 29 layer 1 | Instant intents with no screen at all |
-| Every phone move, with approvals, secret rules and settle | `PhoneToolExecutor`, the Mind's `act` | All modes' moves, unchanged |
-| App names to packages; intent landings | `fastpath/InstalledAppLexicon`, `ImplicitAppRouter`, `FastPathLanding` | "open X", "take a picture" (camera intent), "call" (dial intent) |
-| A zero-model command parser | `voice/VoiceIntents` (timers, alarms) | Grown into the Instant grammar |
-| The rapid runner, the decision board, bumps, the parallel look-ahead, risk by code | `mind/pilot/Pilot.kt` (alpha.76) | Flash's executor; Instant's "is it done / next move" box |
-| The fast decider over OpenRouter (fast model or decision endpoint) | `mind/pilot/FastMode.kt` | Every decision box |
-| The One Mind, missions, the run card, the Task Kit | `mind/`, `mind/mission/`, `task/` | The Mind mode and the shared run surface |
+## 1. What exists and is reused (verified in code)
+
+| Piece | Where | Today | In this plan |
+|---|---|---|---|
+| Every phone move with approvals, secret rules and settle | `PhoneToolExecutor` (`phone.swipe`, `click`, `open_app`, `launch_intent`, `direct_timer`, `direct_alarm`, `direct_contacts_find`, `open_settings`, …) | Used by the Mind | Used by every mode |
+| App names → packages, intent landings | `fastpath/InstalledAppLexicon`, `ImplicitAppRouter`, `FastPathLanding` | Classic agent | Instant "open X", camera, dial |
+| A zero-model command parser | `voice/VoiceIntents` (timers and alarms) | Drive skips the model for these | Grown into the Instant grammar |
+| The rapid runner, decision board, bumps, parallel look-ahead, risk by code | `mind/pilot/Pilot.kt` (alpha.76) | Fast mode | Flash's executor; Instant's check |
+| The fast decider (fast model or decision endpoint) | `mind/pilot/FastMode.kt` | Fast mode | Every decision box |
+| Drive's turn machine, earcons, TTS, barge-in, the car mic | `voice/VoiceTurn`, `VoiceSession`, `Earcons`, `SpeechOut`, `CarMic` | See below | Live |
+
+**Drive's path today, and where the time goes:**
+1. The end of speech waits for **700 ms of silence** (`VoiceActivity.Tuning.endSilenceMs`, 500–1,200 in Settings).
+2. The whole recording is sent to **cloud speech-to-text** (`OpenRouterVoice.transcribe`). Android's on-device
+   recognizer (`SpeechToText`) is the fallback, and its **partial results are ignored** (`onPartialResults = Unit`).
+3. **Understanding:** timers and alarms skip the model (`VoiceIntents`). Everything else is a fast-model call
+   (`OpenRouterVoice.understand`).
+4. **A task:** Drive **speaks an acknowledgement** ("On it.", `VoiceCopy.ack`) and submits the goal to a full Mind
+   mission (`VoiceEffect.Submit`).
+
+So "open my camera" today costs:
+- 0.7 s of silence;
+- ~0.5–1.5 s of cloud transcription;
+- ~0.5–1 s of understanding;
+- a spoken ack;
+- a Mind mission that plans before it opens the camera.
+
+That adds up to several seconds, and Cyclone talks while doing it.
 
 ## 2. The decision box (the one primitive)
 
-A decision box is one fast call that answers **several typed questions at once**, each with a fixed answer set built
-on the phone, plus a confidence per answer. It never writes free text.
+A decision box is **one fast call that answers several typed questions at once**. Each question has a fixed answer set
+built on the phone, and each answer comes with a confidence. It never writes free text.
 
-- **Inputs:** the request, a compact screen (app, title, ≤30 labels, never secret fields or values), candidate lists
-  prepared locally (on-screen labels, matching installed apps, matching contacts), and a marked screenshot only when
-  the labels are weak (the privacy rules of plan 41 §8).
-- **Transport:** `PilotDecider` generalised to `DecisionBox`. It uses OpenRouter's decision endpoint (JEV; OpenAI
-  Decisions when available) or a fast model with a strict schema. There is one wire format and a tolerant reader, as
-  built in `PilotWire`.
-- **Why multi-question:** one call answers mode, intent and target together. Instant's first move needs one round
-  trip, or none.
+- **Inputs:**
+  - the request;
+  - a compact screen: app, title, ≤30 labels, never secret fields or values;
+  - candidate lists prepared on the phone: on-screen labels, matching installed apps, matching contacts;
+  - a marked screenshot only when the labels are weak (plan 41 §8).
+- **Transport:** `PilotDecider` generalised to `DecisionBox`, over OpenRouter's decision endpoint (JEV; OpenAI
+  Decisions when available) or a fast model with a strict schema. One wire format, with the tolerant reader built in
+  `PilotWire`.
+- **Why multi-question:** one call answers everything the next move needs, so a move costs one round trip, or none.
 
-## 3. The router: which mode, in one step
+## 3. The router
 
-The router runs on every request from the Ask bar, voice, Drive, Glass and the Command Center. It replaces the direct
-`MindMissions.start` in `OverlayChromeRuntime.runAiRequest` and friends.
+It runs on every request: the Ask bar, Live voice, Drive, Glass and the Command Center. It replaces the direct
+`MindMissions.start` in `OverlayChromeRuntime.runAiRequest`, and Drive's `VoiceEffect.Submit`.
 
 **Stage 0: local grammar (no model, about 5 ms).** It matches:
 - gestures: "swipe up/down/left/right", "scroll up/down", "go back", "home", "recent apps";
-- "open <app>", with the app found in the installed lexicon;
+- "open <app>", with the app in the installed lexicon;
 - "tap/click/press <label>", with a unique fuzzy match to a label on the screen;
 - timers and alarms (`VoiceIntents`);
-- "take a picture", "take a selfie" / "picture of me";
+- "open the camera", "take a picture", "take a selfie" / "picture of me";
 - "call <name>", with a unique contact match;
-- flashlight, volume, and play/pause.
+- flashlight, volume, play/pause and next;
+- setting pages.
 
-A unique, sure match goes straight to Instant with its arguments. Nothing leaves the phone.
+It covers English and Dutch. A unique, sure match goes straight to Instant with its arguments, and nothing leaves the
+phone.
 
-**Stage 1: Board 0 (one decision box, about 0.2–0.5 s),** only when the grammar is unsure. It asks three questions:
+**Stage 1: Board 0 (one decision box, about 0.2–0.5 s),** only when the grammar is unsure:
 
 | Question | Answers |
 |---|---|
-| `mode` | `instant`, `flash`, `mind` |
+| `route` | `instant`, `flash`, `mind`, `answer` (a short spoken answer), `ignore` (not for Cyclone) |
 | `intent` | the Instant catalogue (§4), or `none` |
-| `target` | the prepared candidates (on-screen labels, apps, contacts), or `none` |
+| `target` | the prepared candidates, or `none` |
 
-**The rules** (code, over the box's answers):
-- **Instant** only when `intent` ≠ none, the target (when needed) is picked with confidence ≥ the bar, and the
-  request has no second clause ("and then", "after that") and no free text to write.
-- **Mind** is forced when the request asks a question to be answered, composes a message, names more than one app, or
-  mentions money, deleting or accounts.
+**The rules** (code, over the answers):
+- **Instant** only when the intent and target (when needed) are sure, there is no second clause ("and then"), and
+  there is no free text to write.
+- **Mind** is forced when the request composes a message, names more than one app, or involves money, deleting or
+  accounts.
+- **Answer** is for questions with short factual answers (§5.4).
 - **Flash** otherwise.
-- **Unsure answers route one mode up, never down.**
+- **Unsure routes one mode up, never down.**
 
 ## 4. Instant mode
 
-**The catalogue.** Each intent is a typed tool call with its arguments filled from candidates, never generated:
+**The catalogue.** Each intent is a typed tool call, with its arguments picked from candidates, never generated:
 
 | Intent | Argument source | Tool | Follow-up moves (max 3) |
 |---|---|---|---|
-| swipe / scroll (up, down, left, right) | the grammar | `phone.swipe` / `phone.scroll` | — |
+| swipe / scroll (up, down, left, right) | grammar | `phone.swipe` / `phone.scroll` | — |
 | back, home, recents | — | `phone.back` / `phone.home` | — |
-| tap a named thing ("click Pokemon Go") | an on-screen label (unique or boxed) | `phone.click` | — |
-| open app | the installed lexicon | `phone.open_app` | — |
-| take a photo / selfie | camera intent (front camera extra for "of me") | `phone.launch_intent` | box: shutter control → tap |
-| call someone | contacts (`direct_contacts_find`) | dial intent | box: the right number (mobile first); 2 s cancel window |
+| tap a named thing ("click Pokemon Go") | on-screen label (unique or boxed) | `phone.click` | — |
+| open app ("open my camera") | installed lexicon | `phone.open_app` | — |
+| take a photo / selfie | camera intent (front camera extra for "of me") | `phone.launch_intent` | Box B: shutter → tap |
+| call someone | contacts (`direct_contacts_find`) | dial intent | Box B: the right number; 2 s cancel window |
 | timer, alarm | `VoiceIntents` | `phone.direct_timer` / `direct_alarm` | — |
-| flashlight, volume, play/pause | the grammar | system actions | — |
+| flashlight, volume, media | grammar | system actions | — |
 | open a setting page | `PhoneSettingsPages` | `phone.open_settings` | — |
 
 **The loop:**
 1. Act.
-2. Settle (Fast Path fingerprint; the plan 41 F0 ledger when built).
+2. Settle (Fast Path fingerprint; plan 41's live screen ledger when built).
 3. Box B:
    - **Questions:** `done` (yes/no), `next` (a screen control, or `none`), `promote` (yes/no plus a reason).
    - **Decision:** done → finish. A sure next move within the 3-move limit → act. Anything else → promote.
 
-**Worked examples:**
-- **"swipe up":** grammar → `phone.swipe(up)`. No model. About 0.1 s.
-- **"click Pokemon Go":**
-  - the grammar fuzzy-matches "Pokémon GO" on the home screen (unique) → `phone.click`;
-  - if two labels match, Board 0 picks with the screenshot;
-  - about 0.1–0.5 s.
-- **"take a picture of me":**
-  1. the grammar gives the selfie intent → camera intent with the front camera;
-  2. Box B finds the shutter (with the screenshot, because shutters are icons) → tap;
-  3. Box B confirms the photo was taken → done.
-  About 1.5–2.5 s, most of it the camera opening.
-- **"call my mom":**
-  1. the grammar gives "call" and the name "mom" → contacts search finds "Mam" (a nickname or relation match);
-  2. one sure match → dial intent;
-  3. the run card shows "Calling Mam in 2 s — Cancel", then the call starts.
-  Two contacts, no number, or no match → **promote to Flash** with the baton: "choose which Mom" becomes the owner's
-  question there.
-- **"search for pizza near me":** needs typing → Board 0 says `flash` (or Instant promotes right after opening Maps).
-
 **What Instant never does:**
 - type or search;
 - compose a message;
-- send, pay, delete or post: a matching label (`Pilot.irreversible`) promotes to the Mind, which asks your approval;
-- act on sensitive screens or in banking, payment and authenticator apps (opening them is fine; acting inside is
-  not);
-- take more than 3 moves;
-- run while another mission holds the screen: a command during a run is a steer or a queue item, per plan 38.
+- send, pay, delete or post: an irreversible label (`Pilot.irreversible`) promotes to the Mind, which asks your
+  approval;
+- act on sensitive screens or inside banking, payment and authenticator apps (opening them is fine);
+- take more than 3 moves.
 
-## 5. Flash mode
+## 5. Live: the voice ping-pong
+
+### 5.1 The pipeline
+
+```
+mic ─► on-device streaming recognition (partials every ~100 ms)
+        │
+        ├─ each partial ─► Stage 0 grammar ──complete & unique?──► COMMIT early (don't wait for 700 ms)
+        │                         └─ prefix of a command? ─► PREWARM (resolve app / contact / camera intent)
+        │
+        └─ end of speech (adaptive) ─► final text ─► Board 0 (one decision call) ─► route
+                                                                     │
+      Instant ◄──────────────────────────────────────────────────────┤  earcon + action, no speech
+      Answer  ◄──────────────────────────────────────────────────────┤  one short spoken line
+      Flash / Mind ◄─────────────────────────────────────────────────┘  one short spoken line, then work
+```
+
+### 5.2 The four speed moves
+
+1. **Streaming partials.** Turn on `EXTRA_PARTIAL_RESULTS` in `SpeechToText` (on-device first, as today) and run the
+   grammar on every partial. Cloud transcription stays as the fallback for accents or languages the on-device
+   recognizer can't serve. It's also used when the owner chooses it.
+2. **Adaptive end of speech.** When the partial is already a complete, unique Instant command ("open my camera"),
+   commit after **~250 ms** of silence instead of 700 ms. Sentences keep the normal 700 ms, so nothing is cut off.
+3. **Prewarm while you're still talking.**
+   - "open my cam…" resolves the camera package;
+   - "call m…" loads contact matches;
+   - "take a pic…" prepares the camera intent.
+   The commit then only fires the tool.
+4. **Silent success.** Instant says nothing: a short earcon (the existing tick) and a haptic, then the action. The
+   voice speaks only:
+   - when Cyclone needs you ("Which Mom: Mam or Mom Work?");
+   - when you asked a question (the answer, one line);
+   - when a request goes to Flash or the Mind ("Working on it.", once, and only if it will take more than ~3 s).
+   The "On it." acknowledgement disappears for Instant.
+
+### 5.3 Ping-pong
+
+- **Stay open.** After an Instant action the mic stays open for the next command for **8 s**, with no button press
+  or wake word: "open camera" → "take a picture" → "swipe left" → "share it". The existing "Listening" state shows it,
+  and a soft earcon marks when it closes.
+- **Barge-in.** Speaking over Cyclone stops it and routes the new words, as Drive already does for speech.
+- **One run for a chain.** Commands in one ping-pong window share one run card with one timeline, so the Mind sees
+  them as context if a later command promotes.
+
+### 5.4 Answer or act, within 10 seconds
+
+Board 0's `route = answer` covers short questions ("what time is it", "how much battery", "what's on my calendar
+today", "who texted me").
+
+- **Local facts first:** time, battery, the calendar provider, notifications (already read by Cyclone). Spoken in
+  one line, no model.
+- **Otherwise:** one fast-model call with a ≤20-word answer limit.
+- **A hard budget of 10 s** from the end of speech. Past it, the request becomes a mission with one spoken line, and
+  the answer comes later as an announcement (plan 32, D3).
+
+### 5.5 Worked voice runs (targets, to be measured)
+
+| You say | What happens | End of speech → action |
+|---|---|---|
+| "swipe up" | partial matches → commit at ~250 ms silence → `phone.swipe(up)` + tick | **≈ 0.3–0.4 s** |
+| "open my camera" | "open my cam…" prewarms the camera package → commit → `phone.open_app` + tick | **≈ 0.4 s** to launch; camera visible **≈ 1 s** |
+| "take a picture of me" | commit → front-camera intent → Box B finds the shutter (screenshot) → tap → Box B: done → tick | **≈ 2–3 s** to the photo |
+| "click Pokemon Go" | partial matches the on-screen label, unique → `phone.click` + tick | **≈ 0.4 s** |
+| "call my mom" | contacts prewarmed on "call m…" → one match → "Calling Mam — say stop" → dial after 2 s | **≈ 2.5 s** to ringing |
+| "call mom" (two matches) | promote to Flash → "Mam or Mom Work?" → you: "Mam" → dial | one question, then **≈ 1 s** |
+| "what time is it" | `answer` → local clock → "It's 22:40." | **≈ 0.6 s** to speech |
+| "message Lou I'm late" | Board 0: `mind` (a message to compose) → "Working on it." → Mind with the Pilot; the send is read back for approval as today (plan 32 D2) | the Mind's pace |
+
+### 5.6 Live safety
+
+- **Unchanged:**
+  - Drive's readback-and-approve for sends (exact text);
+  - approvals for pay, delete, permissions and sign-in;
+  - Task Kit for stop, take over and approve (AGENTS.md).
+- **Voice commands never type secrets.** Screens with password, code or card fields stop Instant.
+- **"Stop", "cancel" and "wacht" always win,** including during the call window, at earcon speed.
+- **Nothing recorded is kept** beyond what Drive already keeps: transcripts in memory, redacted in diagnostics.
+
+## 6. Flash mode
 
 **How it works:**
-- A fast model (the Fast mode model) writes a short plan, up to 8 steps, in the Pilot's step format, from the request
-  and the baton.
-- The parallel Pilot walks it.
-- The smart model's side channel (look-ahead and bumps) is the Mind's model, asked briefly, exactly as built in
-  alpha.76.
+- A fast model writes a short plan, up to 8 steps, in the Pilot's step format, from the request and the baton.
+- The parallel Pilot walks it, with the smart model's look-ahead and bumps, exactly as built in alpha.76.
 
 **It promotes to the Mind when:**
-- the fast planner is unsure or can't plan;
+- the fast planner is unsure;
 - a bump returns `return`;
-- the plan needs composition or a judgement;
-- two failures happen on the same step.
+- the plan needs composition or judgement;
+- two failures happen on one step.
 
-**Examples:**
-- **"search Instagram for lo.06":** plan open Instagram → search → type lo.06 → open the profile.
-- **"turn on dark mode":** plan open Settings → Display → Dark theme toggle.
+## 7. The Mind
 
-## 6. The Mind
+The Mind is unchanged, with the Pilot for routine stretches. **It starts from the baton:** its opening message says
+what the lower mode did and why it stopped, then the screen now. It never starts from scratch.
 
-The Mind is unchanged: the One Mind with Fast mode's Pilot, and the owner's approvals.
+## 8. The baton
 
-**It receives the baton on promotion.** Its opening message says what the lower mode already did and why it
-stopped, then the screen now. It starts where the run is, never from scratch.
+`RunBaton` holds:
+- the goal, and the mode history (`instant → flash`);
+- the moves done, with their record lines;
+- the screen now;
+- the reason for promotion;
+- the candidates already found (the two Moms);
+- the Live chain's earlier commands;
+- the elapsed time.
 
-## 7. The baton (promotion without redoing)
+**A promotion never replays a done move** (a guarded rule). The run card shows the mode chip ("⚡ Instant 0.4 s" →
+"Flash" → "Mind") on one timeline, and diagnostics say which mode decided each move.
 
-`RunBaton`: goal, mode history (`instant → flash`), moves done (with their record lines), the screen now, the
-reason for promotion, candidate data already found (for example the two contacts named Mom), and elapsed time.
+## 9. Reliability rules (the lessons, applied)
 
-- **One run, one card.** The run card shows a mode chip ("⚡ Instant 0.4 s" → "Flash" → "Mind") and one timeline.
-- **Diagnostics** say which mode decided each move (plan 14 lesson L14).
-
-## 8. Reliability rules (the lessons, applied)
-
-- **Goal first, always** (plans 14 and 15): the request travels with every box. Nothing acts on the screen alone;
-  Stage 0 matches the request's own words against the screen, not the screen against nothing.
-- **Unsure goes up, never down.** A promotion is cheap; a wrong Instant tap is not.
+- **Goal first** (plans 14 and 15): the request travels with every box. Stage 0 matches your words against the
+  screen, never the screen alone.
+- **Unsure goes up, never down.** A promotion costs a second; a wrong tap costs trust.
 - **Code decides risk:** irreversible labels, sensitive screens, kept-off apps, calls behind a cancel window.
   Approvals are unchanged.
 - **One screen-changing move per decision**, through `PhoneToolExecutor`, with settle and re-observe.
-- **Transport success isn't task success:** Instant's Box B confirms `done` from the screen (or the direct tool's
-  result) before saying so.
-- **Watch first, per intent** (plan 41 §9): each Instant intent ships behind Auto only after its Lab numbers are in;
-  until then it runs Flash with Instant watching.
+- **Transport success isn't task success.** Box B confirms `done` from the screen, or from the direct tool's result.
+- **Watch first, per intent** (plan 41 §9). Each Instant intent turns on by default only after its Lab numbers are
+  in; until then it runs one mode up, with Instant watching.
+- **Speech is not a guess.** Early commit happens only on a complete, unique grammar match. Anything else waits for
+  the normal end of speech and Board 0.
 
-## 9. Settings
+## 10. Settings
 
-Settings → Model & intelligence → **Speed**. It replaces the alpha.76 "Fast mode" card.
-
+**Settings → Model & intelligence → Speed.** It replaces the alpha.76 "Fast mode" card.
 - **Speed:**
-  - **Auto** (the router; default once promoted);
-  - **Always Mind** (today's behaviour);
-  - **Instant only for commands** (Instant for grammar matches, everything else the Mind).
+  - **Auto** (the router; the default once the Lab passes);
+  - **Instant for commands** (the default until then);
+  - **Always Mind**.
 - **Instant calls:**
   - call after a 2 s cancel window (default);
   - always ask;
   - never instant.
-- **The fast model / decision model, How sure before acting, Screenshots when needed and Smart model checks ahead**
-  stay as in alpha.76, now shared by Flash and Instant.
-- **Show the mode on the run card** (on).
+- **The fast model / decision model, How sure before acting, Screenshots when needed, and Smart model checks ahead**
+  stay as in alpha.76, shared by Flash and Instant.
 
-## 10. The build: next major alpha
+**Settings → Drive / Voice → Live:**
+- **Answer with sounds, not words, for quick actions** (on);
+- **Keep listening after a quick action** (8 s; Off, 5 s, 8 s, 15 s);
+- **Commit fast on clear commands** (on);
+- **On-device recognition first** (on).
 
-**Numbering:** alpha.76 ships the parallel Pilot. This plan is **5.0.0-alpha.77, "Cyclone Modes"**; B1 of plan 39
-moves to alpha.78. Each milestone is a code-only push checked by CI; one release at the end.
+## 11. The build: 5.0.0-alpha.77 "Cyclone Live"
+
+Each milestone is a code-only push checked by CI; there is one release at the end. B1 of plan 39 moves to alpha.78.
 
 | # | Milestone | Delivers | Tests and guards |
 |---|---|---|---|
-| **M1** | Decision box core | `mind/modes/DecisionBox.kt`: multi-question typed choices, candidates, confidences; `PilotDecider` becomes a one-question use of it; tolerant wire for both routes | `DecisionBoxTest` (wire, parsing, candidates, privacy filter) |
-| **M2** | The grammar | `mind/modes/InstantGrammar.kt`: gestures, open app, tap a label (fuzzy, unique), photo/selfie, call a name, timers/alarms (`VoiceIntents`), flashlight, volume, media, setting pages; English and Dutch | `InstantGrammarTest`, with the owner's examples as fixtures |
-| **M3** | The router | `mind/modes/ModeRouter.kt`: Stage 0 → Board 0 → rules; every entry (Ask, voice, Drive, Glass, Command Center) goes through it | `ModeRouterTest`; guard: no entry calls `MindMissions.start` directly |
-| **M4** | Instant engine | `mind/modes/InstantRun.kt`: the catalogue as typed tool calls; act → settle → Box B; 3-move limit; the call cancel window; never type, send, pay, delete or post; sensitive screens and kept-off apps | `InstantRunTest` (fake phone): swipe, tap by name, selfie with shutter, call with one and two matches, promote on typing |
-| **M5** | Flash mode | `mind/modes/FlashRun.kt`: fast planner (strict JSON plan) + the parallel Pilot + the Mind's side channel | `FlashRunTest`: plan, walk, bump, promote |
-| **M6** | Baton and promotion | `RunBaton`; Instant → Flash → Mind handovers; the Mind's opening message from the baton; commands during a run route to steer or queue (plan 38) | `BatonTest`, `PromotionTest`; guard: a promotion never replays a done move |
-| **M7** | Surfaces | The mode chip and one timeline on the run card, the Speed card in Settings, search keywords, the Drive voice path through the router | Compose contract tests; `test_modes_guard.py` |
-| **M8** | Lab and release | An Instant suite in the Lab (the owner's examples plus 20 more); time to first move p50/p90; promotion accuracy; wrong Instant moves; alpha.77 release notes | Promotion rule (§8): Instant on by default only for intents at ≥ 98% agreement when sure |
+| **M1** | Decision box core | `mind/modes/DecisionBox.kt`: multi-question typed choices, candidates, confidences; `PilotDecider` becomes a one-question use; tolerant wire for both routes | `DecisionBoxTest` |
+| **M2** | The grammar | `mind/modes/InstantGrammar.kt` (from `VoiceIntents`): gestures, open app, tap a label (fuzzy, unique), camera/photo/selfie, call a name, timers/alarms, flashlight, volume, media, setting pages; English and Dutch; a `prefix()` for prewarm | `InstantGrammarTest`, with your examples as fixtures |
+| **M3** | The router | `mind/modes/ModeRouter.kt`: Stage 0 → Board 0 (`route`, `intent`, `target`) → rules. Every entry goes through it (Ask, Drive, voice, Glass, Command Center) | `ModeRouterTest`; guard: no entry calls `MindMissions.start` directly |
+| **M4** | Instant engine | `mind/modes/InstantRun.kt`: the catalogue as typed tool calls; act → settle → Box B; 3-move limit; the call cancel window; the never-list | `InstantRunTest` (fake phone): swipe, tap by name, selfie with shutter, call with one and two matches, promote on typing |
+| **M5** | Live voice | `SpeechToText` streaming partials; the grammar on partials; adaptive end of speech (~250 ms on complete commands); prewarm; silent success (earcon + haptic, no "On it."); keep listening 8 s; the answer path with local facts and a 10 s budget; `VoiceTurn` routes through the router instead of `Submit` | `LiveTurnTest` (pure turn machine with scripted partials and timings); `VoiceTimings` targets as tests |
+| **M6** | Flash mode | `mind/modes/FlashRun.kt`: fast planner (strict JSON plan) + the parallel Pilot + the Mind's side channel | `FlashRunTest` |
+| **M7** | Baton and promotion | `RunBaton`; Instant → Flash → Mind; the Mind's opening from the baton; Live chains on one run; mid-run commands as steer or queue (plan 38) | `BatonTest`, `PromotionTest`; guard: no replay of a done move |
+| **M8** | Surfaces | The mode chip and one timeline on the run card; the Speed and Live cards; search keywords; Drive's panel shows "Listening" during the ping-pong window | Compose contract tests; `test_modes_guard.py` |
+| **M9** | Lab and release | An Instant + Live suite: your examples plus 30 more, voice clips for the grammar and early commit; measured end-of-speech → action p50/p90; promotion accuracy; wrong-move rate; alpha.77 release notes | Default rule: an intent turns on by default only at ≥ 98% agreement when sure |
 
-**Order:** M1 → M2 → M3 → M4 give Instant end to end behind "Instant only for commands". M5 → M6 add Flash and the
-promotion ladder. M7 → M8 finish the surfaces and the proof.
+**Order:**
+- M1 → M4: Instant end to end from the Ask bar.
+- M5: Live voice on top.
+- M6 → M7: Flash and the promotion ladder.
+- M8 → M9: surfaces and proof.
 
-**Targets** (to be measured, not promised):
+**Targets** (end of speech or send → first move, p50; measured in M9, not promised):
 
-| Request | Time to the first move, p50 |
+| Request | Target |
 |---|---|
-| Grammar matches | ≤ 0.15 s |
-| Board 0 Instant | ≤ 0.8 s |
+| Grammar command by voice | ≤ 0.4 s |
+| Typed grammar command | ≤ 0.15 s |
+| Board 0 Instant | ≤ 0.9 s |
+| Answer from local facts | ≤ 0.7 s to speech |
 | Flash first move | ≤ 2.5 s |
-| Selfie end to end | ≤ 3 s, the camera's own start dominating |
-| "Call my mom" to ringing | ≤ 3 s, including the 2 s cancel window |
+| Selfie end to end | ≤ 3 s |
+| "Call my mom" to ringing | ≤ 3 s, including the 2 s window |
 
-## 11. Risks
+## 12. Risks
 
-- **A confident wrong tap** from a fuzzy label match. Answers:
-  - Stage 0 acts only on a unique match above a strict similarity;
-  - otherwise Board 0 decides, with the screenshot;
-  - Box B checks the result;
-  - it is on the Lab's watch list.
-- **Calls are consequential.** Answers: the cancel window, a setting, and never when the match is ambiguous.
-- **Camera apps differ** (the shutter is an icon). Answers: a screenshot in Box B; the camera intent's own
-  capture-and-return mode where available.
-- **The decision API contract is unknown** (plan 41 §1). The same port works with JEV or a fast model.
-- **Replacing the entry path** touches every surface. Answers: one router function with the Task Kit rules (AGENTS.md)
-  guarded, and "Always Mind" as a one-tap way back.
+- **A confident wrong tap from a fuzzy match or a misheard word.**
+  - Early commit needs a complete, unique grammar match. Otherwise it waits for the normal end of speech and Board 0.
+  - Box B checks the result.
+  - "Stop" wins at once.
+- **Calls are consequential:** the cancel window, a setting, and never on an ambiguous match.
+- **Camera apps differ** (the shutter is an icon): a screenshot for Box B, and the camera intent's own capture mode
+  where available.
+- **The on-device recognizer's quality and languages vary:** cloud transcription stays as the fallback, and early
+  commit applies only to the recognizer's final-looking partials.
+- **The decision API contract is unknown** (plan 41 §1): the same port works with JEV or a fast model.
+- **Replacing the entry path touches every surface:** one router function with the Task Kit rules guarded, and
+  "Always Mind" as a one-tap way back.
 
-## 12. Owner decisions
+## 13. Owner decisions
 
 1. **Calls:** a 2 s cancel window (recommended), always ask, or never instant?
-2. **"Picture of me":** front camera and the shutter tapped immediately (recommended), or a 3 s self-timer?
-3. **Default Speed:** Auto after the Lab passes (recommended), with "Instant only for commands" until then?
-4. **Numbering:** alpha.77 for Cyclone Modes, shifting B1 to alpha.78 (recommended)?
+2. **"Picture of me":** front camera and the shutter tapped at once (recommended), or a 3 s self-timer?
+3. **Default Speed:** "Instant for commands" until the Lab passes, then Auto (recommended)?
+4. **Keep listening after a quick action:** 8 s (recommended), or another length?
+5. **Numbering:** alpha.77 "Cyclone Live", shifting B1 to alpha.78 (recommended)?
