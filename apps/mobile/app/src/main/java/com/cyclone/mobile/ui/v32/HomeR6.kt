@@ -143,8 +143,8 @@ internal fun rememberHomeProfiles(context: Context, refreshTick: Int): List<Home
                 Layer2Workspaces.initialize(context)
                 val identity = runCatching { ProfileSetupRuntime.visibleProfileIdentity() }.getOrNull()
                 buildProfileClusters(
-                    workspaces = Layer2Workspaces.engine.snapshot(),
-                    records = ProfileRegistryStore.records(context),
+                    allWorkspaces = Layer2Workspaces.engine.snapshot(),
+                    allRecords = ProfileRegistryStore.records(context),
                     waiting = Layer2Workspaces.engine.queue().toSet(),
                     activeWorkspaceId = task?.workspaceId,
                     processUser = ProfileSetupRuntime.currentUserId(),

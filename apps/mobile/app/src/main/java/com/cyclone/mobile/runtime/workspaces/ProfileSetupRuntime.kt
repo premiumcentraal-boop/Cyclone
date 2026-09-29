@@ -136,6 +136,7 @@ object ProfileSetupRuntime {
             } else {
                 ProfileRegistryStore.checkpoint(context, prefs(context))
                 val record = ProfileRegistryStore.records(context).single { it.id == profileId }
+                check(!record.inTrash) { "${record.label} is in Recently deleted. Restore it first." }
                 val target = record.androidUserId ?: error("This profile still needs setup.")
                 check(record.ready && record.secondaryUser) { "This profile still needs setup." }
                 val exact = users.singleOrNull { it.id == target && it.name == record.id }
@@ -518,7 +519,13 @@ object ProfileSetupRuntime {
             start()
         }
         return try {
-            val timeoutSeconds = if (command.operation == ProfileSetupOperation.VERIFY_ROOT) 8L else 30L
+            val timeoutSeconds = when (command.operation) {
+                ProfileSetupOperation.VERIFY_ROOT -> 8L
+                // A backup archives whole app folders; a big profile takes minutes, not seconds.
+                ProfileSetupOperation.BACKUP_APP_DATA -> 900L
+                ProfileSetupOperation.MEASURE_APP_DATA, ProfileSetupOperation.REMOVE_USER, ProfileSetupOperation.STOP_USER -> 120L
+                else -> 30L
+            }
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 process.destroyForcibly()
                 reader.join(500)
@@ -561,18 +568,18 @@ object ProfileSetupRuntime {
         return Execution(result, failure)
     }
 
-    private fun runRequired(command: ProfileSetupCommand): String {
+    internal fun runRequired(command: ProfileSetupCommand): String {
         val execution = executeRoot(command)
         execution.failure?.let { throw SetupFailure(it) }
         return execution.result.output
     }
 
-    private fun runBestEffort(command: ProfileSetupCommand): String? {
+    internal fun runBestEffort(command: ProfileSetupCommand): String? {
         val execution = executeRoot(command)
         return execution.result.output.takeIf { execution.failure == null }
     }
 
-    private fun listUsersRequired(): List<ProfileUserRecord> {
+    internal fun listUsersRequired(): List<ProfileUserRecord> {
         val users = ProfileSetupParser.users(runRequired(ProfileSetupPlan.listUsers()))
         if (users.isEmpty()) {
             fail(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED,

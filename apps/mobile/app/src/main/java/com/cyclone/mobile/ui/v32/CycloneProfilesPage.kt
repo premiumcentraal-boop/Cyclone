@@ -64,7 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class ProfilesTab { ACTIVE, ALL, GROUPS }
+private enum class ProfilesTab { ACTIVE, ALL, GROUPS, DELETED }
 
 internal data class ProfileCluster(
     val key: String,
@@ -88,8 +88,8 @@ private data class AppProfileGroup(
 }
 
 internal fun buildProfileClusters(
-    workspaces: List<Workspace>,
-    records: List<CycloneProfileRecord>,
+    allWorkspaces: List<Workspace>,
+    allRecords: List<CycloneProfileRecord>,
     waiting: Set<String>,
     activeWorkspaceId: String?,
     processUser: Int,
@@ -97,6 +97,10 @@ internal fun buildProfileClusters(
     verifiedCurrentUser: Int?,
     foregroundExecuting: Boolean,
 ): List<ProfileCluster> {
+    // Plan 40 P1: profiles in Recently deleted are hidden everywhere but the trash.
+    val trashedUsers = allRecords.filter { it.inTrash }.mapNotNull { it.androidUserId }.toSet()
+    val records = allRecords.filterNot { it.inTrash }
+    val workspaces = allWorkspaces.filterNot { it.androidUserId in trashedUsers }
     val recordByUser = records.mapNotNull { record -> record.androidUserId?.let { it to record } }.toMap()
     val workspacesByUser = workspaces.groupBy { it.androidUserId }
     val userIds = ProfilePresentationPolicy.visibleUsers(workspacesByUser.keys, recordByUser.keys,
@@ -157,6 +161,10 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
     var workspaces by remember { mutableStateOf(emptyList<Workspace>()) }
     var records by remember { mutableStateOf(emptyList<CycloneProfileRecord>()) }
     var error by remember { mutableStateOf("") }
+    // Plan 40 P1: Recently deleted, the automatic backups, and which dialog is open.
+    var backups by remember { mutableStateOf(emptyList<com.cyclone.mobile.runtime.workspaces.ProfileBackup>()) }
+    var confirm by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var looking by remember { mutableStateOf<String?>(null) }
 
     var ownerUser by remember { mutableStateOf<Int?>(null) }
     var verifiedCurrentUser by remember { mutableStateOf<Int?>(null) }
@@ -190,7 +198,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                 waiting = queued
                 records = saved
                 error = ""
-            }.onFailure {
+            }
+            backups = withContext(Dispatchers.IO) { com.cyclone.mobile.runtime.workspaces.ProfileBackups.list(context) }.onFailure {
                 error = "Profiles couldn't load. Open profile setup to repair."
             }
         }
@@ -239,6 +248,65 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
         }
     }
 
+    /** Runs a lifecycle step off the main thread, with its progress line, then reloads. */
+    fun lifecycle(start: String, step: (onProgress: (String) -> Unit) -> Unit) {
+        if (busy) return
+        busy = true
+        switchMessage = start
+        error = ""
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { step { message -> scope.launch { switchMessage = message } } }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error = failure.message?.take(200) ?: "That didn't work. Nothing was changed."
+            } finally {
+                busy = false
+                refreshProfiles()
+            }
+        }
+    }
+    val trash = remember(records) { com.cyclone.mobile.runtime.workspaces.ProfileTrash.order(records) }
+
+    // The open dialog, if any: rename, or a confirmation ("remove:<id>", "delete:<id>", "empty", "backup:<folder>").
+    looking?.let { id ->
+        records.singleOrNull { it.id == id }?.let { record ->
+            ProfileLookDialog(record, onSave = { label, emoji, color ->
+                looking = null
+                runCatching { com.cyclone.mobile.runtime.workspaces.ProfileRegistryStore.setLook(context, id, label, emoji, color) }
+                    .onFailure { error = it.message.orEmpty() }
+                refreshProfiles()
+            }, onDismiss = { looking = null })
+        }
+    }
+    confirm?.let { (kind, target) ->
+        val label = records.singleOrNull { it.id == target }?.label ?: "this profile"
+        when (kind) {
+            "remove" -> ProfileConfirmDialog(ProfileLifecycleCopy.REMOVE_TITLE, ProfileLifecycleCopy.removeBody(label), "Remove",
+                onConfirm = {
+                    confirm = null
+                    selectedProfileKey = null
+                    lifecycle("Removing $label…") { com.cyclone.mobile.runtime.workspaces.ProfileLifecycle.remove(context, target) }
+                }, onDismiss = { confirm = null })
+            "delete" -> ProfileConfirmDialog(ProfileLifecycleCopy.DELETE_TITLE, ProfileLifecycleCopy.deleteBody(label), "Delete",
+                onConfirm = {
+                    confirm = null
+                    lifecycle("Backing up $label…") { progress -> com.cyclone.mobile.runtime.workspaces.ProfileLifecycle.deleteNow(context, target, progress) }
+                }, onDismiss = { confirm = null })
+            "empty" -> ProfileConfirmDialog(ProfileLifecycleCopy.EMPTY_TITLE, ProfileLifecycleCopy.EMPTY_BODY, "Delete all",
+                onConfirm = {
+                    confirm = null
+                    lifecycle("Emptying Recently deleted…") { progress -> com.cyclone.mobile.runtime.workspaces.ProfileLifecycle.emptyTrash(context, progress) }
+                }, onDismiss = { confirm = null })
+            "backup" -> ProfileConfirmDialog("Delete this backup?", "The backup is removed from the phone. This can't be undone.", "Delete",
+                onConfirm = {
+                    confirm = null
+                    lifecycle("Deleting the backup…") { com.cyclone.mobile.runtime.workspaces.ProfileBackups.delete(context, target) }
+                }, onDismiss = { confirm = null })
+        }
+    }
+
     fun manageProfile(profile: ProfileCluster) {
         val recordId = profile.recordId
         if (recordId != null) {
@@ -262,6 +330,9 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
             onManage = { manageProfile(selectedProfile) },
             canStartTask = ProfilePresentationPolicy.canStartTask(selectedProfile.androidUserId, processUser, verifiedCurrentUser, busy),
             onAsk = onAsk,
+            onRename = selectedProfile.recordId?.let { id -> { looking = id } },
+            // The main profile and the one you're in can't be removed; the runtime checks again with root.
+            onRemove = selectedProfile.recordId?.takeIf { !selectedProfile.owner && !selectedProfile.current }?.let { id -> { confirm = "remove" to id } },
         )
         if (setup) ProfileSetupPage { setup = false; refreshProfiles() }
         return
@@ -310,7 +381,8 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
         item { CyclonePendingRequests() }
         item {
             CycloneSegmentedControl(
-                listOf("Active (${activeProfiles.size})", "All profiles", "Groups"),
+                listOf("Active (${activeProfiles.size})", "All profiles", "Groups") +
+                    if (trash.isNotEmpty() || backups.isNotEmpty() || tab == ProfilesTab.DELETED) listOf("Deleted (${trash.size})") else emptyList(),
                 tab.ordinal,
                 { tab = ProfilesTab.entries[it] },
             )
@@ -397,6 +469,31 @@ fun CycloneProfilesPage(context: Context, refreshTick: Int, onAsk: () -> Unit) {
                             profile = profile,
                             onOpen = { selectedProfileKey = profile.key },
                         )
+                    }
+                }
+            }
+
+            ProfilesTab.DELETED -> {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(ProfileLifecycleCopy.TRASH_NOTE, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (trash.isNotEmpty()) CycloneLiquidTextAction("Delete all", { confirm = "empty" to "" }, enabled = !busy)
+                    }
+                }
+                if (trash.isEmpty()) {
+                    item { QuietProfilesEmpty(title = "Nothing recently deleted", body = "Profiles you remove wait here for ${com.cyclone.mobile.runtime.workspaces.ProfileTrash.TRASH_DAYS} days.") }
+                }
+                val now = System.currentTimeMillis()
+                items(trash, key = { "trash-${it.id}" }) { record ->
+                    ProfileTrashCard(record, now, busy,
+                        onRestore = { lifecycle("Restoring ${record.label}…") { com.cyclone.mobile.runtime.workspaces.ProfileRegistryStore.restore(context, record.id) } },
+                        onDelete = { confirm = "delete" to record.id })
+                }
+                if (backups.isNotEmpty()) {
+                    item { CycloneSectionTitle("Backups") }
+                    items(backups, key = { "backup-${it.folder}" }) { backup ->
+                        ProfileBackupRow(context, backup, busy) { confirm = "backup" to backup.folder }
                     }
                 }
             }
@@ -629,6 +726,8 @@ private fun ProfileDetail429(
     onManage: () -> Unit,
     canStartTask: Boolean,
     onAsk: () -> Unit,
+    onRename: (() -> Unit)? = null,
+    onRemove: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var localMessage by remember { mutableStateOf("") }
@@ -678,6 +777,13 @@ private fun ProfileDetail429(
                 modifier = Modifier.fillMaxWidth(),
             )
             if (!canStartTask) Text("Open this profile first to start a task here.", style = MaterialTheme.typography.bodySmall)
+        }
+        // Plan 40 P1: rename (name, emoji, colour) and remove, which goes to Recently deleted first.
+        if (onRename != null || onRemove != null) item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (onRename != null) CycloneLiquidTextAction("Rename", onRename, Modifier.weight(1f), enabled = !busy)
+                if (onRemove != null) CycloneLiquidTextAction("Remove profile", onRemove, Modifier.weight(1f), enabled = !busy)
+            }
         }
         item { CycloneSectionTitle("Apps") }
         if (profile.workspaces.isEmpty() && profile.packages.isEmpty()) {

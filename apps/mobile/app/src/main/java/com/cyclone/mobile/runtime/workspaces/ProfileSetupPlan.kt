@@ -14,6 +14,13 @@ enum class ProfileSetupOperation {
     LIST_PROFILE_PACKAGE,
     MARK_SETUP_COMPLETE,
     READ_SETUP_COMPLETE,
+    // Plan 40 P1: the profile lifecycle. Only ProfileLifecycle uses these, after its ownership guards.
+    STOP_USER,
+    REMOVE_USER,
+    MEASURE_APP_DATA,
+    BACKUP_APP_DATA,
+    OWN_BACKUP,
+    LABEL_BACKUP,
 }
 
 /**
@@ -39,6 +46,11 @@ object ProfileSetupPlan {
     private val shellTokenPattern = Regex("[A-Za-z0-9_./:-]+")
 
     fun validProfileName(name: String): Boolean = name.matches(namePattern)
+
+    /** A backup folder inside Cyclone's own files: `…/com.cyclone.mobile/files/profile-backups/Cyclone_<hex>-<ms>`. */
+    private val backupDirPattern = Regex("(/data/user/[0-9]+|/data/data)/com\\.cyclone\\.mobile/files/profile-backups/Cyclone_[a-f0-9]{16}-[0-9]{10,14}")
+    fun validBackupDir(path: String): Boolean = path.matches(backupDirPattern)
+    private val dataRootPattern = Regex("/data/(user|user_de)/([0-9]+)")
     fun validPackageName(packageName: String): Boolean = packageName.matches(packagePattern)
 
     fun verifyRoot(): ProfileSetupCommand = ProfileSetupCommand.fixed(
@@ -129,6 +141,44 @@ object ProfileSetupPlan {
         )
     }
 
+    /** Stops a profile Cyclone made (it keeps all its data): the first step of Remove, fully undoable. */
+    fun stopUser(userId: Int): ProfileSetupCommand {
+        require(userId > 0)
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.STOP_USER, "/system/bin/am", "stop-user", "-w", userId.toString())
+    }
+
+    /** Deletes a profile for good. Never user 0; ProfileLifecycle also refuses the main and the current profile. */
+    fun removeUser(userId: Int): ProfileSetupCommand {
+        require(userId > 0)
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.REMOVE_USER, "/system/bin/pm", "remove-user", userId.toString())
+    }
+
+    /** How big one app's data is in a profile, in KB, before a backup decides what fits. */
+    fun measureAppData(userId: Int, packageName: String): ProfileSetupCommand {
+        require(userId > 0 && validPackageName(packageName))
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.MEASURE_APP_DATA, "/system/bin/du", "-sk", "/data/user/$userId/$packageName")
+    }
+
+    /** One app's data (credential storage `user`, or device storage `user_de`) archived into a backup folder. */
+    fun backupAppData(userId: Int, packageName: String, deviceStorage: Boolean, backupDir: String): ProfileSetupCommand {
+        require(userId > 0 && validPackageName(packageName) && validBackupDir(backupDir))
+        val root = if (deviceStorage) "user_de" else "user"
+        val kind = if (deviceStorage) "de" else "ce"
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.BACKUP_APP_DATA,
+            "/system/bin/tar", "-cf", "$backupDir/$kind-$packageName.tar", "-C", "/data/$root/$userId", packageName)
+    }
+
+    /** Hands a finished backup folder to Cyclone (owner and label), so it can list and delete it without root. */
+    fun ownBackup(backupDir: String, uid: Int): ProfileSetupCommand {
+        require(validBackupDir(backupDir) && uid >= 10_000)
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.OWN_BACKUP, "/system/bin/chown", "-R", "$uid:$uid", backupDir)
+    }
+
+    fun labelBackup(backupDir: String): ProfileSetupCommand {
+        require(validBackupDir(backupDir))
+        return ProfileSetupCommand.fixed(ProfileSetupOperation.LABEL_BACKUP, "/system/bin/restorecon", "-R", backupDir)
+    }
+
     internal fun shell(command: ProfileSetupCommand): String {
         val tokens = command.tokens()
         check(tokens.isNotEmpty() && tokens.all { it.matches(shellTokenPattern) })
@@ -167,6 +217,21 @@ object ProfileSetupPlan {
         ProfileSetupOperation.READ_SETUP_COMPLETE -> tokens.size == 6 && tokens[0] == "/system/bin/settings" &&
             tokens[1] == "--user" && tokens[2].toIntOrNull()?.let { it > 0 } == true &&
             tokens.drop(3) == listOf("get", "secure", "user_setup_complete")
+        ProfileSetupOperation.STOP_USER -> tokens.size == 4 && tokens.take(3) == listOf("/system/bin/am", "stop-user", "-w") &&
+            tokens[3].toIntOrNull()?.let { it > 0 } == true
+        ProfileSetupOperation.REMOVE_USER -> tokens.size == 3 && tokens.take(2) == listOf("/system/bin/pm", "remove-user") &&
+            tokens[2].toIntOrNull()?.let { it > 0 } == true
+        ProfileSetupOperation.MEASURE_APP_DATA -> tokens.size == 3 && tokens.take(2) == listOf("/system/bin/du", "-sk") &&
+            Regex("/data/user/([1-9][0-9]*)/(.+)").matchEntire(tokens[2])?.groupValues?.get(2)?.let(::validPackageName) == true
+        ProfileSetupOperation.BACKUP_APP_DATA -> tokens.size == 6 && tokens.take(2) == listOf("/system/bin/tar", "-cf") && tokens[3] == "-C" &&
+            validPackageName(tokens[5]) &&
+            dataRootPattern.matchEntire(tokens[4])?.groupValues?.get(2)?.toIntOrNull()?.let { it > 0 } == true &&
+            tokens[2].substringBeforeLast('/').let(::validBackupDir) &&
+            tokens[2].substringAfterLast('/') == (if (tokens[4].startsWith("/data/user_de/")) "de-" else "ce-") + tokens[5] + ".tar"
+        ProfileSetupOperation.OWN_BACKUP -> tokens.size == 4 && tokens.take(2) == listOf("/system/bin/chown", "-R") &&
+            Regex("([0-9]{5,}):\\1").matches(tokens[2]) && validBackupDir(tokens[3])
+        ProfileSetupOperation.LABEL_BACKUP -> tokens.size == 3 && tokens.take(2) == listOf("/system/bin/restorecon", "-R") &&
+            validBackupDir(tokens[2])
     }
 }
 

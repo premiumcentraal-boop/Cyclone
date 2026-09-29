@@ -81,6 +81,12 @@ fun CycloneMobileV32App() {
         val routinesRevision by AutomationRuntime.store.revision.collectAsState()
         LaunchedEffect(destination, settingsOpen, task?.taskId, task?.phase, routinesRevision) { refreshTick++ }
         LaunchedEffect(task) { CycloneRecentActivity.record(task) }
+        // Plan 40 P1: profiles past their 7 days in Recently deleted are backed up and deleted; old backups cleared.
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.cyclone.mobile.runtime.workspaces.ProfileLifecycle.tidy(context) }
+            }
+        }
 
         DisposableEffect(context) {
             val lifecycle = (context as? LifecycleOwner)?.lifecycle

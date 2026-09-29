@@ -9,7 +9,14 @@ import org.json.JSONObject
 data class CycloneProfileRecord(
     val id: String, val label: String, val androidUserId: Int?, val parentUserId: Int,
     val secondaryUser: Boolean, val packages: Set<String>, val stage: String, val ready: Boolean,
-)
+    /** Plan 40 P1: set while the profile is in Recently deleted (stopped, hidden, restorable for 7 days). */
+    val removedAtMs: Long? = null,
+    /** The owner's look for it: an emoji and a colour (ARGB), shown on the slider and in Profiles. */
+    val emoji: String? = null,
+    val color: Long? = null,
+) {
+    val inTrash: Boolean get() = removedAtMs != null
+}
 
 object ProfileRegistryStore {
     const val JOURNAL_DISPLAY_LABEL = "display_label"
@@ -30,6 +37,9 @@ object ProfileRegistryStore {
                 (0 until apps.length()).map { apps.getString(it) }.toSet(),
                 o.getString("stage"),
                 o.getBoolean("ready"),
+                o.optLong("removed_at", 0L).takeIf { it > 0L },
+                o.optString("emoji").takeIf { it.isNotBlank() },
+                o.optLong("color", 0L).takeIf { it != 0L },
             )
         }
     }
@@ -58,6 +68,9 @@ object ProfileRegistryStore {
             journal.getStringSet("plan_apps", emptySet()).orEmpty().toSet(),
             journal.getString("stage", "PLANNED").orEmpty(),
             journal.getBoolean("ready", false),
+            removedAtMs = previous?.removedAtMs,
+            emoji = previous?.emoji,
+            color = previous?.color,
         )
         save(context, existing.filterNot { it.id == id } + row)
     }
@@ -80,6 +93,30 @@ object ProfileRegistryStore {
         save(context, entries.map { if (it.id == id) it.copy(label = clean) else it })
     }
 
+    /** Name, emoji and colour together (plan 40 P1's rename sheet). */
+    @Synchronized fun setLook(context: Context, id: String, label: String, emoji: String?, color: Long?) {
+        rename(context, id, label)
+        val cleanEmoji = emoji?.trim()?.takeIf { it.isNotEmpty() }?.take(16)
+        save(context, records(context).map { if (it.id == id) it.copy(emoji = cleanEmoji, color = color) else it })
+    }
+
+    /** Moves a profile to Recently deleted. Only [ProfileLifecycle] calls this, after stopping the profile. */
+    @Synchronized internal fun markRemoved(context: Context, id: String, atMs: Long) {
+        check(records(context).any { it.id == id }) { "Profile not found." }
+        save(context, records(context).map { if (it.id == id) it.copy(removedAtMs = atMs) else it })
+    }
+
+    /** Takes a profile out of Recently deleted, exactly as it was. */
+    @Synchronized fun restore(context: Context, id: String) {
+        check(records(context).any { it.id == id && it.inTrash }) { "This profile isn't in Recently deleted." }
+        save(context, records(context).map { if (it.id == id) it.copy(removedAtMs = null) else it })
+    }
+
+    /** Forgets a profile after Android removed it for good. */
+    @Synchronized internal fun drop(context: Context, id: String) {
+        save(context, records(context).filterNot { it.id == id })
+    }
+
     fun cleanLabel(label: String): String {
         val clean = label.trim().replace(Regex("\\s+"), " ").take(40)
         require(clean.isNotBlank()) { "Give this profile a name." }
@@ -98,7 +135,10 @@ object ProfileRegistryStore {
                     .put("secondary", record.secondaryUser)
                     .put("packages", JSONArray(record.packages.sorted()))
                     .put("stage", record.stage)
-                    .put("ready", record.ready),
+                    .put("ready", record.ready)
+                    .put("removed_at", record.removedAtMs ?: 0L)
+                    .put("emoji", record.emoji ?: "")
+                    .put("color", record.color ?: 0L),
             )
         }
         check(store(context).edit().putString("profiles", array.toString()).commit()) {

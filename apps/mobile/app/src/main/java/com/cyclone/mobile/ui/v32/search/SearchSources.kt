@@ -91,7 +91,7 @@ object SearchSources {
             }
     }
 
-    private fun profiles(context: Context): List<SearchItem> = ProfileRegistryStore.records(context).map { record ->
+    private fun profiles(context: Context): List<SearchItem> = ProfileRegistryStore.records(context).filterNot { it.inTrash }.map { record ->
         SearchItem(
             category = SearchCategory.PROFILES,
             target = record.id,

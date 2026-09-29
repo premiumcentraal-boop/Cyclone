@@ -143,6 +143,11 @@ object ProfileFailureClassifier {
             ProfileSetupOperation.LIST_USERS, ProfileSetupOperation.CURRENT_USER ->
                 failure(ProfileSetupFailureKind.PROFILE_VERIFICATION_FAILED, platform)
             ProfileSetupOperation.GET_MAX_USERS -> failure(ProfileSetupFailureKind.ROOT_COMMAND_FAILED, platform)
+            ProfileSetupOperation.STOP_USER, ProfileSetupOperation.REMOVE_USER ->
+                failure(ProfileSetupFailureKind.ROOT_COMMAND_FAILED, platform)
+            ProfileSetupOperation.MEASURE_APP_DATA, ProfileSetupOperation.BACKUP_APP_DATA,
+            ProfileSetupOperation.OWN_BACKUP, ProfileSetupOperation.LABEL_BACKUP ->
+                failure(ProfileSetupFailureKind.STORAGE_FAILURE, platform)
             ProfileSetupOperation.VERIFY_ROOT -> error("handled above")
             ProfileSetupOperation.CREATE_MANAGED_PROFILE, ProfileSetupOperation.CREATE_SECONDARY_USER -> error("handled above")
         }

@@ -41,6 +41,15 @@ class WorkspaceEngine(private val persist: (List<Workspace>) -> Unit = {}) {
         persist(updated.values.toList())
         registry.clear(); registry.putAll(updated); changed()
     }
+    /** Plan 40 P1: forgets every workspace of a profile Android removed for good. */
+    fun forgetUser(androidUserId: Int) = synchronized(mutationLock) {
+        val kept = registry.values.filter { it.androidUserId != androidUserId }
+        if (kept.size == registry.size) return@synchronized
+        if (selected?.let { registry[it]?.androidUserId } == androidUserId) { revoke(); selected = null }
+        armed.removeAll { id -> registry[id]?.androidUserId == androidUserId }
+        persist(kept)
+        registry.clear(); kept.forEach { registry[it.id] = it }; changed()
+    }
     private fun state(id: String, value: WorkspaceState) { registry[id]?.let { registry[id] = it.copy(state = value) } }
     private fun revoke() { lease = null; generation++; changed() }
     fun pause() = synchronized(mutationLock) { revoke(); selected?.let { state(it, WorkspaceState.paused) } }
