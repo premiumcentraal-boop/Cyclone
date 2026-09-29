@@ -1,13 +1,13 @@
-# Cyclone V5 alpha.76 dev1: Fast mode, the parallel Pilot (plan 41) - the smart model plans the whole run; a rapid model walks it with a yes/no decision board per move, doing low-risk moves itself while the smart model reviews ahead in parallel and patches the plan on a mismatch; only irreversible moves ask the owner. Off by default, in Settings.
+# Cyclone V5 alpha.77 dev1: Cyclone Live (plan 42) - every request goes to the lowest mode that can do it: Instant (clear commands with no model: gestures, open and tap by name, camera, selfie, calls with a 2 s cancel window, timers, torch, volume, media), Flash or the Mind, with a baton when it moves up; Drive sends quick commands straight to the router, confirms with a sound and keeps listening 8 s. Settings -> Speed.
 # Owner-requested developer candidate; physical phone and Windows PC acceptance remain UNVERIFIED until tested.
 schema = 1
-product_version = "5.0.0-alpha.76.dev1"
+product_version = "5.0.0-alpha.77.dev1"
 channel = "development"
-android_version_code = 221
+android_version_code = 222
 python_version = "5.0.0-alpha.68.dev1"
 
 [components]
-mobile = "5.0.0-alpha.76.dev1"
+mobile = "5.0.0-alpha.77.dev1"
 # The retired Cyclone One desktop window (plan 31): source kept, no longer built. Cyclone for Windows ships as
 # Cyclone-PC-<product_version>.zip (runtime + Glass + the cyclone command).
 pc_companion = "1.6.0-alpha.43"
@@ -26,4 +26,4 @@ physical_pixel8_ui_acceptance = "UNVERIFIED"
 android_signing = "ROTATED_UPDATE_COMPATIBLE_KEY_REQUIRED"
 windows_signing = "CI_UNSIGNED"
 windows_installer = "CI_UNSIGNED"
-candidate_generation = "cyclone-v5-alpha76-dev1-fast-pilot"
+candidate_generation = "cyclone-v5-alpha77-dev1-cyclone-live"
